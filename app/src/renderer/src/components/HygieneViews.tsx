@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { formatAgo } from '@shared/format'
 import type { HistoryHit } from '@shared/history'
 import type { JanitorRow } from '@shared/ipc'
-import { needsTypedConfirm } from '@shared/janitor'
+import { isCleanupTarget, needsTypedConfirm } from '@shared/janitor'
 import type { AppState, Session } from '@shared/types'
 import { deck, useNow } from '../deck'
 
@@ -28,9 +28,10 @@ export function JanitorView({ state }: { state: AppState }) {
   const [msg, setMsg] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ row: JanitorRow; typed: string } | null>(null)
 
-  const load = useCallback(async () => {
+  // Opening reads PR status from the shared gh cache; Refresh asks GitHub again.
+  const load = useCallback(async (force = false) => {
     setRows(null)
-    setRows(await deck().janitor(liveDirs(state)))
+    setRows(await deck().janitor(liveDirs(state), force))
     // Only when opened or after a removal; not on every state tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -42,10 +43,18 @@ export function JanitorView({ state }: { state: AppState }) {
     setBusy(null)
     setMsg(r.message)
     if (r.ok) setRows((cur) => cur?.filter((x) => x.path !== row.path) ?? null)
+    return r.ok
+  }
+  const cleanUp = async (targets: JanitorRow[]) => {
+    let removed = 0
+    for (const r of targets) if (await remove(r, false)) removed++
+    const failed = targets.length - removed
+    setMsg(`Cleaned up ${removed} worktree${removed === 1 ? '' : 's'}${failed ? `; ${failed} not removed` : ''}`)
   }
   const parked = state.sessions.filter((s) => s.state === 'suspended' && s.bgId)
   const counts = CLS_ORDER.map((c) => [c, rows?.filter((r) => r.cls === c).length ?? 0] as const)
   const safeRows = rows?.filter((r) => r.cls === 'SAFE') ?? []
+  const mergedRows = rows?.filter(isCleanupTarget) ?? []
 
   return (
     <section className="board-view panel">
@@ -54,11 +63,19 @@ export function JanitorView({ state }: { state: AppState }) {
         <span className="muted">worktrees under each repo's .claude/worktrees, and parked sessions · branches are never deleted</span>
         <span style={{ flex: 1 }} />
         {msg && <span className="muted">{msg}</span>}
-        <button className="btn" onClick={() => void load()} disabled={rows === null}>
-          Rescan
+        <button className="btn" onClick={() => void load(true)} disabled={rows === null} title="Rescan worktrees and fetch PR status from GitHub">
+          Refresh
         </button>
         <button
           className="btn primary"
+          disabled={!mergedRows.length || !!busy}
+          title="Remove every clean worktree whose PR is merged; branches are kept"
+          onClick={() => void cleanUp(mergedRows)}
+        >
+          Clean up ({mergedRows.length})
+        </button>
+        <button
+          className="btn"
           disabled={!safeRows.length || !!busy}
           onClick={async () => {
             for (const r of safeRows) await remove(r, false)
@@ -83,6 +100,7 @@ export function JanitorView({ state }: { state: AppState }) {
               <th>Class</th>
               <th>Repo / worktree</th>
               <th>Branch</th>
+              <th>PR</th>
               <th>Why</th>
               <th className="r">Last commit</th>
               <th />
@@ -91,14 +109,14 @@ export function JanitorView({ state }: { state: AppState }) {
           <tbody>
             {rows === null && (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   Scanning repos…
                 </td>
               </tr>
             )}
             {rows?.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   No worktrees. Nothing to clean.
                 </td>
               </tr>
@@ -115,6 +133,15 @@ export function JanitorView({ state }: { state: AppState }) {
                     {r.repo.split('/').pop()}/<b>{r.path.split('/').pop()}</b>
                   </td>
                   <td className="mono">{r.branch ?? '(detached)'}</td>
+                  <td className="nowrap">
+                    {r.pr ? (
+                      <button className="link-btn" title={r.pr.url} onClick={() => deck().openExternal(r.pr!.url)}>
+                        <span className={`pr-state ${r.pr.state.toLowerCase()}`}>#{r.pr.number} {r.pr.state.toLowerCase()}</span>
+                      </button>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                   <td className="muted">{r.reason}</td>
                   <td className="r muted">{r.lastCommitAt ? `${formatAgo(now - r.lastCommitAt)} ago` : '—'}</td>
                   <td className="r nowrap">

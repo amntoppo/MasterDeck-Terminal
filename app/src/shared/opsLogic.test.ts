@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyWorktree, needsTypedConfirm, type WorktreeInfo } from './janitor'
+import { classifyWorktree, isCleanupTarget, needsTypedConfirm, prForBranch, repoSlug, type WorktreeInfo } from './janitor'
 import { addBurnPoint, burndown, groupOf, summarize, summaryMarkdown } from './sprintSummary'
 import { cleanSubject, issueFromBranch, pointsText, rangeFor, standupMarkdown, standupPoints, standupSince } from './standup'
 import type { Board, BoardCard } from './types'
@@ -67,6 +67,35 @@ describe('janitor', () => {
     expect(classifyWorktree(wt({ dirtyFiles: -1, merged: true }), []).cls).toBe('DIRTY')
     expect(needsTypedConfirm('DIRTY')).toBe(true)
     expect(needsTypedConfirm('SAFE')).toBe(false)
+  })
+  it('a merged PR makes a clean worktree SAFE only while it sits on the merged commit', () => {
+    const pr = { number: 7, state: 'MERGED' as const, url: 'u', headOid: 'abc' }
+    const merged = classifyWorktree(wt({ head: 'abc', pr }), [])
+    expect(merged).toEqual({ cls: 'SAFE', reason: 'PR #7 merged' })
+    expect(isCleanupTarget({ ...merged, pr })).toBe(true)
+    expect(classifyWorktree(wt({ head: 'def', pr }), []).cls).toBe('UNPUSHED') // work after the merge
+    expect(classifyWorktree(wt({ head: 'abc', pr, dirtyFiles: 1 }), []).cls).toBe('DIRTY')
+    expect(classifyWorktree(wt({ head: 'abc', pr }), ['/r/.claude/worktrees/x']).cls).toBe('IN USE')
+    const open = { ...pr, state: 'OPEN' as const }
+    expect(isCleanupTarget({ ...classifyWorktree(wt({ head: 'abc', pr: open, merged: true }), []), pr: open })).toBe(false)
+  })
+  it('picks the branch PR: open first, then the newest merged', () => {
+    const list = [
+      { number: 1, state: 'MERGED', headRefName: 'feat/x', headRefOid: 'a', url: 'u1' },
+      { number: 5, state: 'MERGED', headRefName: 'feat/x', headRefOid: 'b', url: 'u5' },
+      { number: 3, state: 'CLOSED', headRefName: 'feat/x', headRefOid: 'c', url: 'u3' },
+      { number: 9, state: 'OPEN', headRefName: 'other', headRefOid: 'd', url: 'u9' },
+    ]
+    expect(prForBranch(list, 'feat/x')).toEqual({ number: 5, state: 'MERGED', url: 'u5', headOid: 'b' })
+    expect(prForBranch([...list, { number: 6, state: 'OPEN', headRefName: 'feat/x', headRefOid: 'e', url: 'u6' }], 'feat/x')?.number).toBe(6)
+    expect(prForBranch(list, null)).toBeNull()
+    expect(prForBranch(null, 'feat/x')).toBeNull()
+  })
+  it('reads owner/repo from origin URLs', () => {
+    expect(repoSlug('git@github.com:acme/web-app.git\n')).toBe('acme/web-app')
+    expect(repoSlug('git@github.com-work:acme/web-app.git')).toBe('acme/web-app')
+    expect(repoSlug('https://github.com/acme/web-app')).toBe('acme/web-app')
+    expect(repoSlug('https://gitlab.com/acme/web-app.git')).toBeNull()
   })
 })
 

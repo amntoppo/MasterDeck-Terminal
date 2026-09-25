@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { summarizeTranscript, type HistoryHit } from '@shared/history'
-import { classifyWorktree, parseWorktreeList, type WorktreeInfo } from '@shared/janitor'
+import { classifyWorktree, parseWorktreeList, prForBranch, repoSlug, type WorktreeInfo } from '@shared/janitor'
 import { isSafeBgId } from '@shared/paneCommand'
 import { issueFromBranch, type StandupCommit } from '@shared/standup'
 import type { CliResult } from '@shared/types'
 import type { JanitorRow, Template } from '@shared/ipc'
+import type { GhRunner } from './ghc'
 import type { Paths } from './paths'
 import type { Runner } from './run'
 
@@ -54,6 +55,7 @@ export class Ops {
     private run: Runner,
     private paths: Paths,
     private claude: () => string,
+    private gh: GhRunner = (args, { ttl: _ttl, force: _force, ...opts } = {}) => run('gh', args, opts),
   ) {}
 
   private git(dir: string, args: string[], timeoutMs = 15_000) {
@@ -139,7 +141,7 @@ export class Ops {
   }
 
   /** One worktree's facts, from git. A failed `git status` reads as dirty (-1), never as clean. */
-  private async inspect(repo: string, w: { path: string; branch: string | null; head: string | null }, base: string): Promise<WorktreeInfo> {
+  private async inspect(repo: string, w: { path: string; branch: string | null; head: string | null }, base: string, prs: unknown = null): Promise<WorktreeInfo> {
     const status = await this.git(w.path, ['status', '--porcelain'])
     const dirtyFiles = status.code === 0 ? status.stdout.split('\n').filter(Boolean).length : -1
     const merged = (await this.git(repo, ['merge-base', '--is-ancestor', w.head ?? 'HEAD', base])).code === 0
@@ -155,6 +157,24 @@ export class Ops {
       pushed,
       orphanCommits: Number(orphan) || 0,
       lastCommitAt: Number.isFinite(last) && last > 0 ? last * 1000 : null,
+      head: w.head,
+      pr: prForBranch(prs, w.branch),
+    }
+  }
+
+  /**
+   * A repo's pull requests (newest 300, any state) through the shared gh cache for 10 minutes;
+   * `force` (the janitor's Refresh) asks GitHub again. null when origin is not on GitHub or gh fails.
+   */
+  private async repoPrs(repo: string, force = false): Promise<unknown> {
+    const slug = repoSlug((await this.git(repo, ['remote', 'get-url', 'origin'])).stdout)
+    if (!slug) return null
+    const r = await this.gh(['pr', 'list', '-R', slug, '--state', 'all', '--limit', '300', '--json', 'number,state,headRefName,headRefOid,url'], { timeoutMs: 60_000, ttl: 600, force })
+    if (r.code !== 0) return null
+    try {
+      return JSON.parse(r.stdout)
+    } catch {
+      return null
     }
   }
 
@@ -163,19 +183,28 @@ export class Ops {
   }
 
   /** Every worktree under <repo>/.claude/worktrees, classified with the worktree-janitor rules. */
-  async janitor(liveDirs: string[]): Promise<JanitorRow[]> {
+  async janitor(liveDirs: string[], force = false): Promise<JanitorRow[]> {
+    // Repos, and the worktrees in each, are inspected in parallel; the PR list is fetched meanwhile.
+    const perRepo = await Promise.all(
+      this.repos().map(async (repo) => {
+        const list = await this.git(repo, ['worktree', 'list', '--porcelain'])
+        if (list.code !== 0) return []
+        const trees = parseWorktreeList(list.stdout).filter((w) => w.path.includes('/.claude/worktrees/') && existsSync(w.path))
+        if (!trees.length) return []
+        // PR status only for repos that have worktrees on a branch.
+        const prs = trees.some((w) => w.branch) ? this.repoPrs(repo, force) : Promise.resolve(null)
+        const base = await this.baseRef(repo)
+        const infos = await Promise.all(trees.map((w) => this.inspect(repo, w, base)))
+        const list2 = await prs
+        return infos.map((info, i): JanitorRow => {
+          const withPr = { ...info, pr: prForBranch(list2, trees[i].branch) }
+          return { ...withPr, ...classifyWorktree(withPr, liveDirs) }
+        })
+      }),
+    )
+    // Sibling checkouts that are themselves worktrees list the same set again: once per path.
     const rows: JanitorRow[] = []
-    for (const repo of this.repos()) {
-      const list = await this.git(repo, ['worktree', 'list', '--porcelain'])
-      if (list.code !== 0) continue
-      const base = await this.baseRef(repo)
-      for (const w of parseWorktreeList(list.stdout)) {
-        // Sibling checkouts that are themselves worktrees list the same set again: once per path.
-        if (!w.path.includes('/.claude/worktrees/') || !existsSync(w.path) || rows.some((r) => r.path === w.path)) continue
-        const info = await this.inspect(repo, w, base)
-        rows.push({ ...info, ...classifyWorktree(info, liveDirs) })
-      }
-    }
+    for (const r of perRepo.flat()) if (!rows.some((x) => x.path === r.path)) rows.push(r)
     return rows
   }
 
@@ -199,7 +228,8 @@ export class Ops {
     const list = await this.git(realRepo, ['worktree', 'list', '--porcelain'])
     const w = parseWorktreeList(list.stdout).find((x) => { try { return realpathSync(x.path) === realPath } catch { return false } })
     if (!w) return { ok: false, message: 'git does not list that worktree' }
-    const { cls, reason } = classifyWorktree(await this.inspect(realRepo, { ...w, path: realPath }, await this.baseRef(realRepo)), liveDirs)
+    const prs = w.branch ? await this.repoPrs(realRepo) : null
+    const { cls, reason } = classifyWorktree(await this.inspect(realRepo, { ...w, path: realPath }, await this.baseRef(realRepo), prs), liveDirs)
     if (cls === 'IN USE') return { ok: false, message: `refused: ${reason}` }
     const confirmClass = cls === 'DIRTY' || cls === 'UNPUSHED'
     if (confirmClass && !force) return { ok: false, message: `refused: ${cls} (${reason}); confirm to remove` }

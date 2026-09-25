@@ -120,7 +120,8 @@ export interface DeckApi {
   /** Move a ticket to a board column (babysit-ticket). */
   setStatus(issue: number, status: string): Promise<CliResult>
   standupCommits(sinceMs: number, dirs: string[], untilMs?: number): Promise<StandupCommit[]>
-  janitor(liveDirs: string[]): Promise<JanitorRow[]>
+  /** `force` skips the shared gh cache for PR status (the Refresh button). */
+  janitor(liveDirs: string[], force?: boolean): Promise<JanitorRow[]>
   removeWorktree(repo: string, path: string, force: boolean): Promise<CliResult>
   removeSession(bgId: string): Promise<CliResult>
   searchHistory(query: string): Promise<HistoryHit[]>

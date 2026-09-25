@@ -60,7 +60,7 @@ function notify(events: NotifyEvent[]): void {
 const gh = makeGhRunner(run, paths.libDir, paths.python)
 const github = new GitHub(run, gh)
 const sender = new Sender(ptys, cli, env, () => claudeBin, (key) => latest?.sessions.find((x) => x.key === key))
-const ops = new Ops(run, paths, () => claudeBin)
+const ops = new Ops(run, paths, () => claudeBin, gh)
 const sources = new Sources(paths, run, cli, (state) => {
   const prev = latest
   latest = state
@@ -223,7 +223,7 @@ function registerIpc(): void {
     return r
   })
   ipcMain.handle(CH.standupCommits, (_e, since: number, dirs: string[], until?: number) => ops.standupCommits(since, [...dirs, ...ops.repos()], until))
-  ipcMain.handle(CH.janitor, (_e, dirs: string[]) => ops.janitor(dirs))
+  ipcMain.handle(CH.janitor, (_e, dirs: string[], force?: boolean) => ops.janitor(dirs, force === true))
   ipcMain.handle(CH.removeWorktree, (_e, repo: string, path: string, force: boolean) => ops.removeWorktree(repo, path, force, liveDirs()))
   ipcMain.handle(CH.removeSession, (_e, bgId: string) => ops.removeSession(bgId))
   ipcMain.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q))
