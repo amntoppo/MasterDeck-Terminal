@@ -8,7 +8,7 @@ import type { RunOpts } from './run'
 describe('ghc bridge', () => {
   it('runs gh through master.ghcache with the ttl and PYTHONPATH', async () => {
     const calls: { cmd: string; args: string[]; opts?: RunOpts }[] = []
-    const gh = makeGhRunner(async (cmd, args, opts) => (calls.push({ cmd, args, opts }), { code: 0, stdout: '', stderr: '' }), '/lib', 'python3')
+    const gh = makeGhRunner(async (cmd, args, opts) => (calls.push({ cmd, args, opts }), { code: 0, stdout: '', stderr: '' }), '/lib', 'python3', 'darwin')
     await gh(['pr', 'view', 'u', '--json', 'state'], { ttl: 120, cwd: '/w' })
     expect(calls[0].cmd).toBe('python3')
     expect(calls[0].args).toEqual(['-m', 'master.ghcache', '--ttl', '120', 'pr', 'view', 'u', '--json', 'state'])
