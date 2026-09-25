@@ -68,7 +68,7 @@ export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssu
       onClose()
       fn()
     }
-    const items: Item[] = ACTIONS.map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
+    const items: Item[] = ACTIONS.filter(([id]) => id !== 'start-master' || state.config.masterEnabled).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
       items.push({

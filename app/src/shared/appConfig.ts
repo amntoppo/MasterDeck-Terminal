@@ -33,6 +33,8 @@ export interface AppConfig {
   sprintField: string
   workspace: string
   masterName: string
+  /** False: no master-agent. Proposals, sweeps and session messages to master are off; the rest works. */
+  masterEnabled: boolean
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -62,6 +64,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   sprintField: 'Sprint',
   workspace: '',
   masterName: 'master-agent',
+  masterEnabled: true,
 }
 
 let current: AppConfig = DEFAULT_CONFIG
@@ -118,6 +121,7 @@ export function parseConfig(raw: unknown): AppConfig {
     sprintField: str(c.sprintField, d.sprintField),
     workspace: str(c.workspace, d.workspace),
     masterName: str(c.masterName, d.masterName),
+    masterEnabled: c.masterEnabled !== false,
   }
 }
 

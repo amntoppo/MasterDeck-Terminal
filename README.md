@@ -62,6 +62,9 @@ Or build it yourself (see [Develop](#develop)).
      They let babysit-ticket move the board, let babysit-pr step in around `gh pr create`, and
      make `/queue` work (it runs the next queued prompt when a response ends).
 3. The master pane on the right offers **Start master**, which starts the master-agent session.
+   Master is optional: untick **Master agent** in Setup and MasterDeck works without it. You lose
+   what only master does: sweeps that propose work, the reports sessions send it (done, blocked,
+   questions) and relaying text to sessions in other terminals. New sessions then ask you directly.
 
 Setup saves everything to one file, `~/.claude/master/config.json`. The master CLI, babysit-ticket
 and the app all read it. To change it later, open **Settings (⚙) → GitHub & board**, or edit it:
@@ -87,6 +90,7 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `sprintField`, `sprintQuery` | The board's iteration field and the filter for "my current sprint" |
 | `workspace` | Folder where master and new sessions start |
 | `masterName` | Name of the master session (default `master-agent`) |
+| `masterEnabled` | `false` runs MasterDeck without a master-agent (Setup → Master agent) |
 
 </details>
 

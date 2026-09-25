@@ -94,6 +94,21 @@ class AssignTest(unittest.TestCase):
         self.assertEqual(rules.propose(None, cur, NOW), [])
 
 
+class MasterOffTest(unittest.TestCase):
+    def test_without_master_the_session_reports_here(self):
+        from master import config
+        old = config.CONFIG.get("masterEnabled")
+        self.addCleanup(lambda: config.CONFIG.__setitem__("masterEnabled", old))
+        config.CONFIG["masterEnabled"] = False
+        prompt = rules._assign(issue(981, "To Do"))["target"]["spawn"]["prompt"]
+        self.assertNotIn("master-agent", prompt)
+        self.assertNotIn("SendMessage", prompt)
+        self.assertIn("ask the user for instructions here", prompt)
+        self.assertTrue(prompt.endswith(rules.REPLY_SOLO.format(n=981)))
+        config.CONFIG["masterEnabled"] = True
+        self.assertIn("tell master-agent", rules._assign(issue(981, "To Do"))["target"]["spawn"]["prompt"])
+
+
 class ReviewAndCiTest(unittest.TestCase):
     def test_review_goes_to_live_owner(self):
         cur = snap(issues=[issue(939)], prs=[pr(threads=2, last="2026-09-24T09:40:00Z")],

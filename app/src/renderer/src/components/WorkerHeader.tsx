@@ -140,9 +140,11 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
               <button onClick={() => { setMenu(false); onDetach() }}>Detach (close tab, keep session)</button>
               <button onClick={() => { setMenu(false); copy(`claude --resume ${s.sessionId}`, 'resume command') }}>Copy resume command</button>
               {s.bgId && <button onClick={() => { setMenu(false); copy(`claude attach ${s.bgId}`, 'attach command') }}>Copy attach command</button>}
-              <button disabled={!masterAttached} title={masterAttached ? 'Types the question into master (only when master is idle)' : 'master-agent is not attached here'} onClick={() => { setMenu(false); onAskMaster(s) }}>
-                Ask master about this session
-              </button>
+              {state.config.masterEnabled && (
+                <button disabled={!masterAttached} title={masterAttached ? 'Types the question into master (only when master is idle)' : 'master-agent is not attached here'} onClick={() => { setMenu(false); onAskMaster(s) }}>
+                  Ask master about this session
+                </button>
+              )}
               {s.kind === 'background' && s.bgId && (
                 <>
                   <hr />

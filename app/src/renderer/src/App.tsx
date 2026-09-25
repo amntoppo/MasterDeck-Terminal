@@ -370,8 +370,11 @@ export function App() {
   }
 
   const shown = new Set([active, split].filter(Boolean) as string[])
-  const rightShown = masterOpen || queueOpen
-  const masterAttached = state.master.kind === 'attached'
+  // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
+  const useMaster = state.config.masterEnabled
+  const masterShown = useMaster && masterOpen
+  const rightShown = masterShown || queueOpen
+  const masterAttached = useMaster && state.master.kind === 'attached'
   const askMaster = (s: Session) => {
     if (state.master.kind !== 'attached') return
     // Typed keystrokes would answer whatever prompt master is showing, so only ask an idle master.
@@ -384,7 +387,7 @@ export function App() {
 
   return (
     <div
-      className={`app ${rightShown ? '' : 'no-right'} ${masterOpen ? '' : 'master-off'}`}
+      className={`app ${rightShown ? '' : 'no-right'} ${masterShown ? '' : 'master-off'}`}
       ref={appRef}
       style={{ ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
     >
@@ -520,7 +523,7 @@ export function App() {
         </div>
       )}
       <div className="right-col" style={rightShown ? undefined : { display: 'none' }}>
-        <MasterPane state={state} shown={masterOpen} />
+        {useMaster && <MasterPane state={state} shown={masterOpen} />}
         {queueOpen && <QueuePanel state={state} activeKey={activeKey} onClose={() => setQueueOpen(false)} />}
       </div>
 
@@ -602,13 +605,15 @@ export function App() {
       {dragging && <div style={{ position: 'fixed', inset: 0, zIndex: 40, cursor: 'col-resize' }} />}
       {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
           before the headers under it (drag regions for moving the window) could not be clicked. */}
-      <button
-        className={`master-toggle ${masterOpen ? 'on' : ''}`}
-        onClick={() => setMasterOpen((o) => !o)}
-        title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
-      >
-        <span className="star">★</span> Master
-      </button>
+      {useMaster && (
+        <button
+          className={`master-toggle ${masterOpen ? 'on' : ''}`}
+          onClick={() => setMasterOpen((o) => !o)}
+          title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
+        >
+          <span className="star">★</span> Master
+        </button>
+      )}
     </div>
   )
 }

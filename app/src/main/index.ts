@@ -8,6 +8,7 @@ import { isSafeBgId } from '@shared/paneCommand'
 import { isClaudeCommand, tasklistImage } from '@shared/procs'
 import { MASTER_NAME } from '@shared/derive'
 import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, SetupCheck } from '@shared/types'
+import { getConfig } from '@shared/appConfig'
 import { startAssign } from './assign'
 import { configuredModel } from './models'
 import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
@@ -191,6 +192,7 @@ let masterStartingUntil = 0
  * (two sessions named master-agent make the CLI refuse every write).
  */
 async function startMaster(): Promise<CliResult> {
+  if (!getConfig().masterEnabled) return { ok: false, message: 'master-agent is turned off (Settings → GitHub & board)' }
   if (!sources.isHealthy('agents')) return { ok: false, message: 'the session list is not loaded yet; try again in a few seconds' }
   if (latest && latest.master.kind !== 'absent') return { ok: false, message: `master is already ${latest.master.kind}` }
   if (Date.now() < masterStartingUntil) return { ok: false, message: 'master-agent is already starting' }

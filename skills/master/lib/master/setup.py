@@ -111,6 +111,8 @@ def _validate(cfg: dict) -> "str | None":
         return "columns must be a list of status names"
     if not isinstance(cfg.get("statuses"), dict):
         return "statuses must be an object"
+    if not isinstance(cfg.get("masterEnabled", True), bool):
+        return "masterEnabled must be true or false"
     return None
 
 

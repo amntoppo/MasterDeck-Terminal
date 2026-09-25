@@ -39,6 +39,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     cfg.project ? { project: cfg.project, projectId: cfg.projectId, statusFieldId: cfg.statusFieldId, statusOptions: cfg.statusOptions, columns: cfg.columns, statuses: cfg.statuses, sprintField: cfg.sprintField } : null,
   )
   const [workspace, setWorkspace] = useState(cfg.workspace || '')
+  const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
   const [hooks, setHooks] = useState({ ticket: state.hooks.ticket || firstRun, pr: state.hooks.pr || firstRun, queue: state.hooks.queue || firstRun })
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -99,6 +100,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         ? { projectId: board.projectId, statusFieldId: board.statusFieldId, statusOptions: board.statusOptions, columns: board.columns, statuses: board.statuses, sprintField: board.sprintField }
         : {}),
       ...(workspace ? { workspace } : {}),
+      masterEnabled: useMaster,
     }
     const r = await deck().configSave(patch)
     if (!r.ok) {
@@ -239,6 +241,16 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             Choose…
           </button>
         </div>
+
+        <label>Master agent</label>
+        <label className="mpick-row">
+          <input type="checkbox" checked={useMaster} onChange={(e) => setUseMaster(e.target.checked)} />
+          <span>
+            Use a master-agent session: it sweeps issues, PRs and meetings for work to hand out, collects what sessions report
+            (done, blocked, questions) and relays to sessions in other terminals. Off: everything else works, and sessions ask
+            you directly.
+          </span>
+        </label>
 
         <label>Hooks (added to ~/.claude/settings.json; a backup is kept)</label>
         <label className="mpick-row">

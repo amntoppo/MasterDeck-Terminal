@@ -47,6 +47,9 @@ DEFAULTS: dict = {
     "sprintField": "Sprint",
     "workspace": str(Path.home() / "Documents"),
     "masterName": "master-agent",
+    # False: no master-agent session. MasterDeck and the CLI still work; new sessions report to
+    # the user in their own session instead of messaging master.
+    "masterEnabled": True,
 }
 
 
@@ -112,6 +115,10 @@ BOARD_SPRINT_QUERY: str = CONFIG["sprintQuery"]
 
 def workspace() -> Path:
     return Path(os.path.expanduser(os.environ.get("MASTER_WORKSPACE") or CONFIG["workspace"]))
+
+
+def master_enabled() -> bool:
+    return CONFIG.get("masterEnabled", True) is not False
 
 
 def issue_ref() -> str:

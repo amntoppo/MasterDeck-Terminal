@@ -9,6 +9,10 @@ REPLY = ("When you are done, blocked or have a question, tell master-agent with 
          "'#{n}: done', '#{n}: blocked — <reason>' or '#{n}: question — <question>'. When you have a "
          "question, ALSO ask the user directly in this session (so they see it here too), and wait for the "
          "answer from either place. If the user answers you here, tell master-agent '#{n}: answered — <answer>'.")
+# Without a master-agent (config masterEnabled false) there is no one to message: report here.
+REPLY_SOLO = ("When you are done, blocked or have a question, say so in this session, first line "
+              "'#{n}: done', '#{n}: blocked — <reason>' or '#{n}: question — <question>', and wait for the "
+              "user's answer here.")
 
 
 def parse_ts(s: str) -> datetime:
@@ -38,12 +42,16 @@ def _assign(i: dict) -> dict:
         f"1. Use the babysit-ticket skill to link this session to #{n}.\n"
         f"2. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and use the babysit-worktree skill "
         f"there to create a worktree for #{n}.\n"
-        f"3. Then stop and ask the user for instructions: tell master-agent "
-        f"'#{n}: question — ready for instructions on #{n}: <one-line summary of the issue, the repo and "
-        f"the worktree/branch you created>', and ask them the same here. Wait for their answer; they will "
-        f"brainstorm and plan the work with you in this session.\n"
-        f"4. Once a PR exists, use the babysit-pr skill to babysit it. Do not merge.\n\n"
-        + REPLY.format(n=n)
+        + (f"3. Then stop and ask the user for instructions: tell master-agent "
+           f"'#{n}: question — ready for instructions on #{n}: <one-line summary of the issue, the repo and "
+           f"the worktree/branch you created>', and ask them the same here. Wait for their answer; they will "
+           f"brainstorm and plan the work with you in this session.\n"
+           if config.master_enabled() else
+           f"3. Then stop and ask the user for instructions here: '#{n}: question — ready for instructions on "
+           f"#{n}: <one-line summary of the issue, the repo and the worktree/branch you created>'. Wait for their "
+           f"answer; they will brainstorm and plan the work with you in this session.\n")
+        + f"4. Once a PR exists, use the babysit-pr skill to babysit it. Do not merge.\n\n"
+        + (REPLY if config.master_enabled() else REPLY_SOLO).format(n=n)
     )
     return {"kind": "ASSIGN", "issue": n, "source": f"issue:{n}",
             "target": {"spawn": {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}},

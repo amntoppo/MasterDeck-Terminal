@@ -20,3 +20,11 @@ describe('appConfig', () => {
     expect(['Todo', 'Doing', 'Review', 'Done', 'Blocked'].map((s) => statusGroup(s, c))).toEqual(['todo', 'progress', 'review', 'done', 'blocked'])
   })
 })
+
+describe('masterEnabled', () => {
+  it('defaults to on; only false turns master off', () => {
+    expect(parseConfig({}).masterEnabled).toBe(true)
+    expect(parseConfig({ masterEnabled: false }).masterEnabled).toBe(false)
+    expect(parseConfig({ masterEnabled: 'no' }).masterEnabled).toBe(true)
+  })
+})
