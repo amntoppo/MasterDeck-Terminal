@@ -94,6 +94,12 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 
 ## Cost and context
 
+- **Tokens:** each session's header shows **Tokens used** (input, output and prompt-cache, with the
+  split on hover), and the Costs view shows tokens next to spend: per day, per ticket and per
+  session. They are summed from the session's transcript and its subagents', counting each message
+  once, by the day it was sent. The first Costs view reads your history once (a few seconds, in the
+  background); after that only new lines are read (`~/.claude/masterdeck/tokens.json`). Cache reads
+  are usually most of the total.
 - **Costs view ($):** spend today, 7 and 30 days, a 14-day bar chart, and tables per ticket and per
   session. The data is the status line's cumulative cost, recorded per session per day in
   `~/.claude/masterdeck/costs.json`. Spend a session had before MasterDeck first saw it counts as a

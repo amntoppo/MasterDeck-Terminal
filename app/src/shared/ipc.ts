@@ -3,6 +3,7 @@ import type { Settings } from './settings'
 import type { HistoryHit } from './history'
 import type { StandupCommit } from './standup'
 import type { WorktreeClass, WorktreeInfo } from './janitor'
+import type { TokensByDay } from './tokens'
 
 /** A change to a session's queue; remove and move name the item by index and text. */
 export type QueueEdit =
@@ -81,6 +82,7 @@ export const CH = {
   deleteTemplate: 'templates:delete',
   resumeSession: 'session:resume',
   resumeStopped: 'session:resumeStopped',
+  tokensByDay: 'costs:tokensByDay',
   dismissStopped: 'session:dismissStopped',
   boardOpen: 'board:open',
 } as const
@@ -152,6 +154,8 @@ export interface DeckApi {
   resumeSession(sessionId: string, name: string, cwd: string | null): Promise<CliResult>
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
   resumeStopped(): Promise<CliResult>
+  /** Tokens per day for these sessions, from their transcripts (the Costs view). */
+  tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>
   dismissStopped(): Promise<void>
   /** Make `login` the only assignee (GitHub REST). */
   assignIssue(issue: number, login: string, current: string[]): Promise<CliResult>

@@ -258,6 +258,7 @@ function registerIpc(): void {
   ipcMain.handle(CH.deleteTemplate, (_e, name: string) => ops.deleteTemplate(name))
   ipcMain.handle(CH.resumeSession, (_e, id: string, name: string, cwd: string | null) => resumeBg(id, name, cwd))
   ipcMain.handle(CH.resumeStopped, () => sources.resumeStopped())
+  ipcMain.handle(CH.tokensByDay, (_e, ids: unknown) => sources.tokensByDay(Array.isArray(ids) ? ids : []))
   ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped())
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))

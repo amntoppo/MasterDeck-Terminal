@@ -40,6 +40,7 @@ const api: DeckApi = {
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),
   resumeSession: (id, name, cwd) => ipcRenderer.invoke(CH.resumeSession, id, name, cwd),
   resumeStopped: () => ipcRenderer.invoke(CH.resumeStopped),
+  tokensByDay: (ids) => ipcRenderer.invoke(CH.tokensByDay, ids),
   dismissStopped: () => ipcRenderer.invoke(CH.dismissStopped),
   assign: (req) => ipcRenderer.invoke(CH.assign, req),
   defaultModel: () => ipcRenderer.invoke(CH.defaultModel),

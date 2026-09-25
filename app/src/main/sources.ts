@@ -38,6 +38,8 @@ import type {
 import { DEFAULT_CONFIG, getConfig, parseConfig, setConfig, type AppConfig } from '@shared/appConfig'
 import { parseTeamPrs, type TeamPr } from '@shared/teamPrs'
 import { nextRestore, parseRestoreFile, type RestoreEntry, type RestoreFile } from '@shared/restore'
+import { totalOf, type Tokens, type TokensByDay } from '@shared/tokens'
+import { TokenIndex } from './tokens'
 import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
 import { GitHub } from './github'
@@ -110,6 +112,10 @@ export class Sources {
   private linker: ((issue: number, sessionId: string, cwd: string | null) => Promise<CliResult>) | null = null
   /** Which background sessions were running, so a restart can be undone (see @shared/restore). */
   private restore: RestoreFile | null = null
+  private tokenIndex: TokenIndex
+  /** Tokens used so far by the sessions whose details are followed (open tabs, focused). */
+  private tokens: Record<string, Tokens> = {}
+  private tokenPending = new Set<string>()
   private restoreSeen = false
   private restoring = false
   private resumer: ((e: RestoreEntry) => Promise<CliResult>) | null = null
@@ -151,6 +157,12 @@ export class Sources {
     private readGhCache: () => GhCacheStatus | null = () => null,
   ) {
     this.transcripts = new TranscriptIndex(paths.projectsDir)
+    this.tokenIndex = new TokenIndex(this.transcripts, join(paths.home, 'tokens.json'))
+  }
+
+  /** Tokens per day for these sessions (the Costs view): the first call reads their history. */
+  tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>> {
+    return this.tokenIndex.refresh(sessionIds.filter((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)))
   }
 
   /** How to resume a stopped background session (`claude --bg --resume`). */
@@ -586,6 +598,7 @@ export class Sources {
 
   stop(): void {
     for (const t of this.timers) clearInterval(t)
+    this.tokenIndex.save()
     unwatchFile(this.paths.ledger)
   }
 
@@ -762,6 +775,18 @@ export class Sources {
           this.lastWrite[id] = tail.mtimeMs
           if (!this.stats[id] || this.stats[id].source === 'transcript') this.stats[id] = statsFromTranscript(this.tails[id], now)
         }
+        // Not awaited: a first read of a long history (or the Costs view's) must not hold up the details.
+        if (!this.tokenPending.has(id)) {
+          this.tokenPending.add(id)
+          void this.tokenIndex
+            .refresh([id])
+            .then((r) => {
+              if (!r[id]) return
+              this.tokens[id] = totalOf(r[id])
+              this.emit()
+            })
+            .finally(() => this.tokenPending.delete(id))
+        }
         const key = s?.key ?? id
         const created = tp ? this.followPrs(tp, key) : false
         const dir = this.stats[id]?.currentDir ?? this.tails[id]?.cwd ?? s?.cwd
@@ -890,6 +915,7 @@ export class Sources {
       teamPrsLoading: this.teamPrsLoading,
       teamPrsError: this.teamPrsError,
       stoppedByRestart: this.restore?.stopped ?? [],
+      tokens: { ...this.tokens },
       restoring: this.restoring,
       config: this.config,
       skills: this.skills,

@@ -13,7 +13,7 @@ function prop(id: number, status: string): Proposal {
 function state(sessions: Session[], proposals: Proposal[] = []): AppState {
   return {
     sessions, proposals, issues: [], prs: [], master: { kind: 'absent' }, needsYou: [], stats: {}, tails: {}, git: {},
-    prLive: {}, sessionPrs: {}, sources: {}, errors: [], lastSnapshotAt: null, statuslineInstalled: false, missingBinaries: [], masterWorkspace: '/', board: null, boardError: null, boardLoading: false, githubRefreshedAt: null, githubRefreshing: false, sprints: [], selectedSprint: '@current', users: [], me: null, settings: DEFAULT_SETTINGS, allStats: {}, costBook: {}, lastActivity: {}, boardHistory: {}, ghCache: null, teamPrs: [], teamPrsAt: null, teamPrsLoading: false, teamPrsError: null, config: DEFAULT_CONFIG, skills: [], hooks: { ticket: false, pr: false, queue: false }, stoppedByRestart: [], restoring: false,
+    prLive: {}, sessionPrs: {}, sources: {}, errors: [], lastSnapshotAt: null, statuslineInstalled: false, missingBinaries: [], masterWorkspace: '/', board: null, boardError: null, boardLoading: false, githubRefreshedAt: null, githubRefreshing: false, sprints: [], selectedSprint: '@current', users: [], me: null, settings: DEFAULT_SETTINGS, allStats: {}, costBook: {}, lastActivity: {}, boardHistory: {}, ghCache: null, teamPrs: [], teamPrsAt: null, teamPrsLoading: false, teamPrsError: null, config: DEFAULT_CONFIG, skills: [], hooks: { ticket: false, pr: false, queue: false }, stoppedByRestart: [], restoring: false, tokens: {},
   }
 }
 

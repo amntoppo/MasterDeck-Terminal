@@ -1,3 +1,4 @@
+import type { Tokens } from './tokens'
 import type { RestoreEntry } from './restore'
 import type { AppConfig } from './appConfig'
 import type { TeamPr } from './teamPrs'
@@ -174,6 +175,8 @@ export interface AppState {
   stoppedByRestart: RestoreEntry[]
   /** Resuming them now. */
   restoring: boolean
+  /** Tokens used so far (input, output, cache) by the sessions in open tabs, from their transcripts. */
+  tokens: Record<string, Tokens>
 }
 
 export interface SkillStatus {

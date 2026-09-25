@@ -2,6 +2,7 @@ import { issueUrl as issueUrlFor } from '@shared/appConfig'
 import { useEffect, useRef, useState } from 'react'
 import { formatAgo, formatCost, formatDiff, formatPct, shortPath } from '@shared/format'
 import { contextLevel } from '@shared/stats'
+import { formatTokens, tokenSum, tokenTitle } from '@shared/tokens'
 import type { AppState, Session } from '@shared/types'
 import { deck, useNow } from '../deck'
 
@@ -30,6 +31,7 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const [note, setNote] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const since = useStateSince(s)
+  const tokens = state.tokens[s.sessionId] ?? null
 
   useEffect(() => {
     if (!menu) return
@@ -168,6 +170,9 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         </span>
         <span className="chip" title={stats?.source === 'transcript' ? 'Install the status line hook for exact cost' : 'Session cost so far'}>
           {formatCost(stats?.costUsd ?? null)}
+        </span>
+        <span className="chip" title={tokens ? `${tokenTitle(tokens)}\n(this session and its subagents, from the transcript)` : 'Counting tokens…'}>
+          Tokens used <b>{formatTokens(tokens ? tokenSum(tokens) : null)}</b>
         </span>
         {(stats?.contextPct ?? 0) >= state.settings.contextWarnPct && (
           <span
