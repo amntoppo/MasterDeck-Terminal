@@ -11,6 +11,9 @@ interface Props {
   onDetach: () => void
   onAskMaster: (s: Session) => void
   masterAttached: boolean
+  /** The Queue panel (this session's /queue) is showing. */
+  queueOpen: boolean
+  onToggleQueue: () => void
 }
 
 const STATE_TEXT: Record<string, string> = {
@@ -21,7 +24,7 @@ const STATE_TEXT: Record<string, string> = {
   done: 'ended',
 }
 
-export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterAttached }: Props) {
+export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterAttached, queueOpen, onToggleQueue }: Props) {
   const now = useNow(1000)
   const [menu, setMenu] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -122,6 +125,9 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
             Open in editor
           </span>
         )}
+        <span className={`chip btnlike ${queueOpen ? 'on' : ''}`} onClick={onToggleQueue} title={queueOpen ? 'Hide the queue' : "Show this session's /queue: prompts it runs after each response"}>
+          Queue Prompts
+        </span>
         {note && <span className="chip muted">{note}</span>}
         <div className="menu-wrap" ref={menuRef}>
           <button className="icon-btn" onClick={() => setMenu(!menu)} title="More">

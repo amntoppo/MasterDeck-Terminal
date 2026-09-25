@@ -251,7 +251,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         </label>
         <label className="mpick-row">
           <input type="checkbox" checked={hooks.queue} onChange={(e) => setHooks({ ...hooks, queue: e.target.checked })} />
-          <span>queue: `/queue &lt;prompt&gt;` runs the prompt after the current response (and the Queue tab)</span>
+          <span>queue: `/queue &lt;prompt&gt;` runs the prompt after the current response (and the Queue panel)</span>
         </label>
 
         <div className="foot">

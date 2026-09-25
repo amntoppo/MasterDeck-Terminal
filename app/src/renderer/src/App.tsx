@@ -18,6 +18,7 @@ import { PrPopup } from './components/PrPopup'
 import { StartHereDialog } from './components/StartHereDialog'
 import { LinkDialog } from './components/LinkDialog'
 import { MasterPane, masterPaneId } from './components/MasterPane'
+import { QueuePanel } from './components/QueuePanel'
 import { RestoreBanner } from './components/RestoreBanner'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
@@ -95,6 +96,8 @@ export function App() {
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
   const [dragging, setDragging] = useState(false)
+  // The Queue panel under master; each session header's Queue Prompts shows or hides it.
+  const [queueOpen, setQueueOpen] = useState(() => load<boolean>('queueOpen', false))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const needsYouRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<HTMLDivElement>(null)
@@ -102,6 +105,7 @@ export function App() {
   useEffect(() => save('tabs', tabs), [tabs])
   useEffect(() => save('active', active), [active])
   useEffect(() => save('masterPct', masterPct), [masterPct])
+  useEffect(() => save('queueOpen', queueOpen), [queueOpen])
   useEffect(() => {
     save('view', view)
     deck().setBoardOpen(view === 'board')
@@ -493,6 +497,8 @@ export function App() {
                   armed={armed.has(t.id)}
                   onArm={() => arm(t.id)}
                   onStartHere={(s, stop) => startHere(t.id, s, stop)}
+                  queueOpen={queueOpen}
+                  onToggleQueue={() => setQueueOpen((o) => !o)}
                 />
               )}
             </div>
@@ -503,7 +509,10 @@ export function App() {
       <div className={`divider ${dragging ? 'dragging' : ''}`} onMouseDown={() => setDragging(true)} title="Drag to resize master">
         ⋮
       </div>
-      <MasterPane state={state} activeKey={activeKey} />
+      <div className="right-col">
+        <MasterPane state={state} />
+        {queueOpen && <QueuePanel state={state} activeKey={activeKey} onClose={() => setQueueOpen(false)} />}
+      </div>
 
       {assigning && (
         <AssignDialog
@@ -650,6 +659,8 @@ function SessionPane(p: {
   masterAttached: boolean
   armed: boolean
   onArm: () => void
+  queueOpen: boolean
+  onToggleQueue: () => void
 }) {
   const [asking, setAsking] = useState(false)
   const s = p.state.sessions.find((x) => x.key === p.tab.key)
@@ -677,7 +688,7 @@ function SessionPane(p: {
 
   return (
     <>
-      <WorkerHeader session={s} state={p.state} onDetach={p.onClose} onAskMaster={p.onAskMaster} masterAttached={p.masterAttached} />
+      <WorkerHeader session={s} state={p.state} onDetach={p.onClose} onAskMaster={p.onAskMaster} masterAttached={p.masterAttached} queueOpen={p.queueOpen} onToggleQueue={p.onToggleQueue} />
       {s.kind === 'background' && s.bgId && !p.armed ? (
         <NotStarted
           label={s.state === 'suspended' ? `${s.name} is parked. Attaching resumes it.` : `${s.name} from your last session`}

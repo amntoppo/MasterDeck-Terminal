@@ -21,7 +21,7 @@ MasterDeck ships with a set of Claude Code **skills** and installs them for you:
 | `babysit-pr` | Runs a self-review before a PR is opened, then handles review comments and CI until it merges. |
 | `babysit-worktree` / `kill-worktree` | Isolates a session in a git worktree, then folds the work back. |
 | `worktree-janitor` | Cleans up finished worktrees across your repos. |
-| `queue` | `/queue <prompt>` in any session queues a prompt to run after the current response; `/queue list`, `/queue clear`. The master pane's **Queue** tab shows and edits each session's queue. |
+| `queue` | `/queue <prompt>` in any session queues a prompt to run after the current response; `/queue list`, `/queue clear`. **Queue Prompts** in a session's header opens a Queue panel under master that shows and edits it. |
 
 Nothing is sent to a session or started without your yes. The skills never merge, never
 force-push and never use `--dangerously-skip-permissions`.

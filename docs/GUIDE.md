@@ -76,10 +76,11 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice.
-- **Queue (master pane → Queue tab):** the focused session's `/queue`, the prompts it runs one by
+- **Queue (Queue Prompts in a session's header):** shows or hides the Queue panel under master, next
+  to it rather than instead of it. It holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
-  moves on after its next response, so the tab offers **Send next now**. In a session, `/queue
+  moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Quick reply:** a Needs-you card with a session's question has a reply box.

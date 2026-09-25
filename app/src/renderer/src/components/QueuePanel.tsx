@@ -7,16 +7,14 @@ interface Props {
   state: AppState
   /** The session of the focused tab: its queue shows unless another one is picked here. */
   activeKey: string | null
-  visible: boolean
-  /** How many prompts the shown queue holds (for the tab label). */
-  onCount: (n: number) => void
+  onClose: () => void
 }
 
 /**
  * One session's /queue (the queue skill): the prompts its Stop hook runs, one per finished
  * response, first to last. Reads and edits ~/.claude/queue/<session id>.jsonl through the app.
  */
-export function QueuePanel({ state, activeKey, visible, onCount }: Props) {
+export function QueuePanel({ state, activeKey, onClose }: Props) {
   const [picked, setPicked] = useState<string | null>(null)
   const [items, setItems] = useState<string[]>([])
   const [text, setText] = useState('')
@@ -39,11 +37,9 @@ export function QueuePanel({ state, activeKey, visible, onCount }: Props) {
   // The Stop hook takes prompts off the file as the session works: re-read while shown.
   useEffect(() => {
     void load()
-    if (!visible) return
     const t = setInterval(() => void load(), 2000)
     return () => clearInterval(t)
-  }, [load, visible])
-  useEffect(() => onCount(items.length), [items.length, onCount])
+  }, [load])
   useEffect(() => setMsg(null), [sid])
 
   const edit = async (e: QueueEdit) => {
@@ -74,7 +70,15 @@ export function QueuePanel({ state, activeKey, visible, onCount }: Props) {
         : 'The session is idle: the queue runs after its next response, or send the first prompt now.'
 
   return (
-    <div className="queue" style={{ display: visible ? 'flex' : 'none' }}>
+    <section className="queue">
+      <div className="mhead">
+        <strong>Queue{items.length ? ` (${items.length})` : ''}</strong>
+        <span className="muted">prompts run after each response, first to last</span>
+        <span style={{ flex: 1 }} />
+        <button className="icon-btn" onClick={onClose} title="Hide the queue (Queue Prompts shows it again)">
+          ×
+        </button>
+      </div>
       <div className="queue-head">
         <select className="fsel" value={key ?? ''} onChange={(e) => setPicked(e.target.value || null)} title="Whose queue">
           {!session && <option value="">Pick a session…</option>}
@@ -143,6 +147,6 @@ export function QueuePanel({ state, activeKey, visible, onCount }: Props) {
           </div>
         </>
       )}
-    </div>
+    </section>
   )
 }
