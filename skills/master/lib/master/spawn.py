@@ -8,6 +8,8 @@ from pathlib import Path
 from . import config, ledger
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$")
 
 
 class SpawnError(RuntimeError):
@@ -28,6 +30,12 @@ def validate_prompt(prompt: "str | None") -> "str | None":
     return None
 
 
+def validate_model(model: "str | None") -> "str | None":
+    if model is not None and not MODEL_RE.fullmatch(model):
+        return f"invalid model: {model!r}"
+    return None
+
+
 def validate_resume(resume: "str | None") -> "str | None":
     try:
         if str(uuid.UUID(resume)) != resume.lower():
@@ -41,7 +49,7 @@ def validate_spawn_target(sp: dict) -> "str | None":
     """Validate a `target["spawn"]` dict. Returns None when valid, else the reason."""
     if sp.get("resume"):
         return validate_resume(sp["resume"])
-    err = validate_name(sp.get("name"))
+    err = validate_name(sp.get("name")) or validate_model(sp.get("model"))
     if err:
         return err
     return validate_prompt(sp.get("prompt"))
@@ -54,7 +62,8 @@ def command(target: dict) -> list:
         raise SpawnError(err)
     if sp.get("resume"):
         return ["claude", "--bg", "--resume", sp["resume"]]
-    return ["claude", "--bg", "-n", sp["name"], sp["prompt"]]
+    model = ["--model", sp["model"]] if sp.get("model") else []
+    return ["claude", "--bg", "-n", sp["name"], *model, sp["prompt"]]
 
 
 def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:

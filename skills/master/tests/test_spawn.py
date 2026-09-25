@@ -34,6 +34,15 @@ class SpawnTest(unittest.TestCase):
             ledger.transition(self.led, p["id"], "approved", now=NOW)
         return p
 
+    def test_model_goes_before_the_prompt_and_is_validated(self):
+        self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "model": "opus[1m]"}}),
+                         ["claude", "--bg", "-n", "981-x", "--model", "opus[1m]", "go"])
+        self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "model": "claude-opus-5-5"}})[4:6],
+                         ["--model", "claude-opus-5-5"])
+        for bad in ("--dangerously-skip-permissions", "", "opus x", "a;b"):
+            with self.assertRaises(spawn.SpawnError):
+                spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "model": bad}})
+
     def test_command_shapes(self):
         self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go"}}),
                          ["claude", "--bg", "-n", "981-x", "go"])

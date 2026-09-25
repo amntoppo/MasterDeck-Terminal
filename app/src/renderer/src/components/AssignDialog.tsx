@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { pendingAssign } from '@shared/derive'
 import type { AssignRequest, Template } from '@shared/ipc'
+import { defaultModelLabel, MODELS } from '@shared/models'
 import { composePrompt } from '@shared/prompt'
 import type { AppState, DraftAssign, Issue } from '@shared/types'
 import { deck } from '../deck'
@@ -28,8 +29,12 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   const [instructions, setInstructions] = useState(initialInstructions ?? '')
   const [templates, setTemplates] = useState<Template[]>([])
   const [savingAs, setSavingAs] = useState<string | null>(null)
+  // '' = start without --model: Claude Code's default (the one in settings.json, if set).
+  const [model, setModel] = useState('')
+  const [configuredModel, setConfiguredModel] = useState<string | null>(null)
   useEffect(() => {
     void deck().templates().then(setTemplates)
+    void deck().defaultModel().then(setConfiguredModel)
   }, [])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -90,7 +95,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
 
   const start = () => {
     if (!draft || !nameOk || !promptOk) return
-    const unchanged = name === draft.name && prompt === draft.prompt.trim()
+    const unchanged = name === draft.name && prompt === draft.prompt.trim() && !model
     onStart({
       issue: issue.number,
       name,
@@ -99,6 +104,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
       proposalId: draft.proposalId,
       edited: !unchanged,
       approved: unchanged && draft.proposalId !== null && draft.proposalId === approved?.id,
+      model: model || undefined,
     })
     onClose()
   }
@@ -128,6 +134,15 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
             <label>Session name</label>
             <input value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} />
             {!nameOk && <div className="error" style={{ fontSize: 11, marginTop: 3 }}>Letters, digits, dot, dash and underscore; up to 64 characters.</div>}
+            <label>Model</label>
+            <select className="fsel full" value={model} onChange={(e) => setModel(e.target.value)} title="claude --model for the new session">
+              <option value="">{defaultModelLabel(configuredModel)}</option>
+              {MODELS.filter((m) => m.value !== configuredModel).map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
             <label>System prompt</label>
             <textarea className="system" value={system} onChange={(e) => setSystem(e.target.value)} spellCheck={false} />
             <div className="label-row">

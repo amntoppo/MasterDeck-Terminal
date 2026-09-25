@@ -127,6 +127,8 @@ def cmd_add(args) -> int:
         target = {"session": args.session}
     else:
         sp = {"name": args.spawn_name, "cwd": args.cwd or str(config.workspace()), "prompt": args.prompt}
+        if args.model:
+            sp["model"] = args.model
         err = spawn.validate_spawn_target(sp)
         if err:
             print(err)
@@ -327,6 +329,7 @@ def parser() -> argparse.ArgumentParser:
     tgt.add_argument("--spawn-name")
     ad.add_argument("--prompt")
     ad.add_argument("--cwd")
+    ad.add_argument("--model", help="claude --model for the spawned session; omitted: the default model")
     ad.set_defaults(fn=cmd_add)
 
     for name, to in (("approve", "approved"), ("reject", "rejected")):

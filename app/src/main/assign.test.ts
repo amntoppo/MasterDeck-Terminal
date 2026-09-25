@@ -9,7 +9,7 @@ function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
     approve: async (ids) => (calls.push(`approve ${ids}`), (over.approve as never) ?? ok()),
     reject: async (ids) => (calls.push(`reject ${ids}`), ok()),
     spawn: async (id) => (calls.push(`spawn ${id}`), (over.spawn as never) ?? ok()),
-    addAssign: async (a) => (calls.push(`add ${a.name}`), (over.addAssign as never) ?? { ok: true, id: 30 }),
+    addAssign: async (a) => (calls.push(`add ${a.name}${a.model ? ` --model ${a.model}` : ''}`), (over.addAssign as never) ?? { ok: true, id: 30 }),
   }
   return { cli, calls }
 }
@@ -44,6 +44,11 @@ describe('startAssign', () => {
   it('a real spawn failure is reported', async () => {
     const f = fakeCli({ spawn: { ok: false, message: 'proposal 30: cwd does not exist: /w' } })
     expect(await startAssign(f.cli, req({}))).toEqual({ ok: false, message: 'proposal 30: cwd does not exist: /w', proposalId: 30 })
+  })
+  it("a chosen model replaces master's proposal with one that carries it", async () => {
+    const f = fakeCli()
+    await startAssign(f.cli, req({ proposalId: 20, approved: true, model: 'sonnet' }))
+    expect(f.calls).toEqual(['add 9-x --model sonnet', 'approve 30', 'reject 20', 'spawn 30'])
   })
   it('retrying a held proposal only spawns it again', async () => {
     const f = fakeCli()

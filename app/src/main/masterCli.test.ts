@@ -58,6 +58,14 @@ describe('MasterCli', () => {
     expect(await new MasterCli(f.run, '/lib', 'python3').spawn(21)).toEqual({ ok: true, message: '21: sent — started' })
     expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'spawn', '21'])
   })
+  it('addAssign passes --model only when one is chosen', async () => {
+    const f = fake({ stdout: 'added 5' })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    await cli.addAssign({ issue: 1, name: '1-x', cwd: '/w', prompt: 'p', source: 's', model: 'opus[1m]' })
+    await cli.addAssign({ issue: 1, name: '1-x', cwd: '/w', prompt: 'p', source: 's' })
+    expect(f.calls[0].args.slice(-2)).toEqual(['--model', 'opus[1m]'])
+    expect(f.calls[1].args).not.toContain('--model')
+  })
   it('a forced board or snapshot tells ghcache to skip cached answers', async () => {
     const f = fake({ stdout: '{}' })
     const cli = new MasterCli(f.run, '/lib', 'python3')

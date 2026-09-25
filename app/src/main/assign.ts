@@ -5,7 +5,7 @@ export interface AssignCli {
   approve(ids: number[]): Promise<CliResult>
   reject(ids: number[]): Promise<CliResult>
   spawn(id: number): Promise<CliResult>
-  addAssign(a: { issue: number; name: string; cwd: string; prompt: string; source: string; kind?: string }): Promise<
+  addAssign(a: { issue: number; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string }): Promise<
     { ok: true; id: number } | { ok: false; message: string }
   >
 }
@@ -20,7 +20,8 @@ const ALREADY_SENT = /is (sent|done|question|blocked), not approved/
  */
 export async function startAssign(cli: AssignCli, req: AssignRequest, now = Date.now()): Promise<CliResult & { proposalId?: number }> {
   let id: number
-  if (req.proposalId !== null && !req.edited) {
+  // A chosen model means a new proposal: master's own has no model in its spawn target.
+  if (req.proposalId !== null && !req.edited && !req.model) {
     id = req.proposalId
     if (!req.approved) {
       const a = await cli.approve([id])
@@ -29,7 +30,7 @@ export async function startAssign(cli: AssignCli, req: AssignRequest, now = Date
   } else {
     const kind = req.kind ?? 'ASSIGN'
     const source = kind === 'PRREVIEW' ? `app:review:${req.issue}:${req.name}:${now}` : `app:issue:${req.issue}:${now}`
-    const added = await cli.addAssign({ issue: req.issue, name: req.name, cwd: req.cwd, prompt: req.prompt, source, kind })
+    const added = await cli.addAssign({ issue: req.issue, name: req.name, cwd: req.cwd, prompt: req.prompt, source, kind, model: req.model || undefined })
     if (!added.ok) return { ok: false, message: added.message }
     const a = await cli.approve([added.id])
     if (!a.ok) {

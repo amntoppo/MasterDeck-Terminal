@@ -37,6 +37,7 @@ const api: DeckApi = {
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),
   resumeSession: (id, name, cwd) => ipcRenderer.invoke(CH.resumeSession, id, name, cwd),
   assign: (req) => ipcRenderer.invoke(CH.assign, req),
+  defaultModel: () => ipcRenderer.invoke(CH.defaultModel),
   refresh: () => ipcRenderer.invoke(CH.refresh),
   refreshBoard: () => ipcRenderer.invoke(CH.boardRefresh),
   refreshTeamPrs: (maxAgeMs) => ipcRenderer.invoke(CH.teamPrsRefresh, maxAgeMs),

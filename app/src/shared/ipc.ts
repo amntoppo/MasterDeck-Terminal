@@ -54,6 +54,7 @@ export const CH = {
   setSprint: 'board:sprint',
   prSummary: 'pr:summary',
   assignIssue: 'issue:assign',
+  defaultModel: 'models:default',
   startHere: 'session:startHere',
   sendText: 'session:sendText',
   getSettings: 'settings:get',
@@ -85,6 +86,8 @@ export interface AssignRequest {
   approved: boolean
   /** ASSIGN (default) or PRREVIEW. */
   kind?: 'ASSIGN' | 'PRREVIEW'
+  /** `claude --model` for the new session; absent: the default model. */
+  model?: string
 }
 
 export interface PtyOpenResult {
@@ -133,6 +136,8 @@ export interface DeckApi {
   /** Make `login` the only assignee (GitHub REST). */
   assignIssue(issue: number, login: string, current: string[]): Promise<CliResult>
   assign(req: AssignRequest): Promise<CliResult & { proposalId?: number }>
+  /** The model set in ~/.claude/settings.json (what "Default" starts), or null. */
+  defaultModel(): Promise<string | null>
   refresh(): Promise<CliResult>
   refreshBoard(): Promise<CliResult>
   /** Fetch every PR in the org; with `maxAgeMs`, only when the list is older than that. */

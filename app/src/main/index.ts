@@ -9,6 +9,7 @@ import { isClaudeCommand, tasklistImage } from '@shared/procs'
 import { MASTER_NAME } from '@shared/derive'
 import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, SetupCheck } from '@shared/types'
 import { startAssign } from './assign'
+import { configuredModel } from './models'
 import { makeGhRunner, readGhCacheStatus } from './ghc'
 import { GitHub } from './github'
 import { Sender } from './send'
@@ -245,6 +246,7 @@ function registerIpc(): void {
     return r
   })
   ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req))
+  ipcMain.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings))
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
   ipcMain.handle(CH.refresh, () => sources.refreshGithub(true))
   ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true))
