@@ -1,0 +1,37 @@
+appId: io.github.amntoppo.masterdeck
+productName: MasterDeck
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - "!**/*.test.*"
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+extraResources:
+  - from: resources/statusline_tee.py
+    to: statusline_tee.py
+  # The Claude Code skills MasterDeck installs into ~/.claude/skills on first launch.
+  - from: ../skills
+    to: skills
+    filter:
+      - "**/*"
+      - "!**/tests/**"
+      - "!**/__pycache__/**"
+      - "!**/.pytest_cache/**"
+npmRebuild: true
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # Unsigned until a Developer ID certificate is configured (CSC_LINK / CSC_KEY_PASSWORD).
+  identity: null
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

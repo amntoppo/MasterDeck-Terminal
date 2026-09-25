@@ -1,0 +1,20 @@
+{
+  "owner": "acme",
+  "ownerType": "organization",
+  "issueRepo": "tracker",
+  "project": 1,
+  "columns": ["To Do", "Ready For Dev", "In Dev", "PR Raised", "Dev Done", "In QA", "QA Done", "Re-Open",
+              "Dev Deployed", "Stage Done", "Qa Done Prod", "Blocked", "Invalid", "Ready for re-test"],
+  "statuses": {
+    "ready": "Ready For Dev",
+    "inProgress": "In Dev",
+    "prRaised": "PR Raised",
+    "devDone": "Dev Done",
+    "blocked": ["Blocked"],
+    "done": ["Dev Done", "In QA", "QA Done", "Qa Done Prod", "Stage Done", "Dev Deployed", "Invalid"],
+    "finished": ["QA Done", "Stage Done", "Qa Done Prod", "Invalid", "Dev Deployed"],
+    "assignable": ["To Do", "Ready For Dev", "Re-Open"],
+    "resumable": ["In Dev", "Re-Open", "PR Raised"]
+  },
+  "workspace": "/tmp/master-test-workspace"
+}
