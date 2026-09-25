@@ -1,14 +1,20 @@
 # lib/master/ledger.py
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
 from . import config
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
 
 TRANSITIONS = {
     "proposed": {"approved", "rejected"},
@@ -58,12 +64,33 @@ def save(led: dict, path: Path | None = None) -> None:
 def file_lock(directory: Path | None = None):
     directory = directory or config.master_home()
     directory.mkdir(parents=True, exist_ok=True)
-    with open(directory / "ledger.lock", "a") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
+    with open(directory / "ledger.lock", "a+") as lf:
+        _lock(lf)
         try:
             yield
         finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
+            _unlock(lf)
+
+
+def _lock(f) -> None:
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return
+    f.seek(0)  # msvcrt locks bytes from the current position
+    while True:
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            time.sleep(0.05)
+
+
+def _unlock(f) -> None:
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return
+    f.seek(0)
+    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextmanager
