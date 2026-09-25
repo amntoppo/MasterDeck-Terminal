@@ -69,6 +69,11 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **Queue (master pane → Queue tab):** the focused session's `/queue`, the prompts it runs one by
+  one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
+  session works through it. Pick another session from the menu at the top. An idle session only
+  moves on after its next response, so the tab offers **Send next now**. In a session, `/queue
+  <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Quick reply:** a Needs-you card with a session's question has a reply box.
 - **Idle nudges:** a session working a ticket but quiet for over N minutes (Settings) shows in Needs

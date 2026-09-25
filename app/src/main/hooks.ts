@@ -7,10 +7,12 @@ import type { CliResult, HookStatus } from '@shared/types'
  * - babysit-ticket: `tt.sh hook` after each Bash call and at session start (moves the board).
  * - babysit-pr: a soft gate before `gh pr create` (self-review first) and a reminder after it
  *   (start babysitting the PR).
+ * - queue: `/queue <prompt>` is stored instead of sent (UserPromptSubmit), and the next stored
+ *   prompt runs when a response ends (Stop).
  * Installing is idempotent and keeps everything else in the file; a backup is written first.
  */
 
-type Hook = { type: 'command'; command: string }
+type Hook = { type: 'command'; command: string; timeout?: number }
 type Matcher = { matcher?: string; hooks: Hook[] }
 type Settings = Record<string, unknown> & { hooks?: Record<string, Matcher[]> }
 
@@ -26,6 +28,12 @@ const PR_POST =
   `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) echo '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"PR created. ` +
   `Arm the Monitor now (timeout_ms 1800000; re-arm on each expiry, there is no persistent flag), per the Monitor phase of the babysit-pr skill: ` +
   `it emits an event per new review comment; on each wake fix and push, reply, resolve threads; the watch ends when the PR is merged/closed."}}' ;; esac`
+const Q_SUBMIT = '"$HOME/.claude/skills/queue/scripts/queue-submit.sh"'
+const Q_DRAIN = '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"'
+// Script names only: an older install from ~/.claude/hooks counts too, so it is never doubled.
+const Q_SUBMIT_MARK = 'queue-submit.sh'
+const Q_DRAIN_MARK = 'queue-drain.sh'
+
 const PR_MARK = 'pr-selfreview-'
 const PR_POST_MARK = 'Monitor phase of the babysit-pr skill'
 
@@ -38,11 +46,11 @@ function has(s: Settings, event: string, mark: string): boolean {
   return (s.hooks?.[event] ?? []).some((m) => (m.hooks ?? []).some((h) => typeof h.command === 'string' && h.command.includes(mark)))
 }
 
-function add(s: Settings, event: string, matcher: string | undefined, command: string, mark: string): void {
+function add(s: Settings, event: string, matcher: string | undefined, command: string, mark: string, timeout?: number): void {
   if (has(s, event, mark)) return
   s.hooks ??= {}
   const list = (s.hooks[event] ??= [])
-  list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] })
+  list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command, ...(timeout ? { timeout } : {}) }] })
 }
 
 function remove(s: Settings, event: string, mark: string): void {
@@ -61,9 +69,10 @@ export function hookStatus(settingsPath: string): HookStatus {
     return {
       ticket: has(s, 'PostToolUse', TT_MARK) && has(s, 'SessionStart', TT_MARK),
       pr: has(s, 'PreToolUse', PR_MARK) && has(s, 'PostToolUse', PR_POST_MARK),
+      queue: has(s, 'UserPromptSubmit', Q_SUBMIT_MARK) && has(s, 'Stop', Q_DRAIN_MARK),
     }
   } catch {
-    return { ticket: false, pr: false }
+    return { ticket: false, pr: false, queue: false }
   }
 }
 
@@ -80,7 +89,7 @@ function write(settingsPath: string, backupDir: string, s: Settings): void {
   renameSync(tmp, target)
 }
 
-export function installHooks(settingsPath: string, backupDir: string, which: { ticket: boolean; pr: boolean }): CliResult {
+export function installHooks(settingsPath: string, backupDir: string, which: HookStatus): CliResult {
   if (process.platform === 'win32') return { ok: false, message: 'these hooks are bash scripts; on Windows add them by hand under Git Bash (see README)' }
   try {
     const s = read(settingsPath)
@@ -97,6 +106,13 @@ export function installHooks(settingsPath: string, backupDir: string, which: { t
     } else {
       remove(s, 'PreToolUse', PR_MARK)
       remove(s, 'PostToolUse', PR_POST_MARK)
+    }
+    if (which.queue) {
+      add(s, 'UserPromptSubmit', undefined, Q_SUBMIT, Q_SUBMIT_MARK, 10)
+      add(s, 'Stop', undefined, Q_DRAIN, Q_DRAIN_MARK, 10)
+    } else {
+      remove(s, 'UserPromptSubmit', Q_SUBMIT_MARK)
+      remove(s, 'Stop', Q_DRAIN_MARK)
     }
     write(settingsPath, backupDir, s)
     return { ok: true, message: 'hooks saved' }

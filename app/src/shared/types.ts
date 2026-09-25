@@ -187,6 +187,8 @@ export interface HookStatus {
   ticket: boolean
   /** babysit-pr's gh pr create hooks (self-review gate, babysit reminder). */
   pr: boolean
+  /** The queue skill's hooks: /queue stores a prompt, the next one runs when a response ends. */
+  queue: boolean
 }
 
 /** What Setup checks before GitHub can work. */

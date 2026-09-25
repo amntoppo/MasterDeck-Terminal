@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
-import { CH, type AssignRequest } from '@shared/ipc'
+import { CH, type AssignRequest, type QueueEdit } from '@shared/ipc'
 import { contextAlerts, diffEvents, newlyNeedsInput } from '@shared/notify'
 import { isSafeBgId } from '@shared/paneCommand'
 import { isClaudeCommand, tasklistImage } from '@shared/procs'
@@ -10,6 +10,7 @@ import { MASTER_NAME } from '@shared/derive'
 import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, SetupCheck } from '@shared/types'
 import { startAssign } from './assign'
 import { configuredModel } from './models'
+import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
 import { makeGhRunner, readGhCacheStatus } from './ghc'
 import { GitHub } from './github'
 import { Sender } from './send'
@@ -217,6 +218,21 @@ function registerIpc(): void {
     const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
     return sender.send(s, text, !!masterUp)
   })
+  ipcMain.handle(CH.queueList, (_e, sessionId: string) => readQueue(String(sessionId)))
+  ipcMain.handle(CH.queueEdit, (_e, sessionId: string, edit: QueueEdit) =>
+    isQueueEdit(edit) ? editQueue(String(sessionId), edit) : { ok: false, message: 'bad queue edit', items: [] },
+  )
+  ipcMain.handle(CH.queueSendNext, async (_e, key: string) => {
+    const s = latest?.sessions.find((x) => x.key === key)
+    if (!s) return { ok: false, message: 'session not found' }
+    const next = shiftQueue(s.sessionId)
+    if (next === null) return { ok: false, message: 'the queue is empty' }
+    const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
+    const r = await sender.send(s, next, !!masterUp)
+    // Not sent: back to the front, so the Stop hook still runs it later.
+    if (!r.ok) unshiftQueue(s.sessionId, next)
+    return r
+  })
   ipcMain.handle(CH.getSettings, () => sources.getSettings())
   ipcMain.handle(CH.setStatus, async (_e, issue: number, status: string) => {
     const r = await ops.setStatus(issue, status)
@@ -264,7 +280,7 @@ function registerIpc(): void {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   ipcMain.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr })
+    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue })
     sources.setHooks(hookStatus(paths.claudeSettings))
     return r
   })

@@ -501,7 +501,7 @@ export function App() {
       <div className={`divider ${dragging ? 'dragging' : ''}`} onMouseDown={() => setDragging(true)} title="Drag to resize master">
         ⋮
       </div>
-      <MasterPane state={state} />
+      <MasterPane state={state} activeKey={activeKey} />
 
       {assigning && (
         <AssignDialog

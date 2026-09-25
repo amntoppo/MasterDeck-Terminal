@@ -21,6 +21,7 @@ MasterDeck ships with a set of Claude Code **skills** and installs them for you:
 | `babysit-pr` | Runs a self-review before a PR is opened, then handles review comments and CI until it merges. |
 | `babysit-worktree` / `kill-worktree` | Isolates a session in a git worktree, then folds the work back. |
 | `worktree-janitor` | Cleans up finished worktrees across your repos. |
+| `queue` | `/queue <prompt>` in any session queues a prompt to run after the current response; `/queue list`, `/queue clear`. The master pane's **Queue** tab shows and edits each session's queue. |
 
 Nothing is sent to a session or started without your yes. The skills never merge, never
 force-push and never use `--dangerously-skip-permissions`.
@@ -58,7 +59,8 @@ Or build it yourself (see [Develop](#develop)).
      PR raised, done. Adjust the guesses if they are wrong.
    - Choose your **workspace**: the folder master runs in, where your repos are.
    - Optionally install the **hooks** into `~/.claude/settings.json` (a backup is made first).
-     They let babysit-ticket move the board and let babysit-pr step in around `gh pr create`.
+     They let babysit-ticket move the board, let babysit-pr step in around `gh pr create`, and
+     make `/queue` work (it runs the next queued prompt when a response ends).
 3. The master pane on the right offers **Start master**, which starts the master-agent session.
 
 Setup saves everything to one file, `~/.claude/master/config.json`. The master CLI, babysit-ticket

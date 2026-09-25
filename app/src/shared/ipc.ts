@@ -4,6 +4,13 @@ import type { HistoryHit } from './history'
 import type { StandupCommit } from './standup'
 import type { WorktreeClass, WorktreeInfo } from './janitor'
 
+/** A change to a session's queue; remove and move name the item by index and text. */
+export type QueueEdit =
+  | { op: 'add'; text: string }
+  | { op: 'remove'; index: number; text: string }
+  | { op: 'move'; index: number; text: string; to: number }
+  | { op: 'clear' }
+
 export interface JanitorRow extends WorktreeInfo {
   cls: WorktreeClass
   reason: string
@@ -57,6 +64,9 @@ export const CH = {
   defaultModel: 'models:default',
   startHere: 'session:startHere',
   sendText: 'session:sendText',
+  queueList: 'queue:list',
+  queueEdit: 'queue:edit',
+  queueSendNext: 'queue:sendNext',
   getSettings: 'settings:get',
   setSettings: 'settings:set',
   autoOpen: 'app:autoOpen',
@@ -117,6 +127,11 @@ export interface DeckApi {
   startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult>
   /** Type text into a session as if the user typed it (open tab, hidden attach, or via master). */
   sendText(sessionKey: string, text: string): Promise<CliResult>
+  /** A session's /queue (the queue skill's ~/.claude/queue/<sessionId>.jsonl), first to run first. */
+  queueList(sessionId: string): Promise<string[]>
+  queueEdit(sessionId: string, edit: QueueEdit): Promise<CliResult & { items: string[] }>
+  /** Take the first queued prompt and type it into the session now (for an idle session). */
+  queueSendNext(sessionKey: string): Promise<CliResult>
   getSettings(): Promise<Settings>
   setSettings(s: Settings): Promise<Settings>
   onAutoOpen(cb: (sessionKey: string) => void): () => void

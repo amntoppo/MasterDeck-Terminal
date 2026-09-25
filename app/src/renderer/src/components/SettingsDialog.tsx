@@ -67,7 +67,7 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           {skillMsg && <div className="muted small">{skillMsg}</div>}
         </div>
         <div className="muted small">
-          Hooks: babysit-ticket {state.hooks.ticket ? 'on' : 'off'} · babysit-pr {state.hooks.pr ? 'on' : 'off'} (change them in GitHub & board)
+          Hooks: babysit-ticket {state.hooks.ticket ? 'on' : 'off'} · babysit-pr {state.hooks.pr ? 'on' : 'off'} · queue {state.hooks.queue ? 'on' : 'off'} (change them in GitHub & board)
         </div>
         <label>Nudge a quiet session after (minutes)</label>
         <input type="number" min={1} value={s.idleNudgeMinutes} onChange={num('idleNudgeMinutes')} />

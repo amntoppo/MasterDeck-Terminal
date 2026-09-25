@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
+import { QueuePanel } from './QueuePanel'
 import { StartHereDialog } from './StartHereDialog'
 import { TerminalView } from './TerminalView'
 
@@ -8,8 +9,12 @@ export function masterPaneId(bgId: string): string {
   return `master:${bgId}`
 }
 
-export function MasterPane({ state }: { state: AppState }) {
+/** The right pane: master-agent's terminal, and a Queue tab for the focused session's /queue. */
+export function MasterPane({ state, activeKey }: { state: AppState; activeKey: string | null }) {
   const m = state.master
+  const [tab, setTab] = useState<'master' | 'queue'>('master')
+  const [queued, setQueued] = useState(0)
+  const onCount = useCallback((n: number) => setQueued(n), [])
   const [menu, setMenu] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -49,12 +54,20 @@ export function MasterPane({ state }: { state: AppState }) {
   return (
     <section className="master">
       <div className="mhead">
-        <span className="star">★</span>
-        <strong>master-agent</strong>
-        <span className="chip muted">
-          {m.kind === 'attached' && <span className={`dot ${m.session.state}`} />}
-          {status}
-        </span>
+        <div className="seg">
+          <button className={tab === 'master' ? 'on' : ''} onClick={() => setTab('master')} title="master-agent">
+            <span className="star">★</span> Master
+          </button>
+          <button className={tab === 'queue' ? 'on' : ''} onClick={() => setTab('queue')} title="The focused session's /queue">
+            Queue{queued ? ` (${queued})` : ''}
+          </button>
+        </div>
+        {tab === 'master' && (
+          <span className="chip muted">
+            {m.kind === 'attached' && <span className={`dot ${m.session.state}`} />}
+            {status}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <div className="menu-wrap" ref={menuRef}>
           <button className="icon-btn" onClick={() => setMenu(!menu)} title="More">
@@ -108,90 +121,94 @@ export function MasterPane({ state }: { state: AppState }) {
           )}
         </div>
       </div>
-      {msg && (
-        <div className="banner" style={{ color: 'var(--muted)', background: 'var(--bg-2)' }} onClick={() => setMsg(null)}>
-          {msg}
-        </div>
-      )}
-      {m.kind === 'attached' && bgId && (
-        <>
-          <TerminalView
-            key={bgId}
-            paneId={masterPaneId(bgId)}
-            spec={{ kind: 'attach', bgId }}
-            visible
-            generation={gen}
-            onExit={() => setExited(true)}
-          />
-          {exited && (
-            <div className="notice" style={{ flex: 'none', paddingTop: 8 }}>
-              <span>Detached from master.</span>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  deck().ptyClose(masterPaneId(bgId))
-                  setExited(false)
-                  setGen(gen + 1)
-                }}
-              >
-                Reattach
+      <QueuePanel state={state} activeKey={activeKey} visible={tab === 'queue'} onCount={onCount} />
+      {/* Hidden, not unmounted: leaving the Master tab must not detach master's terminal. */}
+      <div className="mtab" style={{ display: tab === 'master' ? 'flex' : 'none' }}>
+        {msg && (
+          <div className="banner" style={{ color: 'var(--muted)', background: 'var(--bg-2)' }} onClick={() => setMsg(null)}>
+            {msg}
+          </div>
+        )}
+        {m.kind === 'attached' && bgId && (
+          <>
+            <TerminalView
+              key={bgId}
+              paneId={masterPaneId(bgId)}
+              spec={{ kind: 'attach', bgId }}
+              visible={tab === 'master'}
+              generation={gen}
+              onExit={() => setExited(true)}
+            />
+            {exited && (
+              <div className="notice" style={{ flex: 'none', paddingTop: 8 }}>
+                <span>Detached from master.</span>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    deck().ptyClose(masterPaneId(bgId))
+                    setExited(false)
+                    setGen(gen + 1)
+                  }}
+                >
+                  Reattach
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        {m.kind === 'elsewhere' && (
+          <div className="notice">
+            <h3>master-agent is running in another terminal</h3>
+            <div>
+              pid {m.session.pid} · {m.session.cwd}
+            </div>
+            <div>
+              An interactive session can't be attached here. To run master inside MasterDeck, exit it there, then start it
+              here. It starts as a background session you can attach from anywhere.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => deck().copy(`claude --resume ${m.session.sessionId}`)}>
+                Copy resume command
+              </button>
+              <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
+                {busy ? 'Starting…' : 'Start master here'}
               </button>
             </div>
-          )}
-        </>
-      )}
-      {m.kind === 'elsewhere' && (
-        <div className="notice">
-          <h3>master-agent is running in another terminal</h3>
-          <div>
-            pid {m.session.pid} · {m.session.cwd}
+            {askHere && (
+              <StartHereDialog
+                session={m.session}
+                isMaster
+                onClose={() => setAskHere(false)}
+                onStart={async () => {
+                  setBusy(true)
+                  setMsg(null)
+                  const s = m.session
+                  const r = await deck().startHere({ sessionId: s.sessionId, name: s.name, cwd: s.cwd, pid: s.pid, stopOther: true })
+                  setBusy(false)
+                  setMsg(r.ok ? 'master-agent is starting here; it attaches in a few seconds.' : r.message)
+                }}
+              />
+            )}
           </div>
-          <div>
-            An interactive session can't be attached here. To run master inside MasterDeck, exit it there, then start it
-            here. It starts as a background session you can attach from anywhere.
+        )}
+        {m.kind === 'duplicate' && (
+          <div className="notice">
+            <h3>{m.count} sessions are named master-agent</h3>
+            <div>The master CLI refuses every write until only one is left. Stop or rename the extra ones.</div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => deck().copy(`claude --resume ${m.session.sessionId}`)}>
-              Copy resume command
+        )}
+        {m.kind === 'absent' && (
+          <div className="notice">
+            <h3>master-agent is not running</h3>
+            <div>
+              Starts <code>claude --bg -n master-agent "/master"</code> in <code>{state.masterWorkspace}</code>.
+            </div>
+            <button className="btn primary" onClick={start} disabled={busy}>
+              {busy ? 'Starting…' : 'Start master'}
             </button>
-            <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
-              {busy ? 'Starting…' : 'Start master here'}
-            </button>
           </div>
-          {askHere && (
-            <StartHereDialog
-              session={m.session}
-              isMaster
-              onClose={() => setAskHere(false)}
-              onStart={async () => {
-                setBusy(true)
-                setMsg(null)
-                const s = m.session
-                const r = await deck().startHere({ sessionId: s.sessionId, name: s.name, cwd: s.cwd, pid: s.pid, stopOther: true })
-                setBusy(false)
-                setMsg(r.ok ? 'master-agent is starting here; it attaches in a few seconds.' : r.message)
-              }}
-            />
-          )}
-        </div>
-      )}
-      {m.kind === 'duplicate' && (
-        <div className="notice">
-          <h3>{m.count} sessions are named master-agent</h3>
-          <div>The master CLI refuses every write until only one is left. Stop or rename the extra ones.</div>
-        </div>
-      )}
-      {m.kind === 'absent' && (
-        <div className="notice">
-          <h3>master-agent is not running</h3>
-          <div>
-            Starts <code>claude --bg -n master-agent "/master"</code> in <code>{state.masterWorkspace}</code>.
-          </div>
-          <button className="btn primary" onClick={start} disabled={busy}>
-            {busy ? 'Starting…' : 'Start master'}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   )
 }

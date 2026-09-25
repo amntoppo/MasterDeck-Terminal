@@ -95,7 +95,7 @@ export class Sources {
   private teamPrsError: string | null = null
   private config: AppConfig = DEFAULT_CONFIG
   private skills: SkillStatus[] = []
-  private hooks: HookStatus = { ticket: false, pr: false }
+  private hooks: HookStatus = { ticket: false, pr: false, queue: false }
   private settings: Settings = DEFAULT_SETTINGS
   private allStats: AppState['allStats'] = {}
   private costBook: CostBook = {}

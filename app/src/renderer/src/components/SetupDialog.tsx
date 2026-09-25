@@ -39,7 +39,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     cfg.project ? { project: cfg.project, projectId: cfg.projectId, statusFieldId: cfg.statusFieldId, statusOptions: cfg.statusOptions, columns: cfg.columns, statuses: cfg.statuses, sprintField: cfg.sprintField } : null,
   )
   const [workspace, setWorkspace] = useState(cfg.workspace || '')
-  const [hooks, setHooks] = useState({ ticket: state.hooks.ticket || firstRun, pr: state.hooks.pr || firstRun })
+  const [hooks, setHooks] = useState({ ticket: state.hooks.ticket || firstRun, pr: state.hooks.pr || firstRun, queue: state.hooks.queue || firstRun })
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -105,7 +105,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
       setBusy(false)
       return setMsg(r.message)
     }
-    if (hooks.ticket !== state.hooks.ticket || hooks.pr !== state.hooks.pr) {
+    if (hooks.ticket !== state.hooks.ticket || hooks.pr !== state.hooks.pr || hooks.queue !== state.hooks.queue) {
       const h = await deck().hooksInstall(hooks)
       if (!h.ok) {
         setBusy(false)
@@ -248,6 +248,10 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         <label className="mpick-row">
           <input type="checkbox" checked={hooks.pr} onChange={(e) => setHooks({ ...hooks, pr: e.target.checked })} />
           <span>babysit-pr: self-review before `gh pr create`, then babysit the PR</span>
+        </label>
+        <label className="mpick-row">
+          <input type="checkbox" checked={hooks.queue} onChange={(e) => setHooks({ ...hooks, queue: e.target.checked })} />
+          <span>queue: `/queue &lt;prompt&gt;` runs the prompt after the current response (and the Queue tab)</span>
         </label>
 
         <div className="foot">
