@@ -53,7 +53,7 @@ class DraftAssignTest(unittest.TestCase):
         want = rules._assign(ISSUE)
         self.assertEqual(got["issue"], 42)
         self.assertEqual(got["name"], want["target"]["spawn"]["name"])
-        self.assertEqual(got["cwd"], "/ws")
+        self.assertEqual(got["cwd"], str(Path("/ws")))
         self.assertEqual(got["prompt"], want["target"]["spawn"]["prompt"])
         self.assertEqual(got["summary"], want["summary"])
         self.assertEqual(got["title"], "Fix upload retry")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 
 from master import rules
 
@@ -67,7 +68,7 @@ class AssignTest(unittest.TestCase):
         [c] = rules.propose(None, snap(issues=[issue(981, "To Do")]), NOW)
         self.assertEqual((c["kind"], c["issue"], c["source"]), ("ASSIGN", 981, "issue:981"))
         sp = c["target"]["spawn"]
-        self.assertEqual((sp["name"], sp["cwd"]), ("981-coupon-expiry-banner-981", "/ws"))
+        self.assertEqual((sp["name"], sp["cwd"]), ("981-coupon-expiry-banner-981", str(Path("/ws"))))
         self.assertIn("acme/tracker#981", sp["prompt"])
         self.assertIn("babysit-ticket", sp["prompt"])
         self.assertIn("babysit-worktree", sp["prompt"])

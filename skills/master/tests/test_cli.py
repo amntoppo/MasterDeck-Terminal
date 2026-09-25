@@ -230,7 +230,7 @@ class CliTest(unittest.TestCase):
         self.run_cli("add", "--kind", "MEETING", "--issue", "5", "--source", "f:1", "--summary", "s",
                      "--message", "m", "--spawn-name", "5-x", "--prompt", "do it")
         p = ledger.load()["proposals"][0]
-        self.assertEqual(p["target"], {"spawn": {"name": "5-x", "cwd": "/ws", "prompt": "do it"}})
+        self.assertEqual(p["target"], {"spawn": {"name": "5-x", "cwd": str(Path("/ws")), "prompt": "do it"}})
 
     def test_add_spawn_hostile_prompt_refused(self):
         code, out = self.run_cli("add", "--kind", "MEETING", "--issue", "5", "--source", "f:1",

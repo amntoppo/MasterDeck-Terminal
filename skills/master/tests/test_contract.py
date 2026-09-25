@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 MASTER = Path(__file__).resolve().parent.parent / "master"
 
 
+@unittest.skipIf(sys.platform == "win32", "runs the POSIX master launcher script")
 class SayOverStdinContractTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

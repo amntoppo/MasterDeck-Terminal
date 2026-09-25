@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,7 @@ class SaveAndShellTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 setup.save({"owner": "bad owner!"}, p)
 
+    @unittest.skipIf(sys.platform == "win32", "bash on Windows runners is WSL")
     def test_shell_output_evaluates_in_bash(self):
         cfg = config._merge(config.DEFAULTS, {"owner": "acme", "issueRepo": "tracker", "project": 3,
                                              "statusOptions": {"In Progress": "abc", "It's done": "x'y"}})
