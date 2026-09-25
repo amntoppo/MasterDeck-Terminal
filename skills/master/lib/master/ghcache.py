@@ -222,9 +222,15 @@ def _run_gh(args: list, stdin: bytes | None) -> subprocess.CompletedProcess:
 
 
 def run(args: list, ttl: float = DEFAULT_TTL, cwd: str | None = None, stdin: bytes | None = None,
-        now_fn=time.time) -> "tuple[int, bytes, bytes]":
-    """`gh <args>` through the shared cache. Returns (exit code, stdout, stderr)."""
+        now_fn=time.time, force: bool = False) -> "tuple[int, bytes, bytes]":
+    """`gh <args>` through the shared cache. Returns (exit code, stdout, stderr).
+
+    `force` (or GHC_FORCE=1) skips answers cached before this call, for a manual refresh; the new
+    answer is still cached, and a caller already fetching the same read is waited for, not repeated.
+    """
     cwd = cwd or os.getcwd()
+    force = force or os.environ.get("GHC_FORCE") == "1"
+    started = now_fn()
     if fcntl is None:
         res = _run_gh(args, stdin)
         return res.returncode, res.stdout, res.stderr
@@ -241,7 +247,9 @@ def run(args: list, ttl: float = DEFAULT_TTL, cwd: str | None = None, stdin: byt
     key = cache_key(args, cwd)
 
     def fresh(entry) -> bool:
-        return entry is not None and now_fn() - entry.get("at", 0) < ttl
+        if entry is None or (force and entry.get("at", 0) < started):
+            return False
+        return now_fn() - entry.get("at", 0) < ttl
 
     entry = _read_entry(key)
     if fresh(entry):

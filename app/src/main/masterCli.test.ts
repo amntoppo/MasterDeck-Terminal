@@ -58,6 +58,14 @@ describe('MasterCli', () => {
     expect(await new MasterCli(f.run, '/lib', 'python3').spawn(21)).toEqual({ ok: true, message: '21: sent — started' })
     expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'spawn', '21'])
   })
+  it('a forced board or snapshot tells ghcache to skip cached answers', async () => {
+    const f = fake({ stdout: '{}' })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    await cli.board('@current', true)
+    await cli.snapshot(true)
+    await cli.board()
+    expect(f.calls.map((c) => c.opts?.env?.GHC_FORCE)).toEqual(['1', '1', undefined])
+  })
   it('board runs master board and parses its JSON', async () => {
     const f = fake({ stdout: JSON.stringify({ cards: [], columns: [] }) })
     const r = await new MasterCli(f.run, '/lib', 'python3').board()

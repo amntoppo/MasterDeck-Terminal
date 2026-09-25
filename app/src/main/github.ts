@@ -26,8 +26,8 @@ export class GitHub {
     this.gh = gh ?? ((args, opts) => run('gh', args, opts))
   }
 
-  private api(args: string[], ttl = 120) {
-    return this.gh(['api', ...args], { timeoutMs: 30_000, ttl })
+  private api(args: string[], ttl = 120, force = false) {
+    return this.gh(['api', ...args], { timeoutMs: 30_000, ttl, force })
   }
 
   async me(): Promise<string | null> {
@@ -36,8 +36,8 @@ export class GitHub {
     return r.code === 0 && LOGIN.test(login) ? login : null
   }
 
-  async assignableUsers(): Promise<string[] | null> {
-    const r = await this.api([`${issueRepoPath()}/assignees?per_page=100`, '--paginate', '--jq', '.[].login'], 600)
+  async assignableUsers(force = false): Promise<string[] | null> {
+    const r = await this.api([`${issueRepoPath()}/assignees?per_page=100`, '--paginate', '--jq', '.[].login'], 600, force)
     if (r.code !== 0) return null
     return r.stdout.split('\n').map((l) => l.trim()).filter((l) => LOGIN.test(l))
   }
@@ -62,7 +62,7 @@ export class GitHub {
    * Every open PR in the org (up to 300), plus the latest closed in the last 30 days (up to 300): raw GraphQL search pages.
    * About 6 points a page; read through the shared cache for 5 minutes.
    */
-  async teamPrPages(owner = getConfig().owner, now = Date.now()): Promise<{ ok: true; pages: unknown[]; partial?: string } | { ok: false; message: string }> {
+  async teamPrPages(owner = getConfig().owner, now = Date.now(), force = false): Promise<{ ok: true; pages: unknown[]; partial?: string } | { ok: false; message: string }> {
     if (!owner) return { ok: false, message: 'GitHub is not set up yet (Settings → GitHub & board)' }
     const { open, closed } = teamPrSearches(owner, now, undefined, getConfig().ownerType === 'user' ? 'user' : 'org')
     const pages: unknown[] = []
@@ -71,9 +71,9 @@ export class GitHub {
       let after: string | null = null
       for (let i = 0; i < maxPages; i++) {
         const args = ['graphql', '-f', `q=${q}`, '-f', `query=${query}`, ...(after ? ['-f', `after=${after}`] : [])]
-        let r = await this.api(args, 300)
+        let r = await this.api(args, 300, force)
         // GitHub's search sometimes times out (HTTP 502/504); one retry usually gets through.
-        if (r.code !== 0 && /HTTP 50[234]/.test(r.stderr)) r = await this.api(args, 300)
+        if (r.code !== 0 && /HTTP 50[234]/.test(r.stderr)) r = await this.api(args, 300, force)
         const page = r.code === 0 ? (json(r.stdout) as { data?: { search?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string } } }; errors?: { message?: string }[] } | null) : null
         if (!page?.data?.search) {
           const msg = (r.stderr || page?.errors?.[0]?.message || r.stdout || 'no data').trim().slice(0, 300)

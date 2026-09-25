@@ -386,16 +386,16 @@ export class Sources {
   }
 
   /** Sprints, assignable users and my login: small calls, refreshed with everything else. */
-  private async refreshPeople(): Promise<{ ok: boolean; message: string }> {
-    const [sp, users, me] = await Promise.all([this.cli.sprints(), this.github.assignableUsers(), this.me ? Promise.resolve(this.me) : this.github.me()])
+  private async refreshPeople(force = false): Promise<{ ok: boolean; message: string }> {
+    const [sp, users, me] = await Promise.all([this.cli.sprints(force), this.github.assignableUsers(force), this.me ? Promise.resolve(this.me) : this.github.me()])
     if (sp.ok) this.sprints = sp.sprints
     if (users) this.users = users
     if (me) this.me = me
     return sp.ok ? { ok: true, message: 'ok' } : { ok: false, message: sp.message }
   }
 
-  /** Issues/PRs (snapshot) and the sprint board together; then the cache is saved. */
-  async refreshGithub(): Promise<{ ok: boolean; message: string }> {
+  /** Issues/PRs (snapshot) and the sprint board together; then the cache is saved. `force` (the Refresh button) skips the shared gh cache. */
+  async refreshGithub(force = false): Promise<{ ok: boolean; message: string }> {
     if (this.githubRefreshing) return { ok: true, message: 'already refreshing' }
     this.githubRefreshing = true
     this.emit()
@@ -406,10 +406,10 @@ export class Sources {
       const gh = this.config.configured
       const skip = Promise.resolve({ ok: true, message: 'not set up' })
       const [s, b] = await Promise.all([
-        settle(this.refreshSnapshot()),
-        settle(gh && this.config.project ? this.refreshBoard() : skip),
-        settle(gh ? this.refreshPeople() : skip),
-        settle(gh ? this.refreshTeamPrs() : skip),
+        settle(this.refreshSnapshot(force)),
+        settle(gh && this.config.project ? this.refreshBoard(force) : skip),
+        settle(gh ? this.refreshPeople(force) : skip),
+        settle(gh ? this.refreshTeamPrs(0, force) : skip),
       ])
       if (s.ok || b.ok) this.githubRefreshedAt = Date.now()
       this.saveGithubCache()
@@ -422,7 +422,7 @@ export class Sources {
   }
 
   /** Every PR in the org (the PRs view). `maxAgeMs` skips the call when the list is that fresh. */
-  async refreshTeamPrs(maxAgeMs = 0): Promise<{ ok: boolean; message: string }> {
+  async refreshTeamPrs(maxAgeMs = 0, force = false): Promise<{ ok: boolean; message: string }> {
     if (this.teamPrsLoading) return { ok: true, message: 'already refreshing' }
     if (maxAgeMs && this.teamPrsAt && Date.now() - this.teamPrsAt < maxAgeMs) return { ok: true, message: 'fresh' }
     if (this.githubPaused()) {
@@ -433,7 +433,7 @@ export class Sources {
     this.teamPrsLoading = true
     this.emit()
     try {
-      const r = await this.github.teamPrPages()
+      const r = await this.github.teamPrPages(undefined, undefined, force)
       if (r.ok) {
         this.teamPrPages = r.pages
         this.teamPrs = parseTeamPrs(r.pages)
@@ -455,7 +455,7 @@ export class Sources {
     }
   }
 
-  async refreshBoard(): Promise<{ ok: boolean; message: string }> {
+  async refreshBoard(force = false): Promise<{ ok: boolean; message: string }> {
     if (this.boardRunning) return { ok: true, message: 'already refreshing' }
     const sprint = this.selectedSprint
     if (!process.env.MASTERDECK_BOARD_FIXTURE && this.githubPaused()) {
@@ -470,7 +470,7 @@ export class Sources {
       const fx = process.env.MASTERDECK_BOARD_FIXTURE
       let r: { ok: true; data: unknown } | { ok: false; message: string }
       try {
-        r = fx ? { ok: true, data: JSON.parse(readFileSync(fx, 'utf8')) } : await this.cli.board(sprint)
+        r = fx ? { ok: true, data: JSON.parse(readFileSync(fx, 'utf8')) } : await this.cli.board(sprint, force)
       } catch (e) {
         r = { ok: false, message: String(e) }
       }
@@ -615,12 +615,12 @@ export class Sources {
     return true
   }
 
-  async refreshSnapshot(): Promise<{ ok: boolean; message: string }> {
+  async refreshSnapshot(force = false): Promise<{ ok: boolean; message: string }> {
     if (this.snapshotRunning) return { ok: true, message: 'already refreshing' }
     if (this.githubPaused()) return { ok: false, message: this.errors.github ?? 'GitHub calls paused' }
     this.snapshotRunning = true
     try {
-      const r = await this.cli.snapshot()
+      const r = await this.cli.snapshot(force)
       if (r.ok) {
         // A source that failed (board, prs) comes back empty: keep the last good list instead.
         const raw = { ...(r.data as Record<string, unknown>) }

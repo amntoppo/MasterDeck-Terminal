@@ -4,16 +4,16 @@ import { join } from 'node:path'
 import type { GhCacheStatus } from '@shared/types'
 import type { RunOpts, RunResult, Runner } from './run'
 
-/** `gh <args>` through the shared GitHub cache (master's ghcache): same output as gh. */
-export type GhRunner = (args: string[], opts?: RunOpts & { ttl?: number }) => Promise<RunResult>
+/** `gh <args>` through the shared GitHub cache (master's ghcache): same output as gh. `force` skips cached answers. */
+export type GhRunner = (args: string[], opts?: RunOpts & { ttl?: number; force?: boolean }) => Promise<RunResult>
 
 export function makeGhRunner(run: Runner, libDir: string, python: string, platform = process.platform): GhRunner {
   // ghcache locks with fcntl, which Windows lacks: there, call gh directly.
-  if (platform === 'win32') return (args, { ttl: _ttl, ...opts } = {}) => run('gh', args, opts)
-  return (args, { ttl, ...opts } = {}) =>
+  if (platform === 'win32') return (args, { ttl: _ttl, force: _force, ...opts } = {}) => run('gh', args, opts)
+  return (args, { ttl, force, ...opts } = {}) =>
     run(python, ['-m', 'master.ghcache', '--ttl', String(ttl ?? 60), ...args], {
       ...opts,
-      env: { ...(opts.env ?? {}), PYTHONPATH: libDir, PYTHONIOENCODING: 'utf-8' },
+      env: { ...(opts.env ?? {}), PYTHONPATH: libDir, PYTHONIOENCODING: 'utf-8', ...(force ? { GHC_FORCE: '1' } : {}) },
     })
 }
 

@@ -26,6 +26,16 @@ describe('ghc bridge', () => {
   })
 })
 
+describe('ghc force', () => {
+  it('sets GHC_FORCE only when asked', async () => {
+    const envs: (string | undefined)[] = []
+    const gh = makeGhRunner(async (_c, _a, opts) => (envs.push(opts?.env?.GHC_FORCE), { code: 0, stdout: '', stderr: '' }), '/lib', 'python3', 'darwin')
+    await gh(['api', 'user'], { ttl: 60, force: true })
+    await gh(['api', 'user'], { ttl: 60 })
+    expect(envs).toEqual(['1', undefined])
+  })
+})
+
 describe('ghc on Windows', () => {
   it('calls gh directly (ghcache needs fcntl)', async () => {
     const calls: string[][] = []

@@ -14,11 +14,12 @@ export class MasterCli {
     private python: string,
   ) {}
 
-  private exec(args: string[], stdin?: string, timeoutMs = 30_000): Promise<RunResult> {
+  /** `force` (a manual Refresh) makes GitHub reads skip what the shared gh cache already holds. */
+  private exec(args: string[], stdin?: string, timeoutMs = 30_000, force = false): Promise<RunResult> {
     return this.run(this.python, ['-m', 'master.cli', ...args], {
       stdin,
       timeoutMs,
-      env: { PYTHONPATH: this.libDir, PYTHONIOENCODING: 'utf-8' },
+      env: { PYTHONPATH: this.libDir, PYTHONIOENCODING: 'utf-8', ...(force ? { GHC_FORCE: '1' } : {}) },
     })
   }
 
@@ -46,8 +47,8 @@ export class MasterCli {
   }
 
   /** `master snapshot`: network heavy (gh, board, agents), a few seconds. */
-  async snapshot(): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
-    const r = await this.exec(['snapshot'], undefined, 120_000)
+  async snapshot(force = false): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+    const r = await this.exec(['snapshot'], undefined, 120_000, force)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       return { ok: true, data: JSON.parse(r.stdout) }
@@ -57,8 +58,8 @@ export class MasterCli {
   }
 
   /** `master board`: the current sprint board with PR details (two GitHub calls). */
-  async board(sprint = '@current'): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
-    const r = await this.exec(['board', '--sprint', sprint], undefined, 120_000)
+  async board(sprint = '@current', force = false): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+    const r = await this.exec(['board', '--sprint', sprint], undefined, 120_000, force)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       return { ok: true, data: JSON.parse(r.stdout) }
@@ -68,8 +69,8 @@ export class MasterCli {
   }
 
   /** `master sprints`: every sprint of the project, newest first. */
-  async sprints(): Promise<{ ok: true; sprints: Sprint[] } | { ok: false; message: string }> {
-    const r = await this.exec(['sprints'], undefined, 60_000)
+  async sprints(force = false): Promise<{ ok: true; sprints: Sprint[] } | { ok: false; message: string }> {
+    const r = await this.exec(['sprints'], undefined, 60_000, force)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       const raw = JSON.parse(r.stdout)

@@ -89,6 +89,25 @@ class GhCacheTest(unittest.TestCase):
 
     # behaviour --------------------------------------------------------------------------------
 
+    def test_force_skips_an_answer_cached_before_the_call_and_caches_the_new_one(self):
+        args = ["project", "item-list", "1", "--owner", "o"]
+        ghcache.run(args, ttl=300, now_fn=lambda: 1000.0)
+        ghcache.run(args, ttl=300, now_fn=lambda: 1010.0)
+        self.assertEqual(self.calls(), 1)
+        ghcache.run(args, ttl=300, now_fn=lambda: 1020.0, force=True)
+        self.assertEqual(self.calls(), 2)
+        ghcache.run(args, ttl=300, now_fn=lambda: 1030.0)  # the forced answer is shared
+        self.assertEqual(self.calls(), 2)
+
+    def test_force_from_the_environment(self):
+        args = ["api", "graphql", "-f", "query={ viewer { login } }"]
+        ghcache.run(args, ttl=300, now_fn=lambda: 1000.0)
+        os.environ["GHC_FORCE"] = "1"
+        self.addCleanup(os.environ.pop, "GHC_FORCE", None)
+        ghcache.run(args, ttl=300, now_fn=lambda: 1010.0)
+        self.assertEqual(self.calls(), 2)
+
+
     def test_identical_reads_within_ttl_call_github_once(self):
         a = ghcache.run(["api", "user"], ttl=60, cwd="/w")
         b = ghcache.run(["api", "user"], ttl=60, cwd="/w")

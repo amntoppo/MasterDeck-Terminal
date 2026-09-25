@@ -245,8 +245,9 @@ function registerIpc(): void {
     return r
   })
   ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req))
-  ipcMain.handle(CH.refresh, () => sources.refreshGithub())
-  ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub())
+  // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
+  ipcMain.handle(CH.refresh, () => sources.refreshGithub(true))
+  ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true))
   ipcMain.handle(CH.setupCheck, () => setupCheck())
   ipcMain.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === 'string' ? cli.configDetect(owner.trim(), typeof project === 'number' ? project : undefined) : { ok: false, message: 'owner required' },
@@ -271,7 +272,7 @@ function registerIpc(): void {
     sources.setSkills(syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion()).skills)
     return r
   })
-  ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) => sources.refreshTeamPrs(typeof maxAgeMs === 'number' && maxAgeMs > 0 ? maxAgeMs : 0))
+  ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) => typeof maxAgeMs === 'number' && maxAgeMs > 0 ? sources.refreshTeamPrs(maxAgeMs) : sources.refreshTeamPrs(0, true))
   ipcMain.handle(CH.linkSession, (_e, issue: number, sessionId: string, cwd: string | null) => linkSession(issue, sessionId, cwd))
   ipcMain.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open))
   ipcMain.on(CH.setFocus, (_e, id: string | null) => {
