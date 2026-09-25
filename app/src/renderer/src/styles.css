@@ -357,8 +357,11 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .pal-foot { border-top: 1px solid var(--line); padding: 6px 12px; font-size: 11px; color: var(--faint); }
 
 /* Sidebar tools, quick reply, misc */
-.sidebar-footer .tools { display: flex; gap: 4px; margin-bottom: 6px; }
-.sidebar-footer .tool { flex: 1; border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 6px; padding: 4px 0; cursor: pointer; font-size: 12px; }
+.sidebar-footer .tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 6px; }
+.sidebar-footer .tool { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 6px; padding: 5px 4px; cursor: pointer; font-size: 11px; white-space: nowrap; overflow: hidden; }
+.sidebar-footer .tool-i { flex: none; font-size: 11px; }
+.sidebar-footer .tool.wide { grid-column: 1 / -1; }
+.sidebar-footer .tool kbd { font: 10px var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .sidebar-footer .tool:hover, .sidebar-footer .tool.on { color: var(--text); border-color: var(--accent); }
 .count.mini { font-size: 9px; padding: 0 5px; margin-left: 4px; }
 .quick-reply textarea { width: 100%; min-height: 54px; margin-top: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: 12px/1.4 var(--font); padding: 6px 8px; resize: vertical; outline: none; }

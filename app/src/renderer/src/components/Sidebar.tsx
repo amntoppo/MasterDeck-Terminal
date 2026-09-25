@@ -126,17 +126,26 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
         <div className="tools">
           {(
             [
-              ['palette', '⌘K', 'Command palette (⌘K)'],
-              ['broadcast', '📣', 'Broadcast a message'],
-              ['standup', '🗒', 'Standup'],
-              ['view:costs', '$', 'Costs'],
-              ['view:janitor', '🧹', 'Janitor'],
-              ['view:history', '🔎', 'Search history'],
-              ['settings', '⚙', 'Settings'],
-            ] as [PaletteAction | 'palette', string, string][]
-          ).map(([a, icon, title]) => (
-            <button key={a} className={`tool ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
-              {icon}
+              ['palette', '⌘K', 'Commands', 'Command palette: jump to any session, issue or PR, or run an action (⌘K)'],
+              ['broadcast', '📣', 'Broadcast', 'Send one message to several sessions'],
+              ['standup', '🗒', 'Standup', "Yesterday's commits, PRs and reports, ready to paste"],
+              ['view:costs', '$', 'Costs', 'Spend and tokens per day, ticket and session'],
+              ['view:janitor', '🧹', 'Janitor', 'Clean up worktrees and parked sessions'],
+              ['view:history', '🔎', 'History', 'Search every past session and resume one'],
+              ['settings', '⚙', 'Settings', 'Nudges, budget, context warning, dock, after a restart'],
+            ] as [PaletteAction | 'palette', string, string, string][]
+          ).map(([a, icon, label, title]) => (
+            <button key={a} className={`tool ${a === 'palette' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
+              {a === 'palette' ? (
+                <>
+                  {label} <kbd>{icon}</kbd>
+                </>
+              ) : (
+                <>
+                  <span className="tool-i">{icon}</span>
+                  {label}
+                </>
+              )}
             </button>
           ))}
         </div>
