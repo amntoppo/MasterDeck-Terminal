@@ -388,13 +388,6 @@ export function App() {
       ref={appRef}
       style={{ ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
     >
-      <button
-        className={`master-toggle ${masterOpen ? 'on' : ''}`}
-        onClick={() => setMasterOpen((o) => !o)}
-        title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
-      >
-        <span className="star">★</span> Master
-      </button>
       <Sidebar
         state={state}
         activeKey={activeKey}
@@ -607,6 +600,15 @@ export function App() {
       )}
       {toast && <div className={`toast ${toast.bad ? 'bad' : ''}`}>{toast.text}</div>}
       {dragging && <div style={{ position: 'fixed', inset: 0, zIndex: 40, cursor: 'col-resize' }} />}
+      {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
+          before the headers under it (drag regions for moving the window) could not be clicked. */}
+      <button
+        className={`master-toggle ${masterOpen ? 'on' : ''}`}
+        onClick={() => setMasterOpen((o) => !o)}
+        title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
+      >
+        <span className="star">★</span> Master
+      </button>
     </div>
   )
 }

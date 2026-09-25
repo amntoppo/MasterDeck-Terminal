@@ -50,8 +50,6 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
   return (
     <section className="master" style={shown ? undefined : { display: 'none' }}>
       <div className="mhead">
-        <span className="star">★</span>
-        <strong>master-agent</strong>
         <span className="chip muted">
           {m.kind === 'attached' && <span className={`dot ${m.session.state}`} />}
           {status}
