@@ -1,3 +1,4 @@
+import type { RestoreEntry } from './restore'
 import type { AppConfig } from './appConfig'
 import type { TeamPr } from './teamPrs'
 import type { BurnPoint } from './sprintSummary'
@@ -169,6 +170,10 @@ export interface AppState {
   /** The bundled Claude Code skills and whether each is installed. */
   skills: SkillStatus[]
   hooks: HookStatus
+  /** Background sessions the last restart stopped, not resumed or dismissed yet (Settings: afterRestart). */
+  stoppedByRestart: RestoreEntry[]
+  /** Resuming them now. */
+  restoring: boolean
 }
 
 export interface SkillStatus {

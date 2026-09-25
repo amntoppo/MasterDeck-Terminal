@@ -69,6 +69,13 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
+  MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
+  ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers
+  **Resume all**, which runs `claude --bg --resume` for each: same conversation, same id, same folder,
+  still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
+  turn this off. master-agent is left out (it has its own Start). A session already running again is
+  never resumed twice.
 - **Queue (master pane → Queue tab):** the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only

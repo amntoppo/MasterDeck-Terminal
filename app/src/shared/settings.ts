@@ -4,6 +4,8 @@ export interface Settings {
   contextWarnPct: number
   autoOpenNeedsInput: boolean
   dockBadge: boolean
+  /** After the Mac restarts: offer to resume the background sessions it stopped, resume them, or neither. */
+  afterRestart: 'ask' | 'resume' | 'off'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -12,6 +14,7 @@ export const DEFAULT_SETTINGS: Settings = {
   contextWarnPct: 85,
   autoOpenNeedsInput: true,
   dockBadge: true,
+  afterRestart: 'ask',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -26,5 +29,6 @@ export function normalizeSettings(raw: unknown): Settings {
     contextWarnPct: clamp(r.contextWarnPct, 10, 100, DEFAULT_SETTINGS.contextWarnPct),
     autoOpenNeedsInput: typeof r.autoOpenNeedsInput === 'boolean' ? r.autoOpenNeedsInput : DEFAULT_SETTINGS.autoOpenNeedsInput,
     dockBadge: typeof r.dockBadge === 'boolean' ? r.dockBadge : DEFAULT_SETTINGS.dockBadge,
+    afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
   }
 }

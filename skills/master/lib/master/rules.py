@@ -86,7 +86,7 @@ def _orphan(s: dict, i: dict) -> dict:
     return {"kind": "ORPHAN", "issue": i["number"], "source": f"orphan:{s['session_id']}",
             "target": {"spawn": {"name": spawn_name(i), "cwd": s["cwd"], "resume": s["session_id"]}},
             "message": f"Resume session {s['session_id']} for #{i['number']} in the background.",
-            "summary": f"owner session gone, #{i['number']} is {i['status']}"}
+            "summary": f"owner session stopped, #{i['number']} is {i['status']}; resume it"}
 
 
 def propose(prev: "dict | None", cur: dict, now_iso: str) -> list:

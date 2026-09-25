@@ -18,6 +18,7 @@ import { PrPopup } from './components/PrPopup'
 import { StartHereDialog } from './components/StartHereDialog'
 import { LinkDialog } from './components/LinkDialog'
 import { MasterPane, masterPaneId } from './components/MasterPane'
+import { RestoreBanner } from './components/RestoreBanner'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { WorkerHeader } from './components/WorkerHeader'
@@ -438,6 +439,7 @@ export function App() {
           </div>
         </div>
         {state.missingBinaries.includes('claude') && <div className="banner">`claude` was not found on PATH.</div>}
+        <RestoreBanner state={state} />
         <div className="panes">
           {tabs.length === 0 && (
             <div className="welcome">

@@ -127,6 +127,22 @@ class SpawnTest(unittest.TestCase):
         self.assertEqual(spawn.command({"spawn": {"name": "5-y", "cwd": "/w", "resume": valid}}),
                          ["claude", "--bg", "--resume", valid])
 
+    def test_resume_of_a_running_session_is_not_started_twice(self):
+        sid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(out='[{"sessionId": "%s", "pid": 42, "kind": "background"}]' % sid)
+        got = spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual(got["status"], "sent")
+        self.assertIn("already running", got["note"])
+        self.assertEqual([c[0][:2] for c in run.calls], [["claude", "agents"]])  # no --bg --resume
+
+    def test_resume_of_a_stopped_session_runs_claude_bg_resume(self):
+        sid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(out='[{"sessionId": "%s", "pid": null}]' % sid)
+        spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual(run.calls[-1][0], ["claude", "--bg", "--resume", sid])
+
     def test_refuses_unapproved_and_session_targets(self):
         p = self.add({"spawn": {"name": "a", "cwd": self.tmp.name, "prompt": "go"}}, approve=False)
         with self.assertRaises(spawn.SpawnError):

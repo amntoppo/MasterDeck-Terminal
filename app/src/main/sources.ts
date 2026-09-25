@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watchFile, unwatchFile, writeFileSync } from 'node:fs'
+import { uptime } from 'node:os'
 import { dirname } from 'node:path'
 import { join, resolve } from 'node:path'
 import { applyFreshness, normalizeAgents } from '@shared/agents'
@@ -34,8 +35,9 @@ import type {
   HookStatus,
   SkillStatus,
 } from '@shared/types'
-import { DEFAULT_CONFIG, parseConfig, setConfig, type AppConfig } from '@shared/appConfig'
+import { DEFAULT_CONFIG, getConfig, parseConfig, setConfig, type AppConfig } from '@shared/appConfig'
 import { parseTeamPrs, type TeamPr } from '@shared/teamPrs'
+import { nextRestore, parseRestoreFile, type RestoreEntry, type RestoreFile } from '@shared/restore'
 import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
 import { GitHub } from './github'
@@ -106,6 +108,11 @@ export class Sources {
   private history: SessionHistory = {}
   private carryTried: Record<string, number> = {}
   private linker: ((issue: number, sessionId: string, cwd: string | null) => Promise<CliResult>) | null = null
+  /** Which background sessions were running, so a restart can be undone (see @shared/restore). */
+  private restore: RestoreFile | null = null
+  private restoreSeen = false
+  private restoring = false
+  private resumer: ((e: RestoreEntry) => Promise<CliResult>) | null = null
   /** Boards by sprint key (@current, a sprint title, or none), and which one is on screen. */
   private boards: Record<string, Board> = {}
   private rawBoards: Record<string, unknown> = {}
@@ -144,6 +151,89 @@ export class Sources {
     private readGhCache: () => GhCacheStatus | null = () => null,
   ) {
     this.transcripts = new TranscriptIndex(paths.projectsDir)
+  }
+
+  /** How to resume a stopped background session (`claude --bg --resume`). */
+  setResumer(fn: (e: RestoreEntry) => Promise<CliResult>): void {
+    this.resumer = fn
+  }
+
+  private get restorePath(): string {
+    return join(this.paths.home, 'running-sessions.json')
+  }
+
+  /**
+   * After each `claude agents` scan: record what runs now and, on a new boot, what the restart
+   * stopped. With afterRestart = resume, the first scan after a restart resumes them.
+   */
+  private observeRestore(): void {
+    if (!this.restoreSeen) {
+      try {
+        this.restore = parseRestoreFile(JSON.parse(readFileSync(this.restorePath, 'utf8')))
+      } catch {
+        this.restore = null
+      }
+    }
+    const first = !this.restoreSeen
+    this.restoreSeen = true
+    const next = nextRestore(this.restore, Date.now() - uptime() * 1000, this.withIssues(this.rawSessions), getConfig().masterName, Date.now())
+    if (this.settings.afterRestart === 'off') next.stopped = []
+    const changed = JSON.stringify([next.running, next.stopped]) !== JSON.stringify([this.restore?.running, this.restore?.stopped]) || !this.restore || next.bootAt !== this.restore.bootAt
+    this.restore = next
+    if (changed) {
+      try {
+        mkdirSync(this.paths.home, { recursive: true })
+        writeFileSync(`${this.restorePath}.tmp`, JSON.stringify(next, null, 2))
+        renameSync(`${this.restorePath}.tmp`, this.restorePath)
+      } catch {
+        // best effort: the next scan tries again
+      }
+    }
+    if (first && next.stopped.length && this.settings.afterRestart === 'resume') void this.resumeStopped()
+  }
+
+  /** Resume every session the restart stopped, one at a time; the ones that fail stay listed. */
+  async resumeStopped(): Promise<CliResult> {
+    if (this.restoring) return { ok: true, message: 'already resuming' }
+    if (!this.resumer || !this.restore?.stopped.length) return { ok: true, message: 'nothing to resume' }
+    this.restoring = true
+    this.emit()
+    const failed: string[] = []
+    let resumed = 0
+    try {
+      for (const e of [...this.restore.stopped]) {
+        // Resumed meanwhile (master's ORPHAN, or by hand): resuming again would start a copy.
+        const live = this.rawSessions.some((s) => s.pid !== null && s.state !== 'done' && s.sessionId === e.sessionId)
+        const r = live ? { ok: true, message: 'already running' } : await this.resumer(e)
+        if (r.ok) {
+          resumed++
+          // Off the list now; the next scan also drops it once its process shows up.
+          if (this.restore) this.restore.stopped = this.restore.stopped.filter((x) => x.sessionId !== e.sessionId)
+        } else failed.push(`${e.name}: ${r.message}`)
+      }
+    } finally {
+      this.restoring = false
+      void this.pollAgents()
+    }
+    const msg = `Resumed ${resumed} session${resumed === 1 ? '' : 's'}${failed.length ? `; not resumed: ${failed.join('; ')}` : ''}`
+    return { ok: failed.length === 0, message: msg }
+  }
+
+  /** Forget the sessions the restart stopped (they stay resumable from History). */
+  dismissStopped(): void {
+    if (!this.restore) return
+    this.restore.stopped = []
+    try {
+      writeFileSync(this.restorePath, JSON.stringify(this.restore, null, 2))
+    } catch {
+      // the list shows again next launch at worst
+    }
+    this.emit()
+  }
+
+  private withIssues(sessions: Session[]): Session[] {
+    const issueOf = new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, v.issue] as [string, number])])
+    return attachIssues(sessions, issueOf)
   }
 
   /** How to link a session to an issue (babysit-ticket); used to carry links across a resume. */
@@ -532,6 +622,7 @@ export class Sources {
     try {
       this.rawSessions = normalizeAgents(JSON.parse(r.stdout))
       this.setHealth('agents', true)
+      this.observeRestore()
     } catch {
       this.setHealth('agents', false, 'claude agents printed invalid JSON')
     }
@@ -798,6 +889,8 @@ export class Sources {
       teamPrsAt: this.teamPrsAt,
       teamPrsLoading: this.teamPrsLoading,
       teamPrsError: this.teamPrsError,
+      stoppedByRestart: this.restore?.stopped ?? [],
+      restoring: this.restoring,
       config: this.config,
       skills: this.skills,
       hooks: this.hooks,

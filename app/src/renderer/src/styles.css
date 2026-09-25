@@ -141,6 +141,8 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 /* Divider + master */
 .divider { cursor: col-resize; background: var(--bg-2); border-left: 1px solid var(--line); border-right: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 10px; }
 .divider:hover, .divider.dragging { background: var(--accent-soft); color: var(--accent); }
+.banner.restore { display: flex; align-items: center; gap: 8px; }
+.banner.restore .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .master { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 2px solid var(--accent); }
 .master .mhead { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
 .master .mhead > * { -webkit-app-region: no-drag; }

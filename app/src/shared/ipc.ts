@@ -80,6 +80,8 @@ export const CH = {
   saveTemplate: 'templates:save',
   deleteTemplate: 'templates:delete',
   resumeSession: 'session:resume',
+  resumeStopped: 'session:resumeStopped',
+  dismissStopped: 'session:dismissStopped',
   boardOpen: 'board:open',
 } as const
 
@@ -148,6 +150,9 @@ export interface DeckApi {
   deleteTemplate(name: string): Promise<Template[]>
   /** Resume an ended session's conversation in the background (history search). */
   resumeSession(sessionId: string, name: string, cwd: string | null): Promise<CliResult>
+  /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
+  resumeStopped(): Promise<CliResult>
+  dismissStopped(): Promise<void>
   /** Make `login` the only assignee (GitHub REST). */
   assignIssue(issue: number, login: string, current: string[]): Promise<CliResult>
   assign(req: AssignRequest): Promise<CliResult & { proposalId?: number }>

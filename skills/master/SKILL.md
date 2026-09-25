@@ -165,6 +165,12 @@ Run `master status`. Show the roster as printed. Sessions with status `blocked` 
 
 Start the sweep loop: invoke the `loop` skill with `20m /master sweep`. Tell the user it stops when this session closes and expires after 7 days.
 
+## When sessions stop
+
+Background sessions run under Claude Code's daemon, not under the terminal or process that started them, so closing those does not stop them. They stop when the machine restarts or crashes (every process ends), when someone runs `claude stop`, or when the daemon retires one that sat idle for hours. The conversation is always kept on disk; `claude --bg --resume <session-id>` continues it in the background under the same id.
+
+So never tell the user a session is "gone" or that sessions "don't survive Claude Code exiting". Say it **stopped**, why if the roster shows it (e.g. every session stopped at once: the machine restarted), and how to get it back: MasterDeck's **Resume all** banner after a restart, or approving the `ORPHAN` proposal the sweep makes for a stopped session whose issue is still in progress. `master spawn` does not resume a session that is already running again.
+
 ## Rules that never bend
 
 - Nothing is sent or spawned without the user's yes on that specific proposal id.

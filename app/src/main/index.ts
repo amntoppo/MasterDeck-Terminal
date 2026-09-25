@@ -152,6 +152,15 @@ async function stopPid(pid: number): Promise<void> {
  * background session (then the tab attaches it). With `stopOther`, first stop the other copy,
  * but only when its pid really is a claude process.
  */
+/** `claude --bg --resume <id>`: continue a stopped session in the background under the same id. */
+async function resumeBg(id: string, name: string, cwd: string | null): Promise<CliResult> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, message: 'bad session id' }
+  // A name we can't pass safely is left out: the session keeps the one it has.
+  const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name) ? ['-n', name] : []
+  const r = await run(claudeBin, ['--bg', '--resume', id, ...named], { cwd: cwd && existsSync(cwd) ? cwd : homedir(), timeoutMs: 60_000 })
+  return r.code === 0 ? { ok: true, message: name } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+}
+
 async function startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(o.sessionId)) return { ok: false, message: 'bad session id' }
   if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(o.name)) return { ok: false, message: `bad session name: ${o.name}` }
@@ -247,12 +256,9 @@ function registerIpc(): void {
   ipcMain.handle(CH.templates, () => ops.templates())
   ipcMain.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) => ops.saveTemplate(t))
   ipcMain.handle(CH.deleteTemplate, (_e, name: string) => ops.deleteTemplate(name))
-  ipcMain.handle(CH.resumeSession, async (_e, id: string, name: string, cwd: string | null) => {
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, message: 'bad session id' }
-    const safe = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name) ? name : `resumed-${id.slice(0, 8)}`
-    const r = await run(claudeBin, ['--bg', '--resume', id, '-n', safe], { cwd: cwd && existsSync(cwd) ? cwd : homedir(), timeoutMs: 60_000 })
-    return r.code === 0 ? { ok: true, message: safe } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
-  })
+  ipcMain.handle(CH.resumeSession, (_e, id: string, name: string, cwd: string | null) => resumeBg(id, name, cwd))
+  ipcMain.handle(CH.resumeStopped, () => sources.resumeStopped())
+  ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped())
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))
   ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url))
@@ -409,6 +415,7 @@ app.whenReady().then(async () => {
   }
   sources.setHooks(hookStatus(paths.claudeSettings))
   createWindow()
+  sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd))
   sources.start()
   if (SMOKE) {
     setTimeout(() => {

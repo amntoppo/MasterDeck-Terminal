@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import uuid
@@ -66,6 +67,18 @@ def command(target: dict) -> list:
     return ["claude", "--bg", "-n", sp["name"], *model, sp["prompt"]]
 
 
+def running(session_id: str, runner=subprocess.run) -> bool:
+    """Whether `claude agents` shows a live process for this session. `claude --bg --resume` on a
+    running session starts a copy, so a resume checks first. Unknown counts as not running."""
+    try:
+        r = runner(["claude", "agents", "--json"], capture_output=True, text=True, timeout=30)
+        rows = json.loads(r.stdout) if r.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+    return isinstance(rows, list) and any(
+        isinstance(x, dict) and x.get("sessionId") == session_id and x.get("pid") for x in rows)
+
+
 def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
     p = ledger.get(led, pid)
     if "spawn" not in p["target"]:
@@ -93,6 +106,10 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         note = str(e)
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
+    resume = p["target"]["spawn"].get("resume")
+    if resume and running(resume, runner):
+        # Resumed already (MasterDeck's Resume all, or by hand): the session is working again.
+        return ledger.transition(led, pid, "sent", now=now, note="already running; not resumed again")
     try:
         r = runner(cmd, cwd=cwd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:

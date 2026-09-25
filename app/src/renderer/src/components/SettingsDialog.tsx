@@ -83,6 +83,12 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           <input type="checkbox" checked={s.dockBadge} onChange={(e) => setS({ ...s, dockBadge: e.target.checked })} />
           <span>Show the Needs-you count on the dock icon</span>
         </label>
+        <label>After the Mac restarts, background sessions it stopped</label>
+        <select className="fsel full" value={s.afterRestart} onChange={(e) => setS({ ...s, afterRestart: e.target.value as typeof s.afterRestart })}>
+          <option value="ask">Offer to resume them</option>
+          <option value="resume">Resume them when MasterDeck starts</option>
+          <option value="off">Do nothing</option>
+        </select>
         <div className="foot">
           <span className="grow meta">{saved ? 'Saved' : ''}</span>
           <button className="btn" onClick={onClose}>
