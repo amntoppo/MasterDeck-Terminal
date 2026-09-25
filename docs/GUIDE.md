@@ -69,6 +69,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **★ Master (top right, every view):** shows or hides the master pane. Shown, it sits beside the
+  board, PRs and the other views too; hidden, they use the full width. Hiding it doesn't stop or
+  detach master.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
   MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
   ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers

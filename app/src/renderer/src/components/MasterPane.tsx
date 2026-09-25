@@ -8,7 +8,8 @@ export function masterPaneId(bgId: string): string {
   return `master:${bgId}`
 }
 
-export function MasterPane({ state }: { state: AppState }) {
+/** `shown` false hides the pane without detaching master's terminal. */
+export function MasterPane({ state, shown = true }: { state: AppState; shown?: boolean }) {
   const m = state.master
   const [menu, setMenu] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -47,7 +48,7 @@ export function MasterPane({ state }: { state: AppState }) {
   const status = m.kind === 'attached' ? m.session.state : m.kind === 'elsewhere' ? 'external' : m.kind
 
   return (
-    <section className="master">
+    <section className="master" style={shown ? undefined : { display: 'none' }}>
       <div className="mhead">
         <span className="star">★</span>
         <strong>master-agent</strong>
@@ -119,7 +120,7 @@ export function MasterPane({ state }: { state: AppState }) {
             key={bgId}
             paneId={masterPaneId(bgId)}
             spec={{ kind: 'attach', bgId }}
-            visible
+            visible={shown}
             generation={gen}
             onExit={() => setExited(true)}
           />

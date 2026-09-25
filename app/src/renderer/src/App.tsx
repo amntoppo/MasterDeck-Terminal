@@ -98,6 +98,8 @@ export function App() {
   const [dragging, setDragging] = useState(false)
   // The Queue panel under master; each session header's Queue Prompts shows or hides it.
   const [queueOpen, setQueueOpen] = useState(() => load<boolean>('queueOpen', false))
+  // The ★ Master button (top right, every view) shows or hides master; hidden, it stays attached.
+  const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const needsYouRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<HTMLDivElement>(null)
@@ -106,6 +108,7 @@ export function App() {
   useEffect(() => save('active', active), [active])
   useEffect(() => save('masterPct', masterPct), [masterPct])
   useEffect(() => save('queueOpen', queueOpen), [queueOpen])
+  useEffect(() => save('masterOpen', masterOpen), [masterOpen])
   useEffect(() => {
     save('view', view)
     deck().setBoardOpen(view === 'board')
@@ -367,6 +370,7 @@ export function App() {
   }
 
   const shown = new Set([active, split].filter(Boolean) as string[])
+  const rightShown = masterOpen || queueOpen
   const masterAttached = state.master.kind === 'attached'
   const askMaster = (s: Session) => {
     if (state.master.kind !== 'attached') return
@@ -379,7 +383,18 @@ export function App() {
   }
 
   return (
-    <div className="app" ref={appRef} style={{ ['--master-w' as string]: `${masterPct}%` }}>
+    <div
+      className={`app ${rightShown ? '' : 'no-right'} ${masterOpen ? '' : 'master-off'}`}
+      ref={appRef}
+      style={{ ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
+    >
+      <button
+        className={`master-toggle ${masterOpen ? 'on' : ''}`}
+        onClick={() => setMasterOpen((o) => !o)}
+        title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
+      >
+        <span className="star">★</span> Master
+      </button>
       <Sidebar
         state={state}
         activeKey={activeKey}
@@ -506,11 +521,13 @@ export function App() {
         </div>
       </main>
 
-      <div className={`divider ${dragging ? 'dragging' : ''}`} onMouseDown={() => setDragging(true)} title="Drag to resize master">
-        ⋮
-      </div>
-      <div className="right-col">
-        <MasterPane state={state} />
+      {rightShown && (
+        <div className={`divider ${dragging ? 'dragging' : ''}`} onMouseDown={() => setDragging(true)} title="Drag to resize master">
+          ⋮
+        </div>
+      )}
+      <div className="right-col" style={rightShown ? undefined : { display: 'none' }}>
+        <MasterPane state={state} shown={masterOpen} />
         {queueOpen && <QueuePanel state={state} activeKey={activeKey} onClose={() => setQueueOpen(false)} />}
       </div>
 

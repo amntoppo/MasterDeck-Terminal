@@ -33,7 +33,15 @@ button { font: inherit; color: inherit; }
 .mono { font-family: var(--mono); }
 
 .app { display: grid; height: 100%; grid-template-columns: 272px minmax(0, 1fr) 6px var(--master-w, 34%); }
-.app.no-master { grid-template-columns: 272px minmax(0, 1fr); }
+.app.no-right { grid-template-columns: 272px minmax(0, 1fr); }
+/* The ★ Master toggle sits over the top-right corner of every view; headers there leave it room. */
+.master-toggle { position: absolute; top: 6px; right: 10px; z-index: 30; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; -webkit-app-region: no-drag; }
+.master-toggle:hover { border-color: var(--accent); color: var(--text); }
+.master-toggle.on { border-color: rgba(106, 169, 255, .5); background: var(--accent-soft); color: var(--text); }
+.master-toggle .star { color: var(--accent); font-weight: 700; }
+.master .mhead { padding-right: 104px !important; }
+.app.master-off .queue .mhead { padding-right: 104px; }
+.app.no-right .tabs, .app.no-right .board-head { padding-right: 104px; }
 
 /* Sidebar */
 .sidebar { display: flex; flex-direction: column; background: var(--bg-2); border-right: 1px solid var(--line); min-height: 0; }
@@ -149,6 +157,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .master .mhead .star { color: var(--accent); font-weight: 700; }
 .right-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .right-col .master { flex: 1; }
+.app.master-off .queue { flex: 1; height: auto; }
 .queue { flex: none; height: 42%; min-height: 180px; display: flex; flex-direction: column; border-left: 2px solid var(--purple); border-top: 1px solid var(--line); }
 .queue .mhead { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
 .queue .mhead .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -195,7 +204,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 
 /* Board View: covers workspace + master; both stay mounted underneath */
 .app { position: relative; }
-.board-view { position: absolute; top: 0; bottom: 0; left: 272px; right: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
+.board-view { position: absolute; top: 0; bottom: 0; left: 272px; right: var(--right-w, 0px); z-index: 20; background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
 .board-head { height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--bg-2); -webkit-app-region: drag; }
 .board-head > * { -webkit-app-region: no-drag; }
 .board-head h2 { margin: 0; font-size: 15px; }
