@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import * as pty from 'node-pty'
 import { isSafeBgId, paneCommand } from '@shared/paneCommand'
 import type { PaneSpec } from '@shared/types'
@@ -50,7 +52,7 @@ export class PtyManager {
         name: 'xterm-256color',
         cols: Math.max(cols, 2),
         rows: Math.max(rows, 2),
-        cwd: cmd.cwd ?? process.env.HOME ?? process.cwd(),
+        cwd: startDir(cmd.cwd),
         env: { ...this.env(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>,
       })
       pane.proc = proc
@@ -110,4 +112,11 @@ export class PtyManager {
   closeAll(): void {
     for (const id of [...this.panes.keys()]) this.close(id)
   }
+}
+
+/** Where a terminal starts: `~` expanded; home when the folder is missing (a node-pty spawn would fail). */
+export function startDir(cwd: string | undefined): string {
+  const home = homedir()
+  const dir = cwd?.replace(/^~(?=$|[\\/])/, home)
+  return dir && existsSync(dir) ? dir : home
 }

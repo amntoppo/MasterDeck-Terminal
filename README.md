@@ -50,17 +50,20 @@ Or build it yourself (see [Develop](#develop)).
 
 1. **Skills.** MasterDeck copies its skills into `~/.claude/skills/`. It skips any skill folder
    you already have. Settings lists each skill's state and can replace a copy with the bundled one.
-2. **Setup** opens by itself:
-   - It checks your tools: `claude`, `gh` and its login and scopes, Python, `git`, `jq`.
-   - Enter your GitHub **owner** (an organization or your username) and press **Look up**.
-   - Pick the **repository that holds your issues** and your **project board**. With no board, you
-     still get issues, PRs and sessions.
-   - MasterDeck reads the board's statuses and guesses what each one means: ready, in progress,
-     PR raised, done. Adjust the guesses if they are wrong.
-   - Choose your **workspace**: the folder master runs in, where your repos are.
-   - Optionally install the **hooks** into `~/.claude/settings.json` (a backup is made first).
-     They let babysit-ticket move the board, let babysit-pr step in around `gh pr create`, and
-     make `/queue` work (it runs the next queued prompt when a response ends).
+2. **Setup** opens by itself, in four steps:
+   1. **Tools.** Each of `claude`, `gh`, Python, `git` and `jq` is checked, with what to install if one is missing.
+   2. **GitHub account.** Pick one of the accounts `gh` is logged in to; the choice becomes `gh`'s active
+      account, which MasterDeck, master and your sessions share.
+   3. **Organization.** Pick the organization (or your user) and the repository that holds your issues,
+      then your project board. MasterDeck reads the board's statuses and guesses what each means (ready,
+      in progress, PR raised, done); adjust the guesses if they are wrong. No board: you still get issues,
+      PRs and sessions.
+   4. **Workspace.** The folder master and new shells start in, where your repos are; whether to use a
+      master-agent; and the **hooks** for `~/.claude/settings.json` (a backup is made first), which let
+      babysit-ticket move the board, babysit-pr step in around `gh pr create`, and `/queue` work.
+
+   **Skip for now** leaves GitHub unset: sessions work, and the Board and PRs views offer **Connect your
+   GitHub**, which opens Setup again.
 3. The master pane on the right offers **Start master**, which starts the master-agent session.
    Master is optional: untick **Master agent** in Setup and MasterDeck works without it. You lose
    what only master does: sweeps that propose work, the reports sessions send it (done, blocked,

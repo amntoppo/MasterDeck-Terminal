@@ -32,7 +32,8 @@ export class MasterCli {
   async configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner)) return { ok: false, message: 'not a GitHub login' }
     const args = ['config', 'detect', '--owner', owner, ...(project && Number.isInteger(project) && project > 0 ? ['--project', String(project)] : [])]
-    const r = await this.exec(args, undefined, 90_000)
+    // Fresh from GitHub: the shared cache is not per account, and Setup may have just switched it.
+    const r = await this.exec(args, undefined, 90_000, true)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       return { ok: true, data: JSON.parse(r.stdout) }

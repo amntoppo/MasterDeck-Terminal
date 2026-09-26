@@ -67,7 +67,7 @@ describe.skipIf(process.platform === 'win32')('queue store and the queue skill h
     expect(second.reason).toContain('then run the tests\nand report')
     expect(readQueue(SID, dir)).toEqual([])
     expect(hook('queue-drain.sh', home, { session_id: SID })).toBe('')
-  })
+  }, 20_000) // real bash and jq processes: slow when the whole suite runs at once
   it('a hand-written line still shows', () => {
     const home = mkdtempSync(join(tmpdir(), 'qh-'))
     const dir = join(home, '.claude', 'queue')

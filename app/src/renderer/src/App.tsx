@@ -19,6 +19,7 @@ import { StartHereDialog } from './components/StartHereDialog'
 import { LinkDialog } from './components/LinkDialog'
 import { MasterPane, masterPaneId } from './components/MasterPane'
 import { QueuePanel } from './components/QueuePanel'
+import { ConnectGithub } from './components/ConnectGithub'
 import { RestoreBanner } from './components/RestoreBanner'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
@@ -129,12 +130,14 @@ export function App() {
     activate(id)
   }, [activate])
 
+  // A new shell starts in the workspace chosen in Setup (home until there is one).
+  const workspace = state?.config.workspace || ''
   const openShell = useCallback((cwd?: string) => {
     const id = `sh:${Date.now()}`
-    const dir = cwd ?? deck().home
+    const dir = cwd ?? (workspace || deck().home)
     setTabs((cur) => [...cur, { id, kind: 'shell', cwd: dir, title: dir.split(/[\\/]/).pop() || 'shell' }])
     activate(id)
-  }, [activate])
+  }, [activate, workspace])
 
   const closeTab = useCallback(
     (id: string) => {
@@ -403,7 +406,8 @@ export function App() {
         onTool={(a) => runAction(a)}
         onStartWith={startWithInstructions}
       />
-      {view === 'board' && (
+      {view === 'board' && !state.config.configured && <ConnectGithub title="Board View" what="The board, sprints and issues" onConnect={() => setDialog('setup')} />}
+      {view === 'board' && state.config.configured && (
         <BoardView
           state={state}
           onOpenSession={openSession}
@@ -413,7 +417,12 @@ export function App() {
           onSummary={() => setDialog('sprint-summary')}
         />
       )}
-      {view === 'prs' && <PrsView state={state} onOpenSession={openSession} onPr={openPr} onStartWith={startWithInstructions} />}
+      {view === 'prs' &&
+        (state.config.configured ? (
+          <PrsView state={state} onOpenSession={openSession} onPr={openPr} onStartWith={startWithInstructions} />
+        ) : (
+          <ConnectGithub title="PRs" what="Your organization's pull requests" onConnect={() => setDialog('setup')} />
+        ))}
       {view === 'costs' && <CostsView state={state} onOpenSession={openSession} />}
       {view === 'janitor' && <JanitorView state={state} />}
       {view === 'history' && <HistoryView state={state} onOpenSession={openSession} />}

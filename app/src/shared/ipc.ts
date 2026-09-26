@@ -4,6 +4,9 @@ import type { HistoryHit } from './history'
 import type { StandupCommit } from './standup'
 import type { WorktreeClass, WorktreeInfo } from './janitor'
 import type { TokensByDay } from './tokens'
+import type { GhAccount } from './ghAuth'
+
+export type SetupTool = 'claude' | 'gh' | 'python' | 'git' | 'jq'
 
 /** A change to a session's queue; remove and move name the item by index and text. */
 export type QueueEdit =
@@ -53,6 +56,10 @@ export const CH = {
   boardRefresh: 'board:refresh',
   teamPrsRefresh: 'prs:refresh',
   setupCheck: 'setup:check',
+  setupTool: 'setup:tool',
+  ghAccounts: 'setup:ghAccounts',
+  ghSwitch: 'setup:ghSwitch',
+  ghOwners: 'setup:ghOwners',
   configDetect: 'config:detect',
   configSave: 'config:save',
   pickFolder: 'app:pickFolder',
@@ -168,6 +175,14 @@ export interface DeckApi {
   refreshTeamPrs(maxAgeMs?: number): Promise<CliResult>
   /** Setup: which tools are installed and whether gh is logged in. */
   setupCheck(): Promise<SetupCheck>
+  /** One tool of Setup's first step: installed (and runs)? */
+  setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>
+  /** The github.com accounts gh is logged in to. */
+  ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>
+  /** Make this account gh's active one (what MasterDeck, master and every session's gh use). */
+  ghSwitch(login: string): Promise<CliResult>
+  /** The active account's login and the organizations it belongs to. */
+  ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>
   /** Setup: repos, projects and (for a project) statuses GitHub has for an owner. */
   configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>
   /** Setup: save settings (merged into the config file), then reload everything. */

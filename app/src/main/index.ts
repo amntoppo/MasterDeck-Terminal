@@ -2,13 +2,14 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
-import { CH, type AssignRequest, type QueueEdit } from '@shared/ipc'
+import { CH, type AssignRequest, type QueueEdit, type SetupTool } from '@shared/ipc'
 import { contextAlerts, diffEvents, newlyNeedsInput } from '@shared/notify'
 import { isSafeBgId } from '@shared/paneCommand'
 import { isClaudeCommand, tasklistImage } from '@shared/procs'
 import { MASTER_NAME } from '@shared/derive'
 import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, SetupCheck } from '@shared/types'
 import { getConfig } from '@shared/appConfig'
+import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
 import { startAssign } from './assign'
 import { configuredModel } from './models'
 import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
@@ -276,6 +277,28 @@ function registerIpc(): void {
   ipcMain.handle(CH.refresh, () => sources.refreshGithub(true))
   ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true))
   ipcMain.handle(CH.setupCheck, () => setupCheck())
+  ipcMain.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool))
+  ipcMain.handle(CH.ghAccounts, () => ghAccounts())
+  ipcMain.handle(CH.ghSwitch, async (_e, login: string) => {
+    const { accounts } = await ghAccounts()
+    if (!accounts.some((a) => a.login === login)) return { ok: false, message: `gh is not logged in to ${login}` }
+    const r = await run('gh', ['auth', 'switch', '--hostname', 'github.com', '--user', login], { timeoutMs: 20_000 })
+    return r.code === 0 ? { ok: true, message: `gh now uses ${login}` } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+  })
+  ipcMain.handle(CH.ghOwners, async () => {
+    // Straight to gh, not the shared cache: it is not per account.
+    const [user, orgs] = await Promise.all([
+      run('gh', ['api', 'user', '--jq', '.login'], { timeoutMs: 20_000 }),
+      run('gh', ['api', 'user/orgs', '--paginate', '--jq', '.[].login'], { timeoutMs: 30_000 }),
+    ])
+    const login = user.stdout.trim()
+    if (user.code !== 0 || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return { user: null, orgs: [], error: (user.stderr || user.stdout).trim().slice(0, 300) || 'gh is not logged in' }
+    return {
+      user: login,
+      orgs: orgs.stdout.split('\n').map((x) => x.trim()).filter((x) => /^[A-Za-z0-9-]{1,39}$/.test(x)),
+      ...(orgs.code !== 0 ? { error: `organizations: ${(orgs.stderr || orgs.stdout).trim().slice(0, 200)}` } : {}),
+    }
+  })
   ipcMain.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === 'string' ? cli.configDetect(owner.trim(), typeof project === 'number' ? project : undefined) : { ok: false, message: 'owner required' },
   )
@@ -371,6 +394,27 @@ function createWindow(): void {
 }
 
 /** What Setup needs to know: which tools are on PATH and who gh is logged in as. */
+/** One tool of Setup's first step. */
+async function setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }> {
+  const cmd: Record<SetupTool, [string, string[]]> = {
+    claude: [claudeBin, ['--version']],
+    gh: ['gh', ['--version']],
+    python: [paths.python, ['--version']],
+    git: ['git', ['--version']],
+    jq: ['jq', ['--version']],
+  }
+  const c = cmd[tool]
+  if (!c) return { ok: false, detail: 'unknown tool' }
+  const r = await run(c[0], c[1], { timeoutMs: 15_000 })
+  return { ok: r.code === 0, detail: (r.stdout || r.stderr).trim().split('\n')[0].slice(0, 80) }
+}
+
+async function ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }> {
+  const r = await run('gh', ['auth', 'status', '--hostname', 'github.com'], { timeoutMs: 20_000 })
+  const accounts = parseGhAccounts(r.stdout + '\n' + r.stderr)
+  return accounts.length ? { accounts } : { accounts, error: (r.stderr || r.stdout).trim().slice(0, 300) || 'gh is not logged in' }
+}
+
 async function setupCheck(): Promise<SetupCheck> {
   const ok = async (cmd: string, args: string[]) => (await run(cmd, args, { timeoutMs: 15_000 })).code === 0
   const [ghOk, py, jq, git, user, status] = await Promise.all([
@@ -382,7 +426,9 @@ async function setupCheck(): Promise<SetupCheck> {
     run('gh', ['auth', 'status'], { timeoutMs: 20_000 }),
   ])
   const login = user.code === 0 ? user.stdout.trim() : ''
-  const scopes = /Token scopes:\s*(.+)/.exec(status.stdout + status.stderr)?.[1] ?? ''
+  // Several accounts print a block each: the scopes that count are the active account's.
+  const accounts = parseGhAccounts(status.stdout + '\n' + status.stderr)
+  const scopes = (accounts.find((a) => a.active) ?? accounts[0])?.scopes.join(',') ?? ''
   const claudeOk = await ok(claudeBin, ['--version'])
   return {
     claude: claudeOk ? claudeBin : null,
