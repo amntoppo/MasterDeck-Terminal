@@ -1,7 +1,7 @@
 {
   "name": "masterdeck",
   "productName": "MasterDeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One window for all your Claude Code sessions, with master-agent pinned on the right.",
   "main": "out/main/index.js",
   "private": true,
