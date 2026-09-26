@@ -9,6 +9,16 @@ Screenshots are taken **while the tests run**. Never replay steps, open the app 
 test again just to get pictures. A re-run is only for a fix (code or test), and its screenshots
 replace the old ones.
 
+**Started by the hook** (MasterDeck Setup → Hooks → babysit-proof): just before `gh pr create`, the
+session launches this skill in a background subagent and creates the PR without waiting. As that
+subagent you share the worktree with a session that keeps working in it, so:
+- never commit, push, stash, reset or switch branches; `publish` pushes only the babysit-proof branch;
+- add test files, but don't edit the session's other files; if a test finds a bug, report it with
+  the screenshots and leave the fix to the session;
+- use your own ports for anything you start, and stop what you started when you are done;
+- finish with: the issue comment URL, the test result, and the test files you added (the session
+  asks the user before committing them).
+
 The script: `P="$HOME/.claude/skills/babysit-proof/scripts/proof.py"` (`python3 "$P" --help`).
 Everything lands in a run folder in the worktree, `.proof/<stamp>/` (git-ignored through
 `.git/info/exclude`; never commit it).

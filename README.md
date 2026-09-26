@@ -62,6 +62,8 @@ Or build it yourself (see [Develop](#develop)).
    4. **Workspace.** The folder master and new shells start in, where your repos are; whether to use a
       master-agent; and the **hooks** for `~/.claude/settings.json` (a backup is made first), which let
       babysit-ticket move the board, babysit-pr step in around `gh pr create`, and `/queue` work.
+      The optional **babysit-proof** hook starts `/babysit-proof` in a background subagent just before
+      a PR is created, so the issue gets the tests' screenshots without holding up the PR.
 
    **Skip for now** leaves GitHub unset: sessions work, and the Board and PRs views offer **Connect your
    GitHub**, which opens Setup again.

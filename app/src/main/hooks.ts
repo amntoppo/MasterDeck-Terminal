@@ -9,6 +9,8 @@ import type { CliResult, HookStatus } from '@shared/types'
  *   (start babysitting the PR).
  * - queue: `/queue <prompt>` is stored instead of sent (UserPromptSubmit), and the next stored
  *   prompt runs when a response ends (Stop).
+ * - babysit-proof: just before `gh pr create`, a note to start the proof (tests with a screenshot
+ *   per step, posted on the issue) in a background subagent; the PR goes ahead without waiting.
  * Installing is idempotent and keeps everything else in the file; a backup is written first.
  */
 
@@ -33,6 +35,22 @@ const Q_DRAIN = '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"'
 // Script names only: an older install from ~/.claude/hooks counts too, so it is never doubled.
 const Q_SUBMIT_MARK = 'queue-submit.sh'
 const Q_DRAIN_MARK = 'queue-drain.sh'
+
+// Once per session and commit: babysit-pr's soft gate can make the session try `gh pr create` twice.
+const PROOF_NOTE =
+  'babysit-proof: start the proof now, in parallel. Launch a subagent with the Agent tool (general-purpose, run in the ' +
+  'background, do not wait for it) with this prompt, filled in: Follow the babysit-proof skill ' +
+  '(~/.claude/skills/babysit-proof/SKILL.md) for the work on branch <branch> in <worktree path>, linked to issue <#N>. Run the ' +
+  'end-to-end tests that cover it once, with a screenshot of every step; write the summary; publish it to the linked issue. ' +
+  'Do not commit, push or switch branches (publish pushes only the babysit-proof branch). At the end, list the test files ' +
+  'you added. Then carry on here without waiting: create the PR and babysit it as usual. When the subagent reports, give ' +
+  'the user the issue comment link, and ask before committing the test files it added.'
+const PROOF_PRE =
+  `input=$(cat); cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) ` +
+  `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"'); head=$(git rev-parse HEAD 2>/dev/null || echo none); ` +
+  `m="\${TMPDIR:-/tmp}/babysit-proof-$sid-$head"; [ -f "$m" ] && exit 0; touch "$m"; ` +
+  `jq -n --arg c ${JSON.stringify(PROOF_NOTE)} '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}' ;; esac`
+const PROOF_MARK = 'babysit-proof skill'
 
 const PR_MARK = 'pr-selfreview-'
 const PR_POST_MARK = 'Monitor phase of the babysit-pr skill'
@@ -70,9 +88,10 @@ export function hookStatus(settingsPath: string): HookStatus {
       ticket: has(s, 'PostToolUse', TT_MARK) && has(s, 'SessionStart', TT_MARK),
       pr: has(s, 'PreToolUse', PR_MARK) && has(s, 'PostToolUse', PR_POST_MARK),
       queue: has(s, 'UserPromptSubmit', Q_SUBMIT_MARK) && has(s, 'Stop', Q_DRAIN_MARK),
+      proof: has(s, 'PreToolUse', PROOF_MARK),
     }
   } catch {
-    return { ticket: false, pr: false, queue: false }
+    return { ticket: false, pr: false, queue: false, proof: false }
   }
 }
 
@@ -107,6 +126,8 @@ export function installHooks(settingsPath: string, backupDir: string, which: Hoo
       remove(s, 'PreToolUse', PR_MARK)
       remove(s, 'PostToolUse', PR_POST_MARK)
     }
+    if (which.proof) add(s, 'PreToolUse', 'Bash', PROOF_PRE, PROOF_MARK)
+    else remove(s, 'PreToolUse', PROOF_MARK)
     if (which.queue) {
       add(s, 'UserPromptSubmit', undefined, Q_SUBMIT, Q_SUBMIT_MARK, 10)
       add(s, 'Stop', undefined, Q_DRAIN, Q_DRAIN_MARK, 10)

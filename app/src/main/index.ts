@@ -312,7 +312,7 @@ function registerIpc(): void {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   ipcMain.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue })
+    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue, proof: !!which?.proof })
     sources.setHooks(hookStatus(paths.claudeSettings))
     return r
   })
