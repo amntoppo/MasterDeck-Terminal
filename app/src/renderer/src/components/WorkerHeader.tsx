@@ -49,17 +49,11 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
 
   const issue = s.issue !== null ? state.issues.find((i) => i.number === s.issue) : undefined
   const issueLink = issue?.url ?? (s.issue !== null ? issueUrlFor(s.issue) : null)
-  const live = state.prLive[s.sessionId]
+  // Every PR the session has (a session can open several, across repos), newest first. With none
+  // of its own, the PRs that reference its issue.
   const linked = state.sessionPrs[s.sessionId] ?? []
-  const snapPrs = s.issue !== null ? state.prs.filter((p) => p.refsIssue === s.issue) : []
-  const latestUrl = live?.url ?? linked.at(-1) ?? snapPrs[0]?.url ?? null
-  const snapPr = state.prs.find((p) => p.url === latestUrl) ?? (live ? undefined : snapPrs[0])
-  const prUrl = latestUrl
-  const prNum = live?.number ?? snapPr?.number ?? (prUrl ? Number(prUrl.split('/').pop()) : null)
-  // Earlier PRs this session opened (a session can open several, across repos).
-  const others = [...new Set([...linked, ...snapPrs.map((p) => p.url)])].filter((u) => u !== prUrl).slice(-3)
-  const ci = live?.ci ?? (snapPr?.ci === 'success' ? 'success' : snapPr?.ci === 'failure' || snapPr?.ci === 'error' ? 'failure' : snapPr?.ci ? 'pending' : null)
-  const threads = snapPr?.unresolvedThreads ?? 0
+  const issuePrs = s.issue !== null ? state.prs.filter((p) => p.refsIssue === s.issue).map((p) => p.url) : []
+  const prUrls = [...new Set(linked.length ? linked : issuePrs)].reverse()
   const git = state.git[s.sessionId]
   const stats = state.stats[s.sessionId]
   const tail = state.tails[s.sessionId]
@@ -82,24 +76,9 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         ) : (
           <span className="chip muted">No issue</span>
         )}
-        {prUrl ? (
-          <span className="chip btnlike" onClick={() => deck().openExternal(prUrl)} title={`${live?.title ?? snapPr?.title ?? ''}\n${prUrl}`}>
-            PR #{prNum} ↗
-            {ci === 'success' && <span className="ok">✓ CI</span>}
-            {ci === 'failure' && <span className="bad">✗ CI</span>}
-            {ci === 'pending' && <span className="wait">● CI</span>}
-            {threads > 0 && <span className="wait">💬 {threads}</span>}
-            {live?.reviewDecision === 'APPROVED' && <span className="ok">approved</span>}
-            {live?.reviewDecision === 'CHANGES_REQUESTED' && <span className="bad">changes requested</span>}
-            {live && live.state !== 'OPEN' && <span className="wait">{live.state.toLowerCase()}</span>}
-          </span>
-        ) : (
-          <span className="chip muted">No PR</span>
-        )}
-        {others.map((u) => (
-          <span key={u} className="chip btnlike" onClick={() => deck().openExternal(u)} title={u}>
-            {prLabel(u)} ↗
-          </span>
+        {prUrls.length === 0 && <span className="chip muted">No PR</span>}
+        {prUrls.map((u) => (
+          <PrChip key={u} url={u} state={state} many={prUrls.length > 1} />
         ))}
         {branch && (
           <span className="chip copyable mono" onClick={() => copy(branch, 'branch')} title="Click to copy the branch">
@@ -219,6 +198,29 @@ function useStateSince(s: Session): number | null {
     ref.current = { id: s.sessionId, state: s.state, since: Date.now() }
   }
   return ref.current.since
+}
+
+/** One of the session's PRs: number (repo too when there are several), CI, review threads, review, state. */
+function PrChip({ url, state, many }: { url: string; state: AppState; many: boolean }) {
+  const live = state.prLive[url]
+  const snap = state.prs.find((p) => p.url === url)
+  const ci = live?.ci ?? (snap?.ci === 'success' ? 'success' : snap?.ci === 'failure' || snap?.ci === 'error' ? 'failure' : snap?.ci ? 'pending' : null)
+  const threads = snap?.unresolvedThreads ?? 0
+  const prState = live?.state ?? null
+  const done = prState === 'MERGED' || prState === 'CLOSED'
+  return (
+    <span className={`chip btnlike ${done ? 'pr-done' : ''}`} onClick={() => deck().openExternal(url)} title={`${live?.title ?? snap?.title ?? ''}\n${url}`}>
+      {many ? prLabel(url) : `PR #${live?.number ?? url.split('/').pop()}`} ↗
+      {!done && ci === 'success' && <span className="ok">✓ CI</span>}
+      {!done && ci === 'failure' && <span className="bad">✗ CI</span>}
+      {!done && ci === 'pending' && <span className="wait">● CI</span>}
+      {!done && threads > 0 && <span className="wait">💬 {threads}</span>}
+      {!done && live?.reviewDecision === 'APPROVED' && <span className="ok">approved</span>}
+      {!done && live?.reviewDecision === 'CHANGES_REQUESTED' && <span className="bad">changes requested</span>}
+      {prState === 'MERGED' && <span className="merged">merged</span>}
+      {prState === 'CLOSED' && <span className="muted">closed</span>}
+    </span>
+  )
 }
 
 /** `repo#123` from a PR URL. */

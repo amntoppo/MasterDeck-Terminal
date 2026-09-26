@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { newPrScanState, scanLines } from './prscan'
+import { addPrUrls, newPrScanState, scanLines } from './prscan'
 
 const use = (id: string, command: string, name = 'Bash') =>
   JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: { command } }] } })
@@ -73,5 +73,16 @@ describe('scanLines', () => {
       s,
     )
     expect(s.urls).toEqual(['https://github.com/o/r/pull/7'])
+  })
+})
+
+describe('addPrUrls', () => {
+  it('adds to an empty list, keeps the latest last, and reports changes', () => {
+    const list: string[] = []
+    expect(addPrUrls(list, ['https://github.com/o/a/pull/1', 'https://github.com/o/b/pull/2'])).toBe(true)
+    expect(list).toEqual(['https://github.com/o/a/pull/1', 'https://github.com/o/b/pull/2'])
+    expect(addPrUrls(list, ['https://github.com/o/b/pull/2'])).toBe(false)
+    expect(addPrUrls(list, ['https://github.com/o/a/pull/1'])).toBe(true)
+    expect(list).toEqual(['https://github.com/o/b/pull/2', 'https://github.com/o/a/pull/1'])
   })
 })

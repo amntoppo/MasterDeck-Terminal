@@ -12,7 +12,7 @@ import {
   type ParsedSnapshot,
 } from '@shared/derive'
 import { parseBranchStatus, parseNumstat, parsePrView } from '@shared/git'
-import { newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
+import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
 import { parseStatusline, parseTranscriptTail, statsFromTranscript } from '@shared/stats'
 import { parseBoard } from '@shared/board'
 import { linksToCarry, recordHistory, type LinkInfo, type SessionHistory } from '@shared/carry'
@@ -84,7 +84,8 @@ export class Sources {
   private tails: Record<string, TranscriptTail> = {}
   private lastWrite: Record<string, number> = {}
   private git: Record<string, GitInfo> = {}
-  private prLive: Record<string, PrLive | null> = {}
+  /** Live details of every PR a followed session has, by PR URL. */
+  private prLive: Record<string, PrLive> = {}
   private prFetchedAt: Record<string, number> = {}
   /** Transcript followers for PR detection, by transcript path. */
   private follows: Record<string, { st: FollowState; scan: PrScanState }> = {}
@@ -257,6 +258,38 @@ export class Sources {
     return join(this.paths.home, 'session-history.json')
   }
 
+  private get sessionPrsPath(): string {
+    return join(this.paths.home, 'session-prs.json')
+  }
+
+  /** The PRs each session has (by session key), kept across launches. */
+  private loadSessionPrs(): void {
+    try {
+      const raw = JSON.parse(readFileSync(this.sessionPrsPath, 'utf8'))
+      if (raw && typeof raw === 'object')
+        for (const [k, v] of Object.entries(raw)) if (Array.isArray(v)) this.createdPrs[k] = v.filter((u): u is string => typeof u === 'string' && /\/pull\/\d+$/.test(u))
+    } catch {
+      // none yet
+    }
+  }
+
+  private saveSessionPrs(): void {
+    try {
+      mkdirSync(this.paths.home, { recursive: true })
+      writeFileSync(`${this.sessionPrsPath}.tmp`, JSON.stringify(this.createdPrs, null, 2))
+      renameSync(`${this.sessionPrsPath}.tmp`, this.sessionPrsPath)
+    } catch {
+      // tried again on the next new PR
+    }
+  }
+
+  /** Add PR URLs to a session's list (most recent last); saved when it changed. */
+  private notePrs(key: string, urls: string[]): void {
+    if (!urls.length) return
+    const list = (this.createdPrs[key] ??= [])
+    if (addPrUrls(list, urls)) this.saveSessionPrs()
+  }
+
   private loadHistory(): void {
     try {
       const raw = JSON.parse(readFileSync(this.historyPath, 'utf8'))
@@ -405,6 +438,7 @@ export class Sources {
       // no history yet
     }
     this.loadHistory()
+    this.loadSessionPrs()
     // Last run's tickets first, so the sidebar and board fill at once; GitHub updates them next.
     const cache = loadCache(this.cachePath)
     if (cache.snapshot && typeof cache.snapshot === 'object') {
@@ -796,7 +830,7 @@ export class Sources {
         const every = id === this.focused ? GH_MS : GH_BACKGROUND_MS
         if ((created || now - (this.prFetchedAt[id] ?? 0) > every) && !this.githubPaused()) {
           this.prFetchedAt[id] = now
-          await this.pollPr(id, this.prUrlsFor(id, key).at(-1) ?? null, dir)
+          await this.pollPrs(key, this.prUrlsFor(id, key), dir)
         }
       }
       this.emit()
@@ -828,14 +862,10 @@ export class Sources {
   /** Read what the transcript gained since last time; true when it shows a newly created PR. */
   private followPrs(path: string, key: string): boolean {
     const f = (this.follows[path] ??= { st: { path, offset: 0, rest: '' }, scan: newPrScanState() })
-    const found = scanLines(readNewLines(f.st), f.scan)
-    // Keep the most recently linked PR last; a resumed session adds a second transcript to the key.
-    const list = (this.createdPrs[key] ??= [])
-    for (const u of f.scan.urls) {
-      const i = list.indexOf(u)
-      if (i >= 0) list.splice(i, 1)
-      list.push(u)
-    }
+    // From the start of the transcript: a PR opened early in a long session counts too.
+    const found = scanLines(readNewLines(f.st, Infinity), f.scan)
+    // Most recent last; a resumed session adds a second transcript to the same key.
+    this.notePrs(key, f.scan.urls)
     return found
   }
 
@@ -849,26 +879,32 @@ export class Sources {
     return out
   }
 
-  /** The session's latest known PR by URL; with none known, whatever PR its current branch has. */
-  private async pollPr(id: string, url: string | null, dir: string | undefined): Promise<void> {
+  /**
+   * Live details for every PR the session has. Open ones are fetched each time; a merged or
+   * closed PR only until it is known. The PR of the session's current branch joins its list.
+   */
+  private async pollPrs(key: string, urls: string[], dir: string | undefined): Promise<void> {
     const fields = 'number,title,url,state,reviewDecision,statusCheckRollup'
-    if (url) {
+    for (const url of urls) {
+      const known = this.prLive[url]
+      if (known && known.state !== 'OPEN') continue
       const r = await this.gh(['pr', 'view', url, '--json', fields], { timeoutMs: 20_000, ttl: 45 })
       this.noteBinary('gh', r.code)
-      this.githubPaused(r.stderr + r.stdout)
+      if (this.githubPaused(r.stderr + r.stdout)) return
       // Keep the last good value through a network blip.
-      if (r.code === 0) this.prLive[id] = parsePrView(r.stdout)
-      return
+      const pr = r.code === 0 ? parsePrView(r.stdout) : null
+      if (pr) this.prLive[url] = pr
     }
     // master's workspace is shared by every session; its branch's PR belongs to none of them.
-    if (!dir || !existsSync(dir) || resolve(dir) === resolve(this.paths.masterWorkspace)) {
-      this.prLive[id] = null
-      return
-    }
+    if (!dir || !existsSync(dir) || resolve(dir) === resolve(this.paths.masterWorkspace)) return
     const r = await this.gh(['pr', 'view', '--json', fields], { cwd: dir, timeoutMs: 20_000, ttl: 45 })
     this.noteBinary('gh', r.code)
     if (this.githubPaused(r.stderr + r.stdout)) return
-    this.prLive[id] = r.code === 0 ? parsePrView(r.stdout) : null
+    const pr = r.code === 0 ? parsePrView(r.stdout) : null
+    if (pr?.url) {
+      this.prLive[pr.url] = pr
+      this.notePrs(key, [pr.url])
+    }
   }
 
   private emit(): void {

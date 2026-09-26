@@ -70,3 +70,19 @@ export function scanLines(lines: string[], state: PrScanState): boolean {
   }
   return found
 }
+
+/**
+ * Add PR URLs to a session's list in place, most recently linked last. True when the list
+ * changed: a new URL, or a known one that moved to the end.
+ */
+export function addPrUrls(list: string[], urls: string[]): boolean {
+  let changed = false
+  for (const u of urls) {
+    const i = list.indexOf(u)
+    if (i >= 0 && i === list.length - 1) continue
+    if (i >= 0) list.splice(i, 1)
+    list.push(u)
+    changed = true
+  }
+  return changed
+}

@@ -162,6 +162,8 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .queue { flex: none; height: 42%; min-height: 180px; display: flex; flex-direction: column; border-left: 2px solid var(--purple); border-top: 1px solid var(--line); }
 .queue .mhead { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
 .queue .mhead .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.pr-done { opacity: .75; }
+.chip .merged { color: var(--purple); }
 .chip.btnlike.on { border-color: var(--accent); background: var(--accent); color: #0b1020; }
 .queue-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .queue-head .fsel { max-width: 60%; }

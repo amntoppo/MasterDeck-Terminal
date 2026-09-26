@@ -133,7 +133,8 @@ export interface AppState {
   stats: Record<string, SessionStats>
   tails: Record<string, TranscriptTail>
   git: Record<string, GitInfo>
-  prLive: Record<string, PrLive | null>
+  /** Live details (state, CI, review) of the PRs of followed sessions, by PR URL. */
+  prLive: Record<string, PrLive>
   /** PR URLs linked to each session (sessionId): babysit-ticket's list, then PRs it created. Oldest first. */
   sessionPrs: Record<string, string[]>
   sources: Record<string, SourceHealth>

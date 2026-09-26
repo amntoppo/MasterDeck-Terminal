@@ -27,3 +27,16 @@ describe('readNewLines', () => {
     expect(readNewLines({ path: '/nope/x', offset: 0, rest: '' })).toEqual([])
   })
 })
+
+describe('readNewLines from the start', () => {
+  it('reads a whole file when asked, not just its last part', () => {
+    const d = mkdtempSync(join(tmpdir(), 'rnl-'))
+    const p = join(d, 't.jsonl')
+    writeFileSync(p, 'first\n' + 'x'.repeat(100) + '\nlast\n')
+    const tailOnly = readNewLines({ path: p, offset: 0, rest: '' }, 20)
+    expect(tailOnly).not.toContain('first')
+    const all = readNewLines({ path: p, offset: 0, rest: '' }, Infinity)
+    expect(all[0]).toBe('first')
+    expect(all).toContain('last')
+  })
+})
