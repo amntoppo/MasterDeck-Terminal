@@ -1,3 +1,4 @@
+import type { PastSession } from './pastSessions'
 import { getConfig, statusRank } from './appConfig'
 import { sessionForIssue } from './derive'
 import type { Badge, Board, BoardCard, BoardPr, Proposal, Session } from './types'
@@ -81,6 +82,7 @@ const LABEL: Record<Badge['kind'], string> = {
   working: 'Working',
   done: 'Done',
   idle: 'Idle',
+  stopped: 'Stopped',
   none: 'No session',
 }
 
@@ -90,9 +92,9 @@ function badge(kind: Badge['kind'], detail?: string | null): Badge {
 
 /**
  * The Claude task state of an issue, first match wins: question, blocked, needs input, onboarding,
- * working, done, idle, no session.
+ * working, done, idle, stopped (a session worked on it and can be resumed), no session.
  */
-export function cardBadge(issue: number, sessions: Session[], proposals: Proposal[]): Badge {
+export function cardBadge(issue: number, sessions: Session[], proposals: Proposal[], past: PastSession[] = []): Badge {
   const mine = proposals.filter((p) => p.issue === issue && p.kind !== 'CHAT').sort((a, b) => b.id - a.id)
   const q = mine.find((p) => p.status === 'question')
   if (q) return badge('question', q.note)
@@ -106,5 +108,6 @@ export function cardBadge(issue: number, sessions: Session[], proposals: Proposa
   if (s?.state === 'working') return badge('working')
   if (assign?.status === 'done') return badge('done', assign.note)
   if (s) return badge('idle')
+  if (past.length) return badge('stopped', `${past[0].name}: stopped, can be resumed`)
   return badge('none')
 }

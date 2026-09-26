@@ -19,6 +19,21 @@ export function readTail(path: string, max = 64 * 1024): { text: string; fromSta
   }
 }
 
+/** The first `max` bytes of a file, as text; null when it can't be read. */
+export function readHead(path: string, max = 64 * 1024): string | null {
+  let fd: number | null = null
+  try {
+    const buf = Buffer.alloc(max)
+    fd = openSync(path, 'r')
+    const n = readSync(fd, buf, 0, max, 0)
+    return buf.subarray(0, n).toString('utf8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
 export function mtime(path: string): number | null {
   try {
     return statSync(path).mtimeMs

@@ -72,6 +72,12 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **★ Master (top right, every view):** shows or hides the master pane. Shown, it sits beside the
   board, PRs and the other views too; hidden, they use the full width. Hiding it doesn't stop or
   detach master.
+- **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
+  **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
+  session on it, newest first, each with Resume. The links come from babysit-ticket
+  (`~/.claude/babysit-ticket/state.json`); resumes of one background session count as one; sessions
+  whose conversation is gone (deleted, or only a title stub) are left out. Resume runs
+  `claude --bg --resume` in the session's own folder.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
   MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
   ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers

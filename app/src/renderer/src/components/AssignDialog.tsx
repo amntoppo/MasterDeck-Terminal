@@ -4,6 +4,7 @@ import type { AssignRequest, Template } from '@shared/ipc'
 import { defaultModelLabel, MODELS } from '@shared/models'
 import { composePrompt } from '@shared/prompt'
 import type { AppState, DraftAssign, Issue } from '@shared/types'
+import { formatAgo } from '@shared/format'
 import { deck } from '../deck'
 
 interface Props {
@@ -38,6 +39,9 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   }, [])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
+  const past = state.pastSessions[issue.number] ?? []
+  const [resuming, setResuming] = useState<string | null>(null)
   const instructionsRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -127,6 +131,32 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
           {draft?.proposalId != null && <> · from master's proposal {draft.proposalId}{approved ? ' (approved, not started yet)' : ''}</>}
         </div>
 
+        {past.length > 0 && (
+          <div className="past">
+            <label>Earlier sessions on #{issue.number}: resume one to carry on where it stopped</label>
+            {past.map((p) => (
+              <div key={p.sessionId} className="past-row">
+                <span className="grow" title={`${p.sessionId}\n${p.cwd ?? ''}`}>
+                  ⏸ {p.name} <span className="muted">· {formatAgo(Date.now() - p.lastActivity)} ago{p.cwd ? ` · ${p.cwd.split('/').slice(-2).join('/')}` : ''}</span>
+                </span>
+                <button
+                  className="btn"
+                  disabled={resuming !== null}
+                  onClick={async () => {
+                    setResuming(p.sessionId)
+                    const r = await deck().resumeSession(p.sessionId, p.name, p.cwd)
+                    setResuming(null)
+                    if (r.ok) onClose()
+                    else setError(r.message)
+                  }}
+                >
+                  {resuming === p.sessionId ? 'Resuming…' : 'Resume'}
+                </button>
+              </div>
+            ))}
+            <label>Or start a new session</label>
+          </div>
+        )}
         {loading ? (
           <p className="meta">Drafting…</p>
         ) : draft ? (

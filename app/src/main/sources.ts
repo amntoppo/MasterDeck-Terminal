@@ -39,11 +39,12 @@ import { DEFAULT_CONFIG, getConfig, parseConfig, setConfig, type AppConfig } fro
 import { parseTeamPrs, type TeamPr } from '@shared/teamPrs'
 import { nextRestore, parseRestoreFile, type RestoreEntry, type RestoreFile } from '@shared/restore'
 import { totalOf, type Tokens, type TokensByDay } from '@shared/tokens'
+import { pastByIssue, type PastSession, type TranscriptInfo } from '@shared/pastSessions'
 import { TokenIndex } from './tokens'
 import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
 import { GitHub } from './github'
-import { mtime, readNewLines, readTail, TranscriptIndex, type FollowState } from './files'
+import { mtime, readHead, readNewLines, readTail, TranscriptIndex, type FollowState } from './files'
 import type { MasterCli } from './masterCli'
 import type { Paths } from './paths'
 import type { Runner } from './run'
@@ -117,6 +118,9 @@ export class Sources {
   /** Tokens used so far by the sessions whose details are followed (open tabs, focused). */
   private tokens: Record<string, Tokens> = {}
   private tokenPending = new Set<string>()
+  /** Stopped sessions that worked on each issue and can be resumed. */
+  private past: Record<number, PastSession[]> = {}
+  private transcriptInfos = new Map<string, TranscriptInfo & { path: string }>()
   private restoreSeen = false
   private restoring = false
   private resumer: ((e: RestoreEntry) => Promise<CliResult>) | null = null
@@ -159,6 +163,43 @@ export class Sources {
   ) {
     this.transcripts = new TranscriptIndex(paths.projectsDir)
     this.tokenIndex = new TokenIndex(this.transcripts, join(paths.home, 'tokens.json'))
+  }
+
+  /** Title and folder of a session's transcript, re-read only when the file changed. */
+  private transcriptInfo(sessionId: string): TranscriptInfo | null {
+    const path = this.transcripts.find(sessionId)
+    const mt = path ? mtime(path) : null
+    if (!path || mt === null) return null
+    const hit = this.transcriptInfos.get(sessionId)
+    if (hit && hit.path === path && hit.mtime === mt) return hit
+    let cwd: string | null = null
+    let custom: string | null = null
+    let ai: string | null = null
+    // The folder is in the first lines; titles are rewritten as the session goes, so the last wins.
+    for (const text of [readHead(path) ?? '', readTail(path, 256 * 1024)?.text ?? '']) {
+      for (const line of text.split('\n')) {
+        if (!line.includes('"cwd"') && !line.includes('-title"')) continue
+        let o: Record<string, unknown>
+        try {
+          o = JSON.parse(line)
+        } catch {
+          continue // a line cut at the edge of the read
+        }
+        if (!cwd && typeof o.cwd === 'string') cwd = o.cwd
+        if (o.type === 'custom-title' && typeof o.customTitle === 'string') custom = o.customTitle
+        if (o.type === 'ai-title' && typeof o.aiTitle === 'string') ai = o.aiTitle
+      }
+    }
+    // No conversation line (they all carry cwd): a stub with only a title, nothing to resume.
+    if (!cwd) return null
+    const info = { path, mtime: mt, title: custom ?? ai, cwd }
+    this.transcriptInfos.set(sessionId, info)
+    return info
+  }
+
+  private refreshPast(): void {
+    const live = new Set(this.rawSessions.filter((s) => s.pid !== null && s.state !== 'done').map((s) => s.sessionId))
+    this.past = pastByIssue(this.links, this.history, live, (id) => this.transcriptInfo(id))
   }
 
   /** Tokens per day for these sessions (the Costs view): the first call reads their history. */
@@ -670,6 +711,7 @@ export class Sources {
       this.rawSessions = normalizeAgents(JSON.parse(r.stdout))
       this.setHealth('agents', true)
       this.observeRestore()
+      this.refreshPast()
     } catch {
       this.setHealth('agents', false, 'claude agents printed invalid JSON')
     }
@@ -952,6 +994,7 @@ export class Sources {
       teamPrsError: this.teamPrsError,
       stoppedByRestart: this.restore?.stopped ?? [],
       tokens: { ...this.tokens },
+      pastSessions: this.past,
       restoring: this.restoring,
       config: this.config,
       skills: this.skills,

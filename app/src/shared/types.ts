@@ -1,3 +1,4 @@
+import type { PastSession } from './pastSessions'
 import type { Tokens } from './tokens'
 import type { RestoreEntry } from './restore'
 import type { AppConfig } from './appConfig'
@@ -178,6 +179,8 @@ export interface AppState {
   restoring: boolean
   /** Tokens used so far (input, output, cache) by the sessions in open tabs, from their transcripts. */
   tokens: Record<string, Tokens>
+  /** Per issue: stopped sessions that worked on it and can be resumed, newest first. */
+  pastSessions: Record<number, PastSession[]>
 }
 
 export interface SkillStatus {
@@ -260,7 +263,7 @@ export interface Board {
   cards: BoardCard[]
 }
 
-export type BadgeKind = 'question' | 'blocked' | 'needs-input' | 'onboarding' | 'working' | 'done' | 'idle' | 'none'
+export type BadgeKind = 'question' | 'blocked' | 'needs-input' | 'onboarding' | 'working' | 'done' | 'idle' | 'stopped' | 'none'
 
 export interface Badge {
   kind: BadgeKind

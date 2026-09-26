@@ -1,6 +1,7 @@
 import { getConfig, statusGroup, statusRank, type StatusGroup } from '@shared/appConfig'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cardBadge, cardsIn, visibleColumns } from '@shared/board'
+import type { PastSession } from '@shared/pastSessions'
 import { applyFilters, cardAction, defaultFilters, filterOptions, UNASSIGNED, type FilterState } from '@shared/boardFilter'
 import { ticketSpend } from '@shared/costs'
 import { sessionForIssue } from '@shared/derive'
@@ -28,6 +29,7 @@ const BADGE_ICON: Record<Badge['kind'], string> = {
   working: '⚙️',
   done: '✅',
   idle: '💤',
+  stopped: '⏸',
   none: '○',
 }
 
@@ -288,7 +290,9 @@ function inSprint(start: string, days: number, now: number): boolean {
 function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCard; state: AppState; me: string | null; now: number; spend: number; moving: boolean; onClick: () => void }) {
   const s = sessionForIssue(state.sessions, card.number)
   const mine = me !== null && card.assignees.includes(me)
-  const badge = mine || s ? cardBadge(card.number, state.sessions, state.proposals) : null
+  // Stopped sessions that worked on this issue: the newest can be resumed from the card.
+  const past = s ? [] : (state.pastSessions[card.number] ?? [])
+  const badge = mine || s || past.length ? cardBadge(card.number, state.sessions, state.proposals, past) : null
   const action = cardAction(card, me, state.sessions)
   const stats = s ? state.stats[s.sessionId] : undefined
   return (
@@ -344,6 +348,14 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
             {stats?.contextPct != null && <span>ctx {formatPct(stats.contextPct)}</span>}
             {s.startedAt > 0 && <span>{formatAgo(now - s.startedAt)}</span>}
           </>
+        ) : past.length ? (
+          <>
+            <span className="label" title={`${past[0].name}\n${past[0].cwd ?? ''}${past.length > 1 ? `\n+${past.length - 1} earlier session(s): open the card to see them` : ''}`}>
+              ⏸ {past[0].name}
+            </span>
+            <span>{formatAgo(now - past[0].lastActivity)}</span>
+            <ResumeButton p={past[0]} />
+          </>
         ) : (
           <span className="label" />
         )}
@@ -355,6 +367,28 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
         <Assignees logins={card.assignees} me={me} />
       </div>
     </div>
+  )
+}
+
+/** Continue a stopped session in the background (same conversation and id); it shows up in the sidebar. */
+function ResumeButton({ p }: { p: PastSession }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  return (
+    <button
+      className="mini-btn"
+      disabled={busy}
+      title={msg ?? `claude --bg --resume ${p.sessionId}`}
+      onClick={async (e) => {
+        e.stopPropagation()
+        setBusy(true)
+        const r = await deck().resumeSession(p.sessionId, p.name, p.cwd)
+        setBusy(false)
+        setMsg(r.ok ? 'Resumed' : r.message)
+      }}
+    >
+      {busy ? 'Resuming…' : msg === 'Resumed' ? 'Resumed' : 'Resume'}
+    </button>
   )
 }
 
