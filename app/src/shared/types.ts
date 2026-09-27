@@ -128,6 +128,7 @@ export interface PrLive {
   isDraft: boolean
   /** When it was opened, and its latest comment or review (ms); for "Ready for Review". */
   createdAt: number | null
+  mergedAt: number | null
   lastCommentAt: number | null
 }
 
@@ -285,6 +286,7 @@ export type BadgeKind =
   | 'onboarding'
   | 'working'
   | 'merged'
+  | 'rework'
   | 'approved'
   | 'changes'
   | 'ci-failing'

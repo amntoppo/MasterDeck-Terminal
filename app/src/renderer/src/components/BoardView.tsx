@@ -28,6 +28,7 @@ const BADGE_ICON: Record<Badge['kind'], string> = {
   onboarding: '⏳',
   working: '⚙️',
   merged: '🟣',
+  rework: '🔁',
   approved: '👍',
   changes: '✏️',
   'ci-failing': '❌',

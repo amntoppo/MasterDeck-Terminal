@@ -1039,6 +1039,16 @@ export class Sources {
     }
   }
 
+  /**
+   * When the user last wrote to a session whose PRs are all merged or closed (for Rework): read
+   * from its transcript only then, since it is a file read.
+   */
+  private instructedAt(s: Session): number | null {
+    const prs = this.prUrlsFor(s.sessionId, s.key).map((u) => this.prLive[u])
+    if (!prs.some((p) => p?.state === 'MERGED') || prs.some((p) => !p || p.state === 'OPEN')) return null
+    return this.askOf(s.sessionId)?.userAt ?? null
+  }
+
   /** What a session's transcript says it is asking (the last 256 KB). */
   private askOf(sessionId: string): SessionAsk | null {
     const path = this.transcripts.find(sessionId)
@@ -1131,7 +1141,7 @@ export class Sources {
       prStage: Object.fromEntries(
         sessions
           .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)
-          .map((s) => [s.key, prStage(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes)] as const)
+          .map((s) => [s.key, prStage(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes, this.instructedAt(s))] as const)
           .filter((e): e is readonly [string, PrStage] => e[1] !== null),
       ),
       menus: Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!])),

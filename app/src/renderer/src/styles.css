@@ -288,6 +288,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .badge.none { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
 .badge.stopped { background: rgba(160, 130, 255, .12); color: var(--purple); }
 .badge.merged { background: rgba(167, 139, 250, .18); color: var(--purple); }
+.badge.rework { background: rgba(242, 139, 80, .16); color: #f28b50; }
 .badge.approved { background: rgba(62, 207, 142, .16); color: var(--green); }
 .badge.changes { background: rgba(245, 184, 61, .14); color: var(--amber); }
 .badge.ci-failing { background: rgba(242, 109, 109, .16); color: var(--red); }
@@ -552,6 +553,9 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dot.st-changes { background: var(--amber); box-shadow: 0 0 0 3px rgba(240, 180, 80, .2); }
 .dot.st-approved { background: var(--green); }
 .dot.st-merged { background: var(--purple); }
+.dot.st-rework { background: #f28b50; box-shadow: 0 0 0 3px rgba(242, 139, 80, .2); }
+.sub.st-rework { color: #f28b50; }
+.chip.st-rework { border-color: #f28b50; }
 .dot.st-suspended, .dot.st-done { background: var(--grey); opacity: .6; }
 .sub.st-ready, .chip.st-ready { color: var(--accent); }
 .sub.st-merged, .sub.st-question { color: var(--purple); }

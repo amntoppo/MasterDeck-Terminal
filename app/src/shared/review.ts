@@ -7,7 +7,7 @@ import type { PrLive, Proposal, Session } from './types'
 
 /** Where a session's PRs stand, first match wins. */
 export interface PrStage {
-  kind: 'merged' | 'approved' | 'changes' | 'ci-failing' | 'ready' | 'in-review'
+  kind: 'merged' | 'rework' | 'approved' | 'changes' | 'ci-failing' | 'ready' | 'in-review'
   /** The PRs it is about (numbers). */
   prs: number[]
   /** Why, in a few words, for tooltips. */
@@ -16,6 +16,9 @@ export interface PrStage {
 
 /**
  * - merged: its PRs are merged, none still open;
+ * - rework: merged, but the user gave it more instructions after the last merge
+ *   (`instructedAt`); a new PR then goes through the stages below, and once that is merged too
+ *   (after the instructions) it is merged again. Any number of PRs, merged at any time;
  * - approved / changes: the review decision of an open PR;
  * - ci-failing: a build or test check failed (not the review check);
  * - ready (Ready for Review): the automated review is done, passed or failed, or nothing new has
@@ -23,13 +26,17 @@ export interface PrStage {
  * - in-review: the review check runs, or comments came in the last `quietMinutes`.
  * Drafts count: sessions open their PRs as drafts.
  */
-export function prStage(urls: string[], live: Record<string, PrLive>, now: number, quietMinutes: number): PrStage | null {
+export function prStage(urls: string[], live: Record<string, PrLive>, now: number, quietMinutes: number, instructedAt: number | null = null): PrStage | null {
   const prs = urls.map((u) => live[u]).filter((p): p is PrLive => !!p)
   const open = prs.filter((p) => p.state === 'OPEN')
   const nums = (list: PrLive[]) => list.map((p) => p.number)
   if (!open.length) {
     const merged = prs.filter((p) => p.state === 'MERGED')
-    return merged.length ? { kind: 'merged', prs: nums(merged), why: 'merged' } : null
+    if (!merged.length) return null
+    const lastMerge = Math.max(...merged.map((p) => p.mergedAt ?? 0))
+    if (instructedAt !== null && lastMerge > 0 && instructedAt > lastMerge)
+      return { kind: 'rework', prs: nums(merged), why: 'new instructions after its PR was merged; no new PR yet' }
+    return { kind: 'merged', prs: nums(merged), why: 'merged' }
   }
   const approved = open.filter((p) => p.reviewDecision === 'APPROVED')
   if (approved.length === open.length) return { kind: 'approved', prs: nums(approved), why: 'approved' }
@@ -56,6 +63,7 @@ export type StatusKey =
   | 'question'
   | 'blocked'
   | 'merged'
+  | 'rework'
   | 'approved'
   | 'changes'
   | 'ci-failing'
@@ -71,6 +79,7 @@ export const STATUS_TEXT: Record<StatusKey, string> = {
   question: 'Question',
   blocked: 'Blocked',
   merged: 'Merged',
+  rework: 'Rework',
   approved: 'Approved',
   changes: 'Changes Requested',
   'ci-failing': 'CI Failing',

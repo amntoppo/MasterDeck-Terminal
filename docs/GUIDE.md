@@ -110,7 +110,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Session status:** the sidebar and each session's header show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
-  master), then where its PR stands: **Merged** (all merged), **Approved**, **Changes Requested**,
+  master), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
+  instructions after its last PR merged; a new PR then shows its own status, and once that is merged
+  too the session is Merged again, however many PRs it takes), **Approved**, **Changes Requested**,
   **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
   otherwise **Idle**. Ready for Review: the automated review check (e.g. `claude-review`) passed or
   failed, or nothing new was said on the PR for 20 minutes (Settings), and the session is not
@@ -254,7 +256,7 @@ cards is in them.
 
 - **Badge:** the Claude task state for the issue, first match wins: ❓ Question, ⛔ Blocked, ✋ Needs
   input, ⏳ Onboarding (approved or still setting up), ⚙️ Working, then where its session's PR
-  stands (🟣 Merged, 👍 Approved, ✏️ Changes Requested, ❌ CI Failing, 👀 Ready for Review,
+  stands (🟣 Merged, 🔁 Rework, 👍 Approved, ✏️ Changes Requested, ❌ CI Failing, 👀 Ready for Review,
   🔍 In Review; see Session status), ✅ Done (the session told master it is done), 💤 Idle,
   ⏸ Stopped (can be resumed), ○ No session. Hover a badge for why.
 - **PR chips:** coloured by state (open green, draft grey, merged purple, closed red). Open PRs also

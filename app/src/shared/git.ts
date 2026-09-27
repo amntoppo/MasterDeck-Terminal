@@ -51,9 +51,9 @@ function latest(ts: (number | null)[]): number | null {
 /** `gh pr view` fields, with comments and reviews cut to their times (their bodies can be long). */
 export const PR_VIEW_ARGS = [
   '--json',
-  'number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,comments,reviews',
+  'number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,mergedAt,comments,reviews',
   '--jq',
-  '{number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,comments:[.comments[]|{createdAt}],reviews:[.reviews[]|{submittedAt}]}',
+  '{number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,mergedAt,comments:[.comments[]|{createdAt}],reviews:[.reviews[]|{submittedAt}]}',
 ]
 
 /** Checks together: failure beats pending beats success; null with no checks. */
@@ -92,6 +92,7 @@ export function parsePrView(text: string): PrLive | null {
     buildCi: rollup(checks.filter((c) => !isReviewCheck(c))),
     isDraft: r.isDraft === true,
     createdAt: time(r.createdAt),
+    mergedAt: time(r.mergedAt),
     lastCommentAt: latest([
       ...(Array.isArray(r.comments) ? (r.comments as Record<string, unknown>[]).map((c) => time(c?.createdAt)) : []),
       ...(Array.isArray(r.reviews) ? (r.reviews as Record<string, unknown>[]).map((c) => time(c?.submittedAt)) : []),

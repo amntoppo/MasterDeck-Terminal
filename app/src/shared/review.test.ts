@@ -13,6 +13,7 @@ const pr = (n: number, o: Partial<PrLive> = {}): PrLive => ({
   buildCi: null,
   isDraft: true,
   createdAt: 0,
+  mergedAt: null,
   lastCommentAt: null,
   ...o,
 })
@@ -44,6 +45,22 @@ describe('prStage', () => {
     expect(stage({ u1: pr(1, { reviewDecision: 'APPROVED', buildCi: 'failure' }) })?.kind).toBe('approved')
     expect(stage({ u1: pr(1, { reviewDecision: 'CHANGES_REQUESTED', reviewCheck: 'success' }) })?.kind).toBe('changes')
     expect(stage({ u1: pr(1, { buildCi: 'failure', reviewCheck: 'success' }) })?.kind).toBe('ci-failing')
+  })
+
+  it('Rework: instructions after the last merge; merged again once a newer PR merges', () => {
+    const first = pr(1, { state: 'MERGED', mergedAt: 10 * MIN })
+    // Written to after the merge, no new PR yet.
+    expect(prStage(['u1'], { u1: first }, 30 * MIN, 20, 15 * MIN)).toMatchObject({ kind: 'rework', prs: [1] })
+    // Before the merge (e.g. "merge it"): merged.
+    expect(prStage(['u1'], { u1: first }, 30 * MIN, 20, 5 * MIN)?.kind).toBe('merged')
+    // A new PR for the rework goes through review…
+    const second = pr(2, { createdAt: 20 * MIN, reviewCheck: 'pending' })
+    expect(prStage(['u1', 'u2'], { u1: first, u2: second }, 25 * MIN, 20, 15 * MIN)?.kind).toBe('in-review')
+    // …and once merged after the instructions, the session is merged again.
+    const secondMerged = { ...second, state: 'MERGED', mergedAt: 40 * MIN }
+    expect(prStage(['u1', 'u2'], { u1: first, u2: secondMerged }, 50 * MIN, 20, 15 * MIN)).toMatchObject({ kind: 'merged', prs: [1, 2] })
+    // More instructions after the second merge: rework again.
+    expect(prStage(['u1', 'u2'], { u1: first, u2: secondMerged }, 50 * MIN, 20, 45 * MIN)?.kind).toBe('rework')
   })
 
   it('nothing without PRs, or only closed ones', () => {

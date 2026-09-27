@@ -82,6 +82,7 @@ const LABEL: Record<Badge['kind'], string> = {
   onboarding: 'Onboarding',
   working: 'Working',
   merged: STATUS_TEXT.merged,
+  rework: STATUS_TEXT.rework,
   approved: STATUS_TEXT.approved,
   changes: STATUS_TEXT.changes,
   'ci-failing': STATUS_TEXT['ci-failing'],

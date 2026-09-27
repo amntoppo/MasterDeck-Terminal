@@ -22,7 +22,7 @@ describe('parsePrView', () => {
   const base = { number: 88, url: 'https://github.com/o/r/pull/88', state: 'OPEN', reviewDecision: 'APPROVED' }
   it('success when every check passed', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { state: 'SUCCESS' }] }))
-    expect(p).toEqual({ ...base, title: null, ci: 'success', reviewCheck: null, buildCi: 'success', isDraft: false, createdAt: null, lastCommentAt: null })
+    expect(p).toEqual({ ...base, title: null, ci: 'success', reviewCheck: null, buildCi: 'success', isDraft: false, createdAt: null, mergedAt: null, lastCommentAt: null })
   })
   it('failure beats pending', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ status: 'IN_PROGRESS', conclusion: '' }, { conclusion: 'FAILURE' }] }))
