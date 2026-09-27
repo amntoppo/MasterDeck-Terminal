@@ -156,7 +156,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 
 ## PRs and reviews
 
-- **PR tabs:** like the Board, the PRs view has tabs: **+** adds one, double-click renames, × closes.
+- **PR tabs:** like the Board, the PRs view has tabs, starting with **Mine** (my open PRs, selected) and **Everyone**: **+** adds one, double-click renames, × closes.
   Each tab keeps its own filters and preset (for example one tab "Needs my review", another "Mine"),
   over the same list fetched from GitHub. Tabs are remembered.
 - **PRs view:** every PR in the org, mine and the team's: all open PRs plus the latest 300 closed or
@@ -262,7 +262,7 @@ cards is in them.
   (plus one for their PRs). A ticket is a repo and a number: `#12` in the primary repository, `api#12`
   in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
   all keep the repo). A card moves only within its own board's columns.
-- **Tabs:** **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
+- **Tabs:** it starts with **Mine** (your issues, selected) and **Everyone**. **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
   same fetched board. **Repos** and **Boards** filters (with **Select all**) pick what a tab shows; with
   some boards picked, only their columns show. Tabs and their filters are remembered.
 

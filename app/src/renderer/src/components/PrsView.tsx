@@ -30,7 +30,6 @@ export function useDismissed(): [Set<string>, (id: string) => void] {
   return [d, add]
 }
 
-const FILTERS = 'prFilters'
 const TABS = 'prTabs'
 const TAB = 'prTab'
 
@@ -41,12 +40,16 @@ interface PrTab {
   filters: PrFilters
 }
 
-/** The saved tabs; the first run (or an older version's single filter set) makes one. */
+/** The saved tabs; before any are saved, Mine (my open PRs, selected) and Everyone. */
 function loadTabs(): PrTab[] {
   const saved = load<PrTab[] | null>(TABS, null)
   if (Array.isArray(saved) && saved.length)
     return saved.filter((t) => t && typeof t.id === 'string').map((t) => ({ id: t.id, name: typeof t.name === 'string' && t.name ? t.name : 'PRs', filters: normalizePrFilters(t.filters) }))
-  return [{ id: 'prs-1', name: 'PRs', filters: normalizePrFilters(load<unknown>(FILTERS, DEFAULT_PR_FILTERS)) }]
+  const preset = (label: string) => ({ ...DEFAULT_PR_FILTERS, ...(PRESETS.find((p) => p.label === label)?.f ?? {}) })
+  return [
+    { id: 'prs-mine', name: 'Mine', filters: preset('Mine') },
+    { id: 'prs-everyone', name: 'Everyone', filters: preset('Everyone') },
+  ]
 }
 const PRESETS: { label: string; title: string; f: Partial<PrFilters> }[] = [
   { label: 'Everyone', title: 'All open PRs in the org', f: { state: 'open', author: '', review: 'any', ci: 'any' } },

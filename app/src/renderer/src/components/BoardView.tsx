@@ -54,17 +54,19 @@ const COLUMN_COLOR: Record<string, string> = {
   Blocked: 'var(--red)',
 }
 
-const FILTERS_KEY = 'boardFilters'
 const TABS_KEY = 'boardTabs'
 const TAB_KEY = 'boardTab'
+const MINE_TAB = 'board-mine'
 
-/** The saved tabs; the first run (or an older version's single filter set) makes one. */
+/** The saved tabs; before any are saved, Mine (my issues, selected) and Everyone. */
 function loadTabs(me: string | null): BoardTab[] {
   const saved = load<BoardTab[] | null>(TABS_KEY, null)
   if (Array.isArray(saved) && saved.length)
     return saved.filter((t) => t && typeof t.id === 'string').map((t) => ({ id: t.id, name: typeof t.name === 'string' && t.name ? t.name : 'Board', filters: normalizeFilters(t.filters, me) }))
-  const old = load<Partial<FilterState> | null>(FILTERS_KEY, null)
-  return [{ id: 'board-1', name: 'Board', filters: old ? normalizeFilters(old, me) : defaultFilters(me) }]
+  return [
+    { id: MINE_TAB, name: 'Mine', filters: defaultFilters(me) },
+    { id: 'board-everyone', name: 'Everyone', filters: { ...defaultFilters(me), assignees: [] } },
+  ]
 }
 
 const GROUP_COLOR: Record<StatusGroup, string> = {
@@ -126,12 +128,12 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
   const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(me))
   const [tabId, setTabId] = useState<string>(() => load<string>(TAB_KEY, ''))
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0]
-  // First run: filter to me once my login is known.
-  const [meFilled, setMeFilled] = useState(() => load<BoardTab[] | null>(TABS_KEY, null) !== null || load(FILTERS_KEY, null) !== null)
+  // First run: the Mine tab filters to me once my login is known.
+  const [meFilled, setMeFilled] = useState(() => load<BoardTab[] | null>(TABS_KEY, null) !== null)
   useEffect(() => {
     if (meFilled || !me) return
     setMeFilled(true)
-    setTabs((ts) => ts.map((t, i) => (i === 0 && t.filters.assignees.length === 0 ? { ...t, filters: { ...t.filters, assignees: [me] } } : t)))
+    setTabs((ts) => ts.map((t) => (t.id === MINE_TAB && t.filters.assignees.length === 0 ? { ...t, filters: { ...t.filters, assignees: [me] } } : t)))
   }, [me, meFilled])
   useEffect(() => save(TABS_KEY, tabs), [tabs])
   useEffect(() => save(TAB_KEY, tab.id), [tab.id])
