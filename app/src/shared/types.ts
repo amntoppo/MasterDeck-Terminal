@@ -164,6 +164,8 @@ export interface AppState {
   git: Record<string, GitInfo>
   /** Live details (state, CI, review) of the PRs of followed sessions, by PR URL. */
   prLive: Record<string, PrLive>
+  /** Git worktrees each session created or worked in that still exist, by Session.key; oldest first. */
+  sessionWorktrees: Record<string, import('./worktrees').SessionWorktree[]>
   /** PR URLs linked to each session (sessionId): babysit-ticket's list, then PRs it created. Oldest first. */
   sessionPrs: Record<string, string[]>
   sources: Record<string, SourceHealth>

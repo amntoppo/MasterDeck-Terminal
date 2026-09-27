@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watchFile, unwatchFile, writeFileSync } from 'node:fs'
-import { uptime } from 'node:os'
+import { homedir, uptime } from 'node:os'
 import { dirname } from 'node:path'
 import { join, resolve } from 'node:path'
 import { applyFreshness, normalizeAgents } from '@shared/agents'
@@ -54,6 +54,8 @@ import type { GhRunner } from './ghc'
 import { GitHub } from './github'
 import { mtime, readHead, readNewLines, readTail, TranscriptIndex, type FollowState } from './files'
 import { asksQuestion, describePending, openTasks, stillPending, turnEnded, type PendingTask } from '@shared/activity'
+import { newWorktreeScan, scanWorktreeLines, type SessionWorktree, type WorktreeScan } from '@shared/worktrees'
+import { linkedWorktree } from './worktreeInfo'
 import type { MasterCli } from './masterCli'
 import type { Paths } from './paths'
 import type { Runner } from './run'
@@ -116,7 +118,9 @@ export class Sources {
   private prLive: Record<string, PrLive> = {}
   private prFetchedAt: Record<string, number> = {}
   /** Transcript followers for PR detection, by transcript path. */
-  private follows: Record<string, { st: FollowState; scan: PrScanState }> = {}
+  private follows: Record<string, { st: FollowState; scan: PrScanState; wt: WorktreeScan }> = {}
+  /** Worktree candidates per Session.key, from all its transcripts (a resume adds one). */
+  private worktreeScans: Record<string, WorktreeScan> = {}
   /** PRs each session created, by session key (survives a resume's new sessionId). */
   private createdPrs: Record<string, string[]> = {}
   private ghPausedUntil = 0
@@ -985,12 +989,26 @@ export class Sources {
 
   /** Read what the transcript gained since last time; true when it shows a newly created PR. */
   private followPrs(path: string, key: string): boolean {
-    const f = (this.follows[path] ??= { st: { path, offset: 0, rest: '' }, scan: newPrScanState() })
+    const f = (this.follows[path] ??= { st: { path, offset: 0, rest: '' }, scan: newPrScanState(), wt: newWorktreeScan() })
     // From the start of the transcript: a PR opened early in a long session counts too.
-    const found = scanLines(readNewLines(f.st, Infinity), f.scan)
+    const lines = readNewLines(f.st, Infinity)
+    const found = scanLines(lines, f.scan)
+    scanWorktreeLines(lines, f.wt, homedir())
+    const all = (this.worktreeScans[key] ??= newWorktreeScan())
+    for (const p of f.wt.paths) if (!all.paths.includes(p)) all.paths.push(p)
     // Most recent last; a resumed session adds a second transcript to the same key.
     this.notePrs(key, f.scan.urls)
     return found
+  }
+
+  /** The session's worktrees that still exist, each with its repo and branch (read from .git files). */
+  private worktreesOf(key: string): SessionWorktree[] {
+    const out: SessionWorktree[] = []
+    for (const p of this.worktreeScans[key]?.paths ?? []) {
+      const w = linkedWorktree(p)
+      if (w) out.push(w)
+    }
+    return out
   }
 
   private prUrlsFor(sessionId: string, key: string): string[] {
@@ -1220,6 +1238,7 @@ export class Sources {
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
+      sessionWorktrees: Object.fromEntries(sessions.map((x) => [x.key, this.worktreesOf(x.key)]).filter(([, v]) => v.length)),
       sources: { ...this.health },
       errors: Object.values(this.errors),
       lastSnapshotAt: this.snapshot.takenAt,

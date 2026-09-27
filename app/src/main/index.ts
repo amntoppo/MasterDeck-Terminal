@@ -13,6 +13,7 @@ import { getConfig } from '@shared/appConfig'
 import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
 import { startAssign } from './assign'
 import { toDefaultBranch } from './defaultBranch'
+import { openInEditor } from './editor'
 import { configuredModel } from './models'
 import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
 import { makeGhRunner, readGhCacheStatus } from './ghc'
@@ -311,12 +312,7 @@ async function startHere(o: { sessionId: string; name: string; cwd: string; pid:
 }
 
 async function openEditor(dir: string): Promise<CliResult> {
-  for (const bin of process.platform === 'win32' ? ['cursor.cmd', 'code.cmd'] : ['cursor', 'code']) {
-    const r = await run(bin, [dir], { timeoutMs: 15_000 })
-    if (r.code === 0) return { ok: true, message: `opened in ${bin}` }
-  }
-  const err = await shell.openPath(dir)
-  return err ? { ok: false, message: err } : { ok: true, message: 'opened' }
+  return openInEditor(run, dir, join(paths.home, 'editor-probe'), (p) => shell.openPath(p))
 }
 
 let masterStartingUntil = 0

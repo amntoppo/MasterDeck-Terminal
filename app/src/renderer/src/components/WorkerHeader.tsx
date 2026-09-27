@@ -63,6 +63,12 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const branch = git?.branch ?? tail?.gitBranch ?? null
   const level = contextLevel(stats?.contextPct ?? null)
 
+  const worktrees = state.sessionWorktrees[s.key] ?? []
+  const openInEditor = async (path: string) => {
+    const r = await deck().openEditor(path)
+    flash(r.ok ? r.message : `Editor: ${r.message}`)
+  }
+
   const copy = (text: string, what: string) => {
     deck().copy(text)
     flash(`Copied ${what}`)
@@ -82,7 +88,8 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         {prUrls.map((u) => (
           <PrChip key={u} url={u} state={state} many={prUrls.length > 1} />
         ))}
-        {branch && (
+        {/* With worktree chips, the branch is on each (hover); the folder's own branch would mislead. */}
+        {branch && worktrees.length === 0 && (
           <span className="chip copyable mono" onClick={() => copy(branch, 'branch')} title="Click to copy the branch">
             ⎇ {branch}
             {git && (git.ahead > 0 || git.behind > 0) && (
@@ -92,22 +99,29 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
             )}
           </span>
         )}
-        {dir && (
-          <span className="chip path copyable mono" onClick={() => copy(dir, 'path')} title={`${dir}\nClick to copy`}>
-            <span>📁 {shortPath(dir, deck().home)}</span>
-          </span>
-        )}
-        {dir && (
-          <span
-            className="chip btnlike"
-            onClick={async () => {
-              const r = await deck().openEditor(dir)
-              flash(r.ok ? r.message : `Editor: ${r.message}`)
-            }}
-          >
-            Open in editor
-          </span>
-        )}
+        {/* Where it works: each worktree it made (any repo), else its folder. A click opens it in the IDE. */}
+        {worktrees.length > 0
+          ? worktrees.map((w) => (
+              <span
+                key={w.path}
+                className="chip path btnlike mono"
+                onClick={(e) => (e.altKey ? copy(w.path, 'path') : void openInEditor(w.path))}
+                title={`${w.path}${w.branch ? `\n⎇ ${w.branch}` : ''}\nClick to open in editor · ⌥-click to copy the path`}
+              >
+                <span>
+                  📁 {w.repo} / {w.path.split(/[\\/]/).pop()}
+                </span>
+              </span>
+            ))
+          : dir && (
+              <span
+                className="chip path btnlike mono"
+                onClick={(e) => (e.altKey ? copy(dir, 'path') : void openInEditor(dir))}
+                title={`${dir}\nClick to open in editor · ⌥-click to copy the path`}
+              >
+                <span>📁 {shortPath(dir, deck().home)}</span>
+              </span>
+            )}
         <span className={`chip btnlike ${queueOpen ? 'on' : ''}`} onClick={onToggleQueue} title={queueOpen ? 'Hide the queue' : "Show this session's /queue: prompts it runs after each response"}>
           Queue Prompts
         </span>
