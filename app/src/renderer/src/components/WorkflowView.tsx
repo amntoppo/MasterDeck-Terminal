@@ -93,6 +93,7 @@ export function WorkflowView({ state }: { state: AppState }) {
                 onAdd={(kind) => setAdding(adding?.stage === s.id && adding.kind === kind ? null : { stage: s.id, kind })}
                 onSave={async (step) => (await save([...data.steps, step])) && setAdding(null)}
                 onRemove={(id) => void save(data.steps.filter((x) => x.id !== id))}
+                onUpdate={(id, step) => save(data.steps.map((x) => (x.id === id ? step : x)))}
               />
             ))}
           </div>
@@ -149,7 +150,10 @@ function StageCard(p: {
   onAdd: (kind: CustomStep['kind']) => void
   onSave: (s: CustomStep) => void
   onRemove: (id: string) => void
+  /** Replace step `id` with its edited version; true once saved. */
+  onUpdate: (id: string, step: CustomStep) => Promise<boolean>
 }) {
+  const [editing, setEditing] = useState<string | null>(null)
   const s = p.stage
   const trigger = TRIGGERS.find((t) => t.id === s.trigger)
   const others = p.hooks.filter((h) => !h.owner?.startsWith('custom step'))
@@ -180,22 +184,33 @@ function StageCard(p: {
             ))}
           </div>
         )}
-        {p.steps.map((st) => (
-          <div key={st.id} className={`custom-step ${st.kind}`} title={st.instructions}>
-            <span className="ev">{st.kind === 'instruction' ? 'your instruction' : 'your skill'}</span>
-            {st.kind === 'instruction' ? (
-              <span className="grow">{st.instructions}</span>
+        {p.steps.map((st) =>
+          editing === st.id && trigger ? (
+            st.kind === 'instruction' ? (
+              <AddInstruction key={st.id} trigger={trigger.id} busy={p.busy} initial={st} onCancel={() => setEditing(null)} onSave={async (next) => (await p.onUpdate(st.id, next)) && setEditing(null)} />
             ) : (
-              <span className="grow">
-                <b>{st.skill}</b> <span className="muted">· {st.mode === 'background' ? 'background subagent' : 'in the session'}</span>
-                {st.instructions && <span className="muted"> · {st.instructions}</span>}
-              </span>
-            )}
-            <button className="link-btn" disabled={p.busy} onClick={() => p.onRemove(st.id)}>
-              Remove
-            </button>
-          </div>
-        ))}
+              <AddStep key={st.id} trigger={trigger.id} skills={p.skills} busy={p.busy} initial={st} onCancel={() => setEditing(null)} onSave={async (next) => (await p.onUpdate(st.id, next)) && setEditing(null)} />
+            )
+          ) : (
+            <div key={st.id} className={`custom-step ${st.kind}`} title={st.instructions}>
+              <span className="ev">{st.kind === 'instruction' ? 'your instruction' : 'your skill'}</span>
+              {st.kind === 'instruction' ? (
+                <span className="grow">{st.instructions}</span>
+              ) : (
+                <span className="grow">
+                  <b>{st.skill}</b> <span className="muted">· {st.mode === 'background' ? 'background subagent' : 'in the session'}</span>
+                  {st.instructions && <span className="muted"> · {st.instructions}</span>}
+                </span>
+              )}
+              <button className="link-btn" disabled={p.busy} onClick={() => setEditing(st.id)}>
+                Edit
+              </button>
+              <button className="link-btn" disabled={p.busy} onClick={() => p.onRemove(st.id)}>
+                Remove
+              </button>
+            </div>
+          ),
+        )}
         {trigger && (
           <div className="add-row">
             <button className={`add-step ${p.adding === 'skill' ? 'on' : ''}`} onClick={() => p.onAdd('skill')}>
@@ -214,16 +229,35 @@ function StageCard(p: {
   )
 }
 
-function AddStep({ trigger, skills, busy, onSave }: { trigger: CustomStep['trigger']; skills: { name: string; description: string }[]; busy: boolean; onSave: (s: CustomStep) => void }) {
-  const [skill, setSkill] = useState('')
-  const [mode, setMode] = useState<CustomStep['mode']>('background')
-  const [instructions, setInstructions] = useState('')
+/** A new id on every save: a changed step reaches sessions again (each hook runs once per id and session). */
+const newId = (base: string) => `${base.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 24)}-${Math.random().toString(36).slice(2, 6)}`
+
+/** Add a skill step, or edit one (`initial`). */
+function AddStep({
+  trigger,
+  skills,
+  busy,
+  onSave,
+  initial,
+  onCancel,
+}: {
+  trigger: CustomStep['trigger']
+  skills: { name: string; description: string }[]
+  busy: boolean
+  onSave: (s: CustomStep) => void
+  initial?: CustomStep
+  onCancel?: () => void
+}) {
+  const [skill, setSkill] = useState(initial?.skill ?? '')
+  const [mode, setMode] = useState<CustomStep['mode']>(initial?.mode ?? 'background')
+  const [instructions, setInstructions] = useState(initial?.instructions ?? '')
   const picked = skills.find((s) => s.name === skill)
   return (
     <div className="add-form">
       <label>Skill</label>
       <select className="fsel full" value={skill} onChange={(e) => setSkill(e.target.value)}>
         <option value="">Choose a skill in ~/.claude/skills…</option>
+        {skill && !skills.some((s) => s.name === skill) && <option value={skill}>{skill} (not in ~/.claude/skills)</option>}
         {skills.map((s) => (
           <option key={s.name} value={s.name}>
             {s.name}
@@ -246,32 +280,39 @@ function AddStep({ trigger, skills, busy, onSave }: { trigger: CustomStep['trigg
         A hook in <code>~/.claude/settings.json</code> (a backup is kept) tells each session to run it at this point. A skill you create later
         shows up here once it is in <code>~/.claude/skills</code>.
       </div>
-      <button
-        className="btn primary"
-        disabled={!skill || busy}
-        onClick={() =>
-          onSave({
-            id: `${skill.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 24)}-${Math.random().toString(36).slice(2, 6)}`,
-            trigger,
-            kind: 'skill',
-            skill,
-            mode,
-            instructions,
-          })
-        }
-      >
-        {busy ? 'Saving…' : 'Add to the workflow'}
-      </button>
+      <div className="form-buttons">
+        <button className="btn primary" disabled={!skill || busy} onClick={() => onSave({ id: newId(skill), trigger, kind: 'skill', skill, mode, instructions })}>
+          {busy ? 'Saving…' : initial ? 'Save' : 'Add to the workflow'}
+        </button>
+        {onCancel && (
+          <button className="btn" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
-/** Text the session is given at this point, as is: no skill. Saved when added. */
-function AddInstruction({ trigger, busy, onSave }: { trigger: CustomStep['trigger']; busy: boolean; onSave: (s: CustomStep) => void }) {
-  const [text, setText] = useState('')
+/** Text the session is given at this point, as is: no skill. Saved when added, or when an edit (`initial`) is saved. */
+function AddInstruction({
+  trigger,
+  busy,
+  onSave,
+  initial,
+  onCancel,
+}: {
+  trigger: CustomStep['trigger']
+  busy: boolean
+  onSave: (s: CustomStep) => void
+  initial?: CustomStep
+  onCancel?: () => void
+}) {
+  const [text, setText] = useState(initial?.instructions ?? '')
+  const changed = text.trim() !== (initial?.instructions ?? '').trim()
   const add = () => {
-    if (!text.trim() || busy) return
-    onSave({ id: `note-${Math.random().toString(36).slice(2, 8)}`, trigger, kind: 'instruction', skill: '', mode: 'session', instructions: text.trim() })
+    if (!text.trim() || busy || !changed) return
+    onSave({ id: newId('note'), trigger, kind: 'instruction', skill: '', mode: 'session', instructions: text.trim() })
   }
   return (
     <div className="add-form">
@@ -283,20 +324,23 @@ function AddInstruction({ trigger, busy, onSave }: { trigger: CustomStep['trigge
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) add()
+          if (e.key === 'Escape' && onCancel) onCancel()
         }}
       />
       <div className="meta">
         At this point, every session gets it as a note from a hook in <code>~/.claude/settings.json</code> (a backup is kept), once per
-        session{trigger === 'session-start' || trigger === 'linked' ? '' : ' and commit'}.
+        session{trigger === 'session-start' || trigger === 'linked' ? '' : ' and commit'}.{initial ? ' Once saved, the new text reaches sessions again, including ones that had the old text.' : ''}
       </div>
-      <button
-        className="btn primary"
-        disabled={!text.trim() || busy}
-        title="⌘↵"
-        onClick={add}
-      >
-        {busy ? 'Saving…' : 'Add instruction'}
-      </button>
+      <div className="form-buttons">
+        <button className="btn primary" disabled={!text.trim() || busy || !changed} title="⌘↵" onClick={add}>
+          {busy ? 'Saving…' : initial ? 'Save' : 'Add instruction'}
+        </button>
+        {onCancel && (
+          <button className="btn" disabled={busy} title="Esc" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   )
 }

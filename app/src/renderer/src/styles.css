@@ -535,3 +535,4 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .chip.ask-done { color: var(--muted); }
 .ask-review { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
 .ask-review b { font-weight: 600; }
+.form-buttons { display: flex; gap: 6px; }
