@@ -8,6 +8,7 @@ import { sameTicket, ticketLabel } from '@shared/ticket'
 import type { AppState, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
 import { AskPanel } from './AskPanel'
+import { TerminalView } from './TerminalView'
 
 interface Props {
   state: AppState
@@ -50,6 +51,14 @@ export function TasksView({ state, onOpenSession, onPr }: Props) {
   )
   const byLane = (id: Lane) => tasks.filter((t) => t.lane === id).sort((a, b) => lastAt(state, b.s) - lastAt(state, a.s))
   const active = tasks.filter((t) => t.lane !== 'parked')
+
+  // One task at a time shows its session's terminal under it (the same terminal as in Terminals).
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [termH, setTermHState] = useState(() => load<number>('tasksTermH', 320))
+  const setTermH = (h: number) => {
+    setTermHState(h)
+    save('tasksTermH', h)
+  }
 
   const jump = (key: string) => document.getElementById(`task-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
@@ -108,7 +117,21 @@ export function TasksView({ state, onOpenSession, onPr }: Props) {
                 <span className="tv-lane-title">{l.title}</span>
                 <span className="count">{list.length}</span>
               </button>
-              {!collapsed[l.id] && list.map((t) => <TaskRow key={t.s.key} t={t} state={state} now={now} onOpen={() => onOpenSession(t.s)} onPr={onPr} />)}
+              {!collapsed[l.id] &&
+                list.map((t) => (
+                  <TaskRow
+                    key={t.s.key}
+                    t={t}
+                    state={state}
+                    now={now}
+                    onOpen={() => onOpenSession(t.s)}
+                    onPr={onPr}
+                    expanded={expanded === t.s.key}
+                    onToggle={() => setExpanded((k) => (k === t.s.key ? null : t.s.key))}
+                    termH={termH}
+                    onTermH={setTermH}
+                  />
+                ))}
             </div>
           )
         })}
@@ -119,7 +142,27 @@ export function TasksView({ state, onOpenSession, onPr }: Props) {
 
 const lastAt = (state: AppState, s: Session): number => state.tails[s.sessionId]?.lastActivityAt ?? state.lastActivity[s.sessionId] ?? s.startedAt
 
-function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; now: number; onOpen: () => void; onPr: (url: string) => void }) {
+function TaskRow({
+  t,
+  state,
+  now,
+  onOpen,
+  onPr,
+  expanded,
+  onToggle,
+  termH,
+  onTermH,
+}: {
+  t: Task
+  state: AppState
+  now: number
+  onOpen: () => void
+  onPr: (url: string) => void
+  expanded: boolean
+  onToggle: () => void
+  termH: number
+  onTermH: (h: number) => void
+}) {
   const { s, status, step } = t
   const tail = state.tails[s.sessionId]
   const stats = state.stats[s.sessionId] ?? state.allStats[s.sessionId]
@@ -150,7 +193,14 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
   else now1 = status.key === 'idle' ? 'Waiting for instructions' : ''
 
   return (
-    <div id={`task-${s.key}`} className={`tv-row tone-${step.tone} ${pending ? 'has-ask' : ''}`} onDoubleClick={(e) => !(e.target as HTMLElement).closest('.tv-ask') && onOpen()}>
+    <div
+      id={`task-${s.key}`}
+      className={`tv-row tone-${step.tone} ${pending ? 'has-ask' : ''} ${expanded ? 'expanded' : ''}`}
+      // A click on the row (not its buttons, answer panel or terminal) shows or hides its terminal.
+      onClick={(e) => !(e.target as HTMLElement).closest(INTERACTIVE) && onToggle()}
+      onDoubleClick={(e) => !(e.target as HTMLElement).closest(INTERACTIVE) && onOpen()}
+      title={expanded ? undefined : 'Click to show its terminal here · double-click to open it in Terminals'}
+    >
       <div className="tv-main">
         <div className="tv-title">
           {s.issue !== null && (
@@ -221,6 +271,7 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
           <AskPanel session={s} ask={ask} menu={menu} fallback={status.why || null} full={false} itemId={itemId} />
         </div>
       )}
+      {expanded && <TaskTerminal s={s} height={termH} onHeight={onTermH} onOpen={onOpen} />}
     </div>
   )
 }
@@ -240,6 +291,69 @@ function Stepper({ step }: { step: TaskStep }) {
         </b>
         {step.note ? ` · ${step.note}` : ''}
       </span>
+    </div>
+  )
+}
+
+const INTERACTIVE = 'button, a, input, textarea, select, .tv-ask, .tv-term'
+
+/**
+ * The session's own terminal, shorter, under its task: the same pane (and PTY) the Terminals tab
+ * shows, so typing here goes to the session. While on screen it sets the terminal's size; the
+ * Terminals tab takes it back when it shows again. A parked session attaches only when asked
+ * (attaching resumes it).
+ */
+function TaskTerminal({ s, height, onHeight, onOpen }: { s: Session; height: number; onHeight: (h: number) => void; onOpen: () => void }) {
+  const [attach, setAttach] = useState(false)
+  const [exited, setExited] = useState(false)
+  const drag = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const y0 = e.clientY
+    const h0 = height
+    const move = (m: MouseEvent) => onHeight(Math.round(Math.min(900, Math.max(160, h0 + m.clientY - y0))))
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.classList.remove('resizing')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.classList.add('resizing')
+  }
+  const canAttach = s.kind === 'background' && !!s.bgId
+  const parked = s.state === 'suspended'
+  return (
+    <div className="tv-term" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <div className="tv-term-body" style={{ height }}>
+        {!canAttach ? (
+          <div className="tv-term-note">
+            Runs in another terminal (pid {s.pid ?? '?'}); it can't be shown here.
+            <button className="btn" onClick={onOpen}>
+              Open in Terminals
+            </button>
+          </div>
+        ) : parked && !attach ? (
+          <div className="tv-term-note">
+            {s.name} is parked. Attaching resumes it.
+            <button className="btn primary" onClick={() => setAttach(true)}>
+              Attach
+            </button>
+          </div>
+        ) : (
+          <>
+            <TerminalView paneId={`s:${s.key}`} spec={{ kind: 'attach', bgId: s.bgId! }} visible focusOnShow onExit={() => setExited(true)} />
+            {exited && (
+              <div className="tv-term-note over">
+                Detached: the attach process exited.
+                <button className="btn" onClick={onOpen}>
+                  Open in Terminals
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="tv-term-grip" onMouseDown={drag} title="Drag to resize" />
     </div>
   )
 }

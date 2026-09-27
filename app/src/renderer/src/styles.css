@@ -746,3 +746,13 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .wt-path { font-size: 11px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: copy; }
 .wt-path:hover { color: var(--text); }
 .wt-dialog .meta.ok { color: var(--green); }
+/* Tasks: a task's own terminal, expanded under its row */
+.tv-row { cursor: pointer; }
+.tv-row.expanded { border-color: color-mix(in srgb, var(--tone) 50%, var(--line)); }
+.tv-term { grid-column: 1 / -1; margin-top: 4px; cursor: default; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.tv-term-body { position: relative; display: flex; min-height: 0; }
+.tv-term-body .term-wrap { padding: 6px 4px 4px 8px; }
+.tv-term-note { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.tv-term-note.over { position: absolute; inset: 0; background: rgba(15, 17, 23, .85); }
+.tv-term-grip { height: 7px; cursor: row-resize; background: var(--bg-2); border-top: 1px solid var(--line); }
+.tv-term-grip:hover { background: var(--accent-soft); }

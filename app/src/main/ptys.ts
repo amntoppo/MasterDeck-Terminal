@@ -36,7 +36,8 @@ export class PtyManager {
     if (existing) {
       // An exited pane stays exited until the user asks to reattach (close, then open). A view
       // that remounts must not silently start a new `claude attach`, which resumes a parked session.
-      if (!existing.exited) this.resize(id, cols, rows)
+      // cols 0: a view that is not on screen; it must not resize what another view shows.
+      if (!existing.exited && cols > 0 && rows > 0) this.resize(id, cols, rows)
       return { ok: true, replay: existing.buffer, seq: existing.seq, exited: existing.exited }
     }
     const testNoMaster = process.env.MASTERDECK_TEST_NO_MASTER_ATTACH === '1' && id.startsWith('master:')
@@ -56,8 +57,8 @@ export class PtyManager {
     try {
       const proc = pty.spawn(cmd.file, cmd.args, {
         name: 'xterm-256color',
-        cols: Math.max(cols, 2),
-        rows: Math.max(rows, 2),
+        cols: cols > 0 ? Math.max(cols, 2) : 120,
+        rows: rows > 0 ? Math.max(rows, 2) : 34,
         cwd: startDir(cmd.cwd),
         env: { ...this.env(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>,
       })

@@ -208,6 +208,13 @@ see at a glance where the work stands:
   it wants to do (the command or file, and its description), why it asks, the question, and each
   option as a button: **Yes**, the **don't ask again / allow all** option, and **No**. A click
   presses that option's number in the session, only if the same prompt is still on its screen.
+- **The task's terminal:** click a task (not its buttons) to show its session's terminal under it,
+  shorter than in Terminals; click again to hide it. It is the same terminal as the Terminals tab
+  (same session, same output; typing goes to the session), not a new one. Claude's input box stays
+  on its bottom line and the output above scrolls. Drag its bottom edge to change the height
+  (remembered). One task at a time. While it shows, it sets the terminal's size; the Terminals tab
+  takes its size back when you return there. A parked session shows **Attach** (attaching resumes
+  it); one running in another terminal can't be shown. Double-click a task to open it in Terminals.
 - **Answer from Tasks:** when a session waits on you (a prompt or permission, a menu on its screen,
   a question in its last message, or a question or blocker it reported to master), its row opens an
   answer panel: the full question, its options (click one), and a reply box (⌘↵ sends). Answers go

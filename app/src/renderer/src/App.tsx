@@ -421,7 +421,9 @@ export function App() {
     setAssigning(issue)
   }
 
-  const shown = new Set([active, split].filter(Boolean) as string[])
+  // Terminal tabs count as shown only in the Terminals view: another view (Tasks) may show the same
+  // session's terminal at its own size, and the tab takes its size back when it shows again.
+  const shown = new Set(view === 'terminals' ? ([active, split].filter(Boolean) as string[]) : [])
   // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
   const useMaster = state.config.masterEnabled
   const masterShown = useMaster && masterOpen

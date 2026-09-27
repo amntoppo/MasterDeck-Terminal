@@ -47,6 +47,10 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
   const specKey = JSON.stringify(spec)
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
+  // Only a view on screen sets the PTY's size: the same session can show in two places (Terminals,
+  // and a task expanded in Tasks), one at a time.
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
 
   useEffect(() => {
     if (!host.current) return
@@ -81,7 +85,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     })
     const offExit = deck().onPtyExit(paneId, (code) => onExitRef.current?.(code))
     void deck()
-      .ptyOpen(paneId, spec, t.cols, t.rows)
+      .ptyOpen(paneId, spec, visibleRef.current ? t.cols : 0, visibleRef.current ? t.rows : 0)
       .then((r) => {
         if (disposed) return
         if (!r.ok) setError(r.message ?? 'could not start the terminal')
@@ -96,7 +100,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
         if (!disposed) setError(String(e))
       })
     const input = t.onData((d) => deck().ptyWrite(paneId, d))
-    const resize = t.onResize(({ cols, rows }) => deck().ptyResize(paneId, cols, rows))
+    const resize = t.onResize(({ cols, rows }) => visibleRef.current && deck().ptyResize(paneId, cols, rows))
     // Cmd+C copies a selection instead of sending ^C; Cmd+V pastes.
     t.attachCustomKeyEventHandler((e) => {
       const o = keyOverride(e)
@@ -144,10 +148,12 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       } catch {
         // ignore
       }
+      // Take the PTY's size back: another view may have shown it at its own size meanwhile.
+      if (term.current) deck().ptyResize(paneId, term.current.cols, term.current.rows)
       if (focusOnShow) term.current?.focus()
     })
     return () => cancelAnimationFrame(id)
-  }, [visible, focusOnShow])
+  }, [visible, focusOnShow, paneId])
 
   return (
     <div className="term-wrap" onClick={() => term.current?.focus()}>
