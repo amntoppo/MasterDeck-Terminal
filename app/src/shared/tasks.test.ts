@@ -21,6 +21,12 @@ describe('taskStep', () => {
     expect(taskStep('working', stage('ci-failing')).tone).toBe('busy')
     expect(taskStep('needs-input', stage('ready')).tone).toBe('bad')
   })
+  it('follows a status set by hand at once, over the PR stage', () => {
+    expect(taskStep('ready', stage('merged'), true)).toMatchObject({ at: 3, tone: 'info' })
+    expect(taskStep('merged', null, true)).toMatchObject({ at: 4, tone: 'done' })
+    expect(taskStep('blocked', stage('approved'), true)).toMatchObject({ at: 3, tone: 'bad' })
+    expect(taskStep('blocked', null, true)).toMatchObject({ at: 1, tone: 'bad' })
+  })
   it('goes back to Coding on rework', () => {
     expect(taskStep('rework', stage('rework'))).toMatchObject({ at: 1, tone: 'busy' })
   })

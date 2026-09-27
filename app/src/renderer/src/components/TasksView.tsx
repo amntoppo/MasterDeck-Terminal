@@ -43,7 +43,7 @@ export function TasksView({ state, onOpenSession, onPr }: Props) {
         .map((s) => {
           const status = sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])
           const issue = s.issue !== null ? state.issues.find((i) => sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! })) : undefined
-          return { s, status, step: taskStep(status.key, state.prStage[s.key]), lane: laneOf(status.key), title: issue?.title ?? s.name }
+          return { s, status, step: taskStep(status.key, state.prStage[s.key], !!status.manual), lane: laneOf(status.key), title: issue?.title ?? s.name }
         }),
     [state.sessions, state.prStage, state.proposals, state.manualStatus, state.issues],
   )

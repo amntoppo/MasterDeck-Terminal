@@ -39,8 +39,15 @@ export function toneOf(status: StatusKey): Tone {
   return TONE[status] ?? 'off'
 }
 
-/** Where a task is: its PR stage decides the step, its status how that step is going. */
-export function taskStep(status: StatusKey, stage: PrStage | null | undefined): TaskStep {
+const PR_KINDS: PrStage['kind'][] = ['merged', 'rework', 'approved', 'changes', 'ci-failing', 'ready', 'in-review']
+
+/**
+ * Where a task is: its PR stage decides the step, its status how that step is going. A status set
+ * by hand (`manual`) wins over the PR stage, so the step follows it at once.
+ */
+export function taskStep(status: StatusKey, stage: PrStage | null | undefined, manual = false): TaskStep {
+  // A PR status set by hand moves the step; others (Blocked, Working…) keep it and only recolour it.
+  if (manual && (PR_KINDS as string[]).includes(status)) stage = { kind: status as PrStage['kind'], prs: stage?.prs ?? [], why: '' }
   const tone = toneOf(status)
   switch (stage?.kind) {
     case 'merged':
