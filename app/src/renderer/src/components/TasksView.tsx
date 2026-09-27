@@ -172,6 +172,7 @@ function TaskRow({
   const ask = state.asks[s.key]
   const menu = state.menus[s.key]
   const act = activityOf(s)
+  const hook = state.hookInfo[s.key]
   // Something waits on the user: a prompt or menu on its screen, a question in its last message, or
   // a question or blocker it reported to master. Answered right here, through its Needs-you item
   // when there is one (so that item resolves too).
@@ -182,7 +183,9 @@ function TaskRow({
 
   // What it is doing right now, in one line.
   let now1: string
-  if (menu?.permission) now1 = `Permission: ${menu.permission.title}`
+  if (hook?.failure) now1 = `Stopped on an API error (${hook.failure.type.replace(/_/g, ' ')}): ${hook.failure.message}`
+  else if (hook?.compacting) now1 = 'Compacting its context…'
+  else if (menu?.permission) now1 = `Permission: ${menu.permission.title}`
   else if (menu?.question) now1 = `Asks: ${menu.question.question}`
   else if (status.key === 'needs-input') now1 = ask?.said?.text ? `Asks: ${ask.said.text}` : 'Waiting on a prompt or a permission'
   else if (status.key === 'question' || status.key === 'blocked') now1 = status.why
@@ -214,6 +217,7 @@ function TaskRow({
           <span className="mono">{s.name}</span>
           {(git?.branch || tail?.gitBranch) && <span className="mono"> · {git?.branch ?? tail?.gitBranch}</span>}
           <span> · started {formatAgo(now - s.startedAt)} ago</span>
+          {hook?.compactedAt && !hook.compacting && <span> · compacted {formatAgo(now - hook.compactedAt)} ago</span>}
         </div>
         <Stepper step={step} />
       </div>
@@ -223,6 +227,8 @@ function TaskRow({
             {status.key === 'working' && <span className="tv-spin" />}
             {status.text}
           </span>
+          {hook?.failure && <span className="tv-act act-needs-input">API error</span>}
+          {hook?.compacting && <span className="tv-act act-waiting">Compacting</span>}
           {act.text !== status.text && (
             <span className={`tv-act act-${act.key}`} title={act.key === 'idle' ? 'Nothing running and no question: waiting for your next instruction' : act.key === 'waiting' ? s.waitingOn ?? '' : ''}>
               {act.key === 'working' && <span className="tv-spin" />}

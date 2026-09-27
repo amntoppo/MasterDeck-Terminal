@@ -32,7 +32,8 @@ import { Summaries } from './summary'
 import { parseSteps } from '@shared/workflow'
 import { answerKeys, permissionKey, type MenuAnswer } from '@shared/ask'
 import { asTicket, fullRepo, ticketLabel, ticketRef } from '@shared/ticket'
-import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
+import { deckHooksInstalled, hookStatus, installDeckHooks, installHooks, installWorkflowSteps } from './hooks'
+import { DeckHooks } from './deckHooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
 
 const SMOKE = process.env.MASTERDECK_SMOKE === '1'
@@ -65,6 +66,7 @@ const github = new GitHub(run, gh)
 const sender = new Sender(ptys, cli, env, () => claudeBin, (key) => latest?.sessions.find((x) => x.key === key))
 const ops = new Ops(run, paths, () => claudeBin, gh)
 const summaries = new Summaries(run, () => claudeBin, join(paths.home, 'summaries'), paths.projectsDir)
+const deckHooks = new DeckHooks(paths.home)
 const sources = new Sources(paths, run, cli, (state) => {
   const prev = latest
   latest = state
@@ -137,6 +139,14 @@ sources.inbox.on('event', (e) => {
 async function answerMenuFor(key: string, question: unknown, answer: unknown): Promise<CliResult> {
   const s = latest?.sessions.find((x) => x.key === key)
   if (!s) return { ok: false, message: 'session not found' }
+  // A permission MasterDeck's hook holds: answered through the hook, in any terminal, no keys.
+  const held = latest?.menus[key]?.permission
+  if (held?.requestId && typeof question === 'string' && question === `permission:${permissionKey(held)}`) {
+    const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
+    const n = Array.isArray(o.picks) && o.picks.length === 1 && typeof o.picks[0] === 'number' ? o.picks[0] : -1
+    const r = sources.answerHookRequest(held.requestId, n, typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined)
+    return r.ok ? { ok: true, message: `${s.name}: ${r.message}` } : r
+  }
   // Read the screen again: answer only the question the user saw.
   const menu = await sources.readMenu(s)
   if (menu?.permission || (typeof question === 'string' && question.startsWith('permission:'))) {
@@ -425,6 +435,10 @@ function registerIpc(): void {
   ipcMain.handle(CH.shellPrepare, (_e, dir: unknown) =>
     typeof dir === 'string' && dir && dir === getConfig().workspace ? toDefaultBranch(run, dir) : { ok: true, message: null },
   )
+  ipcMain.handle(CH.ticketMemory, (_e, ticket: unknown) => {
+    const t = asTicket(ticket)
+    return t ? sources.ticketMemory(t) : []
+  })
   ipcMain.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket)
     return t ? github.issueBody(t) : { ok: false, message: 'bad ticket' }
@@ -708,6 +722,23 @@ app.whenReady().then(async () => {
     sources.setSkills(r.skills)
   }
   sources.setHooks(hookStatus(paths.claudeSettings))
+  // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
+  // compactions, and the ticket's context after a compaction. New sessions pick it up.
+  if (process.platform !== 'win32') {
+    try {
+      deckHooks.setup()
+      sources.setDeckHooks(deckHooks, (sid) => {
+        const s = summaries.get(sid)
+        return s ? { text: s.text, at: s.at } : null
+      })
+      if (!SMOKE && process.env.MASTERDECK_NO_HOOK !== '1' && !deckHooksInstalled(paths.claudeSettings)) {
+        const r = installDeckHooks(paths.claudeSettings, paths.home, deckHooks.script)
+        if (!r.ok) console.error(r.message)
+      }
+    } catch (e) {
+      console.error(`MasterDeck hooks: ${String(e)}`)
+    }
+  }
   createWindow()
   sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd))
   sources.start()

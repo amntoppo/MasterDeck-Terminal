@@ -762,3 +762,6 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .shortcut-group-title { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
 .shortcut-row { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; padding: 2px 0; }
 .shortcut-row kbd { flex: none; min-width: 64px; font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--bg-3); text-align: center; }
+.ask.perm .perm-note { width: 100%; margin-top: 6px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 12px; outline: none; }
+.ask.perm .perm-note:focus { border-color: var(--accent); }
+.dialog label.check.memory-check { margin: 10px 0 2px; }

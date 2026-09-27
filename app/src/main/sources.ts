@@ -56,6 +56,8 @@ import { mtime, readHead, readNewLines, readTail, TranscriptIndex, type FollowSt
 import { asksQuestion, describePending, openTasks, stillPending, turnEnded, type PendingTask } from '@shared/activity'
 import { newWorktreeScan, scanWorktreeLines, type SessionWorktree, type WorktreeScan } from '@shared/worktrees'
 import { linkedWorktree } from './worktreeInfo'
+import type { DeckHooks } from './deckHooks'
+import { decisionFor, requestOver, requestPrompt, ticketContext, type HookRequest } from '@shared/deckHooks'
 import type { MasterCli } from './masterCli'
 import type { Paths } from './paths'
 import type { Runner } from './run'
@@ -121,6 +123,14 @@ export class Sources {
   private follows: Record<string, { st: FollowState; scan: PrScanState; wt: WorktreeScan }> = {}
   /** Worktree candidates per Session.key, from all its transcripts (a resume adds one). */
   private worktreeScans: Record<string, WorktreeScan> = {}
+  /** MasterDeck's own hook (permission requests, notifications, errors, compactions). */
+  private deck: DeckHooks | null = null
+  private hookRequests: HookRequest[] = []
+  /** Requests whose session was seen waiting on a prompt since they came. */
+  private seenBlocked = new Set<string>()
+  private deckTouchedAt = 0
+  /** A saved summary of a session (Summary panel), for the ticket context. */
+  private summaryOf: (sessionId: string) => { text: string; at: number } | null = () => null
   /** PRs each session created, by session key (survives a resume's new sessionId). */
   private createdPrs: Record<string, string[]> = {}
   private ghPausedUntil = 0
@@ -597,6 +607,9 @@ export class Sources {
     this.timers.push(setInterval(() => void this.pollAgents(), AGENTS_MS))
     this.timers.push(setInterval(() => void this.pollDetails(), DETAIL_MS))
     this.timers.push(setInterval(() => void this.pollMenus(), MENUS_MS))
+    this.timers.push(setInterval(() => this.pollDeck(), 1_000))
+    this.timers.push(setInterval(() => this.writeTicketContext(this.lastSessions), 60_000))
+    setTimeout(() => this.writeTicketContext(this.lastSessions), 15_000)
     this.timers.push(setInterval(() => void this.pollReview(), 30_000))
     this.timers.push(setInterval(() => void this.refreshGithub(), GITHUB_MS))
     this.timers.push(setInterval(() => this.readLedger(), 5_000))
@@ -1072,7 +1085,8 @@ export class Sources {
     if (this.menusRunning) return
     this.menusRunning = true
     try {
-      const waiting = this.lastSessions.filter((s) => s.state === 'needs-input' && s.kind === 'background' && s.bgId)
+      // A permission MasterDeck's hook holds needs no screen read.
+      const waiting = this.lastSessions.filter((s) => s.state === 'needs-input' && s.kind === 'background' && s.bgId && !this.hookRequests.some((r) => r.sessionId === s.sessionId))
       let changed = false
       for (const key of [...this.menus.keys()])
         if (!waiting.some((s) => s.key === key)) {
@@ -1124,6 +1138,97 @@ export class Sources {
     return this.askOf(s.sessionId)?.userAt ?? null
   }
 
+  /** Use MasterDeck's hook: read its events and permission requests every second. */
+  setDeckHooks(deck: DeckHooks, summaryOf: (sessionId: string) => { text: string; at: number } | null): void {
+    this.deck = deck
+    this.summaryOf = summaryOf
+  }
+
+  private pollDeck(): void {
+    const deck = this.deck
+    if (!deck) return
+    const now = Date.now()
+    if (now - this.deckTouchedAt > 5_000) {
+      deck.touch()
+      this.deckTouchedAt = now
+    }
+    let changed = false
+    for (const sid of deck.readEvents()) {
+      changed = true
+      // A session that moved into a worktree (EnterWorktree, cd): it works there.
+      const cwd = deck.sessions[sid]?.cwd
+      const key = this.rawSessions.find((x) => x.sessionId === sid)?.key
+      if (cwd && key && linkedWorktree(cwd)) {
+        const scan = (this.worktreeScans[key] ??= newWorktreeScan())
+        if (!scan.paths.includes(cwd)) scan.paths.push(cwd)
+      }
+    }
+    const before = this.hookRequests.map((r) => r.id).join()
+    const live: HookRequest[] = []
+    for (const r of deck.pending()) {
+      const s = this.rawSessions.find((x) => x.sessionId === r.sessionId)
+      const blocked = s?.state === 'needs-input'
+      if (blocked) this.seenBlocked.add(r.id)
+      // Answered in the terminal (the hook keeps waiting then): let it go.
+      if (requestOver(r, now, blocked, this.seenBlocked.has(r.id), deck.sessions[r.sessionId]?.stoppedAt ?? null)) {
+        deck.withdraw(r.id)
+        continue
+      }
+      live.push(r)
+    }
+    for (const id of [...this.seenBlocked]) if (!live.some((r) => r.id === id)) this.seenBlocked.delete(id)
+    this.hookRequests = live
+    if (changed || live.map((r) => r.id).join() !== before) this.emit()
+  }
+
+  /** What earlier (stopped) sessions on a ticket did, from their saved summaries, newest first. */
+  ticketMemory(t: Ticket): { name: string; at: number; text: string }[] {
+    return (this.past[ticketKey(t.repo, t.number)] ?? [])
+      .map((p) => {
+        const sum = this.summaryOf(p.sessionId)
+        return sum ? { name: p.name, at: p.lastActivity, text: sum.text } : null
+      })
+      .filter((x): x is { name: string; at: number; text: string } => !!x)
+      .sort((a, b) => b.at - a.at)
+  }
+
+  /** Answer a permission request held by MasterDeck's hook: option `n` of its prompt. */
+  answerHookRequest(id: string, n: number, note?: string): CliResult {
+    const r = this.hookRequests.find((x) => x.id === id)
+    if (!r || !this.deck) return { ok: false, message: 'that permission request is gone; look again' }
+    const decision = decisionFor(r, n, note)
+    if (!decision) return { ok: false, message: 'no such option' }
+    if (!this.deck.answer(id, decision)) return { ok: false, message: 'that permission request is gone; look again' }
+    this.hookRequests = this.hookRequests.filter((x) => x.id !== id)
+    this.emit()
+    return { ok: true, message: requestPrompt(r).options[n] }
+  }
+
+  /**
+   * What SessionStart tells each live session on a ticket (after a resume, a compaction, /clear):
+   * the ticket and what earlier sessions on it did, from their saved summaries.
+   */
+  private writeTicketContext(sessions: Session[]): void {
+    const deck = this.deck
+    if (!deck) return
+    const live = new Set<string>()
+    for (const s of sessions) {
+      if (s.issue === null || s.state === 'done') continue
+      live.add(s.sessionId)
+      const key = ticketKey(s.issueRepo, s.issue)
+      const issue = this.snapshot.issues.find((i) => sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! }))
+      const earlier = (this.past[key] ?? [])
+        .filter((p) => p.sessionId !== s.sessionId)
+        .map((p) => {
+          const sum = this.summaryOf(p.sessionId)
+          return sum ? { name: p.name, at: p.lastActivity, text: sum.text } : null
+        })
+        .filter((x): x is { name: string; at: number; text: string } => !!x)
+      deck.setContext(s.sessionId, ticketContext({ label: ticketLabel(s.issueRepo, s.issue), title: issue?.title ?? null, url: issue?.url ?? null }, earlier))
+    }
+    deck.pruneContext(live)
+  }
+
   /** Background work a session started and is still waiting on (the last 256 KB of its transcript). */
   private tasksOf(sessionId: string): { tasks: PendingTask[]; ended: boolean } {
     const none = { tasks: [], ended: false }
@@ -1156,6 +1261,21 @@ export class Sources {
       if (s.state === 'working' && !pending.length) return s
       const asking = asksQuestion(this.askOf(s.sessionId)?.said ?? null)
       return pending.length || asking ? { ...s, waitingOn: pending.length ? describePending(pending) : null, asking } : s
+    })
+  }
+
+  /**
+   * What MasterDeck's hook knows beats what `claude agents` says a moment later: a session with a
+   * permission request waits on it now; one Claude Code reported idle since its last output is idle.
+   */
+  private withHookState(sessions: Session[]): Session[] {
+    if (!this.deck) return sessions
+    return sessions.map((s) => {
+      if (s.state === 'done' || s.state === 'suspended') return s
+      if (this.hookRequests.some((r) => r.sessionId === s.sessionId)) return s.state === 'needs-input' ? s : { ...s, state: 'needs-input' }
+      const n = this.deck!.sessions[s.sessionId]?.notice
+      if (s.state === 'working' && !s.waitingOn && n?.type === 'idle_prompt' && n.at > (this.lastWrite[s.sessionId] ?? 0)) return { ...s, state: 'idle' }
+      return s
     })
   }
 
@@ -1210,9 +1330,24 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now()
-    const sessions = this.withActivity(applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now), now)
+    const sessions = this.withHookState(this.withActivity(applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now), now))
     const { asks, answered } = this.collectAsks(sessions)
     const menus = Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!]))
+    // A permission MasterDeck's hook holds: exact, and answered through the hook (any terminal).
+    for (const r of this.hookRequests) {
+      const s = sessions.find((x) => x.sessionId === r.sessionId)
+      if (s) menus[s.key] = permissionMenu(requestPrompt(r))
+    }
+    const failures: Record<string, { type: string; message: string; at: number }> = {}
+    const hookInfo: AppState['hookInfo'] = {}
+    for (const s of sessions) {
+      const h = this.deck?.sessions[s.sessionId]
+      if (!h) continue
+      // An API error stands until the session works again (a Stop clears it; so does new output).
+      const f = h.failure && (this.lastWrite[s.sessionId] ?? 0) < h.failure.at + 10_000 ? h.failure : null
+      if (f) failures[s.key] = f
+      hookInfo[s.key] = { compacting: h.compacting, compactedAt: h.compactedAt, failure: f }
+    }
     const sessionPrs = Object.fromEntries(sessions.map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)]).filter(([, v]) => v.length))
     const items = collectItems({
       sessions,
@@ -1224,6 +1359,7 @@ export class Sources {
       costBook: this.costBook,
       prs: this.snapshot.prs.filter((p) => p.authorIsMe),
       sessionPrs,
+      failures,
       now,
     })
     this.inbox.update(items, !this.inboxPrimed)
@@ -1242,6 +1378,7 @@ export class Sources {
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
+      hookInfo,
       sessionWorktrees: Object.fromEntries(sessions.map((x) => [x.key, this.worktreesOf(x.key)]).filter(([, v]) => v.length)),
       sources: { ...this.health },
       errors: Object.values(this.errors),

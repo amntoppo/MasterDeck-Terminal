@@ -3,7 +3,7 @@ import { ticketKey, ticketLabel, ticketOf } from '@shared/ticket'
 import { pendingAssign } from '@shared/derive'
 import type { AssignRequest, Template } from '@shared/ipc'
 import { defaultModelLabel, MODELS } from '@shared/models'
-import { composePrompt } from '@shared/prompt'
+import { composePrompt, earlierBlock } from '@shared/prompt'
 import type { AppState, DraftAssign, Issue } from '@shared/types'
 import { formatAgo } from '@shared/format'
 import { deck } from '../deck'
@@ -48,6 +48,15 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   const [desc, setDesc] = useState<string | null>(null)
   const [descError, setDescError] = useState<string | null>(null)
   const [useDesc, setUseDesc] = useState(true)
+  // What earlier sessions on this ticket did (their saved summaries): context for the new one.
+  const [memory, setMemory] = useState<{ name: string; at: number; text: string }[]>([])
+  const [useMemory, setUseMemory] = useState(true)
+  useEffect(() => {
+    void deck()
+      .ticketMemory(ticketOf(issue))
+      .then(setMemory)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issue.number, issue.repo])
   useEffect(() => {
     let alive = true
     void deck()
@@ -117,7 +126,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   }, [onClose])
 
   const nameOk = NAME_RE.test(name)
-  const prompt = composePrompt(system, instructions, useDesc ? desc ?? '' : '')
+  const prompt = composePrompt(system, instructions, useDesc ? desc ?? '' : '', useMemory ? earlierBlock(memory) : '')
   const promptOk = prompt.length > 0 && !prompt.startsWith('-')
 
   const start = () => {
@@ -215,6 +224,12 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
                 onChange={(e) => setDesc(e.target.value)}
                 spellCheck={false}
               />
+            )}
+            {memory.length > 0 && (
+              <label className="check memory-check" title={memory.slice(0, 3).map((m) => `${m.name}: ${m.text.slice(0, 200)}…`).join('\n\n')}>
+                <input type="checkbox" checked={useMemory} onChange={(e) => setUseMemory(e.target.checked)} />
+                Include what earlier sessions on {ticketLabel(issue.repo ?? null, issue.number)} did ({Math.min(3, memory.length)} summar{Math.min(3, memory.length) === 1 ? 'y' : 'ies'})
+              </label>
             )}
             <label>System prompt</label>
             <textarea className="system" value={system} onChange={(e) => setSystem(e.target.value)} spellCheck={false} />

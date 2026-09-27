@@ -226,12 +226,16 @@ function MenuForm({ session, menu, full, actions, itemId }: { session: Session; 
  */
 function PermissionForm({ session, prompt, actions, itemId }: { session: Session; prompt: PermissionPrompt; actions?: ReactNode; itemId?: string }) {
   const { busy, msg, run } = useSend()
+  const [note, setNote] = useState('')
   const question = `permission:${permissionKey(prompt)}`
-  const pick = (n: number) =>
-    run(
-      () => (itemId ? deck().inboxAct(itemId, 'menu', { question, answer: { picks: [n] } }) : deck().answerMenu(session.key, question, { picks: [n] })),
+  // Held by MasterDeck's hook: a "No" can tell Claude why (it reads the note).
+  const pick = (n: number) => {
+    const answer = { picks: [n], ...(prompt.requestId && n === prompt.options.length - 1 && note.trim() ? { text: note.trim() } : {}) }
+    return run(
+      () => (itemId ? deck().inboxAct(itemId, 'menu', { question, answer }) : deck().answerMenu(session.key, question, answer)),
       `${session.name}: ${prompt.options[n]}`,
     )
+  }
   const kind = (o: string) => (/^no\b/i.test(o) ? 'deny' : /don.t ask again|always|allow all/i.test(o) ? 'always' : 'yes')
   return (
     <div className="ask perm">
@@ -247,6 +251,15 @@ function PermissionForm({ session, prompt, actions, itemId }: { session: Session
           </button>
         ))}
       </div>
+      {prompt.requestId && (
+        <input
+          className="perm-note"
+          value={note}
+          placeholder="Optional: tell Claude why, if you choose No"
+          onChange={(e) => setNote(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+        />
+      )}
       <div className="actions">
         {msg && (
           <span className="error" style={{ color: msg.ok ? 'var(--green)' : undefined }}>

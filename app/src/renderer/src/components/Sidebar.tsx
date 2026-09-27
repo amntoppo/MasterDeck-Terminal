@@ -373,6 +373,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   context: 'CONTEXT',
   idle: 'IDLE',
   waiting: 'WAITING',
+  error: 'API ERROR',
 }
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -441,7 +442,7 @@ function InboxCard({
       </div>
     )
   const s = i.sessionKey ? state.sessions.find((x) => x.key === i.sessionKey) : undefined
-  if (d.type === 'session' && s) return <NeedsCard itemId={i.id} session={s} state={state} onOpenSession={onOpenSession} onDetails={onDetails} full={full} />
+  if (d.type === 'session' && s && i.kind !== 'error') return <NeedsCard itemId={i.id} session={s} state={state} onOpenSession={onOpenSession} onDetails={onDetails} full={full} />
   return <ExtraCard entry={entry} session={s} state={state} onOpenSession={onOpenSession} onDetails={onDetails} full={full} />
 }
 
@@ -671,7 +672,9 @@ function ExtraCard({
     setMsg(r.ok ? 'Sent' : r.message)
   }
   const kind =
-    i.detail.type === 'nudge'
+    i.kind === 'error'
+      ? 'API ERROR'
+      : i.detail.type === 'nudge'
       ? `${i.kind === 'idle' ? 'IDLE' : 'WAITING'} ${i.detail.minutes}M`
       : i.detail.type === 'context'
         ? `CONTEXT ${Math.round(i.detail.pct)}%`

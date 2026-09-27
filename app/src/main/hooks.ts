@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rename
 import { dirname, join } from 'node:path'
 import type { CliResult, HookStatus } from '@shared/types'
 import { STEP_MARK, stepCommand, TRIGGERS, type CustomStep } from '@shared/workflow'
+import { DECK_EVENTS } from '@shared/deckHooks'
 
 /**
  * Claude Code hooks the bundled skills rely on, installed into ~/.claude/settings.json:
@@ -138,6 +139,42 @@ export function installWorkflowSteps(settingsPath: string, backupDir: string, st
     }
     write(settingsPath, backupDir, s)
     return { ok: true, message: `${steps.length} workflow step${steps.length === 1 ? '' : 's'} saved` }
+  } catch (e) {
+    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
+  }
+}
+
+/** MasterDeck's own hook (main/deckHooks.ts): marked by its path, one entry per event. */
+const DECK_MARK = '/deck/hook.sh'
+
+export function deckHooksInstalled(settingsPath: string): boolean {
+  try {
+    const s = read(settingsPath)
+    return DECK_EVENTS.every((e) => has(s, e, DECK_MARK))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Register MasterDeck's hook for its events (idempotent; the rest of settings.json is kept). A
+ * PermissionRequest may wait up to 10 minutes for an answer from MasterDeck; the terminal prompt
+ * shows meanwhile. The others only write a line and return.
+ */
+export function installDeckHooks(settingsPath: string, backupDir: string, script: string): CliResult {
+  if (process.platform === 'win32') return { ok: false, message: 'MasterDeck hooks are a bash script; not installed on Windows' }
+  try {
+    const s = read(settingsPath)
+    // A moved script (another MasterDeck home): replace the old entries.
+    const cmd = (e: string) => `"${script}" ${e}`
+    const stale = DECK_EVENTS.some((e) => has(s, e, DECK_MARK) && !has(s, e, cmd(e)))
+    if (DECK_EVENTS.every((e) => has(s, e, cmd(e))) && !stale) return { ok: true, message: 'already installed' }
+    for (const e of DECK_EVENTS) {
+      remove(s, e, DECK_MARK)
+      add(s, e, undefined, cmd(e), DECK_MARK, e === 'PermissionRequest' ? 600 : 10)
+    }
+    write(settingsPath, backupDir, s)
+    return { ok: true, message: 'MasterDeck hooks installed' }
   } catch (e) {
     return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
   }

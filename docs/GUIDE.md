@@ -203,11 +203,13 @@ see at a glance where the work stands:
   the PR card), lines changed, cost and context used. Next to the status, a second chip says what
   the session itself is doing when that differs: Working, Waiting, Asked you, or **Idle** (waiting
   for your next instruction); the header counts the idle ones.
-- **Permissions from Needs you:** when a session stops for a tool permission (run a Bash command,
-  edit or create a file, fetch a URL…), its Needs-you card (PERMISSION) and its Tasks row show what
-  it wants to do (the command or file, and its description), why it asks, the question, and each
-  option as a button: **Yes**, the **don't ask again / allow all** option, and **No**. A click
-  presses that option's number in the session, only if the same prompt is still on its screen.
+- **Permissions from Needs you:** MasterDeck registers its own Claude Code hook (see *MasterDeck's
+  hook* below). When a session asks for a tool permission, its Needs-you card (PERMISSION) and its
+  Tasks row show exactly what it wants to run (command, file or URL and its description) with
+  **Yes**, **Yes, and don't ask again: <rule>** and **No**, plus an optional note that Claude reads
+  when you choose No. The answer goes through the hook, so it works for any session, including one
+  in another terminal. The terminal shows the prompt too; answering there clears the card. Sessions
+  started before the hook was installed fall back to reading the prompt off the screen.
 - **The task's terminal:** click a task (not its buttons) to show its session's terminal under it,
   shorter than in Terminals; click again to hide it. It is the same terminal as the Terminals tab
   (same session, same output; typing goes to the session), not a new one. Claude's input box stays
@@ -220,6 +222,28 @@ see at a glance where the work stands:
   answer panel: the full question, its options (click one), and a reply box (⌘↵ sends). Answers go
   through the matching Needs-you item, so that item clears too. **Open** (or a double-click) opens it in
   Terminals.
+
+## MasterDeck's hook
+
+At launch MasterDeck writes `~/.claude/masterdeck/deck/hook.sh` and registers it in
+`~/.claude/settings.json` (a backup is kept) for PermissionRequest, Notification, StopFailure,
+PreCompact, PostCompact, CwdChanged, SessionStart and Stop. New sessions pick it up; running ones
+after a restart.
+
+- **Permissions:** answered from Needs you or Tasks (above). While MasterDeck is closed the hook
+  returns at once and the terminal prompt works as always.
+- **Exact status:** a session waiting on a permission shows Needs Input at once; one Claude Code
+  reports idle shows Idle.
+- **API errors:** a turn that ends on an API error (rate limit, overload…) becomes a Needs-you
+  item, **API ERROR**, with **Continue**; Tasks shows it on the row.
+- **Compactions:** Tasks shows *Compacting* while it runs and *compacted N ago* after.
+- **Worktrees:** a session that moves into a worktree adds it to its Worktree list.
+- **The ticket after a compaction:** a session on a ticket is told, after a compaction, resume or
+  `/clear`, which ticket it works on and what earlier sessions on it did (their saved summaries).
+  New sessions get the same from the Start dialog: **Include what earlier sessions did**.
+
+Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
+creation.
 
 ## Cost and context
 

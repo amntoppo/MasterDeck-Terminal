@@ -184,6 +184,8 @@ export interface PermissionPrompt {
   question: string
   /** The choices, in order: pressing n+1 picks options[n]. */
   options: string[]
+  /** Set when MasterDeck's PermissionRequest hook holds it: answered through the hook, not keys. */
+  requestId?: string
 }
 
 const PERMISSION_Q = /^\s*(Do you want to .*\?|Allow .*\?)\s*$/

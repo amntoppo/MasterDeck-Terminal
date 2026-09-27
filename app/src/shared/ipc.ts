@@ -84,6 +84,7 @@ export const CH = {
   prSummary: 'pr:summary',
   issueBody: 'issue:body',
   shellPrepare: 'shell:prepare',
+  ticketMemory: 'ticket:memory',
   assignIssue: 'issue:assign',
   defaultModel: 'models:default',
   startHere: 'session:startHere',
@@ -155,6 +156,8 @@ export interface DeckApi {
   reject(id: number): Promise<CliResult>
   draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
   setSprint(sprint: string): void
+  /** What earlier sessions on a ticket did (their saved summaries), newest first. */
+  ticketMemory(ticket: Ticket): Promise<{ name: string; at: number; text: string }[]>
   /** Before + Shell opens in a git checkout: put it on its default branch (stashing changes). */
   shellPrepare(dir: string): Promise<{ ok: boolean; message: string | null }>
   /** The GitHub description of an issue, for the Start session dialog. */

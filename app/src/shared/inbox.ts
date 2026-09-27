@@ -27,6 +27,7 @@ export type InboxKind =
   | 'context'
   | 'idle' // working a ticket but quiet
   | 'waiting' // blocked on a prompt for a while (another terminal)
+  | 'error' // its turn ended on an API error (rate limit, overload…)
 
 export type InboxActionType =
   | 'reply' // text typed into the session
@@ -95,6 +96,7 @@ export const EMPTY_INBOX: InboxView = { open: [], snoozed: [], history: [] }
 export const PRIORITY: Record<InboxKind, number> = {
   input: 100,
   menu: 100,
+  error: 95,
   question: 90,
   blocked: 80,
   ci: 70,
@@ -121,6 +123,7 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   context: 'context freed',
   idle: 'active again',
   waiting: 'active again',
+  error: 'working again',
 }
 
 /** Actions an item of this kind takes (besides dismiss and snooze, which every item takes). */
@@ -148,6 +151,8 @@ export interface InboxInput {
   /** My PRs (the snapshot's, author is me). */
   prs: Pr[]
   sessionPrs: Record<string, string[]>
+  /** Sessions whose last turn ended on an API error (MasterDeck's StopFailure hook), by Session.key. */
+  failures?: Record<string, { type: string; message: string; at: number }>
   now: number
 }
 
@@ -156,6 +161,22 @@ export function collectItems(x: InboxInput): InboxItem[] {
   const out: InboxItem[] = []
   const byKey = new Map(x.sessions.map((s) => [s.key, s]))
   const waitingOn = new Set<string>()
+
+  for (const [key, f] of Object.entries(x.failures ?? {})) {
+    const s = byKey.get(key)
+    if (!s || s.state === 'done' || s.state === 'working') continue
+    out.push({
+      id: `error:${key}:${f.at}`,
+      kind: 'error',
+      priority: PRIORITY.error,
+      sessionKey: key,
+      ticket: sessionTicket(s),
+      title: s.name,
+      body: `Stopped on an API error (${f.type.replace(/_/g, ' ')}): ${f.message}`,
+      actions: [{ type: 'continue', label: 'Continue', primary: true }, { type: 'open', label: 'Open' }],
+      detail: { type: 'session' },
+    })
+  }
 
   for (const n of deriveNeedsYou(x.proposals, x.sessions)) {
     if (n.kind === 'session') {
@@ -317,7 +338,9 @@ export function inboxNotice(e: InboxEntry): InboxNotice | null {
                 ? `${i.title} is at ${Math.round(i.detail.type === 'context' ? i.detail.pct : 0)}% context`
                 : i.kind === 'idle'
                   ? `${i.title} went quiet`
-                  : i.kind === 'waiting'
+                  : i.kind === 'error'
+                    ? `${i.title} stopped on an error`
+                    : i.kind === 'waiting'
                     ? `${i.title} is waiting`
                     : i.title
   const action = i.actions.find((a) => a.primary && RUNS_IN_MAIN.has(a.type)) ?? null
