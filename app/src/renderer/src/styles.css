@@ -32,8 +32,12 @@ body {
 button { font: inherit; color: inherit; }
 .mono { font-family: var(--mono); }
 
-.app { display: grid; height: 100%; grid-template-columns: 272px minmax(0, 1fr) 6px var(--master-w, 34%); }
-.app.no-right { grid-template-columns: 272px minmax(0, 1fr); }
+.app { display: grid; height: 100%; grid-template-columns: var(--side-w, 272px) minmax(0, 1fr) 6px var(--master-w, 34%); }
+.app.no-right { grid-template-columns: var(--side-w, 272px) minmax(0, 1fr); }
+.side-resizer { position: absolute; top: 0; bottom: 0; left: calc(var(--side-w, 272px) - 3px); width: 6px; z-index: 25; cursor: col-resize; -webkit-app-region: no-drag; }
+.side-resizer:hover, .side-resizer.dragging { background: var(--accent-soft); box-shadow: inset 2px 0 0 -0.5px var(--accent); }
+body.resizing { user-select: none; }
+body.resizing .term, body.resizing iframe { pointer-events: none; }
 /* The ★ Master toggle sits over the top-right corner of every view; headers there leave it room. */
 .master-toggle { position: absolute; top: 6px; right: 10px; z-index: 30; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; -webkit-app-region: no-drag; }
 .master-toggle:hover { border-color: var(--accent); color: var(--text); }
@@ -249,7 +253,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 
 /* Board View: covers workspace + master; both stay mounted underneath */
 .app { position: relative; }
-.board-view { position: absolute; top: 0; bottom: 0; left: 272px; right: var(--right-w, 0px); z-index: 20; background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
+.board-view { position: absolute; top: 0; bottom: 0; left: var(--side-w, 272px); right: var(--right-w, 0px); z-index: 20; background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
 .board-head { height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--bg-2); -webkit-app-region: drag; }
 .board-head > * { -webkit-app-region: no-drag; }
 .board-head h2 { margin: 0; font-size: 15px; }

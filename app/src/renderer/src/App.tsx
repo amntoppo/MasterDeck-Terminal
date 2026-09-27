@@ -49,6 +49,9 @@ type Tab =
     }
 
 const MIN_MASTER = 280
+const SIDE_W = 272
+const MIN_SIDE = 200
+const MAX_SIDE = 560
 
 type HereOpts = { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean; linkIssue: Ticket | null }
 
@@ -103,6 +106,9 @@ export function App() {
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
   const [dragging, setDragging] = useState(false)
+  // The left sidebar's width, dragged at its right edge (double-click resets it).
+  const [sideW, setSideW] = useState<number>(() => load('sideW', SIDE_W))
+  const [sideDragging, setSideDragging] = useState(false)
   // The Queue panel under master; each session header's Queue Prompts shows or hides it.
   const [queueOpen, setQueueOpen] = useState(() => load<boolean>('queueOpen', false))
   // The Summary panel: what the focused session did (Summary in its header shows or hides it).
@@ -118,6 +124,7 @@ export function App() {
   useEffect(() => save('tabs', tabs), [tabs])
   useEffect(() => save('active', active), [active])
   useEffect(() => save('masterPct', masterPct), [masterPct])
+  useEffect(() => save('sideW', sideW), [sideW])
   useEffect(() => save('queueOpen', queueOpen), [queueOpen])
   useEffect(() => save('summaryOpen', summaryOpen), [summaryOpen])
   useEffect(() => save('masterOpen', masterOpen), [masterOpen])
@@ -326,6 +333,27 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [tabs, active, closeTab, activate])
 
+  // Sidebar edge drag
+  useEffect(() => {
+    if (!sideDragging) return
+    const move = (e: MouseEvent) => {
+      const left = appRef.current?.getBoundingClientRect().left ?? 0
+      const w = appRef.current?.clientWidth ?? window.innerWidth
+      setSideW(Math.round(Math.min(Math.max(e.clientX - left, MIN_SIDE), MAX_SIDE, w * 0.45)))
+    }
+    const up = () => setSideDragging(false)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'col-resize'
+    document.body.classList.add('resizing')
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.classList.remove('resizing')
+    }
+  }, [sideDragging])
+
   // Divider drag
   useEffect(() => {
     if (!dragging) return
@@ -407,7 +435,7 @@ export function App() {
     <div
       className={`app ${rightShown ? '' : 'no-right'} ${masterShown ? '' : 'master-off'}`}
       ref={appRef}
-      style={{ ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
+      style={{ ['--side-w' as string]: `${sideW}px`, ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
     >
       <Sidebar
         state={state}
@@ -428,6 +456,15 @@ export function App() {
             setSummaryOpen(true)
           }
         }}
+      />
+      <div
+        className={`side-resizer ${sideDragging ? 'dragging' : ''}`}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setSideDragging(true)
+        }}
+        onDoubleClick={() => setSideW(SIDE_W)}
+        title="Drag to resize the sidebar · double-click to reset"
       />
       {view === 'board' && !state.config.configured && <ConnectGithub title="Board View" what="The board, sprints and issues" onConnect={() => setDialog('setup')} />}
       {view === 'board' && state.config.configured && (
