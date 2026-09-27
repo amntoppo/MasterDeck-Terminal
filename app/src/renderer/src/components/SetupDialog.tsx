@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { claudeInstall } from '@shared/install'
 import type { AppConfig, StatusMap } from '@shared/appConfig'
 import { hasProjectScope, type GhAccount } from '@shared/ghAuth'
 import type { SetupTool } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
+import { TerminalView } from './TerminalView'
 
 interface Detected {
   owner: string
@@ -25,6 +27,19 @@ interface Detected {
 }
 
 const STEPS = ['Tools', 'GitHub account', 'Organization', 'Workspace'] as const
+
+const INSTALLER_PANE = 'setup:installer'
+
+/** Claude's mark, for the button that starts a Claude session. */
+function ClaudeMark() {
+  return (
+    <svg className="claude-mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      {[0, 30, 60, 90, 120, 150].map((a) => (
+        <rect key={a} x="11" y="1.5" width="2" height="21" rx="1" fill="#d97757" transform={`rotate(${a} 12 12)`} />
+      ))}
+    </svg>
+  )
+}
 
 const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
   { id: 'claude', name: 'Claude Code (claude)', hint: 'install Claude Code and log in' },
@@ -53,6 +68,27 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     for (const t of TOOLS) void deck().setupTool(t.id).then((r) => setTools((cur) => ({ ...cur, [t.id]: r })))
   }
   const toolsDone = TOOLS.every((t) => tools[t.id])
+  const claudeMissing = tools.claude?.ok === false
+  // What a Claude session can install for you (not Claude Code itself: it runs the session).
+  const missing = TOOLS.filter((t) => t.id !== 'claude' && tools[t.id]?.ok === false).map((t) => t.id)
+  // The installer session: the tools it was started for (fixed while it runs).
+  const [installing, setInstalling] = useState<SetupTool[] | null>(null)
+  const [copied, setCopied] = useState(false)
+  // While something is missing, check it again every few seconds: it turns green once installed.
+  const waiting = toolsDone && (claudeMissing || missing.length > 0)
+  useEffect(() => {
+    if (!waiting) return
+    const t = setInterval(() => {
+      for (const x of TOOLS) if (tools[x.id]?.ok === false) void deck().setupTool(x.id).then((r) => setTools((cur) => ({ ...cur, [x.id]: r })))
+    }, 4000)
+    return () => clearInterval(t)
+  }, [waiting, tools])
+  const closeInstaller = () => {
+    deck().ptyClose(INSTALLER_PANE)
+    setInstalling(null)
+  }
+  // The session goes when the dialog does, or when the user leaves the tools step.
+  useEffect(() => () => deck().ptyClose(INSTALLER_PANE), [])
 
   // Step 2: the gh account.
   const [accounts, setAccounts] = useState<GhAccount[] | null>(null)
@@ -244,13 +280,58 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                 )
               })}
             </div>
+            {toolsDone && missing.length > 0 && !claudeMissing && !installing && (
+              <div className="install-row">
+                <button className="btn primary install-now" onClick={() => setInstalling(missing)}>
+                  <ClaudeMark /> Install now
+                </button>
+                <span className="meta">Opens a Claude session here that installs {missing.length === 1 ? 'it' : 'them'}; approve its steps as it asks.</span>
+              </div>
+            )}
+            {installing && (
+              <div className="installer">
+                <div className="installer-head">
+                  <ClaudeMark /> <b>Installing {installing.length === 1 ? 'the missing tool' : `${installing.length} missing tools`}</b>
+                  <span className="meta grow">
+                    {missing.length === 0 ? 'All installed. You can close this and continue.' : 'The list above turns green as each one is installed.'}
+                  </span>
+                  <button className="btn" onClick={closeInstaller}>
+                    Close
+                  </button>
+                </div>
+                <div className="installer-term">
+                  <TerminalView paneId={INSTALLER_PANE} spec={{ kind: 'installer', tools: installing }} visible focusOnShow />
+                </div>
+              </div>
+            )}
             {toolsDone && TOOLS.some((t) => !tools[t.id]?.ok) && (
               <div className="meta">
-                Install what's missing, then{' '}
+                MasterDeck checks again every few seconds{' '}
                 <button className="link-btn" onClick={checkTools}>
-                  check again
+                  (check now)
                 </button>
-                . You can go on without it; the features that need it won't work.
+                . You can go on without {TOOLS.filter((t) => !tools[t.id]?.ok).length === 1 ? 'it' : 'them'}; the features that need {TOOLS.filter((t) => !tools[t.id]?.ok).length === 1 ? 'it' : 'them'} won't work.
+              </div>
+            )}
+            {claudeMissing && (
+              <div className="claude-install">
+                <div>
+                  <b>Install Claude Code</b>: run this in {claudeInstall(deck().platform).shell}, then run <code>claude</code> once to log in.
+                  {missing.length > 0 && ' After that, MasterDeck can install the rest for you.'}
+                </div>
+                <div className="cmd-row">
+                  <code className="cmd">{claudeInstall(deck().platform).command}</code>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(claudeInstall(deck().platform).command)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 1500)
+                    }}
+                  >
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
               </div>
             )}
           </>

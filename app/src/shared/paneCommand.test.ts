@@ -12,6 +12,13 @@ describe('paneCommand', () => {
     expect(paneCommand({ kind: 'shell', cwd: 'C:\\w' }, 'win32', undefined)).toEqual({ file: 'powershell.exe', args: ['-NoLogo'], cwd: 'C:\\w' })
     expect(paneCommand({ kind: 'shell', cwd: '/w' }, 'linux', undefined).file).toBe('/bin/zsh')
   })
+  it('installer runs claude with the install instructions for known tools only', () => {
+    const c = paneCommand({ kind: 'installer', tools: ['jq', 'nope'] }, 'darwin', '/bin/zsh')
+    expect(c.file).toBe('claude')
+    expect(c.args).toHaveLength(1)
+    expect(c.args[0]).toContain('brew install jq')
+    expect(c.args[0]).not.toContain('nope')
+  })
   it('isSafeBgId', () => {
     expect(isSafeBgId('ea39fd38')).toBe(true)
     expect(isSafeBgId('ea39fd38; rm -rf')).toBe(false)

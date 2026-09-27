@@ -566,3 +566,15 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .chip.st-merged, .chip.st-question { border-color: var(--purple); }
 .chip.st-blocked, .chip.st-ci-failing, .chip.st-needs-input { border-color: var(--red); }
 .chip.st-changes { border-color: var(--amber); }
+
+/* Setup, tools step: install Claude Code, or let a Claude session install the rest */
+.install-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.install-now { display: inline-flex; align-items: center; gap: 6px; }
+.claude-mark { flex: none; }
+.installer { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; background: var(--bg); }
+.installer-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.installer-head .grow { flex: 1; margin: 0; }
+.installer-term { height: 320px; display: flex; flex-direction: column; }
+.claude-install { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(217, 119, 87, .5); border-radius: 8px; background: rgba(217, 119, 87, .06); font-size: 12px; }
+.claude-install .cmd-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.claude-install .cmd { flex: 1; font: 12px/1.4 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; user-select: all; overflow-x: auto; white-space: nowrap; }

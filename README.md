@@ -61,7 +61,12 @@ Or build it yourself (see [Develop](#develop)).
 1. **Skills.** MasterDeck copies its skills into `~/.claude/skills/`. It skips any skill folder
    you already have. Settings lists each skill's state and can replace a copy with the bundled one.
 2. **Setup** opens by itself, in four steps:
-   1. **Tools.** Each of `claude`, `gh`, Python, `git` and `jq` is checked, with what to install if one is missing.
+   1. **Tools.** Each of `claude`, `gh`, Python, `git` and `jq` is checked. Without Claude Code, the
+      step shows its install command (`curl -fsSL https://claude.ai/install.sh | bash`, or the
+      PowerShell one on Windows) with a Copy button. For the others, **Install now** opens a Claude
+      session in the dialog that installs them (Homebrew on macOS, winget on Windows); you approve
+      its steps there. Missing tools are checked again every few seconds and turn green once
+      installed.
    2. **GitHub account.** Pick one of the accounts `gh` is logged in to; the choice becomes `gh`'s active
       account, which MasterDeck, master and your sessions share.
    3. **Organization.** Pick the organization (or your user) and the repository that holds your issues,

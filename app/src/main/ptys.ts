@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import * as pty from 'node-pty'
 import { isSafeBgId, paneCommand } from '@shared/paneCommand'
@@ -27,6 +27,8 @@ export class PtyManager {
     private env: () => NodeJS.ProcessEnv,
     private send: (channel: string, ...args: unknown[]) => void,
     private claude: () => string,
+    /** An empty folder of its own for the Setup installer session (not the home folder to trust). */
+    private installerDir: () => string = () => homedir(),
   ) {}
 
   open(id: string, spec: PaneSpec, cols: number, rows: number): PtyOpenResult {
@@ -45,6 +47,10 @@ export class PtyManager {
       return { ok: false, replay: '', seq: 0, exited: true, message: `refusing unsafe background id ${spec.bgId}` }
     }
     const cmd = paneCommand(spec, process.platform, process.env.SHELL, this.claude())
+    if (spec.kind === 'installer') {
+      cmd.cwd = this.installerDir()
+      mkdirSync(cmd.cwd, { recursive: true })
+    }
     const pane: Pane = { proc: null, buffer: '', seq: 0, exited: false }
     this.panes.set(id, pane)
     try {

@@ -1,3 +1,4 @@
+import { installPrompt } from './install'
 import type { PaneSpec } from './types'
 
 export interface PaneCommand {
@@ -12,6 +13,7 @@ export function paneCommand(spec: PaneSpec, platform: string, shell: string | un
   if (spec.kind === 'attach') {
     return { file: claude, args: ['attach', spec.bgId] }
   }
+  if (spec.kind === 'installer') return { file: claude, args: [installPrompt(spec.tools, platform)] }
   if (win) return { file: 'powershell.exe', args: ['-NoLogo'], cwd: spec.cwd }
   return { file: shell || '/bin/zsh', args: ['-l'], cwd: spec.cwd }
 }

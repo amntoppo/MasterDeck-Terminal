@@ -66,6 +66,7 @@ there. Isolate with:
 | `MASTER_HOME` | `~/.claude/master` (config.json, ledger) — empty folder = first-run Setup |
 | `MASTERDECK_USER_DATA` | Electron user data (window state, localStorage) |
 | `MASTERDECK_NO_SKILLS=1`, `MASTERDECK_NO_HOOK=1` | skip installing skills / the status line hook |
+| `MASTERDECK_SETUP_MISSING=jq,claude` | Setup's tools step reports these as missing (the install flow) |
 
 To look at or drive the UI, launch the packaged app with `--remote-debugging-port=<port>` and use the
 Chrome DevTools Protocol (`Runtime.evaluate`, `Page.captureScreenshot`). DOM `click()` works for

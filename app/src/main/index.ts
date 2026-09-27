@@ -47,7 +47,7 @@ const paths = resolvePaths(app.getAppPath(), process.resourcesPath, app.isPackag
 const env = () => cleanEnv(process.env, pathEnv)
 const run = makeRunner(env)
 const cli = new MasterCli(run, paths.libDir, paths.python)
-const ptys = new PtyManager(env, (channel, ...args) => win?.webContents.send(channel, ...args), () => claudeBin)
+const ptys = new PtyManager(env, (channel, ...args) => win?.webContents.send(channel, ...args), () => claudeBin, () => join(paths.home, 'installer'))
 
 function notify(events: NotifyEvent[]): void {
   if (SMOKE || !Notification.isSupported()) return
@@ -498,6 +498,8 @@ async function setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string
   }
   const c = cmd[tool]
   if (!c) return { ok: false, detail: 'unknown tool' }
+  // Tests of the install flow: these tools read as missing.
+  if ((process.env.MASTERDECK_SETUP_MISSING ?? '').split(',').includes(tool)) return { ok: false, detail: 'not found (MASTERDECK_SETUP_MISSING)' }
   const r = await run(c[0], c[1], { timeoutMs: 15_000 })
   return { ok: r.code === 0, detail: (r.stdout || r.stderr).trim().split('\n')[0].slice(0, 80) }
 }

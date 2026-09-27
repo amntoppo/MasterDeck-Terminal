@@ -330,3 +330,5 @@ export interface NotifyEvent {
 export type PaneSpec =
   | { kind: 'attach'; bgId: string }
   | { kind: 'shell'; cwd: string }
+  /** Onboarding: a Claude session that installs the missing tools (ids from shared/install.ts). */
+  | { kind: 'installer'; tools: string[] }
