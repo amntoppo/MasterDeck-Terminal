@@ -10,7 +10,6 @@ import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { CostsView } from './components/CostsView'
 import { HistoryView, JanitorView } from './components/HygieneViews'
 import { PrsView } from './components/PrsView'
-import { SettingsDialog } from './components/SettingsDialog'
 import { SetupDialog } from './components/SetupDialog'
 import { SprintSummaryDialog, StandupDialog } from './components/SummaryDialogs'
 import { BoardView } from './components/BoardView'
@@ -18,18 +17,18 @@ import { PrPopup } from './components/PrPopup'
 import { StartHereDialog } from './components/StartHereDialog'
 import { LinkDialog } from './components/LinkDialog'
 import { MasterPane, masterPaneId } from './components/MasterPane'
-import { QueuePanel } from './components/QueuePanel'
 import { ConnectGithub } from './components/ConnectGithub'
 import { RestoreBanner } from './components/RestoreBanner'
 import { SkillsDialog } from './components/SkillsDialog'
-import { SummaryPanel } from './components/SummaryPanel'
 import { WorkflowView } from './components/WorkflowView'
 import { Sidebar, type View } from './components/Sidebar'
 import { TasksView } from './components/TasksView'
+import { Rail } from './components/Rail'
+import { Inspector, type InspectorTab } from './components/Inspector'
+import { SettingsView, type SettingsSection } from './components/SettingsView'
 import { WorktreesDialog } from './components/WorktreesDialog'
 import { cycle, matchShortcut } from '@shared/shortcuts'
 import { TerminalView, typeInto } from './components/TerminalView'
-import { WorkerHeader } from './components/WorkerHeader'
 import { deck, load, save, useAppState } from './deck'
 
 type Tab =
@@ -50,7 +49,8 @@ type Tab =
       proposalId?: number
     }
 
-const MIN_MASTER = 280
+const MIN_MASTER = 300
+const MIN_PANEL = 340
 /** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
 const MAIN_VIEWS: View[] = ['terminals', 'board', 'prs', 'tasks']
 const SIDE_W = 272
@@ -99,27 +99,35 @@ export function App() {
       },
     [state?.issues],
   )
+  // Master's column width (% of the window), on every screen; the Terminals panel's width.
   const [masterPct, setMasterPct] = useState<number>(() => load('masterPct', 34))
+  const [inspPct, setInspPct] = useState<number>(() => load('inspPct', 28))
+  // The Master button (top right, every screen) shows or hides master; hidden, it stays attached.
+  const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
   const [view, setView] = useState<View>(() => {
     const v = load<string>('view', 'terminals')
-    return (['terminals', 'board', 'prs', 'tasks', 'costs', 'janitor', 'history', 'workflow'] as View[]).includes(v as View) ? (v as View) : 'terminals'
+    return (['terminals', 'board', 'prs', 'tasks', 'costs', 'janitor', 'history', 'workflow', 'settings'] as View[]).includes(v as View) ? (v as View) : 'terminals'
   })
   const [palette, setPalette] = useState(false)
   const [worktreesFor, setWorktreesFor] = useState<Session | null>(null)
+  const [settingsAt, setSettingsAt] = useState<{ section: SettingsSection; at: number } | null>(null)
   const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'shortcuts' | 'setup' | 'skills' | 'skills-first' | null>(null)
   // First launch without a config: Setup opens once (Skip remembers it; Settings → Set up MasterDeck reopens it).
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
-  const [dragging, setDragging] = useState(false)
+  // Which column edge is being dragged: the Terminals panel's, or master's.
+  const [dragging, setDragging] = useState<false | 'panel' | 'master'>(false)
   // The left sidebar's width, dragged at its right edge (double-click resets it).
   const [sideW, setSideW] = useState<number>(() => load('sideW', SIDE_W))
   const [sideDragging, setSideDragging] = useState(false)
-  // The Queue panel under master; each session header's Queue Prompts shows or hides it.
-  const [queueOpen, setQueueOpen] = useState(() => load<boolean>('queueOpen', false))
-  // The Summary panel: what the focused session did (Summary in its header shows or hides it).
-  const [summaryOpen, setSummaryOpen] = useState(() => load<boolean>('summaryOpen', false))
-  // The ★ Master button (top right, every view) shows or hides master; hidden, it stays attached.
-  const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
+  // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
+  const [inspTab, setInspTab] = useState<InspectorTab>(() => load<InspectorTab>('inspTab', 'details'))
+  const [inspOpen, setInspOpen] = useState(() => load<boolean>('inspOpen', true))
+  const showPanel = useCallback((t: InspectorTab) => {
+    setView('terminals')
+    setInspTab(t)
+    setInspOpen(true)
+  }, [])
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const needsYouRef = useRef<HTMLDivElement>(null)
   // A clicked notification's Needs-you item, for the Sidebar to open.
@@ -130,9 +138,10 @@ export function App() {
   useEffect(() => save('active', active), [active])
   useEffect(() => save('masterPct', masterPct), [masterPct])
   useEffect(() => save('sideW', sideW), [sideW])
-  useEffect(() => save('queueOpen', queueOpen), [queueOpen])
-  useEffect(() => save('summaryOpen', summaryOpen), [summaryOpen])
+  useEffect(() => save('inspTab', inspTab), [inspTab])
+  useEffect(() => save('inspPct', inspPct), [inspPct])
   useEffect(() => save('masterOpen', masterOpen), [masterOpen])
+  useEffect(() => save('inspOpen', inspOpen), [inspOpen])
   useEffect(() => {
     save('view', view)
     deck().setBoardOpen(view === 'board')
@@ -395,10 +404,12 @@ export function App() {
         flash('Refreshing from GitHub…')
         return done()
       case 'settings':
-        setDialog('settings')
+        setSettingsAt({ section: 'general', at: Date.now() })
+        setView('settings')
         return done()
       case 'shortcuts':
-        setDialog('shortcuts')
+        setSettingsAt({ section: 'keys', at: Date.now() })
+        setView('settings')
         return done()
     }
   }
@@ -434,8 +445,15 @@ export function App() {
     if (!dragging) return
     const move = (e: MouseEvent) => {
       const w = appRef.current?.clientWidth ?? window.innerWidth
-      const px = Math.min(Math.max(w - e.clientX, MIN_MASTER), w * 0.7)
-      setMasterPct((px / w) * 100)
+      if (dragging === 'master') {
+        const px = Math.min(Math.max(w - e.clientX, MIN_MASTER), w * 0.6)
+        setMasterPct((px / w) * 100)
+      } else {
+        // The panel's right edge is master's left edge when master shows.
+        const right = masterOpen && state?.config.masterEnabled ? w - Math.max(MIN_MASTER, (masterPct / 100) * w) - 6 : w
+        const px = Math.min(Math.max(right - e.clientX, MIN_PANEL), w * 0.45)
+        setInspPct((px / w) * 100)
+      }
     }
     const up = () => setDragging(false)
     window.addEventListener('mousemove', move)
@@ -446,7 +464,7 @@ export function App() {
       window.removeEventListener('mouseup', up)
       document.body.style.cursor = ''
     }
-  }, [dragging])
+  }, [dragging, masterOpen, masterPct, state?.config.masterEnabled])
 
   if (!state) {
     return (
@@ -463,7 +481,8 @@ export function App() {
     else if (a.startsWith('view:')) setView(a.slice(5) as View)
     else if (a === 'new-shell') openShell()
     else if (a === 'start-master') void deck().masterStart()
-    else setDialog(a as 'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'skills')
+    else if (a === 'settings') setView('settings')
+    else setDialog(a as 'broadcast' | 'standup' | 'sprint-summary' | 'skills')
   }
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
   const openPr = (url: string, issue: Ticket | null, title: string) => {
@@ -495,8 +514,10 @@ export function App() {
   const shown = new Set(view === 'terminals' ? ([active, split].filter(Boolean) as string[]) : [])
   // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
   const useMaster = state.config.masterEnabled
+  const panelShown = view === 'terminals' && inspOpen
   const masterShown = useMaster && masterOpen
-  const rightShown = masterShown || queueOpen || summaryOpen
+  // rail · sessions · terminal · [panel] · [master]: the other screens cover all but the rail and master.
+  const columns = ['var(--rail-w)', `${sideW}px`, 'minmax(0, 1fr)', ...(panelShown ? ['6px', `max(${MIN_PANEL}px, ${inspPct}%)`] : []), ...(masterShown ? ['6px', `max(${MIN_MASTER}px, ${masterPct}%)`] : [])].join(' ')
   const masterAttached = useMaster && state.master.kind === 'attached'
   const askMaster = (s: Session) => {
     if (state.master.kind !== 'attached') return
@@ -510,10 +531,17 @@ export function App() {
 
   return (
     <div
-      className={`app ${rightShown ? '' : 'no-right'} ${masterShown ? '' : 'master-off'}`}
+      className={`app view-${view} ${panelShown ? '' : 'no-panel'} ${masterShown ? '' : 'master-off'}`}
       ref={appRef}
-      style={{ ['--side-w' as string]: `${sideW}px`, ['--master-w' as string]: `${masterPct}%`, ['--right-w' as string]: rightShown ? `calc(${masterPct}% + 6px)` : '0px' }}
+      style={{ gridTemplateColumns: columns, ['--side-w' as string]: `${sideW}px`, ['--right-w' as string]: masterShown ? `calc(max(${MIN_MASTER}px, ${masterPct}%) + 6px)` : '0px' }}
     >
+      <Rail
+        view={view}
+        onView={setView}
+        onAction={(a) => (a === 'palette' ? setPalette(true) : setDialog(a))}
+        needs={state.inbox.open.filter((e) => e.item.kind !== 'held').length}
+        prAttention={state.inbox.open.filter((e) => e.item.detail.type === 'offer').length + state.prs.filter((p) => p.reviewRequested).length}
+      />
       <Sidebar
         state={state}
         activeKey={activeKey}
@@ -530,9 +558,26 @@ export function App() {
           if (a === 'close-tab') closeTab(`tab:${sess.key}`)
           else {
             openSession(sess)
-            setSummaryOpen(true)
+            showPanel('summary')
           }
         }}
+        split={!!split}
+        onToggleSplit={tabs.length > 1 ? toggleSplit : undefined}
+        others={tabs
+          .filter((t): t is Exclude<Tab, { kind: 'session' }> => t.kind !== 'session')
+          .map((t) => ({
+            id: t.id,
+            kind: t.kind,
+            label: t.kind === 'shell' ? t.title : t.name,
+            sub: t.kind === 'shell' ? t.cwd : t.error ? `Did not start: ${t.error}` : 'Starting…',
+            active: t.id === active,
+            error: t.kind === 'pending' && !!t.error,
+            onOpen: () => {
+              setView('terminals')
+              activate(t.id)
+            },
+            onClose: () => closeTab(t.id),
+          }))}
       />
       <div
         className={`side-resizer ${sideDragging ? 'dragging' : ''}`}
@@ -574,33 +619,9 @@ export function App() {
       {view === 'janitor' && <JanitorView state={state} />}
       {view === 'workflow' && <WorkflowView state={state} />}
       {view === 'history' && <HistoryView state={state} onOpenSession={openSession} />}
+      {view === 'settings' && <SettingsView settings={state.settings} state={state} onSetup={() => setDialog('setup')} onSkills={() => setDialog('skills')} initial={settingsAt} />}
 
       <main className="workspace">
-        <div className="tabs">
-          {tabs.map((t, i) => (
-            <TabLabel
-              key={t.id}
-              tab={t}
-              state={state}
-              index={i}
-              active={t.id === active}
-              split={t.id === split}
-              onClick={() => activate(t.id)}
-              onClose={() => closeTab(t.id)}
-            />
-          ))}
-          <div className="tools">
-            {tabs.length > 1 && (
-              <button
-                className="icon-btn"
-                title={split ? 'Close the split' : 'Show two tabs side by side'}
-                onClick={toggleSplit}
-              >
-                {split ? '▣ Unsplit' : '◫ Split'}
-              </button>
-            )}
-          </div>
-        </div>
         {state.missingBinaries.includes('claude') && <div className="banner">`claude` was not found on PATH.</div>}
         <RestoreBanner state={state} />
         <div className="panes">
@@ -656,10 +677,6 @@ export function App() {
                   armed={armed.has(t.id)}
                   onArm={() => arm(t.id)}
                   onStartHere={(s, stop) => startHere(t.id, s, stop)}
-                  queueOpen={queueOpen}
-                  onToggleQueue={() => setQueueOpen((o) => !o)}
-                  summaryOpen={summaryOpen}
-                  onToggleSummary={() => setSummaryOpen((o) => !o)}
                 />
               )}
             </div>
@@ -667,16 +684,38 @@ export function App() {
         </div>
       </main>
 
-      {rightShown && (
-        <div className={`divider ${dragging ? 'dragging' : ''}`} onMouseDown={() => setDragging(true)} title="Drag to resize master">
+      {panelShown && (
+        <div className={`divider ${dragging === 'panel' ? 'dragging' : ''}`} onMouseDown={() => setDragging('panel')} title="Drag to resize the panel · double-click to hide it" onDoubleClick={() => setInspOpen(false)}>
           ⋮
         </div>
       )}
-      <div className="right-col" style={rightShown ? undefined : { display: 'none' }}>
-        {useMaster && <MasterPane state={state} shown={masterOpen} />}
-        {queueOpen && <QueuePanel state={state} activeKey={activeKey} onClose={() => setQueueOpen(false)} />}
-        {summaryOpen && <SummaryPanel state={state} activeKey={activeKey} onClose={() => setSummaryOpen(false)} />}
+      <div className="insp-slot" style={panelShown ? undefined : { display: 'none' }}>
+        <Inspector
+          state={state}
+          session={activeKey ? (state.sessions.find((x) => x.key === activeKey) ?? null) : null}
+          activeKey={activeKey}
+          tab={inspTab}
+          onTab={setInspTab}
+          onHide={() => setInspOpen(false)}
+          onDetach={() => active && closeTab(active)}
+          onAskMaster={askMaster}
+          masterAttached={masterAttached}
+        />
       </div>
+      {masterShown && (
+        <div className={`divider ${dragging === 'master' ? 'dragging' : ''}`} onMouseDown={() => setDragging('master')} title="Drag to resize master">
+          ⋮
+        </div>
+      )}
+      {/* Always mounted: master stays attached while hidden. */}
+      <div className="master-slot" style={masterShown ? undefined : { display: 'none' }}>
+        {useMaster && <MasterPane state={state} shown={masterShown} />}
+      </div>
+      {view === 'terminals' && !inspOpen && (
+        <button className="panel-show" onClick={() => setInspOpen(true)} title="Show the panel: Details, Master, Queue, Summary">
+          ‹ Panel
+        </button>
+      )}
 
       {assigning && (
         <AssignDialog
@@ -718,9 +757,6 @@ export function App() {
       )}
       {dialog === 'standup' && <StandupDialog state={state} onClose={() => setDialog(null)} />}
       {dialog === 'sprint-summary' && <SprintSummaryDialog state={state} onClose={() => setDialog(null)} />}
-      {(dialog === 'settings' || dialog === 'shortcuts') && (
-        <SettingsDialog settings={state.settings} state={state} onClose={() => setDialog(null)} onSetup={() => setDialog('setup')} showShortcuts={dialog === 'shortcuts'} />
-      )}
       {worktreesFor && (
         <WorktreesDialog
           session={worktreesFor}
@@ -779,41 +815,10 @@ export function App() {
       {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
           before the headers under it (drag regions for moving the window) could not be clicked. */}
       {useMaster && (
-        <button
-          className={`master-toggle ${masterOpen ? 'on' : ''}`}
-          onClick={() => setMasterOpen((o) => !o)}
-          title={masterOpen ? 'Hide master (it keeps running)' : 'Show master'}
-        >
+        <button className={`master-toggle ${masterOpen ? 'on' : ''}`} onClick={() => setMasterOpen((o) => !o)} title={`${masterOpen ? 'Hide master (it keeps running)' : 'Show master'}  ⌘⇧M`}>
           <span className="star">★</span> Master
         </button>
       )}
-    </div>
-  )
-}
-
-function TabLabel(p: { tab: Tab; state: AppState; index: number; active: boolean; split: boolean; onClick: () => void; onClose: () => void }) {
-  const s = p.tab.kind === 'session' ? p.state.sessions.find((x) => x.key === (p.tab as { key: string }).key) : null
-  const title =
-    p.tab.kind === 'shell' ? `⌘ ${p.tab.title}` : p.tab.kind === 'pending' ? `${p.tab.error ? '⚠' : '⏳'} ${p.tab.name}` : (s?.name ?? 'ended session')
-  return (
-    <div
-      className={`tab ${p.active ? 'active' : ''} ${p.split ? 'split' : ''}`}
-      onClick={p.onClick}
-      onAuxClick={(e) => e.button === 1 && p.onClose()}
-      title={`${title}${p.index < 9 ? `  (${deck().platform === 'darwin' ? '⌘' : 'Ctrl+'}${p.index + 1})` : ''}`}
-    >
-      {s && <span className={`dot ${s.state}`} />}
-      <span className="t">{title}</span>
-      <span
-        className="x"
-        onClick={(e) => {
-          e.stopPropagation()
-          p.onClose()
-        }}
-        title="Close tab (the session keeps running)"
-      >
-        ✕
-      </span>
     </div>
   )
 }
@@ -856,10 +861,6 @@ function SessionPane(p: {
   masterAttached: boolean
   armed: boolean
   onArm: () => void
-  queueOpen: boolean
-  onToggleQueue: () => void
-  summaryOpen: boolean
-  onToggleSummary: () => void
 }) {
   const [asking, setAsking] = useState(false)
   const s = p.state.sessions.find((x) => x.key === p.tab.key)
@@ -887,7 +888,6 @@ function SessionPane(p: {
 
   return (
     <>
-      <WorkerHeader session={s} state={p.state} onDetach={p.onClose} onAskMaster={p.onAskMaster} masterAttached={p.masterAttached} queueOpen={p.queueOpen} onToggleQueue={p.onToggleQueue} summaryOpen={p.summaryOpen} onToggleSummary={p.onToggleSummary} />
       {s.kind === 'background' && s.bgId && !p.armed ? (
         <NotStarted
           label={s.state === 'suspended' ? `${s.name} is parked. Attaching resumes it.` : `${s.name} from your last session`}

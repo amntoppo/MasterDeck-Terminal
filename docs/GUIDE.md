@@ -1,8 +1,22 @@
 # MasterDeck
 
-One window for all your Claude Code sessions. The sidebar on the left lists what needs you
-and every session (tickets live in Board View and the ⌘K palette). Worker sessions open as tabs in the middle as real `claude`
-terminals. master-agent is pinned on the right, and you can drag the divider to resize it.
+One window for all your Claude Code sessions, laid out as a command center:
+
+- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, History, Janitor
+  and Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
+  on Terminals counts what needs you; one on PRs counts PRs waiting on you.
+- **Terminals:**
+  - **Sessions column:** what needs you, then every session grouped by what it needs (Needs you,
+    Working, In review, Idle, Merged; your drag order within each group), then open shells and
+    sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
+    side by side; **+ Shell** opens a shell.
+  - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
+  - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
+    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**
+    and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
+- **Master:** master-agent's terminal in its own column at the far right, on every screen. The
+  **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
+- **The other views** use the full width (next to Master when it shows).
 
 It is a front end for the `master` CLI (`skills/master`). Every write goes through that CLI, so
 the ledger's rules still apply: nothing is sent or spawned without an approved proposal.
@@ -80,16 +94,15 @@ checkout whose branch was once linked to a ticket does not link it.
   it; use Reject for that.
 - **Command palette (⌘K / Ctrl+K):** type to jump to any session, issue (it opens the session, or
   Start) or PR (it opens the PR popup), or run an action: Refresh, a view, Broadcast, Standup, Sprint
-  summary, Settings, New shell, Start master. The sidebar footer has the same tools as buttons.
+  summary, Settings, New shell, Start master. The rail has the same tools as buttons.
 - **Typing into sessions:** broadcast, quick reply, Continue and Compact now type into a session as if
   you wrote it. A session with an open tab gets the text there. A background session gets it through a
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
-- **★ Master (top right, every view):** shows or hides the master pane. Shown, it sits beside the
-  board, PRs and the other views too; hidden, they use the full width. Hiding it doesn't stop or
-  detach master.
-- **Workflow (🔀 in the sidebar):** the path from an issue to a merged PR, stage by stage (issue, Claude
+- **★ Master (top right, every screen, ⌘⇧M):** shows or hides master-agent's column. Drag its edge
+  to resize it. Hiding it doesn't stop or detach master.
+- **Workflow (on the rail):** the path from an issue to a merged PR, stage by stage (issue, Claude
   session, babysit-ticket, your instructions, work, before the PR, PR hooks, merged), with what MasterDeck
   and its skills do at each and every hook Claude Code runs there, read live from `~/.claude/settings.json`,
   your workspace repos' `.claude/settings*.json` and your enabled plugins. **+ Add a skill** attaches any
@@ -112,34 +125,33 @@ checkout whose branch was once linked to a ticket does not link it.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice.
-- **Worktree (in a session's header):** opens a popup with every git worktree the session created
+- **Worktrees (Details tab, or ⌘E for a popup):** list every git worktree the session created
   or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
   transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS
   the app code files open with (for example Cursor, VS Code or Antigravity), else the first editor
   found, else `cursor` / `code`. A session without a worktree shows its folder.
-- **Summary (in a session's header):** shows or hides the Summary panel under master: what the focused
+- **Summary (right panel → Summary):** what the focused
   session did, in five parts (Goal, Done, Decisions, Open, State). **Summarize** / **Update** reads its
   transcript (your messages, its replies, files it edited, commands that change things), its PRs and the
   branch's changes, and asks a small model (`claude -p --model haiku`, about 20 s) for the summary; it
   runs only when you press it, and it is kept per session in `~/.claude/masterdeck/summaries/`. The panel
   says when the session has moved on since. **Post to issue** comments it on the session's issue.
-- **Queue (Queue Prompts in a session's header):** shows or hides the Queue panel under master, next
-  to it rather than instead of it. It holds the focused session's `/queue`, the prompts it runs one by
+- **Queue (right panel → Queue):** holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
-- **Set a status by hand:** click the status chip in a session's header (or right-click it in the
-  sidebar → Set status…). Pick a status (it stays, in the sidebar, header and board card, until you
+- **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
+  the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you
   choose **Automatic**; Needs Input still shows while it waits on a prompt), or **Stop session…**:
   it ends (the conversation is kept and can be resumed) and leaves the sessions list at once. A
   session in another terminal is stopped there.
-- **Session order:** the sidebar keeps your order; activity never reorders it. A new session goes on
-  top once. Drag a session to move it; right-click → Move to top.
+- **Session order:** within each group the column keeps your order. A session moves to another
+  group only when what it needs changes. Drag a session to move it; right-click → Move to top.
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
-  Open folder in editor, Move to top, and Stop session…. The copy commands are in the header's ⋯ menu.
-- **Session status:** the sidebar and each session's header show one status, first match wins:
+  Open folder in editor, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
+- **Session status:** the column and the Details tab show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
   instructions after its last PR merged; a new PR then shows its own status, and once that is merged
@@ -247,7 +259,7 @@ creation.
 
 ## Cost and context
 
-- **Tokens:** each session's header shows **Tokens used** (input, output and prompt-cache, with the
+- **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the
   split on hover), and the Costs view shows tokens next to spend: per day, per ticket and per
   session. They are summed from the session's transcript and its subagents', counting each message
   once, by the day it was sent. The first Costs view reads your history once (a few seconds, in the
@@ -332,7 +344,7 @@ in `~/.claude/masterdeck/session-history.json`. It also recognises the original 
 background id is the first 8 characters of the original session id. When a resumed session has no
 link, or only babysit-ticket's automatic branch link made in the first 2 minutes after the resume,
 MasterDeck re-links it to its earlier ticket with `tt.sh link`. A link made on purpose later is left
-alone. Each re-link is tried at most once every 10 minutes; a failure shows in the sidebar footer.
+alone. Each re-link is tried at most once every 10 minutes; a failure shows in the sessions column footer.
 
 ## One GitHub cache for everything
 
@@ -349,7 +361,7 @@ babysit-ticket's `tt.sh`, and babysit-pr's poll loop.
 - **Writes go straight through.** Assign, comment, status change and the like reach GitHub at once.
   They also drop the cached reads they could have changed (an issue write drops board reads too).
 - **One shared pause.** After a rate-limit error, every caller stops calling GitHub for 10
-  minutes. Cached reads are served from the last answer, however old. The sidebar footer shows the
+  minutes. Cached reads are served from the last answer, however old. The sessions column footer shows the
   pause, and otherwise today's hit rate ("GitHub cache today: 80% of reads served").
 - `ghc --status` prints the pause and today's counters. `ghc --no-cache …` bypasses the cache.
   Escape hatches: `MASTER_NO_GH_CACHE=1` for master and `TT_NO_GH_CACHE=1` for `tt.sh`.
@@ -360,8 +372,7 @@ GraphQL and two REST calls.
 
 ## Board View
 
-The **Terminals | Board View** switch at the top of the sidebar replaces the tabs and master pane
-with a Kanban board of your issues in the current sprint, in the project's column order. The
+**Board** on the rail shows a Kanban board of your issues in the current sprint, in the project's column order. The
 columns from your "ready" status to "dev done" always show; other columns appear when one of your
 cards is in them.
 
@@ -420,7 +431,7 @@ cards is in them.
 | `⌘E` | The open session's worktrees (Open in editor) |
 | `⌘⇧M` | Show or hide master |
 | `⌘⇧G` | Refresh from GitHub |
-| `⌘,` | Settings |
+| `⌘,` | Settings (a page: General, Needs you & alerts, Sessions, Hooks & skills, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
 Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where

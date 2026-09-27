@@ -6,7 +6,7 @@ import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
 
 const THEME = {
-  background: '#0f1117',
+  background: '#0b0c0f',
   foreground: '#e6e9ef',
   cursor: '#6aa9ff',
   selectionBackground: 'rgba(106,169,255,0.35)',

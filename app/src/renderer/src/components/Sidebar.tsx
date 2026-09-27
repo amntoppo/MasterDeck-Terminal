@@ -6,6 +6,7 @@ import { inOrder, moveBefore, trimOrder, withNew } from '@shared/sessionOrder'
 import { StatusDialog } from './StatusDialog'
 import { SessionMenu } from './SessionMenu'
 import { attentionFor, sessionStatus } from '@shared/review'
+import { LANES, laneOf } from '@shared/tasks'
 import { formatAgo, formatGhCache, formatRefreshed } from '@shared/format'
 import type { InboxEntry, InboxKind } from '@shared/inbox'
 import type { AppState, Issue, Proposal, Session } from '@shared/types'
@@ -15,7 +16,7 @@ import { OfferRow } from './PrsView'
 import { AskPanel } from './AskPanel'
 import { Markdown } from './SummaryPanel'
 
-export type View = 'terminals' | 'board' | 'prs' | 'tasks' | 'costs' | 'janitor' | 'history' | 'workflow'
+export type View = 'terminals' | 'board' | 'prs' | 'tasks' | 'settings' | 'costs' | 'janitor' | 'history' | 'workflow'
 
 interface Props {
   state: AppState
@@ -33,6 +34,23 @@ interface Props {
   onStartWith: (issue: Issue, instructions: string) => void
   /** Session actions that live in the app: its Summary panel, closing its tab (after a stop). */
   onSessionAction: (s: Session, a: SessionAction) => void
+  /** Open terminals that are not sessions (shells, sessions starting), listed under the sessions. */
+  others?: ColumnTab[]
+  /** Two terminals side by side. */
+  split?: boolean
+  onToggleSplit?: () => void
+}
+
+/** A shell or a starting session in the column (the tab strip is gone). */
+export interface ColumnTab {
+  id: string
+  kind: 'shell' | 'pending'
+  label: string
+  sub: string
+  active: boolean
+  error?: boolean
+  onOpen: () => void
+  onClose: () => void
 }
 
 export type SessionAction = 'summary' | 'close-tab'
@@ -47,7 +65,7 @@ const STATE_LABEL: Record<string, string> = {
   done: 'done',
 }
 
-export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, showItem, view, onView, onTool, onStartWith, onSessionAction }: Props) {
+export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, showItem, onStartWith, onSessionAction, others, split, onToggleSplit }: Props) {
   const now = useNow()
   const [showSuspended, setShowSuspended] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -100,6 +118,7 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
       setMenu({ s, x: e.clientX, y: e.clientY })
     },
   })
+  const statusOf = (s: Session) => sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])
   const live = sessions.filter((s) => s.state !== 'suspended')
   const suspended = sessions.filter((s) => s.state === 'suspended')
 
@@ -138,21 +157,18 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
 
   return (
     <aside className="sidebar">
-      <div className="drag-top">MasterDeck</div>
-      <div className="view-switch" role="tablist">
-        {(
-          [
-            ['terminals', 'Terminals'],
-            ['board', 'Board View'],
-            ['prs', 'PRs'],
-            ['tasks', 'Tasks'],
-          ] as [View, string][]
-        ).map(([v, label]) => (
-          <button key={v} role="tab" aria-selected={view === v} className={view === v ? 'on' : ''} onClick={() => onView(v)}>
-            {label}
-            {v === 'prs' && prAttention > 0 && <span className="count hot mini">{prAttention}</span>}
+      <div className="col-head">
+        <b>Sessions</b>
+        <span style={{ flex: 1 }} />
+        {note && <span className="sub session-note">{note}</span>}
+        {onToggleSplit && (
+          <button className="col-btn" onClick={onToggleSplit} title={split ? 'Close the split  ⌘\\' : 'Show two terminals side by side  ⌘\\'} aria-pressed={!!split}>
+            {split ? 'Unsplit' : 'Split'}
           </button>
-        ))}
+        )}
+        <button className="col-btn" onClick={onNewShell} title="New shell in the workspace  ⌘T">
+          + Shell
+        </button>
       </div>
       <div className="scroll">
         <div className="section" ref={needsYouRef}>
@@ -197,55 +213,77 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
             ))}
         </div>
 
-        <div className="section">
-          <div className="section-head">
-            Sessions <span className="count">{live.length}</span>
-            <span className="spacer" />
-            {note && <span className="sub session-note">{note}</span>}
-            <button onClick={onNewShell} title="Open a plain shell tab">
-              + Shell
-            </button>
+        {live.length === 0 && !others?.length && <div className="empty" style={{ padding: '10px 14px' }}>No live sessions. Start one from the board, or open a shell.</div>}
+        {LANES.filter((l) => l.id !== 'parked').map((l) => {
+          const list = live.filter((s) => laneOf(statusOf(s).key) === l.id)
+          if (!list.length) return null
+          return (
+            <div className="section" key={l.id}>
+              <div className={`section-head lane-${l.id}`} title={l.hint}>
+                {l.title} <span className="count">{list.length}</span>
+              </div>
+              {list.map((s) => (
+                <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} status={statusOf(s)} onClick={() => onOpenSession(s)} {...rowProps(s)} />
+              ))}
+            </div>
+          )
+        })}
+        {dragKey && (
+          // Drop here: to the end of the list.
+          <div
+            className={`row drop-end ${dropKey === '' ? 'drop-before' : ''}`}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDropKey('')
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const k = e.dataTransfer.getData('text/masterdeck-session')
+              if (k) move(k, null)
+              setDragKey(null)
+              setDropKey(null)
+            }}
+          />
+        )}
+        {others && others.length > 0 && (
+          <div className="section">
+            <div className="section-head">
+              Shells &amp; starting <span className="count">{others.length}</span>
+            </div>
+            {others.map((t) => (
+              <div key={t.id} className={`srow ${t.active ? 'active' : ''}`} onClick={t.onOpen} title={t.sub}>
+                <div className="srow-top">
+                  <span className={`dot ${t.kind === 'pending' ? (t.error ? 'st-blocked' : 'st-waiting') : 'st-shell'}`} />
+                  <span className="label">{t.label}</span>
+                  <button
+                    className="srow-x"
+                    aria-label={`Close ${t.label}`}
+                    title="Close"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      t.onClose()
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className={`srow-sub ${t.error ? 'st-blocked' : ''}`}>{t.sub}</div>
+              </div>
+            ))}
           </div>
-          {live.length === 0 && <div className="empty">No live sessions.</div>}
-          {live.map((s) => (
-            <SessionRow
-              key={s.key}
-              s={s}
-              active={s.key === activeKey}
-              now={now}
-              status={sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])}
-              onClick={() => onOpenSession(s)}
-              {...rowProps(s)}
-            />
-          ))}
-          {dragKey && (
-            // Drop here: to the end of the list.
-            <div
-              className={`row drop-end ${dropKey === '' ? 'drop-before' : ''}`}
-              onDragOver={(e) => {
-                e.preventDefault()
-                setDropKey('')
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                const k = e.dataTransfer.getData('text/masterdeck-session')
-                if (k) move(k, null)
-                setDragKey(null)
-                setDropKey(null)
-              }}
-            />
-          )}
-          {suspended.length > 0 && (
+        )}
+        {suspended.length > 0 && (
+          <div className="section">
             <div className="row" onClick={() => setShowSuspended(!showSuspended)}>
               <span className="mark">{showSuspended ? '▾' : '▸'}</span>
-              <span className="label sub">{suspended.length} suspended</span>
+              <span className="label sub">Parked · {suspended.length}</span>
             </div>
-          )}
-          {showSuspended &&
-            suspended.map((s) => (
-              <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} onClick={() => onOpenSession(s)} {...rowProps(s)} />
-            ))}
-        </div>
+            {showSuspended &&
+              suspended.map((s) => (
+                <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} onClick={() => onOpenSession(s)} {...rowProps(s)} />
+              ))}
+          </div>
+        )}
         {menu && (
           <SessionMenu
             s={menu.s}
@@ -264,34 +302,6 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
 
       </div>
       <div className="sidebar-footer">
-        <div className="tools">
-          {(
-            [
-              ['palette', '⌘K', 'Commands', 'Command palette: jump to any session, issue or PR, or run an action (⌘K)'],
-              ['broadcast', '📣', 'Broadcast', 'Send one message to several sessions'],
-              ['standup', '🗒', 'Standup', "Yesterday's commits, PRs and reports, ready to paste"],
-              ['view:costs', '$', 'Costs', 'Spend and tokens per day, ticket and session'],
-              ['view:janitor', '🧹', 'Janitor', 'Clean up worktrees and parked sessions'],
-              ['view:history', '🔎', 'History', 'Search every past session and resume one'],
-              ['skills', '🧩', 'Skills', 'Add or remove skills, and choose which run automatically'],
-              ['view:workflow', '🔀', 'Workflow', 'Issue to merged PR: what runs at each point, and your own steps'],
-              ['settings', '⚙', 'Settings', 'Nudges, budget, context warning, dock, after a restart'],
-            ] as [PaletteAction | 'palette', string, string, string][]
-          ).map(([a, icon, label, title]) => (
-            <button key={a} className={`tool ${a === 'palette' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
-              {a === 'palette' ? (
-                <>
-                  {label} <kbd>{icon}</kbd>
-                </>
-              ) : (
-                <>
-                  <span className="tool-i">{icon}</span>
-                  {label}
-                </>
-              )}
-            </button>
-          ))}
-        </div>
         {state.missingBinaries.length > 0 && <div className="err">Not found on PATH: {state.missingBinaries.join(', ')}</div>}
         {state.errors.slice(0, 3).map((e) => (
           <div key={e} className="err" title={e}>
@@ -475,17 +485,22 @@ function SessionRow({
   const plain = !status || status.key === 'idle' || status.key === 'working'
   return (
     <div
-      className={`row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''} ${dropBefore ? 'drop-before' : ''}`}
+      className={`srow ${active ? 'active' : ''} ${dragging ? 'dragging' : ''} ${dropBefore ? 'drop-before' : ''}`}
       onClick={onClick}
       draggable={!!drag.onDragStart}
       {...drag}
       title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}${status?.why ? `\n${status.text}: ${status.why}` : ''}\nDrag to reorder · right-click for more`}
     >
-      <span className={`dot st-${status?.key ?? s.state}`} />
-      <span className="label">{s.name}</span>
-      {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
-      <span className={`sub st-${status?.key ?? s.state}`}>{s.kind === 'interactive' && plain ? 'ext' : text}</span>
-      <span className="sub">{s.startedAt ? formatAgo(now - s.startedAt) : ''}</span>
+      <div className="srow-top">
+        <span className={`dot st-${status?.key ?? s.state}`} />
+        <span className="label">{s.name}</span>
+        {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
+      </div>
+      <div className="srow-sub">
+        <span className={`st-${status?.key ?? s.state}`}>{s.kind === 'interactive' && plain ? 'another terminal' : text}</span>
+        {s.startedAt ? <span> · {formatAgo(now - s.startedAt)}</span> : null}
+        {s.waitingOn && <span title={s.waitingOn}> · {s.waitingOn}</span>}
+      </div>
     </div>
   )
 }

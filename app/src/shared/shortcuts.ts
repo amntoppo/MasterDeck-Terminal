@@ -41,7 +41,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'close-tab', keys: 'Mod ⇧W', what: 'Close the tab (the session keeps running)', group: 'Tabs' },
   { id: 'split', keys: 'Mod \\', what: 'Show two tabs side by side, or close the split', group: 'Tabs' },
   { id: 'worktree', keys: 'Mod E', what: "The open session's worktrees (open one in your editor)", group: 'Sessions' },
-  { id: 'master', keys: 'Mod ⇧M', what: 'Show or hide master', group: 'Sessions' },
+  { id: 'master', keys: 'Mod ⇧M', what: 'Show or hide master (every screen)', group: 'Sessions' },
   { id: 'refresh', keys: 'Mod ⇧G', what: 'Refresh from GitHub', group: 'App' },
   { id: 'settings', keys: 'Mod ,', what: 'Settings', group: 'App' },
   { id: 'shortcuts', keys: 'Mod /', what: 'This list of shortcuts', group: 'App' },
