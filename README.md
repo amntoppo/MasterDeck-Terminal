@@ -74,9 +74,12 @@ Or build it yourself (see [Develop](#develop)).
       **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).
       MasterDeck reads each board's statuses and guesses what each means (ready, in progress, PR raised,
       done); adjust the guesses per board if they are wrong. No board: you still get issues, PRs and
-      sessions. Settings → GitHub & board shows the same step.
-   4. **Workspace.** The folder master and new shells start in, where your repos are, and whether to
-      use a master-agent.
+      sessions. Settings → Set up MasterDeck shows the same step.
+   4. **Preferences.** The folder master and new shells start in (where your repos are), whether to
+      use a master-agent, and notifications for new Needs-you items.
+
+   Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub account,
+   Repos & boards, Preferences): change any of them and Save.
 
    Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the skills: add or remove each
    one, and choose which run by themselves through a hook in `~/.claude/settings.json` (a backup is

@@ -632,3 +632,13 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .inbox-line .label { flex: 1; min-width: 0; }
 .kind-tag { font-size: 9px; font-weight: 700; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; flex: none; }
 .card .top .title { padding-right: 34px; }
+
+/* Setup opened from Settings: a settings page (sections on the left), not the first-run wizard */
+.dialog.setup.setup-page { width: min(900px, 95vw); }
+.setup-body { display: grid; grid-template-columns: 190px 1fr; gap: 16px; margin-top: 10px; min-height: 420px; }
+.setup-nav { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); padding-right: 10px; }
+.setup-nav button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; background: none; border: none; border-radius: 6px; color: var(--text); padding: 7px 10px; cursor: pointer; font-size: 13px; }
+.setup-nav button:hover:not(:disabled) { background: var(--bg-3); }
+.setup-nav button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.setup-nav-sub { font-size: 11px; font-weight: 400; color: var(--muted); }
+.setup-section { min-width: 0; }

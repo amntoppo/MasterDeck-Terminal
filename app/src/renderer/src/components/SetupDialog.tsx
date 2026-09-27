@@ -9,7 +9,7 @@ import { deck } from '../deck'
 import { TerminalView } from './TerminalView'
 
 
-const STEPS = ['Tools', 'GitHub account', 'Repos & boards', 'Workspace'] as const
+const STEPS = ['Tools', 'GitHub account', 'Repos & boards', 'Preferences'] as const
 
 const INSTALLER_PANE = 'setup:installer'
 
@@ -135,9 +135,12 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   // A fresh install starts from the folder master would use anyway.
   const [workspace, setWorkspace] = useState(cfg.workspace || state.masterWorkspace || '')
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
+  const [notify, setNotify] = useState(state.settings.notifyNeedsYou)
 
   useEffect(() => {
     checkTools()
+    // From Settings every section is one click away: know the account up front.
+    if (!firstRun) void loadAccounts()
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !firstRun && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -181,6 +184,15 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     if (!primaryRepo) return setMsg('Go back and pick at least one repository.')
     setBusy(true)
     setMsg(null)
+    // The chosen account becomes gh's active one (from Settings, Save may come straight from its section).
+    if (account && !account.active) {
+      const sw = await deck().ghSwitch(account.login)
+      if (!sw.ok) {
+        setBusy(false)
+        return setMsg(sw.message)
+      }
+    }
+    if (notify !== state.settings.notifyNeedsYou) await deck().setSettings({ ...(await deck().getSettings()), notifyNeedsYou: notify })
     const [owner, issueRepo] = primaryRepo.split('/')
     const ownerType = found?.owners.find((o) => o.login === owner)?.type ?? (owner === cfg.owner ? cfg.ownerType : 'organization')
     const list = Object.values(boards)
@@ -218,6 +230,14 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     onClose()
   }
 
+  // Settings view: one line under each section's name.
+  const bad = TOOLS.filter((t) => tools[t.id]?.ok === false).length
+  const sectionSummary = [
+    !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
+    login || (accounts === null ? '—' : 'not logged in'),
+    primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(boards).length} board${Object.keys(boards).length === 1 ? '' : 's'}`}` : 'none chosen',
+    `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
+  ]
   const canNext = step === 0 ? toolsDone : step === 1 ? !!account && account.ok : step === 2 ? !!primaryRepo && !finding : true
   const Spin = ({ text }: { text: string }) => (
     <div className="tool-row wait">
@@ -230,15 +250,31 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && !firstRun && onClose()}>
-      <div className="dialog setup" role="dialog" aria-label="Set up MasterDeck">
-        <h3>{firstRun ? 'Welcome to MasterDeck' : 'GitHub & board'}</h3>
-        <ol className="steps">
-          {STEPS.map((name, i) => (
-            <li key={name} className={i === step ? 'on' : i < step ? 'done' : ''}>
-              <span className="n">{i < step ? '✓' : i + 1}</span> {name}
-            </li>
-          ))}
-        </ol>
+      <div className={`dialog setup ${firstRun ? '' : 'setup-page'}`} role="dialog" aria-label="Set up MasterDeck">
+        <h3>{firstRun ? 'Welcome to MasterDeck' : 'Set up MasterDeck'}</h3>
+        {firstRun ? (
+          <ol className="steps">
+            {STEPS.map((name, i) => (
+              <li key={name} className={i === step ? 'on' : i < step ? 'done' : ''}>
+                <span className="n">{i < step ? '✓' : i + 1}</span> {name}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="meta">Change any part, then Save. Nothing changes until you do.</div>
+        )}
+        <div className={firstRun ? '' : 'setup-body'}>
+        {!firstRun && (
+          <nav className="setup-nav" aria-label="Setup sections">
+            {STEPS.map((name, i) => (
+              <button key={name} className={i === step ? 'on' : ''} disabled={busy} onClick={() => void go(i)}>
+                <span>{name}</span>
+                <span className="setup-nav-sub">{sectionSummary[i]}</span>
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className={firstRun ? '' : 'setup-section'}>
 
         {step === 0 && (
           <>
@@ -498,12 +534,23 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               </span>
             </label>
 
+            <label>Notifications</label>
+            <label className="mpick-row">
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+              <span>
+                Notify me when something new needs me: a question, a session waiting on a prompt, a proposal, failing CI… (macOS asks
+                once for permission). Also in Settings.
+              </span>
+            </label>
+
             <div className="meta">
               Saved to <code>{cfg.path || '~/.claude/master/config.json'}</code>, shared with the master and babysit skills.
             </div>
           </>
         )}
 
+        </div>
+        </div>
         <div className="foot">
           <span className="grow meta">{msg && <span className="bad">{msg}</span>}</span>
           {firstRun ? (
@@ -515,12 +562,17 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               Cancel
             </button>
           )}
-          {step > 0 && (
+          {!firstRun ? (
+            <button className="btn primary" disabled={busy || finding || !primaryRepo} onClick={save} title={primaryRepo ? '' : 'Pick at least one repository'}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          ) : null}
+          {firstRun && step > 0 && (
             <button className="btn" disabled={busy} onClick={() => void go(step - 1)}>
               Back
             </button>
           )}
-          {step < STEPS.length - 1 ? (
+          {!firstRun ? null : step < STEPS.length - 1 ? (
             <button className="btn primary" disabled={busy || !canNext} onClick={() => void go(step + 1)}>
               {busy ? 'Switching account…' : 'Next'}
             </button>

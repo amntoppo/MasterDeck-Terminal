@@ -284,7 +284,7 @@ columns from your "ready" status to "dev done" always show; other columns appear
 cards is in them.
 
 - **Several repos and boards:** the board shows the tickets of every repository and board chosen in
-  Setup (Repos & boards; or Settings → GitHub & board), fetched in one GraphQL query for all boards
+  Setup (Repos & boards; or Settings → Set up MasterDeck), fetched in one GraphQL query for all boards
   (plus one for their PRs). A ticket is a repo and a number: `#12` in the primary repository, `api#12`
   in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
   all keep the repo). A card moves only within its own board's columns.

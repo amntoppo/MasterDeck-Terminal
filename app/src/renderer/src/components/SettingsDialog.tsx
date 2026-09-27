@@ -21,7 +21,7 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog" role="dialog" aria-label="Settings">
         <h3>Settings</h3>
-        <label>GitHub & board</label>
+        <label>Set up MasterDeck</label>
         <div className="setup-summary">
           {state.config.configured ? (
             <span>
@@ -44,7 +44,7 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           )}
           <span style={{ flex: 1 }} />
           <button className="btn" onClick={onSetup}>
-            {state.config.configured ? 'Change…' : 'Set up…'}
+            {state.config.configured ? 'Open setup…' : 'Set up…'}
           </button>
         </div>
         <label>Nudge a quiet session after (minutes)</label>
