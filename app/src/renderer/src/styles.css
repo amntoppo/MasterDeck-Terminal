@@ -756,3 +756,9 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .tv-term-note.over { position: absolute; inset: 0; background: rgba(15, 17, 23, .85); }
 .tv-term-grip { height: 7px; cursor: row-resize; background: var(--bg-2); border-top: 1px solid var(--line); }
 .tv-term-grip:hover { background: var(--accent-soft); }
+/* Settings: keyboard shortcuts */
+.shortcut-list { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); }
+.shortcut-group + .shortcut-group { margin-top: 8px; }
+.shortcut-group-title { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+.shortcut-row { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; padding: 2px 0; }
+.shortcut-row kbd { flex: none; min-width: 64px; font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--bg-3); text-align: center; }

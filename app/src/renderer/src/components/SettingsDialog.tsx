@@ -1,9 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { SHORTCUTS, showKeys } from '@shared/shortcuts'
 import type { Settings } from '@shared/settings'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 
-export function SettingsDialog({ settings, state, onClose, onSetup }: { settings: Settings; state: AppState; onClose: () => void; onSetup: () => void }) {
+export function SettingsDialog({
+  settings,
+  state,
+  onClose,
+  onSetup,
+  showShortcuts,
+}: {
+  settings: Settings
+  state: AppState
+  onClose: () => void
+  onSetup: () => void
+  /** Opened with Mod+/: scroll to the shortcuts. */
+  showShortcuts?: boolean
+}) {
+  const shortcutsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (showShortcuts) shortcutsRef.current?.scrollIntoView({ block: 'start' })
+  }, [showShortcuts])
   const [s, setS] = useState<Settings>(settings)
   const [saved, setSaved] = useState(false)
   useEffect(() => {
@@ -73,6 +91,23 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           <option value="resume">Resume them when MasterDeck starts</option>
           <option value="off">Do nothing</option>
         </select>
+        <div ref={shortcutsRef}>
+          <label>Keyboard shortcuts</label>
+          <div className="shortcut-list">
+            {(['Move around', 'Tabs', 'Sessions', 'App'] as const).map((g) => (
+              <div key={g} className="shortcut-group">
+                <div className="shortcut-group-title">{g}</div>
+                {SHORTCUTS.filter((k) => k.group === g).map((k) => (
+                  <div key={k.id} className="shortcut-row">
+                    <kbd>{showKeys(k.keys, deck().platform)}</kbd>
+                    <span>{k.what}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="meta">Shift+arrows work anywhere except in a text box, where they select text. ⌘C copies a terminal selection.</div>
+          </div>
+        </div>
         <div className="foot">
           <span className="grow meta">{saved ? 'Saved' : ''}</span>
           <button className="btn" onClick={onClose}>

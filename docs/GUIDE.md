@@ -381,8 +381,26 @@ cards is in them.
 
 ## Keyboard
 
-`⌘1`–`⌘9` (Ctrl on Windows) switch tabs, `⌘⇧W` closes a tab, and `⌘C` copies the terminal
-selection.
+⌘ is Ctrl on Windows. The full list is in Settings (`⌘/` opens it there).
+
+| Keys | What |
+|---|---|
+| `⇧←` / `⇧→` | Previous / next view: Terminals, Board View, PRs, Tasks |
+| `⇧↑` / `⇧↓` | Previous / next terminal tab (switches to Terminals) |
+| `⌘1`–`⌘9` | Terminal tab 1–9 |
+| `⌘T` | New shell in the workspace (+ Shell) |
+| `⌘⇧W` | Close the tab (the session keeps running) |
+| `⌘\` | Split two tabs side by side, or close the split |
+| `⌘K` | Command palette |
+| `⌘J` | Open the first Needs-you item |
+| `⌘E` | The open session's worktrees (Open in editor) |
+| `⌘⇧M` | Show or hide master |
+| `⌘⇧G` | Refresh from GitHub |
+| `⌘,` | Settings |
+| `⌘/` | The shortcut list |
+
+Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where
+they select text, or while a dialog is open. `⌘C` copies a terminal selection.
 
 ## Windows notes
 

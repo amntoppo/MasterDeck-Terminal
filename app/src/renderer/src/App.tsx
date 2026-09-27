@@ -26,6 +26,8 @@ import { SummaryPanel } from './components/SummaryPanel'
 import { WorkflowView } from './components/WorkflowView'
 import { Sidebar, type View } from './components/Sidebar'
 import { TasksView } from './components/TasksView'
+import { WorktreesDialog } from './components/WorktreesDialog'
+import { cycle, matchShortcut } from '@shared/shortcuts'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { WorkerHeader } from './components/WorkerHeader'
 import { deck, load, save, useAppState } from './deck'
@@ -49,6 +51,8 @@ type Tab =
     }
 
 const MIN_MASTER = 280
+/** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
+const MAIN_VIEWS: View[] = ['terminals', 'board', 'prs', 'tasks']
 const SIDE_W = 272
 const MIN_SIDE = 200
 const MAX_SIDE = 560
@@ -101,7 +105,8 @@ export function App() {
     return (['terminals', 'board', 'prs', 'tasks', 'costs', 'janitor', 'history', 'workflow'] as View[]).includes(v as View) ? (v as View) : 'terminals'
   })
   const [palette, setPalette] = useState(false)
-  const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'setup' | 'skills' | 'skills-first' | null>(null)
+  const [worktreesFor, setWorktreesFor] = useState<Session | null>(null)
+  const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'shortcuts' | 'setup' | 'skills' | 'skills-first' | null>(null)
   // First launch without a config: Setup opens once (Skip remembers it; Settings → Set up MasterDeck reopens it).
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
@@ -317,27 +322,91 @@ export function App() {
   }, [visibleKey])
 
   // Keyboard: Cmd/Ctrl+1..9 switch tabs, Cmd/Ctrl+Shift+W closes the tab.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = deck().platform === 'darwin' ? e.metaKey : e.ctrlKey
-      if (!mod) return
-      if (/^[1-9]$/.test(e.key)) {
-        const t = tabs[Number(e.key) - 1]
-        if (t) {
-          activate(t.id)
-          e.preventDefault()
-        }
-      } else if (e.key.toLowerCase() === 'k' && !e.shiftKey) {
-        setPalette((p) => !p)
-        e.preventDefault()
-      } else if (e.shiftKey && e.key.toLowerCase() === 'w' && active) {
-        closeTab(active)
-        e.preventDefault()
+  const toggleSplit = () => {
+    if (split) setSplit(null)
+    else {
+      const other = tabs.find((t) => t.id !== active)
+      if (other) {
+        setSplit(other.id)
+        arm(other.id)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [tabs, active, closeTab, activate])
+  }
+
+  // Keyboard shortcuts (shared/shortcuts.ts; listed in Settings). Caught before a terminal sees
+  // them, so Shift+arrows move around instead of reaching the shell.
+  const onShortcut = useRef<(e: KeyboardEvent) => void>(() => {})
+  onShortcut.current = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null
+    const inTextField = !!el && !el.classList.contains('xterm-helper-textarea') && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
+    const dialogOpen = !!document.querySelector('.backdrop')
+    const hit = matchShortcut(e, { platform: deck().platform, inTextField, dialogOpen })
+    if (!hit || !state) return
+    const done = () => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const goTab = (id: string | null) => {
+      if (!id) return
+      setView('terminals')
+      activate(id)
+    }
+    switch (hit.id) {
+      case 'view-prev':
+      case 'view-next':
+        setView((v) => cycle(MAIN_VIEWS, MAIN_VIEWS.includes(v) ? v : null, hit.id === 'view-next' ? 1 : -1) ?? v)
+        return done()
+      case 'tab-prev':
+      case 'tab-next':
+        goTab(cycle(tabs.map((t) => t.id), active, hit.id === 'tab-next' ? 1 : -1))
+        return done()
+      case 'tab-n':
+        goTab(tabs[(hit.n ?? 1) - 1]?.id ?? null)
+        return done()
+      case 'close-tab':
+        if (active) closeTab(active)
+        return done()
+      case 'new-shell':
+        void openShell()
+        return done()
+      case 'palette':
+        setPalette((p) => !p)
+        return done()
+      case 'needs-you': {
+        const first = state.inbox.open[0]
+        if (first) setShowItem({ id: first.item.id, at: Date.now() })
+        else flash('Nothing needs you')
+        return done()
+      }
+      case 'worktree': {
+        const s = activeKey ? state.sessions.find((x) => x.key === activeKey) : null
+        if (s) setWorktreesFor(s)
+        else flash('Open a session tab first')
+        return done()
+      }
+      case 'split':
+        toggleSplit()
+        return done()
+      case 'master':
+        if (state.config.masterEnabled) setMasterOpen((o) => !o)
+        return done()
+      case 'refresh':
+        void deck().refresh()
+        flash('Refreshing from GitHub…')
+        return done()
+      case 'settings':
+        setDialog('settings')
+        return done()
+      case 'shortcuts':
+        setDialog('shortcuts')
+        return done()
+    }
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onShortcut.current(e)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   // Sidebar edge drag
   useEffect(() => {
@@ -525,16 +594,7 @@ export function App() {
               <button
                 className="icon-btn"
                 title={split ? 'Close the split' : 'Show two tabs side by side'}
-                onClick={() => {
-                  if (split) setSplit(null)
-                  else {
-                    const other = tabs.find((t) => t.id !== active)
-                    if (other) {
-                      setSplit(other.id)
-                      arm(other.id)
-                    }
-                  }
-                }}
+                onClick={toggleSplit}
               >
                 {split ? '▣ Unsplit' : '◫ Split'}
               </button>
@@ -658,7 +718,17 @@ export function App() {
       )}
       {dialog === 'standup' && <StandupDialog state={state} onClose={() => setDialog(null)} />}
       {dialog === 'sprint-summary' && <SprintSummaryDialog state={state} onClose={() => setDialog(null)} />}
-      {dialog === 'settings' && <SettingsDialog settings={state.settings} state={state} onClose={() => setDialog(null)} onSetup={() => setDialog('setup')} />}
+      {(dialog === 'settings' || dialog === 'shortcuts') && (
+        <SettingsDialog settings={state.settings} state={state} onClose={() => setDialog(null)} onSetup={() => setDialog('setup')} showShortcuts={dialog === 'shortcuts'} />
+      )}
+      {worktreesFor && (
+        <WorktreesDialog
+          session={worktreesFor}
+          worktrees={state.sessionWorktrees[worktreesFor.key] ?? []}
+          dir={state.stats[worktreesFor.sessionId]?.currentDir ?? state.tails[worktreesFor.sessionId]?.cwd ?? worktreesFor.cwd}
+          onClose={() => setWorktreesFor(null)}
+        />
+      )}
       {(dialog === 'setup' || (showFirstRun && !state.config.configured)) && (
         <SetupDialog
           state={state}
