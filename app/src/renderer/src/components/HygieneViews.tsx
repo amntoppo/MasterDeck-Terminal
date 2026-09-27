@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ticketLabel } from '@shared/ticket'
 import { formatAgo } from '@shared/format'
 import type { HistoryHit } from '@shared/history'
 import type { JanitorRow } from '@shared/ipc'
@@ -218,7 +219,7 @@ function ParkedRow({ s, now, lastActivity }: { s: Session; now: number; lastActi
         <span className="dot suspended" /> {s.name}
       </td>
       <td className="mono muted">{s.bgId}</td>
-      <td className="muted">{s.issue !== null ? `#${s.issue}` : ''}</td>
+      <td className="muted">{s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : ''}</td>
       <td className="r muted">{lastActivity ? `quiet for ${formatAgo(now - lastActivity)}` : ''}</td>
       <td className="r nowrap">
         {state === 'idle' && (

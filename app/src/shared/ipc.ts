@@ -1,3 +1,4 @@
+import type { Ticket } from './ticket'
 import type { MenuAnswer } from './ask'
 import type { PrSummary } from './prSummary'
 import type { Settings } from './settings'
@@ -106,6 +107,8 @@ export const CH = {
 
 export interface AssignRequest {
   issue: number
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  repo?: string | null
   name: string
   cwd: string
   prompt: string
@@ -141,7 +144,7 @@ export interface DeckApi {
   onShowNeedsYou(cb: () => void): () => void
   approve(id: number): Promise<CliResult>
   reject(id: number): Promise<CliResult>
-  draftAssign(issue: number, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
+  draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
   setSprint(sprint: string): void
   prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>
   /** Resume a session that runs in another terminal as a background session here. */
@@ -159,7 +162,7 @@ export interface DeckApi {
   setSettings(s: Settings): Promise<Settings>
   onAutoOpen(cb: (sessionKey: string) => void): () => void
   /** Move a ticket to a board column (babysit-ticket). */
-  setStatus(issue: number, status: string): Promise<CliResult>
+  setStatus(issue: Ticket, status: string): Promise<CliResult>
   standupCommits(sinceMs: number, dirs: string[], untilMs?: number): Promise<StandupCommit[]>
   /** `force` skips the shared gh cache for PR status (the Refresh button). */
   janitor(liveDirs: string[], force?: boolean): Promise<JanitorRow[]>
@@ -177,7 +180,7 @@ export interface DeckApi {
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>
   dismissStopped(): Promise<void>
   /** Make `login` the only assignee (GitHub REST). */
-  assignIssue(issue: number, login: string, current: string[]): Promise<CliResult>
+  assignIssue(issue: Ticket, login: string, current: string[]): Promise<CliResult>
   assign(req: AssignRequest): Promise<CliResult & { proposalId?: number }>
   /** The model set in ~/.claude/settings.json (what "Default" starts), or null. */
   defaultModel(): Promise<string | null>
@@ -216,7 +219,7 @@ export interface DeckApi {
   /** Post the saved summary as a comment on the session's issue. */
   summaryPost(sessionKey: string): Promise<CliResult>
   /** Link a session to an issue with babysit-ticket (`tt.sh link`). */
-  linkSession(issue: number, sessionId: string, cwd: string | null): Promise<CliResult>
+  linkSession(issue: Ticket, sessionId: string, cwd: string | null): Promise<CliResult>
   setBoardOpen(open: boolean): void
   setFocus(sessionId: string | null): void
   setVisible(sessionIds: string[]): void

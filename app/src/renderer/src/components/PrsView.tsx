@@ -1,4 +1,4 @@
-import { issueUrl } from '@shared/appConfig'
+import { sameTicket, ticketLabel, ticketUrl, type Ticket } from '@shared/ticket'
 import { useEffect, useMemo, useState } from 'react'
 import { ciMessage, ownerOf, prOffers, reviewMessage, type PrOffer } from '@shared/offers'
 import { formatRefreshed } from '@shared/format'
@@ -11,7 +11,7 @@ interface Props {
   state: AppState
   onOpenSession: (s: Session) => void
   /** Open the PR popup (summary + Review PR). */
-  onPr: (url: string, issue: number | null, title: string) => void
+  onPr: (url: string, issue: Ticket | null, title: string) => void
   /** No owning session: start one for the issue, instruction pre-filled. */
   onStartWith: (issue: Issue, instructions: string) => void
 }
@@ -48,7 +48,8 @@ function asPr(p: TeamPr, snapshot: Pr[]): Pr {
     unresolvedThreads: p.unresolvedThreads,
     ci: p.ci,
     headRef: p.headRef,
-    refsIssue: known?.refsIssue ?? p.issues[0] ?? null,
+    refsIssue: known?.refsIssue ?? p.issueRefs?.[0]?.number ?? p.issues[0] ?? null,
+    refsRepo: known ? (known.refsRepo ?? null) : (p.issueRefs?.[0]?.repo ?? null),
   }
 }
 
@@ -240,12 +241,13 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   )
 }
 
-function issueFor(state: AppState, n: number): Issue {
+function issueFor(state: AppState, t: Ticket): Issue {
   return (
-    state.issues.find((i) => i.number === n) ?? {
-      number: n,
-      title: state.board?.cards.find((c) => c.number === n)?.title ?? `#${n}`,
-      url: issueUrl(n),
+    state.issues.find((i) => sameTicket(i, t)) ?? {
+      number: t.number,
+      repo: t.repo,
+      title: state.board?.cards.find((c) => sameTicket(c, t))?.title ?? ticketLabel(t.repo, t.number),
+      url: ticketUrl(t.repo, t.number),
       status: null,
       currentSprint: false,
       assignedToMe: true,
@@ -276,7 +278,7 @@ function PrRow({
     if (owner) {
       const r = await deck().sendText(owner.key, text)
       setMsg(r.ok ? `Sent to ${owner.name}` : r.message)
-    } else if (pr.refsIssue) onStartWith(issueFor(state, pr.refsIssue), text)
+    } else if (pr.refsIssue) onStartWith(issueFor(state, { repo: pr.refsRepo ?? null, number: pr.refsIssue }), text)
     else setMsg('No session or ticket to route it to')
     setBusy(false)
   }
@@ -286,13 +288,13 @@ function PrRow({
   return (
     <tr>
       <td className="pr-cell">
-        <button className="link-btn" onClick={() => onPr(p.url, pr.refsIssue, p.title)} title="Summary and Review PR">
+        <button className="link-btn" onClick={() => onPr(p.url, pr.refsIssue ? { repo: pr.refsRepo ?? null, number: pr.refsIssue } : null, p.title)} title="Summary and Review PR">
           <PrIcon /> #{p.number}
         </button>{' '}
         <button className="link-btn muted-link" onClick={() => onRepo(p.repo)} title={`Only ${p.repo}`}>
           {p.repo}
         </button>{' '}
-        {pr.refsIssue ? <span className="chip muted" title="Ticket">#{pr.refsIssue}</span> : null} {p.draft && <span className="chip muted">draft</span>} <span className="pr-title" title={`${p.title}\n${p.headRef} → ${p.baseRef}`}>{p.title}</span>
+        {pr.refsIssue ? <span className="chip muted" title="Ticket">{ticketLabel(pr.refsRepo, pr.refsIssue)}</span> : null} {p.draft && <span className="chip muted">draft</span>} <span className="pr-title" title={`${p.title}\n${p.headRef} → ${p.baseRef}`}>{p.title}</span>
         {p.labels.map((l) => (
           <span key={l.name} className="chip label-chip" style={{ borderColor: `#${l.color}` }}>
             {l.name}
@@ -336,7 +338,7 @@ function PrRow({
           </button>
         )}
         {!mine && open && !p.draft && (
-          <button className={`btn ${p.requested.some((r) => !!state.me && r.toLowerCase() === state.me.toLowerCase()) ? 'primary' : ''}`} onClick={() => onPr(p.url, pr.refsIssue, p.title)} title="Summary and Review PR">
+          <button className={`btn ${p.requested.some((r) => !!state.me && r.toLowerCase() === state.me.toLowerCase()) ? 'primary' : ''}`} onClick={() => onPr(p.url, pr.refsIssue ? { repo: pr.refsRepo ?? null, number: pr.refsIssue } : null, p.title)} title="Summary and Review PR">
             Review
           </button>
         )}{' '}
@@ -361,7 +363,7 @@ export function OfferRow({ o, state, onDismiss, onStartWith, onOpenSession }: { 
     } else if (o.owner) {
       const r = await deck().sendText(o.owner.key, o.message)
       setMsg(r.ok ? `Sent to ${o.owner.name}` : r.message)
-    } else if (o.pr.refsIssue) onStartWith(issueFor(state, o.pr.refsIssue), o.message)
+    } else if (o.pr.refsIssue) onStartWith(issueFor(state, { repo: o.pr.refsRepo ?? null, number: o.pr.refsIssue }), o.message)
     setBusy(false)
   }
   return (

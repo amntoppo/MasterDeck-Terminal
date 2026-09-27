@@ -13,6 +13,8 @@ export interface RestoreEntry {
   name: string
   cwd: string
   issue: number | null
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  issueRepo?: string | null
 }
 
 export interface RestoreFile {
@@ -38,7 +40,7 @@ export function sameBoot(a: number, b: number): boolean {
 export function runningNow(sessions: Session[], masterName: string): RestoreEntry[] {
   return sessions
     .filter((s) => s.kind === 'background' && s.pid !== null && s.state !== 'done' && s.name !== masterName)
-    .map((s) => ({ sessionId: s.sessionId, bgId: s.bgId, name: s.name, cwd: s.cwd, issue: s.issue }))
+    .map((s) => ({ sessionId: s.sessionId, bgId: s.bgId, name: s.name, cwd: s.cwd, issue: s.issue, ...(s.issueRepo ? { issueRepo: s.issueRepo } : {}) }))
 }
 
 function isLive(e: RestoreEntry, sessions: Session[]): boolean {
@@ -75,6 +77,7 @@ export function parseRestoreFile(raw: unknown): RestoreFile | null {
             name: typeof e.name === 'string' ? e.name : (e.sessionId as string).slice(0, 8),
             cwd: typeof e.cwd === 'string' ? e.cwd : '',
             issue: typeof e.issue === 'number' ? e.issue : null,
+            ...(typeof e.issueRepo === 'string' ? { issueRepo: e.issueRepo } : {}),
           }))
       : []
   if (typeof r.bootAt !== 'number') return null

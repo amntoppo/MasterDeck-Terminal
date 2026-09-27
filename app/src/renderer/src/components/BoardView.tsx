@@ -1,4 +1,5 @@
-import { getConfig, statusGroup, statusRank, type StatusGroup } from '@shared/appConfig'
+import { getConfig, projectByKey, statusGroup, statusRank, type StatusGroup } from '@shared/appConfig'
+import { fullRepo, ticketKey, ticketLabel, ticketOf } from '@shared/ticket'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cardBadge, cardsIn, visibleColumns } from '@shared/board'
 import type { PastSession } from '@shared/pastSessions'
@@ -74,32 +75,37 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
   const now = useNow(15_000)
   const [refreshing, setRefreshing] = useState(false)
   // Drag and drop: a card shows in its new column at once; this is dropped when GitHub confirms or fails.
-  const [moving, setMoving] = useState<Record<number, string>>({})
+  // By ticketKey: two repos can each have a #12.
+  const [moving, setMoving] = useState<Record<string, string>>({})
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [pendingMove, setPendingMove] = useState<{ card: BoardCard; to: string } | null>(null)
   const [moveMsg, setMoveMsg] = useState<string | null>(null)
   const spend = useMemo(() => ticketSpend(state.costBook), [state.costBook])
 
   const doMove = async (card: BoardCard, to: string) => {
-    setMoving((m) => ({ ...m, [card.number]: to }))
-    setMoveMsg(`Moving #${card.number} to ${to}…`)
-    const r = await deck().setStatus(card.number, to)
+    const k = ticketKey(card.repo, card.number)
+    const lab = ticketLabel(card.repo, card.number)
+    setMoving((m) => ({ ...m, [k]: to }))
+    setMoveMsg(`Moving ${lab} to ${to}…`)
+    const r = await deck().setStatus(ticketOf(card), to)
     setMoving((m) => {
       const n = { ...m }
-      delete n[card.number]
+      delete n[k]
       return n
     })
-    setMoveMsg(r.ok ? r.message : `Could not move #${card.number}: ${r.message}`)
+    setMoveMsg(r.ok ? r.message : `Could not move ${lab}: ${r.message}`)
     setTimeout(() => setMoveMsg(null), 5000)
   }
   const drop = (col: string, e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(null)
-    const n = Number(e.dataTransfer.getData('text/masterdeck-card'))
-    const card = state.board?.cards.find((c) => c.number === n)
-    // Only statuses babysit-ticket can set (a column GitHub added later would fail as "unknown status").
-    if (!card || !state.config.columns.includes(col) || (moving[n] ?? card.status) === col) return
-    const back = statusRank(col) < statusRank(card.status ?? '')
+    const k = e.dataTransfer.getData('text/masterdeck-card')
+    const card = state.board?.cards.find((c) => ticketKey(c.repo, c.number) === k)
+    // Only statuses babysit-ticket can set on the card's own board (a column GitHub added later, or
+    // another board's column, would fail as "unknown status").
+    const cols = projectByKey(card?.project)?.columns ?? state.config.columns
+    if (!card || !cols.includes(col) || (moving[k] ?? card.status) === col) return
+    const back = statusRank(col, undefined, card.project) < statusRank(card.status ?? '', undefined, card.project)
     if (back) setPendingMove({ card, to: col })
     else void doMove(card, col)
   }
@@ -117,7 +123,10 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
 
   const rawBoard = state.board
   const b = useMemo(
-    () => (rawBoard && Object.keys(moving).length ? { ...rawBoard, cards: rawBoard.cards.map((c) => (moving[c.number] ? { ...c, status: moving[c.number] } : c)) } : rawBoard),
+    () =>
+      rawBoard && Object.keys(moving).length
+        ? { ...rawBoard, cards: rawBoard.cards.map((c) => (moving[ticketKey(c.repo, c.number)] ? { ...c, status: moving[ticketKey(c.repo, c.number)] } : c)) }
+        : rawBoard,
     [rawBoard, moving],
   )
   const shown = useMemo(() => (b ? applyFilters(b, f) : null), [b, f])
@@ -132,7 +141,7 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
   const onCard = (card: BoardCard) => {
     const action = cardAction(card, me, state.sessions)
     if (action === 'session') {
-      const s = sessionForIssue(state.sessions, card.number)
+      const s = sessionForIssue(state.sessions, ticketOf(card))
       if (s) onOpenSession(s)
     } else if (action === 'start') onStart(card)
     else if (action === 'pr') onPr(card)
@@ -259,7 +268,16 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
                 </div>
                 <div className="board-col-body">
                   {cards.map((c) => (
-                    <Card key={c.number} card={c} state={state} me={me} now={now} spend={spend[c.number] ?? 0} moving={!!moving[c.number]} onClick={() => onCard(c)} />
+                    <Card
+                      key={ticketKey(c.repo, c.number)}
+                      card={c}
+                      state={state}
+                      me={me}
+                      now={now}
+                      spend={spend[ticketKey(c.repo, c.number)] ?? 0}
+                      moving={!!moving[ticketKey(c.repo, c.number)]}
+                      onClick={() => onCard(c)}
+                    />
                   ))}
                 </div>
               </div>
@@ -269,7 +287,7 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
       )}
       {pendingMove && (
         <div className="move-confirm">
-          Move #{pendingMove.card.number} back from <b>{pendingMove.card.status}</b> to <b>{pendingMove.to}</b>?
+          Move {ticketLabel(pendingMove.card.repo, pendingMove.card.number)} back from <b>{pendingMove.card.status}</b> to <b>{pendingMove.to}</b>?
           <button className="btn" onClick={() => setPendingMove(null)}>
             Cancel
           </button>
@@ -295,11 +313,12 @@ function inSprint(start: string, days: number, now: number): boolean {
 }
 
 function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCard; state: AppState; me: string | null; now: number; spend: number; moving: boolean; onClick: () => void }) {
-  const s = sessionForIssue(state.sessions, card.number)
+  const t = ticketOf(card)
+  const s = sessionForIssue(state.sessions, t)
   const mine = me !== null && card.assignees.includes(me)
   // Stopped sessions that worked on this issue: the newest can be resumed from the card.
-  const past = s ? [] : (state.pastSessions[card.number] ?? [])
-  const badge = mine || s || past.length ? cardBadge(card.number, state.sessions, state.proposals, past, state.prStage) : null
+  const past = s ? [] : (state.pastSessions[ticketKey(t.repo, t.number)] ?? [])
+  const badge = mine || s || past.length ? cardBadge(t, state.sessions, state.proposals, past, state.prStage) : null
   const action = cardAction(card, me, state.sessions)
   const stats = s ? state.stats[s.sessionId] : undefined
   return (
@@ -309,7 +328,7 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
       tabIndex={0}
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.setData('text/masterdeck-card', String(card.number))
+        e.dataTransfer.setData('text/masterdeck-card', ticketKey(card.repo, card.number))
         e.dataTransfer.effectAllowed = 'move'
       }}
       onClick={onClick}
@@ -318,7 +337,9 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
     >
       <div className="bcard-top">
         <span className="issue-ico">⊙</span>
-        <span className="muted">{getConfig().issueRepo} #{card.number}</span>
+        <span className="muted" title={fullRepo(card.repo)}>
+          {fullRepo(card.repo).split('/')[1]} #{card.number}
+        </span>
         <span style={{ flex: 1 }} />
         {badge ? (
           <span className={`badge ${badge.kind}`} title={badge.detail ?? badge.label}>

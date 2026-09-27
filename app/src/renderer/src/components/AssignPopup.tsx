@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 
@@ -27,7 +28,7 @@ export function AssignPopup({ card, state, onClose, onAssigned }: Props) {
     if (!login) return
     setBusy(true)
     setError(null)
-    const r = await deck().assignIssue(card.number, login, card.assignees)
+    const r = await deck().assignIssue(ticketOf(card), login, card.assignees)
     setBusy(false)
     if (!r.ok) {
       setError(r.message)

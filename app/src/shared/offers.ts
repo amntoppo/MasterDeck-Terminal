@@ -1,4 +1,5 @@
 import { getConfig } from './appConfig'
+import { ticketLabel } from './ticket'
 import { sessionForIssue } from './derive'
 import type { Pr, Proposal, Session } from './types'
 
@@ -14,24 +15,27 @@ export interface PrOffer {
   message: string
 }
 
-const REPLY = (n: number) =>
-  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '#${n}: done', '#${n}: blocked — <reason>' or '#${n}: question — <question>'.`
+/** `n`: the ticket's label, #12 or name#12. */
+const REPLY = (n: string) =>
+  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '${n}: done', '${n}: blocked — <reason>' or '${n}: question — <question>'.`
+
+const label = (pr: Pr): string => (pr.refsIssue !== null ? ticketLabel(pr.refsRepo, pr.refsIssue) : '#0')
 
 export function ownerOf(pr: Pr, sessions: Session[], sessionPrs: Record<string, string[]>): Session | null {
   const byPr = sessions.find((s) => s.state !== 'done' && (sessionPrs[s.sessionId] ?? []).includes(pr.url))
   if (byPr) return byPr
-  return pr.refsIssue !== null ? sessionForIssue(sessions, pr.refsIssue) : null
+  return pr.refsIssue !== null ? sessionForIssue(sessions, { repo: pr.refsRepo ?? null, number: pr.refsIssue }) : null
 }
 
 export function ciMessage(pr: Pr): string {
-  const n = pr.refsIssue ?? 0
-  return `#${n}: CI is failing on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\nFind the failing check with \`gh pr checks ${pr.number} --repo ${getConfig().owner}/${pr.repo}\`, fix it, and push. Do not merge.\n\n${REPLY(n)}`
+  const n = label(pr)
+  return `${n}: CI is failing on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\nFind the failing check with \`gh pr checks ${pr.number} --repo ${pr.repoFull || `${getConfig().owner}/${pr.repo}`}\`, fix it, and push. Do not merge.\n\n${REPLY(n)}`
 }
 
 export function reviewMessage(pr: Pr): string {
-  const n = pr.refsIssue ?? 0
+  const n = label(pr)
   const k = pr.unresolvedThreads
-  return `#${n}: address ${k} unresolved review thread${k === 1 ? '' : 's'} on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\nRead each unresolved thread, fix what is valid, reply, and resolve it. Do not merge.\n\n${REPLY(n)}`
+  return `${n}: address ${k} unresolved review thread${k === 1 ? '' : 's'} on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\nRead each unresolved thread, fix what is valid, reply, and resolve it. Do not merge.\n\n${REPLY(n)}`
 }
 
 function matching(p: Proposal, pr: Pr, kind: 'CI' | 'REVIEW'): boolean {

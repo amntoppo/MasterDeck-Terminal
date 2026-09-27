@@ -1,3 +1,4 @@
+import { storedRepo, type Ticket } from './ticket'
 /** Every PR in the org (mine and the team's), for the PRs view: parsing, filtering and sorting. */
 
 export type PrState = 'open' | 'merged' | 'closed'
@@ -30,6 +31,8 @@ export interface TeamPr {
   unresolvedThreads: number
   ci: Ci
   issues: number[]
+  /** The issues it closes, with their repos (issues keeps the numbers alone). */
+  issueRefs?: Ticket[]
 }
 
 /** The GraphQL query MasterDeck runs (one search page of 100). */
@@ -48,7 +51,7 @@ export const TEAM_PR_QUERY = `query($q: String!, $after: String) {
         latestReviews(first: 10) { nodes { state author { login } } }
         reviewThreads(first: 50) { nodes { isResolved } }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-        closingIssuesReferences(first: 3) { nodes { number } }
+        closingIssuesReferences(first: 3) { nodes { number repository { nameWithOwner } } }
       }
     }
   }
@@ -70,7 +73,7 @@ export const TEAM_PR_CLOSED_QUERY = `query($q: String!, $after: String) {
         reviewDecision
         labels(first: 5) { nodes { name color } }
         latestReviews(first: 5) { nodes { state author { login } } }
-        closingIssuesReferences(first: 3) { nodes { number } }
+        closingIssuesReferences(first: 3) { nodes { number repository { nameWithOwner } } }
       }
     }
   }
@@ -149,6 +152,9 @@ export function parseTeamPr(raw: unknown): TeamPr | null {
     unresolvedThreads: nodes(n.reviewThreads).filter((t) => t.isResolved === false).length,
     ci: ciOf(commit.statusCheckRollup),
     issues: nodes(n.closingIssuesReferences).map((i) => num(i.number)).filter((x) => x > 0),
+    issueRefs: nodes(n.closingIssuesReferences)
+      .filter((i) => num(i.number) > 0)
+      .map((i) => ({ repo: storedRepo(typeof obj(i.repository).nameWithOwner === 'string' ? (obj(i.repository).nameWithOwner as string) : null), number: num(i.number) })),
   }
 }
 

@@ -1,5 +1,6 @@
 import type { CliResult, DraftAssign, Sprint } from '@shared/types'
 import type { RunResult, Runner } from './run'
+import type { Ticket } from '@shared/ticket'
 
 function message(r: RunResult): string {
   // The CLI prints its errors on stdout; Python tracebacks land on stderr.
@@ -83,12 +84,13 @@ export class MasterCli {
   }
 
   /** With title and url (a board card), no snapshot lookup is needed. */
-  async draftAssign(issue: number, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
+  async draftAssign(t: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
     const extra = title && url ? ['--title', title, '--url', url] : []
-    const r = await this.exec(['draft-assign', String(issue), ...extra], undefined, 120_000)
+    const r = await this.exec(['draft-assign', String(t.number), ...(t.repo ? ['--repo', t.repo] : []), ...extra], undefined, 120_000)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
-      return { ok: true, draft: { ...JSON.parse(r.stdout), proposalId: null } }
+      const d = JSON.parse(r.stdout)
+      return { ok: true, draft: { ...d, repo: typeof d.repo === 'string' ? d.repo : null, proposalId: null } }
     } catch {
       return { ok: false, message: 'draft-assign printed invalid JSON' }
     }
@@ -108,11 +110,11 @@ export class MasterCli {
   }
 
   /** Add an ASSIGN proposal. The prompt goes on stdin; the message is the same text. */
-  async addAssign(a: { issue: number; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string }): Promise<
+  async addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string }): Promise<
     { ok: true; id: number } | { ok: false; message: string }
   > {
     const r = await this.exec(
-      ['add', '--kind', a.kind ?? 'ASSIGN', '--issue', String(a.issue), '--source', a.source, '--spawn-name', a.name, '--cwd', a.cwd,
+      ['add', '--kind', a.kind ?? 'ASSIGN', '--issue', String(a.issue), ...(a.repo ? ['--repo', a.repo] : []), '--source', a.source, '--spawn-name', a.name, '--cwd', a.cwd,
         '--message', a.prompt, '--prompt', '-', ...(a.model ? ['--model', a.model] : [])],
       a.prompt,
     )

@@ -1,3 +1,5 @@
+import { ticketKey } from './ticket'
+
 /**
  * Cost history from the status line stats. A session's `total_cost_usd` is cumulative, so for
  * each session we keep the highest value seen per day; a day's spend is that day's maximum minus
@@ -10,6 +12,8 @@ export interface CostEntry {
   name: string
   key: string
   issue: number | null
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  issueRepo?: string | null
   cost: number
   /** When the session started (epoch ms), if known. */
   startedAt?: number | null
@@ -25,6 +29,7 @@ export interface SessionCost {
   name: string
   key: string
   issue: number | null
+  issueRepo?: string | null
   /** YYYY-MM-DD → highest cumulative cost seen that day. */
   days: Record<string, number>
 }
@@ -47,15 +52,19 @@ export function recordCosts(book: CostBook, entries: CostEntry[], day: string, d
   for (const e of entries) {
     if (!(e.cost >= 0)) continue
     if (!book[e.sessionId] && dayStartMs !== undefined && (e.startedAt == null || e.startedAt < dayStartMs)) {
-      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, days: { [BASELINE]: e.cost } }
+      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), days: { [BASELINE]: e.cost } }
       changed = true
       continue
     }
-    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, days: {} })
-    if (rec.name !== e.name || rec.issue !== e.issue || rec.key !== e.key) {
+    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), days: {} })
+    if (rec.name !== e.name || rec.issue !== e.issue || (rec.issueRepo ?? null) !== (e.issueRepo ?? null) || rec.key !== e.key) {
       rec.name = e.name
       rec.key = e.key
-      if (e.issue !== null) rec.issue = e.issue
+      if (e.issue !== null) {
+        rec.issue = e.issue
+        if (e.issueRepo) rec.issueRepo = e.issueRepo
+        else delete rec.issueRepo
+      }
       changed = true
     }
     if ((rec.days[day] ?? -1) < e.cost) {
@@ -98,10 +107,14 @@ export function sessionSpendBetween(rec: SessionCost, from: string, to: string):
     .reduce((a, [, v]) => a + v, 0)
 }
 
-/** All-time spend per ticket: the sum of its sessions' totals. */
-export function ticketSpend(book: CostBook): Record<number, number> {
-  const out: Record<number, number> = {}
-  for (const rec of Object.values(book)) if (rec.issue !== null) out[rec.issue] = (out[rec.issue] ?? 0) + sessionTotal(rec)
+/** All-time spend per ticket (by ticketKey): the sum of its sessions' totals. */
+export function ticketSpend(book: CostBook): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const rec of Object.values(book)) {
+    if (rec.issue === null) continue
+    const k = ticketKey(rec.issueRepo, rec.issue)
+    out[k] = (out[k] ?? 0) + sessionTotal(rec)
+  }
   return out
 }
 
@@ -134,7 +147,7 @@ export function validBook(raw: unknown): CostBook {
     if (!rec || typeof rec !== 'object' || !rec.days || typeof rec.days !== 'object') continue
     const days: Record<string, number> = {}
     for (const [d, v] of Object.entries(rec.days)) if (typeof v === 'number' && Number.isFinite(v)) days[d] = v
-    out[id] = { name: typeof rec.name === 'string' ? rec.name : id.slice(0, 8), key: typeof rec.key === 'string' ? rec.key : id, issue: typeof rec.issue === 'number' ? rec.issue : null, days }
+    out[id] = { name: typeof rec.name === 'string' ? rec.name : id.slice(0, 8), key: typeof rec.key === 'string' ? rec.key : id, issue: typeof rec.issue === 'number' ? rec.issue : null, ...(typeof rec.issueRepo === 'string' ? { issueRepo: rec.issueRepo } : {}), days }
   }
   return out
 }

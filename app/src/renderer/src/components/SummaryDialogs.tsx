@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ticketKey, ticketOf } from '@shared/ticket'
 import { cardBadge } from '@shared/board'
 import { burndown, summarize, summaryMarkdown } from '@shared/sprintSummary'
 import { pointsText, rangeFor, standupPoints, type StandupCommit, type StandupRange } from '@shared/standup'
@@ -32,7 +33,7 @@ function Copy({ text, label = 'Copy as Markdown' }: { text: string; label?: stri
 export function SprintSummaryDialog({ state, onClose }: { state: AppState; onClose: () => void }) {
   useEsc(onClose)
   const b = state.board
-  const s = useMemo(() => (b ? summarize(b, (n) => cardBadge(n, state.sessions, state.proposals, [], state.prStage).kind) : null), [b, state.sessions, state.proposals, state.prStage])
+  const s = useMemo(() => (b ? summarize(b, (c) => cardBadge(ticketOf(c), state.sessions, state.proposals, [], state.prStage).kind) : null), [b, state.sessions, state.proposals, state.prStage])
   const sprint = state.sprints.find((x) => x.title === b?.sprint)
   const series = sprint ? burndown(state.boardHistory[sprint.title] ?? [], sprint.startDate, sprint.duration) : []
   const max = Math.max(1, ...series.map((p) => Math.max(p.ideal, p.remaining ?? 0)))
@@ -190,27 +191,30 @@ export function StandupDialog({ state, onClose }: { state: AppState; onClose: ()
     }
   }, [since, until, valid, dirs])
 
-  const titles: Record<number, string> = {}
-  for (const i of state.issues) titles[i.number] = i.title
-  for (const c of state.board?.cards ?? []) titles[c.number] ??= c.title
+  const titles: Record<string, string> = {}
+  for (const i of state.issues) titles[ticketKey(i.repo, i.number)] = i.title
+  for (const c of state.board?.cards ?? []) titles[ticketKey(c.repo, c.number)] ??= c.title
   const sinceIso = since.toISOString()
   const untilIso = until.toISOString()
   const inRange = (t: string | null | undefined) => !!t && t >= sinceIso && t < untilIso
   const prs = state.prs
     .filter((p) => p.authorIsMe && inRange(p.updatedAt))
-    .map((p) => ({ url: p.url, repo: p.repo, number: p.number, title: p.title, issue: p.refsIssue }))
+    .map((p) => ({ url: p.url, repo: p.repo, number: p.number, title: p.title, issue: p.refsIssue, issueRepo: p.refsRepo ?? null }))
   const reports = state.proposals
     .filter((p) => p.kind !== 'CHAT' && ['done', 'blocked', 'question'].includes(p.status) && p.note)
     // Open questions/blocks still count (no close time); finished work counts when it finished in range.
     .filter((p) => (p.closedAt ? inRange(p.closedAt) : p.status !== 'done'))
-    .map((p) => ({ issue: p.issue, status: p.status, note: p.note ?? '' }))
+    .map((p) => ({ issue: p.issue, issueRepo: p.repo ?? null, status: p.status, note: p.note ?? '' }))
   // Commits on a session's branch belong to that session's ticket even when the branch has no number.
-  const byBranch = new Map<string, number>()
+  const byBranch = new Map<string, { issue: number; repo: string | null }>()
   for (const s of state.sessions) {
     const br = state.git[s.sessionId]?.branch ?? state.tails[s.sessionId]?.gitBranch
-    if (br && s.issue !== null) byBranch.set(br, s.issue)
+    if (br && s.issue !== null) byBranch.set(br, { issue: s.issue, repo: s.issueRepo ?? null })
   }
-  const cs = (commits ?? []).map((c) => ({ ...c, issue: c.issue ?? (c.branch ? (byBranch.get(c.branch) ?? null) : null) }))
+  const cs = (commits ?? []).map((c) => {
+    const own = c.branch ? byBranch.get(c.branch) : undefined
+    return c.issue !== null ? c : own ? { ...c, issue: own.issue, issueRepo: own.repo } : c
+  })
   const tickets = commits ? standupPoints(titles, cs, prs, reports) : []
   const lastDay = new Date(until.getTime() - 1)
   const label = ymd(since) === ymd(lastDay) ? fmtDay(since) : `${fmtDay(since)} – ${fmtDay(lastDay)}`

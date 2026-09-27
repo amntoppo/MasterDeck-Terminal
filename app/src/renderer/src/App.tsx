@@ -1,6 +1,6 @@
-import { issueUrl } from '@shared/appConfig'
+import { sameTicket, ticketLabel, ticketOf, ticketUrl, type Ticket } from '@shared/ticket'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { sessionForIssue } from '@shared/derive'
+import { sessionForIssue, sessionTicket } from '@shared/derive'
 import type { AppState, Issue, Session, BoardCard } from '@shared/types'
 import type { AssignRequest } from '@shared/ipc'
 import { AssignDialog } from './components/AssignDialog'
@@ -49,7 +49,7 @@ type Tab =
 
 const MIN_MASTER = 280
 
-type HereOpts = { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean; linkIssue: number | null }
+type HereOpts = { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean; linkIssue: Ticket | null }
 
 function paneIdFor(tab: Tab): string {
   return tab.kind === 'session' ? `s:${tab.key}` : tab.id
@@ -79,8 +79,10 @@ export function App() {
   const [assignCard, setAssignCard] = useState<BoardCard | null>(null)
   const issueOf = useCallback(
     (card: BoardCard): Issue =>
-      state?.issues.find((i) => i.number === card.number) ?? {
+      state?.issues.find((i) => sameTicket(i, card)) ?? {
         number: card.number,
+        repo: card.repo ?? null,
+        project: card.project ?? null,
         title: card.title,
         url: card.url,
         status: card.status,
@@ -162,7 +164,7 @@ export function App() {
   const onIssue = useCallback(
     (issue: Issue) => {
       if (!state) return
-      const owner = sessionForIssue(state.sessions, issue.number)
+      const owner = sessionForIssue(state.sessions, ticketOf(issue))
       if (owner) openSession(owner)
       else setAssigning(issue)
     },
@@ -189,7 +191,7 @@ export function App() {
   const startHere = useCallback(
     (tabId: string, s: Session, stopOther: boolean) => {
       const id = `pending:${s.name}:${Date.now()}`
-      const here: HereOpts = { sessionId: s.sessionId, name: s.name, cwd: s.cwd, pid: s.pid, stopOther, linkIssue: s.issue }
+      const here: HereOpts = { sessionId: s.sessionId, name: s.name, cwd: s.cwd, pid: s.pid, stopOther, linkIssue: sessionTicket(s) }
       setView('terminals')
       setTabs((cur) => {
         const t: Tab = { id, kind: 'pending', name: s.name, issue: s.issue ?? 0, startedAt: Date.now(), here }
@@ -243,7 +245,7 @@ export function App() {
     let next = tabs
     for (const { pendingId, s, linkIssue } of found) {
       // The resumed conversation has a new session id: keep its ticket link.
-      if (linkIssue && s.issue !== linkIssue) void deck().linkSession(linkIssue, s.sessionId, s.cwd)
+      if (linkIssue && !sameTicket(sessionTicket(s), linkIssue)) void deck().linkSession(linkIssue, s.sessionId, s.cwd)
       const tabId = `tab:${s.key}`
       next = next.some((t) => t.id === tabId)
         ? next.filter((t) => t.id !== pendingId)
@@ -356,15 +358,17 @@ export function App() {
     else setDialog(a as 'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'skills')
   }
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
-  const openPr = (url: string, issue: number | null, title: string) => {
+  const openPr = (url: string, issue: Ticket | null, title: string) => {
     const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url)
     if (!m) return
-    const known = state.board?.cards.find((c) => c.number === issue)
+    const known = issue ? state.board?.cards.find((c) => sameTicket(c, issue)) : undefined
     const snap = state.prs.find((p) => p.url === url)
     setPrCard({
-      number: issue ?? 0,
-      title: known?.title ?? state.issues.find((i) => i.number === issue)?.title ?? title,
-      url: issue ? issueUrl(issue) : url,
+      number: issue?.number ?? 0,
+      repo: issue?.repo ?? null,
+      project: known?.project ?? null,
+      title: known?.title ?? (issue ? state.issues.find((i) => sameTicket(i, issue))?.title : undefined) ?? title,
+      url: issue ? ticketUrl(issue.repo, issue.number) : url,
       status: known?.status ?? null,
       prs: [{ url, repo: m[1], number: Number(m[2]), state: 'OPEN', ci: snap?.ci === 'success' ? 'success' : snap?.ci === 'failure' ? 'failure' : null, unresolved: snap?.unresolvedThreads ?? 0 }],
       assignees: known?.assignees ?? [],
@@ -570,7 +574,7 @@ export function App() {
           onAction={runAction}
           onOpenSession={openSession}
           onIssue={(i) => {
-            const s = sessionForIssue(state.sessions, i.number)
+            const s = sessionForIssue(state.sessions, ticketOf(i))
             if (s) openSession(s)
             else setAssigning(i)
           }}
@@ -617,7 +621,7 @@ export function App() {
           onClose={() => setAssignCard(null)}
           onAssigned={(card, login) => {
             if (login === state.me) setAssigning(issueOf({ ...card, assignees: [login] }))
-            else flash(`#${card.number} assigned to ${login}`)
+            else flash(`${ticketLabel(card.repo, card.number)} assigned to ${login}`)
           }}
         />
       )}
@@ -627,7 +631,7 @@ export function App() {
           state={state}
           onClose={() => setLinking(null)}
           onLinked={(s) => {
-            flash(s ? `${s.name} linked to #${linking.number}` : `Linked to #${linking.number}`)
+            flash(s ? `${s.name} linked to ${ticketLabel(linking.repo, linking.number)}` : `Linked to ${ticketLabel(linking.repo, linking.number)}`)
             if (s) openSession(s)
           }}
         />

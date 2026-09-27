@@ -1,9 +1,13 @@
+import { parseTicket, ticketKey, ticketLabel } from './ticket'
+
+/** `issueRepo` on each: the ticket's repo (owner/name); null or missing: the primary issue repo. */
 export interface StandupCommit {
   repo: string
   sha: string
   subject: string
   branch: string | null
   issue: number | null
+  issueRepo?: string | null
 }
 
 export interface StandupPr {
@@ -12,13 +16,23 @@ export interface StandupPr {
   number: number
   title: string
   issue: number | null
+  issueRepo?: string | null
 }
 
 export interface StandupReport {
   issue: number
+  issueRepo?: string | null
   status: string
   note: string
 }
+
+/** A ticket's grouping key (ticketKey), or null for work without one. */
+const keyOf = (x: { issue: number | null; issueRepo?: string | null }): string | null => (x.issue === null ? null : ticketKey(x.issueRepo, x.issue))
+const labelOf = (k: string): string => {
+  const t = parseTicket(k)
+  return t ? ticketLabel(t.repo, t.number) : k
+}
+const numOf = (k: string): number => parseTicket(k)?.number ?? 0
 
 /** The standup window: since yesterday 00:00, or since Friday 00:00 on a Monday. */
 export function standupSince(now: Date): Date {
@@ -34,17 +48,17 @@ export function issueFromBranch(branch: string | null): number | null {
   return m ? Number(m[1]) : null
 }
 
-/** Markdown grouped by ticket; "Other" for work without one. */
-export function standupMarkdown(since: Date, titles: Record<number, string>, commits: StandupCommit[], prs: StandupPr[], reports: StandupReport[]): string {
-  const keys = new Set<number | null>([...commits.map((c) => c.issue), ...prs.map((p) => p.issue), ...reports.map((r) => r.issue)])
-  const order = [...keys].sort((a, b) => (a === null ? 1 : b === null ? -1 : a - b))
+/** Markdown grouped by ticket; "Other" for work without one. `titles` by ticketKey. */
+export function standupMarkdown(since: Date, titles: Record<string, string>, commits: StandupCommit[], prs: StandupPr[], reports: StandupReport[]): string {
+  const keys = new Set<string | null>([...commits.map(keyOf), ...prs.map(keyOf), ...reports.map(keyOf)])
+  const order = [...keys].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b, undefined, { numeric: true })))
   const out = [`### Standup (since ${since.toDateString()})`, '']
   if (order.length === 0) out.push('_Nothing recorded since then._')
   for (const k of order) {
-    out.push(k === null ? '**Other**' : `**#${k} ${titles[k] ?? ''}**`.replace(/ \*\*$/, '**'))
-    for (const r of reports.filter((x) => x.issue === k)) out.push(`- Session reported **${r.status}**: ${r.note.split('\n')[0]}`)
-    for (const p of prs.filter((x) => x.issue === k)) out.push(`- PR ${p.repo}#${p.number}: ${p.title}`)
-    const cs = commits.filter((x) => x.issue === k)
+    out.push(k === null ? '**Other**' : `**${labelOf(k)} ${titles[k] ?? ''}**`.replace(/ \*\*$/, '**'))
+    for (const r of reports.filter((x) => keyOf(x) === k)) out.push(`- Session reported **${r.status}**: ${r.note.split('\n')[0]}`)
+    for (const p of prs.filter((x) => keyOf(x) === k)) out.push(`- PR ${p.repo}#${p.number}: ${p.title}`)
+    const cs = commits.filter((x) => keyOf(x) === k)
     if (cs.length) out.push(`- ${cs.length} commit${cs.length === 1 ? '' : 's'}: ${cs.slice(0, 5).map((c) => `${c.subject} (${c.repo}@${c.sha.slice(0, 7)})`).join('; ')}${cs.length > 5 ? '; …' : ''}`)
     out.push('')
   }
@@ -52,7 +66,10 @@ export function standupMarkdown(since: Date, titles: Record<number, string>, com
 }
 
 export interface TicketPoints {
-  issue: number | null
+  /** ticketKey, or null for work without a ticket. */
+  issue: string | null
+  /** #12 or name#12. */
+  label: string | null
   title: string
   points: string[]
 }
@@ -93,25 +110,25 @@ function firstSentence(note: string): string {
  * and one line of what the commits were about. Tickets with the most to say come first; work
  * without a ticket goes last under "Other".
  */
-export function standupPoints(titles: Record<number, string>, commits: StandupCommit[], prs: StandupPr[], reports: StandupReport[]): TicketPoints[] {
-  const keys = new Set<number | null>([...commits.map((c) => c.issue), ...prs.map((p) => p.issue), ...reports.map((r) => r.issue)])
+export function standupPoints(titles: Record<string, string>, commits: StandupCommit[], prs: StandupPr[], reports: StandupReport[]): TicketPoints[] {
+  const keys = new Set<string | null>([...commits.map(keyOf), ...prs.map(keyOf), ...reports.map(keyOf)])
   const out: TicketPoints[] = []
   for (const k of keys) {
     const points: string[] = []
-    const rs = reports.filter((r) => r.issue === k)
+    const rs = reports.filter((r) => keyOf(r) === k)
     const done = rs.find((r) => r.status === 'done')
     const blocked = rs.find((r) => r.status === 'blocked')
     const question = rs.find((r) => r.status === 'question')
     if (done) points.push(`Done: ${firstSentence(done.note)}`)
     if (blocked) points.push(`Blocked: ${firstSentence(blocked.note)}`)
     if (question) points.push(`Waiting on my input: ${firstSentence(question.note)}`)
-    const ps = prs.filter((p) => p.issue === k)
+    const ps = prs.filter((p) => keyOf(p) === k)
     if (ps.length === 1) points.push(`PR up: ${ps[0].repo}#${ps[0].number}, ${clip(ps[0].title, 70)}`)
     else if (ps.length > 1) points.push(`${ps.length} PRs up: ${ps.map((p) => `${p.repo}#${p.number}`).join(', ')}`)
     const subjects = [
       ...new Set(
         commits
-          .filter((c) => c.issue === k && !/^Merge\b/i.test(c.subject))
+          .filter((c) => keyOf(c) === k && !/^Merge\b/i.test(c.subject))
           .map((c) => cleanSubject(c.subject))
           .filter(Boolean),
       ),
@@ -119,15 +136,15 @@ export function standupPoints(titles: Record<number, string>, commits: StandupCo
     // One short bullet per piece of work (easier to say than a run-on list), at most three.
     subjects.slice(0, 3).forEach((s, i) => points.push(i === 0 ? `Worked on: ${clip(s, 60)}` : clip(s, 60)))
     if (subjects.length > 3) points.push(`+${subjects.length - 3} more commit${subjects.length - 3 === 1 ? '' : 's'}`)
-    if (points.length) out.push({ issue: k, title: k === null ? 'Other' : clip(titles[k] ?? `#${k}`, 70), points })
+    if (points.length) out.push({ issue: k, label: k === null ? null : labelOf(k), title: k === null ? 'Other' : clip(titles[k] ?? labelOf(k), 70), points })
   }
-  return out.sort((a, b) => (a.issue === null ? 1 : b.issue === null ? -1 : b.points.length - a.points.length || a.issue - b.issue))
+  return out.sort((a, b) => (a.issue === null ? 1 : b.issue === null ? -1 : b.points.length - a.points.length || numOf(a.issue) - numOf(b.issue)))
 }
 
 /** Plain bullets for copying (to read out, or paste into chat). */
 export function pointsText(label: string, tickets: TicketPoints[]): string {
   if (tickets.length === 0) return `Standup (${label}): nothing recorded.`
-  return [`Standup (${label})`, ...tickets.flatMap((t) => ['', t.issue === null ? 'Other' : `#${t.issue} ${t.title}`, ...t.points.map((p) => `• ${p}`)])].join('\n')
+  return [`Standup (${label})`, ...tickets.flatMap((t) => ['', t.issue === null ? 'Other' : `${t.label} ${t.title}`, ...t.points.map((p) => `• ${p}`)])].join('\n')
 }
 
 export type StandupRange = 'last-standup' | 'yesterday' | '3d' | 'week' | 'custom'

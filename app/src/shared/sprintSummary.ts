@@ -1,4 +1,4 @@
-import { getConfig, statusRank } from './appConfig'
+import { getConfig, statusesFor, statusRank } from './appConfig'
 import type { Badge, Board, BoardCard } from './types'
 
 export type Group = 'done' | 'progress' | 'blocked' | 'todo'
@@ -6,10 +6,12 @@ export type Group = 'done' | 'progress' | 'blocked' | 'todo'
 /** Where a card counts: Done (dev done and later), In progress, Blocked (column or badge), To do. */
 export function groupOf(c: BoardCard, badge?: Badge['kind']): Group {
   const cfg = getConfig()
-  const s = cfg.statuses
+  // The card's own board decides what its status means.
+  const s = statusesFor(c.project, cfg)
+  const rank = (x: string) => statusRank(x, cfg, c.project)
   if ((c.status && s.blocked.includes(c.status)) || badge === 'blocked') return 'blocked'
   if (!c.status) return 'todo'
-  if (s.done.includes(c.status) || (!s.assignable.includes(c.status) && statusRank(c.status, cfg) >= statusRank(s.devDone, cfg) && statusRank(s.devDone, cfg) >= 0)) return 'done'
+  if (s.done.includes(c.status) || (!s.assignable.includes(c.status) && rank(c.status) >= rank(s.devDone) && rank(s.devDone) >= 0)) return 'done'
   if (c.status === s.inProgress || c.status === s.prRaised) return 'progress'
   return 'todo'
 }
@@ -21,11 +23,11 @@ export interface Summary {
   byAssignee: { login: string; done: number; progress: number; blocked: number; todo: number }[]
 }
 
-export function summarize(b: Board, badgeOf: (n: number) => Badge['kind'] | undefined = () => undefined): Summary {
+export function summarize(b: Board, badgeOf: (c: BoardCard) => Badge['kind'] | undefined = () => undefined): Summary {
   const byGroup: Record<Group, BoardCard[]> = { done: [], progress: [], blocked: [], todo: [] }
   const people = new Map<string, { login: string; done: number; progress: number; blocked: number; todo: number }>()
   for (const c of b.cards) {
-    const g = groupOf(c, badgeOf(c.number))
+    const g = groupOf(c, badgeOf(c))
     byGroup[g].push(c)
     for (const who of c.assignees.length ? c.assignees : ['(unassigned)']) {
       const row = people.get(who) ?? { login: who, done: 0, progress: 0, blocked: 0, todo: 0 }

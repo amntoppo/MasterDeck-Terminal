@@ -83,7 +83,7 @@ describe('MasterCli', () => {
   })
   it('draftAssign parses JSON and marks it as not from a proposal', async () => {
     const f = fake({ stdout: JSON.stringify({ issue: 9, name: 'n', cwd: '/w', prompt: 'p', summary: 's', title: 't', url: 'u' }) })
-    const r = await new MasterCli(f.run, '/lib', 'python3').draftAssign(9)
+    const r = await new MasterCli(f.run, '/lib', 'python3').draftAssign({ repo: null, number: 9 })
     expect(r.ok && r.draft.proposalId).toBeNull()
     expect(r.ok && r.draft.name).toBe('n')
   })

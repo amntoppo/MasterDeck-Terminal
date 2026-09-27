@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ticketKey, ticketLabel, ticketOf, type Ticket } from '@shared/ticket'
 import { MASTER_NAME, sessionForIssue } from '@shared/derive'
 import { rank } from '@shared/fuzzy'
 import type { AppState, Issue, Session } from '@shared/types'
@@ -34,7 +35,7 @@ interface Props {
   onAction: (a: PaletteAction) => void
   onOpenSession: (s: Session) => void
   onIssue: (i: Issue) => void
-  onPr: (url: string, issue: number | null, title: string) => void
+  onPr: (url: string, issue: Ticket | null, title: string) => void
 }
 
 const ACTIONS: [PaletteAction, string, string][] = [
@@ -79,25 +80,27 @@ export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssu
         id: `s:${s.key}`,
         group: 'Session',
         label: s.name,
-        hint: `${s.issue !== null ? `#${s.issue} · ` : ''}${s.state}${s.kind === 'interactive' ? ' · other terminal' : ''}`,
+        hint: `${s.issue !== null ? `${ticketLabel(s.issueRepo, s.issue)} · ` : ''}${s.state}${s.kind === 'interactive' ? ' · other terminal' : ''}`,
         run: done(() => onOpenSession(s)),
       })
     }
-    const issues = new Map<number, Issue>()
-    for (const i of state.issues) issues.set(i.number, i)
-    for (const c of state.board?.cards ?? [])
-      if (!issues.has(c.number)) issues.set(c.number, { number: c.number, title: c.title, url: c.url, status: c.status, currentSprint: true, assignedToMe: state.me ? c.assignees.includes(state.me) : false })
-    for (const i of issues.values()) {
-      const s = sessionForIssue(state.sessions, i.number)
-      items.push({ id: `i:${i.number}`, group: 'Issue', label: `#${i.number} ${i.title}`, hint: s ? `open ${s.name}` : (i.status ?? 'start a session'), run: done(() => (s ? onOpenSession(s) : onIssue(i))) })
+    const issues = new Map<string, Issue>()
+    for (const i of state.issues) issues.set(ticketKey(i.repo, i.number), i)
+    for (const c of state.board?.cards ?? []) {
+      const k = ticketKey(c.repo, c.number)
+      if (!issues.has(k)) issues.set(k, { number: c.number, repo: c.repo ?? null, project: c.project ?? null, title: c.title, url: c.url, status: c.status, currentSprint: true, assignedToMe: state.me ? c.assignees.includes(state.me) : false })
+    }
+    for (const [k, i] of issues) {
+      const s = sessionForIssue(state.sessions, ticketOf(i))
+      items.push({ id: `i:${k}`, group: 'Issue', label: `${ticketLabel(i.repo, i.number)} ${i.title}`, hint: s ? `open ${s.name}` : (i.status ?? 'start a session'), run: done(() => (s ? onOpenSession(s) : onIssue(i))) })
     }
     for (const p of state.prs) {
       items.push({
         id: `p:${p.url}`,
         group: 'PR',
         label: `${p.repo}#${p.number} ${p.title}`,
-        hint: p.refsIssue ? `#${p.refsIssue}` : 'PR',
-        run: done(() => onPr(p.url, p.refsIssue, p.title)),
+        hint: p.refsIssue ? ticketLabel(p.refsRepo, p.refsIssue) : 'PR',
+        run: done(() => onPr(p.url, p.refsIssue ? { repo: p.refsRepo ?? null, number: p.refsIssue } : null, p.title)),
       })
     }
     return items

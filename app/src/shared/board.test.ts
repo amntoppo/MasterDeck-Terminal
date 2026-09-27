@@ -51,17 +51,17 @@ describe('cardBadge with PR statuses', () => {
   it('shows where the PR stands after working, before done and idle', () => {
     const idle = sess({ state: 'idle' })
     const done = prop({ kind: 'ASSIGN', status: 'done' })
-    expect(cardBadge(7, [idle], [done], [], { [idle.key]: stage })).toEqual({ kind: 'ready', label: 'Ready for Review', detail: 'PR #5: the automated review passed' })
-    expect(cardBadge(7, [sess({ state: 'working' })], [], [], { [idle.key]: stage }).kind).toBe('working')
-    expect(cardBadge(7, [idle], [prop({ status: 'question' })], [], { [idle.key]: stage }).kind).toBe('question')
-    expect(cardBadge(7, [idle], [done]).kind).toBe('done')
+    expect(cardBadge({ repo: null, number: 7 }, [idle], [done], [], { [idle.key]: stage })).toEqual({ kind: 'ready', label: 'Ready for Review', detail: 'PR #5: the automated review passed' })
+    expect(cardBadge({ repo: null, number: 7 }, [sess({ state: 'working' })], [], [], { [idle.key]: stage }).kind).toBe('working')
+    expect(cardBadge({ repo: null, number: 7 }, [idle], [prop({ status: 'question' })], [], { [idle.key]: stage }).kind).toBe('question')
+    expect(cardBadge({ repo: null, number: 7 }, [idle], [done]).kind).toBe('done')
   })
 })
 
 describe('cardBadge', () => {
-  const kind = (s: Session[], p: Proposal[]) => cardBadge(7, s, p).kind
+  const kind = (s: Session[], p: Proposal[]) => cardBadge({ repo: null, number: 7 }, s, p).kind
   it('question beats a working session and carries the note', () => {
-    const b = cardBadge(7, [sess({ state: 'working' })], [prop({ status: 'question', note: 'ready for instructions?' })])
+    const b = cardBadge({ repo: null, number: 7 }, [sess({ state: 'working' })], [prop({ status: 'question', note: 'ready for instructions?' })])
     expect(b).toEqual({ kind: 'question', label: 'Question', detail: 'ready for instructions?' })
   })
   it('blocked, then needs input', () => {

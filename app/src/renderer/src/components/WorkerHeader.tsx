@@ -1,5 +1,6 @@
-import { issueUrl as issueUrlFor } from '@shared/appConfig'
 import { useEffect, useRef, useState } from 'react'
+import { sameTicket, ticketLabel, ticketUrl } from '@shared/ticket'
+import { sessionTicket } from '@shared/derive'
 import { formatAgo, formatCost, formatDiff, formatPct, shortPath } from '@shared/format'
 import { contextLevel } from '@shared/stats'
 import { formatTokens, tokenSum, tokenTitle } from '@shared/tokens'
@@ -45,12 +46,13 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
     setTimeout(() => setNote(null), 1600)
   }
 
-  const issue = s.issue !== null ? state.issues.find((i) => i.number === s.issue) : undefined
-  const issueLink = issue?.url ?? (s.issue !== null ? issueUrlFor(s.issue) : null)
+  const t = sessionTicket(s)
+  const issue = t ? state.issues.find((i) => sameTicket(i, t)) : undefined
+  const issueLink = issue?.url ?? (t ? ticketUrl(t.repo, t.number) : null)
   // Every PR the session has (a session can open several, across repos), newest first. With none
   // of its own, the PRs that reference its issue.
   const linked = state.sessionPrs[s.sessionId] ?? []
-  const issuePrs = s.issue !== null ? state.prs.filter((p) => p.refsIssue === s.issue).map((p) => p.url) : []
+  const issuePrs = t ? state.prs.filter((p) => p.refsIssue !== null && sameTicket({ repo: p.refsRepo, number: p.refsIssue }, t)).map((p) => p.url) : []
   const prUrls = [...new Set(linked.length ? linked : issuePrs)].reverse()
   const git = state.git[s.sessionId]
   const stats = state.stats[s.sessionId]
@@ -69,7 +71,7 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
       <div className="r">
         {issueLink ? (
           <span className="chip btnlike" onClick={() => deck().openExternal(issueLink)} title={issue?.title ?? ''}>
-            Issue #{s.issue} ↗
+            Issue {ticketLabel(s.issueRepo, s.issue ?? 0)} ↗
           </span>
         ) : (
           <span className="chip muted">No issue</span>

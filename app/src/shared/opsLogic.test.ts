@@ -41,7 +41,7 @@ describe('standup', () => {
     expect(issueFromBranch('docs/chat-design')).toBeNull()
   })
   it('groups by ticket with reports, PRs and commits', () => {
-    const md = standupMarkdown(new Date(2026, 8, 24), { 1036: 'Notification Pop-up' },
+    const md = standupMarkdown(new Date(2026, 8, 24), { 'acme/tracker#1036': 'Notification Pop-up' },
       [{ repo: 'mobile-app', sha: 'abcdef123', subject: 'feat: bell dropdown', branch: 'feat/1036-x', issue: 1036 }, { repo: 'r', sha: '1234567', subject: 'chore', branch: null, issue: null }],
       [{ url: 'u', repo: 'mobile-app', number: 137, title: 'Notification popup', issue: 1036 }],
       [{ issue: 1036, status: 'done', note: 'Implemented and pushed.\nmore' }])
@@ -107,7 +107,7 @@ describe('standup points', () => {
   })
   it('crisp points per ticket: done/blocked/question, PRs, what the commits were about', () => {
     const pts = standupPoints(
-      { 988: 'Expo public link fix', 941: 'Home page banners' },
+      { 'acme/tracker#988': 'Expo public link fix', 'acme/tracker#941': 'Home page banners' },
       [
         { repo: 'mobile-app', sha: 'a', subject: 'fix(links): accept an emailed org invitation in the app', branch: 'fix/988-x', issue: 988 },
         { repo: 'mobile-app', sha: 'b', subject: 'fix(web): a branded not-found screen', branch: 'fix/988-x', issue: 988 },
@@ -120,7 +120,8 @@ describe('standup points', () => {
       ],
     )
     expect(pts[0]).toEqual({
-      issue: 988,
+      issue: 'acme/tracker#988',
+      label: '#988',
       title: 'Expo public link fix',
       points: ['Done: Live. Backend #605 is on staging', 'PR up: mobile-app#117, Public links', 'Worked on: accept an emailed org invitation in the app', 'a branded not-found screen'],
     })
@@ -129,12 +130,12 @@ describe('standup points', () => {
     expect(pointsText('yesterday', pts).split('\n')[2]).toBe('#988 Expo public link fix')
   })
   it('skips merge commits and cuts long items at a word boundary', () => {
-    const pts = standupPoints({ 1: 'T' }, [
+    const pts = standupPoints({ 'acme/tracker#1': 'T' }, [
       { repo: 'r', sha: 'm', subject: 'Merge origin/main into feat/1-x', branch: null, issue: 1 },
       { repo: 'r', sha: 'a', subject: 'fix(home): clean up the legacy dismiss key and reset banner state on focus', branch: null, issue: 1 },
     ], [], [])
     expect(pts[0].points).toEqual(['Worked on: clean up the legacy dismiss key and reset banner state…'])
-    const many = standupPoints({ 2: 'U' }, ['a one', 'b two', 'c three', 'd four', 'e five'].map((subject, i) => ({ repo: 'r', sha: String(i), subject, branch: null, issue: 2 })), [], [])
+    const many = standupPoints({ 'acme/tracker#2': 'U' }, ['a one', 'b two', 'c three', 'd four', 'e five'].map((subject, i) => ({ repo: 'r', sha: String(i), subject, branch: null, issue: 2 })), [], [])
     expect(many[0].points).toEqual(['Worked on: a one', 'b two', 'c three', '+2 more commits'])
   })
   it('ranges', () => {

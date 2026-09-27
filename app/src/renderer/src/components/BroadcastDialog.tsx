@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ticketLabel } from '@shared/ticket'
 import { MASTER_NAME } from '@shared/derive'
 import { canSend } from '@shared/send'
 import type { AppState, CliResult } from '@shared/types'
@@ -84,7 +85,7 @@ export function BroadcastDialog({ state, onClose, livePanes }: Props) {
                 <input type="checkbox" disabled={!route.ok || busy} checked={route.ok && picked.has(s.key)} onChange={() => toggle(s.key)} />
                 <span className={`dot ${s.state}`} />
                 <span className="label">{s.name}</span>
-                {s.issue !== null && <span className="num">#{s.issue}</span>}
+                {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
                 <span className="sub">{r ? (r.ok ? '✓ sent' : `✗ ${r.message}`) : route.ok ? route.via : route.reason}</span>
               </label>
             )

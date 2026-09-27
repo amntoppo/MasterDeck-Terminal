@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ticketLabel } from '@shared/ticket'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 
@@ -13,7 +14,7 @@ export function RestoreBanner({ state }: { state: AppState }) {
         {msg}
       </div>
     )
-  const names = stopped.map((e) => (e.issue ? `#${e.issue} ${e.name}` : e.name))
+  const names = stopped.map((e) => (e.issue ? `${ticketLabel(e.issueRepo, e.issue)} ${e.name}` : e.name))
   return (
     <div className="banner restore">
       <span className="grow">

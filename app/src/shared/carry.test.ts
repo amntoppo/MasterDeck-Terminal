@@ -28,7 +28,7 @@ describe('linksToCarry', () => {
   const h: SessionHistory = { a4ece16d: ['old', 'new'] }
   it('carries the old link to a resumed session that has none', () => {
     expect(linksToCarry(h, [bg({})], links([['old', { issue: 42, linkedAt: T - 86_400_000 }]]))).toEqual([
-      { bgId: 'a4ece16d', sessionId: 'new', issue: 42, cwd: '/w', replaces: null },
+      { bgId: 'a4ece16d', sessionId: 'new', issue: 42, repo: null, cwd: '/w', replaces: null },
     ])
   })
   it('replaces the automatic branch link made right at the resume (the #967 case)', () => {

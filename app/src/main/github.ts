@@ -1,12 +1,13 @@
 import { getConfig } from '@shared/appConfig'
+import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import { buildPrSummary, parsePrUrl, type PrSummary } from '@shared/prSummary'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
 import { CLOSED_MAX, TEAM_PR_CLOSED_QUERY, TEAM_PR_QUERY, teamPrSearches } from '@shared/teamPrs'
 import type { Runner } from './run'
 
-/** REST path of the configured issue repo. */
-const issueRepoPath = (): string => `repos/${getConfig().owner}/${getConfig().issueRepo}`
+/** REST path of an issue repo; the primary one when `repo` is null. */
+const issueRepoPath = (repo: string | null = null): string => `repos/${fullRepo(repo)}`
 const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 
 function json(text: string): unknown {
@@ -93,19 +94,20 @@ export class GitHub {
     return { ok: true, pages, partial }
   }
 
-  /** Make `login` the only assignee of <owner>/<issueRepo>#issue. */
-  async assign(issue: number, login: string, current: string[]): Promise<CliResult> {
+  /** Make `login` the only assignee of the ticket. */
+  async assign(t: Ticket, login: string, current: string[]): Promise<CliResult> {
+    const issue = t.number
     if (!Number.isInteger(issue) || issue <= 0) return { ok: false, message: 'bad issue number' }
     if (!LOGIN.test(login)) return { ok: false, message: `bad user: ${login}` }
     const drop = current.filter((u) => u !== login && LOGIN.test(u))
     if (drop.length) {
-      const r = await this.api(['-X', 'DELETE', `${issueRepoPath()}/issues/${issue}/assignees`, ...drop.flatMap((u) => ['-f', `assignees[]=${u}`])])
+      const r = await this.api(['-X', 'DELETE', `${issueRepoPath(t.repo)}/issues/${issue}/assignees`, ...drop.flatMap((u) => ['-f', `assignees[]=${u}`])])
       if (r.code !== 0) return { ok: false, message: `could not remove ${drop.join(', ')}: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
     }
     if (!current.includes(login)) {
-      const r = await this.api(['-X', 'POST', `${issueRepoPath()}/issues/${issue}/assignees`, '-f', `assignees[]=${login}`])
+      const r = await this.api(['-X', 'POST', `${issueRepoPath(t.repo)}/issues/${issue}/assignees`, '-f', `assignees[]=${login}`])
       if (r.code !== 0) return { ok: false, message: `could not assign ${login}: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
     }
-    return { ok: true, message: `#${issue} assigned to ${login}` }
+    return { ok: true, message: `${ticketLabel(t.repo, issue)} assigned to ${login}` }
   }
 }

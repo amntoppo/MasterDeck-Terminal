@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ticketKey, ticketLabel, ticketOf } from '@shared/ticket'
 import { pendingAssign } from '@shared/derive'
 import type { AssignRequest, Template } from '@shared/ipc'
 import { defaultModelLabel, MODELS } from '@shared/models'
@@ -22,7 +23,7 @@ interface Props {
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 export function AssignDialog({ issue, state, onClose, onStart, onLink, initialInstructions }: Props) {
-  const pending = pendingAssign(state.proposals, issue.number)
+  const pending = pendingAssign(state.proposals, ticketOf(issue))
   const approved = pending?.status === 'approved' && pending.target.spawn ? pending : null
   const [draft, setDraft] = useState<DraftAssign | null>(null)
   const [name, setName] = useState('')
@@ -40,7 +41,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
-  const past = state.pastSessions[issue.number] ?? []
+  const past = state.pastSessions[ticketKey(issue.repo, issue.number)] ?? []
   const [resuming, setResuming] = useState<string | null>(null)
   const instructionsRef = useRef<HTMLTextAreaElement>(null)
 
@@ -58,6 +59,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
       const sp = fromProposal.target.spawn!
       use({
         issue: issue.number,
+        repo: issue.repo ?? null,
         name: sp.name,
         cwd: sp.cwd ?? state.masterWorkspace,
         prompt: sp.prompt ?? fromProposal.message,
@@ -69,7 +71,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
       return
     }
     void deck()
-      .draftAssign(issue.number, issue.title, issue.url)
+      .draftAssign(ticketOf(issue), issue.title, issue.url)
       .then((r) => {
         if (!alive) return
         if (r.ok) use(r.draft)
@@ -102,6 +104,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
     const unchanged = name === draft.name && prompt === draft.prompt.trim() && !model
     onStart({
       issue: issue.number,
+      repo: issue.repo ?? null,
       name,
       cwd: draft.cwd,
       prompt,

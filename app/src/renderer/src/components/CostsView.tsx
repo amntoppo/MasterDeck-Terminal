@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { parseTicket, ticketKey, ticketLabel } from '@shared/ticket'
 import { dailySpend, dayOf, sessionSpendBetween, sessionTotal, sumBetween, ticketSpend } from '@shared/costs'
 import { formatCost } from '@shared/format'
 import { formatTokens, mergeByDay, tokenSum, tokensBetween, tokenTitle, type TokensByDay } from '@shared/tokens'
@@ -47,18 +48,34 @@ export function CostsView({ state, onOpenSession }: Props) {
     [book, range, from, today],
   )
   const tickets = useMemo(() => {
-    const out = new Map<number, number>()
-    for (const x of sessions) if (x.rec.issue !== null) out.set(x.rec.issue, (out.get(x.rec.issue) ?? 0) + x.spend)
+    // By ticketKey: two repos can each have a #12.
+    const out = new Map<string, number>()
+    for (const x of sessions) {
+      if (x.rec.issue === null) continue
+      const k = ticketKey(x.rec.issueRepo, x.rec.issue)
+      out.set(k, (out.get(k) ?? 0) + x.spend)
+    }
     return [...out].sort((a, b) => b[1] - a[1])
   }, [sessions])
   const allTime = ticketSpend(book)
   const ticketTokens = useMemo(() => {
-    const out = new Map<number, TokensByDay>()
-    for (const [id, rec] of Object.entries(book)) if (rec.issue !== null && tokens?.[id]) out.set(rec.issue, mergeByDay([out.get(rec.issue) ?? {}, tokens[id]]))
+    const out = new Map<string, TokensByDay>()
+    for (const [id, rec] of Object.entries(book)) {
+      if (rec.issue === null || !tokens?.[id]) continue
+      const k = ticketKey(rec.issueRepo, rec.issue)
+      out.set(k, mergeByDay([out.get(k) ?? {}, tokens[id]]))
+    }
     return out
   }, [book, tokens])
   const cap = state.settings.budgetPerTicketUsd
-  const titles = new Map<number, string>([...state.issues.map((i) => [i.number, i.title] as [number, string]), ...(state.board?.cards ?? []).map((c) => [c.number, c.title] as [number, string])])
+  const titles = new Map<string, string>([
+    ...state.issues.map((i) => [ticketKey(i.repo, i.number), i.title] as [string, string]),
+    ...(state.board?.cards ?? []).map((c) => [ticketKey(c.repo, c.number), c.title] as [string, string]),
+  ])
+  const labelOf = (k: string) => {
+    const t = parseTicket(k)
+    return t ? ticketLabel(t.repo, t.number) : k
+  }
   const untracked = state.sessions.filter((s) => s.state !== 'done' && !state.allStats[s.sessionId]).length
 
   return (
@@ -120,7 +137,7 @@ export function CostsView({ state, onOpenSession }: Props) {
                 {tickets.map(([n, v]) => (
                   <tr key={n} className={cap > 0 && (allTime[n] ?? 0) > cap ? 'over' : ''}>
                     <td>
-                      #{n} <span className="muted">{titles.get(n) ?? ''}</span>
+                      {labelOf(n)} <span className="muted">{titles.get(n) ?? ''}</span>
                     </td>
                     <td className="r">{formatCost(v)}</td>
                     <td className="r muted">{rangeTok(ticketTokens.get(n))}</td>
@@ -159,7 +176,7 @@ export function CostsView({ state, onOpenSession }: Props) {
                       <td>
                         {live && <span className={`dot ${live.state}`} />} {rec.name}
                       </td>
-                      <td>{rec.issue !== null ? `#${rec.issue}` : '—'}</td>
+                      <td>{rec.issue !== null ? ticketLabel(rec.issueRepo, rec.issue) : '—'}</td>
                       <td className="r">{formatCost(spend)}</td>
                       <td className="r muted" title={tokens?.[id] ? tokenTitle(range === 'all' ? tokensBetween(tokens[id], '0000-00-00', '9999-99-99') : tokensBetween(tokens[id], from, today)) : undefined}>
                         {rangeTok(tokens?.[id])}

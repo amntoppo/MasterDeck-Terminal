@@ -1,8 +1,11 @@
+import { ticketKey } from './ticket'
 import type { Session } from './types'
 
 /** A babysit-ticket link: which issue, and when it was made. */
 export interface LinkInfo {
   issue: number
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  repo?: string | null
   linkedAt: number | null
 }
 
@@ -13,6 +16,7 @@ export interface Carry {
   bgId: string
   sessionId: string
   issue: number
+  repo: string | null
   cwd: string
   /** The link being replaced: none, or babysit-ticket's automatic branch link. */
   replaces: number | null
@@ -64,10 +68,10 @@ export function linksToCarry(history: SessionHistory, sessions: Session[], links
       .sort((a, b) => (b.linkedAt ?? 0) - (a.linkedAt ?? 0))[0]
     if (!previous) continue
     const current = links.get(s.sessionId)
-    if (current?.issue === previous.issue) continue
+    if (current && ticketKey(current.repo, current.issue) === ticketKey(previous.repo, previous.issue)) continue
     const automatic = current !== undefined && current.linkedAt !== null && s.startedAt > 0 && current.linkedAt - s.startedAt <= ADOPTION_WINDOW_MS
     if (current && !automatic) continue // linked on purpose to something else: leave it
-    out.push({ bgId: s.bgId, sessionId: s.sessionId, issue: previous.issue, cwd: s.cwd, replaces: current?.issue ?? null })
+    out.push({ bgId: s.bgId, sessionId: s.sessionId, issue: previous.issue, repo: previous.repo ?? null, cwd: s.cwd, replaces: current?.issue ?? null })
   }
   return out
 }

@@ -1,3 +1,5 @@
+import { proposalTicket, sessionTicket } from './derive'
+import { sameTicket } from './ticket'
 import type { PrLive, Proposal, Session } from './types'
 
 /**
@@ -94,7 +96,7 @@ export const STATUS_TEXT: Record<StatusKey, string> = {
 export function attentionFor(s: Session, proposals: Proposal[]): Proposal | null {
   const mine = proposals
     .filter((p) => p.kind !== 'CHAT' && (p.status === 'question' || p.status === 'blocked'))
-    .filter((p) => p.target.session === s.name || p.target.spawn?.name === s.name || (s.issue !== null && p.issue === s.issue))
+    .filter((p) => p.target.session === s.name || p.target.spawn?.name === s.name || sameTicket(sessionTicket(s), proposalTicket(p)))
   return mine.sort((a, b) => b.id - a.id)[0] ?? null
 }
 

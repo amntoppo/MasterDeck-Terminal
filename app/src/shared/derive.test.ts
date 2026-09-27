@@ -65,15 +65,15 @@ describe('sessionForIssue', () => {
     const b = sess({ issue: 7, startedAt: 1 })
     const c = sess({ issue: 7, startedAt: 5 })
     const d = sess({ issue: 7, startedAt: 99, state: 'done' })
-    expect(sessionForIssue([a, b, c, d], 7)).toBe(c)
+    expect(sessionForIssue([a, b, c, d], { repo: null, number: 7 })).toBe(c)
   })
   it('returns null when the only owner is done (issue shows as unassigned)', () => {
     const s = [sess({ issue: 7, state: 'done' })]
-    expect(sessionForIssue(s, 7)).toBeNull()
-    expect(issueSessionMark(7, s, [])).toBe('none')
+    expect(sessionForIssue(s, { repo: null, number: 7 })).toBeNull()
+    expect(issueSessionMark({ repo: null, number: 7 }, s, [])).toBe('none')
   })
   it('attachIssues fills issue numbers by session id', () => {
-    const [x] = attachIssues([sess({ sessionId: 's1' })], new Map([['s1', 42]]))
+    const [x] = attachIssues([sess({ sessionId: 's1' })], new Map([['s1', { repo: null, number: 42 }]]))
     expect(x.issue).toBe(42)
   })
 })
@@ -112,9 +112,9 @@ describe('deriveNeedsYou', () => {
 describe('pendingAssign / issueSessionMark', () => {
   it('finds an undispatched ASSIGN and marks approved ones as pending', () => {
     const ps = [prop({ id: 5, issue: 9, status: 'approved' }), prop({ id: 6, issue: 9, status: 'sent' })]
-    expect(pendingAssign(ps, 9)?.id).toBe(5)
-    expect(issueSessionMark(9, [], ps)).toBe('pending')
-    expect(issueSessionMark(9, [sess({ issue: 9 })], ps)).toBe('session')
+    expect(pendingAssign(ps, { repo: null, number: 9 })?.id).toBe(5)
+    expect(issueSessionMark({ repo: null, number: 9 }, [], ps)).toBe('pending')
+    expect(issueSessionMark({ repo: null, number: 9 }, [sess({ issue: 9 })], ps)).toBe('session')
   })
 })
 

@@ -1,3 +1,4 @@
+import { parseTicket, ticketKey, type Ticket } from './ticket'
 /**
  * What a session is asking the user. A question in plain words (the `#N: question — …` a session
  * reports to master-agent, and what it then asks the user directly) comes from its transcript. An
@@ -25,7 +26,7 @@ export interface TextOption {
 
 export interface SessionAsk {
   /** The last `#N: question — …` report (to master-agent, or said in the session). */
-  report: { issue: number; at: number; text: string } | null
+  report: { issue: number; repo: string | null; at: number; text: string } | null
   /** What the session last said to the user since they last wrote: the full question, usually. */
   said: { at: number; text: string; options: TextOption[] } | null
   /** When the user last wrote to the session (typed, not hooks, skills or other sessions). */
@@ -47,7 +48,14 @@ export function isUserWords(text: string): boolean {
   return true
 }
 
-const REPORT = /#(\d+):\s*question\b\s*[—–-]*\s*/
+/** The repo a report names (owner/name), or null for the primary repo. */
+function reportRepo(r: RegExpExecArray): string | null {
+  if (!r[2]) return null
+  return parseTicket(`${r[1] ?? ''}${r[2]}#${r[3]}`)?.repo ?? null
+}
+
+// #12: question — …, or name#12 / owner/name#12 for another repo's ticket.
+const REPORT = /(?:(?<![\w./-])([A-Za-z0-9-]{1,39}\/)?([A-Za-z0-9._-]{1,100}))?#(\d+):\s*question\b\s*[—–-]*\s*/
 
 /**
  * The choices in a plain-words question: the last list of 2+ items marked 1, 2, 3… or A, B, C… in
@@ -110,7 +118,7 @@ export function sessionAsk(lines: string[]): SessionAsk {
         if (b.type === 'text' && str(b.text).trim()) {
           const text = str(b.text).trim()
           const r = REPORT.exec(text)
-          if (r) out.report = { issue: Number(r[1]), at, text: text.slice(r.index) }
+          if (r) out.report = { issue: Number(r[3]), repo: reportRepo(r), at, text: text.slice(r.index) }
           // The question itself starts a fresh "said"; working notes before it are not the question.
           said = said && !r ? { at, parts: [...said.parts, text].slice(-3) } : { at, parts: [text] }
         } else if (b.type === 'tool_use' && b.name === 'SendMessage') {
@@ -118,7 +126,7 @@ export function sessionAsk(lines: string[]): SessionAsk {
           const text = str(input.message) || str(input.content)
           const r = REPORT.exec(text)
           if (r) {
-            out.report = { issue: Number(r[1]), at, text: text.slice(r.index) }
+            out.report = { issue: Number(r[3]), repo: reportRepo(r), at, text: text.slice(r.index) }
             // What it says next is the full question, asked of the user directly.
             said = null
           }
@@ -145,8 +153,8 @@ export function withoutReport(text: string): string {
 }
 
 /** A question proposal that the user answered in the session itself: they wrote after the last report. */
-export function answeredInSession(ask: SessionAsk | undefined, issue: number): boolean {
-  if (!ask?.report || ask.report.issue !== issue || ask.userAt === null) return false
+export function answeredInSession(ask: SessionAsk | undefined, t: Ticket): boolean {
+  if (!ask?.report || ticketKey(ask.report.repo, ask.report.issue) !== ticketKey(t.repo, t.number) || ask.userAt === null) return false
   return ask.userAt > ask.report.at
 }
 

@@ -27,10 +27,16 @@ export interface Session {
   rawState: string
   startedAt: number
   issue: number | null
+  /** The issue's repo (owner/name); null: the primary issue repo. */
+  issueRepo?: string | null
 }
 
 export interface Issue {
   number: number
+  /** owner/name; null or missing: the primary issue repo. */
+  repo?: string | null
+  /** The board it came from (owner/number), when known. */
+  project?: string | null
   title: string
   url: string
   status: string | null
@@ -47,6 +53,10 @@ export interface Pr {
   ci: string | null
   headRef: string
   refsIssue: number | null
+  /** The repo of refsIssue (owner/name); null: the primary issue repo. */
+  refsRepo?: string | null
+  /** The PR's own repo, owner/name. */
+  repoFull?: string | null
   authorIsMe?: boolean
   reviewRequested?: boolean
   updatedAt?: string | null
@@ -63,6 +73,8 @@ export interface Proposal {
   id: number
   kind: string
   issue: number
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  repo?: string | null
   status: string
   summary: string
   message: string
@@ -190,7 +202,8 @@ export interface AppState {
   /** Tokens used so far (input, output, cache) by the sessions in open tabs, from their transcripts. */
   tokens: Record<string, Tokens>
   /** Per issue: stopped sessions that worked on it and can be resumed, newest first. */
-  pastSessions: Record<number, PastSession[]>
+  /** By ticketKey (shared/ticket.ts). */
+  pastSessions: Record<string, PastSession[]>
   /** What sessions on the Needs-you list are asking (a menu, or a question in words), by Session.key. */
   asks: Record<string, SessionAsk>
   /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
@@ -244,6 +257,8 @@ export interface GhCacheStatus {
 
 export interface BoardPr {
   url: string
+  /** The PR repo's owner; repo is its name. */
+  owner?: string
   repo: string
   number: number
   /** OPEN, DRAFT, MERGED, CLOSED, or null when GitHub couldn't resolve it. */
@@ -254,6 +269,10 @@ export interface BoardPr {
 
 export interface BoardCard {
   number: number
+  /** owner/name; null or missing: the primary issue repo. */
+  repo?: string | null
+  /** The board (owner/number) it is on. */
+  project?: string | null
   title: string
   url: string
   status: string | null
@@ -270,6 +289,8 @@ export interface Sprint {
   startDate: string
   duration: number
   completed: boolean
+  /** The boards (owner/number) that have a sprint of this title. */
+  projects?: string[]
 }
 
 export interface Board {
@@ -277,6 +298,8 @@ export interface Board {
   sprint: string | null
   columns: string[]
   cards: BoardCard[]
+  /** Each board in it, with its own columns (a view of some boards shows theirs). */
+  projects?: { key: string; title: string; columns: string[] }[]
 }
 
 export type BadgeKind =
@@ -306,6 +329,7 @@ export interface Badge {
 
 export interface DraftAssign {
   issue: number
+  repo?: string | null
   name: string
   cwd: string
   prompt: string

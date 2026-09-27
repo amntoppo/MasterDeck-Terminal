@@ -1,4 +1,5 @@
-import { MASTER_NAME } from './derive'
+import { MASTER_NAME, proposalTicket, sessionTicket } from './derive'
+import { sameTicket } from './ticket'
 import type { Proposal, Session } from './types'
 
 export interface Nudge {
@@ -26,7 +27,7 @@ export function idleNudges(sessions: Session[], proposals: Proposal[], lastActiv
       continue
     }
     const mine = proposals
-      .filter((p) => p.kind !== 'CHAT' && (p.target.session === s.name || p.target.spawn?.name === s.name || (s.issue !== null && p.issue === s.issue)))
+      .filter((p) => p.kind !== 'CHAT' && (p.target.session === s.name || p.target.spawn?.name === s.name || sameTicket(sessionTicket(s), proposalTicket(p))))
       .sort((a, b) => b.id - a.id)[0]
     if (mine?.status === 'sent') out.push({ session: s, kind: 'idle', minutes: quiet })
   }

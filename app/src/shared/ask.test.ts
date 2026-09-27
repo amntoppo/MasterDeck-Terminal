@@ -37,13 +37,13 @@ describe('sessionAsk', () => {
 
   it('knows when the user answered in the session', () => {
     const lines = [tool(2, 'SendMessage', { to: 'master-agent', message: '#12: question — A or B?' }), said(3, 'A or B?')]
-    expect(answeredInSession(sessionAsk(lines), 12)).toBe(false)
-    expect(answeredInSession(sessionAsk([...lines, user(4, 'A')]), 12)).toBe(true)
+    expect(answeredInSession(sessionAsk(lines), { repo: null, number: 12 })).toBe(false)
+    expect(answeredInSession(sessionAsk([...lines, user(4, 'A')]), { repo: null, number: 12 })).toBe(true)
     // Another issue's report, hooks and other sessions' messages are not answers.
-    expect(answeredInSession(sessionAsk([...lines, user(4, 'A')]), 13)).toBe(false)
-    expect(answeredInSession(sessionAsk([...lines, user(4, '<cross-session-message from="m">hi</cross-session-message>')]), 12)).toBe(false)
-    expect(answeredInSession(sessionAsk([...lines, user(4, 'Base directory for this skill: /x')]), 12)).toBe(false)
-    expect(answeredInSession(sessionAsk([...lines, user(4, 'note', { isMeta: true })]), 12)).toBe(false)
+    expect(answeredInSession(sessionAsk([...lines, user(4, 'A')]), { repo: null, number: 13 })).toBe(false)
+    expect(answeredInSession(sessionAsk([...lines, user(4, '<cross-session-message from="m">hi</cross-session-message>')]), { repo: null, number: 12 })).toBe(false)
+    expect(answeredInSession(sessionAsk([...lines, user(4, 'Base directory for this skill: /x')]), { repo: null, number: 12 })).toBe(false)
+    expect(answeredInSession(sessionAsk([...lines, user(4, 'note', { isMeta: true })]), { repo: null, number: 12 })).toBe(false)
   })
 
   it('reads a report said in the session itself (no master-agent)', () => {

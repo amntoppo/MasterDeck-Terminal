@@ -1,9 +1,9 @@
-import { issueUrl } from '@shared/appConfig'
+import { parseTicket, sameTicket, ticketKey, ticketLabel, ticketOf, ticketUrl, type Ticket } from '@shared/ticket'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ticketSpend } from '@shared/costs'
 import { idleNudges, type Nudge } from '@shared/nudge'
-import { MASTER_NAME, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
+import { MASTER_NAME, proposalTicket, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
 import { attentionFor, sessionStatus } from '@shared/review'
 import { formatAgo, formatCost, formatGhCache, formatRefreshed } from '@shared/format'
 import type { AppState, Issue, NeedsItem, Proposal, Session } from '@shared/types'
@@ -270,7 +270,7 @@ function extraKey(x: Extra, state: AppState): string {
     case 'context':
       return `x:c:${x.session.key}:${Math.floor(x.pct / 10)}`
     case 'budget':
-      return `x:b:${x.issue}:${Math.floor(x.spend / x.cap)}`
+      return `x:b:${ticketKey(x.issue.repo, x.issue.number)}:${Math.floor(x.spend / x.cap)}`
   }
 }
 
@@ -287,7 +287,7 @@ function SessionRow({ s, active, now, status, onClick }: { s: Session; active: b
     <div className={`row ${active ? 'active' : ''}`} onClick={onClick} title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}${status?.why ? `\n${status.text}: ${status.why}` : ''}`}>
       <span className={`dot st-${status?.key ?? s.state}`} />
       <span className="label">{s.name}</span>
-      {s.issue !== null && <span className="num">#{s.issue}</span>}
+      {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
       <span className={`sub st-${status?.key ?? s.state}`}>{s.kind === 'interactive' && plain ? 'ext' : text}</span>
       <span className="sub">{s.startedAt ? formatAgo(now - s.startedAt) : ''}</span>
     </div>
@@ -327,7 +327,7 @@ function NeedsCard({
         <div className="top">
           <span className="kind">{menu ? 'QUESTION' : 'INPUT'}</span>
           <span className="title">{s.name}</span>
-          {s.issue !== null && <span className="num">#{s.issue}</span>}
+          {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
         </div>
         {menu ? (
           <AskPanel session={s} ask={ask} menu={menu} fallback={null} full={full} actions={open} />
@@ -392,8 +392,8 @@ function ProposalCard({
       {!full && <CloseX onClose={onClose} />}
       <div className="top">
         <span className="kind">{attention ? p.status.toUpperCase() : p.kind}</span>
-        <span className="title" title={`#${p.issue} ${dest}`}>
-          #{p.issue} {question && target ? target.name : dest}
+        <span className="title" title={`${ticketLabel(p.repo, p.issue)} ${dest}`}>
+          {ticketLabel(p.repo, p.issue)} {question && target ? target.name : dest}
         </span>
         {!full && !question && (
           <button className="icon-btn" onClick={() => setOpen(!open)} title={open ? 'Hide message' : 'Show the message master will send'}>
@@ -428,10 +428,11 @@ function ProposalCard({
                   className="btn primary"
                   onClick={() =>
                     onIssue(
-                      state.issues.find((i) => i.number === p.issue) ?? {
+                      state.issues.find((i) => sameTicket(i, proposalTicket(p))) ?? {
                         number: p.issue,
+                        repo: p.repo ?? null,
                         title: p.summary.replace(/^"|"$/g, ''),
-                        url: issueUrl(p.issue),
+                        url: ticketUrl(p.repo, p.issue),
                         status: null,
                         currentSprint: true,
                         assignedToMe: true,
@@ -457,7 +458,7 @@ function ProposalCard({
 type Extra =
   | { id: string; kind: 'nudge'; nudge: Nudge }
   | { id: string; kind: 'context'; session: Session; pct: number }
-  | { id: string; kind: 'budget'; issue: number; spend: number; cap: number }
+  | { id: string; kind: 'budget'; issue: Ticket; spend: number; cap: number }
 
 /** Needs-you items the app derives itself: idle/waiting nudges, context warnings, budgets. */
 function useExtras(state: AppState, now: number): Extra[] {
@@ -476,7 +477,10 @@ function useExtras(state: AppState, now: number): Extra[] {
     const cap = state.settings.budgetPerTicketUsd
     if (cap > 0)
       for (const [issue, spend] of Object.entries(ticketSpend(state.costBook)))
-        if (spend > cap) out.push({ id: `b:${issue}`, kind: 'budget', issue: Number(issue), spend, cap })
+        if (spend > cap) {
+          const t = parseTicket(issue)
+          if (t) out.push({ id: `b:${issue}`, kind: 'budget', issue: t, spend, cap })
+        }
     return out
   }, [state, now])
 }
@@ -558,7 +562,7 @@ function ExtraCard({
       <div className="top">
         <span className="kind">BUDGET</span>
         <span className="title">
-          #{x.issue} spent {formatCost(x.spend)} of {formatCost(x.cap)}
+          {ticketLabel(x.issue.repo, x.issue.number)} spent {formatCost(x.spend)} of {formatCost(x.cap)}
         </span>
       </div>
       <div className="body">Its sessions passed the per-ticket budget (Settings).</div>

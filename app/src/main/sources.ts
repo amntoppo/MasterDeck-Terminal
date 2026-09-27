@@ -7,6 +7,7 @@ import {
   attachIssues,
   deriveMaster,
   deriveNeedsYou,
+  proposalTicket,
   MASTER_NAME,
   sessionForProposal,
   parseLedger,
@@ -15,6 +16,7 @@ import {
 } from '@shared/derive'
 import { parseBranchStatus, parseNumstat, parsePrView, PR_VIEW_ARGS } from '@shared/git'
 import { prStage, type PrStage } from '@shared/review'
+import { sameTicket, storedRepo, ticketKey, ticketLabel, type Ticket } from '@shared/ticket'
 import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
 import { parseStatusline, parseTranscriptTail, statsFromTranscript } from '@shared/stats'
 import { parseBoard } from '@shared/board'
@@ -129,7 +131,7 @@ export class Sources {
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {}
   private carryTried: Record<string, number> = {}
-  private linker: ((issue: number, sessionId: string, cwd: string | null) => Promise<CliResult>) | null = null
+  private linker: ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>) | null = null
   /** Which background sessions were running, so a restart can be undone (see @shared/restore). */
   private restore: RestoreFile | null = null
   private tokenIndex: TokenIndex
@@ -137,7 +139,7 @@ export class Sources {
   private tokens: Record<string, Tokens> = {}
   private tokenPending = new Set<string>()
   /** Stopped sessions that worked on each issue and can be resumed. */
-  private past: Record<number, PastSession[]> = {}
+  private past: Record<string, PastSession[]> = {}
   private transcriptInfos = new Map<string, TranscriptInfo & { path: string }>()
   private restoreSeen = false
   private restoring = false
@@ -312,13 +314,17 @@ export class Sources {
     this.emit()
   }
 
+  /** Each session's ticket: the snapshot's, then babysit-ticket's fresher links. */
+  private issueOf(): Map<string, Ticket> {
+    return new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, { repo: v.repo ?? null, number: v.issue }] as [string, Ticket])])
+  }
+
   private withIssues(sessions: Session[]): Session[] {
-    const issueOf = new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, v.issue] as [string, number])])
-    return attachIssues(sessions, issueOf)
+    return attachIssues(sessions, this.issueOf())
   }
 
   /** How to link a session to an issue (babysit-ticket); used to carry links across a resume. */
-  setLinker(fn: (issue: number, sessionId: string, cwd: string | null) => Promise<CliResult>): void {
+  setLinker(fn: (t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>): void {
     this.linker = fn
   }
 
@@ -384,12 +390,12 @@ export class Sources {
     if (!this.linker) return
     const now = Date.now()
     for (const c of linksToCarry(this.history, this.rawSessions, this.links)) {
-      const key = `${c.sessionId}:${c.issue}`
+      const key = `${c.sessionId}:${ticketKey(c.repo, c.issue)}`
       if (now - (this.carryTried[key] ?? 0) < 600_000) continue
       this.carryTried[key] = now
-      void this.linker(c.issue, c.sessionId, c.cwd || null).then((r) => {
+      void this.linker({ repo: c.repo, number: c.issue }, c.sessionId, c.cwd || null).then((r) => {
         if (r.ok) delete this.errors[`carry:${c.bgId}`]
-        else this.errors[`carry:${c.bgId}`] = `could not keep #${c.issue} linked after a resume: ${r.message}`
+        else this.errors[`carry:${c.bgId}`] = `could not keep ${ticketLabel(c.repo, c.issue)} linked after a resume: ${r.message}`
         this.reloadLinks()
       })
     }
@@ -435,7 +441,7 @@ export class Sources {
     const next: AppState['allStats'] = {}
     const entries: CostEntry[] = []
     const bySession = new Map(this.rawSessions.map((s) => [s.sessionId, s]))
-    const issueOf = new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, v.issue] as [string, number])])
+    const issueOf = this.issueOf()
     for (const f of files) {
       const id = f.slice(0, -5)
       const t = readTail(join(this.paths.statsDir, f), 256 * 1024)
@@ -445,7 +451,7 @@ export class Sources {
       next[id] = { costUsd: st.costUsd, contextPct: st.contextPct, updatedAt: st.updatedAt }
       const s = bySession.get(id)
       if (st.costUsd !== null && now - t.mtimeMs < 36 * 3_600_000)
-        entries.push({ sessionId: id, name: s?.name ?? this.costBook[id]?.name ?? id.slice(0, 8), key: s?.key ?? this.costBook[id]?.key ?? id, issue: issueOf.get(id) ?? this.costBook[id]?.issue ?? null, cost: st.costUsd, startedAt: s?.startedAt ?? null })
+        entries.push({ sessionId: id, name: s?.name ?? this.costBook[id]?.name ?? id.slice(0, 8), key: s?.key ?? this.costBook[id]?.key ?? id, issue: issueOf.get(id)?.number ?? this.costBook[id]?.issue ?? null, issueRepo: issueOf.get(id) ? issueOf.get(id)!.repo : (this.costBook[id]?.issueRepo ?? null), cost: st.costUsd, startedAt: s?.startedAt ?? null })
     }
     this.allStats = next
     const midnight = new Date(now)
@@ -555,14 +561,14 @@ export class Sources {
   }
 
   /** After a drag: move the card at once; the next refresh confirms it. */
-  noteStatus(issue: number, status: string): void {
-    for (const b of Object.values(this.boards)) for (const c of b.cards) if (c.number === issue) c.status = status
+  noteStatus(t: Ticket, status: string): void {
+    for (const b of Object.values(this.boards)) for (const c of b.cards) if (sameTicket(c, t)) c.status = status
     this.emit()
   }
 
   /** After an assign: update the card at once; the next refresh confirms it. */
-  noteAssigned(issue: number, login: string): void {
-    for (const b of Object.values(this.boards)) for (const c of b.cards) if (c.number === issue) c.assignees = [login]
+  noteAssigned(t: Ticket, login: string): void {
+    for (const b of Object.values(this.boards)) for (const c of b.cards) if (sameTicket(c, t)) c.assignees = [login]
     this.emit()
   }
 
@@ -759,13 +765,13 @@ export class Sources {
   reloadLinks(): void {
     try {
       const raw = JSON.parse(readFileSync(this.paths.babysitState, 'utf8')) as {
-        sessions?: Record<string, { issue?: unknown; linked_at?: unknown }>
+        sessions?: Record<string, { issue?: unknown; repo?: unknown; linked_at?: unknown }>
       }
       const next = new Map<string, LinkInfo>()
       for (const [sid, v] of Object.entries(raw.sessions ?? {})) {
         if (typeof v?.issue !== 'number') continue
         const at = typeof v.linked_at === 'string' ? Date.parse(v.linked_at) : NaN
-        next.set(sid, { issue: v.issue, linkedAt: Number.isFinite(at) ? at : null })
+        next.set(sid, { issue: v.issue, repo: storedRepo(typeof v.repo === 'string' ? v.repo : null), linkedAt: Number.isFinite(at) ? at : null })
       }
       this.links = next
     } catch {
@@ -1085,7 +1091,7 @@ export class Sources {
     for (const p of this.proposals) {
       if (p.status !== 'question' && p.status !== 'blocked') continue
       const ask = add(sessionForProposal(p, sessions))
-      if (p.status === 'question' && ask && answeredInSession(ask, p.issue)) {
+      if (p.status === 'question' && ask && answeredInSession(ask, proposalTicket(p))) {
         answered.add(p.id)
         const once = `${p.id}:${ask.report?.at}`
         if (!this.answered.has(once)) {
@@ -1099,8 +1105,7 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now()
-    const issueOf = new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, v.issue] as [string, number])])
-    const sessions = applyFreshness(attachIssues(this.rawSessions, issueOf), this.lastWrite, now)
+    const sessions = applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now)
     const { asks, answered } = this.collectAsks(sessions)
     this.lastSessions = sessions
     return {

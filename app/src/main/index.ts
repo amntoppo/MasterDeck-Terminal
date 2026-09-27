@@ -28,6 +28,7 @@ import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
 import { Summaries } from './summary'
 import { parseSteps } from '@shared/workflow'
 import { answerKeys, type MenuAnswer } from '@shared/ask'
+import { asTicket, fullRepo, ticketLabel, ticketRef } from '@shared/ticket'
 import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
 
@@ -115,19 +116,20 @@ function installHook(): CliResult {
  * `tt.sh link`, told which session and folder through TT_SESSION / TT_CWD. Like any
  * babysit-ticket link, it moves the ticket to In Dev (forward only).
  */
-async function linkSession(issue: number, sessionId: string, cwd: string | null): Promise<CliResult> {
-  if (!Number.isInteger(issue) || issue <= 0) return { ok: false, message: 'bad issue number' }
+async function linkSession(raw: unknown, sessionId: string, cwd: string | null): Promise<CliResult> {
+  const t = asTicket(raw)
+  if (!t) return { ok: false, message: 'bad issue' }
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return { ok: false, message: 'bad session id' }
   if (!existsSync(paths.babysitTt)) return { ok: false, message: `babysit-ticket not found at ${paths.babysitTt}` }
   const dir = cwd && existsSync(cwd) ? cwd : homedir()
-  const r = await run('bash', [paths.babysitTt, 'link', String(issue)], {
+  const r = await run('bash', [paths.babysitTt, 'link', ticketRef(t.repo, t.number)], {
     cwd: dir,
     timeoutMs: 60_000,
     env: { TT_SESSION: sessionId, TT_CWD: dir },
   })
   sources.reloadLinks()
   const out = (r.stdout.trim() || r.stderr.trim()).split('\n').filter(Boolean)
-  return r.code === 0 ? { ok: true, message: out[0] ?? `linked to #${issue}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
+  return r.code === 0 ? { ok: true, message: out[0] ?? `linked to ${ticketLabel(t.repo, t.number)}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
 }
 
 /** Is `pid` a running claude process? Guards the stop against a pid reused by something else. */
@@ -240,7 +242,10 @@ function registerIpc(): void {
   ipcMain.handle(CH.getState, () => latest)
   ipcMain.handle(CH.approve, (_e, id: number) => cli.approve([id]))
   ipcMain.handle(CH.reject, (_e, id: number) => cli.reject([id]))
-  ipcMain.handle(CH.draftAssign, (_e, issue: number, title?: string, url?: string) => cli.draftAssign(issue, title, url))
+  ipcMain.handle(CH.draftAssign, (_e, issue: unknown, title?: string, url?: string) => {
+    const t = asTicket(issue)
+    return t ? cli.draftAssign(t, title, url) : { ok: false, message: 'bad issue' }
+  })
   ipcMain.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint))
   ipcMain.handle(CH.sendText, async (_e, key: string, text: string) => {
     const s = latest?.sessions.find((x) => x.key === key)
@@ -285,9 +290,11 @@ function registerIpc(): void {
     return r
   })
   ipcMain.handle(CH.getSettings, () => sources.getSettings())
-  ipcMain.handle(CH.setStatus, async (_e, issue: number, status: string) => {
-    const r = await ops.setStatus(issue, status)
-    if (r.ok) sources.noteStatus(issue, status)
+  ipcMain.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
+    const t = asTicket(issue)
+    if (!t) return { ok: false, message: 'bad issue' }
+    const r = await ops.setStatus(t, status)
+    if (r.ok) sources.noteStatus(t, status)
     return r
   })
   ipcMain.handle(CH.standupCommits, (_e, since: number, dirs: string[], until?: number) => ops.standupCommits(since, [...dirs, ...ops.repos()], until))
@@ -305,9 +312,11 @@ function registerIpc(): void {
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))
   ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url))
-  ipcMain.handle(CH.assignIssue, async (_e, issue: number, login: string, current: string[]) => {
-    const r = await github.assign(issue, login, current)
-    if (r.ok) sources.noteAssigned(issue, login)
+  ipcMain.handle(CH.assignIssue, async (_e, issue: unknown, login: string, current: string[]) => {
+    const t = asTicket(issue)
+    if (!t) return { ok: false, message: 'bad issue' }
+    const r = await github.assign(t, login, current)
+    if (r.ok) sources.noteAssigned(t, login)
     return r
   })
   ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req))
@@ -376,7 +385,7 @@ function registerIpc(): void {
     if (!s) return { ok: false, message: 'session not found' }
     const f = sources.sessionFacts(s.sessionId, s.key)
     if (!f.transcript) return { ok: false, message: 'no transcript for this session yet' }
-    return summaries.make({ sessionId: s.sessionId, name: s.name, transcript: f.transcript, cwd: f.cwd ?? s.cwd, issue: s.issue !== null ? `${getConfig().owner}/${getConfig().issueRepo}#${s.issue}` : null, prs: f.prs })
+    return summaries.make({ sessionId: s.sessionId, name: s.name, transcript: f.transcript, cwd: f.cwd ?? s.cwd, issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null, prs: f.prs })
   })
   ipcMain.handle(CH.summaryPost, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key)
@@ -385,7 +394,7 @@ function registerIpc(): void {
     const summary = summaries.get(s.sessionId)
     if (!summary) return { ok: false, message: 'no summary yet' }
     const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`
-    const r = await run('gh', ['issue', 'comment', String(s.issue), '-R', `${getConfig().owner}/${getConfig().issueRepo}`, '--body-file', '-'], { stdin: body, timeoutMs: 30_000 })
+    const r = await run('gh', ['issue', 'comment', String(s.issue), '-R', fullRepo(s.issueRepo), '--body-file', '-'], { stdin: body, timeoutMs: 30_000 })
     return r.code === 0 ? { ok: true, message: r.stdout.trim() || 'posted' } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
   })
   ipcMain.handle(CH.workflowGet, () => ({
@@ -416,7 +425,7 @@ function registerIpc(): void {
     return r
   })
   ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) => typeof maxAgeMs === 'number' && maxAgeMs > 0 ? sources.refreshTeamPrs(maxAgeMs) : sources.refreshTeamPrs(0, true))
-  ipcMain.handle(CH.linkSession, (_e, issue: number, sessionId: string, cwd: string | null) => linkSession(issue, sessionId, cwd))
+  ipcMain.handle(CH.linkSession, (_e, issue: unknown, sessionId: string, cwd: string | null) => linkSession(issue, sessionId, cwd))
   ipcMain.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open))
   ipcMain.on(CH.setFocus, (_e, id: string | null) => {
     focused = id

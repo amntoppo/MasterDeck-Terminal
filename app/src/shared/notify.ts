@@ -1,3 +1,4 @@
+import { parseTicket, ticketLabel } from './ticket'
 import { ticketSpend } from './costs'
 import type { AppState, NotifyEvent } from './types'
 
@@ -37,7 +38,7 @@ export function diffEvents(prev: AppState | null, next: AppState, focusedSession
     if (was === undefined || was === p.status) continue
     if (p.status === 'question' || p.status === 'blocked') {
       out.push({
-        title: `#${p.issue}: ${p.status}`,
+        title: `${ticketLabel(p.repo, p.issue)}: ${p.status}`,
         body: p.note ?? p.summary,
         target: { needsYou: true },
       })
@@ -48,8 +49,9 @@ export function diffEvents(prev: AppState | null, next: AppState, focusedSession
   if (cap > 0) {
     const before = ticketSpend(prev.costBook)
     for (const [issue, spend] of Object.entries(ticketSpend(next.costBook))) {
-      if (spend > cap && (before[Number(issue)] ?? 0) <= cap) {
-        out.push({ title: `#${issue} passed its $${cap} budget`, body: `Its sessions have spent $${spend.toFixed(2)}.`, target: { needsYou: true } })
+      if (spend > cap && (before[issue] ?? 0) <= cap) {
+        const t = parseTicket(issue)
+        out.push({ title: `${t ? ticketLabel(t.repo, t.number) : issue} passed its $${cap} budget`, body: `Its sessions have spent $${spend.toFixed(2)}.`, target: { needsYou: true } })
       }
     }
   }

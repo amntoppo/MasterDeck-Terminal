@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { ticketLabel, type Ticket } from '@shared/ticket'
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -66,20 +67,21 @@ export class Ops {
    * Move a ticket on the board through babysit-ticket, without touching any real session: a
    * temporary TT_STATE_DIR holds a synthetic link for the issue, and `tt.sh set --force` moves it.
    */
-  async setStatus(issue: number, status: string): Promise<CliResult> {
+  async setStatus(t: Ticket, status: string): Promise<CliResult> {
+    const issue = t.number
     if (!Number.isInteger(issue) || issue <= 0) return { ok: false, message: 'bad issue number' }
     if (!existsSync(this.paths.babysitTt)) return { ok: false, message: `babysit-ticket not found at ${this.paths.babysitTt}` }
     const dir = mkdtempSync(join(tmpdir(), 'masterdeck-tt-'))
     const fake = '00000000-0000-4000-8000-masterdeck00'
     try {
-      writeFileSync(join(dir, 'state.json'), JSON.stringify({ sessions: { [fake]: { issue, title: '', branch: '', linked_at: new Date().toISOString(), prs: [] } }, branches: {} }))
+      writeFileSync(join(dir, 'state.json'), JSON.stringify({ sessions: { [fake]: { issue, ...(t.repo ? { repo: t.repo } : {}), title: '', branch: '', linked_at: new Date().toISOString(), prs: [] } }, branches: {} }))
       const r = await this.run('bash', [this.paths.babysitTt, 'set', status, '--force'], {
         cwd: dir,
         timeoutMs: 60_000,
         env: { TT_STATE_DIR: dir, TT_SESSION: fake, TT_CWD: dir },
       })
       const out = (r.stdout.trim() || r.stderr.trim()).split('\n').filter(Boolean)
-      return r.code === 0 ? { ok: true, message: out.at(-1) ?? `#${issue} → ${status}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
+      return r.code === 0 ? { ok: true, message: out.at(-1) ?? `${ticketLabel(t.repo, issue)} → ${status}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

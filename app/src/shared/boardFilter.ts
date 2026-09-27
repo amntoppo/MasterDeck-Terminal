@@ -1,4 +1,4 @@
-import { issueRef } from './appConfig'
+import { ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -64,7 +64,7 @@ export type CardAction = 'session' | 'start' | 'pr' | 'assign'
  * else's, with a PR); or assign it (someone else's or unassigned, no PR).
  */
 export function cardAction(c: BoardCard, me: string | null, sessions: Session[]): CardAction {
-  if (sessionForIssue(sessions, c.number)) return 'session'
+  if (sessionForIssue(sessions, { repo: c.repo ?? null, number: c.number })) return 'session'
   const mine = me !== null && c.assignees.includes(me)
   if (mine) return 'start'
   return c.prs.length > 0 ? 'pr' : 'assign'
@@ -95,19 +95,22 @@ export interface ReviewTarget {
   title: string
   author: string
   issue: number
+  /** The issue's repo (owner/name); null or missing: the primary issue repo. */
+  issueRepo?: string | null
 }
 
-const REPLY = (n: number) =>
-  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '#${n}: done', ` +
-  `'#${n}: blocked — <reason>' or '#${n}: question — <question>'. When you have a question, ALSO ask the user directly in ` +
+/** `n`: the ticket's label, #12 or name#12. */
+const REPLY = (n: string) =>
+  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '${n}: done', ` +
+  `'${n}: blocked — <reason>' or '${n}: question — <question>'. When you have a question, ALSO ask the user directly in ` +
   `this session (so they see it here too), and wait for the answer from either place. If the user answers you here, tell ` +
-  `master-agent '#${n}: answered — <answer>'.`
+  `master-agent '${n}: answered — <answer>'.`
 
 /** The first message of a PR review session: read-only against the diff, review posted on GitHub. */
 export function composeReviewPrompt(t: ReviewTarget, instructions: string): string {
   const [owner, repo] = new URL(t.url).pathname.split('/').filter(Boolean)
   const lines = [
-    `Review ${owner}/${repo}#${t.number} (${t.title}) by @${t.author}, for ${issueRef()}#${t.issue}. ${t.url}`,
+    `Review ${owner}/${repo}#${t.number} (${t.title}) by @${t.author}, for ${ticketRef(t.issueRepo, t.issue)}. ${t.url}`,
     '',
     'Work read-only against the diff:',
     `- Read it with \`gh pr view ${t.url}\`, \`gh pr diff ${t.url}\` and, for full files, \`gh api repos/${owner}/${repo}/contents/<path>?ref=<head sha>\`.`,
@@ -118,7 +121,7 @@ export function composeReviewPrompt(t: ReviewTarget, instructions: string): stri
     "- Never approve or request changes unless the user's instructions below say so.",
     '- Only comment on real problems (bugs, security, broken behaviour, missing tests on risky paths); no style nits.',
     '',
-    REPLY(t.issue).replace("'#" + t.issue + ": done'", `'#${t.issue}: done — reviewed ${t.url}'`),
+    REPLY(ticketLabel(t.issueRepo, t.issue)).replace(`'${ticketLabel(t.issueRepo, t.issue)}: done'`, `'${ticketLabel(t.issueRepo, t.issue)}: done — reviewed ${t.url}'`),
   ]
   const own = instructions.trim()
   if (own) lines.push('', "## The user's review instructions", '', own)

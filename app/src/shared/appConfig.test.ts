@@ -8,7 +8,7 @@ describe('appConfig', () => {
     expect(c.statuses.inProgress).toBe('Doing')
     expect(c.statuses.ready).toBe(DEFAULT_CONFIG.statuses.ready)
     expect(issueRef(c)).toBe('acme/tracker')
-    expect(issueUrl(3, c)).toBe('https://github.com/acme/tracker/issues/3')
+    expect(issueUrl(3, null, c)).toBe('https://github.com/acme/tracker/issues/3')
     expect(parseConfig({}).configured).toBe(false)
     expect(parseConfig(null).owner).toBe('')
   })

@@ -24,9 +24,9 @@ describe('pastByIssue', () => {
       [B]: { mtime: 200, title: null, cwd: null },
       [D]: { mtime: 400, title: 'live', cwd: '/w' },
     }))
-    expect(got[5].map((p) => [p.sessionId, p.name, p.cwd])).toEqual([[A2, 'fix it', '/w/wt'], [B, '#5 bbbbbbbb', null]])
-    expect(got[6]).toBeUndefined()
-    expect(got[7]).toBeUndefined()
+    expect(got['acme/tracker#5'].map((p) => [p.sessionId, p.name, p.cwd])).toEqual([[A2, 'fix it', '/w/wt'], [B, '#5 bbbbbbbb', null]])
+    expect(got['acme/tracker#6']).toBeUndefined()
+    expect(got['acme/tracker#7']).toBeUndefined()
   })
   it('a running resume hides the whole session', () => {
     const links = new Map([[A1, { issue: 5, linkedAt: 1 }]])

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ticketLabel } from '@shared/ticket'
 import { formatAgo } from '@shared/format'
 import type { SessionSummary } from '@shared/summary'
 import type { AppState } from '@shared/types'
@@ -70,7 +71,7 @@ export function SummaryPanel({ state, activeKey, onClose }: { state: AppState; a
     setBusy('post')
     const r = await deck().summaryPost(session.key)
     setBusy(null)
-    setMsg(r.ok ? `Posted on #${session.issue}` : r.message)
+    setMsg(r.ok ? `Posted on ${ticketLabel(session.issueRepo, session.issue ?? 0)}` : r.message)
   }
 
   return (
@@ -93,7 +94,7 @@ export function SummaryPanel({ state, activeKey, onClose }: { state: AppState; a
           </button>
         )}
         {session && summary && session.issue !== null && (
-          <button className="btn" disabled={busy !== null} onClick={() => void post()} title={`Comment it on #${session.issue}`}>
+          <button className="btn" disabled={busy !== null} onClick={() => void post()} title={`Comment it on ${ticketLabel(session.issueRepo, session.issue ?? 0)}`}>
             {busy === 'post' ? 'Posting…' : 'Post to issue'}
           </button>
         )}

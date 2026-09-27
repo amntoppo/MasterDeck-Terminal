@@ -19,12 +19,12 @@ describe('costs', () => {
     recordCosts(b, [e('old', 10)], '2026-09-23')
     recordCosts(b, [e('new', 1)], '2026-09-24')
     expect(dailySpend(b)).toEqual({ '2026-09-23': 10, '2026-09-24': 1 })
-    expect(ticketSpend(b)).toEqual({ 7: 11 })
+    expect(ticketSpend(b)).toEqual({ 'acme/tracker#7': 11 })
   })
   it('sums by ticket and by range', () => {
     const b: CostBook = {}
     recordCosts(b, [e('a', 4, 1), e('b', 6, 1), e('c', 2, null)], '2026-09-24')
-    expect(ticketSpend(b)).toEqual({ 1: 10 })
+    expect(ticketSpend(b)).toEqual({ 'acme/tracker#1': 10 })
     const daily = dailySpend(b)
     expect(sumBetween(daily, '2026-09-24', '2026-09-24')).toBe(12)
     expect(sessionSpendBetween(b.a, '2026-09-25', '2026-09-30')).toBe(0)
@@ -54,7 +54,7 @@ describe('costs', () => {
     recordCosts(b, [{ ...e('old', 104), startedAt: today - 86_400_000 }], '2026-09-25', today)
     expect(dailySpend(b)).toEqual({ '2026-09-25': 6 })
     expect(sessionTotal(b.old)).toBe(104)
-    expect(ticketSpend(b)).toEqual({ 7: 106 })
+    expect(ticketSpend(b)).toEqual({ 'acme/tracker#7': 106 })
     expect(sessionSpendBetween(b.old, '0000-00-00', '2026-09-25')).toBe(104)
     expect(sessionSpendBetween(b.old, '2026-09-01', '2026-09-25')).toBe(4)
   })

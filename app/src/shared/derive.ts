@@ -1,3 +1,4 @@
+import { sameTicket, storedRepo, type Ticket } from './ticket'
 import type { Issue, MasterState, NeedsItem, Pr, Proposal, Session } from './types'
 
 export const MASTER_NAME = 'master-agent'
@@ -18,7 +19,7 @@ function n(v: unknown): number | null {
 export interface ParsedSnapshot {
   issues: Issue[]
   prs: Pr[]
-  sessionIssue: Map<string, number>
+  sessionIssue: Map<string, Ticket>
   /** PR URLs babysit-ticket linked to each session. */
   sessionPrs: Map<string, string[]>
   sources: Record<string, boolean>
@@ -33,6 +34,8 @@ export function parseSnapshot(raw: unknown): ParsedSnapshot {
     if (number === null) continue
     issues.push({
       number,
+      repo: storedRepo(s(i.repo)),
+      project: s(i.project),
       title: s(i.title) ?? `#${number}`,
       url: s(i.url) ?? '',
       status: s(i.status),
@@ -54,17 +57,19 @@ export function parseSnapshot(raw: unknown): ParsedSnapshot {
       ci: s(p.ci),
       headRef: s(p.head_ref) ?? '',
       refsIssue: n(p.refs_issue),
+      refsRepo: storedRepo(s(p.refs_repo)),
+      repoFull: s(p.repo_full),
       authorIsMe: p.author_is_me === true,
       reviewRequested: p.review_requested === true,
       updatedAt: s(p.updated_at),
     })
   }
-  const sessionIssue = new Map<string, number>()
+  const sessionIssue = new Map<string, Ticket>()
   const sessionPrs = new Map<string, string[]>()
   for (const x of arr(r.sessions).map(obj)) {
     const id = s(x.session_id)
     const issue = n(x.issue)
-    if (id && issue !== null) sessionIssue.set(id, issue)
+    if (id && issue !== null) sessionIssue.set(id, { repo: storedRepo(s(x.issue_repo)), number: issue })
     const prs = arr(x.prs).filter((u): u is string => typeof u === 'string' && /\/pull\/\d+$/.test(u))
     if (id && prs.length) sessionPrs.set(id, prs)
   }
@@ -85,6 +90,7 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
       id,
       kind: s(p.kind) ?? '?',
       issue: n(p.issue) ?? 0,
+      repo: storedRepo(s(p.repo)),
       status: s(p.status) ?? '?',
       summary: s(p.summary) ?? '',
       message: s(p.message) ?? '',
@@ -106,17 +112,25 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
   return { proposals, lastSnapshot: r.last_snapshot ?? null }
 }
 
-export function attachIssues(sessions: Session[], sessionIssue: Map<string, number>): Session[] {
-  return sessions.map((x) => ({ ...x, issue: sessionIssue.get(x.sessionId) ?? null }))
+export function attachIssues(sessions: Session[], sessionIssue: Map<string, Ticket>): Session[] {
+  return sessions.map((x) => {
+    const t = sessionIssue.get(x.sessionId)
+    return { ...x, issue: t?.number ?? null, issueRepo: t?.repo ?? null }
+  })
 }
 
 function live(x: Session): boolean {
   return x.state !== 'done'
 }
 
-/** The session that owns issue n: not done, background preferred, then the newest. */
-export function sessionForIssue(sessions: Session[], issue: number): Session | null {
-  const c = sessions.filter((x) => x.issue === issue && live(x) && x.name !== MASTER_NAME)
+/** A session's ticket, or null. */
+export function sessionTicket(x: Pick<Session, 'issue' | 'issueRepo'>): Ticket | null {
+  return x.issue === null ? null : { repo: x.issueRepo ?? null, number: x.issue }
+}
+
+/** The session that owns a ticket: not done, background preferred, then the newest. */
+export function sessionForIssue(sessions: Session[], t: Ticket): Session | null {
+  const c = sessions.filter((x) => sameTicket(sessionTicket(x), t) && live(x) && x.name !== MASTER_NAME)
   c.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'background' ? -1 : 1
     return b.startedAt - a.startedAt
@@ -145,18 +159,23 @@ export function deriveNeedsYou(proposals: Proposal[], sessions: Session[]): Need
   ]
 }
 
-/** An ASSIGN proposal for issue n that has not been dispatched yet. */
-export function pendingAssign(proposals: Proposal[], issue: number): Proposal | null {
-  const c = proposals.filter((p) => p.kind === 'ASSIGN' && p.issue === issue && (p.status === 'proposed' || p.status === 'approved'))
+/** A proposal's ticket. */
+export function proposalTicket(p: Pick<Proposal, 'issue' | 'repo'>): Ticket {
+  return { repo: p.repo ?? null, number: p.issue }
+}
+
+/** An ASSIGN proposal for a ticket that has not been dispatched yet. */
+export function pendingAssign(proposals: Proposal[], t: Ticket): Proposal | null {
+  const c = proposals.filter((p) => p.kind === 'ASSIGN' && sameTicket(proposalTicket(p), t) && (p.status === 'proposed' || p.status === 'approved'))
   c.sort((a, b) => b.id - a.id)
   return c[0] ?? null
 }
 
 export type IssueMark = 'session' | 'pending' | 'none'
 
-export function issueSessionMark(issue: number, sessions: Session[], proposals: Proposal[]): IssueMark {
-  if (sessionForIssue(sessions, issue)) return 'session'
-  const p = pendingAssign(proposals, issue)
+export function issueSessionMark(t: Ticket, sessions: Session[], proposals: Proposal[]): IssueMark {
+  if (sessionForIssue(sessions, t)) return 'session'
+  const p = pendingAssign(proposals, t)
   return p && p.status === 'approved' ? 'pending' : 'none'
 }
 
@@ -170,7 +189,7 @@ export function sessionForProposal(p: Proposal, sessions: Session[]): Session | 
     const byName = sessions.find((x) => x.name === p.target.spawn!.name && live(x))
     if (byName) return byName
   }
-  return p.issue ? sessionForIssue(sessions, p.issue) : null
+  return p.issue ? sessionForIssue(sessions, proposalTicket(p)) : null
 }
 
 /** Sidebar order: needs-input, working, idle, suspended; newest first inside each group. */

@@ -2,6 +2,8 @@ import type { PastSession } from './pastSessions'
 import { getConfig, statusRank } from './appConfig'
 import { sessionForIssue } from './derive'
 import { STATUS_TEXT, type PrStage } from './review'
+import { sameTicket, storedRepo, type Ticket } from './ticket'
+import { proposalTicket } from './derive'
 import type { Badge, Board, BoardCard, BoardPr, Proposal, Session } from './types'
 
 /** Columns shown even when empty: the workflow from "ready" to "dev done", in board order. */
@@ -38,6 +40,7 @@ export function parseBoard(raw: unknown): Board | null {
       if (!url || typeof p.number !== 'number') continue
       prs.push({
         url,
+        owner: str(p.owner) ?? undefined,
         repo: str(p.repo) ?? '',
         number: p.number,
         state: str(p.state),
@@ -48,6 +51,8 @@ export function parseBoard(raw: unknown): Board | null {
     const strs = (v: unknown) => arr(v).filter((x): x is string => typeof x === 'string')
     cards.push({
       number: c.number,
+      repo: storedRepo(str(c.repo)),
+      project: str(c.project),
       title: str(c.title) ?? `#${c.number}`,
       url: str(c.url) ?? '',
       status: str(c.status),
@@ -59,7 +64,11 @@ export function parseBoard(raw: unknown): Board | null {
     })
   }
   const columns = arr(r.columns).filter((x): x is string => typeof x === 'string')
-  return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards }
+  const projects = arr(r.projects)
+    .map(obj)
+    .filter((p) => typeof p.key === 'string')
+    .map((p) => ({ key: p.key as string, title: str(p.title) ?? (p.key as string), columns: arr(p.columns).filter((x): x is string => typeof x === 'string') }))
+  return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards, projects }
 }
 
 /** Always the five workflow columns; any other only when it has a card; "No status" first when needed. */
@@ -104,8 +113,8 @@ function badge(kind: Badge['kind'], detail?: string | null): Badge {
  * review, in review: `stages`, see shared/review.ts), done, idle, stopped (a session worked on it and
  * can be resumed), no session.
  */
-export function cardBadge(issue: number, sessions: Session[], proposals: Proposal[], past: PastSession[] = [], stages: Record<string, PrStage> = {}): Badge {
-  const mine = proposals.filter((p) => p.issue === issue && p.kind !== 'CHAT').sort((a, b) => b.id - a.id)
+export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposal[], past: PastSession[] = [], stages: Record<string, PrStage> = {}): Badge {
+  const mine = proposals.filter((p) => sameTicket(proposalTicket(p), issue) && p.kind !== 'CHAT').sort((a, b) => b.id - a.id)
   const q = mine.find((p) => p.status === 'question')
   if (q) return badge('question', q.note)
   const bl = mine.find((p) => p.status === 'blocked')

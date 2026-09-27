@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { sameTicket, ticketLabel, ticketOf } from '@shared/ticket'
+import { sessionTicket } from '@shared/derive'
 import { resolveSession, suggestSessions } from '@shared/link'
 import { formatAgo } from '@shared/format'
 import type { AppState, Issue, Session } from '@shared/types'
@@ -38,7 +40,7 @@ export function LinkDialog({ issue, state, onClose, onLinked }: Props) {
     setBusy(true)
     setError(null)
     const cwd = resolved.kind === 'session' ? (state.stats[resolved.session.sessionId]?.currentDir ?? resolved.session.cwd) : null
-    const r = await deck().linkSession(issue.number, sessionId, cwd)
+    const r = await deck().linkSession(ticketOf(issue), sessionId, cwd)
     setBusy(false)
     if (!r.ok) {
       setError(r.message)
@@ -50,7 +52,7 @@ export function LinkDialog({ issue, state, onClose, onLinked }: Props) {
 
   const hint =
     resolved.kind === 'session'
-      ? `→ ${resolved.session.name} (${resolved.session.sessionId.slice(0, 8)})${resolved.session.issue !== null && resolved.session.issue !== issue.number ? ` · now linked to #${resolved.session.issue}; this moves it to #${issue.number}` : ''}`
+      ? `→ ${resolved.session.name} (${resolved.session.sessionId.slice(0, 8)})${resolved.session.issue !== null && !sameTicket(sessionTicket(resolved.session), ticketOf(issue)) ? ` · now linked to ${ticketLabel(resolved.session.issueRepo, resolved.session.issue)}; this moves it to ${ticketLabel(issue.repo, issue.number)}` : ''}`
       : resolved.kind === 'id'
         ? '→ a session not running right now; linked by id'
         : resolved.kind === 'ambiguous'
@@ -92,7 +94,7 @@ export function LinkDialog({ issue, state, onClose, onLinked }: Props) {
               >
                 <span className={`dot ${s.state}`} />
                 <span className="label">{s.name}</span>
-                {s.issue !== null && <span className="num">#{s.issue}</span>}
+                {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
                 <span className="sub mono">{s.sessionId.slice(0, 8)}</span>
                 <span className="sub">{s.startedAt ? formatAgo(now - s.startedAt) : ''}</span>
               </div>

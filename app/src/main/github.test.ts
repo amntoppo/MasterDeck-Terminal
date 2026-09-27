@@ -15,7 +15,7 @@ function fake(reply: (args: string[]) => { code?: number; stdout?: string }) {
 describe('GitHub.assign', () => {
   it('removes the others, then adds the new assignee', async () => {
     const f = fake(() => ({}))
-    const r = await new GitHub(f.run).assign(989, 'alice', ['rahul', 'zoe'])
+    const r = await new GitHub(f.run).assign({ repo: null, number: 989 }, 'alice', ['rahul', 'zoe'])
     expect(r.ok).toBe(true)
     expect(f.calls).toEqual([
       ['api', '-X', 'DELETE', 'repos/acme/tracker/issues/989/assignees', '-f', 'assignees[]=rahul', '-f', 'assignees[]=zoe'],
@@ -24,14 +24,14 @@ describe('GitHub.assign', () => {
   })
   it('skips calls that change nothing, and refuses bad input', async () => {
     const f = fake(() => ({}))
-    await new GitHub(f.run).assign(989, 'rahul', ['rahul'])
+    await new GitHub(f.run).assign({ repo: null, number: 989 }, 'rahul', ['rahul'])
     expect(f.calls).toEqual([])
-    expect((await new GitHub(f.run).assign(989, 'bad user;rm', [])).ok).toBe(false)
-    expect((await new GitHub(f.run).assign(-1, 'rahul', [])).ok).toBe(false)
+    expect((await new GitHub(f.run).assign({ repo: null, number: 989 }, 'bad user;rm', [])).ok).toBe(false)
+    expect((await new GitHub(f.run).assign({ repo: null, number: -1 }, 'rahul', [])).ok).toBe(false)
   })
   it('reports a failed removal and does not add', async () => {
     const f = fake((a) => (a.includes('DELETE') ? { code: 1, stdout: 'Not Found' } : {}))
-    const r = await new GitHub(f.run).assign(1, 'x', ['y'])
+    const r = await new GitHub(f.run).assign({ repo: null, number: 1 }, 'x', ['y'])
     expect(r.ok).toBe(false)
     expect(f.calls).toHaveLength(1)
   })
