@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { hookOwner, parseSteps, type CustomStep, type HookEntry } from '@shared/workflow'
 
 /**
@@ -39,7 +39,8 @@ export function collectHooks(claudeDir: string, repos: string[]): HookEntry[] {
   const line = (settings?.statusLine as { command?: unknown } | undefined)?.command
   if (typeof line === 'string') out.push({ source: 'user', where: null, event: 'StatusLine', matcher: null, command: line, owner: hookOwner(line) ?? 'status line' })
 
-  for (const repo of repos)
+  // The workspace is often one of the repos too: each folder once.
+  for (const repo of [...new Set(repos.map((r) => resolve(r)))])
     for (const f of ['settings.json', 'settings.local.json']) out.push(...entries(readJson(join(repo, '.claude', f))?.hooks, 'project', basename(repo)))
 
   // Plugins: the enabled ones, where installed_plugins.json says they are.
