@@ -167,26 +167,6 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **Auto-open:** when a background session blocks on a prompt, its tab opens (attached, not focused)
   and the dock bounces. The dock badge is the Needs-you count.
 
-## Canvas
-
-The **Canvas** tab (beside Terminals, Board View and PRs) shows every session as a live mini
-terminal on a plane you can move around:
-
-- **Mini terminals** mirror the same terminal as the Terminals tab, so both views can be open at
-  once. A mini terminal copies that terminal's size instead of resizing it, and scales it down to
-  fit its card. Running sessions attach as soon as the Canvas opens. A parked session shows an
-  **Attach** button instead, because attaching resumes it. A session in another terminal shows a
-  note.
-- **Status at a glance:** each card's border and top strip take the session's status colour.
-  Working cards glow slowly; cards that need you (Needs Input, Question, Blocked, CI failing,
-  Changes requested) pulse and show a flag.
-- **Move around:** drag a card to place it anywhere; drag the background or scroll to pan;
-  ⌘/Ctrl + scroll or a trackpad pinch zooms at the pointer; **−/+** and the percentage button zoom
-  from the toolbar. **Fit** shows every card, **Arrange** lays them out in a grid, and the minimap
-  (bottom right) jumps to wherever you click. Positions and zoom are remembered.
-- **Act from a card:** type in the box under a terminal and press Enter to send it to that
-  session. Double-click a card, or press ↗, to open it in Terminals.
-
 ## Cost and context
 
 - **Tokens:** each session's header shows **Tokens used** (input, output and prompt-cache, with the

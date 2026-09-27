@@ -24,7 +24,6 @@ import { RestoreBanner } from './components/RestoreBanner'
 import { SkillsDialog } from './components/SkillsDialog'
 import { SummaryPanel } from './components/SummaryPanel'
 import { WorkflowView } from './components/WorkflowView'
-import { CanvasView } from './components/CanvasView'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { WorkerHeader } from './components/WorkerHeader'
@@ -98,7 +97,7 @@ export function App() {
   const [masterPct, setMasterPct] = useState<number>(() => load('masterPct', 34))
   const [view, setView] = useState<View>(() => {
     const v = load<string>('view', 'terminals')
-    return (['terminals', 'board', 'prs', 'canvas', 'costs', 'janitor', 'history', 'workflow'] as View[]).includes(v as View) ? (v as View) : 'terminals'
+    return (['terminals', 'board', 'prs', 'costs', 'janitor', 'history', 'workflow'] as View[]).includes(v as View) ? (v as View) : 'terminals'
   })
   const [palette, setPalette] = useState(false)
   const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'setup' | 'skills' | 'skills-first' | null>(null)
@@ -483,7 +482,6 @@ export function App() {
         ) : (
           <ConnectGithub title="PRs" what="Your organization's pull requests" onConnect={() => setDialog('setup')} />
         ))}
-      {view === 'canvas' && <CanvasView state={state} onOpenSession={openSession} />}
       {view === 'costs' && <CostsView state={state} onOpenSession={openSession} />}
       {view === 'janitor' && <JanitorView state={state} />}
       {view === 'workflow' && <WorkflowView state={state} />}

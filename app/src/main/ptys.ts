@@ -13,9 +13,6 @@ interface Pane {
   /** Total characters emitted so far; lets a view drop data already in its replay. */
   seq: number
   exited: boolean
-  /** The PTY's size: set by the full terminal view; mini views (Canvas) follow it. */
-  cols: number
-  rows: number
 }
 
 /**
@@ -40,7 +37,7 @@ export class PtyManager {
       // An exited pane stays exited until the user asks to reattach (close, then open). A view
       // that remounts must not silently start a new `claude attach`, which resumes a parked session.
       if (!existing.exited) this.resize(id, cols, rows)
-      return { ok: true, replay: existing.buffer, seq: existing.seq, exited: existing.exited, cols: existing.cols, rows: existing.rows }
+      return { ok: true, replay: existing.buffer, seq: existing.seq, exited: existing.exited }
     }
     const testNoMaster = process.env.MASTERDECK_TEST_NO_MASTER_ATTACH === '1' && id.startsWith('master:')
     if (spec.kind === 'attach' && (process.env.MASTERDECK_TEST_NO_ATTACH === '1' || testNoMaster)) {
@@ -54,13 +51,13 @@ export class PtyManager {
       cmd.cwd = this.installerDir()
       mkdirSync(cmd.cwd, { recursive: true })
     }
-    const pane: Pane = { proc: null, buffer: '', seq: 0, exited: false, cols: Math.max(cols, 2), rows: Math.max(rows, 2) }
+    const pane: Pane = { proc: null, buffer: '', seq: 0, exited: false }
     this.panes.set(id, pane)
     try {
       const proc = pty.spawn(cmd.file, cmd.args, {
         name: 'xterm-256color',
-        cols: pane.cols,
-        rows: pane.rows,
+        cols: Math.max(cols, 2),
+        rows: Math.max(rows, 2),
         cwd: startDir(cmd.cwd),
         env: { ...this.env(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>,
       })
@@ -78,20 +75,11 @@ export class PtyManager {
         pane.proc = null
         if (current()) this.send(`pty:exit:${id}`, exitCode)
       })
-      return { ok: true, replay: '', seq: 0, exited: false, cols: pane.cols, rows: pane.rows }
+      return { ok: true, replay: '', seq: 0, exited: false }
     } catch (e) {
       pane.exited = true
       return { ok: false, replay: '', seq: 0, exited: true, message: `could not start ${cmd.file}: ${String(e)}` }
     }
-  }
-
-  /**
-   * A pane's output so far and size, without starting or resizing anything: for a mini view that
-   * mirrors a terminal another view owns. null when there is no such pane.
-   */
-  peek(id: string): PtyOpenResult | null {
-    const p = this.panes.get(id)
-    return p ? { ok: true, replay: p.buffer, seq: p.seq, exited: p.exited, cols: p.cols, rows: p.rows } : null
   }
 
   /** The last output of a pane (for spotting a prompt before typing into it). */
@@ -110,20 +98,11 @@ export class PtyManager {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    const p = this.panes.get(id)
-    if (!p?.proc) return
-    cols = Math.max(cols, 2)
-    rows = Math.max(rows, 2)
     try {
-      p.proc.resize(cols, rows)
+      this.panes.get(id)?.proc?.resize(Math.max(cols, 2), Math.max(rows, 2))
     } catch {
       // resizing an exiting pty throws; harmless
-      return
     }
-    if (cols === p.cols && rows === p.rows) return
-    p.cols = cols
-    p.rows = rows
-    this.send(`pty:size:${id}`, cols, rows)
   }
 
   close(id: string): void {
@@ -134,8 +113,6 @@ export class PtyManager {
     } catch {
       // already gone
     }
-    // Mini views mirroring the pane start over (a closed pane sends no exit event).
-    if (p) this.send(`pty:closed:${id}`)
   }
 
   closeAll(): void {
