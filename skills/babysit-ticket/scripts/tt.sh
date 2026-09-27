@@ -2,9 +2,10 @@
 # babysit-ticket — link a Claude Code session to an issue on your GitHub project board and
 # move its Status as the work progresses.
 #
-#   tt.sh candidates            my open items: current sprint first, then in-flight elsewhere
+#   tt.sh candidates            my open items on every board: current sprint first, then in-flight elsewhere
 #   tt.sh hints                 issue numbers guessed from branch name + recent commits
-#   tt.sh link <issue#>         link this session (and its branch) to the issue, move to In Dev
+#   tt.sh link <issue>          link this session (and its branch) to the issue, move to In Dev.
+#                               <issue>: 12 (the primary repo), name#12 or owner/name#12
 #   tt.sh show                  what this session is linked to, and its live board status
 #   tt.sh set "<Status>" [--force]   move the linked item (forward-only unless --force)
 #   tt.sh branch <name>         create a branch linked under the issue's Development box
@@ -18,11 +19,39 @@
 # link). That is fine: the board, not the issue's open/closed state, drives QA.
 set -uo pipefail
 
-# Org, issue repo, board ids and status names come from the shared config
+# Org, repos, boards and status names come from the shared config
 # (~/.claude/master/config.json, written by MasterDeck's Setup or `master config save`).
 MASTER_LIB="${MASTER_LIB:-$HOME/.claude/skills/master/lib}"
 CFG_SH="$(PYTHONPATH="$MASTER_LIB" python3 -m master.cli config shell 2>/dev/null)" || CFG_SH=""
 if [ -n "$CFG_SH" ]; then eval "$CFG_SH"; else CFG_CONFIGURED=0; fi
+: "${REPOS_JSON:=[]}" "${PROJECTS_JSON:=[]}"
+
+# One board's status field, options and meanings (the board an issue is on).
+use_project() {  # use_project <owner/number>
+  local sh; sh="$(PYTHONPATH="$MASTER_LIB" python3 -m master.cli config shell --project "$1" 2>/dev/null)" || return 1
+  eval "$sh"
+}
+
+# --- Tickets across repos -----------------------------------------------------------
+# A ticket is owner/name#N. The primary repo (the config's issueRepo) keeps bare numbers in the
+# state file, so older readers still read it; other repos store their repo alongside.
+PRIMARY="$OWNER/$ISSUE_REPO"
+lower() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
+is_primary() { [ "$(lower "${1%#*}")" = "$(lower "$PRIMARY")" ]; }
+ref_repo() { echo "${1%#*}"; }
+ref_num() { echo "${1##*#}"; }
+label() { if is_primary "$1"; then echo "#${1##*#}"; else local r="${1%#*}"; echo "${r#*/}#${1##*#}"; fi; }
+stored_repo() { if is_primary "$1"; then echo ""; else echo "${1%#*}"; fi; }
+
+norm_ref() {  # 12 | #12 | name#12 | owner/name#12 -> owner/name#12
+  local a="${1#\#}" name hit
+  if [[ "$a" =~ ^[0-9]+$ ]]; then echo "$PRIMARY#$a"; return 0; fi
+  [[ "$a" =~ ^(([A-Za-z0-9-]+)/)?([A-Za-z0-9._-]+)#([0-9]+)$ ]] || return 1
+  if [ -n "${BASH_REMATCH[2]}" ]; then echo "${BASH_REMATCH[2]}/${BASH_REMATCH[3]}#${BASH_REMATCH[4]}"; return 0; fi
+  name="${BASH_REMATCH[3]}"
+  hit="$(jq -r --arg n "$(lower "$name")" '[.[] | select((split("/")[1] | ascii_downcase) == $n)][0] // empty' <<<"$REPOS_JSON")"
+  echo "${hit:-$OWNER/$name}#${BASH_REMATCH[4]}"
+}
 
 # GitHub goes through the shared cache (master's `ghc`) when it is installed: reads are reused
 # across sessions for a short time, writes pass straight through, and every caller backs off
@@ -66,42 +95,69 @@ branch_key() {  # <owner>/<repo>@<branch>, or empty when the branch must not car
   echo "$url@$br"
 }
 
-# Prints the linked issue number for this session, adopting a branch link when the
+# The state file keeps {issue: N, repo?: "owner/name"} per session and, per branch, N (primary
+# repo) or "owner/name#N". These turn a record into owner/name#N and back.
+entry_ref() { jq -r --arg p "$PRIMARY" 'if .issue == null then empty else "\(.repo // $p)#\(.issue)" end'; }
+branch_ref() { jq -r --arg p "$PRIMARY" 'if . == null then empty elif type == "number" then "\($p)#\(.)" else . end'; }
+branch_val() { if is_primary "$1"; then echo "${1##*#}"; else jq -n --arg r "$1" '$r'; fi; }
+
+# Prints the linked ticket (owner/name#N) for this session, adopting a branch link when the
 # session itself has none (a /branch or a fresh session on the same feature branch).
 current_issue() {
-  local n bk
-  [ -n "$SESSION" ] && n="$(jq -r --arg s "$SESSION" '.sessions[$s].issue // empty' "$STATE")"
-  if [ -z "${n:-}" ]; then
+  local t bk
+  [ -n "$SESSION" ] && t="$(jq --arg s "$SESSION" '.sessions[$s] // {}' "$STATE" | entry_ref)"
+  if [ -z "${t:-}" ]; then
     bk="$(branch_key)"
-    [ -n "$bk" ] && n="$(jq -r --arg b "$bk" '.branches[$b] // empty' "$STATE")"
-    if [ -n "${n:-}" ] && [ -n "$SESSION" ]; then
-      with_state --arg s "$SESSION" --argjson n "$n" --arg b "$bk" \
-        '.sessions[$s] = ((.sessions[$s] // {}) + {issue:$n, branch:$b, adopted:true, prs:(.sessions[$s].prs // [])})'
+    [ -n "$bk" ] && t="$(jq --arg b "$bk" '.branches[$b]' "$STATE" | branch_ref)"
+    if [ -n "${t:-}" ] && [ -n "$SESSION" ]; then
+      with_state --arg s "$SESSION" --argjson n "$(ref_num "$t")" --arg r "$(stored_repo "$t")" --arg b "$bk" \
+        '.sessions[$s] = ((.sessions[$s] // {}) + {issue:$n, branch:$b, adopted:true, prs:(.sessions[$s].prs // [])}
+                          + (if $r != "" then {repo:$r} else {} end))'
     fi
   fi
-  echo "${n:-}"
+  echo "${t:-}"
 }
 
-issue_info() {  # -> {"title","state","item","status"} for the item on the configured project
-  gh api graphql -F n="$1" -f query='query($n:Int!){repository(owner:"'"$OWNER"'",name:"'"$ISSUE_REPO"'"){issue(number:$n){title state projectItems(first:20){nodes{id project{number} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}' \
-    --jq '.data.repository.issue | {title, state, item: ([.projectItems.nodes[] | select(.project.number=='"$PROJECT_NUMBER"')][0])} | {title, state, item: .item.id, status: (.item.fieldValueByName.name // "")}'
+# issue_info <owner/name#N> -> {"title","state","item","project","status"}: the issue's item on
+# the first selected board that has it (config order), with that board's status. Also switches
+# the status field, options and meanings to that board (use_project).
+issue_info() {
+  local t="$1" repo out
+  repo="$(ref_repo "$t")"
+  [[ "$repo" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  out="$(gh api graphql -F n="$(ref_num "$t")" -f query='query($n:Int!){repository(owner:"'"${repo%%/*}"'",name:"'"${repo#*/}"'"){issue(number:$n){title state projectItems(first:20){nodes{id project{number owner{... on Organization{login} ... on User{login}}} fieldValues(first:30){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{id}}}}}}}}}}')" || return 1
+  out="$(jq -c --argjson ps "$PROJECTS_JSON" '.data.repository.issue as $i | ($i.projectItems.nodes // []
+      | map(. + {key: "\(.project.owner.login)/\(.project.number)"})) as $items
+    | ([$ps[].key as $k | $items[] | select(.key == $k)][0]) as $it
+    | {title: $i.title, state: $i.state, item: $it.id, project: $it.key,
+       values: [($it.fieldValues.nodes // [])[] | select(.name) | {name, field: .field.id}]}' <<<"$out")" || return 1
+  local key; key="$(jq -r '.project // empty' <<<"$out")"
+  [ -n "$key" ] && use_project "$key"
+  jq -c --arg f "${STATUS_FIELD_ID:-}" '. + {status: ([.values[] | select(.field == $f) | .name][0] // "")} | del(.values)' <<<"$out"
 }
 
-move() {  # move <issue#> <Status> [force] -> prints what happened
-  local n="$1" target="$2" force="${3:-}" info item cur opt
-  opt="$(option_id "$target")" || die "unknown status '$target'"
-  info="$(issue_info "$n")" || die "could not read #$n"
+move() {  # move <owner/name#N> <Status> [force] -> prints what happened
+  local t="$1" target="$2" force="${3:-}" info item cur opt lab
+  lab="$(label "$t")"
+  info="$(issue_info "$t")" || die "could not read $t"
   item="$(jq -r '.item // empty' <<<"$info")"
+  [ -n "$item" ] || die "$lab is not on any selected board"
+  opt="$(option_id "$target")" || die "unknown status '$target' on board $(jq -r .project <<<"$info")"
   cur="$(jq -r '.status' <<<"$info")"
-  [ -n "$item" ] || die "#$n is not on project $PROJECT_NUMBER"
-  if [ "$cur" = "$target" ]; then echo "#$n already $target"; return 0; fi
+  if [ "$cur" = "$target" ]; then echo "$lab already $target"; return 0; fi
   if [ -z "$force" ] && [ "$(rank "$cur")" -ge "$(rank "$target")" ]; then
-    echo "#$n left at $cur (not moving back to $target)"; return 0
+    echo "$lab left at $cur (not moving back to $target)"; return 0
   fi
   gh project item-edit --project-id "$PROJECT_ID" --id "$item" \
     --field-id "$STATUS_FIELD_ID" --single-select-option-id "$opt" >/dev/null \
-    || die "board update failed for #$n"
-  echo "#$n: ${cur:-no status} -> $target"
+    || die "board update failed for $lab"
+  echo "$lab: ${cur:-no status} -> $target"
+}
+
+# A status meaning (inProgress, prRaised, devDone) on the ticket's own board.
+move_to() {  # move_to <owner/name#N> <ST_IN_PROGRESS|ST_PR_RAISED|ST_DEV_DONE>
+  issue_info "$1" >/dev/null || die "could not read $1"
+  move "$1" "${!2}"
 }
 
 # --- GitHub "Development" links -----------------------------------------------------
@@ -110,12 +166,13 @@ move() {  # move <issue#> <Status> [force] -> prints what happened
 # So a linked PR closes the ticket when it merges. That is accepted: a closed issue's board
 # item still moves (dev done, QA, ...), so QA is unaffected. Both link kinds work
 # cross-repo: one board can track PRs from any repo of the owner.
-issue_node_id() {
-  gh api graphql -F n="$1" -f query='query($n:Int!){repository(owner:"'"$OWNER"'",name:"'"$ISSUE_REPO"'"){issue(number:$n){id}}}' \
+issue_node_id() {  # issue_node_id <owner/name#N>
+  local repo; repo="$(ref_repo "$1")"
+  gh api graphql -F n="$(ref_num "$1")" -f query='query($n:Int!){repository(owner:"'"${repo%%/*}"'",name:"'"${repo#*/}"'"){issue(number:$n){id}}}' \
     --jq '.data.repository.issue.id' 2>/dev/null
 }
 
-# link_pr <issue#> <pr url> — add the PR to the issue's Development box.
+# link_pr <owner/name#N> <pr url> — add the PR to the issue's Development box.
 link_pr() {
   local n="$1" url="$2" o r p iid pid
   [[ "$url" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]] || return 1
@@ -138,7 +195,7 @@ cmd_branch() {
   url="$(sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@/]+@[^:]+:##' <<<"$url")"
   o="${url%%/*}"; r="${url##*/}"
   oid="$(git -C "$CWD" rev-parse HEAD 2>/dev/null)" || die "no HEAD in $CWD"
-  iid="$(issue_node_id "$n")" || die "could not read #$n"
+  iid="$(issue_node_id "$n")" || die "could not read $n"
   rid="$(gh api graphql -f query='{repository(owner:"'"$o"'",name:"'"$r"'"){id}}' --jq .data.repository.id)" \
     || die "could not read $o/$r"
   local got
@@ -147,78 +204,91 @@ cmd_branch() {
   [ "$got" = "$name" ] || die "branch not linked (does '$name' already exist on $o/$r? an existing branch cannot be linked): $got"
   git -C "$CWD" fetch origin "$name" >/dev/null 2>&1 || die "created $name on $o/$r but could not fetch it"
   git -C "$CWD" checkout -B "$name" "origin/$name" >/dev/null 2>&1 || die "created $name but could not check it out"
-  with_state --arg s "$SESSION" --arg b "$(branch_key)" --argjson n "$n" \
-    'if $b != "" then .branches[$b] = $n | .sessions[$s].branch = $b else . end'
-  echo "#$n: branch $name created, linked under Development, checked out"
+  with_state --arg s "$SESSION" --arg b "$(branch_key)" --argjson v "$(branch_val "$n")" \
+    'if $b != "" then .branches[$b] = $v | .sessions[$s].branch = $b else . end'
+  echo "$(label "$n"): branch $name created, linked under Development, checked out"
 }
 
 cmd_candidates() {
-  local me today
+  local me today key owner num
   me="$(gh api user --jq .login)" || die "gh not authenticated"
   today="$(date +%F)"
-  # Filter server-side: paging the whole board is ~25s, this is ~4s.
-  gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --limit 500 --format json \
-    --query "assignee:$me is:issue $ST_DONE_QUERY" |
-  jq -r --arg me "$me" --arg today "$today" --argjson donelist "$ST_DONE_JSON" --argjson pick "$ST_PICKABLE_JSON" '
-    def done: . as $s | $donelist | index($s);
-    def cur: .sprint and .sprint.startDate <= $today and
-             ((.sprint.startDate | strptime("%Y-%m-%d") | mktime) + .sprint.duration*86400
-               > ($today | strptime("%Y-%m-%d") | mktime));
-    [.items[] | select((.assignees // []) | index($me)) | select(.content.type == "Issue")
-      | select((.status // "") | done | not)]
-    | (map(select(cur)) | sort_by(.status) | map("CURRENT  #\(.content.number)  [\(.status // "-")]  \(.title)  (\(.sprint.title))")[]),
-      (map(select(cur | not) | select(.status as $s | $pick | index($s)))
-        | map("OTHER    #\(.content.number)  [\(.status)]  \(.title)  (\(.sprint.title // "no sprint"))")[])'
+  # Every selected board, each with its own finished statuses. Filter server-side: paging a
+  # whole board is ~25s, this is ~4s. The ticket is named #N (primary repo) or name#N.
+  for key in $(jq -r '.[].key' <<<"$PROJECTS_JSON"); do
+    use_project "$key" || continue
+    owner="${key%/*}"; num="${key##*/}"
+    gh project item-list "$num" --owner "$owner" --limit 500 --format json \
+      --query "assignee:$me is:issue $ST_DONE_QUERY" |
+    jq -r --arg me "$me" --arg today "$today" --argjson donelist "$ST_DONE_JSON" --argjson pick "$ST_PICKABLE_JSON" \
+          --arg p "$(lower "$PRIMARY")" --argjson repos "$REPOS_JSON" --arg all "${ALL_REPOS:-0}" '
+      def done: . as $s | $donelist | index($s);
+      def cur: .sprint and .sprint.startDate <= $today and
+               ((.sprint.startDate | strptime("%Y-%m-%d") | mktime) + .sprint.duration*86400
+                 > ($today | strptime("%Y-%m-%d") | mktime));
+      def repo: (.content.repository // "" | if type == "string" then . else (.nameWithOwner // "") end);
+      def ours: $all == "1" or (repo == "") or (repo | ascii_downcase) as $r | ($repos | map(ascii_downcase) | index($r));
+      def lab: if (repo | ascii_downcase) == $p or repo == "" then "#\(.content.number)" else "\(repo | split("/")[1])#\(.content.number)" end;
+      [.items[] | select((.assignees // []) | index($me)) | select(.content.type == "Issue") | select(ours)
+        | select((.status // "") | done | not)]
+      | (map(select(cur)) | sort_by(.status) | map("CURRENT  \(lab)  [\(.status // "-")]  \(.title)  (\(.sprint.title))")[]),
+        (map(select(cur | not) | select(.status as $s | $pick | index($s)))
+          | map("OTHER    \(lab)  [\(.status)]  \(.title)  (\(.sprint.title // "no sprint"))")[])'
+  done
 }
 
 cmd_hints() {
   local br
   br="$(git -C "$CWD" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   echo "branch: ${br:-<none>}"
-  # Branch segments that are a bare number or start with one (feat/879-ask-ai, 879_fix),
-  # plus explicit <issueRepo>#N references in recent commits. Plain #N in a product repo's
-  # commits is that repo's own issue, not a board ticket, so it is ignored.
-  { tr '/' '\n' <<<"$br" | grep -oE '^(issue-|gh-)?[0-9]{2,4}([-_]|$)' | grep -oE '[0-9]+';
-    git -C "$CWD" log -30 --format='%s%n%b' 2>/dev/null | grep -oiE "$ISSUE_REPO#[0-9]+" | grep -oE '[0-9]+'; } |
-    sort | uniq -c | sort -rn | awk '{print "hint: #" $2 " (" $1 ")"}' || true
+  # Branch segments that are a bare number or start with one (feat/879-ask-ai, 879_fix: the
+  # primary repo), plus explicit <repo>#N references to a selected repo in recent commits.
+  # Plain #N in a product repo's commits is that repo's own issue, not a board ticket.
+  local names; names="$(jq -r '.[] | split("/")[1]' <<<"$REPOS_JSON" | paste -sd'|' -)"
+  { tr '/' '\n' <<<"$br" | grep -oE '^(issue-|gh-)?[0-9]{2,4}([-_]|$)' | grep -oE '[0-9]+' | sed 's/^/#/';
+    [ -n "$names" ] && git -C "$CWD" log -30 --format='%s%n%b' 2>/dev/null | grep -oiE "(^|[^A-Za-z0-9._/-])($names)#[0-9]+" | grep -oiE "($names)#[0-9]+" |
+      while read -r h; do label "$(norm_ref "$h")"; done; } |
+    sort | uniq -c | sort -rn | awk '{print "hint: " $2 " (" $1 ")"}' || true
 }
 
 cmd_link() {
-  local n="${1:-}" info title bk
-  [[ "$n" =~ ^[0-9]+$ ]] || die "usage: link <issue number>"
+  local t info title bk
+  t="$(norm_ref "${1:-}")" || die "usage: link <issue>: 12, name#12 or owner/name#12"
   [ -n "$SESSION" ] || die "no CLAUDE_CODE_SESSION_ID in the environment"
-  info="$(issue_info "$n")" || die "could not read $OWNER/$ISSUE_REPO#$n"
-  [ -n "$(jq -r '.item // empty' <<<"$info")" ] || die "#$n is not on project $PROJECT_NUMBER"
+  info="$(issue_info "$t")" || die "could not read $t"
+  [ -n "$(jq -r '.item // empty' <<<"$info")" ] || die "$(label "$t") is not on any selected board"
   title="$(jq -r .title <<<"$info")"
   bk="$(branch_key)"
-  with_state --arg s "$SESSION" --argjson n "$n" --arg t "$title" --arg b "$bk" --arg at "$(date -u +%FT%TZ)" '
-    .sessions[$s] = {issue:$n, title:$t, branch:$b, linked_at:$at, prs:(.sessions[$s].prs // [])}
-    | if $b != "" then .branches[$b] = $n else . end'
-  echo "linked session to #$n $title"
-  move "$n" "$ST_IN_PROGRESS"
+  with_state --arg s "$SESSION" --argjson n "$(ref_num "$t")" --arg r "$(stored_repo "$t")" --argjson v "$(branch_val "$t")" \
+    --arg t "$title" --arg b "$bk" --arg at "$(date -u +%FT%TZ)" '
+    .sessions[$s] = ({issue:$n, title:$t, branch:$b, linked_at:$at, prs:(.sessions[$s].prs // [])} + (if $r != "" then {repo:$r} else {} end))
+    | if $b != "" then .branches[$b] = $v else . end'
+  echo "linked session to $(label "$t") $title"
+  move "$t" "$ST_IN_PROGRESS"   # issue_info above switched to this ticket's board
 }
 
 cmd_show() {
-  local n; n="$(current_issue)"
-  [ -n "$n" ] || { echo "not linked"; return 0; }
-  issue_info "$n" | jq -r --argjson n "$n" '"#\($n) \(.title)\nboard: \(.status)   issue: \(.state)"'
+  local t; t="$(current_issue)"
+  [ -n "$t" ] || { echo "not linked"; return 0; }
+  issue_info "$t" | jq -r --arg l "$t" '"\($l) \(.title)\nboard: \(.status) (\(.project // "no board"))   issue: \(.state)"'
   jq -r --arg s "$SESSION" '.sessions[$s].prs // [] | .[] | "pr: \(.)"' "$STATE"
 }
 
 cmd_set() {
-  local n; n="$(current_issue)"; [ -n "$n" ] || die "session not linked — run link first"
-  move "$n" "$1" "${2:+force}"
+  local t; t="$(current_issue)"; [ -n "$t" ] || die "session not linked — run link first"
+  issue_info "$t" >/dev/null || die "could not read $t"
+  move "$t" "$1" "${2:+force}"
 }
 
 cmd_pr() {
   local url="$1" n; n="$(current_issue)"; [ -n "$n" ] || die "session not linked"
   # The feature branch often exists only by now (linked on main, branched later): key it.
-  with_state --arg s "$SESSION" --arg u "$url" --arg b "$(branch_key)" --argjson n "$n" '
+  with_state --arg s "$SESSION" --arg u "$url" --arg b "$(branch_key)" --argjson v "$(branch_val "$n")" '
     .sessions[$s].prs = ((.sessions[$s].prs // []) + [$u] | unique)
-    | if $b != "" then .branches[$b] = $n | .sessions[$s].branch = $b else . end'
-  if link_pr "$n" "$url"; then echo "#$n: $url linked under Development"
-  else echo "#$n: could not link $url under Development (board status still moves)"; fi
-  move "$n" "$ST_PR_RAISED"
+    | if $b != "" then .branches[$b] = $v | .sessions[$s].branch = $b else . end'
+  if link_pr "$n" "$url"; then echo "$(label "$n"): $url linked under Development"
+  else echo "$(label "$n"): could not link $url under Development (board status still moves)"; fi
+  move_to "$n" ST_PR_RAISED
 }
 
 cmd_sync() {
@@ -230,7 +300,7 @@ cmd_sync() {
     url="$(cd "$CWD" && gh pr view --json url -q .url 2>/dev/null || true)"
     [ -n "$url" ] && { cmd_pr "$url" >/dev/null; prs="$url"; }
   fi
-  [ -n "$prs" ] || { [ -z "$quiet" ] && echo "#$n: no PR yet"; return 0; }
+  [ -n "$prs" ] || { [ -z "$quiet" ] && echo "$(label "$n"): no PR yet"; return 0; }
   while read -r url; do
     [ -n "$url" ] || continue
     state="$(gh pr view "$url" --json state -q .state 2>/dev/null || echo UNKNOWN)"
@@ -239,8 +309,8 @@ cmd_sync() {
   done <<<"$prs"
   # Dev Done only once every PR for the ticket has landed — a web PR merged while the
   # backend one is still open is not dev complete.
-  if [ "$merged" -gt 0 ] && [ "$open" -eq 0 ]; then move "$n" "$ST_DEV_DONE"
-  elif [ -z "$quiet" ]; then echo "#$n: $open PR(s) still open"; fi
+  if [ "$merged" -gt 0 ] && [ "$open" -eq 0 ]; then move_to "$n" ST_DEV_DONE
+  elif [ -z "$quiet" ]; then echo "$(label "$n"): $open PR(s) still open"; fi
 }
 
 cmd_unlink() {
@@ -268,7 +338,7 @@ cmd_hook() {
   if [ "$event" = "SessionStart" ]; then
     n="$(current_issue)"; [ -n "$n" ] || exit 0
     res="$(cmd_sync quiet 2>&1 | tail -1)"
-    emit SessionStart "session linked to $OWNER/$ISSUE_REPO#$n${res:+ — $res}"
+    emit SessionStart "session linked to $n${res:+ — $res}"
     exit 0
   fi
 
@@ -296,7 +366,7 @@ cmd_hook() {
   url="$(cd "$CWD" && gh pr view ${arg:+"$arg"} --json url -q .url 2>/dev/null || true)"
   [ -n "$url" ] && cmd_pr "$url" >/dev/null 2>&1
   res="$(cmd_sync quiet 2>&1 | tail -1)"
-  emit PostToolUse "${res:-#$n: merge not confirmed yet (auto-merge?) — run sync later}"
+  emit PostToolUse "${res:-$(label "$n"): merge not confirmed yet (auto-merge?) — run sync later}"
 }
 
 sub="${1:-show}"; shift || true

@@ -5,14 +5,19 @@ description: Use when the user types /babysit-ticket, asks which ticket/task thi
 
 # babysit-ticket
 
-Links this Claude Code session to one issue in the configured **issue repo**
-(`<owner>/<issueRepo>`) and, when a project board is configured, moves its
-**Status** on that board as the work progresses. Hooks do the moves; this skill does the linking.
+Links this Claude Code session to one issue in any of the configured **repos** and, when the
+issue is on one of the configured project **boards**, moves its **Status** on that board as the
+work progresses. Hooks do the moves; this skill does the linking.
+
+**Ticket references:** `#N` is an issue in the primary repo (`<owner>/<issueRepo>`); an issue in
+another selected repo is `name#N` (e.g. `api#12`) or `owner/name#N`. `tt` takes any of these.
 
 All values come from `~/.claude/master/config.json` (created by MasterDeck's Setup screen or
 `~/.claude/skills/master/master config save`; `master config show` prints it):
-`owner`, `issueRepo`, `project` (GitHub Projects v2 number; `0` = no board, so no status moves),
-`columns` (the board's statuses, in order), and `statuses.*` (which column each event moves to).
+`owner`, `issueRepo` (the primary repo), `repos` (every selected repo), `projects` (every selected
+board, each with its own `columns` and `statuses.*`: which column each event moves to). An issue's
+status moves on the first selected board that has it, with that board's statuses. Older configs
+have one `project`, `columns` and `statuses`.
 
 All commands: `~/.claude/skills/babysit-ticket/scripts/tt.sh <cmd>` (call it `tt` below).
 
@@ -36,22 +41,22 @@ status (QA-side columns such as In QA) are never set automatically.
 
 1. `tt show`: if it's already linked, report the ticket and board status, run `tt sync`, and stop.
 2. Gather evidence:
-   - `tt hints`, run in the repo being worked on (branch name `feat/879-…`, `<issueRepo>#879` in commits)
-   - `tt candidates` (open tickets assigned to the user; `CURRENT` = this sprint)
+   - `tt hints`, run in the repo being worked on (branch name `feat/879-…`, `<repo>#879` in commits)
+   - `tt candidates` (open tickets assigned to the user on every board; `CURRENT` = this sprint)
    - what this conversation is actually doing
 3. Decide:
    - **Confident** means one candidate clearly matches: a hint number appears in candidates, or
      the work obviously matches one title. Say which one and why in one line, then link.
    - **Otherwise, ask.** Use AskUserQuestion with the 2–4 likeliest candidates as options
-     (label `#N short title`, description = status + sprint). "Other" covers a number not
-     listed. Never guess between two plausible tickets.
-4. `tt link <N>`. It records the session and the feature branch, then moves the ticket to the
-   in-progress status.
+     (label `#N short title` or `name#N short title`, description = status + sprint). "Other"
+     covers a ticket not listed. Never guess between two plausible tickets.
+4. `tt link <ticket>` (`12`, `api#12` or `acme/api#12`). It records the session and the feature
+   branch, then moves the ticket to the in-progress status on its board.
 5. Start the feature branch with **`tt branch <name>`** (not `git checkout -b`) so it appears
    in the ticket's **Development** box. It creates the branch on the remote via GitHub's API,
    then fetches and checks it out — works even when the ticket lives in the issue repo and the
    code in another repo.
-6. When opening a PR, put `Refs <owner>/<issueRepo>#N` in the body — **no closing keyword**.
+6. When opening a PR, put `Refs <owner>/<repo>#N` (the ticket in full) in the body — **no closing keyword**.
    `tt pr` (and the `gh pr create` hook) links the PR under Development for you.
 
 ## The Development box, and why the ticket closes on merge
@@ -98,5 +103,5 @@ other session there. The branch gets keyed when the PR is recorded instead.
 - `git checkout -b` skips the Development link and it cannot be added afterwards. Use `tt branch`.
 - A ticket with PRs in several repos (e.g. web + backend) reaches the dev-done status only when
   **all** of them are merged.
-- `tt hints` ignores plain `#34` in a code repo's commits (when it isn't the issue repo), because
-  that's the repo's own issue, not a board ticket.
+- `tt hints` ignores plain `#34` in a code repo's commits, because that's the repo's own issue,
+  not a board ticket; `<repo>#34` naming a selected repo counts.
