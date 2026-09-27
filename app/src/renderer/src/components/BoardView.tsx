@@ -1,4 +1,5 @@
 import { getConfig, projectByKey, statusGroup, statusRank, type StatusGroup } from '@shared/appConfig'
+import { nextTabName, ViewTabs } from './ViewTabs'
 import { fullRepo, ticketKey, ticketLabel, ticketOf } from '@shared/ticket'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cardBadge, cardsIn, visibleColumns } from '@shared/board'
@@ -124,7 +125,6 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
   // Tabs: each its own name and filters over the one board fetched from GitHub.
   const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(me))
   const [tabId, setTabId] = useState<string>(() => load<string>(TAB_KEY, ''))
-  const [renaming, setRenaming] = useState<string | null>(null)
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0]
   // First run: filter to me once my login is known.
   const [meFilled, setMeFilled] = useState(() => load<BoardTab[] | null>(TABS_KEY, null) !== null || load(FILTERS_KEY, null) !== null)
@@ -140,11 +140,9 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
   const set = (patch: Partial<FilterState>) => setFilters({ ...f, ...patch })
   const addTab = () => {
     const id = `board-${Date.now().toString(36)}`
-    let n = tabs.length + 1
-    while (tabs.some((t) => t.name === `Board ${n}`)) n++
-    setTabs([...tabs, { id, name: `Board ${n}`, filters: { ...defaultFilters(me), assignees: [] } }])
+    setTabs([...tabs, { id, name: nextTabName(tabs, 'Board'), filters: { ...defaultFilters(me), assignees: [] } }])
     setTabId(id)
-    setRenaming(id)
+    return id
   }
   const closeTab = (id: string) => {
     const rest = tabs.filter((t) => t.id !== id)
@@ -189,39 +187,15 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
 
   return (
     <section className="board-view">
-      <div className="board-tabs" role="tablist">
-        {tabs.map((t) => (
-          <div key={t.id} className={`board-tab ${t.id === tab.id ? 'on' : ''}`} role="tab" aria-selected={t.id === tab.id}>
-            {renaming === t.id ? (
-              <input
-                className="board-tab-name"
-                autoFocus
-                defaultValue={t.name}
-                onBlur={(e) => {
-                  renameTab(t.id, e.target.value)
-                  setRenaming(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                  if (e.key === 'Escape') setRenaming(null)
-                }}
-              />
-            ) : (
-              <button onClick={() => setTabId(t.id)} onDoubleClick={() => setRenaming(t.id)} title="Double-click to rename">
-                {t.name}
-              </button>
-            )}
-            {tabs.length > 1 && (
-              <button className="board-tab-x" title="Close this tab" aria-label={`Close ${t.name}`} onClick={() => closeTab(t.id)}>
-                ×
-              </button>
-            )}
-          </div>
-        ))}
-        <button className="board-tab-add" onClick={addTab} title="Another board tab, with its own repos, boards and filters">
-          +
-        </button>
-      </div>
+      <ViewTabs
+        tabs={tabs}
+        activeId={tab.id}
+        onSelect={setTabId}
+        onAdd={addTab}
+        onClose={closeTab}
+        onRename={renameTab}
+        addTitle="Another board tab, with its own repos, boards and filters"
+      />
       <header className="board-head">
         <select className="sprint-pick" value={state.selectedSprint} onChange={(e) => deck().setSprint(e.target.value)} title="Sprint">
           <option value="@current">Current sprint{current ? ` (${current.title})` : ''}</option>

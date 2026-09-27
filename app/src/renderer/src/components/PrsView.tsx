@@ -1,4 +1,5 @@
 import { sameTicket, ticketLabel, ticketUrl, type Ticket } from '@shared/ticket'
+import { nextTabName, ViewTabs } from './ViewTabs'
 import { useEffect, useMemo, useState } from 'react'
 import { ciMessage, ownerOf, prOffers, reviewMessage, type PrOffer } from '@shared/offers'
 import { formatRefreshed } from '@shared/format'
@@ -30,6 +31,23 @@ export function useDismissed(): [Set<string>, (id: string) => void] {
 }
 
 const FILTERS = 'prFilters'
+const TABS = 'prTabs'
+const TAB = 'prTab'
+
+/** A tab of the PRs view: its own name and filters over the one fetched list. */
+interface PrTab {
+  id: string
+  name: string
+  filters: PrFilters
+}
+
+/** The saved tabs; the first run (or an older version's single filter set) makes one. */
+function loadTabs(): PrTab[] {
+  const saved = load<PrTab[] | null>(TABS, null)
+  if (Array.isArray(saved) && saved.length)
+    return saved.filter((t) => t && typeof t.id === 'string').map((t) => ({ id: t.id, name: typeof t.name === 'string' && t.name ? t.name : 'PRs', filters: normalizePrFilters(t.filters) }))
+  return [{ id: 'prs-1', name: 'PRs', filters: normalizePrFilters(load<unknown>(FILTERS, DEFAULT_PR_FILTERS)) }]
+}
 const PRESETS: { label: string; title: string; f: Partial<PrFilters> }[] = [
   { label: 'Everyone', title: 'All open PRs in the org', f: { state: 'open', author: '', review: 'any', ci: 'any' } },
   { label: 'Mine', title: 'Open PRs I created', f: { state: 'open', author: '@me', review: 'any', ci: 'any' } },
@@ -55,13 +73,28 @@ function asPr(p: TeamPr, snapshot: Pr[]): Pr {
 
 export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const now = useNow(30_000)
-  const [f, setF] = useState<PrFilters>(() => normalizePrFilters(load<unknown>(FILTERS, DEFAULT_PR_FILTERS)))
-  const set = (patch: Partial<PrFilters>) =>
-    setF((cur) => {
-      const next = { ...cur, ...patch }
-      save(FILTERS, next)
-      return next
-    })
+  // Tabs: each its own name and filters over the one list of PRs fetched from GitHub.
+  const [tabs, setTabs] = useState<PrTab[]>(loadTabs)
+  const [tabId, setTabId] = useState<string>(() => load<string>(TAB, ''))
+  const tab = tabs.find((t) => t.id === tabId) ?? tabs[0]
+  useEffect(() => save(TABS, tabs), [tabs])
+  useEffect(() => save(TAB, tab.id), [tab.id])
+  const f = tab.filters
+  const setF = (fn: (cur: PrFilters) => PrFilters) => setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, filters: fn(t.filters) } : t)))
+  const set = (patch: Partial<PrFilters>) => setF((cur) => ({ ...cur, ...patch }))
+  const addTab = () => {
+    const id = `prs-${Date.now().toString(36)}`
+    setTabs([...tabs, { id, name: nextTabName(tabs, 'PRs'), filters: { ...DEFAULT_PR_FILTERS } }])
+    setTabId(id)
+    return id
+  }
+  const closeTab = (id: string) => {
+    const rest = tabs.filter((t) => t.id !== id)
+    if (!rest.length) return
+    setTabs(rest)
+    if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
+  }
+  const renameTab = (id: string, name: string) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, name } : t)))
   const [dismissed, dismiss] = useDismissed()
   const me = state.me
   const isMe = (login: string) => !!me && login.toLowerCase() === me.toLowerCase()
@@ -92,15 +125,12 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
 
   return (
     <section className="board-view panel">
+      <ViewTabs tabs={tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
       <header className="board-head">
         <h2>Pull requests</h2>
         <div className="seg">
           {PRESETS.map((p) => (
-            <button key={p.label} className={preset === p ? 'on' : ''} title={p.title} onClick={() => setF(() => {
-              const next = { ...DEFAULT_PR_FILTERS, sort: f.sort, ...p.f }
-              save(FILTERS, next)
-              return next
-            })}>
+            <button key={p.label} className={preset === p ? 'on' : ''} title={p.title} onClick={() => setF((cur) => ({ ...DEFAULT_PR_FILTERS, sort: cur.sort, ...p.f }))}>
               {p.label}
             </button>
           ))}

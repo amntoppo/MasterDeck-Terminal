@@ -156,6 +156,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 
 ## PRs and reviews
 
+- **PR tabs:** like the Board, the PRs view has tabs: **+** adds one, double-click renames, × closes.
+  Each tab keeps its own filters and preset (for example one tab "Needs my review", another "Mine"),
+  over the same list fetched from GitHub. Tabs are remembered.
 - **PRs view:** every PR in the org, mine and the team's: all open PRs plus the latest 300 closed or
   merged in the last 30 days. It is fetched when the view opens (if older than 10 minutes), on
   Refresh, and with the hourly GitHub refresh, through the shared cache. The last list is kept on
