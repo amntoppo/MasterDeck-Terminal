@@ -1,62 +1,105 @@
-import type { PrLive } from './types'
+import type { PrLive, Proposal, Session } from './types'
 
 /**
- * "Ready for Review": a session whose PR is open and has had no new comments or reviews for a
- * while (Settings, 20 minutes by default). The timer starts when the PR is created and starts
- * again at each new comment or review, from anyone.
+ * Session statuses beyond Claude Code's own (working, idle, needs input): where its PR stands, and
+ * what master knows (a question, a blocker). They replace "idle"; working and needs input win.
  */
-export interface ReviewTimer {
-  /** The open PRs it watches (numbers). */
+
+/** Where a session's PRs stand, first match wins. */
+export interface PrStage {
+  kind: 'merged' | 'approved' | 'changes' | 'ci-failing' | 'ready' | 'in-review'
+  /** The PRs it is about (numbers). */
   prs: number[]
-  /** The PR's creation or its last comment or review, whichever is latest (ms). */
-  since: number
-  /** When it counts as ready (ms). */
-  readyAt: number
-  ready: boolean
+  /** Why, in a few words, for tooltips. */
+  why: string
 }
-
-export function reviewTimer(urls: string[], live: Record<string, PrLive>, now: number, quietMinutes: number): ReviewTimer | null {
-  // Drafts count: sessions open their PRs as drafts, and quiet means ready for you to look at it.
-  // Merged and closed PRs are past review.
-  const open = urls.map((u) => live[u]).filter((p): p is PrLive => !!p && p.state === 'OPEN')
-  const times = open.flatMap((p) => [p.createdAt, p.lastCommentAt]).filter((t): t is number => typeof t === 'number')
-  if (!times.length) return null
-  const since = Math.max(...times)
-  const readyAt = since + quietMinutes * 60_000
-  return { prs: open.map((p) => p.number), since, readyAt, ready: now >= readyAt }
-}
-
-/** The session's PRs are all merged: none open (drafts included), and at least one merged. Their numbers. */
-export function mergedPrs(urls: string[], live: Record<string, PrLive>): number[] | null {
-  const prs = urls.map((u) => live[u]).filter((p): p is PrLive => !!p)
-  if (prs.some((p) => p.state === 'OPEN')) return null
-  const merged = prs.filter((p) => p.state === 'MERGED').map((p) => p.number)
-  return merged.length ? merged : null
-}
-
-export type StatusDot = 'working' | 'idle' | 'needs-input' | 'suspended' | 'done' | 'review' | 'merged'
 
 /**
- * What a session's status says, in the sidebar and its header: needs input and working first;
- * then, instead of "idle", where its PR stands: merged, ready for review, or the time left.
+ * - merged: its PRs are merged, none still open;
+ * - approved / changes: the review decision of an open PR;
+ * - ci-failing: a build or test check failed (not the review check);
+ * - ready (Ready for Review): the automated review is done, passed or failed, or nothing new has
+ *   been said on the PR for `quietMinutes` (a stale review counts as done);
+ * - in-review: the review check runs, or comments came in the last `quietMinutes`.
+ * Drafts count: sessions open their PRs as drafts.
  */
-export function sessionStatus(
-  state: string,
-  review: ReviewTimer | null | undefined,
-  merged: number[] | null | undefined,
-  now: number,
-): { text: string; dot: StatusDot; countdown: number | null } {
-  if (state !== 'idle') return { text: STATE_TEXT[state] ?? state, dot: (state in STATE_TEXT ? state : 'idle') as StatusDot, countdown: null }
-  if (merged?.length) return { text: 'merged', dot: 'merged', countdown: null }
-  if (review?.ready) return { text: 'ready for review', dot: 'review', countdown: null }
-  if (review) return { text: 'review in', dot: 'idle', countdown: review.readyAt - now }
-  return { text: 'idle', dot: 'idle', countdown: null }
+export function prStage(urls: string[], live: Record<string, PrLive>, now: number, quietMinutes: number): PrStage | null {
+  const prs = urls.map((u) => live[u]).filter((p): p is PrLive => !!p)
+  const open = prs.filter((p) => p.state === 'OPEN')
+  const nums = (list: PrLive[]) => list.map((p) => p.number)
+  if (!open.length) {
+    const merged = prs.filter((p) => p.state === 'MERGED')
+    return merged.length ? { kind: 'merged', prs: nums(merged), why: 'merged' } : null
+  }
+  const approved = open.filter((p) => p.reviewDecision === 'APPROVED')
+  if (approved.length === open.length) return { kind: 'approved', prs: nums(approved), why: 'approved' }
+  const changes = open.filter((p) => p.reviewDecision === 'CHANGES_REQUESTED')
+  if (changes.length) return { kind: 'changes', prs: nums(changes), why: 'a reviewer asked for changes' }
+  const failing = open.filter((p) => p.buildCi === 'failure')
+  if (failing.length) return { kind: 'ci-failing', prs: nums(failing), why: 'a build or test check failed' }
+
+  const times = open.flatMap((p) => [p.createdAt, p.lastCommentAt]).filter((t): t is number => typeof t === 'number')
+  const quiet = times.length > 0 && now - Math.max(...times) >= quietMinutes * 60_000
+  const reviewed = open.filter((p) => p.reviewCheck === 'success' || p.reviewCheck === 'failure')
+  if (reviewed.length === open.length) {
+    const failed = reviewed.some((p) => p.reviewCheck === 'failure')
+    return { kind: 'ready', prs: nums(open), why: failed ? 'the automated review failed' : 'the automated review passed' }
+  }
+  if (quiet) return { kind: 'ready', prs: nums(open), why: `no new comments for ${quietMinutes} minutes` }
+  const running = open.some((p) => p.reviewCheck === 'pending')
+  return { kind: 'in-review', prs: nums(open), why: running ? 'the automated review is running' : 'comments came in lately' }
 }
 
-const STATE_TEXT: Record<string, string> = {
-  working: 'working',
-  idle: 'idle',
-  'needs-input': 'needs input',
-  suspended: 'suspended',
-  done: 'ended',
+export type StatusKey =
+  | 'needs-input'
+  | 'working'
+  | 'question'
+  | 'blocked'
+  | 'merged'
+  | 'approved'
+  | 'changes'
+  | 'ci-failing'
+  | 'ready'
+  | 'in-review'
+  | 'idle'
+  | 'suspended'
+  | 'done'
+
+export const STATUS_TEXT: Record<StatusKey, string> = {
+  'needs-input': 'Needs Input',
+  working: 'Working',
+  question: 'Question',
+  blocked: 'Blocked',
+  merged: 'Merged',
+  approved: 'Approved',
+  changes: 'Changes Requested',
+  'ci-failing': 'CI Failing',
+  ready: 'Ready for Review',
+  'in-review': 'In Review',
+  idle: 'Idle',
+  suspended: 'Suspended',
+  done: 'Ended',
+}
+
+/** The latest question or blocker master holds for this session (by its name, or its issue). */
+export function attentionFor(s: Session, proposals: Proposal[]): Proposal | null {
+  const mine = proposals
+    .filter((p) => p.kind !== 'CHAT' && (p.status === 'question' || p.status === 'blocked'))
+    .filter((p) => p.target.session === s.name || p.target.spawn?.name === s.name || (s.issue !== null && p.issue === s.issue))
+  return mine.sort((a, b) => b.id - a.id)[0] ?? null
+}
+
+/**
+ * A session's status, first match wins: needs input, working, question, blocked, then where its PR
+ * stands, then idle. Suspended and ended sessions keep those.
+ */
+export function sessionStatus(s: Pick<Session, 'state'>, stage: PrStage | null | undefined, attention: Proposal | null): { key: StatusKey; text: string; why: string } {
+  const out = (key: StatusKey, why = '') => ({ key, text: STATUS_TEXT[key], why })
+  if (s.state === 'needs-input') return out('needs-input', 'waiting on a prompt or permission')
+  if (s.state === 'working') return out('working')
+  if (s.state === 'suspended' || s.state === 'done') return out(s.state)
+  if (attention?.status === 'question') return out('question', attention.note?.trim() || 'it asked master a question')
+  if (attention?.status === 'blocked') return out('blocked', attention.note?.trim() || 'it reported a blocker')
+  if (stage) return out(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)
+  return out('idle')
 }

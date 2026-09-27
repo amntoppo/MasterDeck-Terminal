@@ -6,7 +6,7 @@ export interface Settings {
   dockBadge: boolean
   /** After the Mac restarts: offer to resume the background sessions it stopped, resume them, or neither. */
   afterRestart: 'ask' | 'resume' | 'off'
-  /** A session with an open PR is Ready for Review after this many minutes without new comments. */
+  /** A session's open PR is Ready for Review once its automated review is done, or after this many minutes without new comments. */
   reviewQuietMinutes: number
 }
 

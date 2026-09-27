@@ -1,52 +1,77 @@
 import { describe, expect, it } from 'vitest'
-import { mergedPrs, reviewTimer, sessionStatus } from './review'
-import type { PrLive } from './types'
+import { attentionFor, prStage, sessionStatus } from './review'
+import type { PrLive, Proposal, Session } from './types'
 
-const pr = (n: number, o: Partial<PrLive> = {}): PrLive => ({ number: n, title: null, url: `u${n}`, state: 'OPEN', reviewDecision: null, ci: null, isDraft: false, createdAt: 1_000, lastCommentAt: null, ...o })
+const pr = (n: number, o: Partial<PrLive> = {}): PrLive => ({
+  number: n,
+  title: null,
+  url: `u${n}`,
+  state: 'OPEN',
+  reviewDecision: null,
+  ci: null,
+  reviewCheck: null,
+  buildCi: null,
+  isDraft: true,
+  createdAt: 0,
+  lastCommentAt: null,
+  ...o,
+})
 const MIN = 60_000
+const stage = (live: Record<string, PrLive>, now = 5 * MIN) => prStage(Object.keys(live), live, now, 20)
 
-describe('reviewTimer', () => {
-  it('counts 20 quiet minutes from the PR being created', () => {
-    const live = { u1: pr(1) }
-    expect(reviewTimer(['u1'], live, 1_000 + 19 * MIN, 20)).toEqual({ prs: [1], since: 1_000, readyAt: 1_000 + 20 * MIN, ready: false })
-    expect(reviewTimer(['u1'], live, 1_000 + 20 * MIN, 20)?.ready).toBe(true)
+describe('prStage', () => {
+  it('Ready for Review when the automated review passed or failed', () => {
+    expect(stage({ u1: pr(1, { reviewCheck: 'success' }) })).toMatchObject({ kind: 'ready', why: 'the automated review passed' })
+    expect(stage({ u1: pr(1, { reviewCheck: 'failure' }) })).toMatchObject({ kind: 'ready', why: 'the automated review failed' })
   })
 
-  it('starts again at the latest comment or review, across the open PRs', () => {
-    const live = { u1: pr(1, { lastCommentAt: 5 * MIN }), u2: pr(2, { createdAt: 9 * MIN }) }
-    expect(reviewTimer(['u1', 'u2'], live, 20 * MIN, 20)).toMatchObject({ prs: [1, 2], since: 9 * MIN, ready: false })
+  it('Ready for Review when nothing new was said for 20 minutes, even with the review still running', () => {
+    expect(stage({ u1: pr(1, { lastCommentAt: 2 * MIN, reviewCheck: 'pending' }) }, 22 * MIN)).toMatchObject({ kind: 'ready', why: 'no new comments for 20 minutes' })
   })
 
-  it('counts drafts; skips merged and closed PRs, and PRs not fetched yet', () => {
-    expect(reviewTimer(['u1'], { u1: pr(1, { isDraft: true }) }, 20 * MIN + 1_000, 20)?.ready).toBe(true)
-    const live = { u2: pr(2, { state: 'MERGED' }), u3: pr(3, { state: 'CLOSED' }) }
-    expect(reviewTimer(['u2', 'u3', 'u4'], live, 99 * MIN, 20)).toBeNull()
-    expect(reviewTimer([], live, 0, 20)).toBeNull()
+  it('In Review while the review runs or comments are recent', () => {
+    expect(stage({ u1: pr(1, { reviewCheck: 'pending' }) })).toMatchObject({ kind: 'in-review', why: 'the automated review is running' })
+    expect(stage({ u1: pr(1, { lastCommentAt: 4 * MIN }) }, 10 * MIN)).toMatchObject({ kind: 'in-review' })
+  })
+
+  it('every open PR must be reviewed', () => {
+    expect(stage({ u1: pr(1, { reviewCheck: 'success' }), u2: pr(2) })?.kind).toBe('in-review')
+  })
+
+  it('merged, approved, changes requested and failing CI come first', () => {
+    expect(stage({ u1: pr(1, { state: 'MERGED' }), u2: pr(2, { state: 'CLOSED' }) })).toMatchObject({ kind: 'merged', prs: [1] })
+    expect(stage({ u1: pr(1, { state: 'MERGED' }), u2: pr(2, { reviewCheck: 'success' }) })?.kind).toBe('ready')
+    expect(stage({ u1: pr(1, { reviewDecision: 'APPROVED', buildCi: 'failure' }) })?.kind).toBe('approved')
+    expect(stage({ u1: pr(1, { reviewDecision: 'CHANGES_REQUESTED', reviewCheck: 'success' }) })?.kind).toBe('changes')
+    expect(stage({ u1: pr(1, { buildCi: 'failure', reviewCheck: 'success' }) })?.kind).toBe('ci-failing')
+  })
+
+  it('nothing without PRs, or only closed ones', () => {
+    expect(stage({})).toBeNull()
+    expect(stage({ u1: pr(1, { state: 'CLOSED' }) })).toBeNull()
   })
 })
 
-describe('mergedPrs', () => {
-  it('is the merged PRs once none is open', () => {
-    expect(mergedPrs(['u1', 'u2'], { u1: pr(1, { state: 'MERGED' }), u2: pr(2, { state: 'CLOSED' }) })).toEqual([1])
-    expect(mergedPrs(['u1', 'u2'], { u1: pr(1, { state: 'MERGED' }), u2: pr(2) })).toBeNull()
-    expect(mergedPrs(['u1', 'u2'], { u1: pr(1, { state: 'MERGED' }), u2: pr(2, { isDraft: true }) })).toBeNull()
-    expect(mergedPrs(['u1'], { u1: pr(1, { state: 'CLOSED' }) })).toBeNull()
-    expect(mergedPrs([], {})).toBeNull()
-  })
-})
+const S = (state: Session['state'], o: Partial<Session> = {}) => ({ state, name: 'a', issue: 7, ...o }) as Session
+const P = (o: Partial<Proposal>): Proposal => ({ id: 1, kind: 'ASSIGN', issue: 7, status: 'sent', summary: '', message: '', note: null, target: { session: 'a' }, ...o })
 
 describe('sessionStatus', () => {
-  const timer = { prs: [1], since: 0, readyAt: 20 * MIN, ready: false }
-  it('says where the PR stands instead of idle', () => {
-    expect(sessionStatus('idle', null, [1], 0)).toEqual({ text: 'merged', dot: 'merged', countdown: null })
-    expect(sessionStatus('idle', { ...timer, ready: true }, null, 0)).toEqual({ text: 'ready for review', dot: 'review', countdown: null })
-    expect(sessionStatus('idle', timer, null, 5 * MIN)).toEqual({ text: 'review in', dot: 'idle', countdown: 15 * MIN })
-    expect(sessionStatus('idle', null, null, 0)).toEqual({ text: 'idle', dot: 'idle', countdown: null })
+  const ready = { kind: 'ready' as const, prs: [1], why: 'the automated review passed' }
+  it('needs input and working win; then question, blocked, the PR, idle', () => {
+    expect(sessionStatus(S('needs-input'), ready, P({ status: 'question' })).key).toBe('needs-input')
+    expect(sessionStatus(S('working'), ready, null).key).toBe('working')
+    expect(sessionStatus(S('idle'), ready, P({ status: 'question', note: 'A or B?' }))).toMatchObject({ key: 'question', why: 'A or B?' })
+    expect(sessionStatus(S('idle'), ready, P({ status: 'blocked' })).key).toBe('blocked')
+    expect(sessionStatus(S('idle'), ready, null)).toEqual({ key: 'ready', text: 'Ready for Review', why: 'PR #1: the automated review passed' })
+    expect(sessionStatus(S('idle'), null, null).text).toBe('Idle')
+    expect(sessionStatus(S('done'), ready, null).text).toBe('Ended')
   })
+})
 
-  it('keeps working, needs input and ended as they are', () => {
-    expect(sessionStatus('working', { ...timer, ready: true }, null, 0).text).toBe('working')
-    expect(sessionStatus('needs-input', null, [1], 0)).toMatchObject({ text: 'needs input', dot: 'needs-input' })
-    expect(sessionStatus('done', null, [1], 0).text).toBe('ended')
+describe('attentionFor', () => {
+  it('finds the latest question or blocker for the session', () => {
+    const list = [P({ id: 1, status: 'question' }), P({ id: 2, status: 'blocked' }), P({ id: 3, status: 'done' }), P({ id: 4, kind: 'CHAT', status: 'question' })]
+    expect(attentionFor(S('idle'), list)?.id).toBe(2)
+    expect(attentionFor(S('idle', { name: 'b', issue: 9 }), list)).toBeNull()
   })
 })

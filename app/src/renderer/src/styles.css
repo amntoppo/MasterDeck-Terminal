@@ -536,10 +536,23 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .ask-review { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
 .ask-review b { font-weight: 600; }
 .form-buttons { display: flex; gap: 6px; }
-/* Session status from its PR: Ready for Review (quiet for a while), Merged */
-.dot.merged { background: var(--purple); }
-.dot.review { background: var(--accent); box-shadow: 0 0 0 3px rgba(106, 169, 255, .2); }
-.chip.st-chip-review { border-color: var(--accent); }
-.chip.st-chip-merged { border-color: var(--purple); }
-.sub.st-review { color: var(--accent); }
-.sub.st-merged { color: var(--purple); }
+/* Session statuses (shared/review.ts): the dot, and the colour of the words */
+.dot.st-working { background: var(--green); box-shadow: 0 0 0 3px rgba(62, 207, 142, .15); }
+.dot.st-idle { background: var(--amber); }
+.dot.st-needs-input, .dot.st-blocked, .dot.st-ci-failing { background: var(--red); box-shadow: 0 0 0 3px rgba(242, 109, 109, .2); }
+.dot.st-question { background: var(--purple); box-shadow: 0 0 0 3px rgba(167, 139, 250, .2); }
+.dot.st-ready { background: var(--accent); box-shadow: 0 0 0 3px rgba(106, 169, 255, .2); }
+.dot.st-in-review { background: var(--accent); opacity: .55; }
+.dot.st-changes { background: var(--amber); box-shadow: 0 0 0 3px rgba(240, 180, 80, .2); }
+.dot.st-approved { background: var(--green); }
+.dot.st-merged { background: var(--purple); }
+.dot.st-suspended, .dot.st-done { background: var(--grey); opacity: .6; }
+.sub.st-ready, .chip.st-ready { color: var(--accent); }
+.sub.st-merged, .sub.st-question { color: var(--purple); }
+.sub.st-blocked, .sub.st-ci-failing, .sub.st-needs-input { color: var(--red); }
+.sub.st-changes { color: var(--amber); }
+.sub.st-approved { color: var(--green); }
+.chip.st-ready { border-color: var(--accent); }
+.chip.st-merged, .chip.st-question { border-color: var(--purple); }
+.chip.st-blocked, .chip.st-ci-failing, .chip.st-needs-input { border-color: var(--red); }
+.chip.st-changes { border-color: var(--amber); }

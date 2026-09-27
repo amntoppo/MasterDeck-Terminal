@@ -22,7 +22,7 @@ describe('parsePrView', () => {
   const base = { number: 88, url: 'https://github.com/o/r/pull/88', state: 'OPEN', reviewDecision: 'APPROVED' }
   it('success when every check passed', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { state: 'SUCCESS' }] }))
-    expect(p).toEqual({ ...base, title: null, ci: 'success', isDraft: false, createdAt: null, lastCommentAt: null })
+    expect(p).toEqual({ ...base, title: null, ci: 'success', reviewCheck: null, buildCi: 'success', isDraft: false, createdAt: null, lastCommentAt: null })
   })
   it('failure beats pending', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ status: 'IN_PROGRESS', conclusion: '' }, { conclusion: 'FAILURE' }] }))
@@ -33,6 +33,19 @@ describe('parsePrView', () => {
     const p = parsePrView(JSON.stringify({ ...base, reviewDecision: '', statusCheckRollup: [] }))
     expect(p?.ci).toBeNull()
     expect(p?.reviewDecision).toBeNull()
+  })
+  it('splits the automated review check from build and test checks', () => {
+    const p = parsePrView(
+      JSON.stringify({
+        ...base,
+        statusCheckRollup: [
+          { name: 'claude-review', workflowName: 'Claude Code Review', conclusion: 'FAILURE' },
+          { name: 'build', workflowName: 'CI', conclusion: 'SUCCESS' },
+          { context: 'ci/tests', state: 'PENDING' },
+        ],
+      }),
+    )
+    expect(p).toMatchObject({ ci: 'failure', reviewCheck: 'failure', buildCi: 'pending' })
   })
   it('reads when it was opened and its latest comment or review', () => {
     const p = parsePrView(

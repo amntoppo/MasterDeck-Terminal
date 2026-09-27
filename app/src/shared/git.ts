@@ -38,7 +38,6 @@ export function parseNumstat(text: string): { added: number; removed: number; fi
 const FAIL = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'])
 const PENDING = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'EXPECTED', 'REQUESTED'])
 
-/** Parse `gh pr view --json number,url,state,reviewDecision,statusCheckRollup`. */
 function time(v: unknown): number | null {
   const t = typeof v === 'string' ? Date.parse(v) : NaN
   return Number.isFinite(t) ? t : null
@@ -57,6 +56,21 @@ export const PR_VIEW_ARGS = [
   '{number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,comments:[.comments[]|{createdAt}],reviews:[.reviews[]|{submittedAt}]}',
 ]
 
+/** Checks together: failure beats pending beats success; null with no checks. */
+function rollup(checks: Record<string, unknown>[]): PrLive['ci'] {
+  if (!checks.length) return null
+  const states = checks.map((c) => String(c.conclusion || c.state || c.status || '').toUpperCase())
+  if (states.some((s) => FAIL.has(s))) return 'failure'
+  if (states.some((s) => PENDING.has(s) || s === '')) return 'pending'
+  return 'success'
+}
+
+/** An automated code review check (e.g. `claude-review` of the "Claude Code Review" workflow). */
+function isReviewCheck(c: Record<string, unknown>): boolean {
+  return /review/i.test(`${String(c.name ?? c.context ?? '')} ${String(c.workflowName ?? '')}`)
+}
+
+/** Parse `gh pr view` with `PR_VIEW_ARGS`. */
 export function parsePrView(text: string): PrLive | null {
   let r: Record<string, unknown>
   try {
@@ -66,13 +80,7 @@ export function parsePrView(text: string): PrLive | null {
   }
   if (!r || typeof r.number !== 'number' || typeof r.url !== 'string') return null
   const checks = Array.isArray(r.statusCheckRollup) ? (r.statusCheckRollup as Record<string, unknown>[]) : []
-  let ci: PrLive['ci'] = null
-  if (checks.length > 0) {
-    const states = checks.map((c) => String(c.conclusion || c.state || c.status || '').toUpperCase())
-    if (states.some((s) => FAIL.has(s))) ci = 'failure'
-    else if (states.some((s) => PENDING.has(s) || s === '')) ci = 'pending'
-    else ci = 'success'
-  }
+  const ci = rollup(checks)
   return {
     number: r.number,
     title: typeof r.title === 'string' ? r.title : null,
@@ -80,6 +88,8 @@ export function parsePrView(text: string): PrLive | null {
     state: typeof r.state === 'string' ? r.state : 'OPEN',
     reviewDecision: typeof r.reviewDecision === 'string' && r.reviewDecision ? r.reviewDecision : null,
     ci,
+    reviewCheck: rollup(checks.filter(isReviewCheck)),
+    buildCi: rollup(checks.filter((c) => !isReviewCheck(c))),
     isDraft: r.isDraft === true,
     createdAt: time(r.createdAt),
     lastCommentAt: latest([

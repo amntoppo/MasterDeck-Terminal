@@ -14,7 +14,7 @@ import {
   type ParsedSnapshot,
 } from '@shared/derive'
 import { parseBranchStatus, parseNumstat, parsePrView, PR_VIEW_ARGS } from '@shared/git'
-import { mergedPrs, reviewTimer, type ReviewTimer } from '@shared/review'
+import { prStage, type PrStage } from '@shared/review'
 import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
 import { parseStatusline, parseTranscriptTail, statsFromTranscript } from '@shared/stats'
 import { parseBoard } from '@shared/board'
@@ -1128,17 +1128,11 @@ export class Sources {
       tokens: { ...this.tokens },
       pastSessions: this.past,
       asks,
-      review: Object.fromEntries(
+      prStage: Object.fromEntries(
         sessions
           .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)
-          .map((s) => [s.key, reviewTimer(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes)] as const)
-          .filter((e): e is readonly [string, ReviewTimer] => e[1] !== null),
-      ),
-      merged: Object.fromEntries(
-        sessions
-          .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)
-          .map((s) => [s.key, mergedPrs(this.prUrlsFor(s.sessionId, s.key), this.prLive)] as const)
-          .filter((e): e is readonly [string, number[]] => e[1] !== null),
+          .map((s) => [s.key, prStage(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes)] as const)
+          .filter((e): e is readonly [string, PrStage] => e[1] !== null),
       ),
       menus: Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!])),
       restoring: this.restoring,

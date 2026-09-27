@@ -5,14 +5,6 @@ export function formatCost(usd: number | null): string {
 }
 
 /** A short "how long ago / how long for": 12s, 3m, 2h, 4d. */
-/** Time left on a countdown: "14:05", or "1h 02m" past an hour. */
-export function formatLeft(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}:${String(s % 60).padStart(2, '0')}`
-}
-
 export function formatAgo(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   if (s < 60) return `${s}s`

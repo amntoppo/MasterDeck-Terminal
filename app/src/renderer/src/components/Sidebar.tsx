@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { ticketSpend } from '@shared/costs'
 import { idleNudges, type Nudge } from '@shared/nudge'
 import { MASTER_NAME, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
-import { sessionStatus } from '@shared/review'
+import { attentionFor, sessionStatus } from '@shared/review'
 import { formatAgo, formatCost, formatGhCache, formatRefreshed } from '@shared/format'
 import type { AppState, Issue, NeedsItem, Proposal, Session } from '@shared/types'
 import { deck, KIND_COLOR, useNow } from '../deck'
@@ -125,7 +125,7 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
           </div>
           {live.length === 0 && <div className="empty">No live sessions.</div>}
           {live.map((s) => (
-            <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} status={sessionStatus(s.state, state.review[s.key], state.merged[s.key], now)} onClick={() => onOpenSession(s)} />
+            <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} status={sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals))} onClick={() => onOpenSession(s)} />
           ))}
           {suspended.length > 0 && (
             <div className="row" onClick={() => setShowSuspended(!showSuspended)}>
@@ -278,17 +278,17 @@ function needsKey(item: NeedsItem): string {
   return item.kind === 'session' ? `s:${item.session.key}` : `p:${item.proposal.id}`
 }
 
-/** `status`: what to say instead of idle, when the session has a PR (see `sessionStatus`). */
+/** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
 function SessionRow({ s, active, now, status, onClick }: { s: Session; active: boolean; now: number; status?: ReturnType<typeof sessionStatus>; onClick: () => void }) {
-  // Where its PR stands says more than "ext" for a session in another terminal.
-  const pr = !!status && (status.dot === 'merged' || status.dot === 'review' || status.countdown !== null)
-  const text = !status ? STATE_LABEL[s.state] : status.countdown !== null ? `review in ${Math.max(1, Math.ceil(status.countdown / 60_000))}m` : status.text
+  const text = status ? status.text.toLowerCase() : STATE_LABEL[s.state]
+  // "ext" (a session in another terminal) only when there is nothing more to say.
+  const plain = !status || status.key === 'idle' || status.key === 'working'
   return (
-    <div className={`row ${active ? 'active' : ''}`} onClick={onClick} title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}`}>
-      <span className={`dot ${status?.dot ?? s.state}`} />
+    <div className={`row ${active ? 'active' : ''}`} onClick={onClick} title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}${status?.why ? `\n${status.text}: ${status.why}` : ''}`}>
+      <span className={`dot st-${status?.key ?? s.state}`} />
       <span className="label">{s.name}</span>
       {s.issue !== null && <span className="num">#{s.issue}</span>}
-      <span className={`sub ${status ? `st-${status.dot}` : ''}`}>{s.kind === 'interactive' && !pr ? 'ext' : text}</span>
+      <span className={`sub st-${status?.key ?? s.state}`}>{s.kind === 'interactive' && plain ? 'ext' : text}</span>
       <span className="sub">{s.startedAt ? formatAgo(now - s.startedAt) : ''}</span>
     </div>
   )

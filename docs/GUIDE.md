@@ -108,13 +108,15 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
-- **Session status from its PR:** instead of "idle", a session with a PR says where it stands.
-  **Merged** once its PRs are merged (none still open). **Ready for Review** once its open PR
-  (drafts too) has had no new comment or review, from anyone, for 20 minutes (Settings); until then
-  the header counts down ("Ready for Review in 12:30") and the sidebar says "review in 13m". A new
-  comment starts the timer again. A working session keeps "working", with the timer as its own
-  chip. You get a notification when a session becomes Ready for Review or its PR is merged. PRs of
-  every session are checked every two minutes while open.
+- **Session status:** the sidebar and each session's header show one status, first match wins:
+  **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
+  master), then where its PR stands: **Merged** (all merged), **Approved**, **Changes Requested**,
+  **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
+  otherwise **Idle**. Ready for Review: the automated review check (e.g. `claude-review`) passed or
+  failed, or nothing new was said on the PR for 20 minutes (Settings), and the session is not
+  working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a
+  status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
+  of every session are checked every two minutes while open.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it

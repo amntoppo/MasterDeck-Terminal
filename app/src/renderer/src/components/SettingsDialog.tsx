@@ -38,7 +38,7 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
         </div>
         <label>Nudge a quiet session after (minutes)</label>
         <input type="number" min={1} value={s.idleNudgeMinutes} onChange={num('idleNudgeMinutes')} />
-        <label>Ready for Review after (minutes without new PR comments)</label>
+        <label>Ready for Review when a PR has no new comments for (minutes)</label>
         <input type="number" min={1} value={s.reviewQuietMinutes} onChange={num('reviewQuietMinutes')} />
         <label>Budget per ticket (USD, 0 = off)</label>
         <input type="number" min={0} value={s.budgetPerTicketUsd} onChange={num('budgetPerTicketUsd')} />
