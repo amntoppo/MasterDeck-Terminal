@@ -22,6 +22,7 @@ const api: DeckApi = {
   setSprint: (sprint) => ipcRenderer.send(CH.setSprint, sprint),
   prSummary: (url) => ipcRenderer.invoke(CH.prSummary, url),
   issueBody: (ticket) => ipcRenderer.invoke(CH.issueBody, ticket),
+  shellPrepare: (dir) => ipcRenderer.invoke(CH.shellPrepare, dir),
   assignIssue: (issue, login, current) => ipcRenderer.invoke(CH.assignIssue, issue, login, current),
   startHere: (o) => ipcRenderer.invoke(CH.startHere, o),
   sendText: (key, text) => ipcRenderer.invoke(CH.sendText, key, text),

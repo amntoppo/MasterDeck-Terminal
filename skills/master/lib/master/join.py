@@ -32,21 +32,16 @@ def sessions(agents: list, state: dict, master_name: str,
             cwd=a.get("cwd"),
         )
     for sid, entry in (state.get("sessions") or {}).items():
-        if sid in master_ids or entry.get("issue") is None:
+        # Only explicit links count. Older babysit-ticket versions "adopted" a link for any session
+        # whose checkout sat on a branch once linked; those were never asked for.
+        if sid in master_ids or entry.get("issue") is None or entry.get("adopted"):
             continue
-        adopted = bool(entry.get("adopted"))
         r = recs.get(sid)
         if r is None:
-            if adopted:
-                continue  # a dead adopted link never meant ownership
             r = recs[sid] = _rec(sid, name=f"dead-{sid[:8]}", kind=None, status="dead",
                                  pid=None, bg_id=None, cwd=cwd_lookup(sid))
-        r.update(issue=entry["issue"], issue_repo=refs.stored(entry.get("repo")), link="adopted" if adopted else "explicit",
+        r.update(issue=entry["issue"], issue_repo=refs.stored(entry.get("repo")), link="explicit",
                  branch=entry.get("branch"), prs=list(entry.get("prs") or []))
-    owned = {refs.key(r["issue_repo"], r["issue"]) for r in recs.values() if r["link"] == "explicit" and r["status"] != "dead"}
-    for r in recs.values():
-        if r["link"] == "adopted" and refs.key(r["issue_repo"], r["issue"]) in owned:
-            r.update(issue=None, issue_repo=None, link=None, branch=None, prs=[])
     return sorted(recs.values(), key=lambda r: (r["status"] == "dead", r["name"]))
 
 

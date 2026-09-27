@@ -101,21 +101,13 @@ entry_ref() { jq -r --arg p "$PRIMARY" 'if .issue == null then empty else "\(.re
 branch_ref() { jq -r --arg p "$PRIMARY" 'if . == null then empty elif type == "number" then "\($p)#\(.)" else . end'; }
 branch_val() { if is_primary "$1"; then echo "${1##*#}"; else jq -n --arg r "$1" '$r'; fi; }
 
-# Prints the linked ticket (owner/name#N) for this session, adopting a branch link when the
-# session itself has none (a /branch or a fresh session on the same feature branch).
+# Prints the linked ticket (owner/name#N) for this session, or nothing. Only an explicit link
+# counts (`tt link`, or MasterDeck carrying a link across a resume). A session is never linked just
+# because its checkout sits on a branch another session once linked: the hook runs in every
+# session, and a checkout left on an old feature branch would tie every new session to that ticket.
 current_issue() {
-  local t bk
-  [ -n "$SESSION" ] && t="$(jq --arg s "$SESSION" '.sessions[$s] // {}' "$STATE" | entry_ref)"
-  if [ -z "${t:-}" ]; then
-    bk="$(branch_key)"
-    [ -n "$bk" ] && t="$(jq --arg b "$bk" '.branches[$b]' "$STATE" | branch_ref)"
-    if [ -n "${t:-}" ] && [ -n "$SESSION" ]; then
-      with_state --arg s "$SESSION" --argjson n "$(ref_num "$t")" --arg r "$(stored_repo "$t")" --arg b "$bk" \
-        '.sessions[$s] = ((.sessions[$s] // {}) + {issue:$n, branch:$b, adopted:true, prs:(.sessions[$s].prs // [])}
-                          + (if $r != "" then {repo:$r} else {} end))'
-    fi
-  fi
-  echo "${t:-}"
+  [ -n "$SESSION" ] || return 0
+  jq --arg s "$SESSION" '.sessions[$s] // {}' "$STATE" | entry_ref
 }
 
 # issue_info <owner/name#N> -> {"title","state","item","project","status"}: the issue's item on

@@ -45,10 +45,12 @@ class SessionsTest(unittest.TestCase):
         self.assertEqual(by["walkthrough-expo"]["issue"], 938)
         self.assertEqual((by["workspace-53"]["issue"], by["workspace-53"]["link"]), (None, None))
 
-    def test_adopted_link_kept_when_it_is_the_only_live_owner(self):
-        state = {"sessions": {"s2": link(938, adopted=True)}}
+    def test_adopted_link_is_ignored_even_as_the_only_live_owner(self):
+        # A link adopted from the checkout's branch was never asked for (a manual `claude` in a
+        # checkout left on an old feature branch got that branch's merged ticket).
+        state = {"sessions": {"s2": link(1037, adopted=True)}}
         [s] = join.sessions([agent("s2", "x")], state, MASTER, no_cwd)
-        self.assertEqual((s["issue"], s["link"]), (938, "adopted"))
+        self.assertEqual((s["issue"], s["link"]), (None, None))
 
     def test_dead_explicit_link_is_reported_with_cwd(self):
         out = join.sessions([], {"sessions": {"deadbeef-1": link(939)}}, MASTER, lambda sid: "/repo")

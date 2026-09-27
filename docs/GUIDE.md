@@ -59,6 +59,19 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   session, so like any babysit-ticket link it moves the ticket to your in-progress status if it's earlier on the board.
   On Windows this needs Git Bash and `jq` on PATH.
 
+## Shells and manual sessions
+
+**+ Shell** (Sessions header) opens a terminal in the workspace from Setup. If that workspace is a
+git checkout on some other branch, it is first put on its default branch (origin's HEAD, else
+main, master or dev): changes on the old branch are stashed, untracked files included, under a
+message naming that branch (`git stash list`; `git stash pop` on that branch brings them back),
+then it fast-forwards from origin. A toast says what happened. Only the workspace itself is
+switched, and sessions running in that checkout see the new branch too.
+
+A session you start yourself (`claude` in a shell) is not linked to any ticket unless you ask:
+`/babysit-ticket` or `tt link <N>` in it, or **Link session…** in a ticket's Start dialog. Being in a
+checkout whose branch was once linked to a ticket does not link it.
+
 ## Keeping many sessions moving
 
 - **Closing a Needs-you card (×):** hides it until the situation changes. A session card comes back

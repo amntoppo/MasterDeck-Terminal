@@ -89,11 +89,11 @@ To Do, Ready For Dev, In Dev, PR Raised, Dev Done, In QA, QA Done.
 
 ## How the link survives
 
-State lives in `~/.claude/babysit-ticket/state.json`, keyed by session id **and** by
-`owner/repo@branch`. A `/branch`, a resume, or a new session on the same feature branch
-adopts the link automatically. Long-lived branches (main, master, dev, dev2, develop,
-stage, staging, prod, production, the remote default) are never keyed, so linking on `main` doesn't leak the ticket to every
-other session there. The branch gets keyed when the PR is recorded instead.
+State lives in `~/.claude/babysit-ticket/state.json`, keyed by session id (and it records the
+`owner/repo@branch` a link was made on). A session is linked only when asked: `tt link`, or
+MasterDeck re-linking a background session it resumed. A new session, a `/branch` or a manual
+`claude` in a checkout that sits on a linked feature branch is **not** linked by that; run `tt link`
+in it if it should be.
 
 ## Common mistakes
 

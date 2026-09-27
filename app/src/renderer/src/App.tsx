@@ -150,12 +150,18 @@ export function App() {
 
   // A new shell starts in the workspace chosen in Setup (home until there is one).
   const workspace = state?.config.workspace || ''
-  const openShell = useCallback((cwd?: string) => {
+  // In the workspace, + Shell first puts the checkout on its default branch (main or dev),
+  // stashing what was on the old one, so a session started there starts from it.
+  const openShell = useCallback(async (cwd?: string) => {
     const id = `sh:${Date.now()}`
     const dir = cwd ?? (workspace || deck().home)
+    if (!cwd && workspace) {
+      const r = await deck().shellPrepare(dir)
+      if (r.message) flash(r.message, !r.ok)
+    }
     setTabs((cur) => [...cur, { id, kind: 'shell', cwd: dir, title: dir.split(/[\\/]/).pop() || 'shell' }])
     activate(id)
-  }, [activate, workspace])
+  }, [activate, workspace, flash])
 
   const closeTab = useCallback(
     (id: string) => {

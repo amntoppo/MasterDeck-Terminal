@@ -83,6 +83,7 @@ export const CH = {
   setSprint: 'board:sprint',
   prSummary: 'pr:summary',
   issueBody: 'issue:body',
+  shellPrepare: 'shell:prepare',
   assignIssue: 'issue:assign',
   defaultModel: 'models:default',
   startHere: 'session:startHere',
@@ -154,6 +155,8 @@ export interface DeckApi {
   reject(id: number): Promise<CliResult>
   draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
   setSprint(sprint: string): void
+  /** Before + Shell opens in a git checkout: put it on its default branch (stashing changes). */
+  shellPrepare(dir: string): Promise<{ ok: boolean; message: string | null }>
   /** The GitHub description of an issue, for the Start session dialog. */
   issueBody(ticket: Ticket): Promise<{ ok: true; body: string } | { ok: false; message: string }>
   prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>

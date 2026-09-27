@@ -12,6 +12,7 @@ import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, Session, S
 import { getConfig } from '@shared/appConfig'
 import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
 import { startAssign } from './assign'
+import { toDefaultBranch } from './defaultBranch'
 import { configuredModel } from './models'
 import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
 import { makeGhRunner, readGhCacheStatus } from './ghc'
@@ -412,6 +413,10 @@ function registerIpc(): void {
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))
   ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url))
+  // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
+  ipcMain.handle(CH.shellPrepare, (_e, dir: unknown) =>
+    typeof dir === 'string' && dir && dir === getConfig().workspace ? toDefaultBranch(run, dir) : { ok: true, message: null },
+  )
   ipcMain.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket)
     return t ? github.issueBody(t) : { ok: false, message: 'bad ticket' }

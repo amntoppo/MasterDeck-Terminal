@@ -810,11 +810,13 @@ export class Sources {
   reloadLinks(): void {
     try {
       const raw = JSON.parse(readFileSync(this.paths.babysitState, 'utf8')) as {
-        sessions?: Record<string, { issue?: unknown; repo?: unknown; linked_at?: unknown }>
+        sessions?: Record<string, { issue?: unknown; repo?: unknown; linked_at?: unknown; adopted?: unknown }>
       }
       const next = new Map<string, LinkInfo>()
       for (const [sid, v] of Object.entries(raw.sessions ?? {})) {
         if (typeof v?.issue !== 'number') continue
+        // Adopted from the checkout's branch by older babysit-ticket versions, never asked for.
+        if (v.adopted === true) continue
         const at = typeof v.linked_at === 'string' ? Date.parse(v.linked_at) : NaN
         next.set(sid, { issue: v.issue, repo: storedRepo(typeof v.repo === 'string' ? v.repo : null), linkedAt: Number.isFinite(at) ? at : null })
       }
