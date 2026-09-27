@@ -114,10 +114,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   it ends (the conversation is kept and can be resumed) and leaves the sessions list at once. A
   session in another terminal is stopped there.
 - **Session order:** the sidebar keeps your order; activity never reorders it. A new session goes on
-  top once. Drag a session to move it; right-click → Move to top / bottom.
-- **Right-click a session** for: Open, Set status…, Summary, Queue prompts, Nudge "continue" (idle
-  only), Compact context, Ask master about it, open its ticket or PRs on GitHub, open its folder in
-  the editor, move it, close its tab, copy its name / resume / attach command, and Stop session….
+  top once. Drag a session to move it; right-click → Move to top.
+- **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
+  Open folder in editor, Move to top, and Stop session…. The copy commands are in the header's ⋯ menu.
 - **Session status:** the sidebar and each session's header show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more

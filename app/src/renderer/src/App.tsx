@@ -417,11 +417,9 @@ export function App() {
         onStartWith={startWithInstructions}
         onSessionAction={(sess, a) => {
           if (a === 'close-tab') closeTab(`tab:${sess.key}`)
-          else if (a === 'ask-master') askMaster(sess)
           else {
             openSession(sess)
-            if (a === 'summary') setSummaryOpen(true)
-            else setQueueOpen(true)
+            setSummaryOpen(true)
           }
         }}
       />

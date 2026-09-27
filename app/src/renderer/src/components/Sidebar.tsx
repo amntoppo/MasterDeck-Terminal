@@ -31,11 +31,11 @@ interface Props {
   /** Footer tools and the palette's actions. */
   onTool: (a: PaletteAction) => void
   onStartWith: (issue: Issue, instructions: string) => void
-  /** Session actions that live in the app: its Summary or Queue panel, closing its tab, asking master. */
+  /** Session actions that live in the app: its Summary panel, closing its tab (after a stop). */
   onSessionAction: (s: Session, a: SessionAction) => void
 }
 
-export type SessionAction = 'summary' | 'queue' | 'close-tab' | 'ask-master'
+export type SessionAction = 'summary' | 'close-tab'
 
 const ORDER_KEY = 'sessionOrder'
 
@@ -227,7 +227,7 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
             onOpen={() => onOpenSession(menu.s)}
             onStatus={() => setStatusFor(menu.s)}
             onAction={(a) => onSessionAction(menu.s, a)}
-            onMove={(where) => move(menu.s.key, where === 'top' ? (inOrder(shownSessions, order)[0]?.key ?? null) : null)}
+            onMove={() => move(menu.s.key, inOrder(shownSessions, order)[0]?.key ?? null)}
             flash={flash}
           />
         )}
