@@ -75,6 +75,13 @@ export type StatusKey =
   | 'suspended'
   | 'done'
 
+/** Statuses a person can set by hand (not the ones only the session itself can be in). */
+export const MANUAL_STATUSES: StatusKey[] = ['working', 'in-review', 'ready', 'changes', 'approved', 'ci-failing', 'merged', 'rework', 'question', 'blocked', 'idle']
+
+export function isStatusKey(v: unknown): v is StatusKey {
+  return typeof v === 'string' && v in STATUS_TEXT
+}
+
 export const STATUS_TEXT: Record<StatusKey, string> = {
   'needs-input': 'Needs Input',
   working: 'Working',
@@ -104,9 +111,16 @@ export function attentionFor(s: Session, proposals: Proposal[]): Proposal | null
  * A session's status, first match wins: needs input, working, question, blocked, then where its PR
  * stands, then idle. Suspended and ended sessions keep those.
  */
-export function sessionStatus(s: Pick<Session, 'state'>, stage: PrStage | null | undefined, attention: Proposal | null): { key: StatusKey; text: string; why: string } {
+export function sessionStatus(
+  s: Pick<Session, 'state'>,
+  stage: PrStage | null | undefined,
+  attention: Proposal | null,
+  manual?: StatusKey | null,
+): { key: StatusKey; text: string; why: string; manual?: boolean } {
   const out = (key: StatusKey, why = '') => ({ key, text: STATUS_TEXT[key], why })
   if (s.state === 'needs-input') return out('needs-input', 'waiting on a prompt or permission')
+  // Set by hand (the status popup): it wins until set back to automatic; a prompt waiting still shows.
+  if (manual && manual in STATUS_TEXT && s.state !== 'done') return { ...out(manual, 'set by you'), manual: true }
   if (s.state === 'working') return out('working')
   if (s.state === 'suspended' || s.state === 'done') return out(s.state)
   if (attention?.status === 'question') return out('question', attention.note?.trim() || 'it asked master a question')

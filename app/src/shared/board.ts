@@ -1,7 +1,7 @@
 import type { PastSession } from './pastSessions'
 import { getConfig, projectKey, statusRank, type StatusMap } from './appConfig'
 import { sessionForIssue } from './derive'
-import { STATUS_TEXT, type PrStage } from './review'
+import { STATUS_TEXT, type PrStage, type StatusKey } from './review'
 import { sameTicket, storedRepo, type Ticket } from './ticket'
 import { proposalTicket } from './derive'
 import type { Badge, Board, BoardCard, BoardPr, Proposal, Session } from './types'
@@ -125,13 +125,16 @@ function badge(kind: Badge['kind'], detail?: string | null): Badge {
  * review, in review: `stages`, see shared/review.ts), done, idle, stopped (a session worked on it and
  * can be resumed), no session.
  */
-export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposal[], past: PastSession[] = [], stages: Record<string, PrStage> = {}): Badge {
+export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposal[], past: PastSession[] = [], stages: Record<string, PrStage> = {}, manual: Record<string, StatusKey> = {}): Badge {
   const mine = proposals.filter((p) => sameTicket(proposalTicket(p), issue) && p.kind !== 'CHAT').sort((a, b) => b.id - a.id)
   const q = mine.find((p) => p.status === 'question')
   if (q) return badge('question', q.note)
   const bl = mine.find((p) => p.status === 'blocked')
   if (bl) return badge('blocked', bl.note)
   const s = sessionForIssue(sessions, issue)
+  // Set by hand in the session's status popup (a prompt waiting still shows as needs input).
+  const hand = s ? manual[s.key] : undefined
+  if (hand && s?.state !== 'needs-input' && hand in LABEL) return badge(hand as Badge['kind'], 'set by you')
   if (s?.state === 'needs-input') return badge('needs-input')
   const assign = mine.find((p) => p.kind === 'ASSIGN' && p.status !== 'rejected')
   // Spawning, or spawned but not yet linked to the issue (babysit-ticket does that while setting up).

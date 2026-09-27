@@ -108,6 +108,16 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
+- **Set a status by hand:** click the status chip in a session's header (or right-click it in the
+  sidebar → Set status…). Pick a status (it stays, in the sidebar, header and board card, until you
+  choose **Automatic**; Needs Input still shows while it waits on a prompt), or **Stop session…**:
+  it ends (the conversation is kept and can be resumed) and leaves the sessions list at once. A
+  session in another terminal is stopped there.
+- **Session order:** the sidebar keeps your order; activity never reorders it. A new session goes on
+  top once. Drag a session to move it; right-click → Move to top / bottom.
+- **Right-click a session** for: Open, Set status…, Summary, Queue prompts, Nudge "continue" (idle
+  only), Compact context, Ask master about it, open its ticket or PRs on GitHub, open its folder in
+  the editor, move it, close its tab, copy its name / resume / attach command, and Stop session….
 - **Session status:** the sidebar and each session's header show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more

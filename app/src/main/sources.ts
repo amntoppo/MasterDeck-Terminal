@@ -15,7 +15,7 @@ import {
   type ParsedSnapshot,
 } from '@shared/derive'
 import { parseBranchStatus, parseNumstat, parsePrView, PR_VIEW_ARGS } from '@shared/git'
-import { prStage, type PrStage } from '@shared/review'
+import { isStatusKey, MANUAL_STATUSES, prStage, STATUS_TEXT, type PrStage, type StatusKey } from '@shared/review'
 import { sameTicket, storedRepo, ticketKey, ticketLabel, type Ticket } from '@shared/ticket'
 import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
 import { parseStatusline, parseTranscriptTail, statsFromTranscript } from '@shared/stats'
@@ -332,6 +332,37 @@ export class Sources {
     return join(this.paths.home, 'session-history.json')
   }
 
+  private get manualStatusPath(): string {
+    return join(this.paths.home, 'session-status.json')
+  }
+
+  /** Statuses set by hand, by Session.key (persisted). */
+  private manualStatus: Record<string, StatusKey> = {}
+
+  private loadManualStatus(): void {
+    try {
+      const raw = JSON.parse(readFileSync(this.manualStatusPath, 'utf8')) as Record<string, unknown>
+      this.manualStatus = Object.fromEntries(Object.entries(raw).filter((e): e is [string, StatusKey] => isStatusKey(e[1])))
+    } catch {
+      this.manualStatus = {}
+    }
+  }
+
+  /** Set a session's status by hand; null goes back to the automatic one. */
+  setManualStatus(key: string, status: unknown): CliResult {
+    if (status === null) delete this.manualStatus[key]
+    else if (isStatusKey(status) && MANUAL_STATUSES.includes(status)) this.manualStatus[key] = status
+    else return { ok: false, message: 'not a status' }
+    writeJsonAtomic(this.manualStatusPath, this.manualStatus)
+    this.emit()
+    return { ok: true, message: status === null ? 'automatic' : STATUS_TEXT[status as StatusKey] }
+  }
+
+  /** Read `claude agents` now (after stopping a session, so it leaves the list at once). */
+  refreshAgents(): Promise<void> {
+    return this.pollAgents()
+  }
+
   private get sessionPrsPath(): string {
     return join(this.paths.home, 'session-prs.json')
   }
@@ -541,6 +572,7 @@ export class Sources {
       this.teamPrs = parseTeamPrs(cache.teamPrPages)
       if (typeof cache.teamPrsAt === 'number') this.teamPrsAt = cache.teamPrsAt
     }
+    this.loadManualStatus()
     this.readLedger()
     watchFile(this.paths.ledger, { interval: 1000 }, () => this.readLedger())
     void this.pollAgents()
@@ -1143,6 +1175,7 @@ export class Sources {
       tokens: { ...this.tokens },
       pastSessions: this.past,
       asks,
+      manualStatus: { ...this.manualStatus },
       prStage: Object.fromEntries(
         sessions
           .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)

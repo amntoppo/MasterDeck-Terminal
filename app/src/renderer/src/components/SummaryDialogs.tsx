@@ -33,7 +33,7 @@ function Copy({ text, label = 'Copy as Markdown' }: { text: string; label?: stri
 export function SprintSummaryDialog({ state, onClose }: { state: AppState; onClose: () => void }) {
   useEsc(onClose)
   const b = state.board
-  const s = useMemo(() => (b ? summarize(b, (c) => cardBadge(ticketOf(c), state.sessions, state.proposals, [], state.prStage).kind) : null), [b, state.sessions, state.proposals, state.prStage])
+  const s = useMemo(() => (b ? summarize(b, (c) => cardBadge(ticketOf(c), state.sessions, state.proposals, [], state.prStage, state.manualStatus).kind) : null), [b, state.sessions, state.proposals, state.prStage])
   const sprint = state.sprints.find((x) => x.title === b?.sprint)
   const series = sprint ? burndown(state.boardHistory[sprint.title] ?? [], sprint.startDate, sprint.duration) : []
   const max = Math.max(1, ...series.map((p) => Math.max(p.ideal, p.remaining ?? 0)))

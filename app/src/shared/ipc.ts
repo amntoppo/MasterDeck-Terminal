@@ -47,6 +47,8 @@ export const CH = {
   openEditor: 'app:openEditor',
   copy: 'app:copy',
   stopSession: 'session:stop',
+  stopOtherSession: 'session:stopOther',
+  setManualStatus: 'session:setManualStatus',
   statuslineInstall: 'statusline:install',
   statuslineUninstall: 'statusline:uninstall',
   masterStart: 'master:start',
@@ -230,6 +232,10 @@ export interface DeckApi {
   openEditor(dir: string): Promise<CliResult>
   copy(text: string): void
   stopSession(bgId: string, name: string): Promise<CliResult>
+  /** Stop a session running in another terminal (its claude process), after a confirmation. */
+  stopOtherSession(pid: number, name: string): Promise<CliResult>
+  /** Set a session's status by hand (a StatusKey); null goes back to automatic. */
+  setManualStatus(key: string, status: string | null): Promise<CliResult>
   statuslineInstall(): Promise<CliResult>
   statuslineUninstall(): Promise<CliResult>
   masterStart(): Promise<CliResult>

@@ -450,8 +450,28 @@ function registerIpc(): void {
     })
     if (choice.response !== 1) return { ok: false, message: 'cancelled' }
     const r = await run(claudeBin, ['stop', bgId], { timeoutMs: 30_000 })
+    // Read the session list now: a stopped session leaves the sidebar at once.
+    await sources.refreshAgents()
     return r.code === 0 ? { ok: true, message: 'stopped' } : { ok: false, message: (r.stderr || r.stdout).trim() }
   })
+  ipcMain.handle(CH.stopOtherSession, async (_e, pid: unknown, name: string) => {
+    if (typeof pid !== 'number' || !(await isClaudePid(pid))) return { ok: false, message: 'that session is not a running claude process here' }
+    const choice = await dialog.showMessageBox(win!, {
+      type: 'warning',
+      buttons: ['Cancel', 'Stop session'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Stop ${String(name).slice(0, 80)}?`,
+      detail: 'It runs in another terminal; its claude process is stopped there. The conversation is kept and can be resumed later.',
+    })
+    if (choice.response !== 1) return { ok: false, message: 'cancelled' }
+    await stopPid(pid)
+    await sources.refreshAgents()
+    return (await isClaudePid(pid)) ? { ok: false, message: 'it did not stop; close it in its terminal' } : { ok: true, message: 'stopped' }
+  })
+  ipcMain.handle(CH.setManualStatus, (_e, key: unknown, status: unknown) =>
+    typeof key === 'string' && key.length < 200 ? sources.setManualStatus(key, status) : { ok: false, message: 'bad session' },
+  )
   ipcMain.handle(CH.statuslineInstall, () => installHook())
   ipcMain.handle(CH.statuslineUninstall, () => {
     const r = uninstallStatusline(statuslineOpts())

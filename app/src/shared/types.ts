@@ -1,5 +1,5 @@
 import type { ScreenMenu, SessionAsk } from './ask'
-import type { PrStage } from './review'
+import type { PrStage, StatusKey } from './review'
 import type { PastSession } from './pastSessions'
 import type { Tokens } from './tokens'
 import type { RestoreEntry } from './restore'
@@ -210,6 +210,8 @@ export interface AppState {
   menus: Record<string, ScreenMenu>
   /** Where each session's PRs stand (merged, approved, ready for review…), by Session.key. */
   prStage: Record<string, PrStage>
+  /** Statuses set by hand in a session's status popup, by Session.key. */
+  manualStatus: Record<string, StatusKey>
 }
 
 export interface SkillStatus {

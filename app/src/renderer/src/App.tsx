@@ -415,6 +415,15 @@ export function App() {
         onView={setView}
         onTool={(a) => runAction(a)}
         onStartWith={startWithInstructions}
+        onSessionAction={(sess, a) => {
+          if (a === 'close-tab') closeTab(`tab:${sess.key}`)
+          else if (a === 'ask-master') askMaster(sess)
+          else {
+            openSession(sess)
+            if (a === 'summary') setSummaryOpen(true)
+            else setQueueOpen(true)
+          }
+        }}
       />
       {view === 'board' && !state.config.configured && <ConnectGithub title="Board View" what="The board, sprints and issues" onConnect={() => setDialog('setup')} />}
       {view === 'board' && state.config.configured && (

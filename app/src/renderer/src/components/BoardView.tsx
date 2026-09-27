@@ -382,7 +382,7 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
   const mine = me !== null && card.assignees.includes(me)
   // Stopped sessions that worked on this issue: the newest can be resumed from the card.
   const past = s ? [] : (state.pastSessions[ticketKey(t.repo, t.number)] ?? [])
-  const badge = mine || s || past.length ? cardBadge(t, state.sessions, state.proposals, past, state.prStage) : null
+  const badge = mine || s || past.length ? cardBadge(t, state.sessions, state.proposals, past, state.prStage, state.manualStatus) : null
   const action = cardAction(card, me, state.sessions)
   const stats = s ? state.stats[s.sessionId] : undefined
   return (

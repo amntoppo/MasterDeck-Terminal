@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { StatusDialog } from './StatusDialog'
 import { sameTicket, ticketLabel, ticketUrl } from '@shared/ticket'
 import { sessionTicket } from '@shared/derive'
 import { formatAgo, formatCost, formatDiff, formatPct, shortPath } from '@shared/format'
@@ -29,7 +30,8 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const [note, setNote] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const since = useStateSince(s)
-  const status = sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals))
+  const status = sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])
+  const [statusOpen, setStatusOpen] = useState(false)
   const tokens = state.tokens[s.sessionId] ?? null
 
   useEffect(() => {
@@ -147,11 +149,17 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         </div>
       </div>
       <div className="r">
-        <span className={`chip st-chip st-${status.key}`} title={status.why ? `${status.text}: ${status.why}\nraw: ${s.rawState}` : `raw: ${s.rawState}`}>
+        <span
+          className={`chip btnlike st-chip st-${status.key}`}
+          onClick={() => setStatusOpen(true)}
+          title={`${status.why ? `${status.text}: ${status.why}\n` : ''}Click to set the status by hand, or stop the session\nraw: ${s.rawState}`}
+        >
           <span className={`dot st-${status.key}`} />
           {status.text}
-          {since !== null && (status.key === 'working' || status.key === 'idle' || status.key === 'needs-input') && <span className="muted"> · {formatAgo(now - since)}</span>}
+          {status.manual && <span className="muted"> (set)</span>}
+          {since !== null && !status.manual && (status.key === 'working' || status.key === 'idle' || status.key === 'needs-input') && <span className="muted"> · {formatAgo(now - since)}</span>}
         </span>
+        {statusOpen && <StatusDialog session={s} state={state} onClose={() => setStatusOpen(false)} onStopped={onDetach} />}
         <span className="chip" title={stats?.source === 'transcript' ? 'Install the status line hook for exact cost' : 'Session cost so far'}>
           {formatCost(stats?.costUsd ?? null)}
         </span>

@@ -3,11 +3,14 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ticketSpend } from '@shared/costs'
 import { idleNudges, type Nudge } from '@shared/nudge'
-import { MASTER_NAME, proposalTicket, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
+import { MASTER_NAME, proposalTicket, sessionForIssue, sessionForProposal } from '@shared/derive'
+import { inOrder, moveBefore, trimOrder, withNew } from '@shared/sessionOrder'
+import { StatusDialog } from './StatusDialog'
+import { SessionMenu } from './SessionMenu'
 import { attentionFor, sessionStatus } from '@shared/review'
 import { formatAgo, formatCost, formatGhCache, formatRefreshed } from '@shared/format'
 import type { AppState, Issue, NeedsItem, Proposal, Session } from '@shared/types'
-import { deck, KIND_COLOR, useNow } from '../deck'
+import { deck, KIND_COLOR, load, save, useNow } from '../deck'
 import type { PaletteAction } from './CommandPalette'
 import { OfferRow, useDismissed } from './PrsView'
 import { prOffers } from '@shared/offers'
@@ -28,7 +31,13 @@ interface Props {
   /** Footer tools and the palette's actions. */
   onTool: (a: PaletteAction) => void
   onStartWith: (issue: Issue, instructions: string) => void
+  /** Session actions that live in the app: its Summary or Queue panel, closing its tab, asking master. */
+  onSessionAction: (s: Session, a: SessionAction) => void
 }
+
+export type SessionAction = 'summary' | 'queue' | 'close-tab' | 'ask-master'
+
+const ORDER_KEY = 'sessionOrder'
 
 const STATE_LABEL: Record<string, string> = {
   working: 'working',
@@ -38,15 +47,59 @@ const STATE_LABEL: Record<string, string> = {
   done: 'done',
 }
 
-export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, view, onView, onTool, onStartWith }: Props) {
+export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, view, onView, onTool, onStartWith, onSessionAction }: Props) {
   const now = useNow()
   const [showSuspended, setShowSuspended] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
-  const sessions = useMemo(
-    () => sortSessions(state.sessions.filter((s) => s.name !== MASTER_NAME && s.state !== 'done')),
-    [state.sessions],
-  )
+  // The user's order (drag, Move to top/bottom); activity never reorders. New sessions go on top once.
+  const [order, setOrder] = useState<string[]>(() => load<string[]>(ORDER_KEY, []))
+  const shownSessions = useMemo(() => state.sessions.filter((s) => s.name !== MASTER_NAME && s.state !== 'done'), [state.sessions])
+  useEffect(() => {
+    const next = withNew(order, shownSessions)
+    if (next !== order) setOrder(trimOrder(next, new Set(shownSessions.map((s) => s.key))))
+  }, [shownSessions, order])
+  useEffect(() => save(ORDER_KEY, order), [order])
+  const sessions = useMemo(() => inOrder(shownSessions, order), [shownSessions, order])
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dropKey, setDropKey] = useState<string | null>(null)
+  const move = (key: string, before: string | null) => setOrder((o) => moveBefore(withNew(o, shownSessions), key, before))
+  const [menu, setMenu] = useState<{ s: Session; x: number; y: number } | null>(null)
+  const [statusFor, setStatusFor] = useState<Session | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const flash = (m: string) => {
+    setNote(m)
+    setTimeout(() => setNote((cur) => (cur === m ? null : cur)), 3500)
+  }
+  const rowProps = (s: Session) => ({
+    dragging: dragKey === s.key,
+    dropBefore: dropKey === s.key && dragKey !== s.key,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData('text/masterdeck-session', s.key)
+      e.dataTransfer.effectAllowed = 'move'
+      setDragKey(s.key)
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (!dragKey) return
+      e.preventDefault()
+      setDropKey(s.key)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      const k = e.dataTransfer.getData('text/masterdeck-session')
+      if (k) move(k, s.key)
+      setDragKey(null)
+      setDropKey(null)
+    },
+    onDragEnd: () => {
+      setDragKey(null)
+      setDropKey(null)
+    },
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault()
+      setMenu({ s, x: e.clientX, y: e.clientY })
+    },
+  })
   const live = sessions.filter((s) => s.state !== 'suspended')
   const suspended = sessions.filter((s) => s.state === 'suspended')
 
@@ -119,14 +172,40 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
           <div className="section-head">
             Sessions <span className="count">{live.length}</span>
             <span className="spacer" />
+            {note && <span className="sub session-note">{note}</span>}
             <button onClick={onNewShell} title="Open a plain shell tab">
               + Shell
             </button>
           </div>
           {live.length === 0 && <div className="empty">No live sessions.</div>}
           {live.map((s) => (
-            <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} status={sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals))} onClick={() => onOpenSession(s)} />
+            <SessionRow
+              key={s.key}
+              s={s}
+              active={s.key === activeKey}
+              now={now}
+              status={sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])}
+              onClick={() => onOpenSession(s)}
+              {...rowProps(s)}
+            />
           ))}
+          {dragKey && (
+            // Drop here: to the end of the list.
+            <div
+              className={`row drop-end ${dropKey === '' ? 'drop-before' : ''}`}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDropKey('')
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                const k = e.dataTransfer.getData('text/masterdeck-session')
+                if (k) move(k, null)
+                setDragKey(null)
+                setDropKey(null)
+              }}
+            />
+          )}
           {suspended.length > 0 && (
             <div className="row" onClick={() => setShowSuspended(!showSuspended)}>
               <span className="mark">{showSuspended ? '▾' : '▸'}</span>
@@ -135,9 +214,24 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
           )}
           {showSuspended &&
             suspended.map((s) => (
-              <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} onClick={() => onOpenSession(s)} />
+              <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} onClick={() => onOpenSession(s)} {...rowProps(s)} />
             ))}
         </div>
+        {menu && (
+          <SessionMenu
+            s={menu.s}
+            x={menu.x}
+            y={menu.y}
+            state={state}
+            onClose={() => setMenu(null)}
+            onOpen={() => onOpenSession(menu.s)}
+            onStatus={() => setStatusFor(menu.s)}
+            onAction={(a) => onSessionAction(menu.s, a)}
+            onMove={(where) => move(menu.s.key, where === 'top' ? (inOrder(shownSessions, order)[0]?.key ?? null) : null)}
+            flash={flash}
+          />
+        )}
+        {statusFor && <StatusDialog session={statusFor} state={state} onClose={() => setStatusFor(null)} onStopped={() => onSessionAction(statusFor, 'close-tab')} />}
 
       </div>
       <div className="sidebar-footer">
@@ -279,12 +373,40 @@ function needsKey(item: NeedsItem): string {
 }
 
 /** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
-function SessionRow({ s, active, now, status, onClick }: { s: Session; active: boolean; now: number; status?: ReturnType<typeof sessionStatus>; onClick: () => void }) {
+function SessionRow({
+  s,
+  active,
+  now,
+  status,
+  onClick,
+  dragging,
+  dropBefore,
+  ...drag
+}: {
+  s: Session
+  active: boolean
+  now: number
+  status?: ReturnType<typeof sessionStatus>
+  onClick: () => void
+  dragging?: boolean
+  dropBefore?: boolean
+  onDragStart?: (e: React.DragEvent) => void
+  onDragOver?: (e: React.DragEvent) => void
+  onDrop?: (e: React.DragEvent) => void
+  onDragEnd?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
+}) {
   const text = status ? status.text.toLowerCase() : STATE_LABEL[s.state]
   // "ext" (a session in another terminal) only when there is nothing more to say.
   const plain = !status || status.key === 'idle' || status.key === 'working'
   return (
-    <div className={`row ${active ? 'active' : ''}`} onClick={onClick} title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}${status?.why ? `\n${status.text}: ${status.why}` : ''}`}>
+    <div
+      className={`row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''} ${dropBefore ? 'drop-before' : ''}`}
+      onClick={onClick}
+      draggable={!!drag.onDragStart}
+      {...drag}
+      title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}${status?.why ? `\n${status.text}: ${status.why}` : ''}\nDrag to reorder · right-click for more`}
+    >
       <span className={`dot st-${status?.key ?? s.state}`} />
       <span className="label">{s.name}</span>
       {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
