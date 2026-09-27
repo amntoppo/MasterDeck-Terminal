@@ -98,6 +98,11 @@ export class MasterCli {
     return this.write(['approve', ...ids.map(String)])
   }
 
+  /** `master mark <id> <status> --note -`: move a proposal on (e.g. a question the user answered). */
+  mark(id: number, status: 'sent' | 'done' | 'blocked' | 'held' | 'question', note: string): Promise<CliResult> {
+    return this.write(['mark', String(id), status, '--note', '-'], note)
+  }
+
   reject(ids: number[]): Promise<CliResult> {
     return this.write(['reject', ...ids.map(String)])
   }

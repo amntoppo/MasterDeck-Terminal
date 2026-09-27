@@ -27,6 +27,7 @@ import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } fr
 import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
 import { Summaries } from './summary'
 import { parseSteps } from '@shared/workflow'
+import { answerKeys, type MenuAnswer } from '@shared/ask'
 import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
 
@@ -246,6 +247,27 @@ function registerIpc(): void {
     if (!s) return { ok: false, message: 'session not found' }
     const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
     return sender.send(s, text, !!masterUp)
+  })
+  ipcMain.handle(CH.answerMenu, async (_e, key: string, question: string | null, answer: unknown) => {
+    const s = latest?.sessions.find((x) => x.key === key)
+    if (!s) return { ok: false, message: 'session not found' }
+    // Read the screen again: answer only the question the user saw.
+    const menu = await sources.readMenu(s)
+    const now = menu?.question?.question ?? null
+    if (!menu || now !== (typeof question === 'string' ? question : null)) {
+      void sources.pollMenus()
+      return { ok: false, message: `${s.name}: the question on its screen changed; look again` }
+    }
+    let a: MenuAnswer | 'submit' = 'submit'
+    if (answer !== 'submit') {
+      const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
+      a = { picks: Array.isArray(o.picks) ? o.picks.filter((p): p is number => typeof p === 'number') : [], text: typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined }
+    }
+    const steps = answerKeys(menu, a)
+    if (typeof steps === 'string') return { ok: false, message: steps }
+    const r = await sender.answerMenu(s, steps)
+    void sources.pollMenus()
+    return r
   })
   ipcMain.handle(CH.queueList, (_e, sessionId: string) => readQueue(String(sessionId)))
   ipcMain.handle(CH.queueEdit, (_e, sessionId: string, edit: QueueEdit) =>

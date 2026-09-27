@@ -1,3 +1,4 @@
+import type { ScreenMenu, SessionAsk } from './ask'
 import type { PastSession } from './pastSessions'
 import type { Tokens } from './tokens'
 import type { RestoreEntry } from './restore'
@@ -181,6 +182,10 @@ export interface AppState {
   tokens: Record<string, Tokens>
   /** Per issue: stopped sessions that worked on it and can be resumed, newest first. */
   pastSessions: Record<number, PastSession[]>
+  /** What sessions on the Needs-you list are asking (a menu, or a question in words), by Session.key. */
+  asks: Record<string, SessionAsk>
+  /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
+  menus: Record<string, ScreenMenu>
 }
 
 export interface SkillStatus {

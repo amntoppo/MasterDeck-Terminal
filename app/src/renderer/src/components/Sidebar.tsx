@@ -1,5 +1,6 @@
 import { issueUrl } from '@shared/appConfig'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ticketSpend } from '@shared/costs'
 import { idleNudges, type Nudge } from '@shared/nudge'
 import { MASTER_NAME, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
@@ -9,6 +10,8 @@ import { deck, KIND_COLOR, useNow } from '../deck'
 import type { PaletteAction } from './CommandPalette'
 import { OfferRow, useDismissed } from './PrsView'
 import { prOffers } from '@shared/offers'
+import { AskPanel } from './AskPanel'
+import { Markdown } from './SummaryPanel'
 
 export type View = 'terminals' | 'board' | 'prs' | 'costs' | 'janitor' | 'history' | 'workflow'
 
@@ -59,6 +62,29 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
   const offers = useMemo(() => prOffers(state.prs.filter((p) => p.authorIsMe), state.sessions, state.sessionPrs, state.proposals, dismissed), [state.prs, state.sessions, state.sessionPrs, state.proposals, dismissed])
   const prAttention = offers.length + state.prs.filter((p) => p.reviewRequested).length
   const hot = needsShown.filter((n) => n.kind !== 'attention' || n.proposal.status !== 'held').length
+  // The Needs-you popup: which card, by key; it closes by itself when the card goes (answered, dismissed).
+  const [detail, setDetail] = useState<string | null>(null)
+
+  const cardFor = (key: string, full: boolean): ReactNode => {
+    const open = full ? undefined : () => setDetail(key)
+    const x = extraShown.find((e) => `x:${e.id}` === key)
+    if (x) return <ExtraCard x={x} state={state} onOpenSession={onOpenSession} onClose={() => dismiss(extraKey(x, state))} onDetails={open} full={full} />
+    const o = offers.find((e) => `o:${e.id}` === key)
+    if (o)
+      return (
+        <div className={`card ${open ? 'clickable' : ''}`} style={{ ['--kind' as string]: o.kind === 'ci' ? 'var(--red)' : 'var(--accent)' }} onClick={detailsClick(open)}>
+          {!full && <CloseX onClose={() => dismiss(o.id)} />}
+          <OfferRow o={o} state={state} onDismiss={() => dismiss(o.id)} onStartWith={onStartWith} onOpenSession={onOpenSession} />
+        </div>
+      )
+    const item = needsShown.find((n) => `n:${needsKey(n)}` === key)
+    if (item) return <NeedsCard item={item} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={() => dismiss(needsDismissKey(item, state))} onDetails={open} full={full} />
+    return null
+  }
+  const detailCard = detail ? cardFor(detail, true) : null
+  useEffect(() => {
+    if (detail && !detailCard) setDetail(null)
+  }, [detail, detailCard])
 
   return (
     <aside className="sidebar">
@@ -83,17 +109,8 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
             Needs you <span className={`count ${hot || extraShown.length ? 'hot' : ''}`}>{needsShown.length + extraShown.length + offers.length}</span>
           </div>
           {needsShown.length === 0 && extraShown.length === 0 && offers.length === 0 && <div className="empty">Nothing waiting on you.</div>}
-          {extraShown.map((x) => (
-            <ExtraCard key={x.id} x={x} state={state} onOpenSession={onOpenSession} onClose={() => dismiss(extraKey(x, state))} />
-          ))}
-          {offers.map((o) => (
-            <div key={o.id} className="card" style={{ ['--kind' as string]: o.kind === 'ci' ? 'var(--red)' : 'var(--accent)' }}>
-              <CloseX onClose={() => dismiss(o.id)} />
-              <OfferRow o={o} state={state} onDismiss={() => dismiss(o.id)} onStartWith={onStartWith} onOpenSession={onOpenSession} />
-            </div>
-          ))}
-          {needsShown.map((item) => (
-            <NeedsCard key={needsKey(item)} item={item} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={() => dismiss(needsDismissKey(item, state))} />
+          {[...extraShown.map((x) => `x:${x.id}`), ...offers.map((o) => `o:${o.id}`), ...needsShown.map((n) => `n:${needsKey(n)}`)].map((key) => (
+            <div key={key}>{cardFor(key, false)}</div>
           ))}
         </div>
 
@@ -176,8 +193,46 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
           </button>
         </div>
       </div>
+      {detailCard && <NeedsDialog onClose={() => setDetail(null)}>{detailCard}</NeedsDialog>}
     </aside>
   )
+}
+
+/**
+ * The popup for a Needs-you card: the same card with nothing clipped (the whole question, message
+ * and options). Portalled to the end of the page, after every window drag region, so it is clickable.
+ */
+function NeedsDialog({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return createPortal(
+    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog wide needs-full" role="dialog" aria-label="Needs you">
+        <h3>
+          Needs you
+          <span style={{ flex: 1 }} />
+          <button className="icon-btn" onClick={onClose} title="Close (Esc)">
+            ×
+          </button>
+        </h3>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/** A click on a card's text (not its buttons or fields, and not a text selection) opens the popup. */
+function detailsClick(open?: () => void) {
+  return (e: React.MouseEvent) => {
+    if (!open) return
+    if ((e.target as HTMLElement).closest('button, a, textarea, input, select, label')) return
+    if (window.getSelection()?.toString()) return
+    open()
+  }
 }
 
 /** Close (X) on a Needs-you card: hides it until the situation changes. */
@@ -234,21 +289,58 @@ function SessionRow({ s, active, now, onClick }: { s: Session; active: boolean; 
   )
 }
 
-function NeedsCard({ item, state, onOpenSession, onIssue, onClose }: { item: NeedsItem; state: AppState; onOpenSession: (s: Session) => void; onIssue: (i: Issue) => void; onClose: () => void }) {
+function NeedsCard({
+  item,
+  state,
+  onOpenSession,
+  onIssue,
+  onClose,
+  onDetails,
+  full,
+}: {
+  item: NeedsItem
+  state: AppState
+  onOpenSession: (s: Session) => void
+  onIssue: (i: Issue) => void
+  onClose: () => void
+  onDetails?: () => void
+  full: boolean
+}) {
   if (item.kind === 'session') {
     const s = item.session
+    const ask = state.asks[s.key]
+    const menu = state.menus[s.key]
+    const tool = state.tails[s.sessionId]?.lastTool
+    const open = (
+      <button className="btn" onClick={() => onOpenSession(s)}>
+        Open
+      </button>
+    )
     return (
-      <div className="card" style={{ ['--kind' as string]: 'var(--red)' }} onClick={() => onOpenSession(s)}>
-        <CloseX onClose={onClose} />
+      <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: menu ? 'var(--purple)' : 'var(--red)' }} onClick={detailsClick(onDetails)}>
+        {!full && <CloseX onClose={onClose} />}
         <div className="top">
-          <span className="kind">INPUT</span>
+          <span className="kind">{menu ? 'QUESTION' : 'INPUT'}</span>
           <span className="title">{s.name}</span>
+          {s.issue !== null && <span className="num">#{s.issue}</span>}
         </div>
-        <div className="body">Waiting on a prompt or permission. Click to open.</div>
+        {menu ? (
+          <AskPanel session={s} ask={ask} menu={menu} fallback={null} full={full} actions={open} />
+        ) : (
+          <>
+            <div className="body">Waiting on a prompt or permission{tool ? ` (${tool})` : ''}. Open it to answer.</div>
+            {full && ask?.said && (
+              <div className="ask-text full">
+                <Markdown text={ask.said.text} />
+              </div>
+            )}
+            <div className="actions">{open}</div>
+          </>
+        )}
       </div>
     )
   }
-  return <ProposalCard proposal={item.proposal} attention={item.kind === 'attention'} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={onClose} />
+  return <ProposalCard proposal={item.proposal} attention={item.kind === 'attention'} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={onClose} onDetails={onDetails} full={full} />
 }
 
 function ProposalCard({
@@ -258,6 +350,8 @@ function ProposalCard({
   onOpenSession,
   onIssue,
   onClose,
+  onDetails,
+  full,
 }: {
   proposal: Proposal
   attention: boolean
@@ -265,12 +359,15 @@ function ProposalCard({
   onOpenSession: (s: Session) => void
   onIssue: (i: Issue) => void
   onClose: () => void
+  onDetails?: () => void
+  full: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const target = sessionForProposal(p, state.sessions)
   const dest = p.target.session ? `→ ${p.target.session}` : p.target.spawn ? `→ spawn ${p.target.spawn.name}` : ''
+  const question = attention && p.status === 'question'
 
   const decide = async (approve: boolean) => {
     setBusy(true)
@@ -279,61 +376,75 @@ function ProposalCard({
     setBusy(false)
     if (!r.ok) setError(r.message)
   }
+  const openBtn = target && (
+    <button className="btn" onClick={() => onOpenSession(target)}>
+      Open
+    </button>
+  )
 
   return (
-    <div className="card" style={{ ['--kind' as string]: KIND_COLOR[p.kind] ?? 'var(--accent)' }}>
-      <CloseX onClose={onClose} />
+    <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: question ? 'var(--purple)' : (KIND_COLOR[p.kind] ?? 'var(--accent)') }} onClick={detailsClick(onDetails)}>
+      {!full && <CloseX onClose={onClose} />}
       <div className="top">
         <span className="kind">{attention ? p.status.toUpperCase() : p.kind}</span>
         <span className="title" title={`#${p.issue} ${dest}`}>
-          #{p.issue} {dest}
+          #{p.issue} {question && target ? target.name : dest}
         </span>
-        <button className="icon-btn" onClick={() => setOpen(!open)} title={open ? 'Hide message' : 'Show the message master will send'}>
-          {open ? '▴' : '▾'}
-        </button>
-      </div>
-      <div className="body">{attention && p.note ? p.note : p.summary}</div>
-      {open && <pre>{p.message}</pre>}
-      {attention && p.status === 'question' && target && <QuickReply session={target} />}
-      <div className="actions">
-        {error && <span className="error">{error}</span>}
-        {target && (
-          <button className="btn" onClick={() => onOpenSession(target)}>
-            Open
+        {!full && !question && (
+          <button className="icon-btn" onClick={() => setOpen(!open)} title={open ? 'Hide message' : 'Show the message master will send'}>
+            {open ? '▴' : '▾'}
           </button>
         )}
-        {!attention && (
-          <>
-            <button className="btn" disabled={busy} onClick={() => decide(false)}>
-              Reject
-            </button>
-            {p.kind === 'ASSIGN' && p.target.spawn ? (
-              // Opens the Start dialog: review the prompt, add first instructions, start now.
-              <button
-                className="btn primary"
-                onClick={() =>
-                  onIssue(
-                    state.issues.find((i) => i.number === p.issue) ?? {
-                      number: p.issue,
-                      title: p.summary.replace(/^"|"$/g, ''),
-                      url: issueUrl(p.issue),
-                      status: null,
-                      currentSprint: true,
-                      assignedToMe: true,
-                    },
-                  )
-                }
-              >
-                Start…
-              </button>
-            ) : (
-              <button className="btn primary" disabled={busy} onClick={() => decide(true)}>
-                Approve
-              </button>
-            )}
-          </>
-        )}
       </div>
+      {question ? (
+        <AskPanel session={target} ask={target ? state.asks[target.key] : undefined} fallback={p.note ?? p.summary} full={full} actions={openBtn} />
+      ) : (
+        <div className="body">{attention && p.note ? p.note : p.summary}</div>
+      )}
+      {full && !question && attention && p.note && <div className="body">{p.summary}</div>}
+      {(open || full) && p.message && (
+        <>
+          {full && <div className="ask-note">{attention ? 'What master sent the session' : 'The message master will send'}</div>}
+          <pre>{p.message}</pre>
+        </>
+      )}
+      {!question && (
+        <div className="actions">
+          {error && <span className="error">{error}</span>}
+          {openBtn}
+          {!attention && (
+            <>
+              <button className="btn" disabled={busy} onClick={() => decide(false)}>
+                Reject
+              </button>
+              {p.kind === 'ASSIGN' && p.target.spawn ? (
+                // Opens the Start dialog: review the prompt, add first instructions, start now.
+                <button
+                  className="btn primary"
+                  onClick={() =>
+                    onIssue(
+                      state.issues.find((i) => i.number === p.issue) ?? {
+                        number: p.issue,
+                        title: p.summary.replace(/^"|"$/g, ''),
+                        url: issueUrl(p.issue),
+                        status: null,
+                        currentSprint: true,
+                        assignedToMe: true,
+                      },
+                    )
+                  }
+                >
+                  Start…
+                </button>
+              ) : (
+                <button className="btn primary" disabled={busy} onClick={() => decide(true)}>
+                  Approve
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -365,7 +476,23 @@ function useExtras(state: AppState, now: number): Extra[] {
   }, [state, now])
 }
 
-function ExtraCard({ x, state, onOpenSession, onClose }: { x: Extra; state: AppState; onOpenSession: (s: Session) => void; onClose: () => void }) {
+function ExtraCard({
+  x,
+  state,
+  onOpenSession,
+  onClose,
+  onDetails,
+  full,
+}: {
+  x: Extra
+  state: AppState
+  onOpenSession: (s: Session) => void
+  onClose: () => void
+  onDetails?: () => void
+  full: boolean
+}) {
+  const cls = `card ${onDetails ? 'clickable' : ''}`
+  const click = detailsClick(onDetails)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const send = async (s: Session, text: string) => {
@@ -377,8 +504,8 @@ function ExtraCard({ x, state, onOpenSession, onClose }: { x: Extra; state: AppS
   if (x.kind === 'nudge') {
     const s = x.nudge.session
     return (
-      <div className="card" style={{ ['--kind' as string]: 'var(--amber)' }}>
-        <CloseX onClose={onClose} />
+      <div className={cls} style={{ ['--kind' as string]: 'var(--amber)' }} onClick={click}>
+        {!full && <CloseX onClose={onClose} />}
         <div className="top">
           <span className="kind">{x.nudge.kind === 'idle' ? `IDLE ${x.nudge.minutes}M` : `WAITING ${x.nudge.minutes}M`}</span>
           <span className="title">{s.name}</span>
@@ -400,8 +527,8 @@ function ExtraCard({ x, state, onOpenSession, onClose }: { x: Extra; state: AppS
   }
   if (x.kind === 'context') {
     return (
-      <div className="card" style={{ ['--kind' as string]: 'var(--red)' }}>
-        <CloseX onClose={onClose} />
+      <div className={cls} style={{ ['--kind' as string]: 'var(--red)' }} onClick={click}>
+        {!full && <CloseX onClose={onClose} />}
         <div className="top">
           <span className="kind">CONTEXT {Math.round(x.pct)}%</span>
           <span className="title">{x.session.name}</span>
@@ -421,8 +548,8 @@ function ExtraCard({ x, state, onOpenSession, onClose }: { x: Extra; state: AppS
   }
   const owner = sessionForIssue(state.sessions, x.issue)
   return (
-    <div className="card" style={{ ['--kind' as string]: 'var(--red)' }}>
-      <CloseX onClose={onClose} />
+    <div className={cls} style={{ ['--kind' as string]: 'var(--red)' }} onClick={click}>
+      {!full && <CloseX onClose={onClose} />}
       <div className="top">
         <span className="kind">BUDGET</span>
         <span className="title">
@@ -437,38 +564,6 @@ function ExtraCard({ x, state, onOpenSession, onClose }: { x: Extra; state: AppS
           </button>
         </div>
       )}
-    </div>
-  )
-}
-
-/** Answer a session's question from the card: typed into the session like a reply in its tab. */
-function QuickReply({ session }: { session: Session }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const send = async () => {
-    if (!text.trim() || busy) return
-    setBusy(true)
-    const r = await deck().sendText(session.key, text)
-    setBusy(false)
-    setMsg(r.ok ? `Sent to ${session.name}` : r.message)
-    if (r.ok) setText('')
-  }
-  return (
-    <div className="quick-reply" onClick={(e) => e.stopPropagation()}>
-      <textarea
-        value={text}
-        placeholder={`Reply to ${session.name}…`}
-        onChange={(e) => setText(e.target.value)}
-        disabled={busy}
-        onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && void send()}
-      />
-      <div className="actions">
-        {msg && <span className="error" style={{ color: msg.startsWith('Sent') ? 'var(--green)' : undefined }}>{msg}</span>}
-        <button className="btn primary" disabled={busy || !text.trim()} onClick={send} title="⌘↵">
-          {busy ? 'Sending…' : 'Reply'}
-        </button>
-      </div>
     </div>
   )
 }

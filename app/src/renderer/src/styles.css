@@ -229,6 +229,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dialog .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
 .dialog label { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 4px; }
 .dialog input, .dialog textarea { width: 100%; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 7px 9px; font: 12px/1.45 var(--mono); outline: none; }
+.dialog input.ask-own { font: 12px/1.4 var(--font); }
 .dialog input:focus, .dialog textarea:focus { border-color: var(--accent); }
 .dialog textarea { min-height: 200px; resize: vertical; }
 .dialog .foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
@@ -502,3 +503,35 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .skills-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
 .dialog label.mpick-row { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; color: var(--text); margin: 4px 0; }
 .dialog label.mpick-row input { width: auto; }
+
+/* Needs-you questions: the full question, its options, a reply; clicking a card opens the popup */
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { border-color: var(--muted); border-left-color: var(--kind, var(--accent)); }
+.ask { margin-top: 5px; cursor: auto; }
+.ask-text { font-size: 12px; line-height: 1.45; color: var(--text); max-height: 150px; overflow: auto; }
+.ask-text.full { max-height: none; overflow: visible; }
+.ask-text .md p { margin: 0 0 5px; }
+.ask-text .md ul { margin: 0 0 5px; padding-left: 16px; }
+.ask-q + .ask-q { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.ask-qhead { display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
+.ask-note { color: var(--muted); font-size: 11px; }
+.ask-opts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.ask-opts.col { flex-direction: column; align-items: stretch; }
+.ask-opt { display: flex; align-items: flex-start; gap: 6px; text-align: left; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; max-width: 100%; }
+.ask-opt:hover:not(:disabled) { border-color: var(--accent); }
+.ask-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.ask-opt:disabled { opacity: .6; cursor: default; }
+.ask-key { color: var(--muted); font: 11px/1.5 var(--mono); flex: none; }
+.ask-desc { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.ask-own { width: 100%; margin-top: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: 12px/1.4 var(--font); padding: 5px 8px; outline: none; }
+.ask-own:focus { border-color: var(--accent); }
+.ask .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; align-items: center; }
+.needs-full .card { margin: 0; cursor: auto; }
+.needs-full .card .body { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.needs-full .card .title { white-space: normal; }
+.needs-full .card pre { max-height: 360px; }
+.needs-full .quick-reply textarea { min-height: 90px; }
+.chip.ask-now { border-color: var(--accent); }
+.chip.ask-done { color: var(--muted); }
+.ask-review { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
+.ask-review b { font-weight: 600; }

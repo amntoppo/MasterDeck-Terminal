@@ -16,7 +16,7 @@ part of the app does.
 |---|---|
 | Sessions and their state | `claude agents --json`, polled every 3 s |
 | Issues, PRs, session↔issue links | `master snapshot` at startup, then **every hour**, and on Refresh. The last result is cached in `~/.claude/masterdeck/cache.json` and shown at once on the next start |
-| Needs you, proposals | `~/.claude/master/ledger.json` (watched) |
+| Needs you, proposals | `~/.claude/master/ledger.json` (watched); questions from the session's transcript and, for a menu, its screen (`claude logs`, every 4 s while it waits) |
 | Cost, context, model, mode | the status line hook's files in `~/.claude/masterdeck/stats/`; if a session has none, estimated from its transcript |
 | Last tool, activity | the last 64 KB of the session transcript |
 | Branch, ahead/behind, diff | `git` in the session's current directory |
@@ -108,7 +108,19 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
-- **Quick reply:** a Needs-you card with a session's question has a reply box.
+- **Questions:** a session asking you something shows as a **QUESTION** card with the whole
+  question, its options and a reply box.
+  - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it
+    to the transcript only once it is answered). Click an option to answer the question showing; a
+    multi-select takes ticks and **Next**; "write your own answer" is the menu's "Type something".
+    After the last question, **Submit answers**. The keys go to the session's tab, or a short hidden
+    `claude attach`, and only if the same question is still on its screen.
+  - A question in words (`#N: question — …` to master-agent) shows what the session asked you,
+    with any numbered or lettered choices in it as buttons (they reply "B: …").
+  - Answered in the session itself (from here or in its tab), the card goes by itself, and the
+    ledger is marked `sent` with "answered in the session", as master-agent would.
+- **Needs-you popup:** click any Needs-you card for a popup with all of it: the full question,
+  option descriptions, the message master sent, and the same buttons.
 - **Idle nudges:** a session working a ticket but quiet for over N minutes (Settings) shows in Needs
   you with **Continue**. One stuck on a prompt that long shows "Waiting".
 - **Auto-open:** when a background session blocks on a prompt, its tab opens (attached, not focused)

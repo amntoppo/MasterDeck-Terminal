@@ -12,7 +12,7 @@ function inline(text: string): ReactNode[] {
 }
 
 /** The little markdown a summary uses: paragraphs, `- ` bullets, **bold**, `code`. */
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = []
   let items: string[] = []
   const flush = () => {

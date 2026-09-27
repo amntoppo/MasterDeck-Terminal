@@ -86,6 +86,8 @@ buttons; it does not go through macOS window drag regions.
   per id. Claude Code writes a `pr-link` record for every PR a session creates.
 - `claude --bg --resume <id>` on a session that is already running starts a copy: check `claude
   agents --json` first.
+- An AskUserQuestion menu is not in the transcript until it is answered: read it from the screen
+  (`claude logs <id>`, rendered with `@xterm/headless`; `shared/ask.ts` `parseMenuScreen`).
 - The shared GitHub cache (`ghcache`) is not per `gh` account: reads right after an account switch
   (Setup) go straight to GitHub.
 - Tests that spawn bash/jq/git get a 20 s timeout; the full suite runs files in parallel.

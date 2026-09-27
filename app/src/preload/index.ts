@@ -23,6 +23,7 @@ const api: DeckApi = {
   assignIssue: (issue, login, current) => ipcRenderer.invoke(CH.assignIssue, issue, login, current),
   startHere: (o) => ipcRenderer.invoke(CH.startHere, o),
   sendText: (key, text) => ipcRenderer.invoke(CH.sendText, key, text),
+  answerMenu: (key, question, answer) => ipcRenderer.invoke(CH.answerMenu, key, question, answer),
   queueList: (sessionId) => ipcRenderer.invoke(CH.queueList, sessionId),
   queueEdit: (sessionId, edit) => ipcRenderer.invoke(CH.queueEdit, sessionId, edit),
   queueSendNext: (key) => ipcRenderer.invoke(CH.queueSendNext, key),

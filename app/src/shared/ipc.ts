@@ -1,3 +1,4 @@
+import type { MenuAnswer } from './ask'
 import type { PrSummary } from './prSummary'
 import type { Settings } from './settings'
 import type { HistoryHit } from './history'
@@ -80,6 +81,7 @@ export const CH = {
   defaultModel: 'models:default',
   startHere: 'session:startHere',
   sendText: 'session:sendText',
+  answerMenu: 'session:answerMenu',
   queueList: 'queue:list',
   queueEdit: 'queue:edit',
   queueSendNext: 'queue:sendNext',
@@ -146,6 +148,8 @@ export interface DeckApi {
   startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult>
   /** Type text into a session as if the user typed it (open tab, hidden attach, or via master). */
   sendText(sessionKey: string, text: string): Promise<CliResult>
+  /** Answer the question on a session's AskUserQuestion menu (`question` as shown), or 'submit' its review. */
+  answerMenu(sessionKey: string, question: string | null, answer: MenuAnswer | 'submit'): Promise<CliResult>
   /** A session's /queue (the queue skill's ~/.claude/queue/<sessionId>.jsonl), first to run first. */
   queueList(sessionId: string): Promise<string[]>
   queueEdit(sessionId: string, edit: QueueEdit): Promise<CliResult & { items: string[] }>

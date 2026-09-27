@@ -7,6 +7,7 @@ import {
   attachIssues,
   deriveMaster,
   deriveNeedsYou,
+  sessionForProposal,
   parseLedger,
   parseSnapshot,
   type ParsedSnapshot,
@@ -40,6 +41,8 @@ import { parseTeamPrs, type TeamPr } from '@shared/teamPrs'
 import { nextRestore, parseRestoreFile, type RestoreEntry, type RestoreFile } from '@shared/restore'
 import { totalOf, type Tokens, type TokensByDay } from '@shared/tokens'
 import { pastByIssue, type PastSession, type TranscriptInfo } from '@shared/pastSessions'
+import { answeredInSession, parseMenuScreen, sessionAsk, type ScreenMenu, type SessionAsk } from '@shared/ask'
+import { sessionScreen } from './screen'
 import { TokenIndex } from './tokens'
 import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
@@ -51,6 +54,8 @@ import type { Runner } from './run'
 
 const AGENTS_MS = 3_000
 const DETAIL_MS = 3_000
+/** How often the screens of sessions waiting on input are read for a question menu. */
+const MENUS_MS = 4_000
 // GitHub allows 5,000 API requests an hour, shared with gh in every session and master's sweeps.
 // A snapshot is the heavy call (board + PR GraphQL); a PR check is one light request.
 /** Issues, PRs and the sprint board come from GitHub at startup, then once an hour (or on Refresh). */
@@ -81,6 +86,14 @@ export class Sources {
   private rawSessions: Session[] = []
   private snapshot: ParsedSnapshot = EMPTY_SNAPSHOT
   private proposals: Proposal[] = []
+  /** What a session is asking, re-read only when its transcript changed. */
+  private askCache = new Map<string, { path: string; mtime: number; ask: SessionAsk }>()
+  /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
+  private menus = new Map<string, ScreenMenu>()
+  private menusRunning = false
+  private lastSessions: Session[] = []
+  /** Questions already marked answered from here, by proposal id and question time (once each). */
+  private answered = new Set<string>()
   private stats: Record<string, SessionStats> = {}
   private tails: Record<string, TranscriptTail> = {}
   private lastWrite: Record<string, number> = {}
@@ -523,6 +536,7 @@ export class Sources {
     void this.refreshGithub()
     this.timers.push(setInterval(() => void this.pollAgents(), AGENTS_MS))
     this.timers.push(setInterval(() => void this.pollDetails(), DETAIL_MS))
+    this.timers.push(setInterval(() => void this.pollMenus(), MENUS_MS))
     this.timers.push(setInterval(() => void this.refreshGithub(), GITHUB_MS))
     this.timers.push(setInterval(() => this.readLedger(), 5_000))
     setTimeout(() => this.scanAllStats(), 2_000)
@@ -966,17 +980,99 @@ export class Sources {
     }, 250)
   }
 
+  /** The menu on a background session's screen now (`claude logs`, rendered). */
+  async readMenu(s: Session): Promise<ScreenMenu | null> {
+    if (s.kind !== 'background' || !s.bgId) return null
+    const screen = await sessionScreen(this.run, this.claude(), s.bgId)
+    return screen ? parseMenuScreen(screen) : null
+  }
+
+  /** Read the menus of the sessions waiting on input; the others have none. */
+  async pollMenus(): Promise<void> {
+    if (this.menusRunning) return
+    this.menusRunning = true
+    try {
+      const waiting = this.lastSessions.filter((s) => s.state === 'needs-input' && s.kind === 'background' && s.bgId)
+      let changed = false
+      for (const key of [...this.menus.keys()])
+        if (!waiting.some((s) => s.key === key)) {
+          this.menus.delete(key)
+          changed = true
+        }
+      for (const s of waiting) {
+        const menu = await this.readMenu(s)
+        const before = JSON.stringify(this.menus.get(s.key) ?? null)
+        if (menu) this.menus.set(s.key, menu)
+        else this.menus.delete(s.key)
+        if (JSON.stringify(menu) !== before) changed = true
+      }
+      if (changed) this.emit()
+    } finally {
+      this.menusRunning = false
+    }
+  }
+
+  /** What a session's transcript says it is asking (the last 256 KB). */
+  private askOf(sessionId: string): SessionAsk | null {
+    const path = this.transcripts.find(sessionId)
+    const mt = path ? mtime(path) : null
+    if (!path || mt === null) return null
+    const hit = this.askCache.get(sessionId)
+    if (hit && hit.path === path && hit.mtime === mt) return hit.ask
+    const tail = readTail(path, 256 * 1024)
+    if (!tail) return null
+    const lines = tail.text.split('\n')
+    if (!tail.fromStart) lines.shift()
+    const ask = sessionAsk(lines)
+    this.askCache.set(sessionId, { path, mtime: mt, ask })
+    return ask
+  }
+
+  /**
+   * Asks of the sessions that need the user (waiting on a prompt, or with a question or blocker for
+   * master), and the question proposals the user has since answered in the session itself: those
+   * leave Needs you, and the ledger is told, as master-agent would on "#N: answered".
+   */
+  private collectAsks(sessions: Session[]): { asks: Record<string, SessionAsk>; answered: Set<number> } {
+    const asks: Record<string, SessionAsk> = {}
+    const answered = new Set<number>()
+    const add = (s: Session | null): SessionAsk | null => {
+      if (!s) return null
+      if (!asks[s.key]) {
+        const a = this.askOf(s.sessionId)
+        if (a) asks[s.key] = a
+      }
+      return asks[s.key] ?? null
+    }
+    for (const s of sessions) if (s.state === 'needs-input') add(s)
+    for (const p of this.proposals) {
+      if (p.status !== 'question' && p.status !== 'blocked') continue
+      const ask = add(sessionForProposal(p, sessions))
+      if (p.status === 'question' && ask && answeredInSession(ask, p.issue)) {
+        answered.add(p.id)
+        const once = `${p.id}:${ask.report?.at}`
+        if (!this.answered.has(once)) {
+          this.answered.add(once)
+          void this.cli.mark(p.id, 'sent', 'answered in the session')
+        }
+      }
+    }
+    return { asks, answered }
+  }
+
   build(): AppState {
     const now = Date.now()
     const issueOf = new Map([...this.snapshot.sessionIssue, ...[...this.links].map(([k, v]) => [k, v.issue] as [string, number])])
     const sessions = applyFreshness(attachIssues(this.rawSessions, issueOf), this.lastWrite, now)
+    const { asks, answered } = this.collectAsks(sessions)
+    this.lastSessions = sessions
     return {
       sessions,
       issues: this.snapshot.issues,
       prs: this.snapshot.prs,
       proposals: this.proposals,
       master: deriveMaster(sessions),
-      needsYou: deriveNeedsYou(this.proposals, sessions),
+      needsYou: deriveNeedsYou(this.proposals.filter((p) => !answered.has(p.id)), sessions),
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },
@@ -1004,6 +1100,8 @@ export class Sources {
       stoppedByRestart: this.restore?.stopped ?? [],
       tokens: { ...this.tokens },
       pastSessions: this.past,
+      asks,
+      menus: Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!])),
       restoring: this.restoring,
       config: this.config,
       skills: this.skills,

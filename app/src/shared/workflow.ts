@@ -207,7 +207,7 @@ export const STAGES: Stage[] = [
     title: 'Your instructions',
     actor: 'you',
     what: 'The session stops and asks; you plan the work with it, answer questions, or queue prompts.',
-    builtin: ['Needs you: a card when a session waits on you; quick reply, Continue', 'Queue: prompts you line up run one by one'],
+    builtin: ['Needs you: a card when a session waits on you; its question and options, a reply, Continue', 'Queue: prompts you line up run one by one'],
   },
   {
     id: 'work',
