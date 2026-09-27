@@ -86,6 +86,7 @@ export const CH = {
   startHere: 'session:startHere',
   sendText: 'session:sendText',
   answerMenu: 'session:answerMenu',
+  inboxAct: 'inbox:act',
   queueList: 'queue:list',
   queueEdit: 'queue:edit',
   queueSendNext: 'queue:sendNext',
@@ -156,6 +157,8 @@ export interface DeckApi {
   sendText(sessionKey: string, text: string): Promise<CliResult>
   /** Answer the question on a session's AskUserQuestion menu (`question` as shown), or 'submit' its review. */
   answerMenu(sessionKey: string, question: string | null, answer: MenuAnswer | 'submit'): Promise<CliResult>
+  /** Act on a Needs-you item (shared/inbox.ts): its actions, or dismiss / snooze {minutes} / wake. */
+  inboxAct(id: string, type: string, payload?: Record<string, unknown>): Promise<CliResult>
   /** A session's /queue (the queue skill's ~/.claude/queue/<sessionId>.jsonl), first to run first. */
   queueList(sessionId: string): Promise<string[]>
   queueEdit(sessionId: string, edit: QueueEdit): Promise<CliResult & { items: string[] }>

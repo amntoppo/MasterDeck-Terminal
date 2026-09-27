@@ -171,6 +171,7 @@ export interface ScreenMenu {
 }
 
 const TABS = /^\s*←\s+(.*?)\s+→\s*$/
+const SINGLE = /^\s*([☐☒])\s+(\S.*?)\s*$/
 const SEPARATOR = /^\s*[─━]{8,}/
 const OPTION = /^\s*(?:❯\s*)?(\d+)\.\s+(?:\[([ ✔✓xX])\]\s+)?(.*)$/
 
@@ -188,8 +189,21 @@ export function parseMenuScreen(screen: string): ScreenMenu | null {
       break
     }
   }
-  if (at < 0) return null
-  const tabs = [...TABS.exec(lines[at])![1].matchAll(/([☐☒])\s+(.+?)(?=\s+[☐☒✔]|$)/g)].map((m) => ({ label: m[2].trim(), answered: m[1] === '☒' }))
+  let tabs: ScreenMenu['tabs'] = []
+  if (at >= 0) tabs = [...TABS.exec(lines[at])![1].matchAll(/([☐☒])\s+(.+?)(?=\s+[☐☒✔]|$)/g)].map((m) => ({ label: m[2].trim(), answered: m[1] === '☒' }))
+  else {
+    // One question: no tab row, just its header (" ☐ Colour"), with the menu's footer below.
+    const footer = lines.map((l) => /Enter to select/.test(l)).lastIndexOf(true)
+    for (let i = footer - 1; i >= 0 && footer >= 0; i--) {
+      const m = SINGLE.exec(lines[i])
+      if (m) {
+        at = i
+        tabs = [{ label: m[2].trim(), answered: m[1] === '☒' }]
+        break
+      }
+    }
+    if (at < 0) return null
+  }
   const rest = lines.slice(at + 1)
 
   if (rest.some((l) => /Review your answers|Ready to submit your answers/.test(l))) {
@@ -272,7 +286,10 @@ export function plainScreen(s: string): string {
   return s.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, '').replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '').replace(/\x1b[()][A-Z0-9]/g, '')
 }
 
-/** An AskUserQuestion menu (or its review screen) is on screen: its tab row ends in "✔ Submit →". */
+/** An AskUserQuestion menu (or its review screen) is on screen: its tab row ends in "✔ Submit →", or
+ * (one question) its header box and the menu's footer show. */
 export function menuOnScreen(screen: string): boolean {
-  return /✔\s*Submit\s*→/.test(plainScreen(screen).slice(-6000))
+  // Words on a live screen are often placed by cursor moves, which leave no spaces between them.
+  const tail = plainScreen(screen).slice(-6000).replace(/\s+/g, '')
+  return /✔Submit→/.test(tail) || (/[☐☒]/.test(tail) && /Entertoselect/.test(tail) && /Esctocancel/.test(tail))
 }

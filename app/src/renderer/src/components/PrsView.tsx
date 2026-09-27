@@ -1,7 +1,7 @@
 import { sameTicket, ticketLabel, ticketUrl, type Ticket } from '@shared/ticket'
 import { nextTabName, ViewTabs } from './ViewTabs'
 import { useEffect, useMemo, useState } from 'react'
-import { ciMessage, ownerOf, prOffers, reviewMessage, type PrOffer } from '@shared/offers'
+import { ciMessage, ownerOf, reviewMessage, type PrOffer } from '@shared/offers'
 import { formatRefreshed } from '@shared/format'
 import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, normalizePrFilters, prFilterOptions, reviewLabel, type PrFilters, type TeamPr } from '@shared/teamPrs'
 import type { AppState, Issue, Pr, Session } from '@shared/types'
@@ -17,18 +17,6 @@ interface Props {
   onStartWith: (issue: Issue, instructions: string) => void
 }
 
-const DISMISSED = 'dismissedOffers'
-
-export function useDismissed(): [Set<string>, (id: string) => void] {
-  const [d, setD] = useState<Set<string>>(() => new Set(load<string[]>(DISMISSED, [])))
-  const add = (id: string) =>
-    setD((cur) => {
-      const n = new Set(cur).add(id)
-      save(DISMISSED, [...n].slice(-200))
-      return n
-    })
-  return [d, add]
-}
 
 const TABS = 'prTabs'
 const TAB = 'prTab'
@@ -98,7 +86,6 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
   const renameTab = (id: string, name: string) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, name } : t)))
-  const [dismissed, dismiss] = useDismissed()
   const me = state.me
   const isMe = (login: string) => !!me && login.toLowerCase() === me.toLowerCase()
 
@@ -120,8 +107,8 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     for (const p of filterPrs(all, { ...f, author: '' }, me, now)) c[p.author.toLowerCase()] = (c[p.author.toLowerCase()] ?? 0) + 1
     return c
   }, [all, f, me, now])
-  const mine = state.prs.filter((p) => p.authorIsMe)
-  const offers = useMemo(() => prOffers(mine, state.sessions, state.sessionPrs, state.proposals, dismissed), [mine, state.sessions, state.sessionPrs, state.proposals, dismissed])
+  // The PR offers are Needs-you items: dismissing one here dismisses it there too.
+  const offers = useMemo(() => state.inbox.open.flatMap((e) => (e.item.detail.type === 'offer' ? [{ ...e.item.detail.offer, itemId: e.item.id }] : [])), [state.inbox.open])
   const active = activeFilterCount(f)
   const preset = PRESETS.find((p) => (Object.keys(DEFAULT_PR_FILTERS) as (keyof PrFilters)[]).every((k) => k === 'sort' || f[k] === { ...DEFAULT_PR_FILTERS, ...p.f }[k]))
   const loading = state.teamPrsLoading
@@ -233,7 +220,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
             <h3 className="sec">Needs its session ({offers.length})</h3>
             <div className="offers">
               {offers.map((o) => (
-                <OfferRow key={o.id} o={o} state={state} onDismiss={() => dismiss(o.id)} onStartWith={onStartWith} onOpenSession={onOpenSession} />
+                <OfferRow key={o.id} o={o} itemId={o.itemId} state={state} onDismiss={() => void deck().inboxAct(o.itemId, 'dismiss')} onStartWith={onStartWith} onOpenSession={onOpenSession} />
               ))}
             </div>
           </>
@@ -383,13 +370,17 @@ function PrRow({
   )
 }
 
-export function OfferRow({ o, state, onDismiss, onStartWith, onOpenSession }: { o: PrOffer; state: AppState; onDismiss: () => void } & Pick<Props, 'onStartWith' | 'onOpenSession'>) {
+/** A PR offer (a Needs-you item, `itemId`): send it through the inbox, or start a session when none owns the PR. */
+export function OfferRow({ o, itemId, state, onDismiss, onStartWith, onOpenSession }: { o: PrOffer; itemId?: string; state: AppState; onDismiss: () => void } & Pick<Props, 'onStartWith' | 'onOpenSession'>) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const send = async () => {
     if (busy) return
     setBusy(true)
-    if (o.proposal) {
+    if (itemId && (o.proposal || o.owner)) {
+      const r = await deck().inboxAct(itemId, 'send')
+      setMsg(r.message)
+    } else if (o.proposal) {
       // master's own proposal: approving it lets master send it (and track it).
       const r = await deck().approve(o.proposal.id)
       setMsg(r.ok ? 'Approved; master sends it' : r.message)

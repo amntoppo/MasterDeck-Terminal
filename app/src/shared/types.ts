@@ -1,4 +1,5 @@
 import type { ScreenMenu, SessionAsk } from './ask'
+import type { InboxView } from './inbox'
 import type { PrStage, StatusKey } from './review'
 import type { PastSession } from './pastSessions'
 import type { Tokens } from './tokens'
@@ -152,7 +153,8 @@ export interface AppState {
   prs: Pr[]
   proposals: Proposal[]
   master: MasterState
-  needsYou: NeedsItem[]
+  /** Needs you: open items by priority, snoozed ones, and the last day's resolved ones (shared/inbox.ts). */
+  inbox: InboxView
   stats: Record<string, SessionStats>
   tails: Record<string, TranscriptTail>
   git: Record<string, GitInfo>

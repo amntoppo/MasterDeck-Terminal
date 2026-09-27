@@ -128,6 +128,17 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a
   status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
   of every session are checked every two minutes while open.
+- **Needs you is one inbox** (`shared/inbox.ts`, `main/inbox.ts`): the main process builds every item
+  (questions and menus, sessions waiting on input, blocked, proposals, failing CI and review threads
+  on my PRs, budgets, context, idle and waiting nudges), each with a stable id, a priority, the full
+  text and its actions. Items are ordered by priority. Every action (reply, pick an option, answer a
+  menu, continue, compact, approve, reject, send) goes through one path that first checks the item
+  is still open and the session still in a state for it. **⏾** snoozes (an hour, 4 hours, until
+  tomorrow); **×** dismisses until the situation changes. Items close by themselves when resolved
+  (answered, CI green, threads resolved, active again…) and **Done today** lists what closed and
+  how. It is saved in `~/.claude/masterdeck/inbox.json`; every addition, action and resolution is
+  appended to `inbox-events.jsonl`, and notifications come from those events. The PRs view's
+  "Needs its session" list is the same inbox.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it

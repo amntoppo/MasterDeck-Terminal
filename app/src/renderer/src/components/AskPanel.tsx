@@ -16,6 +16,7 @@ export function AskPanel({
   fallback,
   full,
   actions,
+  itemId,
 }: {
   session: Session | null
   ask: SessionAsk | undefined
@@ -24,8 +25,10 @@ export function AskPanel({
   full: boolean
   /** The card's own buttons (Open), on the same row as Reply / Submit. */
   actions?: ReactNode
+  /** The Needs-you item this answers: replies and menu answers go through the inbox (shared/inbox.ts). */
+  itemId?: string
 }) {
-  if (session && menu) return <MenuForm key={menu.question?.question ?? 'review'} session={session} menu={menu} full={full} actions={actions} />
+  if (session && menu) return <MenuForm key={menu.question?.question ?? 'review'} session={session} menu={menu} full={full} actions={actions} itemId={itemId} />
   const text = (ask?.said ? withoutReport(ask.said.text) : null) ?? (ask?.report ? reportQuestion(ask.report) : null) ?? fallback ?? ''
   const options = ask?.said?.options ?? textOptions(text)
   return (
@@ -36,7 +39,7 @@ export function AskPanel({
         </div>
       )}
       {session ? (
-        <TextAnswer session={session} options={options} actions={actions} />
+        <TextAnswer session={session} options={options} actions={actions} itemId={itemId} />
       ) : (
         <>
           <div className="ask-note">No live session to reply to.</div>
@@ -68,19 +71,21 @@ function short(text: string): string {
 }
 
 /** Choices from the question's own list (sent as "B: …"), or a reply in your words. */
-function TextAnswer({ session, options, actions }: { session: Session; options: { key: string; text: string }[]; actions?: ReactNode }) {
+function TextAnswer({ session, options, actions, itemId }: { session: Session; options: { key: string; text: string }[]; actions?: ReactNode; itemId?: string }) {
   const [text, setText] = useState('')
   const { busy, msg, run } = useSend()
-  const send = async (t: string) => {
+  const send = async (t: string, option?: { key: string; text: string }) => {
     if (!t.trim() || busy) return
-    if (await run(() => deck().sendText(session.key, t), `Sent to ${session.name}`)) setText('')
+    const go = () =>
+      !itemId ? deck().sendText(session.key, t) : option ? deck().inboxAct(itemId, 'option', { key: option.key, text: option.text }) : deck().inboxAct(itemId, 'reply', { text: t })
+    if (await run(go, `Sent to ${session.name}`)) setText('')
   }
   return (
     <>
       {options.length > 0 && (
         <div className="ask-opts">
           {options.map((o) => (
-            <button key={o.key} className="ask-opt" disabled={busy} title={`Reply "${o.key}: ${short(o.text)}"\n\n${o.text}`} onClick={() => void send(`${o.key}: ${short(o.text)}`)}>
+            <button key={o.key} className="ask-opt" disabled={busy} title={`Reply "${o.key}: ${short(o.text)}"\n\n${o.text}`} onClick={() => void send(`${o.key}: ${short(o.text)}`, { key: o.key, text: short(o.text) })}>
               <span className="ask-key">{o.key}</span>
               {o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}
             </button>
@@ -115,12 +120,16 @@ function TextAnswer({ session, options, actions }: { session: Session; options: 
  * An AskUserQuestion menu, one question at a time as the session shows them: clicking an option
  * answers it (a multi-select sends its ticks with Next), and after the last one, Submit sends them.
  */
-function MenuForm({ session, menu, full, actions }: { session: Session; menu: ScreenMenu; full: boolean; actions?: ReactNode }) {
+function MenuForm({ session, menu, full, actions, itemId }: { session: Session; menu: ScreenMenu; full: boolean; actions?: ReactNode; itemId?: string }) {
   const q = menu.question
   const [ticks, setTicks] = useState<number[]>(() => menu.checked.map((k) => k - 1))
   const [own, setOwn] = useState('')
   const { busy, msg, run } = useSend()
-  const answer = (a: MenuAnswer | 'submit') => run(() => deck().answerMenu(session.key, q?.question ?? null, a), a === 'submit' ? `Answered ${session.name}` : 'Sent')
+  const answer = (a: MenuAnswer | 'submit') =>
+    run(
+      () => (itemId ? deck().inboxAct(itemId, 'menu', { question: q?.question ?? null, answer: a }) : deck().answerMenu(session.key, q?.question ?? null, a)),
+      a === 'submit' ? `Answered ${session.name}` : 'Sent',
+    )
 
   return (
     <div className="ask">

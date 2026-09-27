@@ -1,19 +1,17 @@
-import { parseTicket, sameTicket, ticketKey, ticketLabel, ticketOf, ticketUrl, type Ticket } from '@shared/ticket'
+import { sameTicket, ticketLabel, ticketUrl } from '@shared/ticket'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ticketSpend } from '@shared/costs'
-import { idleNudges, type Nudge } from '@shared/nudge'
 import { MASTER_NAME, proposalTicket, sessionForIssue, sessionForProposal } from '@shared/derive'
 import { inOrder, moveBefore, trimOrder, withNew } from '@shared/sessionOrder'
 import { StatusDialog } from './StatusDialog'
 import { SessionMenu } from './SessionMenu'
 import { attentionFor, sessionStatus } from '@shared/review'
-import { formatAgo, formatCost, formatGhCache, formatRefreshed } from '@shared/format'
-import type { AppState, Issue, NeedsItem, Proposal, Session } from '@shared/types'
+import { formatAgo, formatGhCache, formatRefreshed } from '@shared/format'
+import type { InboxEntry, InboxKind } from '@shared/inbox'
+import type { AppState, Issue, Proposal, Session } from '@shared/types'
 import { deck, KIND_COLOR, load, save, useNow } from '../deck'
 import type { PaletteAction } from './CommandPalette'
-import { OfferRow, useDismissed } from './PrsView'
-import { prOffers } from '@shared/offers'
+import { OfferRow } from './PrsView'
 import { AskPanel } from './AskPanel'
 import { Markdown } from './SummaryPanel'
 
@@ -109,31 +107,20 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
     setRefreshing(false)
   }
 
-  const extras = useExtras(state, now)
-  const [dismissed, dismiss] = useDismissed()
-  const extraShown = extras.filter((x) => !dismissed.has(extraKey(x, state)))
-  const needsShown = state.needsYou.filter((n) => !dismissed.has(needsDismissKey(n, state)))
-  const offers = useMemo(() => prOffers(state.prs.filter((p) => p.authorIsMe), state.sessions, state.sessionPrs, state.proposals, dismissed), [state.prs, state.sessions, state.sessionPrs, state.proposals, dismissed])
-  const prAttention = offers.length + state.prs.filter((p) => p.reviewRequested).length
-  const hot = needsShown.filter((n) => n.kind !== 'attention' || n.proposal.status !== 'held').length
-  // The Needs-you popup: which card, by key; it closes by itself when the card goes (answered, dismissed).
+  // Needs you: the inbox main builds (shared/inbox.ts); every card acts through deck().inboxAct.
+  const open = state.inbox.open
+  const offerCount = open.filter((e) => e.item.detail.type === 'offer').length
+  const prAttention = offerCount + state.prs.filter((p) => p.reviewRequested).length
+  const hot = open.filter((e) => e.item.kind !== 'held' && e.item.kind !== 'idle').length
+  const [showSnoozed, setShowSnoozed] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  // The Needs-you popup: which item, by id; it closes by itself when the item goes (answered, dismissed).
   const [detail, setDetail] = useState<string | null>(null)
 
-  const cardFor = (key: string, full: boolean): ReactNode => {
-    const open = full ? undefined : () => setDetail(key)
-    const x = extraShown.find((e) => `x:${e.id}` === key)
-    if (x) return <ExtraCard x={x} state={state} onOpenSession={onOpenSession} onClose={() => dismiss(extraKey(x, state))} onDetails={open} full={full} />
-    const o = offers.find((e) => `o:${e.id}` === key)
-    if (o)
-      return (
-        <div className={`card ${open ? 'clickable' : ''}`} style={{ ['--kind' as string]: o.kind === 'ci' ? 'var(--red)' : 'var(--accent)' }} onClick={detailsClick(open)}>
-          {!full && <CloseX onClose={() => dismiss(o.id)} />}
-          <OfferRow o={o} state={state} onDismiss={() => dismiss(o.id)} onStartWith={onStartWith} onOpenSession={onOpenSession} />
-        </div>
-      )
-    const item = needsShown.find((n) => `n:${needsKey(n)}` === key)
-    if (item) return <NeedsCard item={item} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={() => dismiss(needsDismissKey(item, state))} onDetails={open} full={full} />
-    return null
+  const cardFor = (id: string, full: boolean): ReactNode => {
+    const e = open.find((x) => x.item.id === id)
+    if (!e) return null
+    return <InboxCard entry={e} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onStartWith={onStartWith} onDetails={full ? undefined : () => setDetail(id)} full={full} />
   }
   const detailCard = detail ? cardFor(detail, true) : null
   useEffect(() => {
@@ -160,12 +147,44 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
       <div className="scroll">
         <div className="section" ref={needsYouRef}>
           <div className="section-head">
-            Needs you <span className={`count ${hot || extraShown.length ? 'hot' : ''}`}>{needsShown.length + extraShown.length + offers.length}</span>
+            Needs you <span className={`count ${hot ? 'hot' : ''}`}>{open.length}</span>
           </div>
-          {needsShown.length === 0 && extraShown.length === 0 && offers.length === 0 && <div className="empty">Nothing waiting on you.</div>}
-          {[...extraShown.map((x) => `x:${x.id}`), ...offers.map((o) => `o:${o.id}`), ...needsShown.map((n) => `n:${needsKey(n)}`)].map((key) => (
-            <div key={key}>{cardFor(key, false)}</div>
+          {open.length === 0 && <div className="empty">Nothing waiting on you.</div>}
+          {open.map((e) => (
+            <div key={e.item.id}>{cardFor(e.item.id, false)}</div>
           ))}
+          {state.inbox.snoozed.length > 0 && (
+            <div className="row inbox-fold" onClick={() => setShowSnoozed(!showSnoozed)}>
+              <span className="mark">{showSnoozed ? '▾' : '▸'}</span>
+              <span className="label sub">{state.inbox.snoozed.length} snoozed</span>
+            </div>
+          )}
+          {showSnoozed &&
+            state.inbox.snoozed.map((e) => (
+              <div key={e.item.id} className="row inbox-line" title={e.item.body}>
+                <span className="kind-tag">{KIND_TAG[e.item.kind]}</span>
+                <span className="label">{e.item.title}</span>
+                <span className="sub">{e.snoozedUntil ? `until ${new Date(e.snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+                <button className="link-btn" onClick={() => void deck().inboxAct(e.item.id, 'wake')}>
+                  Show
+                </button>
+              </div>
+            ))}
+          {state.inbox.history.length > 0 && (
+            <div className="row inbox-fold" onClick={() => setShowHistory(!showHistory)}>
+              <span className="mark">{showHistory ? '▾' : '▸'}</span>
+              <span className="label sub">Done today · {state.inbox.history.length}</span>
+            </div>
+          )}
+          {showHistory &&
+            state.inbox.history.map((e) => (
+              <div key={`${e.item.id}:${e.resolvedAt}`} className="row inbox-line" title={`${e.item.title}\n${e.item.body}`}>
+                <span className="kind-tag">{KIND_TAG[e.item.kind]}</span>
+                <span className="label">{e.item.title}</span>
+                <span className="sub">{e.resolvedHow}</span>
+                <span className="sub">{e.resolvedAt ? formatAgo(now - e.resolvedAt) : ''}</span>
+              </div>
+            ))}
         </div>
 
         <div className="section">
@@ -330,46 +349,90 @@ function detailsClick(open?: () => void) {
   }
 }
 
-/** Close (X) on a Needs-you card: hides it until the situation changes. */
-function CloseX({ onClose }: { onClose: () => void }) {
+/** Short labels for a Needs-you item's kind (the snoozed and history lists). */
+const KIND_TAG: Record<InboxKind, string> = {
+  input: 'INPUT',
+  menu: 'QUESTION',
+  question: 'QUESTION',
+  blocked: 'BLOCKED',
+  held: 'HELD',
+  proposal: 'PROPOSAL',
+  ci: 'CI',
+  review: 'THREADS',
+  budget: 'BUDGET',
+  context: 'CONTEXT',
+  idle: 'IDLE',
+  waiting: 'WAITING',
+}
+
+/** Minutes from now until 9:00 tomorrow. */
+function untilTomorrow(): number {
+  const t = new Date()
+  t.setDate(t.getDate() + 1)
+  t.setHours(9, 0, 0, 0)
+  return Math.max(60, Math.round((t.getTime() - Date.now()) / 60_000))
+}
+
+/** Snooze (⏾) and dismiss (×) on a Needs-you card: both through the inbox. Dismissed items come back
+ * when the situation changes (a new question, more context used…). */
+function ItemControls({ itemId }: { itemId: string }) {
+  const [open, setOpen] = useState(false)
+  const act = (type: string, payload?: Record<string, unknown>) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setOpen(false)
+    void deck().inboxAct(itemId, type, payload)
+  }
   return (
-    <button
-      className="card-x"
-      title="Close"
-      aria-label="Close"
-      onClick={(e) => {
-        e.stopPropagation()
-        onClose()
-      }}
-    >
-      ×
-    </button>
+    <span className="card-ctl" onClick={(e) => e.stopPropagation()}>
+      <button className="card-x" title="Snooze" aria-label="Snooze" onClick={() => setOpen(!open)}>
+        ⏾
+      </button>
+      <button className="card-x" title="Dismiss (it comes back if the situation changes)" aria-label="Dismiss" onClick={act('dismiss')}>
+        ×
+      </button>
+      {open && (
+        <span className="menu snooze-menu">
+          <button onClick={act('snooze', { minutes: 60 })}>For an hour</button>
+          <button onClick={act('snooze', { minutes: 240 })}>For 4 hours</button>
+          <button onClick={act('snooze', { minutes: untilTomorrow() })}>Until tomorrow</button>
+        </span>
+      )}
+    </span>
   )
 }
 
-/**
- * What a closed card is remembered by. Each key includes what would make the card worth showing
- * again: new activity in the session, a proposal's new status, another 10% of context, another
- * multiple of the budget.
- */
-function needsDismissKey(item: NeedsItem, state: AppState): string {
-  if (item.kind === 'session') return `x:s:${item.session.key}:${state.lastActivity[item.session.sessionId] ?? 0}`
-  return `x:p:${item.proposal.id}:${item.proposal.status}`
-}
-
-function extraKey(x: Extra, state: AppState): string {
-  switch (x.kind) {
-    case 'nudge':
-      return `x:n:${x.nudge.session.key}:${x.nudge.kind}:${state.lastActivity[x.nudge.session.sessionId] ?? 0}`
-    case 'context':
-      return `x:c:${x.session.key}:${Math.floor(x.pct / 10)}`
-    case 'budget':
-      return `x:b:${ticketKey(x.issue.repo, x.issue.number)}:${Math.floor(x.spend / x.cap)}`
-  }
-}
-
-function needsKey(item: NeedsItem): string {
-  return item.kind === 'session' ? `s:${item.session.key}` : `p:${item.proposal.id}`
+/** One Needs-you item as its card: the card for its kind, acting through the inbox. */
+function InboxCard({
+  entry,
+  state,
+  onOpenSession,
+  onIssue,
+  onStartWith,
+  onDetails,
+  full,
+}: {
+  entry: InboxEntry
+  state: AppState
+  onOpenSession: (s: Session) => void
+  onIssue: (i: Issue) => void
+  onStartWith: (issue: Issue, instructions: string) => void
+  onDetails?: () => void
+  full: boolean
+}) {
+  const i = entry.item
+  const d = i.detail
+  if (d.type === 'proposal')
+    return <ProposalCard itemId={i.id} proposal={d.proposal} attention={i.kind !== 'proposal'} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onDetails={onDetails} full={full} />
+  if (d.type === 'offer')
+    return (
+      <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: i.kind === 'ci' ? 'var(--red)' : 'var(--accent)' }} onClick={detailsClick(onDetails)}>
+        {!full && <ItemControls itemId={i.id} />}
+        <OfferRow o={d.offer} itemId={i.id} state={state} onDismiss={() => void deck().inboxAct(i.id, 'dismiss')} onStartWith={onStartWith} onOpenSession={onOpenSession} />
+      </div>
+    )
+  const s = i.sessionKey ? state.sessions.find((x) => x.key === i.sessionKey) : undefined
+  if (d.type === 'session' && s) return <NeedsCard itemId={i.id} session={s} state={state} onOpenSession={onOpenSession} onDetails={onDetails} full={full} />
+  return <ExtraCard entry={entry} session={s} state={state} onOpenSession={onOpenSession} onDetails={onDetails} full={full} />
 }
 
 /** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
@@ -416,76 +479,71 @@ function SessionRow({
   )
 }
 
+/** A session waiting on a prompt, or on the menu on its screen (answered right here). */
 function NeedsCard({
-  item,
+  itemId,
+  session: s,
   state,
   onOpenSession,
-  onIssue,
-  onClose,
   onDetails,
   full,
 }: {
-  item: NeedsItem
+  itemId: string
+  session: Session
   state: AppState
   onOpenSession: (s: Session) => void
-  onIssue: (i: Issue) => void
-  onClose: () => void
   onDetails?: () => void
   full: boolean
 }) {
-  if (item.kind === 'session') {
-    const s = item.session
-    const ask = state.asks[s.key]
-    const menu = state.menus[s.key]
-    const tool = state.tails[s.sessionId]?.lastTool
-    const open = (
-      <button className="btn" onClick={() => onOpenSession(s)}>
-        Open
-      </button>
-    )
-    return (
-      <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: menu ? 'var(--purple)' : 'var(--red)' }} onClick={detailsClick(onDetails)}>
-        {!full && <CloseX onClose={onClose} />}
-        <div className="top">
-          <span className="kind">{menu ? 'QUESTION' : 'INPUT'}</span>
-          <span className="title">{s.name}</span>
-          {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
-        </div>
-        {menu ? (
-          <AskPanel session={s} ask={ask} menu={menu} fallback={null} full={full} actions={open} />
-        ) : (
-          <>
-            <div className="body">Waiting on a prompt or permission{tool ? ` (${tool})` : ''}. Open it to answer.</div>
-            {full && ask?.said && (
-              <div className="ask-text full">
-                <Markdown text={ask.said.text} />
-              </div>
-            )}
-            <div className="actions">{open}</div>
-          </>
-        )}
+  const ask = state.asks[s.key]
+  const menu = state.menus[s.key]
+  const tool = state.tails[s.sessionId]?.lastTool
+  const open = (
+    <button className="btn" onClick={() => onOpenSession(s)}>
+      Open
+    </button>
+  )
+  return (
+    <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: menu ? 'var(--purple)' : 'var(--red)' }} onClick={detailsClick(onDetails)}>
+      {!full && <ItemControls itemId={itemId} />}
+      <div className="top">
+        <span className="kind">{menu ? 'QUESTION' : 'INPUT'}</span>
+        <span className="title">{s.name}</span>
+        {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
       </div>
-    )
-  }
-  return <ProposalCard proposal={item.proposal} attention={item.kind === 'attention'} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onClose={onClose} onDetails={onDetails} full={full} />
+      {menu ? (
+        <AskPanel session={s} ask={ask} menu={menu} fallback={null} full={full} actions={open} itemId={itemId} />
+      ) : (
+        <>
+          <div className="body">Waiting on a prompt or permission{tool ? ` (${tool})` : ''}. Open it to answer.</div>
+          {full && ask?.said && (
+            <div className="ask-text full">
+              <Markdown text={ask.said.text} />
+            </div>
+          )}
+          <div className="actions">{open}</div>
+        </>
+      )}
+    </div>
+  )
 }
 
 function ProposalCard({
+  itemId,
   proposal: p,
   attention,
   state,
   onOpenSession,
   onIssue,
-  onClose,
   onDetails,
   full,
 }: {
+  itemId: string
   proposal: Proposal
   attention: boolean
   state: AppState
   onOpenSession: (s: Session) => void
   onIssue: (i: Issue) => void
-  onClose: () => void
   onDetails?: () => void
   full: boolean
 }) {
@@ -499,7 +557,7 @@ function ProposalCard({
   const decide = async (approve: boolean) => {
     setBusy(true)
     setError(null)
-    const r = approve ? await deck().approve(p.id) : await deck().reject(p.id)
+    const r = await deck().inboxAct(itemId, approve ? 'approve' : 'reject')
     setBusy(false)
     if (!r.ok) setError(r.message)
   }
@@ -511,7 +569,7 @@ function ProposalCard({
 
   return (
     <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: question ? 'var(--purple)' : (KIND_COLOR[p.kind] ?? 'var(--accent)') }} onClick={detailsClick(onDetails)}>
-      {!full && <CloseX onClose={onClose} />}
+      {!full && <ItemControls itemId={itemId} />}
       <div className="top">
         <span className="kind">{attention ? p.status.toUpperCase() : p.kind}</span>
         <span className="title" title={`${ticketLabel(p.repo, p.issue)} ${dest}`}>
@@ -524,7 +582,7 @@ function ProposalCard({
         )}
       </div>
       {question ? (
-        <AskPanel session={target} ask={target ? state.asks[target.key] : undefined} fallback={p.note ?? p.summary} full={full} actions={openBtn} />
+        <AskPanel session={target} ask={target ? state.asks[target.key] : undefined} fallback={p.note ?? p.summary} full={full} actions={openBtn} itemId={itemId} />
       ) : (
         <div className="body">{attention && p.note ? p.note : p.summary}</div>
       )}
@@ -577,124 +635,60 @@ function ProposalCard({
   )
 }
 
-type Extra =
-  | { id: string; kind: 'nudge'; nudge: Nudge }
-  | { id: string; kind: 'context'; session: Session; pct: number }
-  | { id: string; kind: 'budget'; issue: Ticket; spend: number; cap: number }
-
-/** Needs-you items the app derives itself: idle/waiting nudges, context warnings, budgets. */
-function useExtras(state: AppState, now: number): Extra[] {
-  return useMemo(() => {
-    const out: Extra[] = []
-    for (const n of idleNudges(state.sessions, state.proposals, state.lastActivity, state.settings.idleNudgeMinutes, now)) {
-      // A session already listed as needing input keeps that card; add the wait time only for others.
-      if (n.kind === 'waiting' && state.needsYou.some((i) => i.kind === 'session' && i.session.key === n.session.key)) continue
-      out.push({ id: `n:${n.session.key}`, kind: 'nudge', nudge: n })
-    }
-    for (const s of state.sessions) {
-      const pct = state.allStats[s.sessionId]?.contextPct
-      if (s.state !== 'done' && s.name !== MASTER_NAME && pct != null && pct >= state.settings.contextWarnPct)
-        out.push({ id: `c:${s.key}`, kind: 'context', session: s, pct })
-    }
-    const cap = state.settings.budgetPerTicketUsd
-    if (cap > 0)
-      for (const [issue, spend] of Object.entries(ticketSpend(state.costBook)))
-        if (spend > cap) {
-          const t = parseTicket(issue)
-          if (t) out.push({ id: `b:${issue}`, kind: 'budget', issue: t, spend, cap })
-        }
-    return out
-  }, [state, now])
-}
-
+/** Idle and waiting nudges, context and budget warnings. */
 function ExtraCard({
-  x,
+  entry,
+  session: s,
   state,
   onOpenSession,
-  onClose,
   onDetails,
   full,
 }: {
-  x: Extra
+  entry: InboxEntry
+  session: Session | undefined
   state: AppState
   onOpenSession: (s: Session) => void
-  onClose: () => void
   onDetails?: () => void
   full: boolean
 }) {
-  const cls = `card ${onDetails ? 'clickable' : ''}`
-  const click = detailsClick(onDetails)
+  const i = entry.item
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const send = async (s: Session, text: string) => {
+  const act = async (type: string) => {
     setBusy(true)
-    const r = await deck().sendText(s.key, text)
+    const r = await deck().inboxAct(i.id, type)
     setBusy(false)
     setMsg(r.ok ? 'Sent' : r.message)
   }
-  if (x.kind === 'nudge') {
-    const s = x.nudge.session
-    return (
-      <div className={cls} style={{ ['--kind' as string]: 'var(--amber)' }} onClick={click}>
-        {!full && <CloseX onClose={onClose} />}
-        <div className="top">
-          <span className="kind">{x.nudge.kind === 'idle' ? `IDLE ${x.nudge.minutes}M` : `WAITING ${x.nudge.minutes}M`}</span>
-          <span className="title">{s.name}</span>
-        </div>
-        <div className="body">{x.nudge.kind === 'idle' ? 'Working a ticket but quiet. Nudge it to carry on?' : 'Blocked on a prompt. Open it to answer.'}</div>
-        <div className="actions">
-          {msg && <span className="error" style={{ color: msg === 'Sent' ? 'var(--green)' : undefined }}>{msg}</span>}
-          <button className="btn" onClick={() => onOpenSession(s)}>
-            Open
-          </button>
-          {x.nudge.kind === 'idle' && (
-            <button className="btn primary" disabled={busy} onClick={() => send(s, 'continue')}>
-              Continue
-            </button>
-          )}
-        </div>
-      </div>
-    )
-  }
-  if (x.kind === 'context') {
-    return (
-      <div className={cls} style={{ ['--kind' as string]: 'var(--red)' }} onClick={click}>
-        {!full && <CloseX onClose={onClose} />}
-        <div className="top">
-          <span className="kind">CONTEXT {Math.round(x.pct)}%</span>
-          <span className="title">{x.session.name}</span>
-        </div>
-        <div className="body">Near the context limit. Compacting keeps it working well.</div>
-        <div className="actions">
-          {msg && <span className="error" style={{ color: msg === 'Sent' ? 'var(--green)' : undefined }}>{msg}</span>}
-          <button className="btn" onClick={() => onOpenSession(x.session)}>
-            Open
-          </button>
-          <button className="btn primary" disabled={busy} onClick={() => send(x.session, '/compact')}>
-            Compact now
-          </button>
-        </div>
-      </div>
-    )
-  }
-  const owner = sessionForIssue(state.sessions, x.issue)
+  const kind =
+    i.detail.type === 'nudge'
+      ? `${i.kind === 'idle' ? 'IDLE' : 'WAITING'} ${i.detail.minutes}M`
+      : i.detail.type === 'context'
+        ? `CONTEXT ${Math.round(i.detail.pct)}%`
+        : 'BUDGET'
+  const owner = s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null)
+  const primary = i.actions.find((a) => a.type === 'continue' || a.type === 'compact')
   return (
-    <div className={cls} style={{ ['--kind' as string]: 'var(--red)' }} onClick={click}>
-      {!full && <CloseX onClose={onClose} />}
+    <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: i.kind === 'idle' || i.kind === 'waiting' ? 'var(--amber)' : 'var(--red)' }} onClick={detailsClick(onDetails)}>
+      {!full && <ItemControls itemId={i.id} />}
       <div className="top">
-        <span className="kind">BUDGET</span>
-        <span className="title">
-          {ticketLabel(x.issue.repo, x.issue.number)} spent {formatCost(x.spend)} of {formatCost(x.cap)}
-        </span>
+        <span className="kind">{kind}</span>
+        <span className="title">{i.title}</span>
       </div>
-      <div className="body">Its sessions passed the per-ticket budget (Settings).</div>
-      {owner && (
-        <div className="actions">
+      <div className="body">{i.body}</div>
+      <div className="actions">
+        {msg && <span className="error" style={{ color: msg === 'Sent' ? 'var(--green)' : undefined }}>{msg}</span>}
+        {owner && (
           <button className="btn" onClick={() => onOpenSession(owner)}>
-            Open {owner.name}
+            {i.detail.type === 'budget' ? `Open ${owner.name}` : 'Open'}
           </button>
-        </div>
-      )}
+        )}
+        {primary && (
+          <button className="btn primary" disabled={busy} onClick={() => void act(primary.type)}>
+            {primary.label}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

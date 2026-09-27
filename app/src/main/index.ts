@@ -3,11 +3,12 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
 import { CH, type AssignRequest, type QueueEdit, type SetupTool } from '@shared/ipc'
-import { contextAlerts, diffEvents, newlyNeedsInput } from '@shared/notify'
+import { diffEvents, newlyNeedsInput } from '@shared/notify'
+import { inboxNotice, type InboxItem } from '@shared/inbox'
 import { isSafeBgId } from '@shared/paneCommand'
 import { isClaudeCommand, tasklistImage } from '@shared/procs'
-import { MASTER_NAME } from '@shared/derive'
-import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, SetupCheck } from '@shared/types'
+import { MASTER_NAME, sessionForProposal } from '@shared/derive'
+import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, Session, SetupCheck } from '@shared/types'
 import { getConfig } from '@shared/appConfig'
 import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
 import { startAssign } from './assign'
@@ -41,8 +42,6 @@ let latest: AppState | null = null
 let focused: string | null = null
 let pathEnv = process.env.PATH ?? ''
 let claudeBin = 'claude'
-const contextWarned = new Set<string>()
-let contextPrimed = false
 
 const paths = resolvePaths(app.getAppPath(), process.resourcesPath, app.isPackaged)
 const env = () => cleanEnv(process.env, pathEnv)
@@ -76,12 +75,8 @@ const sources = new Sources(paths, run, cli, (state) => {
   latest = state
   win?.webContents.send(CH.state, state)
   notify(diffEvents(prev, state, focused))
-  // The first stats scan only records who is already high; warnings are for crossings after that.
-  const ctx = contextAlerts(contextWarned, state)
-  if (contextPrimed) notify(ctx)
-  else if (Object.keys(state.allStats).length) contextPrimed = true
   // Dock badge: the Needs-you count.
-  if (state.settings.dockBadge) app.setBadgeCount(state.needsYou.length)
+  if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length)
   else if (prev?.settings.dockBadge) app.setBadgeCount(0)
   // Auto-open: a session that just blocked on a prompt gets its tab (not focused) and a dock bounce.
   const blocked = newlyNeedsInput(prev, state)
@@ -94,6 +89,90 @@ const sources = new Sources(paths, run, cli, (state) => {
     app.exit(0)
   }
 }, () => claudeBin, github, gh, () => readGhCacheStatus())
+
+// Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
+sources.inbox.on('event', (e) => {
+  if (e.type !== 'added') return
+  const n = inboxNotice(e.entry)
+  if (n) notify([n])
+})
+
+/** Answer the menu on a session's screen, if it is still the question the user saw. */
+async function answerMenuFor(key: string, question: unknown, answer: unknown): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.key === key)
+  if (!s) return { ok: false, message: 'session not found' }
+  // Read the screen again: answer only the question the user saw.
+  const menu = await sources.readMenu(s)
+  const now = menu?.question?.question ?? null
+  if (!menu || now !== (typeof question === 'string' ? question : null)) {
+    void sources.pollMenus()
+    return { ok: false, message: `${s.name}: the question on its screen changed; look again` }
+  }
+  let a: MenuAnswer | 'submit' = 'submit'
+  if (answer !== 'submit') {
+    const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
+    a = { picks: Array.isArray(o.picks) ? o.picks.filter((p): p is number => typeof p === 'number') : [], text: typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined }
+  }
+  const steps = answerKeys(menu, a)
+  if (typeof steps === 'string') return { ok: false, message: steps }
+  const r = await sender.answerMenu(s, steps)
+  void sources.pollMenus()
+  return r
+}
+
+/**
+ * Carry out an inbox item's action: the one path the Needs-you cards, notifications and (later) a
+ * phone all use. The inbox has checked the item is still open; this checks the session is still in
+ * a state where the action makes sense, then uses the same code as the rest of the app.
+ */
+async function runInboxAction(item: InboxItem, type: string, payload: Record<string, unknown>): Promise<CliResult> {
+  const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
+  const d = item.detail
+  const owner = (): Session | undefined => {
+    if (item.sessionKey) return latest?.sessions.find((x) => x.key === item.sessionKey)
+    if (d.type === 'proposal') return latest ? (sessionForProposal(d.proposal, latest.sessions) ?? undefined) : undefined
+    return undefined
+  }
+  const text = typeof payload.text === 'string' ? payload.text.slice(0, 20_000) : ''
+  switch (type) {
+    case 'reply':
+    case 'option': {
+      const s = owner()
+      if (!s) return { ok: false, message: 'no live session to reply to' }
+      const msg = type === 'option' && typeof payload.key === 'string' ? `${payload.key}: ${text}` : text
+      if (!msg.trim()) return { ok: false, message: 'nothing to send' }
+      return sender.send(s, msg, !!masterUp)
+    }
+    case 'menu':
+      if (!item.sessionKey) return { ok: false, message: 'no session' }
+      return answerMenuFor(item.sessionKey, payload.question, payload.answer)
+    case 'continue':
+    case 'compact': {
+      const s = owner()
+      if (!s) return { ok: false, message: 'no live session' }
+      if (type === 'continue' && s.state !== 'idle') return { ok: false, message: `${s.name} is ${s.state}, not idle` }
+      return sender.send(s, type === 'continue' ? 'continue' : '/compact', !!masterUp)
+    }
+    case 'approve':
+    case 'reject':
+      if (d.type !== 'proposal') return { ok: false, message: 'not a proposal' }
+      return type === 'approve' ? cli.approve([d.proposal.id]) : cli.reject([d.proposal.id])
+    case 'send': {
+      if (d.type !== 'offer') return { ok: false, message: 'not a PR offer' }
+      // master's own proposal: approving it lets master send it (and track it).
+      if (d.offer.proposal) {
+        const r = await cli.approve([d.offer.proposal.id])
+        return r.ok ? { ok: true, message: 'approved; master sends it' } : r
+      }
+      const s = owner()
+      if (!s) return { ok: false, message: 'no session owns this PR; start one' }
+      const r = await sender.send(s, d.offer.message, !!masterUp)
+      return r.ok ? { ok: true, message: `sent to ${s.name}` } : r
+    }
+    default:
+      return { ok: false, message: `${type} is done in the window` }
+  }
+}
 
 function statuslineOpts() {
   return { settingsPath: paths.claudeSettings, home: paths.home, scriptPath: paths.installedTee, python: paths.python }
@@ -253,25 +332,12 @@ function registerIpc(): void {
     const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
     return sender.send(s, text, !!masterUp)
   })
-  ipcMain.handle(CH.answerMenu, async (_e, key: string, question: string | null, answer: unknown) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { ok: false, message: 'session not found' }
-    // Read the screen again: answer only the question the user saw.
-    const menu = await sources.readMenu(s)
-    const now = menu?.question?.question ?? null
-    if (!menu || now !== (typeof question === 'string' ? question : null)) {
-      void sources.pollMenus()
-      return { ok: false, message: `${s.name}: the question on its screen changed; look again` }
-    }
-    let a: MenuAnswer | 'submit' = 'submit'
-    if (answer !== 'submit') {
-      const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
-      a = { picks: Array.isArray(o.picks) ? o.picks.filter((p): p is number => typeof p === 'number') : [], text: typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined }
-    }
-    const steps = answerKeys(menu, a)
-    if (typeof steps === 'string') return { ok: false, message: steps }
-    const r = await sender.answerMenu(s, steps)
-    void sources.pollMenus()
+  ipcMain.handle(CH.answerMenu, (_e, key: string, question: string | null, answer: unknown) => answerMenuFor(String(key), question, answer))
+  ipcMain.handle(CH.inboxAct, async (_e, id: unknown, type: unknown, payload: unknown) => {
+    if (typeof id !== 'string' || typeof type !== 'string') return { ok: false, message: 'bad inbox action' }
+    const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    const r = await sources.inbox.act(id, type, p, runInboxAction)
+    sources.changed()
     return r
   })
   ipcMain.handle(CH.queueList, (_e, sessionId: string) => readQueue(String(sessionId)))

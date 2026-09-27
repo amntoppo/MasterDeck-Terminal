@@ -122,7 +122,31 @@ Ready to submit your answers?
 ❯ 1. Submit answers
   2. Cancel`
 
+const SINGLE_SCREEN = `❯ Use the AskUserQuestion tool to ask me one question
+──────────────────────────────────────────────
+ ☐ Colour
+
+What's your favourite colour?
+
+❯ 1. Red
+     Warm, energetic, bold
+  2. Green
+  3. Blue
+  4. Type something.
+──────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel`
+
 describe('parseMenuScreen', () => {
+  it('reads a one-question menu (no tab row, just its header)', () => {
+    const m = parseMenuScreen(SINGLE_SCREEN)!
+    expect(m.tabs).toEqual([{ label: 'Colour', answered: false }])
+    expect(m.question).toMatchObject({ question: "What's your favourite colour?", header: 'Colour', multiSelect: false })
+    expect(m.question!.options.map((o) => o.label)).toEqual(['Red', 'Green', 'Blue'])
+    expect(menuOnScreen(SINGLE_SCREEN)).toBe(true)
+  })
+
   it('reads the question on screen, its options and descriptions', () => {
     expect(parseMenuScreen(COLOUR)).toEqual({
       tabs: [
@@ -205,6 +229,8 @@ describe('menuOnScreen', () => {
   it('sees the menu footer through escape codes', () => {
     expect(menuOnScreen('← \x1b[48;2;1;1;1m ☐ Colour \x1b[14G☐\x1b[16GPets\x1b[22G✔\x1b[24GSubmit\x1b[32G→')).toBe(true)
     expect(menuOnScreen('❯ ready')).toBe(false)
+    // A live screen places words with cursor moves: no spaces between them.
+    expect(menuOnScreen('\x1b[2G☐\x1b[4GColour\x1b[9;1HEnter\x1b[7Gto\x1b[10Gselect\x1b[20GEsc\x1b[24Gto\x1b[27Gcancel')).toBe(true)
   })
 })
 

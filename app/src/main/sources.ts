@@ -6,7 +6,6 @@ import { applyFreshness, normalizeAgents } from '@shared/agents'
 import {
   attachIssues,
   deriveMaster,
-  deriveNeedsYou,
   proposalTicket,
   MASTER_NAME,
   sessionForProposal,
@@ -15,6 +14,8 @@ import {
   type ParsedSnapshot,
 } from '@shared/derive'
 import { parseBranchStatus, parseNumstat, parsePrView, PR_VIEW_ARGS } from '@shared/git'
+import { collectItems } from '@shared/inbox'
+import { Inbox } from './inbox'
 import { isStatusKey, MANUAL_STATUSES, prStage, STATUS_TEXT, type PrStage, type StatusKey } from '@shared/review'
 import { sameTicket, storedRepo, ticketKey, ticketLabel, type Ticket } from '@shared/ticket'
 import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
@@ -92,6 +93,10 @@ export class Sources {
   private rawSessions: Session[] = []
   private snapshot: ParsedSnapshot = EMPTY_SNAPSHOT
   private proposals: Proposal[] = []
+  /** Needs you: every item waiting on the user, what they did about it, and its history. */
+  readonly inbox: Inbox
+  /** The first builds after starting announce nothing: those items may be old. */
+  private inboxPrimed = false
   /** What a session is asking, re-read only when its transcript changed. */
   private askCache = new Map<string, { path: string; mtime: number; ask: SessionAsk }>()
   /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
@@ -182,6 +187,7 @@ export class Sources {
     private readGhCache: () => GhCacheStatus | null = () => null,
   ) {
     this.transcripts = new TranscriptIndex(paths.projectsDir)
+    this.inbox = new Inbox(join(paths.home, 'inbox.json'), join(paths.home, 'inbox-events.jsonl'))
     this.tokenIndex = new TokenIndex(this.transcripts, join(paths.home, 'tokens.json'))
   }
 
@@ -356,6 +362,11 @@ export class Sources {
     writeJsonAtomic(this.manualStatusPath, this.manualStatus)
     this.emit()
     return { ok: true, message: status === null ? 'automatic' : STATUS_TEXT[status as StatusKey] }
+  }
+
+  /** Send the state again now (after an inbox action). */
+  changed(): void {
+    this.emit()
   }
 
   /** Read `claude agents` now (after stopping a session, so it leaves the list at once). */
@@ -1139,6 +1150,23 @@ export class Sources {
     const now = Date.now()
     const sessions = applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now)
     const { asks, answered } = this.collectAsks(sessions)
+    const menus = Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!]))
+    const sessionPrs = Object.fromEntries(sessions.map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)]).filter(([, v]) => v.length))
+    const items = collectItems({
+      sessions,
+      proposals: this.proposals.filter((p) => !answered.has(p.id)),
+      menus,
+      lastActivity: this.lastWrite,
+      settings: this.settings,
+      allStats: this.allStats,
+      costBook: this.costBook,
+      prs: this.snapshot.prs.filter((p) => p.authorIsMe),
+      sessionPrs,
+      now,
+    })
+    this.inbox.update(items, !this.inboxPrimed)
+    // Primed once sessions are loaded and the ledger was read (there may be none: no master-agent).
+    if (this.health.agents === 'ok' && this.health.ledger !== undefined && this.health.ledger !== 'pending') this.inboxPrimed = true
     this.lastSessions = sessions
     return {
       sessions,
@@ -1146,12 +1174,12 @@ export class Sources {
       prs: this.snapshot.prs,
       proposals: this.proposals,
       master: deriveMaster(sessions),
-      needsYou: deriveNeedsYou(this.proposals.filter((p) => !answered.has(p.id)), sessions),
+      inbox: this.inbox.view(),
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },
       prLive: { ...this.prLive },
-      sessionPrs: Object.fromEntries(sessions.map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)]).filter(([, v]) => v.length)),
+      sessionPrs,
       sources: { ...this.health },
       errors: Object.values(this.errors),
       lastSnapshotAt: this.snapshot.takenAt,
@@ -1182,7 +1210,7 @@ export class Sources {
           .map((s) => [s.key, prStage(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes, this.instructedAt(s))] as const)
           .filter((e): e is readonly [string, PrStage] => e[1] !== null),
       ),
-      menus: Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!])),
+      menus,
       restoring: this.restoring,
       config: this.config,
       skills: this.skills,
