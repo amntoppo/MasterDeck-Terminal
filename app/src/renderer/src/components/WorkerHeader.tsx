@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { StatusDialog } from './StatusDialog'
+import { WorktreesDialog } from './WorktreesDialog'
 import { sameTicket, ticketLabel, ticketUrl } from '@shared/ticket'
 import { sessionTicket } from '@shared/derive'
-import { formatAgo, formatCost, formatDiff, formatPct, shortPath } from '@shared/format'
+import { formatAgo, formatDiff, formatPct } from '@shared/format'
 import { contextLevel } from '@shared/stats'
 import { formatTokens, tokenSum, tokenTitle } from '@shared/tokens'
 import { attentionFor, sessionStatus } from '@shared/review'
@@ -32,6 +33,7 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const since = useStateSince(s)
   const status = sessionStatus(s, state.prStage[s.key], attentionFor(s, state.proposals), state.manualStatus[s.key])
   const [statusOpen, setStatusOpen] = useState(false)
+  const [wtOpen, setWtOpen] = useState(false)
   const tokens = state.tokens[s.sessionId] ?? null
 
   useEffect(() => {
@@ -64,10 +66,6 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const level = contextLevel(stats?.contextPct ?? null)
 
   const worktrees = state.sessionWorktrees[s.key] ?? []
-  const openInEditor = async (path: string) => {
-    const r = await deck().openEditor(path)
-    flash(r.ok ? r.message : `Editor: ${r.message}`)
-  }
 
   const copy = (text: string, what: string) => {
     deck().copy(text)
@@ -99,29 +97,11 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
             )}
           </span>
         )}
-        {/* Where it works: each worktree it made (any repo), else its folder. A click opens it in the IDE. */}
-        {worktrees.length > 0
-          ? worktrees.map((w) => (
-              <span
-                key={w.path}
-                className="chip path btnlike mono"
-                onClick={(e) => (e.altKey ? copy(w.path, 'path') : void openInEditor(w.path))}
-                title={`${w.path}${w.branch ? `\n⎇ ${w.branch}` : ''}\nClick to open in editor · ⌥-click to copy the path`}
-              >
-                <span>
-                  📁 {w.repo} / {w.path.split(/[\\/]/).pop()}
-                </span>
-              </span>
-            ))
-          : dir && (
-              <span
-                className="chip path btnlike mono"
-                onClick={(e) => (e.altKey ? copy(dir, 'path') : void openInEditor(dir))}
-                title={`${dir}\nClick to open in editor · ⌥-click to copy the path`}
-              >
-                <span>📁 {shortPath(dir, deck().home)}</span>
-              </span>
-            )}
+        {/* The worktrees it made (any repo), in a popup, each with Open in editor. */}
+        <span className="chip btnlike" onClick={() => setWtOpen(true)} title={worktrees.length ? worktrees.map((w) => w.path).join('\n') : dir}>
+          Worktree
+        </span>
+        {wtOpen && <WorktreesDialog session={s} worktrees={worktrees} dir={dir} onClose={() => setWtOpen(false)} />}
         <span className={`chip btnlike ${queueOpen ? 'on' : ''}`} onClick={onToggleQueue} title={queueOpen ? 'Hide the queue' : "Show this session's /queue: prompts it runs after each response"}>
           Queue Prompts
         </span>
@@ -174,9 +154,6 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
           {since !== null && !status.manual && (status.key === 'working' || status.key === 'idle' || status.key === 'needs-input') && <span className="muted"> · {formatAgo(now - since)}</span>}
         </span>
         {statusOpen && <StatusDialog session={s} state={state} onClose={() => setStatusOpen(false)} onStopped={onDetach} />}
-        <span className="chip" title={stats?.source === 'transcript' ? 'Install the status line hook for exact cost' : 'Session cost so far'}>
-          {formatCost(stats?.costUsd ?? null)}
-        </span>
         <span className="chip" title={tokens ? `${tokenTitle(tokens)}\n(this session and its subagents, from the transcript)` : 'Counting tokens…'}>
           Tokens used <b>{formatTokens(tokens ? tokenSum(tokens) : null)}</b>
         </span>
@@ -200,16 +177,7 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
           {formatPct(stats?.contextPct ?? null)}
         </span>
         {(stats?.model ?? tail?.model) && <span className="chip muted">{stats?.model ?? tail?.model}</span>}
-        {(stats?.permissionMode ?? tail?.permissionMode) && (
-          <span className="chip muted">mode: {stats?.permissionMode ?? tail?.permissionMode}</span>
-        )}
         <span className="chip muted">{git ? formatDiff(git) : 'diff —'}</span>
-        {tail?.lastTool && (
-          <span className="chip muted" title="Last tool the session used">
-            last tool: {tail.lastTool}
-            {tail.lastToolAt && ` · ${formatAgo(now - tail.lastToolAt)}`}
-          </span>
-        )}
         {s.kind === 'interactive' && <span className="chip muted">pid {s.pid} · outside the app</span>}
       </div>
     </div>

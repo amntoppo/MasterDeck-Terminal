@@ -112,12 +112,11 @@ checkout whose branch was once linked to a ticket does not link it.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice.
-- **Worktrees (in a session's header):** one 📁 chip per git worktree the session created or
-  worked in, in any repo (`repo / worktree`; hover for the path and branch), read from its
-  transcript (EnterWorktree, `git worktree add`, where it ran). A session without one shows its
-  folder. Click a chip to open it in your IDE: on macOS the app code files open with (for example
-  Cursor, VS Code or Antigravity), else the first editor found, else `cursor` / `code`. ⌥-click
-  copies the path.
+- **Worktree (in a session's header):** opens a popup with every git worktree the session created
+  or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
+  transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS
+  the app code files open with (for example Cursor, VS Code or Antigravity), else the first editor
+  found, else `cursor` / `code`. A session without a worktree shows its folder.
 - **Summary (in a session's header):** shows or hides the Summary panel under master: what the focused
   session did, in five parts (Goal, Done, Decisions, Open, State). **Summarize** / **Update** reads its
   transcript (your messages, its replies, files it edited, commands that change things), its PRs and the

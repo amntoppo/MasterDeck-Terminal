@@ -736,3 +736,13 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .ask.perm .perm-opt.always { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .ask.perm .perm-opt.deny { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
 .ask.perm .actions { margin-top: 6px; }
+/* Worktrees popup (session header → Worktree) */
+.wt-dialog { width: min(640px, 92vw); }
+.wt-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.wt-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.wt-info { flex: 1; min-width: 0; }
+.wt-name { font-size: 13px; }
+.wt-branch { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.wt-path { font-size: 11px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: copy; }
+.wt-path:hover { color: var(--text); }
+.wt-dialog .meta.ok { color: var(--green); }
