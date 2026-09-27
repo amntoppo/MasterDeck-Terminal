@@ -36,11 +36,21 @@ force-push and never use `--dangerously-skip-permissions`.
 
 ## Install
 
-Download the latest build from [Releases](https://github.com/amntoppo/MasterDeck-Terminal/releases):
+**macOS** (Apple silicon and Intel): run this in Terminal.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/amntoppo/MasterDeck-Terminal/main/install.sh | bash
+```
+
+It downloads the right build from the latest [release](https://github.com/amntoppo/MasterDeck-Terminal/releases),
+installs it in `/Applications` and opens it. Run it again to update. The app is not signed by Apple;
+a DMG downloaded in a browser is blocked until you allow it in **System Settings → Privacy & Security
+→ Open Anyway**, but a download by `curl` is not, so this needs no such step. See [install.sh](install.sh).
+
+Or download a build from [Releases](https://github.com/amntoppo/MasterDeck-Terminal/releases):
 
 - **macOS:** `MasterDeck-<version>-arm64.dmg` for Apple silicon, or `MasterDeck-<version>.dmg` for
-  Intel. The app is not signed. On first launch, right-click the app and choose **Open**, or run
-  `xattr -dr com.apple.quarantine /Applications/MasterDeck.app`.
+  Intel. macOS blocks it the first time: **System Settings → Privacy & Security → Open Anyway**.
 - **Windows:** `MasterDeck Setup <version>.exe`. It is not signed, so SmartScreen asks you to
   confirm: **More info**, then **Run anyway**.
 
