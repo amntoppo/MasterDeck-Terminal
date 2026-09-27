@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CliResult, HookStatus } from '@shared/types'
+import { runsOrExit, STEP_MARK, stepCommand, TRIGGERS, type CustomStep } from '@shared/workflow'
 
 /**
  * Claude Code hooks the bundled skills rely on, installed into ~/.claude/settings.json:
@@ -47,9 +48,9 @@ const PROOF_NOTE =
   'the user the issue comment link, and ask before committing the test files it added.'
 const PROOF_PRE =
   // Only a command that runs gh pr create (at the start of a line, or after ; & | or a parenthesis),
-  // not one that merely mentions it, such as text written to a file.
+  // not one that merely mentions it: heredoc bodies (text written to a file) are left out.
   `input=$(cat); cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""'); ` +
-  `printf '%s' "$cmd" | grep -Eq '(^|[;&|(])[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create' || exit 0; case "$cmd" in *'gh pr create'*) ` +
+  `${runsOrExit('(^|[;&|(])[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create')}; case "$cmd" in *'gh pr create'*) ` +
   `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"'); head=$(git rev-parse HEAD 2>/dev/null || echo none); ` +
   `m="\${TMPDIR:-/tmp}/babysit-proof-$sid-$head"; [ -f "$m" ] && exit 0; touch "$m"; ` +
   `jq -n --arg c ${JSON.stringify(PROOF_NOTE)} '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}' ;; esac`
@@ -140,6 +141,27 @@ export function installHooks(settingsPath: string, backupDir: string, which: Hoo
     }
     write(settingsPath, backupDir, s)
     return { ok: true, message: 'hooks saved' }
+  } catch (e) {
+    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
+  }
+}
+
+/**
+ * The workflow's custom steps as hooks: every hook MasterDeck made for a step is replaced by one per
+ * step now (each marked with its id), and the rest of settings.json is kept.
+ */
+export function installWorkflowSteps(settingsPath: string, backupDir: string, steps: CustomStep[]): CliResult {
+  if (process.platform === 'win32') return { ok: false, message: 'these hooks are bash commands; on Windows add them by hand under Git Bash' }
+  try {
+    const s = read(settingsPath)
+    for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK)
+    for (const step of steps) {
+      const t = TRIGGERS.find((x) => x.id === step.trigger)
+      if (!t) continue
+      add(s, t.event, t.event === 'SessionStart' ? undefined : 'Bash', stepCommand(step), `${STEP_MARK}${step.id}`, 10)
+    }
+    write(settingsPath, backupDir, s)
+    return { ok: true, message: `${steps.length} workflow step${steps.length === 1 ? '' : 's'} saved` }
   } catch (e) {
     return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
   }

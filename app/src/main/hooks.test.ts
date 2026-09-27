@@ -39,6 +39,7 @@ describe.skipIf(process.platform === 'win32')('hooks', () => {
     expect(run('git status')).toBe('')
     // Mentioned, not run: text written to a file, or a sentence.
     expect(run("cat > notes.md <<'EOF'\nThen `gh pr create` opens the PR.\nEOF")).toBe('')
+    expect(run("cat > t.ts <<'EOF'\nconst c = 'cd x && gh pr create --fill'\nEOF")).toBe('')
     expect(run('echo "run gh pr create later"')).toBe('')
     const out = JSON.parse(run('cd sub && gh pr create --fill'))
     expect(out.hookSpecificOutput.hookEventName).toBe('PreToolUse')

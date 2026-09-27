@@ -10,7 +10,7 @@ import type { PaletteAction } from './CommandPalette'
 import { OfferRow, useDismissed } from './PrsView'
 import { prOffers } from '@shared/offers'
 
-export type View = 'terminals' | 'board' | 'prs' | 'costs' | 'janitor' | 'history'
+export type View = 'terminals' | 'board' | 'prs' | 'costs' | 'janitor' | 'history' | 'workflow'
 
 interface Props {
   state: AppState
@@ -133,10 +133,11 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
               ['view:janitor', '🧹', 'Janitor', 'Clean up worktrees and parked sessions'],
               ['view:history', '🔎', 'History', 'Search every past session and resume one'],
               ['skills', '🧩', 'Skills', 'Add or remove skills, and choose which run automatically'],
+              ['view:workflow', '🔀', 'Workflow', 'Issue to merged PR: what runs at each point, and your own steps'],
               ['settings', '⚙', 'Settings', 'Nudges, budget, context warning, dock, after a restart'],
             ] as [PaletteAction | 'palette', string, string, string][]
           ).map(([a, icon, label, title]) => (
-            <button key={a} className={`tool ${a === 'palette' || a === 'settings' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
+            <button key={a} className={`tool ${a === 'palette' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
               {a === 'palette' ? (
                 <>
                   {label} <kbd>{icon}</kbd>

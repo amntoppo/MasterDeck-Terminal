@@ -72,6 +72,14 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **★ Master (top right, every view):** shows or hides the master pane. Shown, it sits beside the
   board, PRs and the other views too; hidden, they use the full width. Hiding it doesn't stop or
   detach master.
+- **Workflow (🔀 in the sidebar):** the path from an issue to a merged PR, stage by stage (issue, Claude
+  session, babysit-ticket, your instructions, work, before the PR, PR hooks, merged), with what MasterDeck
+  and its skills do at each and every hook Claude Code runs there, read live from `~/.claude/settings.json`,
+  your workspace repos' `.claude/settings*.json` and your enabled plugins. **+ Add a skill** attaches any
+  skill in `~/.claude/skills` to a stage (session starts, linked to its issue, after a push, before the
+  PR, PR created, PR merged): a hook in `~/.claude/settings.json` tells the session to run it at that
+  point, in a background subagent or in the session, with your extra instructions. Steps are kept in
+  `~/.claude/masterdeck/workflow.json`; Remove takes the hook out again.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
   session on it, newest first, each with Resume. The links come from babysit-ticket

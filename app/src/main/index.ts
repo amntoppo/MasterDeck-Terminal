@@ -24,7 +24,9 @@ import { PtyManager } from './ptys'
 import { makeRunner } from './run'
 import { Sources } from './sources'
 import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } from './skills'
-import { hookStatus, installHooks } from './hooks'
+import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
+import { parseSteps } from '@shared/workflow'
+import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
 
 const SMOKE = process.env.MASTERDECK_SMOKE === '1'
@@ -162,6 +164,9 @@ async function resumeBg(id: string, name: string, cwd: string | null): Promise<C
   const r = await run(claudeBin, ['--bg', '--resume', id, ...named], { cwd: cwd && existsSync(cwd) ? cwd : homedir(), timeoutMs: 60_000 })
   return r.code === 0 ? { ok: true, message: name } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
 }
+
+/** The workflow's custom steps (their hooks live in ~/.claude/settings.json). */
+const workflowFile = () => join(paths.home, 'workflow.json')
 
 /** Which skills the user removed in the Skills popup. */
 const skillsFile = () => join(paths.home, 'skills.json')
@@ -332,6 +337,17 @@ function registerIpc(): void {
     // Added back: no longer one the user removed.
     if (r.ok) writeRemoved(skillsFile(), readRemoved(skillsFile()).filter((x) => x !== name))
     refreshSkills()
+    return r
+  })
+  ipcMain.handle(CH.workflowGet, () => ({
+    hooks: collectHooks(dirname(paths.claudeSettings), [paths.masterWorkspace, ...ops.repos()]),
+    skills: listSkills(paths.skillsDir),
+    steps: readSteps(workflowFile()),
+  }))
+  ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
+    const steps = parseSteps(raw)
+    const r = installWorkflowSteps(paths.claudeSettings, paths.home, steps)
+    if (r.ok) writeSteps(workflowFile(), steps)
     return r
   })
   ipcMain.handle(CH.skillRemove, (_e, name: unknown) => {
