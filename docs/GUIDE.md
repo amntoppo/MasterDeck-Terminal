@@ -167,6 +167,22 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **Auto-open:** when a background session blocks on a prompt, its tab opens (attached, not focused)
   and the dock bounces. The dock badge is the Needs-you count.
 
+## Tasks
+
+The **Tasks** tab (beside Terminals, Board View and PRs) shows every session as a task, so you can
+see at a glance where the work stands:
+
+- **Flow strip** at the top: one column per step (Started, Coding, PR open, Review, Merged), with
+  the number of tasks on it and a pill for each. Click a pill to jump to its task.
+- **Lanes:** tasks grouped by what they need: Needs you (a question, a prompt, a blocker, failing
+  CI, changes requested), Working, In review, Idle, Merged and Parked (folded by default). Click a
+  lane's title to fold or unfold it.
+- **Each task** shows its ticket and title, session and branch, a five-step progress bar coloured
+  by how the current step is going, its status, what it is doing right now (the question it asks,
+  the tool it runs, or why it waits), when it was last active, its PRs with CI state (click one for
+  the PR card), lines changed, cost and context used. **Open** (or a double-click) opens it in
+  Terminals.
+
 ## Cost and context
 
 - **Tokens:** each session's header shows **Tokens used** (input, output and prompt-cache, with the
