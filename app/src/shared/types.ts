@@ -30,6 +30,10 @@ export interface Session {
   issue: number | null
   /** The issue's repo (owner/name); null: the primary issue repo. */
   issueRepo?: string | null
+  /** Idle but waiting on background work it started (a Monitor, a background command or agent, a wakeup). */
+  waitingOn?: string | null
+  /** Idle and its last message asks the user something. */
+  asking?: string | null
 }
 
 export interface Issue {
@@ -320,6 +324,7 @@ export type BadgeKind =
   | 'ready'
   | 'in-review'
   | 'done'
+  | 'waiting'
   | 'idle'
   | 'stopped'
   | 'none'

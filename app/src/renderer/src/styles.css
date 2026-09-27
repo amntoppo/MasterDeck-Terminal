@@ -713,3 +713,12 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
   .tv-scroll { padding: 12px 12px 30px; }
   .tv-stage { padding: 8px; }
 }
+/* Waiting: idle, but on a Monitor or background task it started */
+.dot.st-waiting { background: #4fd1c5; box-shadow: 0 0 0 3px rgba(79, 209, 197, .18); }
+.sub.st-waiting, .chip.st-waiting { color: #4fd1c5; }
+.badge.waiting { background: rgba(79, 209, 197, .14); color: #4fd1c5; }
+.tv-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.tv-act { --tone: var(--grey); display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; color: var(--tone); border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent); }
+.tv-act.act-working { --tone: var(--green); } .tv-act.act-needs-input, .tv-act.act-question { --tone: var(--red); }
+.tv-act.act-waiting { --tone: #4fd1c5; } .tv-act.act-idle { --tone: var(--amber); }
+.tv-count.lane-idle { color: var(--amber); }

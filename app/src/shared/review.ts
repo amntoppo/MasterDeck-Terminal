@@ -71,6 +71,7 @@ export type StatusKey =
   | 'ci-failing'
   | 'ready'
   | 'in-review'
+  | 'waiting'
   | 'idle'
   | 'suspended'
   | 'done'
@@ -94,6 +95,7 @@ export const STATUS_TEXT: Record<StatusKey, string> = {
   'ci-failing': 'CI Failing',
   ready: 'Ready for Review',
   'in-review': 'In Review',
+  waiting: 'Waiting',
   idle: 'Idle',
   suspended: 'Suspended',
   done: 'Ended',
@@ -112,7 +114,7 @@ export function attentionFor(s: Session, proposals: Proposal[]): Proposal | null
  * stands, then idle. Suspended and ended sessions keep those.
  */
 export function sessionStatus(
-  s: Pick<Session, 'state'>,
+  s: Pick<Session, 'state' | 'waitingOn' | 'asking'>,
   stage: PrStage | null | undefined,
   attention: Proposal | null,
   manual?: StatusKey | null,
@@ -121,10 +123,21 @@ export function sessionStatus(
   if (s.state === 'needs-input') return out('needs-input', 'waiting on a prompt or permission')
   // Set by hand (the status popup): it wins until set back to automatic; a prompt waiting still shows.
   if (manual && manual in STATUS_TEXT && s.state !== 'done') return { ...out(manual, 'set by you'), manual: true }
-  if (s.state === 'working') return out('working')
+  // Busy only because of background work it started (turn over, a Monitor live): see waitingOn below.
+  if (s.state === 'working' && !s.waitingOn) return out('working')
   if (s.state === 'suspended' || s.state === 'done') return out(s.state)
   if (attention?.status === 'question') return out('question', attention.note?.trim() || 'it asked master a question')
   if (attention?.status === 'blocked') return out('blocked', attention.note?.trim() || 'it reported a blocker')
+  // Idle (or busy only on background work), from here on. Asking the user something in its last message: a question for you.
+  if (s.asking) return out('question', oneLine(s.asking))
   if (stage) return out(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)
-  return out('idle')
+  // Waiting on a Monitor, a background command or agent, or a wakeup: not on you.
+  if (s.waitingOn) return out('waiting', s.waitingOn)
+  return out('idle', 'waiting for your next instruction')
+}
+
+/** The end of a message, on one line: its question, usually. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > 200 ? `…${flat.slice(-199)}` : flat
 }

@@ -123,11 +123,13 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   Open folder in editor, Move to top, and Stop session…. The copy commands are in the header's ⋯ menu.
 - **Session status:** the sidebar and each session's header show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
-  master), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
+  master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
   instructions after its last PR merged; a new PR then shows its own status, and once that is merged
   too the session is Merged again, however many PRs it takes), **Approved**, **Changes Requested**,
   **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
-  otherwise **Idle**. Ready for Review: the automated review check (e.g. `claude-review`) passed or
+  then **Waiting** (its turn is over but a Monitor, background command or agent, or scheduled
+  wakeup it started is still running; hover for which); otherwise **Idle**: nothing running, no
+  question, waiting for your next instruction. Ready for Review: the automated review check (e.g. `claude-review`) passed or
   failed, or nothing new was said on the PR for 20 minutes (Settings), and the session is not
   working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a
   status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
@@ -180,7 +182,9 @@ see at a glance where the work stands:
 - **Each task** shows its ticket and title, session and branch, a five-step progress bar coloured
   by how the current step is going, its status, what it is doing right now (the question it asks,
   the tool it runs, or why it waits), when it was last active, its PRs with CI state (click one for
-  the PR card), lines changed, cost and context used. **Open** (or a double-click) opens it in
+  the PR card), lines changed, cost and context used. Next to the status, a second chip says what
+  the session itself is doing when that differs: Working, Waiting, Asked you, or **Idle** (waiting
+  for your next instruction); the header counts the idle ones. **Open** (or a double-click) opens it in
   Terminals.
 
 ## Cost and context

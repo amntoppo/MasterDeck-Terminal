@@ -53,6 +53,7 @@ import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
 import { GitHub } from './github'
 import { mtime, readHead, readNewLines, readTail, TranscriptIndex, type FollowState } from './files'
+import { asksQuestion, describePending, openTasks, stillPending, turnEnded, type PendingTask } from '@shared/activity'
 import type { MasterCli } from './masterCli'
 import type { Paths } from './paths'
 import type { Runner } from './run'
@@ -99,6 +100,7 @@ export class Sources {
   private inboxPrimed = false
   /** What a session is asking, re-read only when its transcript changed. */
   private askCache = new Map<string, { path: string; mtime: number; ask: SessionAsk }>()
+  private taskCache = new Map<string, { path: string; mtime: number; tasks: PendingTask[]; ended: boolean }>()
   /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
   private menus = new Map<string, ScreenMenu>()
   private menusRunning = false
@@ -1098,6 +1100,41 @@ export class Sources {
     return this.askOf(s.sessionId)?.userAt ?? null
   }
 
+  /** Background work a session started and is still waiting on (the last 256 KB of its transcript). */
+  private tasksOf(sessionId: string): { tasks: PendingTask[]; ended: boolean } {
+    const none = { tasks: [], ended: false }
+    const path = this.transcripts.find(sessionId)
+    const mt = path ? mtime(path) : null
+    if (!path || mt === null) return none
+    const hit = this.taskCache.get(sessionId)
+    if (hit && hit.path === path && hit.mtime === mt) return hit
+    const tail = readTail(path, 256 * 1024)
+    if (!tail) return none
+    const lines = tail.text.split('\n')
+    if (!tail.fromStart) lines.shift()
+    const out = { path, mtime: mt, tasks: openTasks(lines), ended: turnEnded(lines) }
+    this.taskCache.set(sessionId, out)
+    return out
+  }
+
+  /**
+   * Idle sessions: what they still wait on (background work they started) and whether their last
+   * message asks the user something. Only an idle session with neither is waiting on the user's
+   * next instruction.
+   */
+  private withActivity(sessions: Session[], now: number): Session[] {
+    return sessions.map((s) => {
+      if (s.state !== 'idle' && s.state !== 'working') return s
+      const t = this.tasksOf(s.sessionId)
+      // "busy" with its turn over: only its background work keeps it so (a live Monitor).
+      if (s.state === 'working' && !t.ended) return s
+      const pending = stillPending(t.tasks, now)
+      if (s.state === 'working' && !pending.length) return s
+      const asking = asksQuestion(this.askOf(s.sessionId)?.said ?? null)
+      return pending.length || asking ? { ...s, waitingOn: pending.length ? describePending(pending) : null, asking } : s
+    })
+  }
+
   /** What a session's transcript says it is asking (the last 256 KB). */
   private askOf(sessionId: string): SessionAsk | null {
     const path = this.transcripts.find(sessionId)
@@ -1148,7 +1185,7 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now()
-    const sessions = applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now)
+    const sessions = this.withActivity(applyFreshness(attachIssues(this.rawSessions, this.issueOf()), this.lastWrite, now), now)
     const { asks, answered } = this.collectAsks(sessions)
     const menus = Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!]))
     const sessionPrs = Object.fromEntries(sessions.map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)]).filter(([, v]) => v.length))

@@ -109,6 +109,7 @@ const LABEL: Record<Badge['kind'], string> = {
   'ci-failing': STATUS_TEXT['ci-failing'],
   ready: STATUS_TEXT.ready,
   'in-review': STATUS_TEXT['in-review'],
+  waiting: STATUS_TEXT.waiting,
   done: 'Done',
   idle: 'Idle',
   stopped: 'Stopped',
@@ -139,10 +140,12 @@ export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposa
   const assign = mine.find((p) => p.kind === 'ASSIGN' && p.status !== 'rejected')
   // Spawning, or spawned but not yet linked to the issue (babysit-ticket does that while setting up).
   if (assign && (assign.status === 'approved' || (assign.status === 'sent' && !s))) return badge('onboarding')
-  if (s?.state === 'working') return badge('working')
+  if (s?.state === 'working' && !s.waitingOn) return badge('working')
+  if (s?.asking) return badge('question', s.asking.replace(/\s+/g, ' ').slice(-200))
   const stage = s ? stages[s.key] : undefined
   if (stage) return badge(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)
   if (assign?.status === 'done') return badge('done', assign.note)
+  if (s?.waitingOn) return badge('waiting', s.waitingOn)
   if (s) return badge('idle')
   if (past.length) return badge('stopped', `${past[0].name}: stopped, can be resumed`)
   return badge('none')

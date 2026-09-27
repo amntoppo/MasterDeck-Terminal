@@ -37,6 +37,7 @@ const BADGE_ICON: Record<Badge['kind'], string> = {
   ready: '👀',
   'in-review': '🔍',
   done: '✅',
+  waiting: '📡',
   idle: '💤',
   stopped: '⏸',
   none: '○',

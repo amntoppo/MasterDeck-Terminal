@@ -3,7 +3,7 @@ import { issueUrl } from '@shared/appConfig'
 import { MASTER_NAME } from '@shared/derive'
 import { formatAgo, formatCost, formatPct } from '@shared/format'
 import { attentionFor, sessionStatus } from '@shared/review'
-import { LANES, laneOf, STEPS, taskStep, type Lane, type TaskStep } from '@shared/tasks'
+import { activityOf, LANES, laneOf, STEPS, taskStep, type Lane, type TaskStep } from '@shared/tasks'
 import { sameTicket, ticketLabel } from '@shared/ticket'
 import type { AppState, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
@@ -58,7 +58,11 @@ export function TasksView({ state, onOpenSession, onPr }: Props) {
         <h2>Tasks</h2>
         <span className="muted">
           {active.length} active
-          {LANES.filter((l) => l.id !== 'parked').map((l) => {
+          {(() => {
+            const n = active.filter((t) => activityOf(t.s).key === 'idle').length
+            return n ? <span className="tv-count lane-idle"> · {n} idle</span> : null
+          })()}
+          {LANES.filter((l) => l.id !== 'parked' && l.id !== 'idle').map((l) => {
             const n = tasks.filter((t) => t.lane === l.id).length
             return n ? <span key={l.id} className={`tv-count lane-${l.id}`}> · {n} {l.title.toLowerCase()}</span> : null
           })}
@@ -123,6 +127,7 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
   const at = lastAt(state, s)
   const ask = state.asks[s.key]
   const menu = state.menus[s.key]
+  const act = activityOf(s)
 
   // What it is doing right now, in one line.
   let now1: string
@@ -130,6 +135,8 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
   else if (status.key === 'needs-input') now1 = ask?.said?.text ? `Asks: ${ask.said.text}` : 'Waiting on a prompt or a permission'
   else if (status.key === 'question' || status.key === 'blocked') now1 = status.why
   else if (status.key === 'working') now1 = tail?.lastTool ? `Running ${tail.lastTool}` : ''
+  else if (act.key === 'question' && s.asking) now1 = `Asks: ${s.asking.replace(/\s+/g, ' ').slice(-240)}`
+  else if (act.key === 'waiting' && s.waitingOn) now1 = `Waiting on ${s.waitingOn}`
   else if (status.why) now1 = status.why
   else now1 = status.key === 'idle' ? 'Waiting for instructions' : ''
 
@@ -152,10 +159,18 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
         <Stepper step={step} />
       </div>
       <div className="tv-now">
-        <span className={`tv-status tone-${step.tone}`}>
-          {status.key === 'working' && <span className="tv-spin" />}
-          {status.text}
-        </span>
+        <div className="tv-chips">
+          <span className={`tv-status tone-${step.tone}`} title={status.why || undefined}>
+            {status.key === 'working' && <span className="tv-spin" />}
+            {status.text}
+          </span>
+          {act.text !== status.text && (
+            <span className={`tv-act act-${act.key}`} title={act.key === 'idle' ? 'Nothing running and no question: waiting for your next instruction' : act.key === 'waiting' ? s.waitingOn ?? '' : ''}>
+              {act.key === 'working' && <span className="tv-spin" />}
+              {act.text}
+            </span>
+          )}
+        </div>
         {now1 && (
           <div className="tv-now-text" title={now1}>
             {now1}
