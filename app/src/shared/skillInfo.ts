@@ -17,10 +17,6 @@ export const SKILL_INFO: Record<string, SkillInfo> = {
     what: 'Reviews the branch before a PR is opened, then handles review comments and CI until it merges.',
     hook: { key: 'pr', label: 'Self-review before `gh pr create`, then babysit the PR', recommended: true },
   },
-  'babysit-proof': {
-    what: 'Runs the end-to-end tests once with a screenshot of every step, and posts them with a summary on the issue.',
-    hook: { key: 'proof', label: 'Before each PR, run it in a background subagent (the PR does not wait)', recommended: false },
-  },
   'babysit-worktree': { what: 'Moves a session into its own git worktree, so its changes stay apart from your checkout.' },
   'kill-worktree': { what: 'Folds a worktree back into the main checkout, keeping every change.' },
   'worktree-janitor': { what: 'Finds finished worktrees across your repos and cleans up the safe ones.' },

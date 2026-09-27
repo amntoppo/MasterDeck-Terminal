@@ -21,7 +21,6 @@ MasterDeck ships with a set of Claude Code **skills** and installs them for you:
 | `babysit-pr` | Runs a self-review before a PR is opened, then handles review comments and CI until it merges. |
 | `babysit-worktree` / `kill-worktree` | Isolates a session in a git worktree, then folds the work back. |
 | `worktree-janitor` | Cleans up finished worktrees across your repos. |
-| `babysit-proof` | Runs the feature's end-to-end tests once (Playwright for web, Maestro for Expo) with a screenshot of every step, then posts a summary, test results, what changed and the screenshots on the session's GitHub issue. |
 | `queue` | `/queue <prompt>` in any session queues a prompt to run after the current response; `/queue list`, `/queue clear`. **Queue Prompts** in a session's header opens a Queue panel under master that shows and edits it. |
 
 Nothing is sent to a session or started without your yes. The skills never merge, never
@@ -64,9 +63,8 @@ Or build it yourself (see [Develop](#develop)).
 
    Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the skills: add or remove each
    one, and choose which run by themselves through a hook in `~/.claude/settings.json` (a backup is
-   made first): babysit-ticket moves the board, babysit-pr steps in around `gh pr create`, `/queue`
-   works, and babysit-proof (off by default) starts `/babysit-proof` in a background subagent just
-   before a PR is created, so the issue gets the tests' screenshots without holding up the PR.
+   made first): babysit-ticket moves the board, babysit-pr steps in around `gh pr create`, and `/queue`
+   works.
 
    **Skip for now** leaves GitHub unset: sessions work, and the Board and PRs views offer **Connect your
    GitHub**, which opens Setup again.

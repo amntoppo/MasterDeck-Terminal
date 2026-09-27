@@ -128,7 +128,6 @@ export function hookOwner(command: string): string | null {
   if (command.includes('babysit-ticket/scripts/tt.sh')) return 'babysit-ticket'
   if (command.includes('pr-selfreview-')) return 'babysit-pr (self-review gate)'
   if (command.includes('Monitor phase of the babysit-pr')) return 'babysit-pr (watch the PR)'
-  if (command.includes('babysit-proof skill')) return 'babysit-proof'
   if (command.includes('queue-submit.sh')) return 'queue (store /queue prompts)'
   if (command.includes('queue-drain.sh')) return 'queue (run the next prompt)'
   if (command.includes('statusline_tee')) return 'MasterDeck status line (costs)'

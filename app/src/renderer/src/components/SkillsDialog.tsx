@@ -20,7 +20,7 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
   // First run: the recommended hooks start ticked; later, what is installed.
   const [hooks, setHooks] = useState<HookStatus>(() =>
     firstRun
-      ? { ticket: true, pr: true, queue: true, proof: state.hooks.proof }
+      ? { ticket: true, pr: true, queue: true }
       : state.hooks,
   )
   const [busy, setBusy] = useState<string | null>(null)

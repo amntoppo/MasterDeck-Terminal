@@ -201,8 +201,6 @@ export interface HookStatus {
   pr: boolean
   /** The queue skill's hooks: /queue stores a prompt, the next one runs when a response ends. */
   queue: boolean
-  /** babysit-proof: before `gh pr create`, start the proof in a background subagent. */
-  proof: boolean
 }
 
 /** What Setup checks before GitHub can work. */

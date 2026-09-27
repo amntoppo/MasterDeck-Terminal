@@ -172,7 +172,7 @@ const workflowFile = () => join(paths.home, 'workflow.json')
 const skillsFile = () => join(paths.home, 'skills.json')
 
 /** The hook that belongs to a skill (off when the skill is removed). */
-const SKILL_HOOK: Record<string, keyof HookStatus> = { 'babysit-ticket': 'ticket', 'babysit-pr': 'pr', queue: 'queue', 'babysit-proof': 'proof' }
+const SKILL_HOOK: Record<string, keyof HookStatus> = { 'babysit-ticket': 'ticket', 'babysit-pr': 'pr', queue: 'queue' }
 
 function refreshSkills(): void {
   sources.setSkills(syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion(), readRemoved(skillsFile())).skills)
@@ -327,7 +327,7 @@ function registerIpc(): void {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   ipcMain.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue, proof: !!which?.proof })
+    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue })
     sources.setHooks(hookStatus(paths.claudeSettings))
     return r
   })
