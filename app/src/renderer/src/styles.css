@@ -287,6 +287,12 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .badge.idle { background: rgba(245, 184, 61, .14); color: var(--amber); }
 .badge.none { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
 .badge.stopped { background: rgba(160, 130, 255, .12); color: var(--purple); }
+.badge.merged { background: rgba(167, 139, 250, .18); color: var(--purple); }
+.badge.approved { background: rgba(62, 207, 142, .16); color: var(--green); }
+.badge.changes { background: rgba(245, 184, 61, .14); color: var(--amber); }
+.badge.ci-failing { background: rgba(242, 109, 109, .16); color: var(--red); }
+.badge.ready { background: rgba(106, 169, 255, .18); color: var(--accent); }
+.badge.in-review { background: rgba(106, 169, 255, .09); color: var(--accent); }
 .mini-btn { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid rgba(106, 169, 255, .5); background: var(--accent-soft); color: var(--text); cursor: pointer; flex: none; }
 .mini-btn:hover { border-color: var(--accent); }
 .mini-btn:disabled { opacity: .6; cursor: default; }

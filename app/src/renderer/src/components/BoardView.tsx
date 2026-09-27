@@ -27,6 +27,12 @@ const BADGE_ICON: Record<Badge['kind'], string> = {
   'needs-input': '✋',
   onboarding: '⏳',
   working: '⚙️',
+  merged: '🟣',
+  approved: '👍',
+  changes: '✏️',
+  'ci-failing': '❌',
+  ready: '👀',
+  'in-review': '🔍',
   done: '✅',
   idle: '💤',
   stopped: '⏸',
@@ -292,7 +298,7 @@ function Card({ card, state, me, now, spend, moving, onClick }: { card: BoardCar
   const mine = me !== null && card.assignees.includes(me)
   // Stopped sessions that worked on this issue: the newest can be resumed from the card.
   const past = s ? [] : (state.pastSessions[card.number] ?? [])
-  const badge = mine || s || past.length ? cardBadge(card.number, state.sessions, state.proposals, past) : null
+  const badge = mine || s || past.length ? cardBadge(card.number, state.sessions, state.proposals, past, state.prStage) : null
   const action = cardAction(card, me, state.sessions)
   const stats = s ? state.stats[s.sessionId] : undefined
   return (

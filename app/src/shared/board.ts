@@ -1,6 +1,7 @@
 import type { PastSession } from './pastSessions'
 import { getConfig, statusRank } from './appConfig'
 import { sessionForIssue } from './derive'
+import { STATUS_TEXT, type PrStage } from './review'
 import type { Badge, Board, BoardCard, BoardPr, Proposal, Session } from './types'
 
 /** Columns shown even when empty: the workflow from "ready" to "dev done", in board order. */
@@ -80,6 +81,12 @@ const LABEL: Record<Badge['kind'], string> = {
   'needs-input': 'Needs input',
   onboarding: 'Onboarding',
   working: 'Working',
+  merged: STATUS_TEXT.merged,
+  approved: STATUS_TEXT.approved,
+  changes: STATUS_TEXT.changes,
+  'ci-failing': STATUS_TEXT['ci-failing'],
+  ready: STATUS_TEXT.ready,
+  'in-review': STATUS_TEXT['in-review'],
   done: 'Done',
   idle: 'Idle',
   stopped: 'Stopped',
@@ -92,9 +99,11 @@ function badge(kind: Badge['kind'], detail?: string | null): Badge {
 
 /**
  * The Claude task state of an issue, first match wins: question, blocked, needs input, onboarding,
- * working, done, idle, stopped (a session worked on it and can be resumed), no session.
+ * working, where its session's PR stands (merged, approved, changes requested, CI failing, ready for
+ * review, in review: `stages`, see shared/review.ts), done, idle, stopped (a session worked on it and
+ * can be resumed), no session.
  */
-export function cardBadge(issue: number, sessions: Session[], proposals: Proposal[], past: PastSession[] = []): Badge {
+export function cardBadge(issue: number, sessions: Session[], proposals: Proposal[], past: PastSession[] = [], stages: Record<string, PrStage> = {}): Badge {
   const mine = proposals.filter((p) => p.issue === issue && p.kind !== 'CHAT').sort((a, b) => b.id - a.id)
   const q = mine.find((p) => p.status === 'question')
   if (q) return badge('question', q.note)
@@ -106,6 +115,8 @@ export function cardBadge(issue: number, sessions: Session[], proposals: Proposa
   // Spawning, or spawned but not yet linked to the issue (babysit-ticket does that while setting up).
   if (assign && (assign.status === 'approved' || (assign.status === 'sent' && !s))) return badge('onboarding')
   if (s?.state === 'working') return badge('working')
+  const stage = s ? stages[s.key] : undefined
+  if (stage) return badge(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)
   if (assign?.status === 'done') return badge('done', assign.note)
   if (s) return badge('idle')
   if (past.length) return badge('stopped', `${past[0].name}: stopped, can be resumed`)

@@ -253,7 +253,10 @@ columns from your "ready" status to "dev done" always show; other columns appear
 cards is in them.
 
 - **Badge:** the Claude task state for the issue, first match wins: ❓ Question, ⛔ Blocked, ✋ Needs
-  input, ⏳ Onboarding (approved or still setting up), ⚙️ Working, ✅ Done, 💤 Idle, ○ No session.
+  input, ⏳ Onboarding (approved or still setting up), ⚙️ Working, then where its session's PR
+  stands (🟣 Merged, 👍 Approved, ✏️ Changes Requested, ❌ CI Failing, 👀 Ready for Review,
+  🔍 In Review; see Session status), ✅ Done (the session told master it is done), 💤 Idle,
+  ⏸ Stopped (can be resumed), ○ No session. Hover a badge for why.
 - **PR chips:** coloured by state (open green, draft grey, merged purple, closed red). Open PRs also
   show CI ✓ ✗ ● and 💬 unresolved threads. Clicking a chip opens the PR.
 - **Clicking a card:** opens that issue's session in Terminals, or the Assign dialog if it has none.

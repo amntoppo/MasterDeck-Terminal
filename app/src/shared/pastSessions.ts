@@ -1,3 +1,4 @@
+import { MASTER_NAME } from './derive'
 import type { LinkInfo, SessionHistory } from './carry'
 
 /**
@@ -53,7 +54,8 @@ export function pastByIssue(
       const t = info(id)
       if (t && (!best || t.mtime > best.mtime)) best = { ...t, id }
     }
-    if (!best) continue
+    // master-agent is never a ticket's session, even when a link says so.
+    if (!best || best.title === MASTER_NAME) continue
     ;(out[issue] ??= []).push({ sessionId: best.id, issue, name: best.title ?? `#${issue} ${best.id.slice(0, 8)}`, cwd: best.cwd, lastActivity: best.mtime })
   }
   for (const list of Object.values(out)) list.sort((a, b) => b.lastActivity - a.lastActivity)

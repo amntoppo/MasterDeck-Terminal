@@ -278,7 +278,22 @@ export interface Board {
   cards: BoardCard[]
 }
 
-export type BadgeKind = 'question' | 'blocked' | 'needs-input' | 'onboarding' | 'working' | 'done' | 'idle' | 'stopped' | 'none'
+export type BadgeKind =
+  | 'question'
+  | 'blocked'
+  | 'needs-input'
+  | 'onboarding'
+  | 'working'
+  | 'merged'
+  | 'approved'
+  | 'changes'
+  | 'ci-failing'
+  | 'ready'
+  | 'in-review'
+  | 'done'
+  | 'idle'
+  | 'stopped'
+  | 'none'
 
 export interface Badge {
   kind: BadgeKind

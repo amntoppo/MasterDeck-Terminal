@@ -32,4 +32,8 @@ describe('pastByIssue', () => {
     const links = new Map([[A1, { issue: 5, linkedAt: 1 }]])
     expect(pastByIssue(links, { aaaaaaaa: [A1, A2] }, new Set([A2]), info({ [A1]: { mtime: 1, title: 'x', cwd: null } }))).toEqual({})
   })
+  it('never offers master-agent as a ticket session', () => {
+    const links = new Map([[B, { issue: 5, linkedAt: 1 }]])
+    expect(pastByIssue(links, {}, new Set(), info({ [B]: { mtime: 1, title: 'master-agent', cwd: '/w' } }))).toEqual({})
+  })
 })
