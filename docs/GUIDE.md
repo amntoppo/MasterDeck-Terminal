@@ -204,6 +204,11 @@ see at a glance where the work stands:
   the PR card), lines changed, cost and context used. Next to the status, a second chip says what
   the session itself is doing when that differs: Working, Waiting, Asked you, or **Idle** (waiting
   for your next instruction); the header counts the idle ones.
+- **Permissions from Needs you:** when a session stops for a tool permission (run a Bash command,
+  edit or create a file, fetch a URL…), its Needs-you card (PERMISSION) and its Tasks row show what
+  it wants to do (the command or file, and its description), why it asks, the question, and each
+  option as a button: **Yes**, the **don't ask again / allow all** option, and **No**. A click
+  presses that option's number in the session, only if the same prompt is still on its screen.
 - **Answer from Tasks:** when a session waits on you (a prompt or permission, a menu on its screen,
   a question in its last message, or a question or blocker it reported to master), its row opens an
   answer panel: the full question, its options (click one), and a reply box (⌘↵ sends). Answers go

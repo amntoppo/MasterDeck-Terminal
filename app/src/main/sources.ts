@@ -46,7 +46,7 @@ import { parseTeamPrs, type TeamPr } from '@shared/teamPrs'
 import { nextRestore, parseRestoreFile, type RestoreEntry, type RestoreFile } from '@shared/restore'
 import { totalOf, type Tokens, type TokensByDay } from '@shared/tokens'
 import { pastByIssue, type PastSession, type TranscriptInfo } from '@shared/pastSessions'
-import { answeredInSession, parseMenuScreen, sessionAsk, type ScreenMenu, type SessionAsk } from '@shared/ask'
+import { answeredInSession, parseMenuScreen, parsePermissionScreen, permissionMenu, sessionAsk, type ScreenMenu, type SessionAsk } from '@shared/ask'
 import { sessionScreen } from './screen'
 import { TokenIndex } from './tokens'
 import { loadCache, saveCache } from './cache'
@@ -1060,7 +1060,11 @@ export class Sources {
   async readMenu(s: Session): Promise<ScreenMenu | null> {
     if (s.kind !== 'background' || !s.bgId) return null
     const screen = await sessionScreen(this.run, this.claude(), s.bgId)
-    return screen ? parseMenuScreen(screen) : null
+    if (!screen) return null
+    const menu = parseMenuScreen(screen)
+    if (menu) return menu
+    const perm = parsePermissionScreen(screen)
+    return perm ? permissionMenu(perm) : null
   }
 
   /** Read the menus of the sessions waiting on input; the others have none. */

@@ -517,7 +517,7 @@ function NeedsCard({
     <div className={`card ${onDetails ? 'clickable' : ''}`} style={{ ['--kind' as string]: menu ? 'var(--purple)' : 'var(--red)' }} onClick={detailsClick(onDetails)}>
       {!full && <ItemControls itemId={itemId} />}
       <div className="top">
-        <span className="kind">{menu ? 'QUESTION' : 'INPUT'}</span>
+        <span className="kind">{menu?.permission ? 'PERMISSION' : menu ? 'QUESTION' : 'INPUT'}</span>
         <span className="title">{s.name}</span>
         {s.issue !== null && <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>}
       </div>

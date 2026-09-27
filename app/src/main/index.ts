@@ -30,7 +30,7 @@ import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } fr
 import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
 import { Summaries } from './summary'
 import { parseSteps } from '@shared/workflow'
-import { answerKeys, type MenuAnswer } from '@shared/ask'
+import { answerKeys, permissionKey, type MenuAnswer } from '@shared/ask'
 import { asTicket, fullRepo, ticketLabel, ticketRef } from '@shared/ticket'
 import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
@@ -139,6 +139,18 @@ async function answerMenuFor(key: string, question: unknown, answer: unknown): P
   if (!s) return { ok: false, message: 'session not found' }
   // Read the screen again: answer only the question the user saw.
   const menu = await sources.readMenu(s)
+  if (menu?.permission || (typeof question === 'string' && question.startsWith('permission:'))) {
+    if (!menu?.permission || `permission:${permissionKey(menu.permission)}` !== question) {
+      void sources.pollMenus()
+      return { ok: false, message: `${s.name}: the permission on its screen changed; look again` }
+    }
+    const pick = (answer as { picks?: unknown } | null)?.picks
+    const n = Array.isArray(pick) && pick.length === 1 && typeof pick[0] === 'number' ? pick[0] : -1
+    if (!Number.isInteger(n) || n < 0 || n >= menu.permission.options.length || n > 8) return { ok: false, message: 'no such option' }
+    const r = await sender.answerMenu(s, [{ keys: String(n + 1), wait: 700 }])
+    void sources.pollMenus()
+    return r.ok ? { ok: true, message: `${s.name}: ${menu.permission.options[n]}` } : r
+  }
   const now = menu?.question?.question ?? null
   if (!menu || now !== (typeof question === 'string' ? question : null)) {
     void sources.pollMenus()

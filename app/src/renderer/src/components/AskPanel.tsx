@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { reportQuestion, textOptions, withoutReport, type MenuAnswer, type ScreenMenu, type SessionAsk } from '@shared/ask'
+import { permissionKey, reportQuestion, textOptions, withoutReport, type MenuAnswer, type PermissionPrompt, type ScreenMenu, type SessionAsk } from '@shared/ask'
 import type { Session } from '@shared/types'
 import { deck } from '../deck'
 import { Markdown } from './SummaryPanel'
@@ -28,6 +28,7 @@ export function AskPanel({
   /** The Needs-you item this answers: replies and menu answers go through the inbox (shared/inbox.ts). */
   itemId?: string
 }) {
+  if (session && menu?.permission) return <PermissionForm key={permissionKey(menu.permission)} session={session} prompt={menu.permission} actions={actions} itemId={itemId} />
   if (session && menu) return <MenuForm key={menu.question?.question ?? 'review'} session={session} menu={menu} full={full} actions={actions} itemId={itemId} />
   const text = (ask?.said ? withoutReport(ask.said.text) : null) ?? (ask?.report ? reportQuestion(ask.report) : null) ?? fallback ?? ''
   const options = ask?.said?.options ?? textOptions(text)
@@ -214,6 +215,46 @@ function MenuForm({ session, menu, full, actions, itemId }: { session: Session; 
           </div>
         </>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * A permission prompt on the session's screen (run a command, edit a file…): what it wants to do,
+ * why, and its options as buttons. A button presses that option's number in the session, once the
+ * same prompt is confirmed still on screen.
+ */
+function PermissionForm({ session, prompt, actions, itemId }: { session: Session; prompt: PermissionPrompt; actions?: ReactNode; itemId?: string }) {
+  const { busy, msg, run } = useSend()
+  const question = `permission:${permissionKey(prompt)}`
+  const pick = (n: number) =>
+    run(
+      () => (itemId ? deck().inboxAct(itemId, 'menu', { question, answer: { picks: [n] } }) : deck().answerMenu(session.key, question, { picks: [n] })),
+      `${session.name}: ${prompt.options[n]}`,
+    )
+  const kind = (o: string) => (/^no\b/i.test(o) ? 'deny' : /don.t ask again|always|allow all/i.test(o) ? 'always' : 'yes')
+  return (
+    <div className="ask perm">
+      <div className="perm-title">🔐 {prompt.title}</div>
+      {prompt.lines.length > 0 && <pre className="perm-lines">{prompt.lines.join('\n')}</pre>}
+      {prompt.reason && <div className="perm-reason">{prompt.reason}</div>}
+      <div className="perm-q">{prompt.question}</div>
+      <div className="perm-opts">
+        {prompt.options.map((o, n) => (
+          <button key={n} className={`btn perm-opt ${kind(o)}`} disabled={busy} onClick={(e) => (e.stopPropagation(), void pick(n))} title={`Press ${n + 1} in ${session.name}`}>
+            <span className="ask-key">{n + 1}</span>
+            {o}
+          </button>
+        ))}
+      </div>
+      <div className="actions">
+        {msg && (
+          <span className="error" style={{ color: msg.ok ? 'var(--green)' : undefined }}>
+            {msg.text}
+          </span>
+        )}
+        {actions}
+      </div>
     </div>
   )
 }

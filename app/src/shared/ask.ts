@@ -168,6 +168,63 @@ export interface ScreenMenu {
   checked: number[]
   /** The review screen before submitting: each question and its answer. */
   review: { question: string; answer: string }[] | null
+  /** A permission prompt instead (run a command, edit a file…): then there are no tabs or question. */
+  permission?: PermissionPrompt | null
+}
+
+/** Claude Code asking to use a tool: "Bash command … Do you want to proceed? 1. Yes 2. Yes, and don't ask again … 3. No". */
+export interface PermissionPrompt {
+  /** What it wants to do: "Bash command", "Edit file", "Fetch"… */
+  title: string
+  /** The command, file or URL and its description, as shown. */
+  lines: string[]
+  /** Why it asks, when it says ("This command requires approval"). */
+  reason: string | null
+  /** "Do you want to proceed?" */
+  question: string
+  /** The choices, in order: pressing n+1 picks options[n]. */
+  options: string[]
+}
+
+const PERMISSION_Q = /^\s*(Do you want to .*\?|Allow .*\?)\s*$/
+const REASON = /requires approval|not allowed|permission/i
+
+/**
+ * A permission prompt at the bottom of a session's screen: a separator line, a title, what it
+ * wants to run or change, maybe why, then "Do you want to …?" and numbered options, with
+ * "Esc to cancel" below. Null when the screen shows none.
+ */
+export function parsePermissionScreen(screen: string): PermissionPrompt | null {
+  const lines = screen.split('\n').map((l) => l.trimEnd())
+  const qi = lines.map((l) => PERMISSION_Q.test(l)).lastIndexOf(true)
+  if (qi < 0) return null
+  const options: string[] = []
+  let i = qi + 1
+  for (; i < lines.length; i++) {
+    const m = OPTION.exec(lines[i])
+    if (m && Number(m[1]) === options.length + 1) options.push(m[3].trim())
+    else if (lines[i].trim() && options.length && !/Esc to cancel/.test(lines[i])) options[options.length - 1] += ` ${lines[i].trim()}`
+    else if (/Esc to cancel/.test(lines[i]) || (!lines[i].trim() && options.length)) break
+  }
+  if (options.length < 2 || !lines.slice(i, i + 4).some((l) => /Esc to cancel/.test(l))) return null
+  // Up from the question to the separator line: the title, then what it wants and why.
+  let top = qi - 1
+  while (top >= 0 && !SEPARATOR.test(lines[top])) top--
+  const body = lines.slice(top + 1, qi).map((l) => l.trim()).filter(Boolean)
+  const title = body.shift() ?? 'Permission'
+  const reasonAt = body.findIndex((l) => REASON.test(l))
+  const reason = reasonAt >= 0 ? body.splice(reasonAt, 1)[0] : null
+  return { title, lines: body, reason, question: lines[qi].trim(), options }
+}
+
+/** A permission prompt as a ScreenMenu, so it takes the menu's path to Needs you. */
+export function permissionMenu(p: PermissionPrompt): ScreenMenu {
+  return { tabs: [], question: null, checked: [], review: null, permission: p }
+}
+
+/** Identifies a permission prompt: answers go only to the one the user saw. */
+export function permissionKey(p: PermissionPrompt): string {
+  return `${p.title}\n${p.lines.join('\n')}\n${p.question}`
 }
 
 const TABS = /^\s*←\s+(.*?)\s+→\s*$/
@@ -291,5 +348,10 @@ export function plainScreen(s: string): string {
 export function menuOnScreen(screen: string): boolean {
   // Words on a live screen are often placed by cursor moves, which leave no spaces between them.
   const tail = plainScreen(screen).slice(-6000).replace(/\s+/g, '')
-  return /✔Submit→/.test(tail) || (/[☐☒]/.test(tail) && /Entertoselect/.test(tail) && /Esctocancel/.test(tail))
+  return (
+    /✔Submit→/.test(tail) ||
+    (/[☐☒]/.test(tail) && /Entertoselect/.test(tail) && /Esctocancel/.test(tail)) ||
+    // A permission prompt: "Do you want to proceed? ❯ 1. Yes 2. … Esc to cancel".
+    (/(Doyouwantto|Allow)[^?]{0,200}\?(❯)?1\.Yes/.test(tail) && /Esctocancel/.test(tail))
+  )
 }

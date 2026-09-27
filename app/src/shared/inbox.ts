@@ -170,8 +170,14 @@ export function collectItems(x: InboxInput): InboxItem[] {
         sessionKey: s.key,
         ticket: sessionTicket(s),
         title: s.name,
-        body: menu?.question ? menu.question.question : menu?.review ? 'Ready to submit its answers.' : 'Waiting on a prompt or permission.',
-        actions: menu ? [{ type: 'menu', label: 'Answer', primary: true }, { type: 'open', label: 'Open' }] : [{ type: 'open', label: 'Open', primary: true }],
+        body: menu?.permission
+          ? `Permission: ${menu.permission.title}${menu.permission.lines[0] ? ` · ${menu.permission.lines[0]}` : ''}`
+          : menu?.question
+            ? menu.question.question
+            : menu?.review
+              ? 'Ready to submit its answers.'
+              : 'Waiting on a prompt or permission.',
+        actions: menu ? [{ type: 'menu', label: menu.permission ? 'Allow / deny' : 'Answer', primary: true }, { type: 'open', label: 'Open' }] : [{ type: 'open', label: 'Open', primary: true }],
         detail: { type: 'session' },
       })
       continue

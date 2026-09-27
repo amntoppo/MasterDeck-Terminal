@@ -139,7 +139,8 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
 
   // What it is doing right now, in one line.
   let now1: string
-  if (menu?.question) now1 = `Asks: ${menu.question.question}`
+  if (menu?.permission) now1 = `Permission: ${menu.permission.title}`
+  else if (menu?.question) now1 = `Asks: ${menu.question.question}`
   else if (status.key === 'needs-input') now1 = ask?.said?.text ? `Asks: ${ask.said.text}` : 'Waiting on a prompt or a permission'
   else if (status.key === 'question' || status.key === 'blocked') now1 = status.why
   else if (status.key === 'working') now1 = tail?.lastTool ? `Running ${tail.lastTool}` : ''
@@ -216,7 +217,7 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
       </div>
       {pending && (
         <div className="tv-ask">
-          <div className="tv-ask-head">{menu ? 'Question on its screen' : s.state === 'needs-input' ? 'Waiting on you' : status.key === 'blocked' ? 'Blocked' : 'Asks you'}</div>
+          <div className="tv-ask-head">{menu?.permission ? 'Permission' : menu ? 'Question on its screen' : s.state === 'needs-input' ? 'Waiting on you' : status.key === 'blocked' ? 'Blocked' : 'Asks you'}</div>
           <AskPanel session={s} ask={ask} menu={menu} fallback={status.why || null} full={false} itemId={itemId} />
         </div>
       )}

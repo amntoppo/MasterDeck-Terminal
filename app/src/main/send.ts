@@ -95,6 +95,8 @@ export class Sender {
   }
 
   private async typeKeys(s: Session, steps: KeyStep[], write: (d: string) => void, screen: () => string): Promise<CliResult> {
+    // A fresh attach can go quiet before it redraws the prompt: give it a moment to show.
+    for (let waited = 0; !menuOnScreen(screen()) && waited < 3000; waited += 250) await sleep(250)
     if (!menuOnScreen(screen())) return { ok: false, message: `${s.name}: its question is no longer on screen; open it to answer` }
     for (const step of steps) {
       if ('expect' in step && !step.expect.test(plainScreen(screen()).slice(-4000)))
