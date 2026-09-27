@@ -33,7 +33,7 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 ]
 
 /**
- * First-run setup (and Settings → GitHub & board), in four steps: tools, the gh account, the
+ * First-run setup (a four-step wizard; from Settings → Set up MasterDeck, the same sections as one page): tools, the gh account, the
  * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master, babysit-ticket and MasterDeck share.

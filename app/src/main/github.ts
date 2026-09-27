@@ -64,7 +64,7 @@ export class GitHub {
    * About 6 points a page; read through the shared cache for 5 minutes.
    */
   async teamPrPages(owner = getConfig().owner, now = Date.now(), force = false): Promise<{ ok: true; pages: unknown[]; partial?: string } | { ok: false; message: string }> {
-    if (!owner) return { ok: false, message: 'GitHub is not set up yet (Settings → GitHub & board)' }
+    if (!owner) return { ok: false, message: 'GitHub is not set up yet (Settings → Set up MasterDeck)' }
     const { open, closed } = teamPrSearches(owner, now, undefined, getConfig().ownerType === 'user' ? 'user' : 'org')
     const pages: unknown[] = []
     let partial: string | undefined

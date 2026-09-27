@@ -235,7 +235,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
-- **GitHub & board:** reopens Setup (owner, issue repo, project board, status mapping, workspace,
+- **Set up MasterDeck:** opens Setup as one page (tools, GitHub account, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
 - **Skills:** each bundled skill's state in `~/.claude/skills`. MasterDeck installs missing skills
   at launch and updates its own unchanged copies. A skill you edited, your own copy, or a symlink

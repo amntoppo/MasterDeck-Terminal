@@ -94,7 +94,7 @@ Or build it yourself (see [Develop](#develop)).
    questions) and relaying text to sessions in other terminals. New sessions then ask you directly.
 
 Setup saves everything to one file, `~/.claude/master/config.json`. The master CLI, babysit-ticket
-and the app all read it. To change it later, open **Settings (⚙) → GitHub & board**, or edit it:
+and the app all read it. To change it later, open **Settings (⚙) → Set up MasterDeck**, or edit it:
 
 ```bash
 ~/.claude/skills/master/master config show      # print the current config

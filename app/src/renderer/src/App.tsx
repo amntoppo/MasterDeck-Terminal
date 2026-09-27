@@ -98,7 +98,7 @@ export function App() {
   })
   const [palette, setPalette] = useState(false)
   const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'setup' | 'skills' | 'skills-first' | null>(null)
-  // First launch without a config: Setup opens once (Skip remembers it; Settings → GitHub & board reopens it).
+  // First launch without a config: Setup opens once (Skip remembers it; Settings → Set up MasterDeck reopens it).
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
   const [dragging, setDragging] = useState(false)
