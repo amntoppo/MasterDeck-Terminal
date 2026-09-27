@@ -9,7 +9,7 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import board, collect, config, guard, inbox, ledger, rules, snapshot, spawn
+from . import board, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn
 
 WRITE_CMDS = {"add", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
 
@@ -68,21 +68,23 @@ def cmd_sweep(args) -> int:
 
 def cmd_status(args) -> int:
     snap = _snap(args)
-    issues = {i["number"]: i for i in snap["issues"]}
+    issues = {refs.key(i.get("repo"), i["number"]): i for i in snap["issues"]}
     threads: dict = {}
     for pr in snap["prs"]:
         if pr["refs_issue"]:
-            threads[pr["refs_issue"]] = threads.get(pr["refs_issue"], 0) + pr["unresolved_threads"]
+            k = refs.key(pr.get("refs_repo"), pr["refs_issue"])
+            threads[k] = threads.get(k, 0) + pr["unresolved_threads"]
     for s in snap["sessions"]:
-        if s["status"] == "dead" and s["issue"] not in issues:
+        k = refs.key(s.get("issue_repo"), s["issue"]) if s["issue"] is not None else None
+        if s["status"] == "dead" and k not in issues:
             continue
         line = f"{s['name']:<32} {s['status']:<8}"
         if s["issue"] is not None:
             # the snapshot drops Dev Done and later, so a missing issue is finished or out of scope
-            board = (issues.get(s["issue"]) or {}).get("status") or "done or out of scope"
-            line += f" #{s['issue']} [{board}]"
-            if threads.get(s["issue"]):
-                line += f" threads={threads[s['issue']]}"
+            board = (issues.get(k) or {}).get("status") or "done or out of scope"
+            line += f" {refs.label(s.get('issue_repo'), s['issue'])} [{board}]"
+            if threads.get(k):
+                line += f" threads={threads[k]}"
         if s["status"] == "blocked":
             attach = f"claude attach {s['bg_id']}" if s["bg_id"] else "switch to its terminal"
             line += f"  needs input — {attach}"
@@ -109,7 +111,7 @@ def _derive_summary(message: str) -> str:
     """First line of message, with a leading '#<digits>: ' prefix removed, whitespace
     collapsed, truncated to 60 chars (with '…' appended when it was cut)."""
     first_line = message.splitlines()[0] if message else ""
-    first_line = re.sub(r"^#\d+:\s*", "", first_line)
+    first_line = re.sub(r"^(?:[A-Za-z0-9._/-]*)#\d+:\s*", "", first_line)
     first_line = re.sub(r"\s+", " ", first_line).strip()
     if len(first_line) > 60:
         first_line = first_line[:60] + "…"
@@ -135,7 +137,10 @@ def cmd_add(args) -> int:
             return 2
         target = {"spawn": sp}
     with ledger.locked() as led:
-        p = ledger.add(led, kind=args.kind, issue=args.issue, source=args.source, target=target,
+        repo, n = refs.parse(args.issue)
+        if args.repo:
+            repo = refs.stored(args.repo)
+        p = ledger.add(led, kind=args.kind, issue=n, repo=repo, source=args.source, target=target,
                        message=args.message, summary=args.summary, now=_now(args))
     print("duplicate" if p is None else f"added {p['id']}")
     return 0
@@ -248,25 +253,25 @@ def cmd_watch(args) -> int:
 
 
 def cmd_draft_assign(args) -> int:
+    repo, n = refs.parse(args.issue)
+    if args.repo:
+        repo = refs.stored(args.repo)
+    k = refs.key(repo, n)
     if args.title and args.url:
         # The caller already knows the issue (a board card): no snapshot needed.
-        issue = {"number": args.issue, "title": args.title, "url": args.url}
-        a = rules._assign(issue)
-        sp = a["target"]["spawn"]
-        print(json.dumps({"issue": a["issue"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
-                          "summary": a["summary"], "title": args.title, "url": args.url}))
-        return 0
-    snap = None if args.live else ledger.load().get("last_snapshot")
-    issue = next((i for i in (snap or {}).get("issues", []) if i["number"] == args.issue), None)
-    if issue is None:
-        # Master's last sweep can predate the issue (or --live asked for fresh data).
-        issue = next((i for i in _snap(args)["issues"] if i["number"] == args.issue), None)
-    if issue is None:
-        print(f"issue {args.issue} not found")
-        return 1
+        issue = {"number": n, "repo": repo, "title": args.title, "url": args.url}
+    else:
+        snap = None if args.live else ledger.load().get("last_snapshot")
+        issue = next((i for i in (snap or {}).get("issues", []) if refs.key(i.get("repo"), i["number"]) == k), None)
+        if issue is None:
+            # Master's last sweep can predate the issue (or --live asked for fresh data).
+            issue = next((i for i in _snap(args)["issues"] if refs.key(i.get("repo"), i["number"]) == k), None)
+        if issue is None:
+            print(f"issue {refs.label(repo, n).lstrip('#')} not found")
+            return 1
     a = rules._assign(issue)
     sp = a["target"]["spawn"]
-    print(json.dumps({"issue": a["issue"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
+    print(json.dumps({"issue": a["issue"], "repo": a["repo"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
                       "summary": a["summary"], "title": issue["title"], "url": issue["url"]}))
     return 0
 
@@ -284,7 +289,7 @@ def cmd_board(args) -> int:
 
 
 def cmd_sprints(args) -> int:
-    if not args.fixtures and (not config.PROJECT or not config.CONFIG.get("sprintField")):
+    if not args.fixtures and not any(p.get("sprintField") for p in config.projects()):
         print("[]")  # no board, or a board without a sprint (iteration) field
         return 0
     try:
@@ -319,7 +324,8 @@ def parser() -> argparse.ArgumentParser:
 
     ad = sub.add_parser("add")
     ad.add_argument("--kind", required=True)
-    ad.add_argument("--issue", type=int, required=True)
+    ad.add_argument("--issue", required=True, help="12, name#12 or owner/name#12")
+    ad.add_argument("--repo", help="owner/name of the issue's repo; omitted: from --issue, else the primary repo")
     ad.add_argument("--source", required=True)
     ad.add_argument("--summary")
     ad.add_argument("--message", required=True)
@@ -392,7 +398,8 @@ def parser() -> argparse.ArgumentParser:
     with_src(sub.add_parser("sprints")).set_defaults(fn=cmd_sprints)
 
     da = with_src(sub.add_parser("draft-assign"))
-    da.add_argument("issue", type=int)
+    da.add_argument("issue", help="12, name#12 or owner/name#12")
+    da.add_argument("--repo", help="owner/name of the issue's repo; omitted: from the issue, else the primary repo")
     da.add_argument("--live", action="store_true")
     da.add_argument("--title")
     da.add_argument("--url")

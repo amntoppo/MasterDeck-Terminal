@@ -23,10 +23,10 @@ class PrsTest(unittest.TestCase):
         node = pr_node(55, ci="FAILURE", body="Fixes it.\n\nRefs acme/tracker#939", head_oid="def456")
         [pr] = normalize.prs([node], [], ME)
         self.assertEqual(pr, {
-            "url": "https://github.com/acme/mobile-app/pull/55", "repo": "mobile-app",
+            "url": "https://github.com/acme/mobile-app/pull/55", "repo": "mobile-app", "repo_full": "acme/mobile-app",
             "number": 55, "title": "PR 55", "author_is_me": True, "review_requested": False,
             "unresolved_threads": 0, "last_unresolved_at": None, "ci": "failure",
-            "head_oid": "def456", "head_ref": "feat/x", "refs_issue": 939,
+            "head_oid": "def456", "head_ref": "feat/x", "refs_issue": 939, "refs_repo": None,
             "updated_at": "2026-09-24T09:00:00Z"})
 
     def test_no_ci_and_no_ref(self):

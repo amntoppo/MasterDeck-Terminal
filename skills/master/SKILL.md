@@ -14,8 +14,11 @@ The CLI is `~/.claude/skills/master/master` (called `master` below). The ledger 
 Everything user-specific lives in one file, `~/.claude/master/config.json`, created by MasterDeck's Setup screen or by `master config save`. `master config show` prints it; `master config get <field>` prints one field. Fields:
 
 - `owner` — the GitHub org or user that owns the repos.
-- `issueRepo` — the repo holding the issues. Issue references read `<owner>/<issueRepo>#N`.
-- `project` — GitHub Projects v2 number of the board (`0` = no board).
+- `issueRepo` — the primary repo holding the issues.
+- `repos` — every selected repo (`owner/name`), primary first; `allRepos: true` means any repo counts. `projects` — every selected board, each with its own status field, columns and `statuses`.
+- `project` — GitHub Projects v2 number of the (first) board (`0` = no board).
+
+**Ticket references.** A ticket is a repo and a number. In the primary repo it is written `#N` (and stored as a bare number, as before); in another repo it is `name#N` (for example `api#12`), or `owner/name#N` in full. Wherever this skill says `#N`, read "the ticket's label": `#N` or `name#N`. Sessions report with that label (`api#12: done`). `master add` / `master draft-assign` take `--issue` as `12`, `api#12` or `acme/api#12`; `master list` shows a `repo` field on proposals for other repos. When matching a report to a proposal, match both the number and the repo (no `repo` field means the primary repo).
 - `columns` — the board's status names, in order.
 - `statuses.inProgress` (default `In Dev`), `statuses.prRaised` (default `PR Raised`), `statuses.devDone` (default `Dev Done`), and the lists `statuses.done`, `statuses.assignable`, `statuses.resumable`.
 - `workspace` — the folder master runs in.

@@ -7,6 +7,9 @@
     master config detect --owner O [--project N]
                                        what GitHub has: owner type, repos, projects, and for a
                                        project its status options, ids and a guessed mapping
+    master config detect --all         every owner gh can reach (the user and their orgs), with
+                                       their repos and projects (status options, guessed
+                                       mapping, sprint field): two GraphQL calls in all
     master config save < json          merge JSON from stdin into the saved config
 """
 from __future__ import annotations
@@ -102,6 +105,92 @@ def detect(owner: str, project: "int | None") -> dict:
     return out
 
 
+_LOGIN = re.compile(r"[A-Za-z0-9-]{1,39}")
+
+_OWNER_FIELDS = """
+  login
+  repositories(first: 100, %s orderBy: {field: PUSHED_AT, direction: DESC}) {
+    nodes { name nameWithOwner isArchived hasIssuesEnabled issues(states: OPEN) { totalCount } }
+  }
+  projectsV2(first: 50) {
+    nodes {
+      number title id closed
+      items { totalCount }
+      fields(first: 50) {
+        nodes {
+          __typename
+          ... on ProjectV2SingleSelectField { id name options { id name } }
+          ... on ProjectV2IterationField { id name }
+        }
+      }
+    }
+  }
+"""
+
+
+def owners_query(owners: list) -> str:
+    """One query for every owner: a user's own repos, an org's repos, and their projects."""
+    parts = []
+    for i, (login, kind) in enumerate(owners):
+        if not _LOGIN.fullmatch(login):
+            raise ValueError(f"not a GitHub login: {login!r}")
+        root = "user" if kind == "user" else "organization"
+        aff = "ownerAffiliations: OWNER," if kind == "user" else ""
+        parts.append(f'o{i}: {root}(login: "{login}") {{ {_OWNER_FIELDS % aff} }}')
+    return "query { " + " ".join(parts) + " }"
+
+
+def _board_of(p: dict, owner: str, kind: str) -> dict:
+    fields = [f for f in (p.get("fields") or {}).get("nodes") or [] if isinstance(f, dict)]
+    selects = [f for f in fields if f.get("__typename") == "ProjectV2SingleSelectField" and f.get("options")]
+    status = next((f for f in selects if f.get("name") == "Status"), None) or (selects[0] if selects else None)
+    iteration = next((f for f in fields if f.get("__typename") == "ProjectV2IterationField"), None)
+    cols = [o["name"] for o in (status or {}).get("options") or []]
+    out = {
+        "owner": owner, "ownerType": kind, "number": p["number"], "title": p.get("title") or "",
+        "id": p.get("id") or "", "closed": bool(p.get("closed")),
+        "items": ((p.get("items") or {}).get("totalCount")) or 0,
+        "statusField": (status or {}).get("name") or "Status",
+        "statusFieldId": (status or {}).get("id") or "",
+        "statusOptions": {o["name"]: o["id"] for o in (status or {}).get("options") or []},
+        "columns": cols,
+        "statuses": guess_statuses(cols),
+        "sprintField": (iteration or {}).get("name") or "",
+    }
+    if not status:
+        out["error"] = "no single-select Status field"
+    return out
+
+
+def parse_owners(data: dict, owners: list) -> list:
+    out = []
+    for i, (login, kind) in enumerate(owners):
+        node = (data or {}).get(f"o{i}")
+        if not isinstance(node, dict):
+            continue
+        repos = [{"repo": r["nameWithOwner"], "openIssues": ((r.get("issues") or {}).get("totalCount")) or 0}
+                 for r in (node.get("repositories") or {}).get("nodes") or []
+                 if isinstance(r, dict) and r.get("nameWithOwner") and not r.get("isArchived") and r.get("hasIssuesEnabled", True)]
+        projects = [_board_of(p, login, kind) for p in (node.get("projectsV2") or {}).get("nodes") or []
+                    if isinstance(p, dict) and p.get("number") and not p.get("closed")]
+        out.append({"login": login, "type": kind, "repos": repos, "projects": projects})
+    return out
+
+
+def detect_all() -> dict:
+    """Every owner gh can reach, with their repos and project boards: two GraphQL calls."""
+    me = _gh_json(["api", "graphql", "-f", "query=query { viewer { login organizations(first: 100) { nodes { login } } } }"])
+    viewer = ((me or {}).get("data") or {}).get("viewer") if isinstance(me, dict) else None
+    if not isinstance(viewer, dict) or not viewer.get("login"):
+        return {"owners": [], "error": "gh is not logged in (run: gh auth login)"}
+    owners = [(viewer["login"], "user")] + [(o["login"], "organization") for o in (viewer.get("organizations") or {}).get("nodes") or []
+                                             if isinstance(o, dict) and o.get("login")]
+    data = _gh_json(["api", "graphql", "-f", f"query={owners_query(owners)}"])
+    if not isinstance(data, dict):
+        return {"user": viewer["login"], "owners": [], "error": "could not read repositories and projects (gh needs the 'project' and 'read:org' scopes: gh auth refresh -s project,read:org)"}
+    return {"user": viewer["login"], "owners": parse_owners(data.get("data") or {}, owners)}
+
+
 def _validate(cfg: dict) -> "str | None":
     if not isinstance(cfg.get("owner"), str) or not re.fullmatch(r"[A-Za-z0-9-]{0,39}", cfg["owner"]):
         return "owner must be a GitHub login"
@@ -113,12 +202,33 @@ def _validate(cfg: dict) -> "str | None":
         return "statuses must be an object"
     if not isinstance(cfg.get("masterEnabled", True), bool):
         return "masterEnabled must be true or false"
+    if not isinstance(cfg.get("repos", []), list) or not all(isinstance(r, str) and re.fullmatch(config.REPO_RE, r) for r in cfg.get("repos", [])):
+        return "repos must be a list of owner/name"
+    ps = cfg.get("projects", [])
+    if not isinstance(ps, list) or not all(isinstance(p, dict) and isinstance(p.get("number"), int) and _LOGIN.fullmatch(str(p.get("owner") or "")) for p in ps):
+        return "projects must be a list of {owner, number, ...}"
     return None
+
+
+def _mirror(cfg: dict) -> dict:
+    """The first repo and project also go in the single-repo fields that older readers use."""
+    repos = cfg.get("repos") or []
+    if repos and not (cfg.get("owner") and cfg.get("issueRepo")):
+        cfg["owner"], cfg["issueRepo"] = repos[0].split("/", 1)
+    ps = config.projects(cfg) if cfg.get("projects") else []
+    if ps:
+        p = ps[0]
+        cfg.update(project=p["number"], projectId=p["id"], statusFieldId=p["statusFieldId"],
+                   statusOptions=p["statusOptions"], columns=p["columns"], statuses=p["statuses"],
+                   sprintField=p["sprintField"])
+        if cfg.get("owner") == p["owner"] or not cfg.get("owner"):
+            cfg["ownerType"] = p["ownerType"]
+    return cfg
 
 
 def save(patch: dict, path: "Path | None" = None) -> dict:
     path = path or config.config_path()
-    cfg = config._merge(config.load(path), patch)
+    cfg = _mirror(config._merge(config.load(path), patch))
     err = _validate(cfg)
     if err:
         raise ValueError(err)
@@ -138,9 +248,19 @@ def _get(cfg: dict, key: str):
     return cur
 
 
-def shell(cfg: dict) -> str:
-    """Assignments and two functions (option_id, rank) for tt.sh to eval."""
+def shell(cfg: dict, project: "str | None" = None) -> str:
+    """Assignments and two functions (option_id, rank) for tt.sh to eval. `project` (owner/number)
+    gives that board's status field, options and meanings; otherwise the primary board's.
+    REPOS_JSON and PROJECTS_JSON list every selected repo and board (key, owner, number, id)."""
     q = shlex.quote
+    boards = config.projects(cfg)
+    if project:
+        pick = next((p for p in boards if config.project_key(p) == project), None)
+        if pick is None:
+            raise ValueError(f"no such project in the config: {project}")
+        cfg = dict(cfg, project=pick["number"], projectId=pick["id"], statusFieldId=pick["statusFieldId"],
+                   statusOptions=pick["statusOptions"], columns=pick["columns"], statuses=pick["statuses"])
+        cfg["projectOwner"] = pick["owner"]
     st = cfg["statuses"]
     fin = st.get("finished") or st["done"]
     lines = [
@@ -148,6 +268,10 @@ def shell(cfg: dict) -> str:
         f"OWNER={q(cfg['owner'])}",
         f"ISSUE_REPO={q(cfg['issueRepo'])}",
         f"PROJECT_NUMBER={int(cfg.get('project') or 0)}",
+        f"PROJECT_OWNER={q(cfg.get('projectOwner') or cfg['owner'])}",
+        f"REPOS_JSON={q(json.dumps(config.repos(cfg)))}",
+        f"ALL_REPOS={1 if cfg.get('allRepos') else 0}",
+        f"PROJECTS_JSON={q(json.dumps([{'key': config.project_key(p), 'owner': p['owner'], 'number': p['number'], 'id': p['id']} for p in boards]))}",
         f"PROJECT_ID={q(cfg.get('projectId') or '')}",
         f"STATUS_FIELD_ID={q(cfg.get('statusFieldId') or '')}",
         f"ST_READY={q(st['ready'])}",
@@ -193,7 +317,15 @@ def main(argv: list) -> int:
         print(v if isinstance(v, str) else json.dumps(v))
         return 0
     if cmd == "shell":
-        sys.stdout.write(shell(cfg))
+        project = rest[1] if rest[:1] == ["--project"] and len(rest) > 1 else None
+        try:
+            sys.stdout.write(shell(cfg, project))
+        except ValueError as e:
+            print(f"master config shell: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if cmd == "detect" and rest[:1] == ["--all"]:
+        print(json.dumps(detect_all(), indent=2))
         return 0
     if cmd == "detect":
         owner, project = None, None

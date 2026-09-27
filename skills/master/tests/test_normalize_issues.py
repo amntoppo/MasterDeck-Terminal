@@ -35,7 +35,7 @@ class IssuesTest(unittest.TestCase):
             [], TODAY)
         self.assertEqual([i["number"] for i in out], [1, 3])
         self.assertEqual(out[0], {
-            "number": 1, "title": "Issue 1", "status": "In Dev", "sprint": "Sprint 6",
+            "number": 1, "repo": None, "project": None, "title": "Issue 1", "status": "In Dev", "sprint": "Sprint 6",
             "current_sprint": True, "assigned_to_me": True,
             "url": "https://github.com/acme/tracker/issues/1"})
         self.assertEqual((out[1]["sprint"], out[1]["current_sprint"]), (None, False))

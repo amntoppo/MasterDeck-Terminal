@@ -26,7 +26,7 @@ class SessionsTest(unittest.TestCase):
         out = join.sessions([agent("s1", "paywall")], {"sessions": {"s1": link(939, prs=["u1"])}}, MASTER, no_cwd)
         self.assertEqual(out, [{
             "name": "paywall", "session_id": "s1", "pid": 1, "bg_id": None, "kind": "interactive",
-            "status": "idle", "cwd": "/w", "issue": 939, "link": "explicit",
+            "status": "idle", "cwd": "/w", "issue": 939, "issue_repo": None, "link": "explicit",
             "branch": "acme/mobile-app@feat/x", "prs": ["u1"]}])
 
     def test_live_session_without_link(self):
@@ -93,8 +93,9 @@ class OwnerTest(unittest.TestCase):
 
     def test_issue_for_pr_prefers_body_ref(self):
         sess = [self.rec("a", 7, prs=["u"])]
-        self.assertEqual(join.issue_for_pr({"url": "u", "refs_issue": 9}, sess), 9)
-        self.assertEqual(join.issue_for_pr({"url": "u", "refs_issue": None}, sess), 7)
+        self.assertEqual(join.issue_for_pr({"url": "u", "refs_issue": 9}, sess), (None, 9))
+        self.assertEqual(join.issue_for_pr({"url": "u", "refs_issue": 9, "refs_repo": "acme/api"}, sess), ("acme/api", 9))
+        self.assertEqual(join.issue_for_pr({"url": "u", "refs_issue": None}, sess), (None, 7))
         self.assertIsNone(join.issue_for_pr({"url": "v", "refs_issue": None}, sess))
 
 

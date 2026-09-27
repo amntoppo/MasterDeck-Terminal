@@ -14,7 +14,7 @@ query($q: String!) {
     nodes {
       ... on PullRequest {
         url number title updatedAt headRefName body
-        repository { name }
+        repository { name nameWithOwner }
         author { login }
         reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { nodes { createdAt author { login } } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
@@ -24,9 +24,14 @@ query($q: String!) {
 }
 """
 
-BOARD_MINE_QUERY = ('is:issue assignee:@me -status:"QA Done","Qa Done Prod","Invalid",'
-                    '"Stage Done","Dev Deployed"')
-BOARD_READY_QUERY = f'is:issue status:"{config.READY_STATUS}"'
+def _mine_query(p: dict) -> str:
+    """My open work on one board: leaves out its finished statuses."""
+    fin = p["statuses"].get("finished") or p["statuses"].get("done") or []
+    return "is:issue assignee:@me" + (" -status:" + ",".join(json.dumps(x) for x in fin) if fin else "")
+
+
+def _ready_query(p: dict) -> str:
+    return f'is:issue status:{json.dumps(p["statuses"]["ready"])}'
 
 
 # How long each kind of GitHub read may be reused from the shared cache (ghcache): the board
@@ -75,24 +80,60 @@ class Live:
     def me(self) -> str:
         return _run(["gh", "api", "user", "--jq", ".login"]).strip()
 
-    def _board(self, query: str) -> list:
-        out = _run(["gh", "project", "item-list", str(config.PROJECT), "--owner", config.OWNER,
-                    "--limit", "500", "--format", "json", "--query", query])
-        return json.loads(out)["items"]
+    def project_items(self, reqs: list, max_pages: int = 20) -> dict:
+        """Items of every (alias, project, filter) at once: one GraphQL call per page round,
+        every project and filter in it; later rounds only for the ones with more pages.
+        Each item carries its project's key."""
+        from . import board
+        pending = {alias: (p, flt, None) for alias, p, flt in reqs}
+        out: dict = {alias: [] for alias, _, _ in reqs}
+        for _ in range(max_pages):
+            if not pending:
+                break
+            query, variables = board.items_query([(a, p, f, c) for a, (p, f, c) in pending.items()])
+            args = ["gh", "api", "graphql", "-f", f"query={query}"]
+            for k, v in variables.items():
+                args += ["-f", f"{k}={v}"]
+            data = json.loads(_run(args)).get("data") or {}
+            for alias in list(pending):
+                p, flt, _ = pending[alias]
+                items, cursor = board.items_page(data, alias)
+                key = config.project_key(p)
+                out[alias] += [dict(it, project=key) for it in items]
+                if cursor:
+                    pending[alias] = (p, flt, cursor)
+                else:
+                    del pending[alias]
+        return out
+
+    def board_mine_ready(self) -> "tuple[list, list]":
+        """My open issues and the ready ones, on every board, in one round of GraphQL."""
+        ps = config.projects()
+        got = self.project_items([(f"m{i}", p, _mine_query(p)) for i, p in enumerate(ps)] +
+                                 [(f"r{i}", p, _ready_query(p)) for i, p in enumerate(ps)])
+        mine = [it for i in range(len(ps)) for it in got[f"m{i}"]]
+        ready = [it for i in range(len(ps)) for it in got[f"r{i}"]]
+        return mine, ready
 
     def board_mine(self) -> list:
-        return self._board(BOARD_MINE_QUERY)
+        return self.board_mine_ready()[0]
 
     def board_ready(self) -> list:
-        return self._board(BOARD_READY_QUERY)
+        return self.board_mine_ready()[1]
 
     def board_sprint(self, query: str = config.BOARD_SPRINT_QUERY) -> list:
-        return self._board(query)
+        ps = config.projects()
+        got = self.project_items([(f"b{i}", p, query) for i, p in enumerate(ps)])
+        return [it for i in range(len(ps)) for it in got[f"b{i}"]]
 
     def sprints(self) -> list:
         from . import board
-        out = json.loads(_run(["gh", "api", "graphql", "-f", f"query={board.SPRINTS_QUERY}"]))
-        return board.parse_sprints(out.get("data") or {})
+        ps = config.projects()
+        query = board.sprints_query(ps)
+        if not query:
+            return []
+        out = json.loads(_run(["gh", "api", "graphql", "-f", f"query={query}"]))
+        return board.parse_sprints(out.get("data") or {}, ps)
 
     def pr_details(self, urls: list) -> dict:
         from . import board
@@ -106,11 +147,20 @@ class Live:
         out = _run(["gh", "api", "graphql", "-f", f"q={q}", "-f", f"query={PR_QUERY}"])
         return json.loads(out)["data"]["search"]["nodes"]
 
+    def _owners_qualifier(self) -> str:
+        """org:a user:b ... for every owner of a selected repo or board (GitHub ORs them)."""
+        owners = {}
+        for r in config.repos():
+            owners.setdefault(r.split("/", 1)[0], "org" if config.OWNER_TYPE != "user" or r.split("/", 1)[0] != config.OWNER else "user")
+        for p in config.projects():
+            owners.setdefault(p["owner"], "user" if p["ownerType"] == "user" else "org")
+        return " ".join(f"{k}:{o}" for o, k in owners.items()) or config.OWNER_QUALIFIER
+
     def prs_mine(self) -> list:
-        return self._prs(f"{config.OWNER_QUALIFIER} is:pr is:open author:@me")
+        return self._prs(f"{self._owners_qualifier()} is:pr is:open author:@me")
 
     def prs_review(self) -> list:
-        return self._prs(f"{config.OWNER_QUALIFIER} is:pr is:open review-requested:@me")
+        return self._prs(f"{self._owners_qualifier()} is:pr is:open review-requested:@me")
 
     def agents(self) -> list:
         return json.loads(_run(["claude", "agents", "--json"]))
@@ -153,6 +203,7 @@ class Fixtures:
     def me(self) -> str: return (self.dir / "me.txt").read_text().strip()
     def board_mine(self) -> list: return self._json("board_mine.json")
     def board_ready(self) -> list: return self._json("board_ready.json")
+    def board_mine_ready(self) -> "tuple[list, list]": return self.board_mine(), self.board_ready()
     def board_sprint(self, query: str = "") -> list: return self._json("board_sprint.json")
     def sprints(self) -> list: return self._json("sprints.json")
     def pr_details(self, urls: list) -> dict: return self._json("board_prs.json")

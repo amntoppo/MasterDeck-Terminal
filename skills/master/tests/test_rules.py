@@ -104,7 +104,7 @@ class MasterOffTest(unittest.TestCase):
         self.assertNotIn("master-agent", prompt)
         self.assertNotIn("SendMessage", prompt)
         self.assertIn("ask the user for instructions here", prompt)
-        self.assertTrue(prompt.endswith(rules.REPLY_SOLO.format(n=981)))
+        self.assertTrue(prompt.endswith(rules.REPLY_SOLO.format(n="#981")))
         config.CONFIG["masterEnabled"] = True
         self.assertIn("tell master-agent", rules._assign(issue(981, "To Do"))["target"]["spawn"]["prompt"])
 
@@ -154,7 +154,7 @@ class StaleAndOrphanTest(unittest.TestCase):
         self.assertEqual((c["kind"], c["source"], c["target"]),
                          ("STALE", "stale:id-p:2026-09-24T09:59:00Z", {"session": "p"}))
         self.assertTrue(c["message"].startswith("#939: status check from master-agent — where does this issue stand?"))
-        self.assertTrue(c["message"].endswith(rules.REPLY.format(n=939)))
+        self.assertTrue(c["message"].endswith(rules.REPLY.format(n="#939")))
 
     def test_not_stale_when_recent_moved_no_prev_or_not_in_dev(self):
         prev = snap(sessions=[sess("p", 939, head="h1")])
@@ -185,13 +185,13 @@ class StaleAndOrphanTest(unittest.TestCase):
 
 class ReplyTemplateTest(unittest.TestCase):
     def test_reply_template_offers_question(self):
-        text = rules.REPLY.format(n=939)
+        text = rules.REPLY.format(n="#939")
         self.assertIn("'#939: done'", text)
         self.assertIn("'#939: blocked — <reason>'", text)
         self.assertIn("'#939: question — <question>'", text)
 
     def test_reply_template_asks_user_directly_and_offers_answered(self):
-        text = rules.REPLY.format(n=939)
+        text = rules.REPLY.format(n="#939")
         self.assertIn("ask the user directly in this session", text)
         self.assertIn("wait for the answer from either place", text)
         self.assertIn("'#939: answered — <answer>'", text)

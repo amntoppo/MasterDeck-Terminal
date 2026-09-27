@@ -50,6 +50,15 @@ DEFAULTS: dict = {
     # False: no master-agent session. MasterDeck and the CLI still work; new sessions report to
     # the user in their own session instead of messaging master.
     "masterEnabled": True,
+    # Several repositories and project boards. Repos are "owner/name"; each project carries its own
+    # status field, options, columns and status meanings. Empty lists mean the single issueRepo and
+    # project above (configs from before). The first repo is the primary one: a bare issue number
+    # (#12, in the ledger and babysit-ticket's state) means an issue there. allRepos/allProjects:
+    # the user chose "Select all" (every repo counts, not only the listed ones).
+    "repos": [],
+    "allRepos": False,
+    "projects": [],
+    "allProjects": False,
 }
 
 
@@ -82,6 +91,83 @@ def load(path: "Path | None" = None) -> dict:
 
 def is_configured(cfg: dict) -> bool:
     return bool(cfg.get("owner") and cfg.get("issueRepo"))
+
+
+REPO_RE = r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}"
+
+
+def primary_repo(cfg: "dict | None" = None) -> str:
+    """owner/name of the primary issue repo: bare issue numbers mean an issue there."""
+    cfg = cfg or CONFIG
+    return f"{cfg['owner']}/{cfg['issueRepo']}" if cfg.get("owner") and cfg.get("issueRepo") else ""
+
+
+def repos(cfg: "dict | None" = None) -> list:
+    """The selected repositories (owner/name), primary first."""
+    import re
+    cfg = cfg or CONFIG
+    listed = [r for r in cfg.get("repos") or [] if isinstance(r, str) and re.fullmatch(REPO_RE, r)]
+    prim = primary_repo(cfg)
+    out = ([prim] if prim else []) + [r for r in listed if r.lower() != prim.lower()]
+    return out
+
+
+def repo_allowed(repo: "str | None", cfg: "dict | None" = None) -> bool:
+    """Is a ticket in this repo one of ours? Every repo when the user selected all."""
+    cfg = cfg or CONFIG
+    if not repo or cfg.get("allRepos"):
+        return True
+    return repo.lower() in {r.lower() for r in repos(cfg)}
+
+
+def _project(p: dict, cfg: dict) -> "dict | None":
+    if not isinstance(p, dict) or not isinstance(p.get("number"), int) or p["number"] <= 0:
+        return None
+    owner = p.get("owner") or cfg.get("owner")
+    if not owner:
+        return None
+    return {
+        "owner": owner,
+        "ownerType": "user" if p.get("ownerType") == "user" else "organization",
+        "number": p["number"],
+        "id": p.get("id") or "",
+        "title": p.get("title") or f"Project {p['number']}",
+        "statusField": p.get("statusField") or "Status",
+        "statusFieldId": p.get("statusFieldId") or "",
+        "statusOptions": dict(p.get("statusOptions") or {}),
+        "columns": list(p.get("columns") or []),
+        "statuses": _merge(DEFAULTS["statuses"], p.get("statuses") or {}),
+        "sprintField": p.get("sprintField") if isinstance(p.get("sprintField"), str) else "Sprint",
+    }
+
+
+def projects(cfg: "dict | None" = None) -> list:
+    """The selected project boards, each with its own statuses. Older configs: the one project."""
+    cfg = cfg or CONFIG
+    listed = [x for x in (_project(p, cfg) for p in cfg.get("projects") or []) if x]
+    if listed:
+        return listed
+    if int(cfg.get("project") or 0) > 0:
+        legacy = _project({"owner": cfg.get("owner"), "ownerType": cfg.get("ownerType"), "number": int(cfg["project"]),
+                           "id": cfg.get("projectId"), "statusFieldId": cfg.get("statusFieldId"),
+                           "statusOptions": cfg.get("statusOptions"), "columns": cfg.get("columns"),
+                           "statuses": cfg.get("statuses"), "sprintField": cfg.get("sprintField")}, cfg)
+        return [legacy] if legacy else []
+    return []
+
+
+def project_key(p: dict) -> str:
+    return f"{p['owner']}/{p['number']}"
+
+
+def project_by_key(key: "str | None", cfg: "dict | None" = None) -> "dict | None":
+    return next((p for p in projects(cfg) if project_key(p) == key), None)
+
+
+def statuses_for(key: "str | None") -> dict:
+    """A project's status meanings; the global ones for items with no known project."""
+    p = project_by_key(key)
+    return p["statuses"] if p else STATUSES
 
 
 def rank(cfg: dict, status: str) -> int:

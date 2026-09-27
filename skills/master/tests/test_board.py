@@ -79,13 +79,14 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(b["columns"][:5], config.BOARD_COLUMNS[:5])
         self.assertEqual(b["columns"][-1], "Weird New Status")
         c = b["cards"][0]
-        self.assertEqual(c["prs"], [{"url": EXPO + "137", "repo": "mobile-app", "number": 137,
+        self.assertEqual((c["repo"], c["project"]), ("acme/tracker", None))
+        self.assertEqual(c["prs"], [{"url": EXPO + "137", "owner": "acme", "repo": "mobile-app", "number": 137,
                                      "state": "OPEN", "ci": "success", "unresolved": 1}])
         self.assertIsNone(b["cards"][3]["status"])
 
     def test_unresolved_pr_is_kept_with_null_state(self):
         b = board.build([item(1, "In Dev", [BACK + "9"])], {}, NOW)
-        self.assertEqual(b["cards"][0]["prs"][0], {"url": BACK + "9", "repo": "api-server", "number": 9,
+        self.assertEqual(b["cards"][0]["prs"][0], {"url": BACK + "9", "owner": "acme", "repo": "api-server", "number": 9,
                                                    "state": None, "ci": None, "unresolved": 0})
 
 
@@ -146,14 +147,46 @@ class SprintAndFieldsTest(unittest.TestCase):
         self.assertEqual((bare["labels"], bare["milestone"], bare["type"]), ([], None, None))
 
     def test_parse_sprints(self):
-        data = {"organization": {"projectV2": {"field": {"configuration": {
-            "iterations": [{"id": "b", "title": "Sprint 6", "startDate": "2026-09-21", "duration": 14},
-                           {"id": "c", "title": "Sprint 7", "startDate": "2026-10-05", "duration": 14}],
-            "completedIterations": [{"id": "a", "title": "Sprint 5", "startDate": "2026-09-07", "duration": 14}]}}}}}
-        got = board.parse_sprints(data)
+        ps = [{"owner": "acme", "ownerType": "organization", "number": 1, "sprintField": "Sprint"},
+              {"owner": "acme", "ownerType": "organization", "number": 2, "sprintField": "Sprint"}]
+        data = {"o0": {
+            "p0": {"field": {"configuration": {
+                "iterations": [{"id": "b", "title": "Sprint 6", "startDate": "2026-09-21", "duration": 14},
+                               {"id": "c", "title": "Sprint 7", "startDate": "2026-10-05", "duration": 14}],
+                "completedIterations": [{"id": "a", "title": "Sprint 5", "startDate": "2026-09-07", "duration": 14}]}}},
+            # A second board with a sprint of the same title: one sprint, both boards.
+            "p1": {"field": {"configuration": {"iterations": [{"id": "x", "title": "Sprint 6", "startDate": "2026-09-21", "duration": 14}],
+                                              "completedIterations": []}}}}}
+        got = board.parse_sprints(data, ps)
         self.assertEqual([s["title"] for s in got], ["Sprint 7", "Sprint 6", "Sprint 5"])
         self.assertEqual([s["completed"] for s in got], [False, False, True])
-        self.assertEqual(board.parse_sprints({}), [])
+        self.assertEqual(got[1]["projects"], ["acme/1", "acme/2"])
+        self.assertEqual(board.parse_sprints({}, ps), [])
+
+    def test_items_query_batches_boards_and_filters(self):
+        ps = [{"owner": "acme", "ownerType": "organization", "number": 1, "statusField": "Status", "sprintField": "Sprint"},
+              {"owner": "bob", "ownerType": "user", "number": 3, "statusField": "Stage", "sprintField": ""}]
+        q, v = board.items_query([("a", ps[0], "is:issue", None), ("b", ps[0], "assignee:@me", "CUR"), ("c", ps[1], "is:issue", None)])
+        self.assertIn('organization(login: "acme")', q)
+        self.assertIn('user(login: "bob")', q)
+        self.assertEqual(q.count("projectV2(number: 1)"), 2)
+        self.assertIn('fieldValueByName(name: "Stage")', q)
+        self.assertEqual(v, {"q_a": "is:issue", "q_b": "assignee:@me", "c_b": "CUR", "q_c": "is:issue"})
+
+    def test_items_page_reads_issues_and_cursor(self):
+        data = {"o0": {"a": {"items": {"pageInfo": {"hasNextPage": True, "endCursor": "X"}, "nodes": [
+            {"status": {"name": "In Dev"}, "sprint": {"title": "S6", "startDate": "2026-09-21", "duration": 14},
+             "content": {"__typename": "Issue", "number": 5, "title": "T", "url": "u", "repository": {"nameWithOwner": "acme/api"},
+                         "assignees": {"nodes": [{"login": "me"}]}, "labels": {"nodes": [{"name": "bug"}]}, "milestone": None,
+                         "issueType": {"name": "Bug"}, "closedByPullRequestsReferences": {"nodes": [{"url": "p"}]}}},
+            {"content": {"__typename": "DraftIssue"}}]}}}}
+        items, cursor = board.items_page(data, "a")
+        self.assertEqual(cursor, "X")
+        self.assertEqual(items[0], {"content": {"type": "Issue", "number": 5, "title": "T", "url": "u", "repository": "acme/api"},
+                                    "status": "In Dev", "sprint": {"title": "S6", "startDate": "2026-09-21", "duration": 14},
+                                    "assignees": ["me"], "labels": ["bug"], "milestone": None, "issue type": "Bug",
+                                    "linked pull requests": ["p"]})
+        self.assertEqual(items[1]["content"]["type"], "DraftIssue")
 
 
 class DraftAssignDirectTest(unittest.TestCase):

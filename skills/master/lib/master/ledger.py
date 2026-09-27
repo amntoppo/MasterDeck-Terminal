@@ -104,12 +104,14 @@ def locked(path: Path | None = None):
 
 
 def add(led: dict, *, kind: str, issue: int, source: str, target: dict,
-        message: str, summary: str, now: str) -> dict | None:
-    key = (kind, issue, source)
-    if any((p["kind"], p["issue"], p["source"]) == key for p in led["proposals"]):
+        message: str, summary: str, now: str, repo: "str | None" = None) -> dict | None:
+    """`repo` (owner/name) only for an issue outside the primary repo: records for the primary
+    repo keep just the number, as before."""
+    key = (kind, issue, repo or None, source)
+    if any((p["kind"], p["issue"], p.get("repo") or None, p["source"]) == key for p in led["proposals"]):
         return None
     p = {
-        "id": led["next_id"], "kind": kind, "issue": issue, "source": source,
+        "id": led["next_id"], "kind": kind, "issue": issue, **({"repo": repo} if repo else {}), "source": source,
         "target": target, "message": message, "summary": summary,
         "status": "proposed", "created_at": now, "decided_at": None,
         "sent_at": None, "closed_at": None, "note": None,

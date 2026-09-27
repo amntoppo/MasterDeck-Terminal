@@ -28,11 +28,12 @@ def build(src, *, now_iso: str, today: date, master_name: str = config.MASTER_NA
             return None
 
     # Before setup (no owner/repo) there is nothing to ask GitHub; sessions still work.
-    has_repo = bool(config.OWNER and config.ISSUE_REPO)
-    has_board = has_repo and config.PROJECT > 0
+    has_repo = bool(config.repos())
+    has_board = bool(config.projects())
     me = guard("gh", src.me, None)
-    mine = guard("board", src.board_mine, []) if has_board else []
-    ready = guard("board", src.board_ready, []) if has_board else []
+    # Both lists, every board, in one round of GitHub calls.
+    both = getattr(src, "board_mine_ready", None) or (lambda: (src.board_mine(), src.board_ready()))
+    mine, ready = guard("board", both, ([], [])) if has_board else ([], [])
     prs_mine = guard("prs", src.prs_mine, []) if has_repo else []
     prs_review = guard("prs", src.prs_review, []) if has_repo else []
     agents = guard("agents", src.agents, [])
