@@ -301,6 +301,10 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 /* Start dialog */
 .dialog textarea.system { min-height: 150px; color: var(--muted); }
 .dialog textarea.instructions { min-height: 110px; }
+.dialog textarea.desc { min-height: 120px; }
+.dialog label.check { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; color: var(--text); cursor: pointer; }
+.dialog label.check input { width: auto; margin: 0; }
+.dialog textarea.desc.off { color: var(--muted); }
 .dialog code { font-family: var(--mono); background: var(--bg-3); padding: 1px 5px; border-radius: 4px; }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--bg-3); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

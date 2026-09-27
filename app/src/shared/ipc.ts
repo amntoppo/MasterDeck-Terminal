@@ -82,6 +82,7 @@ export const CH = {
   linkSession: 'session:link',
   setSprint: 'board:sprint',
   prSummary: 'pr:summary',
+  issueBody: 'issue:body',
   assignIssue: 'issue:assign',
   defaultModel: 'models:default',
   startHere: 'session:startHere',
@@ -153,6 +154,8 @@ export interface DeckApi {
   reject(id: number): Promise<CliResult>
   draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
   setSprint(sprint: string): void
+  /** The GitHub description of an issue, for the Start session dialog. */
+  issueBody(ticket: Ticket): Promise<{ ok: true; body: string } | { ok: false; message: string }>
   prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>
   /** Resume a session that runs in another terminal as a background session here. */
   startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult>

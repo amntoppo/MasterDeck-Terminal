@@ -412,6 +412,10 @@ function registerIpc(): void {
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))
   ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url))
+  ipcMain.handle(CH.issueBody, (_e, ticket: unknown) => {
+    const t = asTicket(ticket)
+    return t ? github.issueBody(t) : { ok: false, message: 'bad ticket' }
+  })
   ipcMain.handle(CH.assignIssue, async (_e, issue: unknown, login: string, current: string[]) => {
     const t = asTicket(issue)
     if (!t) return { ok: false, message: 'bad issue' }

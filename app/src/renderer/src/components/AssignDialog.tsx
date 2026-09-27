@@ -44,6 +44,27 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   const past = state.pastSessions[ticketKey(issue.repo, issue.number)] ?? []
   const [resuming, setResuming] = useState<string | null>(null)
   const instructionsRef = useRef<HTMLTextAreaElement>(null)
+  // The ticket's GitHub description: null while loading; editable, and sent when `useDesc` is on.
+  const [desc, setDesc] = useState<string | null>(null)
+  const [descError, setDescError] = useState<string | null>(null)
+  const [useDesc, setUseDesc] = useState(true)
+  useEffect(() => {
+    let alive = true
+    void deck()
+      .issueBody(ticketOf(issue))
+      .then((r) => {
+        if (!alive) return
+        if (r.ok) setDesc(r.body)
+        else {
+          setDesc('')
+          setDescError(r.message)
+        }
+      })
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issue.number, issue.repo])
 
   useEffect(() => {
     let alive = true
@@ -96,7 +117,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
   }, [onClose])
 
   const nameOk = NAME_RE.test(name)
-  const prompt = composePrompt(system, instructions)
+  const prompt = composePrompt(system, instructions, useDesc ? desc ?? '' : '')
   const promptOk = prompt.length > 0 && !prompt.startsWith('-')
 
   const start = () => {
@@ -176,6 +197,25 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
                 </option>
               ))}
             </select>
+            <div className="label-row">
+              <label>Ticket description</label>
+              <span style={{ flex: 1 }} />
+              <label className="check" title="Send the description (as edited here) with the first instructions">
+                <input type="checkbox" checked={useDesc && !!desc?.trim()} disabled={!desc?.trim()} onChange={(e) => setUseDesc(e.target.checked)} />
+                Include as instructions
+              </label>
+            </div>
+            {desc === null ? (
+              <div className="meta">Loading the description from GitHub…</div>
+            ) : (
+              <textarea
+                className={`desc${useDesc && desc.trim() ? '' : ' off'}`}
+                value={desc}
+                placeholder={descError ? `Could not load the description: ${descError}` : 'This ticket has no description.'}
+                onChange={(e) => setDesc(e.target.value)}
+                spellCheck={false}
+              />
+            )}
             <label>System prompt</label>
             <textarea className="system" value={system} onChange={(e) => setSystem(e.target.value)} spellCheck={false} />
             <div className="label-row">
@@ -229,7 +269,7 @@ export function AssignDialog({ issue, state, onClose, onStart, onLink, initialIn
               }}
             />
             <div className="meta" style={{ marginTop: 6 }}>
-              {instructions.trim()
+              {instructions.trim() || (useDesc && desc?.trim())
                 ? 'Sent after the system prompt; the session follows these instead of stopping to ask.'
                 : 'Empty: the session sets up, then asks you for instructions.'}{' '}
               Starts in <code className="mono">{draft.cwd}</code>.

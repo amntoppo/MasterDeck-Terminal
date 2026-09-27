@@ -43,6 +43,13 @@ export class GitHub {
     return r.stdout.split('\n').map((l) => l.trim()).filter((l) => LOGIN.test(l))
   }
 
+  /** An issue's description (its body), '' when it has none; cached for 5 minutes. */
+  async issueBody(t: Ticket): Promise<{ ok: true; body: string } | { ok: false; message: string }> {
+    const r = await this.api([`${issueRepoPath(t.repo)}/issues/${t.number}`, '--jq', '.body // ""'], 300)
+    if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) || `could not read ${ticketLabel(t.repo, t.number)}` }
+    return { ok: true, body: r.stdout.replace(/\r\n/g, '\n').trim() }
+  }
+
   async prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }> {
     const id = parsePrUrl(url)
     if (!id) return { ok: false, message: `not a PR URL: ${url}` }

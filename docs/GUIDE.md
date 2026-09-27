@@ -43,6 +43,10 @@ part of the app does.
 Clicking a ticket with no session (a card on the board, an issue in the ⌘K palette, or **Start…** on
 an ASSIGN card in Needs you) opens the **Start** dialog:
 
+- **Ticket description:** the issue's body from GitHub, editable. With **Include as instructions**
+  ticked (the default), your edited copy is sent after the system prompt, and the session works from
+  it instead of stopping to ask. Untick it to leave the description out; your edits don't change the
+  issue on GitHub.
 - **System prompt:** master's ASSIGN text (babysit-ticket, worktree, reply protocol), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
   follows them instead of stopping to ask.
