@@ -24,7 +24,8 @@ function short(c: string): string {
  */
 export function WorkflowView({ state }: { state: AppState }) {
   const [data, setData] = useState<Data | null>(null)
-  const [adding, setAdding] = useState<StageId | null>(null)
+  // Which stage has a form open, and for what.
+  const [adding, setAdding] = useState<{ stage: StageId; kind: CustomStep['kind'] } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -87,9 +88,9 @@ export function WorkflowView({ state }: { state: AppState }) {
                 steps={data.steps.filter((x) => STAGES.find((st) => st.trigger === x.trigger)?.id === s.id)}
                 skills={data.skills}
                 masterOn={state.config.masterEnabled}
-                adding={adding === s.id}
+                adding={adding?.stage === s.id ? adding.kind : null}
                 busy={busy}
-                onAdd={() => setAdding(adding === s.id ? null : s.id)}
+                onAdd={(kind) => setAdding(adding?.stage === s.id && adding.kind === kind ? null : { stage: s.id, kind })}
                 onSave={async (step) => (await save([...data.steps, step])) && setAdding(null)}
                 onRemove={(id) => void save(data.steps.filter((x) => x.id !== id))}
               />
@@ -143,9 +144,9 @@ function StageCard(p: {
   steps: CustomStep[]
   skills: { name: string; description: string }[]
   masterOn: boolean
-  adding: boolean
+  adding: CustomStep['kind'] | null
   busy: boolean
-  onAdd: () => void
+  onAdd: (kind: CustomStep['kind']) => void
   onSave: (s: CustomStep) => void
   onRemove: (id: string) => void
 }) {
@@ -180,23 +181,34 @@ function StageCard(p: {
           </div>
         )}
         {p.steps.map((st) => (
-          <div key={st.id} className="custom-step">
-            <span className="ev">your step</span>
-            <span className="grow">
-              <b>{st.skill}</b> <span className="muted">· {st.mode === 'background' ? 'background subagent' : 'in the session'}</span>
-              {st.instructions && <span className="muted"> · {st.instructions}</span>}
-            </span>
+          <div key={st.id} className={`custom-step ${st.kind}`} title={st.instructions}>
+            <span className="ev">{st.kind === 'instruction' ? 'your instruction' : 'your skill'}</span>
+            {st.kind === 'instruction' ? (
+              <span className="grow">{st.instructions}</span>
+            ) : (
+              <span className="grow">
+                <b>{st.skill}</b> <span className="muted">· {st.mode === 'background' ? 'background subagent' : 'in the session'}</span>
+                {st.instructions && <span className="muted"> · {st.instructions}</span>}
+              </span>
+            )}
             <button className="link-btn" disabled={p.busy} onClick={() => p.onRemove(st.id)}>
               Remove
             </button>
           </div>
         ))}
         {trigger && (
-          <button className="add-step" onClick={p.onAdd}>
-            {p.adding ? 'Cancel' : `+ Add a skill · ${trigger.label}`}
-          </button>
+          <div className="add-row">
+            <button className={`add-step ${p.adding === 'skill' ? 'on' : ''}`} onClick={() => p.onAdd('skill')}>
+              {p.adding === 'skill' ? 'Cancel' : '+ Add a skill'}
+            </button>
+            <button className={`add-step ${p.adding === 'instruction' ? 'on' : ''}`} onClick={() => p.onAdd('instruction')}>
+              {p.adding === 'instruction' ? 'Cancel' : '+ Add an instruction'}
+            </button>
+            <span className="muted small">{trigger.label}</span>
+          </div>
         )}
-        {p.adding && trigger && <AddStep trigger={trigger.id} skills={p.skills} busy={p.busy} onSave={p.onSave} />}
+        {p.adding === 'skill' && trigger && <AddStep trigger={trigger.id} skills={p.skills} busy={p.busy} onSave={p.onSave} />}
+        {p.adding === 'instruction' && trigger && <AddInstruction trigger={trigger.id} busy={p.busy} onSave={p.onSave} />}
       </div>
     </div>
   )
@@ -241,6 +253,7 @@ function AddStep({ trigger, skills, busy, onSave }: { trigger: CustomStep['trigg
           onSave({
             id: `${skill.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 24)}-${Math.random().toString(36).slice(2, 6)}`,
             trigger,
+            kind: 'skill',
             skill,
             mode,
             instructions,
@@ -248,6 +261,41 @@ function AddStep({ trigger, skills, busy, onSave }: { trigger: CustomStep['trigg
         }
       >
         {busy ? 'Saving…' : 'Add to the workflow'}
+      </button>
+    </div>
+  )
+}
+
+/** Text the session is given at this point, as is: no skill. Saved when added. */
+function AddInstruction({ trigger, busy, onSave }: { trigger: CustomStep['trigger']; busy: boolean; onSave: (s: CustomStep) => void }) {
+  const [text, setText] = useState('')
+  const add = () => {
+    if (!text.trim() || busy) return
+    onSave({ id: `note-${Math.random().toString(36).slice(2, 8)}`, trigger, kind: 'instruction', skill: '', mode: 'session', instructions: text.trim() })
+  }
+  return (
+    <div className="add-form">
+      <label>Instruction for the session</label>
+      <textarea
+        value={text}
+        autoFocus
+        placeholder="e.g. After pushing, post the preview URL in the PR description."
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) add()
+        }}
+      />
+      <div className="meta">
+        At this point, every session gets it as a note from a hook in <code>~/.claude/settings.json</code> (a backup is kept), once per
+        session{trigger === 'session-start' || trigger === 'linked' ? '' : ' and commit'}.
+      </div>
+      <button
+        className="btn primary"
+        disabled={!text.trim() || busy}
+        title="⌘↵"
+        onClick={add}
+      >
+        {busy ? 'Saving…' : 'Add instruction'}
       </button>
     </div>
   )

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { hookOwner, parseSteps, stageOf, stepCommand, type CustomStep } from './workflow'
 
-const step = (p: Partial<CustomStep>): CustomStep => ({ id: 'deploy-ab12', trigger: 'pr-created', skill: 'my-deploy', mode: 'background', instructions: "Use the 'staging' env.", ...p })
+const step = (p: Partial<CustomStep>): CustomStep => ({ id: 'deploy-ab12', trigger: 'pr-created', kind: 'skill', skill: 'my-deploy', mode: 'background', instructions: "Use the 'staging' env.", ...p })
 
 describe.skipIf(process.platform === 'win32')('custom step hooks', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'wf-'))
@@ -36,7 +36,27 @@ describe.skipIf(process.platform === 'win32')('custom step hooks', () => {
   }, 20_000)
 })
 
+describe.skipIf(process.platform === 'win32')('instruction steps', () => {
+  it('hand the session the text itself, once per session and commit', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'wfi-'))
+    const s = step({ id: 'note-1', trigger: 'after-push', kind: 'instruction', skill: '', mode: 'session', instructions: "After pushing, post the branch's preview URL in the PR." })
+    const input = { session_id: 'i1', tool_input: { command: 'git push -u origin feat/x' }, tool_response: { stdout: '' } }
+    const run = () => execFileSync('bash', ['-c', stepCommand(s)], { cwd: tmp, input: JSON.stringify(input), env: { ...process.env, TMPDIR: tmp }, encoding: 'utf8' })
+    const out = JSON.parse(run())
+    expect(out.hookSpecificOutput.additionalContext).toBe("Workflow instruction (After a git push): After pushing, post the branch's preview URL in the PR.")
+    expect(run()).toBe('')
+  }, 20_000)
+})
+
 describe('workflow model', () => {
+  it('reads instruction steps, and old steps without a kind as skills', () => {
+    const got = parseSteps({ steps: [
+      { id: 'n-1', trigger: 'pr-merged', kind: 'instruction', instructions: 'Delete the preview app.' },
+      { id: 'n-2', trigger: 'pr-merged', kind: 'instruction', instructions: '   ' },
+      { id: 'old-1', trigger: 'pr-created', skill: 'x', mode: 'background', instructions: '' },
+    ] })
+    expect(got.map((x) => [x.id, x.kind, x.skill, x.mode])).toEqual([['n-1', 'instruction', '', 'session'], ['old-1', 'skill', 'x', 'background']])
+  })
   it('reads steps defensively', () => {
     expect(parseSteps({ steps: [step({}), { id: 'BAD ID', trigger: 'pr-created', skill: 'x' }, { id: 'ok-1', trigger: 'nope', skill: 'x' }] })).toEqual([step({})])
   })

@@ -78,8 +78,10 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   your workspace repos' `.claude/settings*.json` and your enabled plugins. **+ Add a skill** attaches any
   skill in `~/.claude/skills` to a stage (session starts, linked to its issue, after a push, before the
   PR, PR created, PR merged): a hook in `~/.claude/settings.json` tells the session to run it at that
-  point, in a background subagent or in the session, with your extra instructions. Steps are kept in
-  `~/.claude/masterdeck/workflow.json`; Remove takes the hook out again.
+  point, in a background subagent or in the session, with your extra instructions. **+ Add an
+  instruction** attaches plain text instead: at that point the session gets it as it is, no skill
+  involved (e.g. after a push: "post the preview URL in the PR description"). Both are saved as soon as
+  they are added, in `~/.claude/masterdeck/workflow.json`; Remove takes the hook out again.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
   session on it, newest first, each with Resume. The links come from babysit-ticket

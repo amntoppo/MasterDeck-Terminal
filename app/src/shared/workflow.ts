@@ -33,6 +33,9 @@ export const TRIGGERS: Trigger[] = [
 export interface CustomStep {
   id: string
   trigger: TriggerId
+  /** skill: run a skill; instruction: hand the session the instructions as they are. */
+  kind: 'skill' | 'instruction'
+  /** The skill to run ('' for an instruction). */
   skill: string
   /** background: a subagent runs it while the session carries on; session: the session runs it. */
   mode: 'background' | 'session'
@@ -45,6 +48,7 @@ export const STEP_MARK = 'masterdeck-workflow:'
 export function stepNote(s: CustomStep): string {
   const t = TRIGGERS.find((x) => x.id === s.trigger)
   const extra = s.instructions.trim() ? ` ${s.instructions.trim().replace(/\s+/g, ' ')}` : ''
+  if (s.kind === 'instruction') return `Workflow instruction (${t?.label ?? s.trigger}):${extra}`
   if (s.mode === 'session')
     return `Workflow step (${t?.label ?? s.trigger}): now use the ${s.skill} skill for this session's work.${extra} Then carry on with what you were doing.`
   return (
@@ -98,14 +102,25 @@ export function parseSteps(raw: unknown): CustomStep[] {
   const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { steps?: unknown }).steps) ? (raw as { steps: unknown[] }).steps : []
   return list
     .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-    .filter((x) => typeof x.id === 'string' && /^[a-z0-9-]{1,40}$/.test(x.id) && TRIGGERS.some((t) => t.id === x.trigger) && typeof x.skill === 'string' && /^[\w:.-]{1,80}$/.test(x.skill))
-    .map((x) => ({
-      id: x.id as string,
-      trigger: x.trigger as TriggerId,
-      skill: x.skill as string,
-      mode: x.mode === 'session' ? 'session' : 'background',
-      instructions: typeof x.instructions === 'string' ? x.instructions.slice(0, 1000) : '',
-    }))
+    .filter((x) => typeof x.id === 'string' && /^[a-z0-9-]{1,40}$/.test(x.id) && TRIGGERS.some((t) => t.id === x.trigger))
+    // A skill step needs a skill; an instruction step needs its text.
+    .filter((x) =>
+      x.kind === 'instruction'
+        ? typeof x.instructions === 'string' && x.instructions.trim() !== ''
+        : typeof x.skill === 'string' && /^[\w:.-]{1,80}$/.test(x.skill),
+    )
+    .map((x): CustomStep => {
+      const instruction = x.kind === 'instruction'
+      return {
+        id: x.id as string,
+        trigger: x.trigger as TriggerId,
+        kind: instruction ? 'instruction' : 'skill',
+        skill: instruction ? '' : (x.skill as string),
+        // An instruction is handed to the session itself.
+        mode: instruction || x.mode === 'session' ? 'session' : 'background',
+        instructions: typeof x.instructions === 'string' ? x.instructions.slice(0, 2000) : '',
+      }
+    })
 }
 
 /** A hook Claude Code runs, wherever it is defined. */

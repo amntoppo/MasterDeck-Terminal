@@ -175,6 +175,11 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .src-project { border-color: rgba(106, 169, 255, .5); color: var(--accent); }
 .add-step { align-self: flex-start; background: none; border: 1px dashed var(--line); border-radius: 6px; color: var(--accent); font-size: 12px; padding: 4px 10px; cursor: pointer; }
 .add-step:hover { border-color: var(--accent); }
+.add-step.on { border-style: solid; border-color: var(--accent); }
+.add-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.add-form textarea { background: var(--bg-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 6px 8px; font: 12px/1.45 var(--mono); min-height: 64px; resize: vertical; outline: none; }
+.add-form textarea:focus { border-color: var(--accent); }
+.custom-step.instruction { border-color: var(--green); }
 .add-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); max-width: 640px; }
 .add-form input { background: var(--bg-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
 .add-form .btn { align-self: flex-start; }
