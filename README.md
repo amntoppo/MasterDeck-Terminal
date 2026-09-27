@@ -69,10 +69,12 @@ Or build it yourself (see [Develop](#develop)).
       installed.
    2. **GitHub account.** Pick one of the accounts `gh` is logged in to; the choice becomes `gh`'s active
       account, which MasterDeck, master and your sessions share.
-   3. **Organization.** Pick the organization (or your user) and the repository that holds your issues,
-      then your project board. MasterDeck reads the board's statuses and guesses what each means (ready,
-      in progress, PR raised, done); adjust the guesses if they are wrong. No board: you still get issues,
-      PRs and sessions.
+   3. **Repos & boards.** One read lists every organization `gh` can reach, with its repositories and
+      project boards. Tick the repositories whose issues you work on and the boards that track them (or
+      **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).
+      MasterDeck reads each board's statuses and guesses what each means (ready, in progress, PR raised,
+      done); adjust the guesses per board if they are wrong. No board: you still get issues, PRs and
+      sessions. Settings → GitHub & board shows the same step.
    4. **Workspace.** The folder master and new shells start in, where your repos are, and whether to
       use a master-agent.
 
@@ -103,8 +105,10 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | Field | Meaning |
 |---|---|
 | `owner`, `ownerType` | GitHub organization or user that owns your repos and board |
-| `issueRepo` | Repository that holds the issues |
-| `project`, `projectId`, `statusFieldId`, `statusOptions` | The GitHub Projects (v2) board and its Status field; filled in by Setup (`0` = no board) |
+| `issueRepo` | The primary repository: a plain issue number (`#12`) means an issue there |
+| `repos`, `allRepos` | Every selected repository (`owner/name`, primary first); `allRepos: true` after "Select all" |
+| `projects`, `allProjects` | Every selected board, each with its own `statusField`, `statusFieldId`, `statusOptions`, `columns`, `statuses` and `sprintField` |
+| `project`, `projectId`, `statusFieldId`, `statusOptions` | The first board (kept for older readers); `0` = no board |
 | `columns` | The board's statuses, in order |
 | `statuses.ready` / `inProgress` / `prRaised` / `devDone` | The status for new work, work in progress, a PR opened, and PRs merged |
 | `statuses.done` / `finished` / `assignable` / `resumable` / `blocked` | Status sets: not new work; hidden from pick lists; master may assign; a session may resume; blocked |

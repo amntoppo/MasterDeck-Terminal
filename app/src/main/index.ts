@@ -347,6 +347,7 @@ function registerIpc(): void {
       ...(orgs.code !== 0 ? { error: `organizations: ${(orgs.stderr || orgs.stdout).trim().slice(0, 200)}` } : {}),
     }
   })
+  ipcMain.handle(CH.configDetectAll, () => cli.configDetectAll())
   ipcMain.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === 'string' ? cli.configDetect(owner.trim(), typeof project === 'number' ? project : undefined) : { ok: false, message: 'owner required' },
   )

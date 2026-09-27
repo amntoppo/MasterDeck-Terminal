@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, pickPr, reviewName, UNASSIGNED } from './boardFilter'
+import { applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
 const card = (p: Partial<BoardCard>): BoardCard => ({ number: 1, title: 'T', url: '', status: 'In Dev', prs: [], assignees: [], labels: [], milestone: null, type: null, ...p })
@@ -75,5 +75,42 @@ describe('composeReviewPrompt', () => {
   })
   it('appends the instructions', () => {
     expect(composeReviewPrompt(t, 'Focus on the web bell.').endsWith("## The user's review instructions\n\nFocus on the web bell.")).toBe(true)
+  })
+})
+
+describe('repos and boards', () => {
+  const mixed = [
+    card({ number: 1, repo: null, project: 'acme/1', status: 'In Dev' }),
+    card({ number: 1, repo: 'acme/api', project: 'acme/2', status: 'Doing' }),
+    card({ number: 2, repo: 'acme/web', project: 'acme/2', status: 'Backlog' }),
+  ]
+  const b: Board = {
+    ...board(mixed),
+    columns: ['To Do', 'In Dev', 'Backlog', 'Doing'],
+    projects: [
+      { key: 'acme/1', title: 'Delivery', columns: ['To Do', 'In Dev'] },
+      { key: 'acme/2', title: 'Platform', columns: ['Backlog', 'Doing'] },
+    ],
+  }
+  const f = { ...defaultFilters(null) }
+
+  it('filters by repo and by board; empty means all', () => {
+    expect(applyFilters(b, f).cards).toHaveLength(3)
+    expect(applyFilters(b, { ...f, repos: ['acme/api', 'ACME/web'] }).cards.map((c) => c.repo)).toEqual(['acme/api', 'acme/web'])
+    expect(applyFilters(b, { ...f, projects: ['acme/2'] }).cards.map((c) => c.number)).toEqual([1, 2])
+  })
+
+  it('a board filter shows only those boards columns', () => {
+    expect(applyFilters(b, { ...f, projects: ['acme/2'] }).columns).toEqual(['Backlog', 'Doing'])
+    expect(applyFilters(b, f).columns).toEqual(b.columns)
+  })
+
+  it('offers the selected repos and those on cards, once each', () => {
+    expect(repoOptions(b, ['acme/tracker', 'ACME/API'])).toEqual(['acme/tracker', 'ACME/API', 'acme/web'])
+  })
+
+  it('older saved filters get the new fields', () => {
+    expect(normalizeFilters({ assignees: ['x'], labels: ['bug'] } as never, 'me')).toMatchObject({ assignees: ['x'], labels: ['bug'], repos: [], projects: [] })
+    expect(normalizeFilters(null, 'me').assignees).toEqual(['me'])
   })
 })

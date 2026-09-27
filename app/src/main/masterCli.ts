@@ -43,6 +43,18 @@ export class MasterCli {
     }
   }
 
+  /** `master config detect --all`: every owner, their repos and boards, in two GraphQL calls. */
+  async configDetectAll(): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+    // Fresh from GitHub: the shared cache is not per account, and Setup may have just switched it.
+    const r = await this.exec(['config', 'detect', '--all'], undefined, 120_000, true)
+    if (r.code !== 0) return { ok: false, message: message(r) }
+    try {
+      return { ok: true, data: JSON.parse(r.stdout) }
+    } catch {
+      return { ok: false, message: 'config detect printed invalid JSON' }
+    }
+  }
+
   /** `master config save`: merge these settings into ~/.claude/master/config.json. */
   configSave(patch: unknown): Promise<CliResult> {
     return this.write(['config', 'save'], JSON.stringify(patch ?? {}))

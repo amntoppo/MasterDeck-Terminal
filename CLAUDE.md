@@ -81,6 +81,9 @@ buttons; it does not go through macOS window drag regions.
   `; & | (`), with heredoc bodies stripped (`runsOrExit` in `shared/workflow.ts`); otherwise text
   written to a file that mentions `gh pr create` fires them.
 - **Shell scripts run under macOS bash 3.2**: write `${var}` before non-ASCII text (`"$chip…"` breaks).
+- **Tickets are (repo, number)** (`shared/ticket.ts`, Python `refs.py`). The primary repo (`issueRepo`)
+  keeps bare numbers in every record (ledger, babysit-ticket state, snapshot), so older readers still
+  work; other repos add a `repo` field. Compare with `ticketKey`/`sameTicket`, never `.number` alone.
 - **Claude session ids change on resume**; the background id (first 8 chars) does not. Key per-session
   data by `Session.key` where it must survive a resume.
 - **Transcripts** repeat each assistant message on several lines (same `message.id`): count usage once

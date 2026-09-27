@@ -254,6 +254,15 @@ with a Kanban board of your issues in the current sprint, in the project's colum
 columns from your "ready" status to "dev done" always show; other columns appear when one of your
 cards is in them.
 
+- **Several repos and boards:** the board shows the tickets of every repository and board chosen in
+  Setup (Repos & boards; or Settings → GitHub & board), fetched in one GraphQL query for all boards
+  (plus one for their PRs). A ticket is a repo and a number: `#12` in the primary repository, `api#12`
+  in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
+  all keep the repo). A card moves only within its own board's columns.
+- **Tabs:** **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
+  same fetched board. **Repos** and **Boards** filters (with **Select all**) pick what a tab shows; with
+  some boards picked, only their columns show. Tabs and their filters are remembered.
+
 - **Badge:** the Claude task state for the issue, first match wins: ❓ Question, ⛔ Blocked, ✋ Needs
   input, ⏳ Onboarding (approved or still setting up), ⚙️ Working, then where its session's PR
   stands (🟣 Merged, 🔁 Rework, 👍 Approved, ✏️ Changes Requested, ❌ CI Failing, 👀 Ready for Review,

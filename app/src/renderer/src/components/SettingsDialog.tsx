@@ -26,7 +26,18 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           {state.config.configured ? (
             <span>
               <code>{state.config.owner}/{state.config.issueRepo}</code>
-              {state.config.project ? ` · project #${state.config.project}` : ' · no board'}
+              {state.config.allRepos
+                ? ' · all repositories'
+                : state.config.repos.length > 1
+                  ? ` + ${state.config.repos.length - 1} more repo${state.config.repos.length === 2 ? '' : 's'}`
+                  : ''}
+              {state.config.allProjects
+                ? ' · all boards'
+                : state.config.projects.length > 1
+                  ? ` · ${state.config.projects.length} boards`
+                  : state.config.projects.length === 1
+                    ? ` · ${state.config.projects[0].title}`
+                    : ' · no board'}
             </span>
           ) : (
             <span className="bad">Not set up</span>

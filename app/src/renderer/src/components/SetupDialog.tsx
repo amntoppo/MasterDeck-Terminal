@@ -1,32 +1,15 @@
 import { useEffect, useState } from 'react'
 import { claudeInstall } from '@shared/install'
-import type { AppConfig, StatusMap } from '@shared/appConfig'
+import { projectKey, type AppConfig, type ProjectConfig, type StatusMap } from '@shared/appConfig'
+import { parseDetectAll, type DetectAll } from '@shared/detect'
 import { hasProjectScope, type GhAccount } from '@shared/ghAuth'
 import type { SetupTool } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 import { TerminalView } from './TerminalView'
 
-interface Detected {
-  owner: string
-  ownerType?: 'organization' | 'user'
-  repos?: string[]
-  projects?: { number: number; title: string; id: string }[]
-  projectsError?: string
-  error?: string
-  board?: {
-    project: number
-    projectId: string
-    statusFieldId: string
-    statusOptions: Record<string, string>
-    columns: string[]
-    statuses: StatusMap
-    sprintField: string
-    error?: string
-  }
-}
 
-const STEPS = ['Tools', 'GitHub account', 'Organization', 'Workspace'] as const
+const STEPS = ['Tools', 'GitHub account', 'Repos & boards', 'Workspace'] as const
 
 const INSTALLER_PANE = 'setup:installer'
 
@@ -104,16 +87,49 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   }
   const account = accounts?.find((a) => a.login === login) ?? null
 
-  // Step 3: owner, issue repository, board and what its statuses mean.
-  const [owners, setOwners] = useState<string[] | null>(null)
-  const [owner, setOwner] = useState(cfg.owner)
-  const [det, setDet] = useState<Detected | null>(null)
-  const [detecting, setDetecting] = useState(false)
-  const [issueRepo, setIssueRepo] = useState(cfg.issueRepo)
-  const [project, setProject] = useState<number>(cfg.project)
-  const [board, setBoard] = useState<Detected['board'] | null>(
-    cfg.project ? { project: cfg.project, projectId: cfg.projectId, statusFieldId: cfg.statusFieldId, statusOptions: cfg.statusOptions, columns: cfg.columns, statuses: cfg.statuses, sprintField: cfg.sprintField } : null,
-  )
+  // Step 3: the repos and boards to follow (every org gh can reach), which repo is primary, and
+  // what each board's statuses mean.
+  const [found, setFound] = useState<DetectAll | null>(null)
+  const [finding, setFinding] = useState(false)
+  const [repos, setRepos] = useState<string[]>(() => cfg.repos)
+  const [allRepos, setAllRepos] = useState(cfg.allRepos)
+  const [primary, setPrimary] = useState(() => (cfg.owner && cfg.issueRepo ? `${cfg.owner}/${cfg.issueRepo}` : ''))
+  const [boards, setBoards] = useState<Record<string, ProjectConfig>>(() => Object.fromEntries(cfg.projects.map((p) => [projectKey(p), p])))
+  const [allBoards, setAllBoards] = useState(cfg.allProjects)
+  const [repoSearch, setRepoSearch] = useState('')
+
+  const loadFound = async () => {
+    setFinding(true)
+    setMsg(null)
+    const r = await deck().configDetectAll()
+    setFinding(false)
+    if (!r.ok) return setMsg(r.message)
+    const d = parseDetectAll(r.data)
+    setFound(d)
+    if (d.error) setMsg(d.error)
+    const every = d.owners.flatMap((o) => o.repos.map((x) => x.repo))
+    const everyBoard = d.owners.flatMap((o) => o.projects)
+    // Boards already chosen take GitHub's current title, ids and columns, keeping what the user
+    // said their statuses mean.
+    const fresh = (p: ProjectConfig): ProjectConfig => {
+      const had = boards[projectKey(p)]
+      return had ? { ...p, statuses: had.statuses } : p
+    }
+    setBoards((cur) => Object.fromEntries(Object.entries(cur).map(([k, b]) => [k, everyBoard.find((p) => projectKey(p) === k) ? fresh(everyBoard.find((p) => projectKey(p) === k)!) : b])))
+    // "Select all" last time: everything there is now, including repos and boards added since.
+    if (allRepos) setRepos(every)
+    if (allBoards) setBoards(Object.fromEntries(everyBoard.map((p) => [projectKey(p), fresh(p)])))
+    // First setup: start from the repo with the most open issues (usually the tracker) and its owner's boards.
+    if (!repos.length && !allRepos) {
+      const top = d.owners.flatMap((o) => o.repos).sort((a, b) => b.openIssues - a.openIssues)[0]
+      if (top) {
+        setRepos([top.repo])
+        setPrimary(top.repo)
+        const own = everyBoard.filter((p) => p.owner === top.repo.split('/')[0])
+        if (own.length === 1 && !Object.keys(boards).length) setBoards({ [projectKey(own[0])]: own[0] })
+      }
+    }
+  }
 
   // Step 4.
   // A fresh install starts from the folder master would use anyway.
@@ -128,74 +144,6 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const detect = async (o: string, p?: number): Promise<Detected | null> => {
-    if (!o) return null
-    setDetecting(true)
-    setMsg(null)
-    const r = await deck().configDetect(o, p)
-    setDetecting(false)
-    if (!r.ok) {
-      setMsg(r.message)
-      return null
-    }
-    const d = r.data as Detected
-    if (d.error) {
-      setMsg(d.error)
-      return null
-    }
-    setDet(d)
-    if (p) {
-      setBoard(d.board ?? null)
-      if (d.board?.error) setMsg(d.board.error)
-    }
-    return d
-  }
-
-  const resetBelowOwner = () => {
-    setIssueRepo('')
-    setProject(0)
-    setBoard(null)
-    setDet(null)
-  }
-
-  const loadOwners = async () => {
-    setOwners(null)
-    const r = await deck().ghOwners()
-    const list = r.user ? [r.user, ...r.orgs] : r.orgs
-    setOwners(list)
-    if (r.error && !r.user) setMsg(r.error)
-    // Keep the saved owner when this account can see it; otherwise start from the account itself.
-    const o = list.includes(owner) ? owner : (r.user ?? list[0] ?? '')
-    if (o !== owner) resetBelowOwner()
-    setOwner(o)
-    if (!o) return
-    const d = await detect(o)
-    // An account often owns no repositories itself (they live in its organizations): then start
-    // from the first organization that has some, unless an owner was saved before.
-    if (d && !d.repos?.length && o === r.user && !list.includes(cfg.owner)) {
-      for (const org of r.orgs) {
-        const od = await detect(org)
-        if (od?.repos?.length) {
-          setOwner(org)
-          return
-        }
-      }
-      setOwner(o)
-      void detect(o)
-    }
-  }
-
-  const pickOwner = (o: string) => {
-    setOwner(o)
-    resetBelowOwner()
-    void detect(o)
-  }
-  const pickProject = (n: number) => {
-    setProject(n)
-    setBoard(null)
-    if (n) void detect(owner, n)
-  }
-
   const go = async (to: number) => {
     setMsg(null)
     if (to === 1 && accounts === null) void loadAccounts()
@@ -207,29 +155,57 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         setBusy(false)
         if (!r.ok) return setMsg(r.message)
         setAccounts((cur) => cur?.map((a) => ({ ...a, active: a.login === account.login })) ?? cur)
-        void loadOwners()
-      } else if (owners === null) void loadOwners()
+        void loadFound()
+      } else if (found === null) void loadFound()
     }
     setStep(to)
   }
 
-  const st = board?.statuses
-  const setSt = (patch: Partial<StatusMap>) => board && setBoard({ ...board, statuses: { ...board.statuses, ...patch } })
-  const toggle = (k: 'done' | 'finished' | 'assignable' | 'resumable' | 'blocked', col: string) =>
-    st && setSt({ [k]: st[k].includes(col) ? st[k].filter((c) => c !== col) : [...st[k], col] })
+  const selectedRepos = allRepos ? (found ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : repos) : repos
+  const primaryRepo = selectedRepos.includes(primary) ? primary : (selectedRepos[0] ?? '')
+  const toggleRepo = (r: string) => {
+    setAllRepos(false)
+    setRepos(repos.includes(r) ? repos.filter((x) => x !== r) : [...repos, r])
+  }
+  const toggleBoard = (p: ProjectConfig) => {
+    setAllBoards(false)
+    const k = projectKey(p)
+    const next = { ...boards }
+    if (next[k]) delete next[k]
+    else next[k] = p
+    setBoards(next)
+  }
+  const setStatuses = (k: string, st: StatusMap) => setBoards((b) => (b[k] ? { ...b, [k]: { ...b[k], statuses: st } } : b))
 
   const save = async () => {
-    if (!owner.trim() || !issueRepo.trim()) return setMsg('Go back and pick the organization and the repository that holds your issues.')
+    if (!primaryRepo) return setMsg('Go back and pick at least one repository.')
     setBusy(true)
     setMsg(null)
+    const [owner, issueRepo] = primaryRepo.split('/')
+    const ownerType = found?.owners.find((o) => o.login === owner)?.type ?? (owner === cfg.owner ? cfg.ownerType : 'organization')
+    const list = Object.values(boards)
     const patch: Partial<AppConfig> & Record<string, unknown> = {
-      owner: owner.trim(),
-      ownerType: det?.ownerType ?? cfg.ownerType,
-      issueRepo: issueRepo.trim(),
-      project: board ? project : 0,
-      ...(board
-        ? { projectId: board.projectId, statusFieldId: board.statusFieldId, statusOptions: board.statusOptions, columns: board.columns, statuses: board.statuses, sprintField: board.sprintField }
-        : {}),
+      owner,
+      ownerType,
+      issueRepo,
+      repos: [primaryRepo, ...selectedRepos.filter((r) => r !== primaryRepo)],
+      allRepos,
+      projects: list.map((p) => ({
+        owner: p.owner,
+        ownerType: p.ownerType,
+        number: p.number,
+        id: p.id,
+        title: p.title,
+        statusField: p.statusField,
+        statusFieldId: p.statusFieldId,
+        statusOptions: p.statusOptions,
+        columns: p.columns,
+        statuses: p.statuses,
+        sprintField: p.sprintField,
+      })),
+      allProjects: allBoards,
+      // No board: issues and PRs only (the first board otherwise fills these, see master config save).
+      ...(list.length ? {} : { project: 0 }),
       ...(workspace ? { workspace } : {}),
       masterEnabled: useMaster,
     }
@@ -242,8 +218,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     onClose()
   }
 
-  const repos = det?.owner === owner ? (det.repos ?? []) : []
-  const canNext = step === 0 ? toolsDone : step === 1 ? !!account && account.ok : step === 2 ? !!owner && !!issueRepo && !detecting : true
+  const canNext = step === 0 ? toolsDone : step === 1 ? !!account && account.ok : step === 2 ? !!primaryRepo && !finding : true
   const Spin = ({ text }: { text: string }) => (
     <div className="tool-row wait">
       <span className="tool-mark">
@@ -390,109 +365,116 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
         {step === 2 && (
           <>
-            <label>Organization or user</label>
-            {owners === null ? (
-              <Spin text={`Loading ${login || 'your account'}'s organizations…`} />
-            ) : (
-              <select className="fsel full" value={owner} onChange={(e) => pickOwner(e.target.value)}>
-                {!owners.includes(owner) && <option value="">Choose…</option>}
-                {owners.map((o, i) => (
-                  <option key={o} value={o}>
-                    {o}
-                    {i === 0 ? ' (you)' : ''}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {owner && owners !== null && (
+            <div className="meta">
+              The repositories whose issues you work on, and the project boards that track them. Tickets from all of them show on
+              the Board and can start sessions; each board keeps its own statuses.{' '}
+              <button className="link-btn" onClick={() => void loadFound()} disabled={finding}>
+                Look again
+              </button>
+            </div>
+            {finding && !found ? (
+              <Spin text="Reading your organizations, repositories and boards from GitHub…" />
+            ) : found ? (
               <>
-                <label>Repository that holds your issues</label>
-                {detecting && !repos.length ? (
-                  <Spin text={`Loading ${owner}'s repositories…`} />
-                ) : det?.owner === owner && !repos.length ? (
-                  <div className="meta">
-                    {owner} has no repositories of its own{owners && owners.length > 1 ? ': your issues are probably in one of your organizations above.' : '.'}
-                  </div>
-                ) : (
-                  <select className="fsel full" value={issueRepo} onChange={(e) => setIssueRepo(e.target.value)}>
-                    {!issueRepo && <option value="">Choose a repository…</option>}
-                    {issueRepo && !repos.includes(issueRepo) && <option value={issueRepo}>{issueRepo}</option>}
-                    {repos.map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
-                )}
-              </>
-            )}
-
-            {issueRepo && owners !== null && (
-              <>
-                <label>Project board (GitHub Projects)</label>
-                <select className="fsel full" value={project} onChange={(e) => pickProject(Number(e.target.value))}>
-                  <option value={0}>No board (issues and PRs only)</option>
-                  {project > 0 && !(det?.projects ?? []).some((p) => p.number === project) && <option value={project}>#{project}</option>}
-                  {(det?.projects ?? []).map((p) => (
-                    <option key={p.number} value={p.number}>
-                      #{p.number} {p.title}
-                    </option>
-                  ))}
-                </select>
-                {det?.projectsError && <div className="meta">{det.projectsError}</div>}
-                {detecting && project > 0 && !board && <Spin text="Reading the board's statuses…" />}
-                {board && st && (
-                  <>
-                    <label>What each status means</label>
-                    <div className="status-map">
-                      {(
-                        [
-                          ['ready', 'Ready to pick up'],
-                          ['inProgress', 'Session starts work'],
-                          ['prRaised', 'PR opened'],
-                          ['devDone', 'PRs merged'],
-                        ] as [keyof StatusMap, string][]
-                      ).map(([k, label]) => (
-                        <div key={k} className="status-row">
-                          <span>{label}</span>
-                          <select className="fsel" value={st[k] as string} onChange={(e) => setSt({ [k]: e.target.value })}>
-                            {board.columns.map((c) => (
-                              <option key={c}>{c}</option>
-                            ))}
-                          </select>
+                <div className="pick-head">
+                  <label>Repositories</label>
+                  <label className="mpick-row pick-all">
+                    <input
+                      type="checkbox"
+                      checked={allRepos}
+                      onChange={(e) => {
+                        setAllRepos(e.target.checked)
+                        setRepos(e.target.checked ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : primaryRepo ? [primaryRepo] : [])
+                      }}
+                    />
+                    <span>Select all</span>
+                  </label>
+                  <span className="grow" />
+                  <input className="pick-search" placeholder="Filter repositories" value={repoSearch} onChange={(e) => setRepoSearch(e.target.value)} />
+                </div>
+                <div className="pick-list">
+                  {found.owners.map((o) => {
+                    // Chosen ones first, then the ones with the most open issues.
+                    const rs = o.repos
+                      .filter((x) => !repoSearch || x.repo.toLowerCase().includes(repoSearch.toLowerCase()))
+                      .sort((a, b) => Number(selectedRepos.includes(b.repo)) - Number(selectedRepos.includes(a.repo)) || b.openIssues - a.openIssues || a.repo.localeCompare(b.repo))
+                    if (!rs.length) return null
+                    return (
+                      <div key={o.login} className="pick-group">
+                        <div className="pick-owner">
+                          {o.login}
+                          <span className="muted"> · {o.type === 'user' ? 'you' : 'organization'}</span>
                         </div>
+                        {rs.map((x) => (
+                          <label key={x.repo} className="mpick-row pick-row">
+                            <input type="checkbox" checked={selectedRepos.includes(x.repo)} onChange={() => toggleRepo(x.repo)} />
+                            <span className="grow">{x.repo.split('/')[1]}</span>
+                            <span className="muted">{x.openIssues ? `${x.openIssues} open issue${x.openIssues === 1 ? '' : 's'}` : 'no open issues'}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  {!found.owners.some((o) => o.repos.length) && <div className="meta">No repositories found for this account.</div>}
+                </div>
+                {selectedRepos.length > 1 && (
+                  <>
+                    <label>Primary repository (where a plain #12 points)</label>
+                    <select className="fsel full" value={primaryRepo} onChange={(e) => setPrimary(e.target.value)}>
+                      {selectedRepos.map((r) => (
+                        <option key={r}>{r}</option>
                       ))}
-                    </div>
-                    <details className="status-more">
-                      <summary>More: which statuses count as done, assignable, resumable, blocked</summary>
-                      <table className="tbl">
-                        <thead>
-                          <tr>
-                            <th>Status</th>
-                            <th title="Not offered as new work">Done</th>
-                            <th title="Hidden from a session's pick list">Finished</th>
-                            <th title="master may assign it">Assignable</th>
-                            <th title="A session may resume it">Resumable</th>
-                            <th>Blocked</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {board.columns.map((c) => (
-                            <tr key={c}>
-                              <td>{c}</td>
-                              {(['done', 'finished', 'assignable', 'resumable', 'blocked'] as const).map((k) => (
-                                <td key={k}>
-                                  <input type="checkbox" checked={st[k].includes(c)} onChange={() => toggle(k, c)} />
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </details>
+                    </select>
                   </>
                 )}
+
+                <div className="pick-head">
+                  <label>Project boards</label>
+                  <label className="mpick-row pick-all">
+                    <input
+                      type="checkbox"
+                      checked={allBoards}
+                      onChange={(e) => {
+                        setAllBoards(e.target.checked)
+                        setBoards(e.target.checked ? Object.fromEntries(found.owners.flatMap((o) => o.projects).map((p) => [projectKey(p), boards[projectKey(p)] ?? p])) : {})
+                      }}
+                    />
+                    <span>Select all</span>
+                  </label>
+                </div>
+                <div className="pick-list">
+                  {found.owners.flatMap((o) => o.projects).length === 0 && (
+                    <div className="meta">No project boards found (gh needs the project scope: <code>gh auth refresh -s project</code>). Issues and PRs still work.</div>
+                  )}
+                  {found.owners
+                    .filter((o) => o.projects.length)
+                    .map((o) => (
+                      <div key={o.login} className="pick-group">
+                        <div className="pick-owner">{o.login}</div>
+                        {o.projects.map((p) => (
+                          <label key={projectKey(p)} className="mpick-row pick-row">
+                            <input type="checkbox" checked={!!boards[projectKey(p)]} onChange={() => toggleBoard(p)} />
+                            <span className="grow">
+                              #{p.number} {p.title}
+                            </span>
+                            <span className="muted">
+                              {p.items} item{p.items === 1 ? '' : 's'}
+                              {p.sprintField ? ` · sprints (${p.sprintField})` : ''}
+                              {p.error ? ` · ${p.error}` : ''}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                </div>
+                {Object.values(boards).map((p) => (
+                  <details key={projectKey(p)} className="status-more">
+                    <summary>What the statuses on {p.title} mean</summary>
+                    <StatusEditor columns={p.columns} statuses={p.statuses} onChange={(st) => setStatuses(projectKey(p), st)} />
+                  </details>
+                ))}
               </>
-            )}
+            ) : null}
           </>
         )}
 
@@ -550,5 +532,59 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         </div>
       </div>
     </div>
+  )
+}
+
+/** What each of a board's statuses means: the four moves, and which count as done, assignable... */
+function StatusEditor({ columns, statuses: st, onChange }: { columns: string[]; statuses: StatusMap; onChange: (s: StatusMap) => void }) {
+  const set = (patch: Partial<StatusMap>) => onChange({ ...st, ...patch })
+  const toggle = (k: 'done' | 'finished' | 'assignable' | 'resumable' | 'blocked', col: string) =>
+    set({ [k]: st[k].includes(col) ? st[k].filter((c) => c !== col) : [...st[k], col] })
+  return (
+    <>
+      <div className="status-map">
+        {(
+          [
+            ['ready', 'Ready to pick up'],
+            ['inProgress', 'Session starts work'],
+            ['prRaised', 'PR opened'],
+            ['devDone', 'PRs merged'],
+          ] as [keyof StatusMap, string][]
+        ).map(([k, label]) => (
+          <div key={k} className="status-row">
+            <span>{label}</span>
+            <select className="fsel" value={st[k] as string} onChange={(e) => set({ [k]: e.target.value })}>
+              {columns.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th title="Not offered as new work">Done</th>
+            <th title="Hidden from a session's pick list">Finished</th>
+            <th title="master may assign it">Assignable</th>
+            <th title="A session may resume it">Resumable</th>
+            <th>Blocked</th>
+          </tr>
+        </thead>
+        <tbody>
+          {columns.map((c) => (
+            <tr key={c}>
+              <td>{c}</td>
+              {(['done', 'finished', 'assignable', 'resumable', 'blocked'] as const).map((k) => (
+                <td key={k}>
+                  <input type="checkbox" checked={st[k].includes(c)} onChange={() => toggle(k, c)} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   )
 }

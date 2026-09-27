@@ -65,6 +65,7 @@ export const CH = {
   ghSwitch: 'setup:ghSwitch',
   ghOwners: 'setup:ghOwners',
   configDetect: 'config:detect',
+  configDetectAll: 'config:detectAll',
   configSave: 'config:save',
   pickFolder: 'app:pickFolder',
   hooksInstall: 'hooks:install',
@@ -200,6 +201,8 @@ export interface DeckApi {
   ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>
   /** Setup: repos, projects and (for a project) statuses GitHub has for an owner. */
   configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>
+  /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed). */
+  configDetectAll(): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>
   /** Setup: save settings (merged into the config file), then reload everything. */
   configSave(patch: unknown): Promise<CliResult>
   pickFolder(start?: string): Promise<string | null>

@@ -3,7 +3,7 @@ import { fullRepo, ticketKey, ticketLabel, ticketOf } from '@shared/ticket'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cardBadge, cardsIn, visibleColumns } from '@shared/board'
 import type { PastSession } from '@shared/pastSessions'
-import { applyFilters, cardAction, defaultFilters, filterOptions, UNASSIGNED, type FilterState } from '@shared/boardFilter'
+import { applyFilters, cardAction, defaultFilters, filterOptions, normalizeFilters, repoOptions, UNASSIGNED, type BoardTab, type FilterState } from '@shared/boardFilter'
 import { ticketSpend } from '@shared/costs'
 import { sessionForIssue } from '@shared/derive'
 import { formatAgo, formatCost, formatPct, formatRefreshed } from '@shared/format'
@@ -54,6 +54,17 @@ const COLUMN_COLOR: Record<string, string> = {
 }
 
 const FILTERS_KEY = 'boardFilters'
+const TABS_KEY = 'boardTabs'
+const TAB_KEY = 'boardTab'
+
+/** The saved tabs; the first run (or an older version's single filter set) makes one. */
+function loadTabs(me: string | null): BoardTab[] {
+  const saved = load<BoardTab[] | null>(TABS_KEY, null)
+  if (Array.isArray(saved) && saved.length)
+    return saved.filter((t) => t && typeof t.id === 'string').map((t) => ({ id: t.id, name: typeof t.name === 'string' && t.name ? t.name : 'Board', filters: normalizeFilters(t.filters, me) }))
+  const old = load<Partial<FilterState> | null>(FILTERS_KEY, null)
+  return [{ id: 'board-1', name: 'Board', filters: old ? normalizeFilters(old, me) : defaultFilters(me) }]
+}
 
 const GROUP_COLOR: Record<StatusGroup, string> = {
   todo: 'var(--grey)',
@@ -109,17 +120,39 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
     if (back) setPendingMove({ card, to: col })
     else void doMove(card, col)
   }
-  const [filters, setFilters] = useState<FilterState | null>(() => load<FilterState | null>(FILTERS_KEY, null))
   const me = state.me
+  // Tabs: each its own name and filters over the one board fetched from GitHub.
+  const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(me))
+  const [tabId, setTabId] = useState<string>(() => load<string>(TAB_KEY, ''))
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const tab = tabs.find((t) => t.id === tabId) ?? tabs[0]
   // First run: filter to me once my login is known.
+  const [meFilled, setMeFilled] = useState(() => load<BoardTab[] | null>(TABS_KEY, null) !== null || load(FILTERS_KEY, null) !== null)
   useEffect(() => {
-    if (!filters && me) setFilters(defaultFilters(me))
-  }, [filters, me])
-  useEffect(() => {
-    if (filters) save(FILTERS_KEY, filters)
-  }, [filters])
-  const f = filters ?? defaultFilters(me)
+    if (meFilled || !me) return
+    setMeFilled(true)
+    setTabs((ts) => ts.map((t, i) => (i === 0 && t.filters.assignees.length === 0 ? { ...t, filters: { ...t.filters, assignees: [me] } } : t)))
+  }, [me, meFilled])
+  useEffect(() => save(TABS_KEY, tabs), [tabs])
+  useEffect(() => save(TAB_KEY, tab.id), [tab.id])
+  const f = tab.filters
+  const setFilters = (next: FilterState) => setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, filters: next } : t)))
   const set = (patch: Partial<FilterState>) => setFilters({ ...f, ...patch })
+  const addTab = () => {
+    const id = `board-${Date.now().toString(36)}`
+    let n = tabs.length + 1
+    while (tabs.some((t) => t.name === `Board ${n}`)) n++
+    setTabs([...tabs, { id, name: `Board ${n}`, filters: { ...defaultFilters(me), assignees: [] } }])
+    setTabId(id)
+    setRenaming(id)
+  }
+  const closeTab = (id: string) => {
+    const rest = tabs.filter((t) => t.id !== id)
+    if (!rest.length) return
+    setTabs(rest)
+    if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
+  }
+  const renameTab = (id: string, name: string) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, name: name.trim() || t.name } : t)))
 
   const rawBoard = state.board
   const b = useMemo(
@@ -150,10 +183,45 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
 
   const loading = state.boardLoading || state.githubRefreshing || refreshing
   const current = state.sprints.find((s) => !s.completed && inSprint(s.startDate, s.duration, now))
-  const columns = shown ? visibleColumns(shown).filter((c) => !f.hiddenColumns.includes(c)) : []
+  const columns = shown ? visibleColumns(shown, f.projects).filter((c) => !f.hiddenColumns.includes(c)) : []
+  const boards = b?.projects?.length ? b.projects : state.config.projects.map((p) => ({ key: `${p.owner}/${p.number}`, title: p.title, columns: p.columns }))
+  const repos = repoOptions(b, state.config.repos)
 
   return (
     <section className="board-view">
+      <div className="board-tabs" role="tablist">
+        {tabs.map((t) => (
+          <div key={t.id} className={`board-tab ${t.id === tab.id ? 'on' : ''}`} role="tab" aria-selected={t.id === tab.id}>
+            {renaming === t.id ? (
+              <input
+                className="board-tab-name"
+                autoFocus
+                defaultValue={t.name}
+                onBlur={(e) => {
+                  renameTab(t.id, e.target.value)
+                  setRenaming(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'Escape') setRenaming(null)
+                }}
+              />
+            ) : (
+              <button onClick={() => setTabId(t.id)} onDoubleClick={() => setRenaming(t.id)} title="Double-click to rename">
+                {t.name}
+              </button>
+            )}
+            {tabs.length > 1 && (
+              <button className="board-tab-x" title="Close this tab" aria-label={`Close ${t.name}`} onClick={() => closeTab(t.id)}>
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        <button className="board-tab-add" onClick={addTab} title="Another board tab, with its own repos, boards and filters">
+          +
+        </button>
+      </div>
       <header className="board-head">
         <select className="sprint-pick" value={state.selectedSprint} onChange={(e) => deck().setSprint(e.target.value)} title="Sprint">
           <option value="@current">Current sprint{current ? ` (${current.title})` : ''}</option>
@@ -187,6 +255,26 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
       </header>
 
       <div className="filter-bar">
+        {repos.length > 1 && (
+          <MultiPick
+            label="Repos"
+            all="All repos"
+            values={f.repos}
+            options={repos.map((r) => ({ value: r, label: r.split('/')[1] ?? r }))}
+            onChange={(v) => set({ repos: v.length === repos.length ? [] : v })}
+            quick={[{ label: 'Select all', values: [] }]}
+          />
+        )}
+        {boards.length > 1 && (
+          <MultiPick
+            label="Boards"
+            all="All boards"
+            values={f.projects}
+            options={boards.map((p) => ({ value: p.key, label: p.title }))}
+            onChange={(v) => set({ projects: v.length === boards.length ? [] : v, hiddenColumns: [] })}
+            quick={[{ label: 'Select all', values: [] }]}
+          />
+        )}
         <MultiPick
           label="Assignee"
           all="Everyone"
@@ -210,13 +298,13 @@ export function BoardView({ state, onOpenSession, onStart, onPr, onAssign, onSum
         <MultiPick
           label="Columns"
           all="All columns"
-          values={b ? visibleColumns(b).filter((c) => !f.hiddenColumns.includes(c)) : []}
-          options={(b ? visibleColumns(b) : []).map((c) => ({ value: c, label: c }))}
-          onChange={(vis) => set({ hiddenColumns: (b ? visibleColumns(b) : []).filter((c) => !vis.includes(c)) })}
+          values={shown ? visibleColumns(shown, f.projects).filter((c) => !f.hiddenColumns.includes(c)) : []}
+          options={(shown ? visibleColumns(shown, f.projects) : []).map((c) => ({ value: c, label: c }))}
+          onChange={(vis) => set({ hiddenColumns: (shown ? visibleColumns(shown, f.projects) : []).filter((c) => !vis.includes(c)) })}
           invertAll
         />
         <input className="filter search" placeholder="Search title or #number" value={f.search} onChange={(e) => set({ search: e.target.value })} />
-        {(f.labels.length > 0 || f.milestone || f.hasPr !== 'any' || f.search || f.hiddenColumns.length > 0 || f.assignees.join() !== (me ?? '')) && (
+        {(f.labels.length > 0 || f.milestone || f.hasPr !== 'any' || f.search || f.hiddenColumns.length > 0 || f.repos.length > 0 || f.projects.length > 0 || f.assignees.join() !== (me ?? '')) && (
           <button className="link-btn" onClick={() => setFilters(defaultFilters(me))}>
             Reset filters
           </button>

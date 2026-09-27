@@ -1,4 +1,4 @@
-import { ticketLabel, ticketRef } from './ticket'
+import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -13,10 +13,38 @@ export interface FilterState {
   search: string
   /** Columns the user hid. */
   hiddenColumns: string[]
+  /** Repos (owner/name) to show; empty: every repo. */
+  repos: string[]
+  /** Boards (owner/number) to show; empty: every board. */
+  projects: string[]
 }
 
 export function defaultFilters(me: string | null): FilterState {
-  return { assignees: me ? [me] : [], labels: [], milestone: null, hasPr: 'any', search: '', hiddenColumns: [] }
+  return { assignees: me ? [me] : [], labels: [], milestone: null, hasPr: 'any', search: '', hiddenColumns: [], repos: [], projects: [] }
+}
+
+/** Saved filters from an older version lack the newer fields: fill them in. */
+export function normalizeFilters(f: Partial<FilterState> | null | undefined, me: string | null): FilterState {
+  const d = defaultFilters(me)
+  if (!f || typeof f !== 'object') return d
+  const arr = (v: unknown, dflt: string[]) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : dflt)
+  return {
+    assignees: arr(f.assignees, d.assignees),
+    labels: arr(f.labels, []),
+    milestone: typeof f.milestone === 'string' ? f.milestone : null,
+    hasPr: f.hasPr === 'with' || f.hasPr === 'without' ? f.hasPr : 'any',
+    search: typeof f.search === 'string' ? f.search : '',
+    hiddenColumns: arr(f.hiddenColumns, []),
+    repos: arr(f.repos, []),
+    projects: arr(f.projects, []),
+  }
+}
+
+/** A tab of the Board view: its own name and filters (all tabs show the same fetched board). */
+export interface BoardTab {
+  id: string
+  name: string
+  filters: FilterState
 }
 
 export interface FilterOptions {
@@ -40,6 +68,8 @@ export function filterOptions(b: Board, me: string | null, users: string[] = [])
 }
 
 export function matches(c: BoardCard, f: FilterState): boolean {
+  if (f.repos?.length && !f.repos.some((r) => r.toLowerCase() === fullRepo(c.repo).toLowerCase())) return false
+  if (f.projects?.length && (!c.project || !f.projects.includes(c.project))) return false
   if (f.assignees.length) {
     const hit = c.assignees.some((a) => f.assignees.includes(a)) || (c.assignees.length === 0 && f.assignees.includes(UNASSIGNED))
     if (!hit) return false
@@ -53,8 +83,24 @@ export function matches(c: BoardCard, f: FilterState): boolean {
   return true
 }
 
+/** The cards the filters let through; with some boards picked, only those boards' columns. */
 export function applyFilters(b: Board, f: FilterState): Board {
-  return { ...b, cards: b.cards.filter((c) => matches(c, f)) }
+  const cards = b.cards.filter((c) => matches(c, f))
+  const boards = f.projects?.length ? (b.projects ?? []).filter((p) => f.projects.includes(p.key)) : []
+  const columns = boards.length ? [...new Set(boards.flatMap((p) => p.columns))] : b.columns
+  return { ...b, cards, columns }
+}
+
+/** The repos to offer in a board filter: the selected ones and any seen on cards. */
+export function repoOptions(b: Board | null, selected: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const r of [...selected, ...(b?.cards ?? []).map((c) => fullRepo(c.repo))])
+    if (r && !seen.has(r.toLowerCase())) {
+      seen.add(r.toLowerCase())
+      out.push(r)
+    }
+  return out
 }
 
 export type CardAction = 'session' | 'start' | 'pr' | 'assign'

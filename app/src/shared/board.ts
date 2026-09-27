@@ -1,5 +1,5 @@
 import type { PastSession } from './pastSessions'
-import { getConfig, statusRank } from './appConfig'
+import { getConfig, projectKey, statusRank, type StatusMap } from './appConfig'
 import { sessionForIssue } from './derive'
 import { STATUS_TEXT, type PrStage } from './review'
 import { sameTicket, storedRepo, type Ticket } from './ticket'
@@ -8,10 +8,20 @@ import type { Badge, Board, BoardCard, BoardPr, Proposal, Session } from './type
 
 /** Columns shown even when empty: the workflow from "ready" to "dev done", in board order. */
 export function alwaysColumns(c = getConfig()): string[] {
-  const s = c.statuses
-  const want = new Set([...s.assignable.filter((x) => statusRank(x, c) <= statusRank(s.ready, c)), s.ready, s.inProgress, s.prRaised, s.devDone])
-  const inBoard = c.columns.filter((x) => want.has(x))
+  return alwaysFor(c.statuses, c.columns, (x) => statusRank(x, c))
+}
+
+function alwaysFor(s: StatusMap, columns: string[], rank: (x: string) => number): string[] {
+  const want = new Set([...s.assignable.filter((x) => rank(x) <= rank(s.ready)), s.ready, s.inProgress, s.prRaised, s.devDone])
+  const inBoard = columns.filter((x) => want.has(x))
   return inBoard.length ? inBoard : [...want]
+}
+
+/** The always-shown columns of some boards (all selected boards when `projects` is empty). */
+export function alwaysColumnsOf(projects: string[] = [], c = getConfig()): string[] {
+  const boards = c.projects.filter((p) => !projects.length || projects.includes(projectKey(p)))
+  if (!boards.length) return alwaysColumns(c)
+  return [...new Set(boards.flatMap((p) => alwaysFor(p.statuses, p.columns, (x) => statusRank(x, c, projectKey(p)))))]
 }
 export const NO_STATUS = 'No status'
 
@@ -71,11 +81,13 @@ export function parseBoard(raw: unknown): Board | null {
   return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards, projects }
 }
 
-/** Always the five workflow columns; any other only when it has a card; "No status" first when needed. */
-export function visibleColumns(b: Board): string[] {
+/** Always the five workflow columns (of the boards shown: `projects`, empty for all); any other
+ * only when it has a card; "No status" first when needed. */
+export function visibleColumns(b: Board, projects: string[] = []): string[] {
   const used = new Set(b.cards.map((c) => c.status))
-  const cols = b.columns.filter((c) => alwaysColumns().includes(c) || used.has(c))
-  for (const c of alwaysColumns()) if (!cols.includes(c)) cols.push(c)
+  const always = alwaysColumnsOf(projects)
+  const cols = b.columns.filter((c) => always.includes(c) || used.has(c))
+  for (const c of always) if (!cols.includes(c)) cols.push(c)
   for (const s of used) if (s && !cols.includes(s)) cols.push(s)
   return used.has(null) ? [NO_STATUS, ...cols] : cols
 }

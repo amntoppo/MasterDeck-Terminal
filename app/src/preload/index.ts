@@ -54,6 +54,7 @@ const api: DeckApi = {
   ghSwitch: (login) => ipcRenderer.invoke(CH.ghSwitch, login),
   ghOwners: () => ipcRenderer.invoke(CH.ghOwners),
   configDetect: (owner, project) => ipcRenderer.invoke(CH.configDetect, owner, project),
+  configDetectAll: () => ipcRenderer.invoke(CH.configDetectAll),
   configSave: (patch) => ipcRenderer.invoke(CH.configSave, patch),
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
   hooksInstall: (which) => ipcRenderer.invoke(CH.hooksInstall, which),
