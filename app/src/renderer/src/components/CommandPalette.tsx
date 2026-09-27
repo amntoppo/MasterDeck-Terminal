@@ -15,6 +15,7 @@ export type PaletteAction =
   | 'standup'
   | 'sprint-summary'
   | 'settings'
+  | 'skills'
   | 'new-shell'
   | 'start-master'
 
@@ -47,6 +48,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['standup', 'Standup…', "yesterday's commits, PRs and reports"],
   ['sprint-summary', 'Sprint summary…', 'done, in progress, blocked, burndown'],
   ['settings', 'Settings…', 'nudges, budget, context, dock'],
+  ['skills', 'Skills…', 'add or remove skills, automatic hooks'],
   ['new-shell', 'New shell tab', 'terminal'],
   ['start-master', 'Start master-agent', 'when it is not running'],
 ]

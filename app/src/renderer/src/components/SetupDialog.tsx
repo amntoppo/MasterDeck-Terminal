@@ -36,7 +36,8 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 
 /**
  * First-run setup (and Settings → GitHub & board), in four steps: tools, the gh account, the
- * owner / issue repository / board with its statuses, then workspace, master-agent and hooks.
+ * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
+ * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master, babysit-ticket and MasterDeck share.
  */
 export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onClose: () => void; firstRun: boolean }) {
@@ -82,7 +83,6 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   // A fresh install starts from the folder master would use anyway.
   const [workspace, setWorkspace] = useState(cfg.workspace || state.masterWorkspace || '')
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
-  const [hooks, setHooks] = useState({ ticket: state.hooks.ticket || firstRun, pr: state.hooks.pr || firstRun, queue: state.hooks.queue || firstRun, proof: state.hooks.proof })
 
   useEffect(() => {
     checkTools()
@@ -201,13 +201,6 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     if (!r.ok) {
       setBusy(false)
       return setMsg(r.message)
-    }
-    if (hooks.ticket !== state.hooks.ticket || hooks.pr !== state.hooks.pr || hooks.queue !== state.hooks.queue || hooks.proof !== state.hooks.proof) {
-      const h = await deck().hooksInstall(hooks)
-      if (!h.ok) {
-        setBusy(false)
-        return setMsg(`Saved, but hooks: ${h.message}`)
-      }
     }
     setBusy(false)
     onClose()
@@ -442,26 +435,6 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               </span>
             </label>
 
-            <label>Hooks (added to ~/.claude/settings.json; a backup is kept)</label>
-            <label className="mpick-row">
-              <input type="checkbox" checked={hooks.ticket} onChange={(e) => setHooks({ ...hooks, ticket: e.target.checked })} />
-              <span>babysit-ticket: move the board as sessions link, open PRs and merge</span>
-            </label>
-            <label className="mpick-row">
-              <input type="checkbox" checked={hooks.pr} onChange={(e) => setHooks({ ...hooks, pr: e.target.checked })} />
-              <span>babysit-pr: self-review before `gh pr create`, then babysit the PR</span>
-            </label>
-            <label className="mpick-row">
-              <input type="checkbox" checked={hooks.queue} onChange={(e) => setHooks({ ...hooks, queue: e.target.checked })} />
-              <span>queue: `/queue &lt;prompt&gt;` runs the prompt after the current response (and the Queue panel)</span>
-            </label>
-            <label className="mpick-row">
-              <input type="checkbox" checked={hooks.proof} onChange={(e) => setHooks({ ...hooks, proof: e.target.checked })} />
-              <span>
-                babysit-proof: when a PR is about to be created, a background subagent runs the end-to-end tests once, screenshots every
-                step and posts them on the issue; the PR doesn't wait for it
-              </span>
-            </label>
             <div className="meta">
               Saved to <code>{cfg.path || '~/.claude/master/config.json'}</code>, shared with the master and babysit skills.
             </div>

@@ -46,7 +46,10 @@ const PROOF_NOTE =
   'you added. Then carry on here without waiting: create the PR and babysit it as usual. When the subagent reports, give ' +
   'the user the issue comment link, and ask before committing the test files it added.'
 const PROOF_PRE =
-  `input=$(cat); cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) ` +
+  // Only a command that runs gh pr create (at the start of a line, or after ; & | or a parenthesis),
+  // not one that merely mentions it, such as text written to a file.
+  `input=$(cat); cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""'); ` +
+  `printf '%s' "$cmd" | grep -Eq '(^|[;&|(])[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create' || exit 0; case "$cmd" in *'gh pr create'*) ` +
   `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"'); head=$(git rev-parse HEAD 2>/dev/null || echo none); ` +
   `m="\${TMPDIR:-/tmp}/babysit-proof-$sid-$head"; [ -f "$m" ] && exit 0; touch "$m"; ` +
   `jq -n --arg c ${JSON.stringify(PROOF_NOTE)} '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}' ;; esac`

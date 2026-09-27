@@ -23,7 +23,7 @@ import { resolvePaths } from './paths'
 import { PtyManager } from './ptys'
 import { makeRunner } from './run'
 import { Sources } from './sources'
-import { reinstallSkill, syncSkills } from './skills'
+import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } from './skills'
 import { hookStatus, installHooks } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
 
@@ -161,6 +161,16 @@ async function resumeBg(id: string, name: string, cwd: string | null): Promise<C
   const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name) ? ['-n', name] : []
   const r = await run(claudeBin, ['--bg', '--resume', id, ...named], { cwd: cwd && existsSync(cwd) ? cwd : homedir(), timeoutMs: 60_000 })
   return r.code === 0 ? { ok: true, message: name } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+}
+
+/** Which skills the user removed in the Skills popup. */
+const skillsFile = () => join(paths.home, 'skills.json')
+
+/** The hook that belongs to a skill (off when the skill is removed). */
+const SKILL_HOOK: Record<string, keyof HookStatus> = { 'babysit-ticket': 'ticket', 'babysit-pr': 'pr', queue: 'queue', 'babysit-proof': 'proof' }
+
+function refreshSkills(): void {
+  sources.setSkills(syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion(), readRemoved(skillsFile())).skills)
 }
 
 async function startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult> {
@@ -319,7 +329,25 @@ function registerIpc(): void {
   ipcMain.handle(CH.skillReinstall, (_e, name: unknown) => {
     if (typeof name !== 'string') return { ok: false, message: 'bad skill name' }
     const r = reinstallSkill(paths.bundledSkills, paths.skillsDir, name, app.getVersion())
-    sources.setSkills(syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion()).skills)
+    // Added back: no longer one the user removed.
+    if (r.ok) writeRemoved(skillsFile(), readRemoved(skillsFile()).filter((x) => x !== name))
+    refreshSkills()
+    return r
+  })
+  ipcMain.handle(CH.skillRemove, (_e, name: unknown) => {
+    if (typeof name !== 'string') return { ok: false, message: 'bad skill name' }
+    const r = removeSkill(paths.bundledSkills, paths.skillsDir, name)
+    if (r.ok) {
+      writeRemoved(skillsFile(), [...readRemoved(skillsFile()), name])
+      // Its hook would call a script that is gone: turn it off too.
+      const key = SKILL_HOOK[name]
+      const hooks = hookStatus(paths.claudeSettings)
+      if (key && hooks[key]) {
+        installHooks(paths.claudeSettings, paths.home, { ...hooks, [key]: false })
+        sources.setHooks(hookStatus(paths.claudeSettings))
+      }
+    }
+    refreshSkills()
     return r
   })
   ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) => typeof maxAgeMs === 'number' && maxAgeMs > 0 ? sources.refreshTeamPrs(maxAgeMs) : sources.refreshTeamPrs(0, true))
@@ -458,7 +486,7 @@ app.whenReady().then(async () => {
   }
   // Bundled skills: install the missing ones, update our own unmodified copies.
   if (process.env.MASTERDECK_NO_SKILLS !== '1') {
-    const r = syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion())
+    const r = syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion(), readRemoved(skillsFile()))
     for (const e of r.errors) console.error(e)
     sources.setSkills(r.skills)
   }

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { reinstallSkill, skillStatus, syncSkills } from './skills'
+import { readRemoved, reinstallSkill, removeSkill, skillStatus, syncSkills, writeRemoved } from './skills'
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'skills-'))
@@ -45,6 +45,21 @@ describe('skills', () => {
     mkdirSync(join(bundled, 'gamma'))
     writeFileSync(join(bundled, 'gamma', 'SKILL.md'), 'g')
     expect(skillStatus(bundled, target, 'gamma').state).toBe('linked')
+  })
+  it('a removed skill goes to the backup, stays out at launch, and comes back when added', () => {
+    const { bundled, target } = setup()
+    syncSkills(bundled, target, '1.0.0')
+    const name = readdirSync(bundled)[0]
+    expect(removeSkill(bundled, target, name).ok).toBe(true)
+    expect(existsSync(join(target, name))).toBe(false)
+    expect(readdirSync(join(target, '.masterdeck-backup')).some((d) => d.startsWith(name))).toBe(true)
+    const file = join(target, '..', 'masterdeck', 'skills.json')
+    writeRemoved(file, [name])
+    expect(readRemoved(file)).toEqual([name])
+    expect(syncSkills(bundled, target, '1.0.0', readRemoved(file)).skills.find((k) => k.name === name)?.state).toBe('missing')
+    expect(reinstallSkill(bundled, target, name, '1.0.0').ok).toBe(true)
+    expect(skillStatus(bundled, target, name).state).toBe('installed')
+    expect(removeSkill(bundled, target, 'not-ours').ok).toBe(false)
   })
   it('reinstalls on request and keeps the old folder', () => {
     const { bundled, target } = setup()

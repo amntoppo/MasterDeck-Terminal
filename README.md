@@ -59,11 +59,14 @@ Or build it yourself (see [Develop](#develop)).
       then your project board. MasterDeck reads the board's statuses and guesses what each means (ready,
       in progress, PR raised, done); adjust the guesses if they are wrong. No board: you still get issues,
       PRs and sessions.
-   4. **Workspace.** The folder master and new shells start in, where your repos are; whether to use a
-      master-agent; and the **hooks** for `~/.claude/settings.json` (a backup is made first), which let
-      babysit-ticket move the board, babysit-pr step in around `gh pr create`, and `/queue` work.
-      The optional **babysit-proof** hook starts `/babysit-proof` in a background subagent just before
-      a PR is created, so the issue gets the tests' screenshots without holding up the PR.
+   4. **Workspace.** The folder master and new shells start in, where your repos are, and whether to
+      use a master-agent.
+
+   Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the skills: add or remove each
+   one, and choose which run by themselves through a hook in `~/.claude/settings.json` (a backup is
+   made first): babysit-ticket moves the board, babysit-pr steps in around `gh pr create`, `/queue`
+   works, and babysit-proof (off by default) starts `/babysit-proof` in a background subagent just
+   before a PR is created, so the issue gets the tests' screenshots without holding up the PR.
 
    **Skip for now** leaves GitHub unset: sessions work, and the Board and PRs views offer **Connect your
    GitHub**, which opens Setup again.

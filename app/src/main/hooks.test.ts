@@ -37,7 +37,10 @@ describe.skipIf(process.platform === 'win32')('hooks', () => {
     const run = (command: string, sid = 's1') =>
       execFileSync('bash', ['-c', cmd], { cwd: repo, input: JSON.stringify({ session_id: sid, tool_input: { command } }), env: { ...process.env, TMPDIR: d }, encoding: 'utf8' })
     expect(run('git status')).toBe('')
-    const out = JSON.parse(run('gh pr create --fill'))
+    // Mentioned, not run: text written to a file, or a sentence.
+    expect(run("cat > notes.md <<'EOF'\nThen `gh pr create` opens the PR.\nEOF")).toBe('')
+    expect(run('echo "run gh pr create later"')).toBe('')
+    const out = JSON.parse(run('cd sub && gh pr create --fill'))
     expect(out.hookSpecificOutput.hookEventName).toBe('PreToolUse')
     expect(out.hookSpecificOutput.additionalContext).toContain('Agent tool')
     expect(out.hookSpecificOutput.additionalContext).toContain('do not wait for it')

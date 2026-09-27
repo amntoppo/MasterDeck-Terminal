@@ -414,6 +414,14 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 
 /* Setup */
 .dialog.setup { width: min(720px, 94vw); }
+.dialog.skills { width: min(680px, 94vw); }
+.skill-cards { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 60vh; overflow-y: auto; }
+.skill-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); display: flex; flex-direction: column; gap: 4px; }
+.skill-card.off { opacity: .8; border-style: dashed; }
+.skill-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.skill-head code { font-size: 12px; font-weight: 600; }
+.skill-what { font-size: 12px; color: var(--muted); }
+.skill-card .mpick-row { padding: 3px 0; }
 .past { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 .past-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; background: var(--bg); }
 .past-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

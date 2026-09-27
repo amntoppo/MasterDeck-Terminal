@@ -65,6 +65,7 @@ export const CH = {
   pickFolder: 'app:pickFolder',
   hooksInstall: 'hooks:install',
   skillReinstall: 'skills:reinstall',
+  skillRemove: 'skills:remove',
   linkSession: 'session:link',
   setSprint: 'board:sprint',
   prSummary: 'pr:summary',
@@ -189,7 +190,10 @@ export interface DeckApi {
   configSave(patch: unknown): Promise<CliResult>
   pickFolder(start?: string): Promise<string | null>
   hooksInstall(which: HookStatus): Promise<CliResult>
+  /** Install a bundled skill (or replace the copy there); a skill removed before is added back. */
   skillReinstall(name: string): Promise<CliResult>
+  /** Take a bundled skill out of ~/.claude/skills (kept in its backup folder) and keep it out. */
+  skillRemove(name: string): Promise<CliResult>
   /** Link a session to an issue with babysit-ticket (`tt.sh link`). */
   linkSession(issue: number, sessionId: string, cwd: string | null): Promise<CliResult>
   setBoardOpen(open: boolean): void

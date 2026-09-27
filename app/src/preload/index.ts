@@ -57,6 +57,7 @@ const api: DeckApi = {
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
   hooksInstall: (which) => ipcRenderer.invoke(CH.hooksInstall, which),
   skillReinstall: (name) => ipcRenderer.invoke(CH.skillReinstall, name),
+  skillRemove: (name) => ipcRenderer.invoke(CH.skillRemove, name),
   linkSession: (issue, sessionId, cwd) => ipcRenderer.invoke(CH.linkSession, issue, sessionId, cwd),
   setBoardOpen: (open) => ipcRenderer.send(CH.boardOpen, open),
   setFocus: (id) => ipcRenderer.send(CH.setFocus, id),

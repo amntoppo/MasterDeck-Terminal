@@ -21,6 +21,7 @@ import { MasterPane, masterPaneId } from './components/MasterPane'
 import { QueuePanel } from './components/QueuePanel'
 import { ConnectGithub } from './components/ConnectGithub'
 import { RestoreBanner } from './components/RestoreBanner'
+import { SkillsDialog } from './components/SkillsDialog'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { WorkerHeader } from './components/WorkerHeader'
@@ -92,7 +93,7 @@ export function App() {
     return (['terminals', 'board', 'prs', 'costs', 'janitor', 'history'] as View[]).includes(v as View) ? (v as View) : 'terminals'
   })
   const [palette, setPalette] = useState(false)
-  const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'setup' | null>(null)
+  const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'setup' | 'skills' | 'skills-first' | null>(null)
   // First launch without a config: Setup opens once (Skip remembers it; Settings → GitHub & board reopens it).
   const [showFirstRun, setShowFirstRun] = useState(() => !load<boolean>('setupSkipped', false))
   const [startWith, setStartWith] = useState<string | undefined>(undefined)
@@ -347,7 +348,7 @@ export function App() {
     else if (a.startsWith('view:')) setView(a.slice(5) as View)
     else if (a === 'new-shell') openShell()
     else if (a === 'start-master') void deck().masterStart()
-    else setDialog(a as 'broadcast' | 'standup' | 'sprint-summary' | 'settings')
+    else setDialog(a as 'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'skills')
   }
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
   const openPr = (url: string, issue: number | null, title: string) => {
@@ -582,9 +583,21 @@ export function App() {
           state={state}
           firstRun={dialog !== 'setup'}
           onClose={() => {
-            setDialog(null)
+            // After the first-run setup (finished or skipped), the skills come next, once.
+            const first = dialog !== 'setup' && !load<boolean>('skillsShown', false)
+            setDialog(first ? 'skills-first' : null)
             setShowFirstRun(false)
             save('setupSkipped', true)
+          }}
+        />
+      )}
+      {(dialog === 'skills' || dialog === 'skills-first') && (
+        <SkillsDialog
+          state={state}
+          firstRun={dialog === 'skills-first'}
+          onClose={() => {
+            setDialog(null)
+            save('skillsShown', true)
           }}
         />
       )}

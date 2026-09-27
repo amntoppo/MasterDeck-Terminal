@@ -1,19 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/settings'
-import type { AppState, SkillStatus } from '@shared/types'
+import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 
-const SKILL_TEXT: Record<SkillStatus['state'], string> = {
-  installed: 'installed',
-  outdated: 'update pending',
-  modified: 'changed by you',
-  custom: 'your own copy',
-  linked: 'symlink (left alone)',
-  missing: 'not installed',
-}
-
 export function SettingsDialog({ settings, state, onClose, onSetup }: { settings: Settings; state: AppState; onClose: () => void; onSetup: () => void }) {
-  const [skillMsg, setSkillMsg] = useState<string | null>(null)
   const [s, setS] = useState<Settings>(settings)
   const [saved, setSaved] = useState(false)
   useEffect(() => {
@@ -45,29 +35,6 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           <button className="btn" onClick={onSetup}>
             {state.config.configured ? 'Change…' : 'Set up…'}
           </button>
-        </div>
-        <label>Skills (in ~/.claude/skills)</label>
-        <div className="skills-list">
-          {state.skills.map((k) => (
-            <div key={k.name} className="skill-row">
-              <code>{k.name}</code>
-              <span className={k.state === 'installed' ? 'ok' : k.state === 'missing' ? 'bad' : 'muted'}>{SKILL_TEXT[k.state]}</span>
-              <span style={{ flex: 1 }} />
-              {k.state !== 'installed' && (
-                <button
-                  className="link-btn"
-                  title="Replace with the version bundled with MasterDeck; the current folder is kept in ~/.claude/skills/.masterdeck-backup"
-                  onClick={async () => setSkillMsg((await deck().skillReinstall(k.name)).message)}
-                >
-                  {k.state === 'missing' ? 'Install' : 'Replace with bundled'}
-                </button>
-              )}
-            </div>
-          ))}
-          {skillMsg && <div className="muted small">{skillMsg}</div>}
-        </div>
-        <div className="muted small">
-          Hooks: babysit-ticket {state.hooks.ticket ? 'on' : 'off'} · babysit-pr {state.hooks.pr ? 'on' : 'off'} · queue {state.hooks.queue ? 'on' : 'off'} · babysit-proof {state.hooks.proof ? 'on' : 'off'} (change them in GitHub & board)
         </div>
         <label>Nudge a quiet session after (minutes)</label>
         <input type="number" min={1} value={s.idleNudgeMinutes} onChange={num('idleNudgeMinutes')} />

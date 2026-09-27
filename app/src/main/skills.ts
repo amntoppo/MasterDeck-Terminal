@@ -94,13 +94,14 @@ export function skillStatus(bundled: string, target: string, name: string): Skil
  * On launch: install missing skills and update unmodified ones. Returns the status of each and
  * any errors (which never stop the app).
  */
-export function syncSkills(bundled: string, target: string, version: string): { skills: SkillStatus[]; errors: string[] } {
+export function syncSkills(bundled: string, target: string, version: string, removed: string[] = []): { skills: SkillStatus[]; errors: string[] } {
   const errors: string[] = []
   const skills: SkillStatus[] = []
   for (const name of bundledSkillNames(bundled)) {
     let st = skillStatus(bundled, target, name)
     try {
-      if (st.state === 'missing' || st.state === 'outdated') {
+      // A skill the user removed in the Skills popup stays out until they add it back.
+      if ((st.state === 'missing' && !removed.includes(name)) || st.state === 'outdated') {
         mkdirSync(target, { recursive: true })
         const dest = join(target, name)
         if (st.state === 'outdated') renameSync(dest, backupPath(target, name))
@@ -119,6 +120,35 @@ function backupPath(target: string, name: string): string {
   const dir = join(target, '.masterdeck-backup')
   mkdirSync(dir, { recursive: true })
   return join(dir, `${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+}
+
+/** Skills the user removed in the Skills popup (~/.claude/masterdeck/skills.json). */
+export function readRemoved(file: string): string[] {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { removed?: unknown }
+    return Array.isArray(raw.removed) ? raw.removed.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function writeRemoved(file: string, removed: string[]): void {
+  mkdirSync(join(file, '..'), { recursive: true })
+  writeFileSync(file, JSON.stringify({ removed: [...new Set(removed)].sort() }, null, 2) + '\n')
+}
+
+/** Take a skill out of ~/.claude/skills: the folder (or link) moves to the backup folder, never deleted. */
+export function removeSkill(bundled: string, target: string, name: string): { ok: boolean; message: string } {
+  if (!bundledSkillNames(bundled).includes(name)) return { ok: false, message: `no bundled skill named ${name}` }
+  const dest = join(target, name)
+  if (!lstatSync(dest, { throwIfNoEntry: false })) return { ok: true, message: `${name} was not installed` }
+  try {
+    const backup = backupPath(target, name)
+    renameSync(dest, backup)
+    return { ok: true, message: `removed ${name}; the folder is in ${backup}` }
+  } catch (e) {
+    return { ok: false, message: `could not remove ${name}: ${String(e)}` }
+  }
 }
 
 /** Replace an installed skill with the bundled copy; the old folder (or link) is kept as a backup. */

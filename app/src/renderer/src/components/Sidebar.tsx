@@ -132,10 +132,11 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
               ['view:costs', '$', 'Costs', 'Spend and tokens per day, ticket and session'],
               ['view:janitor', '🧹', 'Janitor', 'Clean up worktrees and parked sessions'],
               ['view:history', '🔎', 'History', 'Search every past session and resume one'],
+              ['skills', '🧩', 'Skills', 'Add or remove skills, and choose which run automatically'],
               ['settings', '⚙', 'Settings', 'Nudges, budget, context warning, dock, after a restart'],
             ] as [PaletteAction | 'palette', string, string, string][]
           ).map(([a, icon, label, title]) => (
-            <button key={a} className={`tool ${a === 'palette' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
+            <button key={a} className={`tool ${a === 'palette' || a === 'settings' ? 'wide' : ''} ${view === a.replace('view:', '') ? 'on' : ''}`} title={title} onClick={() => onTool(a as PaletteAction)}>
               {a === 'palette' ? (
                 <>
                   {label} <kbd>{icon}</kbd>
