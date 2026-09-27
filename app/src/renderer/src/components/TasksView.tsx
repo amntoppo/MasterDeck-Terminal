@@ -7,6 +7,7 @@ import { activityOf, LANES, laneOf, STEPS, taskStep, type Lane, type TaskStep } 
 import { sameTicket, ticketLabel } from '@shared/ticket'
 import type { AppState, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
+import { AskPanel } from './AskPanel'
 
 interface Props {
   state: AppState
@@ -128,6 +129,13 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
   const ask = state.asks[s.key]
   const menu = state.menus[s.key]
   const act = activityOf(s)
+  // Something waits on the user: a prompt or menu on its screen, a question in its last message, or
+  // a question or blocker it reported to master. Answered right here, through its Needs-you item
+  // when there is one (so that item resolves too).
+  const pending = s.state === 'needs-input' || !!menu || !!s.asking || status.key === 'question' || status.key === 'blocked'
+  const itemId = pending
+    ? [...state.inbox.open, ...state.inbox.snoozed].find((e) => e.item.sessionKey === s.key && ['input', 'menu', 'question', 'blocked'].includes(e.item.kind))?.item.id
+    : undefined
 
   // What it is doing right now, in one line.
   let now1: string
@@ -141,7 +149,7 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
   else now1 = status.key === 'idle' ? 'Waiting for instructions' : ''
 
   return (
-    <div id={`task-${s.key}`} className={`tv-row tone-${step.tone}`} onDoubleClick={onOpen}>
+    <div id={`task-${s.key}`} className={`tv-row tone-${step.tone} ${pending ? 'has-ask' : ''}`} onDoubleClick={(e) => !(e.target as HTMLElement).closest('.tv-ask') && onOpen()}>
       <div className="tv-main">
         <div className="tv-title">
           {s.issue !== null && (
@@ -171,7 +179,7 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
             </span>
           )}
         </div>
-        {now1 && (
+        {now1 && !pending && (
           <div className="tv-now-text" title={now1}>
             {now1}
           </div>
@@ -206,6 +214,12 @@ function TaskRow({ t, state, now, onOpen, onPr }: { t: Task; state: AppState; no
           Open
         </button>
       </div>
+      {pending && (
+        <div className="tv-ask">
+          <div className="tv-ask-head">{menu ? 'Question on its screen' : s.state === 'needs-input' ? 'Waiting on you' : status.key === 'blocked' ? 'Blocked' : 'Asks you'}</div>
+          <AskPanel session={s} ask={ask} menu={menu} fallback={status.why || null} full={false} itemId={itemId} />
+        </div>
+      )}
     </div>
   )
 }

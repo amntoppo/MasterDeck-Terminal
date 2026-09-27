@@ -722,3 +722,6 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .tv-act.act-working { --tone: var(--green); } .tv-act.act-needs-input, .tv-act.act-question { --tone: var(--red); }
 .tv-act.act-waiting { --tone: #4fd1c5; } .tv-act.act-idle { --tone: var(--amber); }
 .tv-count.lane-idle { color: var(--amber); }
+.tv-ask { grid-column: 1 / -1; margin-top: 2px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); }
+.tv-ask-head { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--red); margin-bottom: 6px; }
+.tv-ask .ask-text { max-height: 220px; overflow-y: auto; }

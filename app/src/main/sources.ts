@@ -1167,7 +1167,8 @@ export class Sources {
       }
       return asks[s.key] ?? null
     }
-    for (const s of sessions) if (s.state === 'needs-input') add(s)
+    // Waiting on a prompt, or its last message asks the user something (the Tasks view answers both).
+    for (const s of sessions) if (s.state === 'needs-input' || s.asking) add(s)
     for (const p of this.proposals) {
       if (p.status !== 'question' && p.status !== 'blocked') continue
       const ask = add(sessionForProposal(p, sessions))

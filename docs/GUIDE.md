@@ -184,7 +184,11 @@ see at a glance where the work stands:
   the tool it runs, or why it waits), when it was last active, its PRs with CI state (click one for
   the PR card), lines changed, cost and context used. Next to the status, a second chip says what
   the session itself is doing when that differs: Working, Waiting, Asked you, or **Idle** (waiting
-  for your next instruction); the header counts the idle ones. **Open** (or a double-click) opens it in
+  for your next instruction); the header counts the idle ones.
+- **Answer from Tasks:** when a session waits on you (a prompt or permission, a menu on its screen,
+  a question in its last message, or a question or blocker it reported to master), its row opens an
+  answer panel: the full question, its options (click one), and a reply box (⌘↵ sends). Answers go
+  through the matching Needs-you item, so that item clears too. **Open** (or a double-click) opens it in
   Terminals.
 
 ## Cost and context
