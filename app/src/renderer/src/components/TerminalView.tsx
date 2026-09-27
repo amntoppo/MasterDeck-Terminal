@@ -5,7 +5,7 @@ import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
 
-const THEME = {
+export const THEME = {
   background: '#0f1117',
   foreground: '#e6e9ef',
   cursor: '#6aa9ff',

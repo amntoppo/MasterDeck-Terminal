@@ -9,6 +9,7 @@ export type PaletteAction =
   | 'view:terminals'
   | 'view:board'
   | 'view:prs'
+  | 'view:canvas'
   | 'view:costs'
   | 'view:janitor'
   | 'view:history'
@@ -43,6 +44,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['view:terminals', 'Go to Terminals', 'view'],
   ['view:board', 'Go to Board View', 'view'],
   ['view:prs', 'Go to PRs', 'my PRs, review queue'],
+  ['view:canvas', 'Go to Canvas', 'all sessions as live mini terminals'],
   ['view:costs', 'Go to Costs', 'spend per day, ticket, session'],
   ['view:janitor', 'Go to Janitor', 'worktrees and parked sessions'],
   ['view:history', 'Search session history', 'full-text over transcripts'],

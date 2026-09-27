@@ -587,6 +587,7 @@ function registerIpc(): void {
   ipcMain.on(CH.ptyWrite, (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
   ipcMain.on(CH.ptyClose, (_e, id: string) => ptys.close(id))
+  ipcMain.handle(CH.ptyPeek, (_e, id: string) => ptys.peek(id))
 }
 
 function createWindow(): void {

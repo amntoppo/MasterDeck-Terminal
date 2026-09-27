@@ -87,6 +87,9 @@ const api: DeckApi = {
   ptyClose: (id) => ipcRenderer.send(CH.ptyClose, id),
   onPtyData: (id, cb) => listen(`${CH.ptyData}:${id}`, cb),
   onPtyExit: (id, cb) => listen(`${CH.ptyExit}:${id}`, cb),
+  ptyPeek: (id) => ipcRenderer.invoke(CH.ptyPeek, id),
+  onPtySize: (id, cb) => listen(`${CH.ptySize}:${id}`, cb),
+  onPtyClosed: (id, cb) => listen(`${CH.ptyClosed}:${id}`, cb),
 }
 
 contextBridge.exposeInMainWorld('deck', api)

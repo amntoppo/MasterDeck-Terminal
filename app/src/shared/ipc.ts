@@ -57,6 +57,9 @@ export const CH = {
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyClose: 'pty:close',
+  ptyPeek: 'pty:peek',
+  ptySize: 'pty:size',
+  ptyClosed: 'pty:closed',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
   confirm: 'app:confirm',
@@ -138,6 +141,9 @@ export interface PtyOpenResult {
   seq: number
   exited: boolean
   message?: string
+  /** The PTY's size, which a mini view copies instead of resizing the PTY. */
+  cols?: number
+  rows?: number
 }
 
 /** The API the preload script exposes as `window.deck`. */
@@ -254,4 +260,9 @@ export interface DeckApi {
   ptyClose(id: string): void
   onPtyData(id: string, cb: (data: string, seq: number) => void): () => void
   onPtyExit(id: string, cb: (code: number) => void): () => void
+  /** An open pane's output and size, or null; starts nothing (Canvas mini views). */
+  ptyPeek(id: string): Promise<PtyOpenResult | null>
+  onPtySize(id: string, cb: (cols: number, rows: number) => void): () => void
+  /** The pane was closed (its tab closed, or Reattach). */
+  onPtyClosed(id: string, cb: () => void): () => void
 }

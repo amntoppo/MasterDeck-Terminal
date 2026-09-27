@@ -15,7 +15,7 @@ import { OfferRow } from './PrsView'
 import { AskPanel } from './AskPanel'
 import { Markdown } from './SummaryPanel'
 
-export type View = 'terminals' | 'board' | 'prs' | 'costs' | 'janitor' | 'history' | 'workflow'
+export type View = 'terminals' | 'board' | 'prs' | 'canvas' | 'costs' | 'janitor' | 'history' | 'workflow'
 
 interface Props {
   state: AppState
@@ -145,6 +145,7 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
             ['terminals', 'Terminals'],
             ['board', 'Board View'],
             ['prs', 'PRs'],
+            ['canvas', 'Canvas'],
           ] as [View, string][]
         ).map(([v, label]) => (
           <button key={v} role="tab" aria-selected={view === v} className={view === v ? 'on' : ''} onClick={() => onView(v)}>
