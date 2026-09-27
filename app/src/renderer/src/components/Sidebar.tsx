@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { ticketSpend } from '@shared/costs'
 import { idleNudges, type Nudge } from '@shared/nudge'
 import { MASTER_NAME, sessionForIssue, sessionForProposal, sortSessions } from '@shared/derive'
+import { sessionStatus } from '@shared/review'
 import { formatAgo, formatCost, formatGhCache, formatRefreshed } from '@shared/format'
 import type { AppState, Issue, NeedsItem, Proposal, Session } from '@shared/types'
 import { deck, KIND_COLOR, useNow } from '../deck'
@@ -124,7 +125,7 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
           </div>
           {live.length === 0 && <div className="empty">No live sessions.</div>}
           {live.map((s) => (
-            <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} onClick={() => onOpenSession(s)} />
+            <SessionRow key={s.key} s={s} active={s.key === activeKey} now={now} status={sessionStatus(s.state, state.review[s.key], state.merged[s.key], now)} onClick={() => onOpenSession(s)} />
           ))}
           {suspended.length > 0 && (
             <div className="row" onClick={() => setShowSuspended(!showSuspended)}>
@@ -277,13 +278,17 @@ function needsKey(item: NeedsItem): string {
   return item.kind === 'session' ? `s:${item.session.key}` : `p:${item.proposal.id}`
 }
 
-function SessionRow({ s, active, now, onClick }: { s: Session; active: boolean; now: number; onClick: () => void }) {
+/** `status`: what to say instead of idle, when the session has a PR (see `sessionStatus`). */
+function SessionRow({ s, active, now, status, onClick }: { s: Session; active: boolean; now: number; status?: ReturnType<typeof sessionStatus>; onClick: () => void }) {
+  // Where its PR stands says more than "ext" for a session in another terminal.
+  const pr = !!status && (status.dot === 'merged' || status.dot === 'review' || status.countdown !== null)
+  const text = !status ? STATE_LABEL[s.state] : status.countdown !== null ? `review in ${Math.max(1, Math.ceil(status.countdown / 60_000))}m` : status.text
   return (
     <div className={`row ${active ? 'active' : ''}`} onClick={onClick} title={`${s.name}\n${s.cwd}\n${s.kind} · ${s.rawState}`}>
-      <span className={`dot ${s.state}`} />
+      <span className={`dot ${status?.dot ?? s.state}`} />
       <span className="label">{s.name}</span>
       {s.issue !== null && <span className="num">#{s.issue}</span>}
-      <span className="sub">{s.kind === 'interactive' ? 'ext' : STATE_LABEL[s.state]}</span>
+      <span className={`sub ${status ? `st-${status.dot}` : ''}`}>{s.kind === 'interactive' && !pr ? 'ext' : text}</span>
       <span className="sub">{s.startedAt ? formatAgo(now - s.startedAt) : ''}</span>
     </div>
   )

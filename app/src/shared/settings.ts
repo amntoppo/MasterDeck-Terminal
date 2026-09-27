@@ -6,6 +6,8 @@ export interface Settings {
   dockBadge: boolean
   /** After the Mac restarts: offer to resume the background sessions it stopped, resume them, or neither. */
   afterRestart: 'ask' | 'resume' | 'off'
+  /** A session with an open PR is Ready for Review after this many minutes without new comments. */
+  reviewQuietMinutes: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -15,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoOpenNeedsInput: true,
   dockBadge: true,
   afterRestart: 'ask',
+  reviewQuietMinutes: 20,
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -30,5 +33,6 @@ export function normalizeSettings(raw: unknown): Settings {
     autoOpenNeedsInput: typeof r.autoOpenNeedsInput === 'boolean' ? r.autoOpenNeedsInput : DEFAULT_SETTINGS.autoOpenNeedsInput,
     dockBadge: typeof r.dockBadge === 'boolean' ? r.dockBadge : DEFAULT_SETTINGS.dockBadge,
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
+    reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
   }
 }

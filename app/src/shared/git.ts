@@ -39,6 +39,24 @@ const FAIL = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQU
 const PENDING = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'EXPECTED', 'REQUESTED'])
 
 /** Parse `gh pr view --json number,url,state,reviewDecision,statusCheckRollup`. */
+function time(v: unknown): number | null {
+  const t = typeof v === 'string' ? Date.parse(v) : NaN
+  return Number.isFinite(t) ? t : null
+}
+
+function latest(ts: (number | null)[]): number | null {
+  const ok = ts.filter((t): t is number => t !== null)
+  return ok.length ? Math.max(...ok) : null
+}
+
+/** `gh pr view` fields, with comments and reviews cut to their times (their bodies can be long). */
+export const PR_VIEW_ARGS = [
+  '--json',
+  'number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,comments,reviews',
+  '--jq',
+  '{number,title,url,state,reviewDecision,statusCheckRollup,isDraft,createdAt,comments:[.comments[]|{createdAt}],reviews:[.reviews[]|{submittedAt}]}',
+]
+
 export function parsePrView(text: string): PrLive | null {
   let r: Record<string, unknown>
   try {
@@ -62,5 +80,11 @@ export function parsePrView(text: string): PrLive | null {
     state: typeof r.state === 'string' ? r.state : 'OPEN',
     reviewDecision: typeof r.reviewDecision === 'string' && r.reviewDecision ? r.reviewDecision : null,
     ci,
+    isDraft: r.isDraft === true,
+    createdAt: time(r.createdAt),
+    lastCommentAt: latest([
+      ...(Array.isArray(r.comments) ? (r.comments as Record<string, unknown>[]).map((c) => time(c?.createdAt)) : []),
+      ...(Array.isArray(r.reviews) ? (r.reviews as Record<string, unknown>[]).map((c) => time(c?.submittedAt)) : []),
+    ]),
   }
 }

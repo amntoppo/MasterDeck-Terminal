@@ -1,8 +1,9 @@
 import { issueUrl as issueUrlFor } from '@shared/appConfig'
 import { useEffect, useRef, useState } from 'react'
-import { formatAgo, formatCost, formatDiff, formatPct, shortPath } from '@shared/format'
+import { formatAgo, formatCost, formatDiff, formatLeft, formatPct, shortPath } from '@shared/format'
 import { contextLevel } from '@shared/stats'
 import { formatTokens, tokenSum, tokenTitle } from '@shared/tokens'
+import { sessionStatus } from '@shared/review'
 import type { AppState, Session } from '@shared/types'
 import { deck, useNow } from '../deck'
 
@@ -20,12 +21,9 @@ interface Props {
   onToggleSummary: () => void
 }
 
-const STATE_TEXT: Record<string, string> = {
-  working: 'working',
-  idle: 'idle',
-  'needs-input': 'needs input',
-  suspended: 'suspended',
-  done: 'ended',
+const STATUS_TEXT: Record<string, string> = {
+  'ready for review': 'Ready for Review',
+  merged: 'Merged',
 }
 
 export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterAttached, queueOpen, onToggleQueue, summaryOpen, onToggleSummary }: Props) {
@@ -34,6 +32,14 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
   const [note, setNote] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const since = useStateSince(s)
+  const review = state.review[s.key] ?? null
+  const merged = state.merged[s.key] ?? null
+  const status = sessionStatus(s.state, review, merged, now)
+  const statusTitle = merged
+    ? `PR ${merged.map((n) => `#${n}`).join(', ')} merged`
+    : review
+      ? `PR ${review.prs.map((n) => `#${n}`).join(', ')}: last comment or review ${formatAgo(now - review.since)} ago. Ready for Review after ${state.settings.reviewQuietMinutes} minutes without new ones (Settings).`
+      : `raw: ${s.rawState}`
   const tokens = state.tokens[s.sessionId] ?? null
 
   useEffect(() => {
@@ -150,11 +156,22 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         </div>
       </div>
       <div className="r">
-        <span className="chip" title={`raw: ${s.rawState}`}>
-          <span className={`dot ${s.state}`} />
-          {STATE_TEXT[s.state]}
-          {since !== null && <span className="muted"> · {formatAgo(now - since)}</span>}
+        <span className={`chip ${status.dot === 'review' || status.dot === 'merged' ? `st-chip-${status.dot}` : ''}`} title={statusTitle}>
+          <span className={`dot ${status.dot}`} />
+          {status.countdown !== null ? (
+            <>
+              Ready for Review in <b>{formatLeft(status.countdown)}</b>
+            </>
+          ) : (
+            STATUS_TEXT[status.text] ?? status.text
+          )}
+          {since !== null && status.countdown === null && status.dot !== 'review' && status.dot !== 'merged' && <span className="muted"> · {formatAgo(now - since)}</span>}
         </span>
+        {s.state === 'working' && review && (
+          <span className={`chip ${review.ready ? 'st-chip-review' : ''}`} title={statusTitle}>
+            {review.ready ? 'PR quiet: Ready for Review' : <>Ready for Review in <b>{formatLeft(review.readyAt - now)}</b></>}
+          </span>
+        )}
         <span className="chip" title={stats?.source === 'transcript' ? 'Install the status line hook for exact cost' : 'Session cost so far'}>
           {formatCost(stats?.costUsd ?? null)}
         </span>

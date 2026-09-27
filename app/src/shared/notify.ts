@@ -15,6 +15,18 @@ export function diffEvents(prev: AppState | null, next: AppState, focusedSession
       out.push({ title: `${s.name} finished`, body: 'The session went idle.', target: { sessionKey: s.key } })
     }
   }
+  // Ready for Review: the timer ran out (not a PR first seen already quiet, e.g. at startup).
+  for (const s of next.sessions) {
+    const was = prev.review[s.key]
+    if (next.review[s.key]?.ready && was && !was.ready)
+      out.push({ title: `${s.name} is ready for review`, body: `No new comments on its PR for ${next.settings.reviewQuietMinutes} minutes.`, target: { sessionKey: s.key } })
+  }
+  // Merged: its last open PR was merged (not one first seen merged, e.g. at startup).
+  for (const s of next.sessions) {
+    const prs = next.merged[s.key]
+    if (prs && !prev.merged[s.key] && prev.review[s.key])
+      out.push({ title: `${s.name}: PR merged`, body: prs.map((n) => `#${n}`).join(', ') + ' merged.', target: { sessionKey: s.key } })
+  }
   const prevStatus = new Map(prev.proposals.map((p) => [p.id, p.status]))
   const fresh = next.proposals.filter((p) => p.status === 'proposed' && !prevStatus.has(p.id))
   if (fresh.length > 0) {

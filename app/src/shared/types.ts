@@ -1,4 +1,5 @@
 import type { ScreenMenu, SessionAsk } from './ask'
+import type { ReviewTimer } from './review'
 import type { PastSession } from './pastSessions'
 import type { Tokens } from './tokens'
 import type { RestoreEntry } from './restore'
@@ -121,6 +122,10 @@ export interface PrLive {
   state: string
   reviewDecision: string | null
   ci: 'success' | 'failure' | 'pending' | null
+  isDraft: boolean
+  /** When it was opened, and its latest comment or review (ms); for "Ready for Review". */
+  createdAt: number | null
+  lastCommentAt: number | null
 }
 
 export type SourceHealth = 'ok' | 'error' | 'pending'
@@ -186,6 +191,10 @@ export interface AppState {
   asks: Record<string, SessionAsk>
   /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
   menus: Record<string, ScreenMenu>
+  /** Sessions with an open PR: how long since its last comment, and whether it is Ready for Review. By Session.key. */
+  review: Record<string, ReviewTimer>
+  /** Sessions whose PRs are all merged: the merged PR numbers. By Session.key. */
+  merged: Record<string, number[]>
 }
 
 export interface SkillStatus {

@@ -7,12 +7,14 @@ import {
   attachIssues,
   deriveMaster,
   deriveNeedsYou,
+  MASTER_NAME,
   sessionForProposal,
   parseLedger,
   parseSnapshot,
   type ParsedSnapshot,
 } from '@shared/derive'
-import { parseBranchStatus, parseNumstat, parsePrView } from '@shared/git'
+import { parseBranchStatus, parseNumstat, parsePrView, PR_VIEW_ARGS } from '@shared/git'
+import { mergedPrs, reviewTimer, type ReviewTimer } from '@shared/review'
 import { addPrUrls, newPrScanState, scanLines, type PrScanState } from '@shared/prscan'
 import { parseStatusline, parseTranscriptTail, statsFromTranscript } from '@shared/stats'
 import { parseBoard } from '@shared/board'
@@ -62,6 +64,8 @@ const MENUS_MS = 4_000
 const GITHUB_MS = 3_600_000
 const GH_MS = 120_000
 const GH_BACKGROUND_MS = 600_000
+/** Sessions with an open PR, open in a tab or not: their comments, for the Ready-for-Review timer. */
+const REVIEW_MS = 120_000
 const RATE_LIMIT_PAUSE_MS = 600_000
 const RATE_LIMITED = /rate limit|secondary rate|abuse detection/i
 
@@ -91,6 +95,7 @@ export class Sources {
   /** AskUserQuestion menus on the screens of sessions waiting on input, by Session.key. */
   private menus = new Map<string, ScreenMenu>()
   private menusRunning = false
+  private reviewRunning = false
   private lastSessions: Session[] = []
   /** Questions already marked answered from here, by proposal id and question time (once each). */
   private answered = new Set<string>()
@@ -537,6 +542,7 @@ export class Sources {
     this.timers.push(setInterval(() => void this.pollAgents(), AGENTS_MS))
     this.timers.push(setInterval(() => void this.pollDetails(), DETAIL_MS))
     this.timers.push(setInterval(() => void this.pollMenus(), MENUS_MS))
+    this.timers.push(setInterval(() => void this.pollReview(), 30_000))
     this.timers.push(setInterval(() => void this.refreshGithub(), GITHUB_MS))
     this.timers.push(setInterval(() => this.readLedger(), 5_000))
     setTimeout(() => this.scanAllStats(), 2_000)
@@ -949,11 +955,10 @@ export class Sources {
    * closed PR only until it is known. The PR of the session's current branch joins its list.
    */
   private async pollPrs(key: string, urls: string[], dir: string | undefined): Promise<void> {
-    const fields = 'number,title,url,state,reviewDecision,statusCheckRollup'
     for (const url of urls) {
       const known = this.prLive[url]
       if (known && known.state !== 'OPEN') continue
-      const r = await this.gh(['pr', 'view', url, '--json', fields], { timeoutMs: 20_000, ttl: 45 })
+      const r = await this.gh(['pr', 'view', url, ...PR_VIEW_ARGS], { timeoutMs: 20_000, ttl: 45 })
       this.noteBinary('gh', r.code)
       if (this.githubPaused(r.stderr + r.stdout)) return
       // Keep the last good value through a network blip.
@@ -962,7 +967,7 @@ export class Sources {
     }
     // master's workspace is shared by every session; its branch's PR belongs to none of them.
     if (!dir || !existsSync(dir) || resolve(dir) === resolve(this.paths.masterWorkspace)) return
-    const r = await this.gh(['pr', 'view', '--json', fields], { cwd: dir, timeoutMs: 20_000, ttl: 45 })
+    const r = await this.gh(['pr', 'view', ...PR_VIEW_ARGS], { cwd: dir, timeoutMs: 20_000, ttl: 45 })
     this.noteBinary('gh', r.code)
     if (this.githubPaused(r.stderr + r.stdout)) return
     const pr = r.code === 0 ? parsePrView(r.stdout) : null
@@ -1009,6 +1014,28 @@ export class Sources {
       if (changed) this.emit()
     } finally {
       this.menusRunning = false
+    }
+  }
+
+  /**
+   * PRs of every live session, open in a tab or not, every two minutes while open: new comments
+   * restart its Ready-for-Review timer. Merged and closed PRs are not fetched again.
+   */
+  private async pollReview(): Promise<void> {
+    if (this.reviewRunning || this.githubPaused()) return
+    this.reviewRunning = true
+    try {
+      const now = Date.now()
+      for (const s of this.lastSessions) {
+        if (s.state === 'done' || s.name === MASTER_NAME || now - (this.prFetchedAt[s.sessionId] ?? 0) < REVIEW_MS) continue
+        const urls = this.prUrlsFor(s.sessionId, s.key)
+        if (!urls.some((u) => !this.prLive[u] || this.prLive[u].state === 'OPEN')) continue
+        this.prFetchedAt[s.sessionId] = now
+        await this.pollPrs(s.key, urls, undefined)
+      }
+      this.emit()
+    } finally {
+      this.reviewRunning = false
     }
   }
 
@@ -1101,6 +1128,18 @@ export class Sources {
       tokens: { ...this.tokens },
       pastSessions: this.past,
       asks,
+      review: Object.fromEntries(
+        sessions
+          .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)
+          .map((s) => [s.key, reviewTimer(this.prUrlsFor(s.sessionId, s.key), this.prLive, now, this.settings.reviewQuietMinutes)] as const)
+          .filter((e): e is readonly [string, ReviewTimer] => e[1] !== null),
+      ),
+      merged: Object.fromEntries(
+        sessions
+          .filter((s) => s.state !== 'done' && s.name !== MASTER_NAME)
+          .map((s) => [s.key, mergedPrs(this.prUrlsFor(s.sessionId, s.key), this.prLive)] as const)
+          .filter((e): e is readonly [string, number[]] => e[1] !== null),
+      ),
       menus: Object.fromEntries(sessions.filter((s) => s.state === 'needs-input' && this.menus.has(s.key)).map((s) => [s.key, this.menus.get(s.key)!])),
       restoring: this.restoring,
       config: this.config,

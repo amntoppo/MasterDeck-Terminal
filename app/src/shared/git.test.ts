@@ -22,7 +22,7 @@ describe('parsePrView', () => {
   const base = { number: 88, url: 'https://github.com/o/r/pull/88', state: 'OPEN', reviewDecision: 'APPROVED' }
   it('success when every check passed', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { state: 'SUCCESS' }] }))
-    expect(p).toEqual({ ...base, title: null, ci: 'success' })
+    expect(p).toEqual({ ...base, title: null, ci: 'success', isDraft: false, createdAt: null, lastCommentAt: null })
   })
   it('failure beats pending', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ status: 'IN_PROGRESS', conclusion: '' }, { conclusion: 'FAILURE' }] }))
@@ -33,6 +33,18 @@ describe('parsePrView', () => {
     const p = parsePrView(JSON.stringify({ ...base, reviewDecision: '', statusCheckRollup: [] }))
     expect(p?.ci).toBeNull()
     expect(p?.reviewDecision).toBeNull()
+  })
+  it('reads when it was opened and its latest comment or review', () => {
+    const p = parsePrView(
+      JSON.stringify({
+        ...base,
+        isDraft: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        comments: [{ createdAt: '2026-01-01T00:05:00Z' }],
+        reviews: [{ submittedAt: '2026-01-01T00:09:00Z' }, { submittedAt: null }],
+      }),
+    )
+    expect(p).toMatchObject({ isDraft: true, createdAt: Date.parse('2026-01-01T00:00:00Z'), lastCommentAt: Date.parse('2026-01-01T00:09:00Z') })
   })
   it('null for gh errors', () => {
     expect(parsePrView('no pull requests found for branch "x"')).toBeNull()
