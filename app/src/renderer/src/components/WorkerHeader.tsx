@@ -15,6 +15,9 @@ interface Props {
   /** The Queue panel (this session's /queue) is showing. */
   queueOpen: boolean
   onToggleQueue: () => void
+  /** The Summary panel (what this session did) is showing. */
+  summaryOpen: boolean
+  onToggleSummary: () => void
 }
 
 const STATE_TEXT: Record<string, string> = {
@@ -25,7 +28,7 @@ const STATE_TEXT: Record<string, string> = {
   done: 'ended',
 }
 
-export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterAttached, queueOpen, onToggleQueue }: Props) {
+export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterAttached, queueOpen, onToggleQueue, summaryOpen, onToggleSummary }: Props) {
   const now = useNow(1000)
   const [menu, setMenu] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -108,6 +111,9 @@ export function WorkerHeader({ session: s, state, onDetach, onAskMaster, masterA
         )}
         <span className={`chip btnlike ${queueOpen ? 'on' : ''}`} onClick={onToggleQueue} title={queueOpen ? 'Hide the queue' : "Show this session's /queue: prompts it runs after each response"}>
           Queue Prompts
+        </span>
+        <span className={`chip btnlike ${summaryOpen ? 'on' : ''}`} onClick={onToggleSummary} title={summaryOpen ? 'Hide the summary' : 'What this session did: goal, changes, decisions, open questions'}>
+          Summary
         </span>
         {note && <span className="chip muted">{note}</span>}
         <div className="menu-wrap" ref={menuRef}>

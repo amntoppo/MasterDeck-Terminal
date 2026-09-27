@@ -202,6 +202,15 @@ export class Sources {
     this.past = pastByIssue(this.links, this.history, live, (id) => this.transcriptInfo(id))
   }
 
+  /** A session's transcript file and PR URLs (for its summary). */
+  sessionFacts(sessionId: string, key: string): { transcript: string | null; prs: string[]; cwd: string | null } {
+    return {
+      transcript: this.transcripts.find(sessionId),
+      prs: this.prUrlsFor(sessionId, key),
+      cwd: this.stats[sessionId]?.currentDir ?? this.tails[sessionId]?.cwd ?? null,
+    }
+  }
+
   /** Tokens per day for these sessions (the Costs view): the first call reads their history. */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>> {
     return this.tokenIndex.refresh(sessionIds.filter((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)))

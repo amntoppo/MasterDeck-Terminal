@@ -22,6 +22,7 @@ import { QueuePanel } from './components/QueuePanel'
 import { ConnectGithub } from './components/ConnectGithub'
 import { RestoreBanner } from './components/RestoreBanner'
 import { SkillsDialog } from './components/SkillsDialog'
+import { SummaryPanel } from './components/SummaryPanel'
 import { WorkflowView } from './components/WorkflowView'
 import { Sidebar, type View } from './components/Sidebar'
 import { TerminalView, typeInto } from './components/TerminalView'
@@ -101,6 +102,8 @@ export function App() {
   const [dragging, setDragging] = useState(false)
   // The Queue panel under master; each session header's Queue Prompts shows or hides it.
   const [queueOpen, setQueueOpen] = useState(() => load<boolean>('queueOpen', false))
+  // The Summary panel: what the focused session did (Summary in its header shows or hides it).
+  const [summaryOpen, setSummaryOpen] = useState(() => load<boolean>('summaryOpen', false))
   // The ★ Master button (top right, every view) shows or hides master; hidden, it stays attached.
   const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
@@ -111,6 +114,7 @@ export function App() {
   useEffect(() => save('active', active), [active])
   useEffect(() => save('masterPct', masterPct), [masterPct])
   useEffect(() => save('queueOpen', queueOpen), [queueOpen])
+  useEffect(() => save('summaryOpen', summaryOpen), [summaryOpen])
   useEffect(() => save('masterOpen', masterOpen), [masterOpen])
   useEffect(() => {
     save('view', view)
@@ -378,7 +382,7 @@ export function App() {
   // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
   const useMaster = state.config.masterEnabled
   const masterShown = useMaster && masterOpen
-  const rightShown = masterShown || queueOpen
+  const rightShown = masterShown || queueOpen || summaryOpen
   const masterAttached = useMaster && state.master.kind === 'attached'
   const askMaster = (s: Session) => {
     if (state.master.kind !== 'attached') return
@@ -522,6 +526,8 @@ export function App() {
                   onStartHere={(s, stop) => startHere(t.id, s, stop)}
                   queueOpen={queueOpen}
                   onToggleQueue={() => setQueueOpen((o) => !o)}
+                  summaryOpen={summaryOpen}
+                  onToggleSummary={() => setSummaryOpen((o) => !o)}
                 />
               )}
             </div>
@@ -537,6 +543,7 @@ export function App() {
       <div className="right-col" style={rightShown ? undefined : { display: 'none' }}>
         {useMaster && <MasterPane state={state} shown={masterOpen} />}
         {queueOpen && <QueuePanel state={state} activeKey={activeKey} onClose={() => setQueueOpen(false)} />}
+        {summaryOpen && <SummaryPanel state={state} activeKey={activeKey} onClose={() => setSummaryOpen(false)} />}
       </div>
 
       {assigning && (
@@ -709,6 +716,8 @@ function SessionPane(p: {
   onArm: () => void
   queueOpen: boolean
   onToggleQueue: () => void
+  summaryOpen: boolean
+  onToggleSummary: () => void
 }) {
   const [asking, setAsking] = useState(false)
   const s = p.state.sessions.find((x) => x.key === p.tab.key)
@@ -736,7 +745,7 @@ function SessionPane(p: {
 
   return (
     <>
-      <WorkerHeader session={s} state={p.state} onDetach={p.onClose} onAskMaster={p.onAskMaster} masterAttached={p.masterAttached} queueOpen={p.queueOpen} onToggleQueue={p.onToggleQueue} />
+      <WorkerHeader session={s} state={p.state} onDetach={p.onClose} onAskMaster={p.onAskMaster} masterAttached={p.masterAttached} queueOpen={p.queueOpen} onToggleQueue={p.onToggleQueue} summaryOpen={p.summaryOpen} onToggleSummary={p.onToggleSummary} />
       {s.kind === 'background' && s.bgId && !p.armed ? (
         <NotStarted
           label={s.state === 'suspended' ? `${s.name} is parked. Attaching resumes it.` : `${s.name} from your last session`}

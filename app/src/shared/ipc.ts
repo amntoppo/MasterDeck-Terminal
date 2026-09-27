@@ -6,6 +6,7 @@ import type { WorktreeClass, WorktreeInfo } from './janitor'
 import type { TokensByDay } from './tokens'
 import type { GhAccount } from './ghAuth'
 import type { CustomStep, HookEntry } from './workflow'
+import type { SessionSummary } from './summary'
 
 export type SetupTool = 'claude' | 'gh' | 'python' | 'git' | 'jq'
 
@@ -68,6 +69,9 @@ export const CH = {
   skillReinstall: 'skills:reinstall',
   skillRemove: 'skills:remove',
   workflowGet: 'workflow:get',
+  summaryGet: 'summary:get',
+  summaryMake: 'summary:make',
+  summaryPost: 'summary:post',
   workflowSave: 'workflow:save',
   linkSession: 'session:link',
   setSprint: 'board:sprint',
@@ -201,6 +205,12 @@ export interface DeckApi {
   workflowGet(): Promise<{ hooks: HookEntry[]; skills: { name: string; description: string }[]; steps: CustomStep[] }>
   /** Save the custom steps: their hooks in ~/.claude/settings.json, the list in workflow.json. */
   workflowSave(steps: CustomStep[]): Promise<CliResult>
+  /** The saved summary of a session, and whether its transcript grew since. */
+  summaryGet(sessionKey: string): Promise<{ summary: SessionSummary | null; stale: boolean }>
+  /** Summarize a session now (a one-off `claude -p`, about 20 s). */
+  summaryMake(sessionKey: string): Promise<{ ok: true; summary: SessionSummary } | { ok: false; message: string }>
+  /** Post the saved summary as a comment on the session's issue. */
+  summaryPost(sessionKey: string): Promise<CliResult>
   /** Link a session to an issue with babysit-ticket (`tt.sh link`). */
   linkSession(issue: number, sessionId: string, cwd: string | null): Promise<CliResult>
   setBoardOpen(open: boolean): void

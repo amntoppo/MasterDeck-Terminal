@@ -186,6 +186,15 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .right-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .right-col .master { flex: 1; }
 .app.master-off .queue { flex: 1; height: auto; }
+/* Queue and Summary share the column under master: each takes part of it; alone with master off, all. */
+.right-col .queue + .queue { border-top: 1px solid var(--line); }
+.app:not(.master-off) .right-col .queue:not(:only-of-type) { height: 32%; }
+.summary-panel { border-left-color: var(--green); }
+.summary-body { flex: 1; overflow-y: auto; padding: 8px 12px 12px; font-size: 12px; line-height: 1.5; user-select: text; }
+.summary-body .md p { margin: 8px 0 2px; }
+.summary-body .md ul { margin: 2px 0 6px; padding-left: 18px; }
+.summary-body .md code { font-family: var(--mono); background: var(--bg-3); padding: 0 4px; border-radius: 3px; }
+.queue-head .meta.grow { flex: 1; min-width: 0; }
 .queue { flex: none; height: 42%; min-height: 180px; display: flex; flex-direction: column; border-left: 2px solid var(--purple); border-top: 1px solid var(--line); }
 .queue .mhead { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
 .queue .mhead .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

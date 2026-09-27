@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
@@ -25,6 +25,7 @@ import { makeRunner } from './run'
 import { Sources } from './sources'
 import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } from './skills'
 import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
+import { Summaries } from './summary'
 import { parseSteps } from '@shared/workflow'
 import { hookStatus, installHooks, installWorkflowSteps } from './hooks'
 import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
@@ -67,6 +68,7 @@ const gh = makeGhRunner(run, paths.libDir, paths.python)
 const github = new GitHub(run, gh)
 const sender = new Sender(ptys, cli, env, () => claudeBin, (key) => latest?.sessions.find((x) => x.key === key))
 const ops = new Ops(run, paths, () => claudeBin, gh)
+const summaries = new Summaries(run, () => claudeBin, join(paths.home, 'summaries'), paths.projectsDir)
 const sources = new Sources(paths, run, cli, (state) => {
   const prev = latest
   latest = state
@@ -338,6 +340,31 @@ function registerIpc(): void {
     if (r.ok) writeRemoved(skillsFile(), readRemoved(skillsFile()).filter((x) => x !== name))
     refreshSkills()
     return r
+  })
+  ipcMain.handle(CH.summaryGet, (_e, key: string) => {
+    const s = latest?.sessions.find((x) => x.key === key)
+    if (!s) return { summary: null, stale: false }
+    const summary = summaries.get(s.sessionId)
+    const t = sources.sessionFacts(s.sessionId, s.key).transcript
+    const size = t && existsSync(t) ? statSync(t).size : 0
+    return { summary, stale: !!summary && size > summary.size }
+  })
+  ipcMain.handle(CH.summaryMake, async (_e, key: string) => {
+    const s = latest?.sessions.find((x) => x.key === key)
+    if (!s) return { ok: false, message: 'session not found' }
+    const f = sources.sessionFacts(s.sessionId, s.key)
+    if (!f.transcript) return { ok: false, message: 'no transcript for this session yet' }
+    return summaries.make({ sessionId: s.sessionId, name: s.name, transcript: f.transcript, cwd: f.cwd ?? s.cwd, issue: s.issue !== null ? `${getConfig().owner}/${getConfig().issueRepo}#${s.issue}` : null, prs: f.prs })
+  })
+  ipcMain.handle(CH.summaryPost, async (_e, key: string) => {
+    const s = latest?.sessions.find((x) => x.key === key)
+    if (!s) return { ok: false, message: 'session not found' }
+    if (s.issue === null) return { ok: false, message: 'this session is not linked to an issue' }
+    const summary = summaries.get(s.sessionId)
+    if (!summary) return { ok: false, message: 'no summary yet' }
+    const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`
+    const r = await run('gh', ['issue', 'comment', String(s.issue), '-R', `${getConfig().owner}/${getConfig().issueRepo}`, '--body-file', '-'], { stdin: body, timeoutMs: 30_000 })
+    return r.code === 0 ? { ok: true, message: r.stdout.trim() || 'posted' } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
   })
   ipcMain.handle(CH.workflowGet, () => ({
     hooks: collectHooks(dirname(paths.claudeSettings), [paths.masterWorkspace, ...ops.repos()]),

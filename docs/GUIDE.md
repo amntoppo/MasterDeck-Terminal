@@ -93,6 +93,12 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice.
+- **Summary (in a session's header):** shows or hides the Summary panel under master: what the focused
+  session did, in five parts (Goal, Done, Decisions, Open, State). **Summarize** / **Update** reads its
+  transcript (your messages, its replies, files it edited, commands that change things), its PRs and the
+  branch's changes, and asks a small model (`claude -p --model haiku`, about 20 s) for the summary; it
+  runs only when you press it, and it is kept per session in `~/.claude/masterdeck/summaries/`. The panel
+  says when the session has moved on since. **Post to issue** comments it on the session's issue.
 - **Queue (Queue Prompts in a session's header):** shows or hides the Queue panel under master, next
   to it rather than instead of it. It holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
