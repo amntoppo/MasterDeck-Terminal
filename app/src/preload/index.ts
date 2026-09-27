@@ -15,6 +15,7 @@ const api: DeckApi = {
   onState: (cb) => listen(CH.state, cb),
   onFocusSession: (cb) => listen(CH.focusSession, cb),
   onShowNeedsYou: (cb) => listen(CH.showNeedsYou, cb),
+  onShowInboxItem: (cb) => listen(CH.showInboxItem, cb),
   approve: (id) => ipcRenderer.invoke(CH.approve, id),
   reject: (id) => ipcRenderer.invoke(CH.reject, id),
   draftAssign: (issue, title, url) => ipcRenderer.invoke(CH.draftAssign, issue, title, url),

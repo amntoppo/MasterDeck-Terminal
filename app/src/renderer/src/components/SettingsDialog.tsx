@@ -60,6 +60,10 @@ export function SettingsDialog({ settings, state, onClose, onSetup }: { settings
           <span>Open a session's tab when it blocks on a prompt</span>
         </label>
         <label className="mpick-row">
+          <input type="checkbox" checked={s.notifyNeedsYou} onChange={(e) => setS({ ...s, notifyNeedsYou: e.target.checked })} />
+          <span>Notify me when something new needs me (a question, a session waiting, a proposal, failing CI…)</span>
+        </label>
+        <label className="mpick-row">
           <input type="checkbox" checked={s.dockBadge} onChange={(e) => setS({ ...s, dockBadge: e.target.checked })} />
           <span>Show the Needs-you count on the dock icon</span>
         </label>

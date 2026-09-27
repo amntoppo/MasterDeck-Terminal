@@ -66,6 +66,11 @@ rm -rf "$dest/MasterDeck.app"
 cp -R "$mnt/MasterDeck.app" "$dest/"
 # Clear the "downloaded from the internet" mark, in case anything set it.
 xattr -dr com.apple.quarantine "$dest/MasterDeck.app" 2>/dev/null || true
+# Releases before 0.5 carry only the executable's own signature, which does not bind the bundle
+# id: macOS then never registers the app for notifications. Sign the whole bundle (ad-hoc).
+if ! codesign -dv "$dest/MasterDeck.app" 2>&1 | grep -q "Identifier=io.github"; then
+  codesign --force --deep --sign - "$dest/MasterDeck.app" >/dev/null 2>&1 || true
+fi
 
 say "MasterDeck $version is installed."
 if [ -z "${MASTERDECK_NO_OPEN:-}" ]; then open "$dest/MasterDeck.app"; fi

@@ -110,6 +110,8 @@ export function App() {
   const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const needsYouRef = useRef<HTMLDivElement>(null)
+  // A clicked notification's Needs-you item, for the Sidebar to open.
+  const [showItem, setShowItem] = useState<{ id: string; at: number } | null>(null)
   const appRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => save('tabs', tabs), [tabs])
@@ -271,10 +273,12 @@ export function App() {
       if (s) openSession(s)
     })
     const offNeeds = deck().onShowNeedsYou(() => needsYouRef.current?.scrollIntoView({ behavior: 'smooth' }))
+    const offItem = deck().onShowInboxItem((id) => setShowItem({ id, at: Date.now() }))
     return () => {
       offAuto()
       offFocus()
       offNeeds()
+      offItem()
     }
   }, [state, openSession, arm])
 
@@ -411,6 +415,7 @@ export function App() {
         onIssue={onIssue}
         onNewShell={() => openShell()}
         needsYouRef={needsYouRef}
+        showItem={showItem}
         view={view}
         onView={setView}
         onTool={(a) => runAction(a)}

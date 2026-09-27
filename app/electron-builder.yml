@@ -26,8 +26,13 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
-  # Unsigned until a Developer ID certificate is configured (CSC_LINK / CSC_KEY_PASSWORD).
-  identity: null
+  # Ad-hoc signed ("-"): no Apple account needed. A whole-bundle signature binds the bundle id,
+  # which macOS needs to register the app for notifications (a linker-only signature does not).
+  # A Developer ID certificate (CSC_LINK / CSC_KEY_PASSWORD) would replace this.
+  identity: "-"
+  # Hardened runtime is for notarization (Developer ID); with an ad-hoc signature it would block
+  # loading the app's own libraries.
+  hardenedRuntime: false
 win:
   target:
     - target: nsis

@@ -4,6 +4,8 @@ export interface Settings {
   contextWarnPct: number
   autoOpenNeedsInput: boolean
   dockBadge: boolean
+  /** A desktop notification when something new lands in Needs you. */
+  notifyNeedsYou: boolean
   /** After the Mac restarts: offer to resume the background sessions it stopped, resume them, or neither. */
   afterRestart: 'ask' | 'resume' | 'off'
   /** A session's open PR is Ready for Review once its automated review is done, or after this many minutes without new comments. */
@@ -16,6 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
   contextWarnPct: 85,
   autoOpenNeedsInput: true,
   dockBadge: true,
+  notifyNeedsYou: true,
   afterRestart: 'ask',
   reviewQuietMinutes: 20,
 }
@@ -32,6 +35,7 @@ export function normalizeSettings(raw: unknown): Settings {
     contextWarnPct: clamp(r.contextWarnPct, 10, 100, DEFAULT_SETTINGS.contextWarnPct),
     autoOpenNeedsInput: typeof r.autoOpenNeedsInput === 'boolean' ? r.autoOpenNeedsInput : DEFAULT_SETTINGS.autoOpenNeedsInput,
     dockBadge: typeof r.dockBadge === 'boolean' ? r.dockBadge : DEFAULT_SETTINGS.dockBadge,
+    notifyNeedsYou: typeof r.notifyNeedsYou === 'boolean' ? r.notifyNeedsYou : DEFAULT_SETTINGS.notifyNeedsYou,
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
   }

@@ -35,6 +35,7 @@ export const CH = {
   state: 'state:update',
   focusSession: 'app:focusSession',
   showNeedsYou: 'app:showNeedsYou',
+  showInboxItem: 'app:showInboxItem',
   getState: 'state:get',
   approve: 'cli:approve',
   reject: 'cli:reject',
@@ -146,6 +147,8 @@ export interface DeckApi {
   onState(cb: (s: AppState) => void): () => void
   onFocusSession(cb: (sessionKey: string) => void): () => void
   onShowNeedsYou(cb: () => void): () => void
+  /** A notification for a Needs-you item was clicked: show that item. */
+  onShowInboxItem(cb: (id: string) => void): () => void
   approve(id: number): Promise<CliResult>
   reject(id: number): Promise<CliResult>
   draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>

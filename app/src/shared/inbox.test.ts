@@ -98,12 +98,16 @@ describe('collectItems', () => {
     expect(allowed(q, 'approve')).toBe(false)
   })
 
-  it('notices for the kinds worth a notification', () => {
+  it('notices for every new item but held ones', () => {
     const [q] = collectItems(input({ proposals: [prop({ status: 'question', note: 'A or B?' })] }))
     const e = { item: q, state: 'open' as const, firstSeen: 0, lastSeen: 0 }
     expect(inboxNotice(e)).toMatchObject({ title: '#7: question', body: 'A or B?' })
     const [i] = collectItems(input({ sessions: [sess('a', { state: 'idle' })], proposals: [prop({ status: 'sent', target: { session: 'a' } })], lastActivity: { 'id-a': 0 } }))
     expect(i.kind).toBe('idle')
-    expect(inboxNotice({ ...e, item: i })).toBeNull()
+    // Every new item gets one, with the action it can take from the notification.
+    expect(inboxNotice({ ...e, item: i })).toMatchObject({ title: 'a went quiet', action: { type: 'continue' }, reply: false })
+    expect(inboxNotice(e)).toMatchObject({ reply: true, target: { itemId: q.id } })
+    const [h] = collectItems(input({ proposals: [prop({ status: 'held' })] }))
+    expect(inboxNotice({ ...e, item: h })).toBeNull()
   })
 })

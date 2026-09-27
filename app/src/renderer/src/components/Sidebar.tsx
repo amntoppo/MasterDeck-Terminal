@@ -24,6 +24,8 @@ interface Props {
   onIssue: (issue: Issue) => void
   onNewShell: () => void
   needsYouRef: React.RefObject<HTMLDivElement | null>
+  /** Open this Needs-you item's popup (a notification was clicked); `at` makes each click count. */
+  showItem?: { id: string; at: number } | null
   view: View
   onView: (v: View) => void
   /** Footer tools and the palette's actions. */
@@ -45,7 +47,7 @@ const STATE_LABEL: Record<string, string> = {
   done: 'done',
 }
 
-export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, view, onView, onTool, onStartWith, onSessionAction }: Props) {
+export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, needsYouRef, showItem, view, onView, onTool, onStartWith, onSessionAction }: Props) {
   const now = useNow()
   const [showSuspended, setShowSuspended] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -122,6 +124,13 @@ export function Sidebar({ state, activeKey, onOpenSession, onIssue, onNewShell, 
     if (!e) return null
     return <InboxCard entry={e} state={state} onOpenSession={onOpenSession} onIssue={onIssue} onStartWith={onStartWith} onDetails={full ? undefined : () => setDetail(id)} full={full} />
   }
+  useEffect(() => {
+    if (!showItem) return
+    needsYouRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (open.some((e) => e.item.id === showItem.id)) setDetail(showItem.id)
+    // Only when a notification is clicked, not as the list changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showItem])
   const detailCard = detail ? cardFor(detail, true) : null
   useEffect(() => {
     if (detail && !detailCard) setDetail(null)

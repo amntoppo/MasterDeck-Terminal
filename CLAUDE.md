@@ -87,6 +87,10 @@ buttons; it does not go through macOS window drag regions.
 - **Needs you is the inbox** (`shared/inbox.ts` builds items, `main/inbox.ts` stores them): add a new
   kind there (id, priority, actions, resolution reason, notice), and act only through `inboxAct` /
   `runInboxAction`, never from a card directly. Nothing resolves while the state is still loading.
+- **macOS notifications need a whole-bundle signature.** Without one (only the executable's linker
+  signature) macOS never registers the bundle id, so notifications silently never show and the app
+  is missing from Settings → Notifications. The build ad-hoc signs (`identity: "-"`, no hardened
+  runtime); install.sh re-signs older releases.
 - **Claude session ids change on resume**; the background id (first 8 chars) does not. Key per-session
   data by `Session.key` where it must survive a resume.
 - **Transcripts** repeat each assistant message on several lines (same `message.id`): count usage once

@@ -278,24 +278,42 @@ export function collectItems(x: InboxInput): InboxItem[] {
   return out.filter((i) => i.sessionKey === null || byKey.has(i.sessionKey)).sort((a, b) => b.priority - a.priority)
 }
 
-/** The notification a new item gets, or none: idle nudges, PR offers and held items stay quiet. */
-export function inboxNotice(e: InboxEntry): { title: string; body: string; target: { sessionKey?: string; needsYou?: true } } | null {
+/** A new item's notification: its text, the item (clicking opens it), and what it can do from the
+ * notification itself (macOS: a button for its main action, a reply field for a question). Held
+ * items (parked on purpose) get none. */
+export interface InboxNotice {
+  title: string
+  body: string
+  target: { sessionKey?: string; needsYou?: true; itemId: string }
+  /** Carried out by the inbox (not the ones the window does: open, start). */
+  action: InboxAction | null
+  reply: boolean
+}
+
+const RUNS_IN_MAIN = new Set<InboxActionType>(['continue', 'compact', 'approve', 'send'])
+
+export function inboxNotice(e: InboxEntry): InboxNotice | null {
   const i = e.item
-  const target = i.sessionKey ? { sessionKey: i.sessionKey } : { needsYou: true as const }
-  switch (i.kind) {
-    case 'input':
-    case 'menu':
-      return { title: `${i.title} needs input`, body: i.body, target }
-    case 'question':
-    case 'blocked':
-      return { title: `${i.title}: ${i.kind}`, body: i.body, target: { needsYou: true } }
-    case 'proposal':
-      return { title: 'New proposal', body: `${i.title} ${i.body}`, target: { needsYou: true } }
-    case 'budget':
-      return { title: i.title, body: i.body, target: { needsYou: true } }
-    case 'context':
-      return { title: `${i.title} is at ${Math.round(i.detail.type === 'context' ? i.detail.pct : 0)}% context`, body: 'Compact it now to keep it working well.', target }
-    default:
-      return null
-  }
+  if (i.kind === 'held') return null
+  const target = { ...(i.sessionKey ? { sessionKey: i.sessionKey } : { needsYou: true as const }), itemId: i.id }
+  const title =
+    i.kind === 'input' || i.kind === 'menu'
+      ? `${i.title} needs you`
+      : i.kind === 'question' || i.kind === 'blocked'
+        ? `${i.title}: ${i.kind}`
+        : i.kind === 'proposal'
+          ? `New proposal: ${i.title}`
+          : i.kind === 'ci'
+            ? `CI failing: ${i.title}`
+            : i.kind === 'review'
+              ? `Review threads: ${i.title}`
+              : i.kind === 'context'
+                ? `${i.title} is at ${Math.round(i.detail.type === 'context' ? i.detail.pct : 0)}% context`
+                : i.kind === 'idle'
+                  ? `${i.title} went quiet`
+                  : i.kind === 'waiting'
+                    ? `${i.title} is waiting`
+                    : i.title
+  const action = i.actions.find((a) => a.primary && RUNS_IN_MAIN.has(a.type)) ?? null
+  return { title, body: i.body.length > 240 ? `${i.body.slice(0, 240)}…` : i.body, target, action, reply: i.kind === 'question' || i.kind === 'blocked' }
 }

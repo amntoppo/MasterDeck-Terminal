@@ -53,14 +53,7 @@ function notify(events: NotifyEvent[]): void {
   if (SMOKE || !Notification.isSupported()) return
   for (const e of events.slice(0, 4)) {
     const n = new Notification({ title: e.title, body: e.body, silent: false })
-    n.on('click', () => {
-      if (!win) return
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-      if (e.target.sessionKey) win.webContents.send(CH.focusSession, e.target.sessionKey)
-      else win.webContents.send(CH.showNeedsYou)
-    })
+    n.on('click', () => reveal(e.target))
     n.show()
   }
 }
@@ -90,11 +83,52 @@ const sources = new Sources(paths, run, cli, (state) => {
   }
 }, () => claudeBin, github, gh, () => readGhCacheStatus())
 
+/** Bring the window forward, showing a Needs-you item (or a session, or the list). */
+function reveal(target: NotifyEvent['target']): void {
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  if (target.itemId) win.webContents.send(CH.showInboxItem, target.itemId)
+  else if (target.sessionKey) win.webContents.send(CH.focusSession, target.sessionKey)
+  else win.webContents.send(CH.showNeedsYou)
+}
+
+/** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
+const shown = new Set<Notification>()
+
+/**
+ * A new Needs-you item's notification (Settings: "Notify me…"). Clicking it opens the item. On
+ * macOS it can also act without opening the app: a button for the item's main action, a reply
+ * field for a question; both go through the inbox like the cards do.
+ */
+function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
+  if (SMOKE || !Notification.isSupported() || !latest?.settings.notifyNeedsYou) return
+  const n = inboxNotice(entry)
+  if (!n) return
+  const mac = process.platform === 'darwin'
+  const note = new Notification({
+    title: n.title,
+    body: n.body,
+    silent: false,
+    ...(mac && n.action ? { actions: [{ type: 'button' as const, text: n.action.label }] } : {}),
+    ...(mac && n.reply ? { hasReply: true, replyPlaceholder: 'Reply…' } : {}),
+  })
+  const id = entry.item.id
+  const done = (r: CliResult) => {
+    if (!r.ok) notify([{ title: 'Could not do that', body: r.message, target: n.target }])
+  }
+  note.on('click', () => reveal(n.target))
+  note.on('action', () => n.action && void sources.inbox.act(id, n.action.type, { by: 'notification' }, runInboxAction).then((r) => (sources.changed(), done(r))))
+  note.on('reply', (_e, text) => void sources.inbox.act(id, 'reply', { text, by: 'notification' }, runInboxAction).then((r) => (sources.changed(), done(r))))
+  note.on('close', () => shown.delete(note))
+  shown.add(note)
+  note.show()
+}
+
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
 sources.inbox.on('event', (e) => {
-  if (e.type !== 'added') return
-  const n = inboxNotice(e.entry)
-  if (n) notify([n])
+  if (e.type === 'added') notifyItem(e.entry)
 })
 
 /** Answer the menu on a session's screen, if it is still the question the user saw. */
@@ -631,6 +665,9 @@ async function setupCheck(): Promise<SetupCheck> {
     git,
   }
 }
+
+// Windows shows notifications only for an app with this id (the one the installer registers).
+if (process.platform === 'win32') app.setAppUserModelId('io.github.amntoppo.masterdeck')
 
 app.whenReady().then(async () => {
   app.setName('MasterDeck')

@@ -128,6 +128,12 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a
   status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
   of every session are checked every two minutes while open.
+- **Notifications:** every new Needs-you item (except held ones) shows a macOS / Windows
+  notification; Settings → "Notify me when something new needs me" turns them off. Clicking one
+  opens the item. On macOS a notification can also act: a button for the item's main action
+  (Approve, Continue, Compact now, Send) and a reply field for a question; both go through the inbox
+  like the cards. The first notification asks macOS for permission (System Settings → Notifications
+  → MasterDeck).
 - **Needs you is one inbox** (`shared/inbox.ts`, `main/inbox.ts`): the main process builds every item
   (questions and menus, sessions waiting on input, blocked, proposals, failing CI and review threads
   on my PRs, budgets, context, idle and waiting nudges), each with a stable id, a priority, the full

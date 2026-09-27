@@ -352,7 +352,7 @@ export interface CliResult {
 export interface NotifyEvent {
   title: string
   body: string
-  target: { sessionKey?: string; needsYou?: true }
+  target: { sessionKey?: string; needsYou?: true; itemId?: string }
 }
 
 export type PaneSpec =
