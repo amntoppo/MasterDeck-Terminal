@@ -955,3 +955,32 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .cleanup-bar { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
 .cleanup-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .cleanup-actions .btn { font-size: 12px; padding: 4px 10px; }
+/* Workflow templates (Workflow window) and a session's Workflow panel */
+.wf-templates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.wf-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.wf-seg button { display: inline-flex; align-items: center; gap: 6px; }
+.wf-count { font-size: 10.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; }
+.wf-name { display: inline-flex; gap: 6px; align-items: center; }
+.wf-name input, .wf-input { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; outline: none; min-width: 180px; }
+.wf-name input:focus, .wf-input:focus { border-color: var(--accent); }
+.wf-note { flex-basis: 100%; }
+.wf-panel .insp-head .seg button { cursor: pointer; }
+.wf-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 20px; display: flex; flex-direction: column; gap: 12px; }
+.wf-head { display: flex; flex-direction: column; gap: 6px; }
+.wf-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wf-actions .fsel { max-width: 200px; }
+.wf-input { flex: 1; min-width: 0; }
+.wf-ok { color: var(--green); font-size: 12px; }
+.wf-link { align-self: flex-start; font-size: 12px; }
+.stages.compact { margin-bottom: 0; }
+.stages.compact .stage-body { padding: 8px 10px; }
+.stages.compact .add-form { max-width: none; }
+.stages.compact .add-row { flex-wrap: wrap; }
+.stages.compact .add-row .muted.small { display: none; }
+.panel-shows { position: absolute; top: 10px; right: 12px; z-index: 18; display: flex; gap: 6px; }
+.panel-shows .panel-show { position: static; }
+.app.master-off .panel-shows { right: 118px; }
+.insp-switch { border: 1px solid var(--line-2); background: var(--bg-3); color: var(--muted); border-radius: 7px; padding: 3px 9px; font-size: 12px; cursor: pointer; margin-left: auto; }
+.insp-switch:hover { color: var(--text); border-color: var(--accent); }
+.stages.compact .custom-step { flex-wrap: wrap; }
+.stages.compact .custom-step .grow { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex-basis: 100%; order: 2; }

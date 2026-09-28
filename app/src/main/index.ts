@@ -73,9 +73,9 @@ import {
   syncSkills,
   writeRemoved,
 } from "./skills";
-import { collectHooks, listSkills, readSteps, writeSteps } from "./workflow";
+import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { Summaries } from "./summary";
-import { parseSteps } from "@shared/workflow";
+import { DEFAULT_TEMPLATE, parseSteps, validSessionId } from "@shared/workflow";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
 import {
@@ -83,7 +83,7 @@ import {
   hookStatus,
   installDeckHooks,
   installHooks,
-  installWorkflowSteps,
+  installWorkflowHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import {
@@ -152,6 +152,17 @@ const sources = new Sources(
   (state) => {
     const prev = latest;
     latest = state;
+    // Each session's own workflow: copied the first time it shows up.
+    if (process.platform !== "win32")
+      try {
+        workflows().snapshot(
+          state.sessions.filter(
+            (s) => s.name !== MASTER_NAME && s.state !== "done",
+          ),
+        );
+      } catch (e) {
+        console.error(`workflow copy: ${String(e)}`);
+      }
     win?.webContents.send(CH.state, state);
     notify(diffEvents(prev, state, focused));
     // Dock badge: the Needs-you count.
@@ -548,8 +559,17 @@ async function resumeBg(
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
 }
 
-/** The workflow's custom steps (their hooks live in ~/.claude/settings.json). */
-const workflowFile = () => join(paths.home, "workflow.json");
+/** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
+let workflowStore: WorkflowStore | null = null;
+const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
+/** Put the trigger hooks in (or take them out when no workflow has a step). */
+const syncWorkflowHooks = () =>
+  installWorkflowHooks(
+    paths.claudeSettings,
+    paths.home,
+    paths.home,
+    workflows().anySteps(),
+  );
 
 /** Which skills the user removed in the Skills popup. */
 const skillsFile = () => join(paths.home, "skills.json");
@@ -830,7 +850,16 @@ function registerIpc(): void {
       return r;
     },
   );
-  ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req));
+  ipcMain.handle(CH.assign, (_e, req: AssignRequest) => {
+    // The template picked in the Start dialog: the new session copies it instead of the default.
+    if (
+      typeof req?.workflow === "string" &&
+      req.workflow !== DEFAULT_TEMPLATE &&
+      typeof req.name === "string"
+    )
+      workflows().setPending(req.name, req.workflow);
+    return startAssign(cli, req);
+  });
   ipcMain.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
   ipcMain.handle(CH.refresh, () => sources.refreshGithub(true));
@@ -983,14 +1012,48 @@ function registerIpc(): void {
       ...ops.repos(),
     ]),
     skills: listSkills(paths.skillsDir),
-    steps: readSteps(workflowFile()),
+    steps: workflows().template(DEFAULT_TEMPLATE)?.steps ?? [],
+    templates: workflows().templates(),
   }));
   ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
-    const steps = parseSteps(raw);
-    const r = installWorkflowSteps(paths.claudeSettings, paths.home, steps);
-    if (r.ok) writeSteps(workflowFile(), steps);
-    return r;
+    workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseSteps(raw));
+    return syncWorkflowHooks();
   });
+  ipcMain.handle(
+    CH.workflowTemplateSave,
+    (_e, id: unknown, name: unknown, raw: unknown) => {
+      const tid = workflows().saveTemplate(
+        typeof id === "string" ? id : null,
+        typeof name === "string" ? name : "",
+        parseSteps(raw),
+      );
+      if (!tid) return { ok: false, message: "give the template a name" };
+      const r = syncWorkflowHooks();
+      return r.ok ? { ok: true, message: "template saved", id: tid } : r;
+    },
+  );
+  ipcMain.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
+    if (typeof id !== "string" || !workflows().deleteTemplate(id))
+      return { ok: false, message: "no such template" };
+    syncWorkflowHooks();
+    return { ok: true, message: "template deleted" };
+  });
+  ipcMain.handle(CH.sessionWorkflowGet, (_e, sid: unknown) =>
+    validSessionId(sid) ? workflows().sessionDoc(sid) : null,
+  );
+  ipcMain.handle(
+    CH.sessionWorkflowSave,
+    (_e, sid: unknown, raw: unknown, from: unknown) => {
+      if (!validSessionId(sid)) return { ok: false, message: "bad session" };
+      workflows().saveSession(sid, {
+        steps: parseSteps(raw),
+        from: typeof from === "string" ? from.slice(0, 80) : null,
+        at: Date.now(),
+      });
+      const r = syncWorkflowHooks();
+      return r.ok ? { ok: true, message: "saved for this session" } : r;
+    },
+  );
   ipcMain.handle(CH.skillRemove, (_e, name: unknown) => {
     if (typeof name !== "string")
       return { ok: false, message: "bad skill name" };
@@ -1323,6 +1386,15 @@ app.whenReady().then(async () => {
       console.error(`MasterDeck hooks: ${String(e)}`);
     }
   }
+  // Workflows: older installs had one hook per step; now one per trigger, reading each session's copy.
+  if (process.platform !== "win32" && !SMOKE)
+    try {
+      workflows().migrate();
+      const r = syncWorkflowHooks();
+      if (!r.ok) console.error(r.message);
+    } catch (e) {
+      console.error(`workflow hooks: ${String(e)}`);
+    }
   createWindow();
   sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
   sources.start();

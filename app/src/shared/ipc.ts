@@ -7,7 +7,12 @@ import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
-import type { CustomStep, HookEntry } from "./workflow";
+import type {
+  CustomStep,
+  HookEntry,
+  WorkflowDoc,
+  WorkflowTemplate,
+} from "./workflow";
 import type { SessionSummary } from "./summary";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
@@ -87,6 +92,10 @@ export const CH = {
   summaryMake: "summary:make",
   summaryPost: "summary:post",
   workflowSave: "workflow:save",
+  workflowTemplateSave: "workflow:templateSave",
+  workflowTemplateDelete: "workflow:templateDelete",
+  sessionWorkflowGet: "workflow:sessionGet",
+  sessionWorkflowSave: "workflow:sessionSave",
   linkSession: "session:link",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
@@ -139,6 +148,8 @@ export interface AssignRequest {
   kind?: "ASSIGN" | "PRREVIEW";
   /** `claude --model` for the new session; absent: the default model. */
   model?: string;
+  /** The workflow template the session starts with; absent: the default. */
+  workflow?: string;
 }
 
 export interface PtyOpenResult {
@@ -296,9 +307,25 @@ export interface DeckApi {
     hooks: HookEntry[];
     skills: { name: string; description: string }[];
     steps: CustomStep[];
+    templates: WorkflowTemplate[];
   }>;
-  /** Save the custom steps: their hooks in ~/.claude/settings.json, the list in workflow.json. */
+  /** Save the default workflow (what new sessions copy). */
   workflowSave(steps: CustomStep[]): Promise<CliResult>;
+  /** Save a template (a new one when `id` is null; 'default' is the default workflow). */
+  workflowTemplateSave(
+    id: string | null,
+    name: string,
+    steps: CustomStep[],
+  ): Promise<CliResult & { id?: string }>;
+  workflowTemplateDelete(id: string): Promise<CliResult>;
+  /** A session's own workflow; null while it follows the default. */
+  sessionWorkflowGet(sessionId: string): Promise<WorkflowDoc | null>;
+  /** Change a session's workflow (`from`: the template it now comes from, if one was applied). */
+  sessionWorkflowSave(
+    sessionId: string,
+    steps: CustomStep[],
+    from?: string | null,
+  ): Promise<CliResult>;
   /** The saved summary of a session, and whether its transcript grew since. */
   summaryGet(
     sessionKey: string,

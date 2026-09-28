@@ -81,6 +81,13 @@ const api: DeckApi = {
   skillRemove: (name) => ipcRenderer.invoke(CH.skillRemove, name),
   workflowGet: () => ipcRenderer.invoke(CH.workflowGet),
   workflowSave: (steps) => ipcRenderer.invoke(CH.workflowSave, steps),
+  workflowTemplateSave: (id, name, steps) =>
+    ipcRenderer.invoke(CH.workflowTemplateSave, id, name, steps),
+  workflowTemplateDelete: (id) =>
+    ipcRenderer.invoke(CH.workflowTemplateDelete, id),
+  sessionWorkflowGet: (sid) => ipcRenderer.invoke(CH.sessionWorkflowGet, sid),
+  sessionWorkflowSave: (sid, steps, from) =>
+    ipcRenderer.invoke(CH.sessionWorkflowSave, sid, steps, from ?? null),
   summaryGet: (key) => ipcRenderer.invoke(CH.summaryGet, key),
   summaryMake: (key) => ipcRenderer.invoke(CH.summaryMake, key),
   summaryPost: (key) => ipcRenderer.invoke(CH.summaryPost, key),

@@ -112,6 +112,18 @@ checkout whose branch was once linked to a ticket does not link it.
   instruction** attaches plain text instead: at that point the session gets it as it is, no skill
   involved (e.g. after a push: "post the preview URL in the PR description"). Both are saved as soon as
   they are added, in `~/.claude/masterdeck/workflow.json`; **Edit** opens the step in place (Save, Cancel); a saved edit reaches sessions again, even ones that had the old text. Remove takes the hook out again.
+- **Workflow templates:** the Workflow window edits the **Default** (what every new session copies)
+  or a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
+  templates (not the Default). Templates live in `~/.claude/masterdeck/workflows/templates/`.
+- **A session's own workflow:** each session gets its own copy of the workflow the first time
+  MasterDeck sees it: the Default, or the template picked under **Workflow** in the Start dialog.
+  Open it on the Terminals screen with **Workflow** at the top right (next to **Panel**; the two take
+  turns in the same place). There you add, edit or remove steps for that session only, **Use a
+  template… → Apply** replaces its steps with a template's, and **Save as template** keeps them for
+  later sessions. Changing the Default or a template later doesn't change sessions that already have
+  their copy. Copies are in `~/.claude/masterdeck/workflows/sessions/<session id>.json`; one MasterDeck
+  hook per trigger in `~/.claude/settings.json` reads the session's copy (or the Default, before it
+  has one), replacing the one-hook-per-step setup older versions installed.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
   session on it, newest first, each with Resume. The links come from babysit-ticket

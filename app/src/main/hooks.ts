@@ -1,8 +1,16 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import type { CliResult, HookStatus } from '@shared/types'
-import { STEP_MARK, stepCommand, TRIGGERS, type CustomStep } from '@shared/workflow'
-import { DECK_EVENTS } from '@shared/deckHooks'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import type { CliResult, HookStatus } from "@shared/types";
+import { STEP_MARK, triggerCommand, TRIGGERS } from "@shared/workflow";
+import { DECK_EVENTS } from "@shared/deckHooks";
 
 /**
  * Claude Code hooks the bundled skills rely on, installed into ~/.claude/settings.json:
@@ -14,145 +22,217 @@ import { DECK_EVENTS } from '@shared/deckHooks'
  * Installing is idempotent and keeps everything else in the file; a backup is written first.
  */
 
-type Hook = { type: 'command'; command: string; timeout?: number }
-type Matcher = { matcher?: string; hooks: Hook[] }
-type Settings = Record<string, unknown> & { hooks?: Record<string, Matcher[]> }
+type Hook = { type: "command"; command: string; timeout?: number };
+type Matcher = { matcher?: string; hooks: Hook[] };
+type Settings = Record<string, unknown> & { hooks?: Record<string, Matcher[]> };
 
-const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook'
-const TT_MARK = 'babysit-ticket/scripts/tt.sh'
+const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook';
+const TT_MARK = "babysit-ticket/scripts/tt.sh";
 
 const PR_PRE =
   `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) sha=$(git rev-parse HEAD 2>/dev/null) || exit 0; ` +
   `[ -f ".git/pr-selfreview-$sha" ] && exit 0; echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Soft gate: no self-review marker for current HEAD. ` +
   `Before creating this PR, run the pre-PR self-review from the babysit-pr skill (review branch diff, fix findings, commit, write marker .git/pr-selfreview-<HEAD sha>). ` +
-  `Proceed without it only if the user explicitly said to skip review."}}' ;; esac`
+  `Proceed without it only if the user explicitly said to skip review."}}' ;; esac`;
 const PR_POST =
   `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) echo '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"PR created. ` +
   `Arm the Monitor now (timeout_ms 1800000; re-arm on each expiry, there is no persistent flag), per the Monitor phase of the babysit-pr skill: ` +
-  `it emits an event per new review comment; on each wake fix and push, reply, resolve threads; the watch ends when the PR is merged/closed."}}' ;; esac`
-const Q_SUBMIT = '"$HOME/.claude/skills/queue/scripts/queue-submit.sh"'
-const Q_DRAIN = '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"'
+  `it emits an event per new review comment; on each wake fix and push, reply, resolve threads; the watch ends when the PR is merged/closed."}}' ;; esac`;
+const Q_SUBMIT = '"$HOME/.claude/skills/queue/scripts/queue-submit.sh"';
+const Q_DRAIN = '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"';
 // Script names only: an older install from ~/.claude/hooks counts too, so it is never doubled.
-const Q_SUBMIT_MARK = 'queue-submit.sh'
-const Q_DRAIN_MARK = 'queue-drain.sh'
+const Q_SUBMIT_MARK = "queue-submit.sh";
+const Q_DRAIN_MARK = "queue-drain.sh";
 
-const PR_MARK = 'pr-selfreview-'
-const PR_POST_MARK = 'Monitor phase of the babysit-pr skill'
+const PR_MARK = "pr-selfreview-";
+const PR_POST_MARK = "Monitor phase of the babysit-pr skill";
 
 function read(path: string): Settings {
-  if (!existsSync(path)) return {}
-  return JSON.parse(readFileSync(path, 'utf8')) as Settings
+  if (!existsSync(path)) return {};
+  return JSON.parse(readFileSync(path, "utf8")) as Settings;
 }
 
 function has(s: Settings, event: string, mark: string): boolean {
-  return (s.hooks?.[event] ?? []).some((m) => (m.hooks ?? []).some((h) => typeof h.command === 'string' && h.command.includes(mark)))
+  return (s.hooks?.[event] ?? []).some((m) =>
+    (m.hooks ?? []).some(
+      (h) => typeof h.command === "string" && h.command.includes(mark),
+    ),
+  );
 }
 
-function add(s: Settings, event: string, matcher: string | undefined, command: string, mark: string, timeout?: number): void {
-  if (has(s, event, mark)) return
-  s.hooks ??= {}
-  const list = (s.hooks[event] ??= [])
-  list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command, ...(timeout ? { timeout } : {}) }] })
+function add(
+  s: Settings,
+  event: string,
+  matcher: string | undefined,
+  command: string,
+  mark: string,
+  timeout?: number,
+): void {
+  if (has(s, event, mark)) return;
+  s.hooks ??= {};
+  const list = (s.hooks[event] ??= []);
+  list.push({
+    ...(matcher ? { matcher } : {}),
+    hooks: [{ type: "command", command, ...(timeout ? { timeout } : {}) }],
+  });
 }
 
 function remove(s: Settings, event: string, mark: string): void {
-  const list = s.hooks?.[event]
-  if (!list) return
+  const list = s.hooks?.[event];
+  if (!list) return;
   const kept = list
-    .map((m) => ({ ...m, hooks: (m.hooks ?? []).filter((h) => !(typeof h.command === 'string' && h.command.includes(mark))) }))
-    .filter((m) => m.hooks.length > 0)
-  if (kept.length) s.hooks![event] = kept
-  else delete s.hooks![event]
+    .map((m) => ({
+      ...m,
+      hooks: (m.hooks ?? []).filter(
+        (h) => !(typeof h.command === "string" && h.command.includes(mark)),
+      ),
+    }))
+    .filter((m) => m.hooks.length > 0);
+  if (kept.length) s.hooks![event] = kept;
+  else delete s.hooks![event];
 }
 
 export function hookStatus(settingsPath: string): HookStatus {
   try {
-    const s = read(settingsPath)
+    const s = read(settingsPath);
     return {
-      ticket: has(s, 'PostToolUse', TT_MARK) && has(s, 'SessionStart', TT_MARK),
-      pr: has(s, 'PreToolUse', PR_MARK) && has(s, 'PostToolUse', PR_POST_MARK),
-      queue: has(s, 'UserPromptSubmit', Q_SUBMIT_MARK) && has(s, 'Stop', Q_DRAIN_MARK),
-    }
+      ticket: has(s, "PostToolUse", TT_MARK) && has(s, "SessionStart", TT_MARK),
+      pr: has(s, "PreToolUse", PR_MARK) && has(s, "PostToolUse", PR_POST_MARK),
+      queue:
+        has(s, "UserPromptSubmit", Q_SUBMIT_MARK) &&
+        has(s, "Stop", Q_DRAIN_MARK),
+    };
   } catch {
-    return { ticket: false, pr: false, queue: false }
+    return { ticket: false, pr: false, queue: false };
   }
 }
 
 function write(settingsPath: string, backupDir: string, s: Settings): void {
   if (existsSync(settingsPath)) {
-    mkdirSync(backupDir, { recursive: true })
-    copyFileSync(settingsPath, join(backupDir, `settings.backup.${Date.now()}.json`))
+    mkdirSync(backupDir, { recursive: true });
+    copyFileSync(
+      settingsPath,
+      join(backupDir, `settings.backup.${Date.now()}.json`),
+    );
   }
   // Follow a symlink so a dotfiles link stays a link.
-  const target = existsSync(settingsPath) ? realpathSync(settingsPath) : settingsPath
-  mkdirSync(dirname(target), { recursive: true })
-  const tmp = `${target}.masterdeck-tmp`
-  writeFileSync(tmp, JSON.stringify(s, null, 2) + '\n')
-  renameSync(tmp, target)
+  const target = existsSync(settingsPath)
+    ? realpathSync(settingsPath)
+    : settingsPath;
+  mkdirSync(dirname(target), { recursive: true });
+  const tmp = `${target}.masterdeck-tmp`;
+  writeFileSync(tmp, JSON.stringify(s, null, 2) + "\n");
+  renameSync(tmp, target);
 }
 
-export function installHooks(settingsPath: string, backupDir: string, which: HookStatus): CliResult {
-  if (process.platform === 'win32') return { ok: false, message: 'these hooks are bash scripts; on Windows add them by hand under Git Bash (see README)' }
+export function installHooks(
+  settingsPath: string,
+  backupDir: string,
+  which: HookStatus,
+): CliResult {
+  if (process.platform === "win32")
+    return {
+      ok: false,
+      message:
+        "these hooks are bash scripts; on Windows add them by hand under Git Bash (see README)",
+    };
   try {
-    const s = read(settingsPath)
+    const s = read(settingsPath);
     if (which.ticket) {
-      add(s, 'PostToolUse', 'Bash', TT, TT_MARK)
-      add(s, 'SessionStart', undefined, TT, TT_MARK)
+      add(s, "PostToolUse", "Bash", TT, TT_MARK);
+      add(s, "SessionStart", undefined, TT, TT_MARK);
     } else {
-      remove(s, 'PostToolUse', TT_MARK)
-      remove(s, 'SessionStart', TT_MARK)
+      remove(s, "PostToolUse", TT_MARK);
+      remove(s, "SessionStart", TT_MARK);
     }
     if (which.pr) {
-      add(s, 'PreToolUse', 'Bash', PR_PRE, PR_MARK)
-      add(s, 'PostToolUse', 'Bash', PR_POST, PR_POST_MARK)
+      add(s, "PreToolUse", "Bash", PR_PRE, PR_MARK);
+      add(s, "PostToolUse", "Bash", PR_POST, PR_POST_MARK);
     } else {
-      remove(s, 'PreToolUse', PR_MARK)
-      remove(s, 'PostToolUse', PR_POST_MARK)
+      remove(s, "PreToolUse", PR_MARK);
+      remove(s, "PostToolUse", PR_POST_MARK);
     }
     if (which.queue) {
-      add(s, 'UserPromptSubmit', undefined, Q_SUBMIT, Q_SUBMIT_MARK, 10)
-      add(s, 'Stop', undefined, Q_DRAIN, Q_DRAIN_MARK, 10)
+      add(s, "UserPromptSubmit", undefined, Q_SUBMIT, Q_SUBMIT_MARK, 10);
+      add(s, "Stop", undefined, Q_DRAIN, Q_DRAIN_MARK, 10);
     } else {
-      remove(s, 'UserPromptSubmit', Q_SUBMIT_MARK)
-      remove(s, 'Stop', Q_DRAIN_MARK)
+      remove(s, "UserPromptSubmit", Q_SUBMIT_MARK);
+      remove(s, "Stop", Q_DRAIN_MARK);
     }
-    write(settingsPath, backupDir, s)
-    return { ok: true, message: 'hooks saved' }
+    write(settingsPath, backupDir, s);
+    return { ok: true, message: "hooks saved" };
   } catch (e) {
-    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
+    return {
+      ok: false,
+      message: `could not update ${settingsPath}: ${String(e)}`,
+    };
   }
 }
 
 /**
- * The workflow's custom steps as hooks: every hook MasterDeck made for a step is replaced by one per
- * step now (each marked with its id), and the rest of settings.json is kept.
+ * The workflow hooks: one per trigger, reading each session's own workflow (or the default) from
+ * `dir` (see `triggerCommand`). They replace every hook MasterDeck made for a workflow before
+ * (older versions had one per step); with `on` false they are all removed. The rest of
+ * settings.json is kept.
  */
-export function installWorkflowSteps(settingsPath: string, backupDir: string, steps: CustomStep[]): CliResult {
-  if (process.platform === 'win32') return { ok: false, message: 'these hooks are bash commands; on Windows add them by hand under Git Bash' }
+export function installWorkflowHooks(
+  settingsPath: string,
+  backupDir: string,
+  dir: string,
+  on: boolean,
+): CliResult {
+  if (process.platform === "win32")
+    return {
+      ok: false,
+      message:
+        "these hooks are bash commands; on Windows add them by hand under Git Bash",
+    };
   try {
-    const s = read(settingsPath)
-    for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK)
-    for (const step of steps) {
-      const t = TRIGGERS.find((x) => x.id === step.trigger)
-      if (!t) continue
-      add(s, t.event, t.event === 'SessionStart' ? undefined : 'Bash', stepCommand(step), `${STEP_MARK}${step.id}`, 10)
-    }
-    write(settingsPath, backupDir, s)
-    return { ok: true, message: `${steps.length} workflow step${steps.length === 1 ? '' : 's'} saved` }
+    const s = read(settingsPath);
+    const want = on
+      ? TRIGGERS.map((t) => ({ t, cmd: triggerCommand(t, dir) }))
+      : [];
+    const current = Object.values(s.hooks ?? {})
+      .flatMap((list) =>
+        (Array.isArray(list) ? list : []).flatMap((m) =>
+          (m?.hooks ?? []).map((h: { command?: string }) => h?.command ?? ""),
+        ),
+      )
+      .filter((c) => c.includes(STEP_MARK));
+    if (
+      current.length === want.length &&
+      want.every((w) => current.includes(w.cmd))
+    )
+      return { ok: true, message: "workflow saved" };
+    for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK);
+    for (const { t, cmd } of want)
+      add(
+        s,
+        t.event,
+        t.event === "SessionStart" ? undefined : "Bash",
+        cmd,
+        `${STEP_MARK}trigger-${t.id}`,
+        10,
+      );
+    write(settingsPath, backupDir, s);
+    return { ok: true, message: "workflow saved" };
   } catch (e) {
-    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
+    return {
+      ok: false,
+      message: `could not update ${settingsPath}: ${String(e)}`,
+    };
   }
 }
 
 /** MasterDeck's own hook (main/deckHooks.ts): marked by its path, one entry per event. */
-const DECK_MARK = '/deck/hook.sh'
+const DECK_MARK = "/deck/hook.sh";
 
 export function deckHooksInstalled(settingsPath: string): boolean {
   try {
-    const s = read(settingsPath)
-    return DECK_EVENTS.every((e) => has(s, e, DECK_MARK))
+    const s = read(settingsPath);
+    return DECK_EVENTS.every((e) => has(s, e, DECK_MARK));
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -161,21 +241,42 @@ export function deckHooksInstalled(settingsPath: string): boolean {
  * PermissionRequest may wait up to 10 minutes for an answer from MasterDeck; the terminal prompt
  * shows meanwhile. The others only write a line and return.
  */
-export function installDeckHooks(settingsPath: string, backupDir: string, script: string): CliResult {
-  if (process.platform === 'win32') return { ok: false, message: 'MasterDeck hooks are a bash script; not installed on Windows' }
+export function installDeckHooks(
+  settingsPath: string,
+  backupDir: string,
+  script: string,
+): CliResult {
+  if (process.platform === "win32")
+    return {
+      ok: false,
+      message: "MasterDeck hooks are a bash script; not installed on Windows",
+    };
   try {
-    const s = read(settingsPath)
+    const s = read(settingsPath);
     // A moved script (another MasterDeck home): replace the old entries.
-    const cmd = (e: string) => `"${script}" ${e}`
-    const stale = DECK_EVENTS.some((e) => has(s, e, DECK_MARK) && !has(s, e, cmd(e)))
-    if (DECK_EVENTS.every((e) => has(s, e, cmd(e))) && !stale) return { ok: true, message: 'already installed' }
+    const cmd = (e: string) => `"${script}" ${e}`;
+    const stale = DECK_EVENTS.some(
+      (e) => has(s, e, DECK_MARK) && !has(s, e, cmd(e)),
+    );
+    if (DECK_EVENTS.every((e) => has(s, e, cmd(e))) && !stale)
+      return { ok: true, message: "already installed" };
     for (const e of DECK_EVENTS) {
-      remove(s, e, DECK_MARK)
-      add(s, e, undefined, cmd(e), DECK_MARK, e === 'PermissionRequest' ? 600 : 10)
+      remove(s, e, DECK_MARK);
+      add(
+        s,
+        e,
+        undefined,
+        cmd(e),
+        DECK_MARK,
+        e === "PermissionRequest" ? 600 : 10,
+      );
     }
-    write(settingsPath, backupDir, s)
-    return { ok: true, message: 'MasterDeck hooks installed' }
+    write(settingsPath, backupDir, s);
+    return { ok: true, message: "MasterDeck hooks installed" };
   } catch (e) {
-    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` }
+    return {
+      ok: false,
+      message: `could not update ${settingsPath}: ${String(e)}`,
+    };
   }
 }
