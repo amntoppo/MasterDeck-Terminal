@@ -16,8 +16,6 @@ interface Props {
   onDetach: () => void;
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
-  /** Show the Workflow panel instead. */
-  onWorkflow?: () => void;
 }
 
 /**
@@ -34,7 +32,6 @@ export function Inspector({
   onDetach,
   onAskMaster,
   masterAttached,
-  onWorkflow,
 }: Props) {
   const tabs: [InspectorTab, string][] = [
     ["details", "Details"],
@@ -58,15 +55,6 @@ export function Inspector({
             </button>
           ))}
         </div>
-        {onWorkflow && (
-          <button
-            className="insp-switch"
-            onClick={onWorkflow}
-            title="This session's workflow"
-          >
-            Workflow
-          </button>
-        )}
         <button
           className="insp-hide"
           onClick={onHide}

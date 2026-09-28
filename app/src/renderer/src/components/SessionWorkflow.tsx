@@ -2,80 +2,198 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   actionCount,
-  compileFlow,
   DEFAULT_TEMPLATE,
   triggerInfo,
   type Flow,
+  type FlowTrigger,
   type WorkflowDoc,
   type WorkflowTemplate,
 } from "@shared/flow";
+import type { WorkflowStatus } from "@shared/ipc";
+import { formatAgo } from "@shared/format";
 import type { AppState, Session } from "@shared/types";
-import { deck } from "../deck";
+import { deck, useNow } from "../deck";
 import { FlowEditor, type Skill } from "./FlowEditor";
 import { SaveBadge, useAutosave } from "./WorkflowView";
 
-interface Props {
+/** A trigger's name for people; an unknown one (renamed since) as it is. */
+const triggerName = (t: string): string => {
+  try {
+    return triggerInfo(t as FlowTrigger).short;
+  } catch {
+    return t;
+  }
+};
+
+/**
+ * The Workflow line in a session's Details: the step its workflow handed it last, shown as running
+ * while the session is still on it (it has not finished its turn since), else when it ran; and
+ * Edit, which opens the session's workflow in the editor.
+ */
+export function WorkflowWidget({
+  session: s,
+  state,
+}: {
+  session: Session;
   state: AppState;
-  /** The open session (null: a shell, or nothing open). */
-  session: Session | null;
-  onHide: () => void;
-  /** Switch to the Details / Queue / Summary panel. */
-  onPanel: () => void;
-  /** Open the Workflow window (templates). */
-  onTemplates: () => void;
+}) {
+  const now = useNow(15_000);
+  const [st, setSt] = useState<WorkflowStatus | null>(null);
+  const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  const load = useCallback(
+    async () => setSt(await deck().workflowStatus(s.sessionId)),
+    [s.sessionId],
+  );
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => void load(), 4000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const run = st?.run ?? null;
+  const stoppedAt = state.hookInfo[s.key]?.stoppedAt ?? 0;
+  const ongoing =
+    !!run &&
+    run.at > stoppedAt &&
+    (s.state === "working" || s.busyWith != null) &&
+    now - run.at < 3 * 3600_000;
+  const lines =
+    run?.note
+      .split("\n")
+      .filter(
+        (l) =>
+          l.trim() && !/^Workflow step|^Then carry on|^Do these before/.test(l),
+      ) ?? [];
+  const next = [...new Set(st?.triggers ?? [])].filter(
+    (t) => t !== run?.trigger,
+  );
+
+  return (
+    <section className={`dsec wfw ${ongoing ? "on" : ""}`}>
+      <div className="wfw-head">
+        <span className="eyebrow">Workflow</span>
+        <span
+          className="muted wfw-from"
+          title="Its own copy, made from this template"
+        >
+          {st?.from ?? "Default"}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          className="link-btn"
+          onClick={() => setOpen(true)}
+          title="Change this session's workflow"
+        >
+          Edit
+        </button>
+      </div>
+      {run ? (
+        <div
+          className="wfw-step"
+          onClick={() => setMore((m) => !m)}
+          title={more ? "Show less" : "Show the whole step"}
+        >
+          <span
+            className={`wfw-dot ${ongoing ? "live" : ""}`}
+            aria-hidden="true"
+          />
+          <div className="wfw-main">
+            <div className="wfw-title">
+              <b>{triggerName(run.trigger)}</b>
+              <span className={ongoing ? "wfw-live" : "muted"}>
+                {ongoing
+                  ? ` · running ${formatAgo(now - run.at)}`
+                  : ` · ran ${formatAgo(now - run.at)} ago`}
+              </span>
+            </div>
+            {(more ? lines : lines.slice(0, 2)).map((l, i) => (
+              <div key={i} className="wfw-line">
+                {l.trim()}
+              </div>
+            ))}
+            {!more && lines.length > 2 && (
+              <div className="wfw-line muted">+{lines.length - 2} more</div>
+            )}
+            {run.notify.length > 0 && (
+              <div className="wfw-line muted">
+                Notified: {run.notify.join(" · ")}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="wfw-step idle">
+          <span className="wfw-dot" aria-hidden="true" />
+          <div className="wfw-main">
+            <div className="wfw-title muted">No step has run yet</div>
+          </div>
+        </div>
+      )}
+      {next.length > 0 && (
+        <div className="wfw-next muted">
+          Next on: {next.map(triggerName).join(" · ")}
+        </div>
+      )}
+      {open && (
+        <SessionWorkflowDialog
+          session={s}
+          onClose={() => {
+            setOpen(false);
+            void load();
+          }}
+        />
+      )}
+    </section>
+  );
 }
 
 /**
- * The Terminals screen's Workflow panel: the open session's own workflow (copied from the default,
- * or a template, when it started), as a map; Edit opens the same editor as the Workflow window,
- * full size. Changes apply to this session only. A template can replace it, and it can be saved
- * as a new template.
+ * A session's own workflow in the editor, full size: changes apply to this session only. A
+ * template can replace it, and it can be saved as a new template.
  */
-export function SessionWorkflow({
+export function SessionWorkflowDialog({
   session,
-  onHide,
-  onPanel,
-  onTemplates,
-}: Props) {
-  const sid = session?.sessionId ?? "";
+  onClose,
+}: {
+  session: Session;
+  onClose: () => void;
+}) {
+  const sid = session.sessionId;
   const [doc, setDoc] = useState<WorkflowDoc | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [lib, setLib] = useState<{
     templates: WorkflowTemplate[];
     skills: Skill[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  const [pick, setPick] = useState<string>("");
+  const [pick, setPick] = useState("");
   const [saveAs, setSaveAs] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  // Remounts the map after a change made elsewhere (the editor, a template applied).
+  // Remounts the editor when a template replaces the flow.
   const [gen, setGen] = useState(0);
 
   const load = useCallback(async () => {
     const [d, w] = await Promise.all([
-      sid ? deck().sessionWorkflowGet(sid) : Promise.resolve(null),
+      deck().sessionWorkflowGet(sid),
       deck().workflowGet(),
     ]);
     setDoc(d);
     setLib({ templates: w.templates, skills: w.skills });
-    setLoaded(true);
-    setGen((g) => g + 1);
   }, [sid]);
+  useEffect(() => void load(), [load]);
   useEffect(() => {
-    setLoaded(false);
-    setMsg(null);
-    setSaveAs(null);
-    setEditing(false);
-    void load();
-  }, [load]);
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" &&
+      !(e.target as HTMLElement).closest("input, textarea, select") &&
+      onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const fallback = lib?.templates.find((t) => t.id === DEFAULT_TEMPLATE);
-  const flow: Flow = doc?.flow ?? fallback?.flow ?? { nodes: [], edges: [] };
+  const flow: Flow | null = doc?.flow ?? fallback?.flow ?? null;
   const from = doc?.from ?? "Default";
-
   const save = async (next: Flow, source: string | null = from) => {
-    if (!sid) return { ok: false, message: "no session" };
     const r = await deck().sessionWorkflowSave(sid, next, source);
     if (r.ok)
       setDoc((d) => ({ flow: next, from: source, at: d?.at ?? Date.now() }));
@@ -95,7 +213,7 @@ export function SessionWorkflow({
     }
   };
   const saveTemplate = async () => {
-    if (!saveAs?.trim()) return;
+    if (!saveAs?.trim() || !flow) return;
     setBusy(true);
     const r = await deck().workflowTemplateSave(null, saveAs.trim(), flow);
     setBusy(false);
@@ -108,202 +226,100 @@ export function SessionWorkflow({
       await load();
     }
   };
-  const compiled = compileFlow(flow);
-  const close = () => {
-    setEditing(false);
-    setGen((g) => g + 1);
-  };
 
-  return (
-    <aside className="inspector wf-panel" aria-label="Session workflow">
-      <div className="insp-head">
-        <div className="seg" role="tablist">
-          <button
-            role="tab"
-            aria-selected={false}
-            onClick={onPanel}
-            title="Details, Queue, Summary"
-          >
-            Panel
-          </button>
-          <button role="tab" aria-selected className="on">
-            Workflow
-          </button>
-        </div>
-        <button
-          className="insp-hide"
-          onClick={onHide}
-          title="Hide the workflow"
-          aria-label="Hide the workflow"
-        >
-          ›
-        </button>
-      </div>
-      <div className="insp-body">
-        {!session ? (
-          <div className="insp-empty">
-            Open a session to see and change its workflow. Shells have none.
-          </div>
-        ) : !loaded || !lib ? (
-          <div className="insp-empty">Reading the workflow…</div>
-        ) : (
-          <div className="wf-body">
-            <div className="wf-head">
-              <div className="wf-title">
-                <b>{session.name}</b>
-                <span style={{ flex: 1 }} />
-                <button
-                  className="btn primary"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit workflow
-                </button>
-              </div>
-              <div className="meta">
-                {doc ? (
-                  <>
-                    Its own copy, from <b>{from}</b>
-                    {doc.at
-                      ? ` · ${new Date(doc.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                      : ""}
-                    . Changes apply to this session only, from its next step on.
-                  </>
-                ) : (
-                  <>Follows the Default until you change it.</>
-                )}
-              </div>
-              <div className="wf-actions">
-                <select
-                  className="fsel"
-                  value={pick}
-                  onChange={(e) => setPick(e.target.value)}
-                  aria-label="Template to apply"
-                >
-                  <option value="">Use a template…</option>
-                  {lib.templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({actionCount(t.flow)} blocks)
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn"
-                  disabled={!pick || busy}
-                  onClick={() => void apply()}
-                  title="Replace this session's workflow with the template"
-                >
-                  Apply
-                </button>
-                <span style={{ flex: 1 }} />
-                {saveAs === null && (
-                  <button
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => setSaveAs("")}
-                    title="Keep this workflow as a template for later sessions"
-                  >
-                    Save as template
-                  </button>
-                )}
-              </div>
-              {saveAs !== null && (
-                <div className="wf-actions">
-                  <input
-                    className="wf-input"
-                    autoFocus
-                    value={saveAs}
-                    placeholder="Template name"
-                    onChange={(e) => setSaveAs(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void saveTemplate();
-                      if (e.key === "Escape") setSaveAs(null);
-                    }}
-                  />
-                  <button
-                    className="btn primary"
-                    disabled={busy || !saveAs.trim()}
-                    onClick={() => void saveTemplate()}
-                  >
-                    Save
-                  </button>
-                  <button className="btn" onClick={() => setSaveAs(null)}>
-                    Cancel
-                  </button>
-                </div>
-              )}
-              {msg && (
-                <div className={msg.ok ? "wf-ok" : "error"}>{msg.text}</div>
-              )}
-            </div>
-            <div
-              className="wf-map"
-              onDoubleClick={() => setEditing(true)}
-              title="Double-click to edit"
+  return createPortal(
+    <div
+      className="backdrop"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="dialog flow-dialog"
+        role="dialog"
+        aria-label={`Workflow of ${session.name}`}
+      >
+        <h3>
+          Workflow · {session.name}
+          <span className="muted small">this session only · from {from}</span>
+          <span style={{ flex: 1 }} />
+          {msg && (
+            <span className={msg.ok ? "wf-ok" : "error"}>{msg.text}</span>
+          )}
+          {lib && (
+            <>
+              <select
+                className="fsel"
+                value={pick}
+                onChange={(e) => setPick(e.target.value)}
+                aria-label="Template to apply"
+              >
+                <option value="">Use a template…</option>
+                {lib.templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({actionCount(t.flow)} blocks)
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn"
+                disabled={!pick || busy}
+                onClick={() => void apply()}
+                title="Replace this session's workflow with the template"
+              >
+                Apply
+              </button>
+            </>
+          )}
+          {saveAs === null ? (
+            <button
+              className="btn"
+              disabled={busy || !flow}
+              onClick={() => setSaveAs("")}
+              title="Keep this workflow as a template for later sessions"
             >
-              <FlowEditor
-                key={`${sid}:${gen}`}
-                flow={flow}
-                skills={lib.skills}
-                readOnly
-              />
-            </div>
-            <div className="wf-summary">
-              {compiled.steps.length === 0 && (
-                <div className="meta">
-                  No steps of its own: only the built-ins run.
-                </div>
-              )}
-              {compiled.steps.map((s) => (
-                <div key={s.id} className="wf-sum-row">
-                  <span className="fb-kind">When</span>{" "}
-                  {triggerInfo(s.trigger).short}
-                  {s.pattern ? <code> {s.pattern}</code> : null}
-                </div>
-              ))}
-              {compiled.problems.length > 0 && (
-                <div className="error">
-                  {compiled.problems.length} problem(s): open the editor to see
-                  them.
-                </div>
-              )}
-            </div>
-            <button className="link-btn wf-link" onClick={onTemplates}>
-              Templates and the Default are in the Workflow window →
+              Save as template
             </button>
-          </div>
+          ) : (
+            <>
+              <input
+                className="wf-input"
+                autoFocus
+                value={saveAs}
+                placeholder="Template name"
+                onChange={(e) => setSaveAs(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void saveTemplate();
+                  if (e.key === "Escape") setSaveAs(null);
+                }}
+              />
+              <button
+                className="btn primary"
+                disabled={busy || !saveAs.trim()}
+                onClick={() => void saveTemplate()}
+              >
+                Save
+              </button>
+              <button className="btn" onClick={() => setSaveAs(null)}>
+                Cancel
+              </button>
+            </>
+          )}
+          <button className="btn primary" onClick={onClose}>
+            Done
+          </button>
+        </h3>
+        {lib && flow ? (
+          <FlowEditor
+            key={gen}
+            flow={flow}
+            skills={lib.skills}
+            onChange={onChange}
+            toolbar={<SaveBadge state={saveState} />}
+          />
+        ) : (
+          <div className="empty">Reading the workflow…</div>
         )}
       </div>
-      {editing &&
-        session &&
-        lib &&
-        createPortal(
-          <div
-            className="backdrop"
-            onMouseDown={(e) => e.target === e.currentTarget && close()}
-          >
-            <div
-              className="dialog flow-dialog"
-              role="dialog"
-              aria-label={`Workflow of ${session.name}`}
-            >
-              <h3>
-                Workflow · {session.name}
-                <span className="muted small">this session only</span>
-                <span style={{ flex: 1 }} />
-                <button className="btn primary" onClick={close}>
-                  Done
-                </button>
-              </h3>
-              <FlowEditor
-                flow={flow}
-                skills={lib.skills}
-                onChange={onChange}
-                toolbar={<SaveBadge state={saveState} />}
-              />
-            </div>
-          </div>,
-          document.body,
-        )}
-    </aside>
+    </div>,
+    document.body,
   );
 }

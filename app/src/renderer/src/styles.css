@@ -1089,3 +1089,21 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .fp-gcount { flex: none; font-size: 10.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; font-weight: 500; }
 .fp-gbody { display: flex; flex-direction: column; gap: 4px; padding-left: 10px; }
 .fp-gbody > * { flex: none; }
+/* The Workflow line in Details */
+.wfw-head { display: flex; align-items: center; gap: 8px; }
+.wfw-from { font-size: 11.5px; }
+.wfw-step { display: flex; gap: 10px; align-items: flex-start; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); cursor: pointer; }
+.wfw-step.idle { cursor: default; }
+.wfw.on .wfw-step { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); position: relative; overflow: hidden; }
+/* Running: a light sweeping across, and a pulsing dot. */
+.wfw.on .wfw-step::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--accent) 14%, transparent) 50%, transparent 80%); transform: translateX(-100%); animation: wfw-sweep 2.4s ease-in-out infinite; pointer-events: none; }
+@keyframes wfw-sweep { to { transform: translateX(100%); } }
+.wfw-dot { flex: none; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--faint); }
+.wfw-dot.live { background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: wfw-pulse 1.6s ease-out infinite; }
+@keyframes wfw-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+@media (prefers-reduced-motion: reduce) { .wfw.on .wfw-step::after, .wfw-dot.live { animation: none; } }
+.wfw-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.wfw-title { font-size: 12.5px; }
+.wfw-live { color: var(--accent); font-weight: 600; }
+.wfw-line { font-size: 12px; line-height: 1.45; color: var(--text); word-break: break-word; }
+.wfw-next { font-size: 11.5px; margin-top: 6px; }

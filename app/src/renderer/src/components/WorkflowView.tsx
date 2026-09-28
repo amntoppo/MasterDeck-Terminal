@@ -252,7 +252,7 @@ export function WorkflowView(_: { state: AppState }) {
           <span className="wf-note muted">
             {current.id === DEFAULT_TEMPLATE
               ? "Every new session starts with a copy of the Default."
-              : "Pick it in the Start dialog, or apply it from a session’s Workflow panel."}
+              : "Pick it in the Start dialog, or apply it from a session’s Details (Workflow → Edit)."}
           </span>
         </div>
       )}

@@ -130,14 +130,16 @@ checkout whose branch was once linked to a ticket does not link it.
   a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.
 - **A session's own workflow:** each session gets its own copy the first time MasterDeck sees it: the
-  Default, or the template picked under **Workflow** in the Start dialog. On the Terminals screen,
-  **Workflow** at the top right (next to **Panel**; the two take turns in the same place) shows its
-  map; **Edit workflow** opens the same editor, full size, for that session only. **Use a template… →
-  Apply** replaces it with a template, and **Save as template** keeps it for later sessions. Changing
-  the Default or a template doesn't change sessions that already have their copy. Copies are in
-  `~/.claude/masterdeck/workflows/sessions/<session id>.json`. One MasterDeck hook per trigger in
-  `~/.claude/settings.json` reads the session's copy (or the Default before it has one); workflows
-  from older versions (a list of steps) are turned into flows at launch.
+  Default, or the template picked under **Workflow** in the Start dialog. Its **Details** tab shows a
+  **Workflow** line: the step its workflow handed it last (the trigger and the plan's first lines;
+  click for all of it), pulsing as **running** while the session is still on it (it has not finished
+  its turn since), else *ran N min ago*, and which triggers come next. **Edit** opens the same editor
+  as the Workflow window, full size, for that session only, with **Use a template… → Apply** and
+  **Save as template**. Changing the Default or a template doesn't change sessions that already have
+  their copy. Copies are in `~/.claude/masterdeck/workflows/sessions/<session id>.json`, and each run
+  is logged in `workflows/runs.jsonl`. One MasterDeck hook per trigger in `~/.claude/settings.json`
+  reads the session's copy (or the Default before it has one); workflows from older versions (a
+  list of steps) are turned into flows at launch.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
   session on it, newest first, each with Resume. The links come from babysit-ticket

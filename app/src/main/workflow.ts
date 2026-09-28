@@ -4,6 +4,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  appendFileSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -275,6 +276,13 @@ const readRaw = (file: string): unknown => {
  * (`workflows/sessions/<session id>.json`) and the template picked for a session being started
  * (`workflows/pending.json`, by session name).
  */
+export interface WorkflowRun {
+  at: number;
+  trigger: string;
+  /** The compiled steps it handed over. */
+  ids: string[];
+}
+
 export class WorkflowStore {
   /** Sessions already given their copy (or found with one) in this run. */
   private seen = new Set<string>();
@@ -480,5 +488,78 @@ export class WorkflowStore {
     const steps = compileFlow(parseDoc(readRaw(f)).flow).steps;
     this.compiled.set(f, { mtime, steps });
     return steps;
+  }
+
+  private get runsFile(): string {
+    return join(this.home, "workflows", "runs.jsonl");
+  }
+  private runs: { mtime: number; last: Map<string, WorkflowRun> } = {
+    mtime: -1,
+    last: new Map(),
+  };
+
+  /** Record a step MasterDeck ran itself (needs you, idle). */
+  logRun(sessionId: string, trigger: string, ids: string[]): void {
+    if (!validSessionId(sessionId)) return;
+    mkdirSync(join(this.home, "workflows"), { recursive: true });
+    appendFileSync(
+      this.runsFile,
+      JSON.stringify({
+        at: Date.now(),
+        sid: sessionId,
+        trigger,
+        ids: ids.join(" "),
+      }) + "\n",
+    );
+  }
+
+  /** The last workflow step that ran for a session (hooks and MasterDeck log each run). */
+  lastRun(sessionId: string): WorkflowRun | null {
+    let mtime = 0;
+    try {
+      const st = statSync(this.runsFile);
+      mtime = st.mtimeMs;
+      // Kept short: the newest lines are all that matter.
+      if (st.size > 1_000_000) {
+        const lines = readFileSync(this.runsFile, "utf8")
+          .trim()
+          .split("\n")
+          .slice(-2000);
+        writeAtomic(this.runsFile, lines.join("\n") + "\n");
+        mtime = statSync(this.runsFile).mtimeMs;
+      }
+    } catch {
+      return null;
+    }
+    if (mtime !== this.runs.mtime) {
+      const last = new Map<string, WorkflowRun>();
+      for (const line of readFileSync(this.runsFile, "utf8").split("\n")) {
+        try {
+          const r = JSON.parse(line) as {
+            at?: unknown;
+            sid?: unknown;
+            trigger?: unknown;
+            ids?: unknown;
+          };
+          if (
+            typeof r.sid !== "string" ||
+            typeof r.at !== "number" ||
+            typeof r.trigger !== "string"
+          )
+            continue;
+          last.set(r.sid, {
+            at: r.at,
+            trigger: r.trigger,
+            ids: String(r.ids ?? "")
+              .split(" ")
+              .filter(Boolean),
+          });
+        } catch {
+          /* a partial line */
+        }
+      }
+      this.runs = { mtime, last };
+    }
+    return this.runs.last.get(sessionId) ?? null;
   }
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -189,6 +189,15 @@ describe.skipIf(process.platform === "win32")("flow hooks", () => {
     expect(run(stop, dir, { session_id: SID, stop_hook_active: true })).toBe(
       "",
     );
+    // Each run is logged for MasterDeck (the Workflow line in Details).
+    const log = readFileSync(join(dir, "workflows", "runs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(log.map((r) => [r.sid, r.trigger])).toEqual([
+      [SID, "command-after"],
+      [SID, "turn-end"],
+    ]);
   }, 20_000);
   it("a built-in left out of the workflow skips its hook", () => {
     const on = setup({ builtins: ["pr-watch"] });

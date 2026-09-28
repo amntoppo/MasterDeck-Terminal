@@ -85,4 +85,14 @@ describe("WorkflowStore", () => {
     expect(mine.from).toBe("Default");
     expect(mine.builtins).toHaveLength(3);
   });
+  it("keeps the last run of each session", () => {
+    const home = mkdtempSync(join(tmpdir(), "wfr-"));
+    const w = new WorkflowStore(home);
+    expect(w.lastRun(SID)).toBeNull();
+    w.logRun(SID, "idle", ["id-1"]);
+    w.logRun(SID2, "needs-you", ["ny-1"]);
+    w.logRun(SID, "needs-you", ["ny-2"]);
+    expect(w.lastRun(SID)).toMatchObject({ trigger: "needs-you", ids: ["ny-2"] });
+    expect(w.lastRun(SID2)?.trigger).toBe("needs-you");
+  });
 });

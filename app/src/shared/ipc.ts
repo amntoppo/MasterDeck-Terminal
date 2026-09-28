@@ -8,7 +8,16 @@ import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
 import type { HookEntry } from "./workflow";
-import type { Flow, WorkflowDoc, WorkflowTemplate } from "./flow";
+import type { Flow, FlowTrigger, WorkflowDoc, WorkflowTemplate } from "./flow";
+
+export interface WorkflowStatus {
+  /** The template its copy came from; null: it follows the Default. */
+  from: string | null;
+  /** The triggers its workflow has steps for. */
+  triggers: FlowTrigger[];
+  /** The last step that ran: when, which trigger, what the session was handed. */
+  run: { at: number; trigger: string; note: string; notify: string[] } | null;
+}
 import type { SessionSummary } from "./summary";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
@@ -91,6 +100,7 @@ export const CH = {
   workflowTemplateSave: "workflow:templateSave",
   workflowTemplateDelete: "workflow:templateDelete",
   sessionWorkflowGet: "workflow:sessionGet",
+  workflowStatus: "workflow:status",
   sessionWorkflowSave: "workflow:sessionSave",
   linkSession: "session:link",
   setSprint: "board:sprint",
@@ -315,6 +325,8 @@ export interface DeckApi {
     flow: Flow,
   ): Promise<CliResult & { id?: string }>;
   workflowTemplateDelete(id: string): Promise<CliResult>;
+  /** What a session's workflow last did (the Workflow line in Details). */
+  workflowStatus(sessionId: string): Promise<WorkflowStatus | null>;
   /** A session's own workflow; null while it follows the default. */
   sessionWorkflowGet(sessionId: string): Promise<WorkflowDoc | null>;
   /** Change a session's workflow (`from`: the template it now comes from, if one was applied). */

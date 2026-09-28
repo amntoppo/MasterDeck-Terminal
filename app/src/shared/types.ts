@@ -167,7 +167,7 @@ export interface AppState {
   /** Live details (state, CI, review) of the PRs of followed sessions, by PR URL. */
   prLive: Record<string, PrLive>
   /** What MasterDeck's hook reported per Session.key: compaction, and an API error that stopped it. */
-  hookInfo: Record<string, { compacting: boolean; compactedAt: number | null; failure: { type: string; message: string; at: number } | null }>
+  hookInfo: Record<string, { compacting: boolean; compactedAt: number | null; failure: { type: string; message: string; at: number } | null; stoppedAt?: number | null }>
   /** Git worktrees each session created or worked in that still exist, by Session.key; oldest first. */
   sessionWorktrees: Record<string, import('./worktrees').SessionWorktree[]>
   /** PR URLs linked to each session (sessionId): babysit-ticket's list, then PRs it created. Oldest first. */

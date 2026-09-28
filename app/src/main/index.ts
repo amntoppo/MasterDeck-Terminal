@@ -604,6 +604,7 @@ function runFlowWatch(state: AppState): void {
   for (const a of r.actions) {
     const s = live.find((x) => x.key === a.key);
     if (!s) continue;
+    workflows().logRun(s.sessionId, a.trigger, [a.step]);
     notify(
       a.notify.map((body) => ({
         title: `${s.name}: workflow`,
@@ -1090,6 +1091,25 @@ function registerIpc(): void {
       return { ok: false, message: "no such template" };
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
+  });
+  ipcMain.handle(CH.workflowStatus, (_e, sid: unknown) => {
+    if (!validSessionId(sid)) return null;
+    const doc = workflows().sessionDoc(sid);
+    const run = workflows().lastRun(sid);
+    const steps = workflows().compiledFor(sid);
+    const ran = run ? steps.filter((x) => run.ids.includes(x.id)) : [];
+    return {
+      from: doc?.from ?? null,
+      triggers: steps.map((x) => x.trigger),
+      run: run
+        ? {
+            at: run.at,
+            trigger: run.trigger,
+            note: ran.map((x) => x.note).join("\n\n"),
+            notify: ran.flatMap((x) => x.notify ?? []),
+          }
+        : null,
+    };
   });
   ipcMain.handle(CH.sessionWorkflowGet, (_e, sid: unknown) =>
     validSessionId(sid) ? workflows().sessionDoc(sid) : null,

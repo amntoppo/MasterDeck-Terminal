@@ -649,6 +649,10 @@ export function flowTriggerCommand(
     `ids=""; for id in $(${pick}); do case "$id" in *[!a-z0-9-]*) continue;; esac; ${markLine}ids="$ids $id"; done`,
   );
   lines.push(`[ -n "$ids" ] || exit 0`);
+  // What ran, for MasterDeck (the Workflow line in a session's Details).
+  lines.push(
+    `mkdir -p "$d/workflows" 2>/dev/null; printf '{"at":%s000,"sid":"%s","trigger":"%s","ids":"%s"}\\n' "$(date +%s)" "$sid" ${q(t.id)} "$ids" >> "$d/workflows/runs.jsonl" 2>/dev/null`,
+  );
   const text = `([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))`;
   const outp =
     t.id === "turn-end"

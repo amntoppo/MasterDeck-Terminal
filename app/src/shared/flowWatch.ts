@@ -18,6 +18,7 @@ export interface WatchState {
 export interface WatchAction {
   key: string;
   step: string;
+  trigger: "needs-you" | "idle";
   notify: string[];
   /** Idle: the message to send the session. */
   message: string | null;
@@ -59,6 +60,7 @@ export function flowActions(
       actions.push({
         key: s.key,
         step: step.id,
+        trigger: step.trigger as "needs-you" | "idle",
         notify: step.notify ?? [],
         message: step.trigger === "idle" && step.note.trim() ? step.note : null,
       });

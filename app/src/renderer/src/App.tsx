@@ -36,7 +36,6 @@ import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { TasksView } from "./components/TasksView";
 import { Rail } from "./components/Rail";
-import { SessionWorkflow } from "./components/SessionWorkflow";
 import { Inspector, type InspectorTab } from "./components/Inspector";
 import { SettingsView, type SettingsSection } from "./components/SettingsView";
 import { WorktreesDialog } from "./components/WorktreesDialog";
@@ -191,19 +190,9 @@ export function App() {
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
   );
-  const [inspOpen, setInspOpenRaw] = useState(() =>
+  const [inspOpen, setInspOpen] = useState(() =>
     load<boolean>("inspOpen", true),
   );
-  // The Workflow panel: the open session's own workflow, in the same place (one of the two shows).
-  const [wfOpen, setWfOpenRaw] = useState(() => load<boolean>("wfOpen", false));
-  const setInspOpen = useCallback((v: boolean) => {
-    setInspOpenRaw(v);
-    if (v) setWfOpenRaw(false);
-  }, []);
-  const setWfOpen = useCallback((v: boolean) => {
-    setWfOpenRaw(v);
-    if (v) setInspOpenRaw(false);
-  }, []);
   const showPanel = useCallback(
     (t: InspectorTab) => {
       setView("terminals");
@@ -230,7 +219,6 @@ export function App() {
   useEffect(() => save("inspPct", inspPct), [inspPct]);
   useEffect(() => save("masterOpen", masterOpen), [masterOpen]);
   useEffect(() => save("inspOpen", inspOpen), [inspOpen]);
-  useEffect(() => save("wfOpen", wfOpen), [wfOpen]);
   useEffect(() => {
     save("view", view);
     deck().setBoardOpen(view === "board");
@@ -783,7 +771,7 @@ export function App() {
   );
   // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
   const useMaster = state.config.masterEnabled;
-  const panelShown = view === "terminals" && (inspOpen || wfOpen);
+  const panelShown = view === "terminals" && inspOpen;
   const masterShown = useMaster && masterOpen;
   // What ⌘F searches: the open terminal, or the Board / PRs screen's text.
   const findKey =
@@ -1052,7 +1040,7 @@ export function App() {
           className={`divider ${dragging === "panel" ? "dragging" : ""}`}
           onMouseDown={() => setDragging("panel")}
           title="Drag to resize the panel · double-click to hide it"
-          onDoubleClick={() => (setInspOpen(false), setWfOpen(false))}
+          onDoubleClick={() => setInspOpen(false)}
         >
           ⋮
         </div>
@@ -1061,36 +1049,21 @@ export function App() {
         className="insp-slot"
         style={panelShown ? undefined : { display: "none" }}
       >
-        {wfOpen ? (
-          <SessionWorkflow
-            state={state}
-            session={
-              activeKey
-                ? (state.sessions.find((x) => x.key === activeKey) ?? null)
-                : null
-            }
-            onHide={() => setWfOpen(false)}
-            onPanel={() => setInspOpen(true)}
-            onTemplates={() => setView("workflow")}
-          />
-        ) : (
-          <Inspector
-            state={state}
-            session={
-              activeKey
-                ? (state.sessions.find((x) => x.key === activeKey) ?? null)
-                : null
-            }
-            activeKey={activeKey}
-            tab={inspTab}
-            onTab={setInspTab}
-            onHide={() => setInspOpen(false)}
-            onDetach={() => active && closeTab(active)}
-            onAskMaster={askMaster}
-            masterAttached={masterAttached}
-            onWorkflow={() => setWfOpen(true)}
-          />
-        )}
+        <Inspector
+          state={state}
+          session={
+            activeKey
+              ? (state.sessions.find((x) => x.key === activeKey) ?? null)
+              : null
+          }
+          activeKey={activeKey}
+          tab={inspTab}
+          onTab={setInspTab}
+          onHide={() => setInspOpen(false)}
+          onDetach={() => active && closeTab(active)}
+          onAskMaster={askMaster}
+          masterAttached={masterAttached}
+        />
       </div>
       {masterShown && (
         <div
@@ -1108,23 +1081,14 @@ export function App() {
       >
         {useMaster && <MasterPane state={state} shown={masterShown} />}
       </div>
-      {view === "terminals" && !inspOpen && !wfOpen && (
-        <div className="panel-shows">
-          <button
-            className="panel-show"
-            onClick={() => setInspOpen(true)}
-            title="Show the panel: Details, Queue, Summary"
-          >
-            ‹ Panel
-          </button>
-          <button
-            className="panel-show"
-            onClick={() => setWfOpen(true)}
-            title="Show this session's workflow: change its steps, apply or save a template"
-          >
-            ‹ Workflow
-          </button>
-        </div>
+      {view === "terminals" && !inspOpen && (
+        <button
+          className="panel-show"
+          onClick={() => setInspOpen(true)}
+          title="Show the panel: Details, Queue, Summary"
+        >
+          ‹ Panel
+        </button>
       )}
 
       {assigning && (

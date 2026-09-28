@@ -1823,6 +1823,7 @@ export class Sources {
         compacting: h.compacting,
         compactedAt: h.compactedAt,
         failure: f,
+        stoppedAt: h.stoppedAt,
       };
     }
     const sessionPrs = Object.fromEntries(

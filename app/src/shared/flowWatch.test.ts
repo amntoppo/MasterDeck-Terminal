@@ -23,7 +23,13 @@ describe("flowActions", () => {
       0,
     );
     expect(r.actions).toEqual([
-      { key: "a", step: "ny-1", notify: ["Look at it"], message: null },
+      {
+        key: "a",
+        step: "ny-1",
+        trigger: "needs-you",
+        notify: ["Look at it"],
+        message: null,
+      },
     ]);
     r = flowActions(
       r.next,
@@ -49,6 +55,7 @@ describe("flowActions", () => {
       {
         key: "a",
         step: "id-1",
+        trigger: "idle",
         notify: ["Idle"],
         message: "1. Check CI and continue.",
       },
