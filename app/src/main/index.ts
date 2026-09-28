@@ -5,6 +5,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -1075,6 +1076,61 @@ function registerIpc(): void {
         : { ok: true, message: "stopped" };
     },
   );
+  ipcMain.handle(CH.stopSessions, async (_e, keys: unknown) => {
+    const want = new Set(
+      Array.isArray(keys)
+        ? keys.filter((k): k is string => typeof k === "string")
+        : [],
+    );
+    const list = (latest?.sessions ?? []).filter(
+      (s) => want.has(s.key) && canStop(s),
+    );
+    if (!list.length) return { ok: false, message: "nothing to stop" };
+    const names = list.map((s) => s.name);
+    const choice = await dialog.showMessageBox(win!, {
+      type: "warning",
+      buttons: [
+        "Cancel",
+        `Stop ${list.length} session${list.length === 1 ? "" : "s"}`,
+      ],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Stop ${list.length} session${list.length === 1 ? "" : "s"}?`,
+      detail: `${names.slice(0, 15).join("\n")}${names.length > 15 ? `\n…and ${names.length - 15} more` : ""}\n\nTheir conversations are kept: resume one later from its ticket on the Board.`,
+    });
+    if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    const results = await Promise.all(
+      list.map(async (s) => {
+        if (s.kind === "background" && s.bgId && isSafeBgId(s.bgId)) {
+          const r = await run(claudeBin, ["stop", s.bgId], {
+            timeoutMs: 30_000,
+          });
+          return r.code === 0 ? s.key : null;
+        }
+        if (s.pid !== null && (await isClaudePid(s.pid))) {
+          await stopPid(s.pid);
+          return (await isClaudePid(s.pid)) ? null : s.key;
+        }
+        return null;
+      }),
+    );
+    await sources.refreshAgents();
+    const stopped = results.filter((k): k is string => k !== null);
+    const failed = list
+      .filter((s) => !stopped.includes(s.key))
+      .map((s) => s.name);
+    return failed.length
+      ? {
+          ok: stopped.length > 0,
+          stopped,
+          message: `stopped ${stopped.length}; could not stop ${failed.join(", ")}`,
+        }
+      : {
+          ok: true,
+          stopped,
+          message: `stopped ${stopped.length} session${stopped.length === 1 ? "" : "s"}`,
+        };
+  });
   ipcMain.handle(CH.setManualStatus, (_e, key: unknown, status: unknown) =>
     typeof key === "string" && key.length < 200
       ? sources.setManualStatus(key, status)

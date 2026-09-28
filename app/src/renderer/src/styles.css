@@ -948,3 +948,10 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .asked-d { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.4; }
 .asked-own { margin-top: 2px; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .asked-own:focus { border-color: var(--accent); }
+/* Cleanup: pick sessions to stop */
+.srow-pick { margin: 0 2px 0 0; width: 13px; height: 13px; accent-color: var(--accent); pointer-events: none; flex: none; }
+.srow.picked { background: var(--accent-soft); border-color: var(--accent); }
+.srow.unpickable { opacity: .45; cursor: default; }
+.cleanup-bar { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
+.cleanup-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.cleanup-actions .btn { font-size: 12px; padding: 4px 10px; }

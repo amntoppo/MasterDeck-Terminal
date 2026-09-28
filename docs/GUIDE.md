@@ -223,6 +223,12 @@ see at a glance where the work stands:
   when you choose No. The answer goes through the hook, so it works for any session, including one
   in another terminal. The terminal shows the prompt too; answering there clears the card. Sessions
   started before the hook was installed fall back to reading the prompt off the screen.
+- **Cleanup:** the **Cleanup** button at the bottom of the Sessions column (next to Refresh) makes
+  every session selectable, with the ones whose PRs are merged already picked. Click sessions to
+  pick or unpick them (**None** / **All** clears or picks every one). **Stop sessions** stops the
+  picked ones after one confirmation and closes their tabs; **Cancel** leaves Cleanup. Their
+  conversations are kept, so you can resume one later from its ticket on the Board. Parked
+  sessions show greyed out, since they're already stopped.
 - **Questions from Needs you:** when Claude asks you questions (its AskUserQuestion tool), the
   hook holds them too. The card (QUESTION) and the Tasks row show each question with its header and
   its options with their descriptions: pick one, or several where it says *pick any*, or type your

@@ -1,266 +1,347 @@
-import type { Ticket } from './ticket'
-import type { MenuAnswer } from './ask'
-import type { PrSummary } from './prSummary'
-import type { Settings } from './settings'
-import type { HistoryHit, TranscriptWindow } from './history'
-import type { StandupCommit } from './standup'
-import type { WorktreeClass, WorktreeInfo } from './janitor'
-import type { TokensByDay } from './tokens'
-import type { GhAccount } from './ghAuth'
-import type { CustomStep, HookEntry } from './workflow'
-import type { SessionSummary } from './summary'
+import type { Ticket } from "./ticket";
+import type { MenuAnswer } from "./ask";
+import type { PrSummary } from "./prSummary";
+import type { Settings } from "./settings";
+import type { HistoryHit, TranscriptWindow } from "./history";
+import type { StandupCommit } from "./standup";
+import type { WorktreeClass, WorktreeInfo } from "./janitor";
+import type { TokensByDay } from "./tokens";
+import type { GhAccount } from "./ghAuth";
+import type { CustomStep, HookEntry } from "./workflow";
+import type { SessionSummary } from "./summary";
 
-export type SetupTool = 'claude' | 'gh' | 'python' | 'git' | 'jq'
+export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
 
 /** A change to a session's queue; remove and move name the item by index and text. */
 export type QueueEdit =
-  | { op: 'add'; text: string }
-  | { op: 'remove'; index: number; text: string }
-  | { op: 'move'; index: number; text: string; to: number }
-  | { op: 'clear' }
+  | { op: "add"; text: string }
+  | { op: "remove"; index: number; text: string }
+  | { op: "move"; index: number; text: string; to: number }
+  | { op: "clear" };
 
 export interface JanitorRow extends WorktreeInfo {
-  cls: WorktreeClass
-  reason: string
+  cls: WorktreeClass;
+  reason: string;
 }
 
 export interface Template {
-  name: string
-  text: string
-  builtin?: boolean
+  name: string;
+  text: string;
+  builtin?: boolean;
 }
-import type { AppState, CliResult, DraftAssign, HookStatus, PaneSpec, SetupCheck } from './types'
+import type {
+  AppState,
+  CliResult,
+  DraftAssign,
+  HookStatus,
+  PaneSpec,
+  SetupCheck,
+} from "./types";
 
 export const CH = {
-  state: 'state:update',
-  focusSession: 'app:focusSession',
-  showNeedsYou: 'app:showNeedsYou',
-  showInboxItem: 'app:showInboxItem',
-  getState: 'state:get',
-  approve: 'cli:approve',
-  reject: 'cli:reject',
-  draftAssign: 'cli:draftAssign',
-  assign: 'cli:assign',
-  refresh: 'cli:refresh',
-  setFocus: 'app:setFocus',
-  setVisible: 'app:setVisible',
-  openExternal: 'app:openExternal',
-  openEditor: 'app:openEditor',
-  copy: 'app:copy',
-  stopSession: 'session:stop',
-  stopOtherSession: 'session:stopOther',
-  setManualStatus: 'session:setManualStatus',
-  statuslineInstall: 'statusline:install',
-  statuslineUninstall: 'statusline:uninstall',
-  masterStart: 'master:start',
-  ptyOpen: 'pty:open',
-  ptyWrite: 'pty:write',
-  ptyResize: 'pty:resize',
-  ptyClose: 'pty:close',
-  ptyData: 'pty:data',
-  ptyExit: 'pty:exit',
-  confirm: 'app:confirm',
-  boardRefresh: 'board:refresh',
-  teamPrsRefresh: 'prs:refresh',
-  setupCheck: 'setup:check',
-  setupTool: 'setup:tool',
-  ghAccounts: 'setup:ghAccounts',
-  ghSwitch: 'setup:ghSwitch',
-  ghOwners: 'setup:ghOwners',
-  configDetect: 'config:detect',
-  configDetectAll: 'config:detectAll',
-  configSave: 'config:save',
-  pickFolder: 'app:pickFolder',
-  hooksInstall: 'hooks:install',
-  skillReinstall: 'skills:reinstall',
-  skillRemove: 'skills:remove',
-  workflowGet: 'workflow:get',
-  summaryGet: 'summary:get',
-  summaryMake: 'summary:make',
-  summaryPost: 'summary:post',
-  workflowSave: 'workflow:save',
-  linkSession: 'session:link',
-  setSprint: 'board:sprint',
-  prSummary: 'pr:summary',
-  issueBody: 'issue:body',
-  shellPrepare: 'shell:prepare',
-  ticketMemory: 'ticket:memory',
-  assignIssue: 'issue:assign',
-  defaultModel: 'models:default',
-  startHere: 'session:startHere',
-  sendText: 'session:sendText',
-  answerMenu: 'session:answerMenu',
-  inboxAct: 'inbox:act',
-  queueList: 'queue:list',
-  queueEdit: 'queue:edit',
-  queueSendNext: 'queue:sendNext',
-  getSettings: 'settings:get',
-  setSettings: 'settings:set',
-  autoOpen: 'app:autoOpen',
-  setStatus: 'board:setStatus',
-  standupCommits: 'standup:commits',
-  janitor: 'janitor:list',
-  removeWorktree: 'janitor:removeWorktree',
-  removeSession: 'janitor:removeSession',
-  searchHistory: 'history:search',
-  historyTranscript: 'history:transcript',
-  templates: 'templates:list',
-  saveTemplate: 'templates:save',
-  deleteTemplate: 'templates:delete',
-  resumeSession: 'session:resume',
-  resumeStopped: 'session:resumeStopped',
-  tokensByDay: 'costs:tokensByDay',
-  dismissStopped: 'session:dismissStopped',
-  boardOpen: 'board:open',
-} as const
+  state: "state:update",
+  focusSession: "app:focusSession",
+  showNeedsYou: "app:showNeedsYou",
+  showInboxItem: "app:showInboxItem",
+  getState: "state:get",
+  approve: "cli:approve",
+  reject: "cli:reject",
+  draftAssign: "cli:draftAssign",
+  assign: "cli:assign",
+  refresh: "cli:refresh",
+  setFocus: "app:setFocus",
+  setVisible: "app:setVisible",
+  openExternal: "app:openExternal",
+  openEditor: "app:openEditor",
+  copy: "app:copy",
+  stopSession: "session:stop",
+  stopOtherSession: "session:stopOther",
+  stopSessions: "session:stopMany",
+  setManualStatus: "session:setManualStatus",
+  statuslineInstall: "statusline:install",
+  statuslineUninstall: "statusline:uninstall",
+  masterStart: "master:start",
+  ptyOpen: "pty:open",
+  ptyWrite: "pty:write",
+  ptyResize: "pty:resize",
+  ptyClose: "pty:close",
+  ptyData: "pty:data",
+  ptyExit: "pty:exit",
+  confirm: "app:confirm",
+  boardRefresh: "board:refresh",
+  teamPrsRefresh: "prs:refresh",
+  setupCheck: "setup:check",
+  setupTool: "setup:tool",
+  ghAccounts: "setup:ghAccounts",
+  ghSwitch: "setup:ghSwitch",
+  ghOwners: "setup:ghOwners",
+  configDetect: "config:detect",
+  configDetectAll: "config:detectAll",
+  configSave: "config:save",
+  pickFolder: "app:pickFolder",
+  hooksInstall: "hooks:install",
+  skillReinstall: "skills:reinstall",
+  skillRemove: "skills:remove",
+  workflowGet: "workflow:get",
+  summaryGet: "summary:get",
+  summaryMake: "summary:make",
+  summaryPost: "summary:post",
+  workflowSave: "workflow:save",
+  linkSession: "session:link",
+  setSprint: "board:sprint",
+  prSummary: "pr:summary",
+  issueBody: "issue:body",
+  shellPrepare: "shell:prepare",
+  ticketMemory: "ticket:memory",
+  assignIssue: "issue:assign",
+  defaultModel: "models:default",
+  startHere: "session:startHere",
+  sendText: "session:sendText",
+  answerMenu: "session:answerMenu",
+  inboxAct: "inbox:act",
+  queueList: "queue:list",
+  queueEdit: "queue:edit",
+  queueSendNext: "queue:sendNext",
+  getSettings: "settings:get",
+  setSettings: "settings:set",
+  autoOpen: "app:autoOpen",
+  setStatus: "board:setStatus",
+  standupCommits: "standup:commits",
+  janitor: "janitor:list",
+  removeWorktree: "janitor:removeWorktree",
+  removeSession: "janitor:removeSession",
+  searchHistory: "history:search",
+  historyTranscript: "history:transcript",
+  templates: "templates:list",
+  saveTemplate: "templates:save",
+  deleteTemplate: "templates:delete",
+  resumeSession: "session:resume",
+  resumeStopped: "session:resumeStopped",
+  tokensByDay: "costs:tokensByDay",
+  dismissStopped: "session:dismissStopped",
+  boardOpen: "board:open",
+} as const;
 
 export interface AssignRequest {
-  issue: number
+  issue: number;
   /** The issue's repo (owner/name); null or missing: the primary issue repo. */
-  repo?: string | null
-  name: string
-  cwd: string
-  prompt: string
+  repo?: string | null;
+  name: string;
+  cwd: string;
+  prompt: string;
   /** The existing proposal the draft came from, if any. */
-  proposalId: number | null
+  proposalId: number | null;
   /** True when the user changed the name or text of an existing proposal. */
-  edited: boolean
+  edited: boolean;
   /** The existing proposal is already approved (waiting for a spawn); just spawn it. */
-  approved: boolean
+  approved: boolean;
   /** ASSIGN (default) or PRREVIEW. */
-  kind?: 'ASSIGN' | 'PRREVIEW'
+  kind?: "ASSIGN" | "PRREVIEW";
   /** `claude --model` for the new session; absent: the default model. */
-  model?: string
+  model?: string;
 }
 
 export interface PtyOpenResult {
-  ok: boolean
+  ok: boolean;
   /** Output produced before this view mounted (replayed into xterm). */
-  replay: string
+  replay: string;
   /** Sequence number at the end of `replay`. */
-  seq: number
-  exited: boolean
-  message?: string
+  seq: number;
+  exited: boolean;
+  message?: string;
 }
 
 /** The API the preload script exposes as `window.deck`. */
 export interface DeckApi {
-  platform: string
-  home: string
-  getState(): Promise<AppState | null>
-  onState(cb: (s: AppState) => void): () => void
-  onFocusSession(cb: (sessionKey: string) => void): () => void
-  onShowNeedsYou(cb: () => void): () => void
+  platform: string;
+  home: string;
+  getState(): Promise<AppState | null>;
+  onState(cb: (s: AppState) => void): () => void;
+  onFocusSession(cb: (sessionKey: string) => void): () => void;
+  onShowNeedsYou(cb: () => void): () => void;
   /** A notification for a Needs-you item was clicked: show that item. */
-  onShowInboxItem(cb: (id: string) => void): () => void
-  approve(id: number): Promise<CliResult>
-  reject(id: number): Promise<CliResult>
-  draftAssign(issue: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
-  setSprint(sprint: string): void
+  onShowInboxItem(cb: (id: string) => void): () => void;
+  approve(id: number): Promise<CliResult>;
+  reject(id: number): Promise<CliResult>;
+  draftAssign(
+    issue: Ticket,
+    title?: string,
+    url?: string,
+  ): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>;
+  setSprint(sprint: string): void;
   /** What earlier sessions on a ticket did (their saved summaries), newest first. */
-  ticketMemory(ticket: Ticket): Promise<{ name: string; at: number; text: string }[]>
+  ticketMemory(
+    ticket: Ticket,
+  ): Promise<{ name: string; at: number; text: string }[]>;
   /** Before + Shell opens in a git checkout: put it on its default branch (stashing changes). */
-  shellPrepare(dir: string): Promise<{ ok: boolean; message: string | null }>
+  shellPrepare(dir: string): Promise<{ ok: boolean; message: string | null }>;
   /** The GitHub description of an issue, for the Start session dialog. */
-  issueBody(ticket: Ticket): Promise<{ ok: true; body: string } | { ok: false; message: string }>
-  prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>
+  issueBody(
+    ticket: Ticket,
+  ): Promise<{ ok: true; body: string } | { ok: false; message: string }>;
+  prSummary(
+    url: string,
+  ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;
   /** Resume a session that runs in another terminal as a background session here. */
-  startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult>
+  startHere(o: {
+    sessionId: string;
+    name: string;
+    cwd: string;
+    pid: number | null;
+    stopOther: boolean;
+  }): Promise<CliResult>;
   /** Type text into a session as if the user typed it (open tab, hidden attach, or via master). */
-  sendText(sessionKey: string, text: string): Promise<CliResult>
+  sendText(sessionKey: string, text: string): Promise<CliResult>;
   /** Answer the question on a session's AskUserQuestion menu (`question` as shown), or 'submit' its review. */
-  answerMenu(sessionKey: string, question: string | null, answer: MenuAnswer | 'submit'): Promise<CliResult>
+  answerMenu(
+    sessionKey: string,
+    question: string | null,
+    answer: MenuAnswer | "submit",
+  ): Promise<CliResult>;
   /** Act on a Needs-you item (shared/inbox.ts): its actions, or dismiss / snooze {minutes} / wake. */
-  inboxAct(id: string, type: string, payload?: Record<string, unknown>): Promise<CliResult>
+  inboxAct(
+    id: string,
+    type: string,
+    payload?: Record<string, unknown>,
+  ): Promise<CliResult>;
   /** A session's /queue (the queue skill's ~/.claude/queue/<sessionId>.jsonl), first to run first. */
-  queueList(sessionId: string): Promise<string[]>
-  queueEdit(sessionId: string, edit: QueueEdit): Promise<CliResult & { items: string[] }>
+  queueList(sessionId: string): Promise<string[]>;
+  queueEdit(
+    sessionId: string,
+    edit: QueueEdit,
+  ): Promise<CliResult & { items: string[] }>;
   /** Take the first queued prompt and type it into the session now (for an idle session). */
-  queueSendNext(sessionKey: string): Promise<CliResult>
-  getSettings(): Promise<Settings>
-  setSettings(s: Settings): Promise<Settings>
-  onAutoOpen(cb: (sessionKey: string) => void): () => void
+  queueSendNext(sessionKey: string): Promise<CliResult>;
+  getSettings(): Promise<Settings>;
+  setSettings(s: Settings): Promise<Settings>;
+  onAutoOpen(cb: (sessionKey: string) => void): () => void;
   /** Move a ticket to a board column (babysit-ticket). */
-  setStatus(issue: Ticket, status: string): Promise<CliResult>
-  standupCommits(sinceMs: number, dirs: string[], untilMs?: number): Promise<StandupCommit[]>
+  setStatus(issue: Ticket, status: string): Promise<CliResult>;
+  standupCommits(
+    sinceMs: number,
+    dirs: string[],
+    untilMs?: number,
+  ): Promise<StandupCommit[]>;
   /** `force` skips the shared gh cache for PR status (the Refresh button). */
-  janitor(liveDirs: string[], force?: boolean): Promise<JanitorRow[]>
-  removeWorktree(repo: string, path: string, force: boolean): Promise<CliResult>
-  removeSession(bgId: string): Promise<CliResult>
-  searchHistory(query: string): Promise<HistoryHit[]>
+  janitor(liveDirs: string[], force?: boolean): Promise<JanitorRow[]>;
+  removeWorktree(
+    repo: string,
+    path: string,
+    force: boolean,
+  ): Promise<CliResult>;
+  removeSession(bgId: string): Promise<CliResult>;
+  searchHistory(query: string): Promise<HistoryHit[]>;
   /** A found session's conversation, for the History reader (only transcripts under ~/.claude/projects). */
-  historyTranscript(path: string, query: string, focus: string | null): Promise<TranscriptWindow | null>
-  templates(): Promise<Template[]>
-  saveTemplate(t: Template): Promise<Template[]>
-  deleteTemplate(name: string): Promise<Template[]>
+  historyTranscript(
+    path: string,
+    query: string,
+    focus: string | null,
+  ): Promise<TranscriptWindow | null>;
+  templates(): Promise<Template[]>;
+  saveTemplate(t: Template): Promise<Template[]>;
+  deleteTemplate(name: string): Promise<Template[]>;
   /** Resume an ended session's conversation in the background (history search). */
-  resumeSession(sessionId: string, name: string, cwd: string | null): Promise<CliResult>
+  resumeSession(
+    sessionId: string,
+    name: string,
+    cwd: string | null,
+  ): Promise<CliResult>;
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
-  resumeStopped(): Promise<CliResult>
+  resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
-  tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>
-  dismissStopped(): Promise<void>
+  tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
+  dismissStopped(): Promise<void>;
   /** Make `login` the only assignee (GitHub REST). */
-  assignIssue(issue: Ticket, login: string, current: string[]): Promise<CliResult>
-  assign(req: AssignRequest): Promise<CliResult & { proposalId?: number }>
+  assignIssue(
+    issue: Ticket,
+    login: string,
+    current: string[],
+  ): Promise<CliResult>;
+  assign(req: AssignRequest): Promise<CliResult & { proposalId?: number }>;
   /** The model set in ~/.claude/settings.json (what "Default" starts), or null. */
-  defaultModel(): Promise<string | null>
-  refresh(): Promise<CliResult>
-  refreshBoard(): Promise<CliResult>
+  defaultModel(): Promise<string | null>;
+  refresh(): Promise<CliResult>;
+  refreshBoard(): Promise<CliResult>;
   /** Fetch every PR in the org; with `maxAgeMs`, only when the list is older than that. */
-  refreshTeamPrs(maxAgeMs?: number): Promise<CliResult>
+  refreshTeamPrs(maxAgeMs?: number): Promise<CliResult>;
   /** Setup: which tools are installed and whether gh is logged in. */
-  setupCheck(): Promise<SetupCheck>
+  setupCheck(): Promise<SetupCheck>;
   /** One tool of Setup's first step: installed (and runs)? */
-  setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>
+  setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>;
   /** The github.com accounts gh is logged in to. */
-  ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>
+  ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>;
   /** Make this account gh's active one (what MasterDeck, master and every session's gh use). */
-  ghSwitch(login: string): Promise<CliResult>
+  ghSwitch(login: string): Promise<CliResult>;
   /** The active account's login and the organizations it belongs to. */
-  ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>
+  ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>;
   /** Setup: repos, projects and (for a project) statuses GitHub has for an owner. */
-  configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>
+  configDetect(
+    owner: string,
+    project?: number,
+  ): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>;
   /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed). */
-  configDetectAll(): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>
+  configDetectAll(): Promise<
+    { ok: true; data: unknown } | { ok: false; message: string }
+  >;
   /** Setup: save settings (merged into the config file), then reload everything. */
-  configSave(patch: unknown): Promise<CliResult>
-  pickFolder(start?: string): Promise<string | null>
-  hooksInstall(which: HookStatus): Promise<CliResult>
+  configSave(patch: unknown): Promise<CliResult>;
+  pickFolder(start?: string): Promise<string | null>;
+  hooksInstall(which: HookStatus): Promise<CliResult>;
   /** Install a bundled skill (or replace the copy there); a skill removed before is added back. */
-  skillReinstall(name: string): Promise<CliResult>
+  skillReinstall(name: string): Promise<CliResult>;
   /** Take a bundled skill out of ~/.claude/skills (kept in its backup folder) and keep it out. */
-  skillRemove(name: string): Promise<CliResult>
+  skillRemove(name: string): Promise<CliResult>;
   /** Every hook Claude Code runs, the skills a stage can use, and the custom steps. */
-  workflowGet(): Promise<{ hooks: HookEntry[]; skills: { name: string; description: string }[]; steps: CustomStep[] }>
+  workflowGet(): Promise<{
+    hooks: HookEntry[];
+    skills: { name: string; description: string }[];
+    steps: CustomStep[];
+  }>;
   /** Save the custom steps: their hooks in ~/.claude/settings.json, the list in workflow.json. */
-  workflowSave(steps: CustomStep[]): Promise<CliResult>
+  workflowSave(steps: CustomStep[]): Promise<CliResult>;
   /** The saved summary of a session, and whether its transcript grew since. */
-  summaryGet(sessionKey: string): Promise<{ summary: SessionSummary | null; stale: boolean }>
+  summaryGet(
+    sessionKey: string,
+  ): Promise<{ summary: SessionSummary | null; stale: boolean }>;
   /** Summarize a session now (a one-off `claude -p`, about 20 s). */
-  summaryMake(sessionKey: string): Promise<{ ok: true; summary: SessionSummary } | { ok: false; message: string }>
+  summaryMake(
+    sessionKey: string,
+  ): Promise<
+    { ok: true; summary: SessionSummary } | { ok: false; message: string }
+  >;
   /** Post the saved summary as a comment on the session's issue. */
-  summaryPost(sessionKey: string): Promise<CliResult>
+  summaryPost(sessionKey: string): Promise<CliResult>;
   /** Link a session to an issue with babysit-ticket (`tt.sh link`). */
-  linkSession(issue: Ticket, sessionId: string, cwd: string | null): Promise<CliResult>
-  setBoardOpen(open: boolean): void
-  setFocus(sessionId: string | null): void
-  setVisible(sessionIds: string[]): void
-  openExternal(url: string): void
-  openEditor(dir: string): Promise<CliResult>
-  copy(text: string): void
-  stopSession(bgId: string, name: string): Promise<CliResult>
+  linkSession(
+    issue: Ticket,
+    sessionId: string,
+    cwd: string | null,
+  ): Promise<CliResult>;
+  setBoardOpen(open: boolean): void;
+  setFocus(sessionId: string | null): void;
+  setVisible(sessionIds: string[]): void;
+  openExternal(url: string): void;
+  openEditor(dir: string): Promise<CliResult>;
+  copy(text: string): void;
+  stopSession(bgId: string, name: string): Promise<CliResult>;
   /** Stop a session running in another terminal (its claude process), after a confirmation. */
-  stopOtherSession(pid: number, name: string): Promise<CliResult>
+  stopOtherSession(pid: number, name: string): Promise<CliResult>;
+  /** Cleanup: stop these sessions (by key) after one confirmation; `stopped` lists the keys that stopped. */
+  stopSessions(keys: string[]): Promise<CliResult & { stopped?: string[] }>;
   /** Set a session's status by hand (a StatusKey); null goes back to automatic. */
-  setManualStatus(key: string, status: string | null): Promise<CliResult>
-  statuslineInstall(): Promise<CliResult>
-  statuslineUninstall(): Promise<CliResult>
-  masterStart(): Promise<CliResult>
-  ptyOpen(id: string, spec: PaneSpec, cols: number, rows: number): Promise<PtyOpenResult>
-  ptyWrite(id: string, data: string): void
-  ptyResize(id: string, cols: number, rows: number): void
-  ptyClose(id: string): void
-  onPtyData(id: string, cb: (data: string, seq: number) => void): () => void
-  onPtyExit(id: string, cb: (code: number) => void): () => void
+  setManualStatus(key: string, status: string | null): Promise<CliResult>;
+  statuslineInstall(): Promise<CliResult>;
+  statuslineUninstall(): Promise<CliResult>;
+  masterStart(): Promise<CliResult>;
+  ptyOpen(
+    id: string,
+    spec: PaneSpec,
+    cols: number,
+    rows: number,
+  ): Promise<PtyOpenResult>;
+  ptyWrite(id: string, data: string): void;
+  ptyResize(id: string, cols: number, rows: number): void;
+  ptyClose(id: string): void;
+  onPtyData(id: string, cb: (data: string, seq: number) => void): () => void;
+  onPtyExit(id: string, cb: (code: number) => void): () => void;
 }
