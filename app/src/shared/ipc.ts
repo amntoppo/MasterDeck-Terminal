@@ -7,12 +7,8 @@ import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
-import type {
-  CustomStep,
-  HookEntry,
-  WorkflowDoc,
-  WorkflowTemplate,
-} from "./workflow";
+import type { HookEntry } from "./workflow";
+import type { Flow, WorkflowDoc, WorkflowTemplate } from "./flow";
 import type { SessionSummary } from "./summary";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
@@ -306,16 +302,17 @@ export interface DeckApi {
   workflowGet(): Promise<{
     hooks: HookEntry[];
     skills: { name: string; description: string }[];
-    steps: CustomStep[];
+    /** The default workflow. */
+    flow: Flow | null;
     templates: WorkflowTemplate[];
   }>;
   /** Save the default workflow (what new sessions copy). */
-  workflowSave(steps: CustomStep[]): Promise<CliResult>;
+  workflowSave(flow: Flow): Promise<CliResult>;
   /** Save a template (a new one when `id` is null; 'default' is the default workflow). */
   workflowTemplateSave(
     id: string | null,
     name: string,
-    steps: CustomStep[],
+    flow: Flow,
   ): Promise<CliResult & { id?: string }>;
   workflowTemplateDelete(id: string): Promise<CliResult>;
   /** A session's own workflow; null while it follows the default. */
@@ -323,7 +320,7 @@ export interface DeckApi {
   /** Change a session's workflow (`from`: the template it now comes from, if one was applied). */
   sessionWorkflowSave(
     sessionId: string,
-    steps: CustomStep[],
+    flow: Flow,
     from?: string | null,
   ): Promise<CliResult>;
   /** The saved summary of a session, and whether its transcript grew since. */

@@ -9,7 +9,13 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CliResult, HookStatus } from "@shared/types";
-import { STEP_MARK, triggerCommand, TRIGGERS } from "@shared/workflow";
+import { STEP_MARK } from "@shared/workflow";
+import {
+  flowTriggerCommand,
+  guardedBuiltin,
+  HOOK_TRIGGERS,
+  type BuiltinId,
+} from "@shared/flow";
 import { DECK_EVENTS } from "@shared/deckHooks";
 
 /**
@@ -138,16 +144,18 @@ export function installHooks(
     };
   try {
     const s = read(settingsPath);
+    const g = (id: BuiltinId, cmd: string) =>
+      guardedBuiltin(id, cmd, backupDir);
     if (which.ticket) {
-      add(s, "PostToolUse", "Bash", TT, TT_MARK);
-      add(s, "SessionStart", undefined, TT, TT_MARK);
+      add(s, "PostToolUse", "Bash", g("ticket", TT), TT_MARK);
+      add(s, "SessionStart", undefined, g("ticket", TT), TT_MARK);
     } else {
       remove(s, "PostToolUse", TT_MARK);
       remove(s, "SessionStart", TT_MARK);
     }
     if (which.pr) {
-      add(s, "PreToolUse", "Bash", PR_PRE, PR_MARK);
-      add(s, "PostToolUse", "Bash", PR_POST, PR_POST_MARK);
+      add(s, "PreToolUse", "Bash", g("pr-review", PR_PRE), PR_MARK);
+      add(s, "PostToolUse", "Bash", g("pr-watch", PR_POST), PR_POST_MARK);
     } else {
       remove(s, "PreToolUse", PR_MARK);
       remove(s, "PostToolUse", PR_POST_MARK);
@@ -190,7 +198,10 @@ export function installWorkflowHooks(
   try {
     const s = read(settingsPath);
     const want = on
-      ? TRIGGERS.map((t) => ({ t, cmd: triggerCommand(t, dir) }))
+      ? HOOK_TRIGGERS.map((t) => ({
+          t,
+          cmd: flowTriggerCommand(t, dir, `${STEP_MARK}trigger-${t.id}`),
+        }))
       : [];
     const current = Object.values(s.hooks ?? {})
       .flatMap((list) =>
@@ -208,8 +219,10 @@ export function installWorkflowHooks(
     for (const { t, cmd } of want)
       add(
         s,
-        t.event,
-        t.event === "SessionStart" ? undefined : "Bash",
+        t.event!,
+        t.event === "PreToolUse" || t.event === "PostToolUse"
+          ? "Bash"
+          : undefined,
         cmd,
         `${STEP_MARK}trigger-${t.id}`,
         10,
@@ -273,6 +286,52 @@ export function installDeckHooks(
     }
     write(settingsPath, backupDir, s);
     return { ok: true, message: "MasterDeck hooks installed" };
+  } catch (e) {
+    return {
+      ok: false,
+      message: `could not update ${settingsPath}: ${String(e)}`,
+    };
+  }
+}
+
+const GUARD_MARK = "masterdeck-builtin:";
+
+/**
+ * Built-in hooks installed before workflows could leave them out: replace each with its guarded
+ * version (it skips sessions whose workflow removed the built-in). `dir`: MasterDeck's home.
+ */
+export function guardBuiltinHooks(
+  settingsPath: string,
+  dir: string,
+): CliResult {
+  if (process.platform === "win32") return { ok: true, message: "skipped" };
+  try {
+    const s = read(settingsPath);
+    const want: [string, string | undefined, string, string, BuiltinId][] = [
+      ["PostToolUse", "Bash", TT, TT_MARK, "ticket"],
+      ["SessionStart", undefined, TT, TT_MARK, "ticket"],
+      ["PreToolUse", "Bash", PR_PRE, PR_MARK, "pr-review"],
+      ["PostToolUse", "Bash", PR_POST, PR_POST_MARK, "pr-watch"],
+    ];
+    let changed = false;
+    for (const [event, matcher, cmd, mark, id] of want) {
+      const list = s.hooks?.[event] ?? [];
+      const found = list
+        .flatMap((m) => m.hooks ?? [])
+        .filter(
+          (h) => typeof h.command === "string" && h.command.includes(mark),
+        );
+      if (!found.length || found.every((h) => h.command.includes(GUARD_MARK)))
+        continue;
+      remove(s, event, mark);
+      add(s, event, matcher, guardedBuiltin(id, cmd, dir), mark);
+      changed = true;
+    }
+    if (changed) write(settingsPath, dir, s);
+    return {
+      ok: true,
+      message: changed ? "built-in hooks guarded" : "already guarded",
+    };
   } catch (e) {
     return {
       ok: false,

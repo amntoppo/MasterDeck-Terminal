@@ -214,10 +214,8 @@ export interface HookEntry {
 export function hookOwner(command: string): string | null {
   const step = new RegExp(`${STEP_MARK}([a-z0-9-]+)`).exec(command);
   const trigger =
-    step && step[1].startsWith("trigger-")
-      ? TRIGGERS.find((t) => `trigger-${t.id}` === step[1])
-      : null;
-  if (trigger) return `workflow steps (${trigger.label.toLowerCase()})`;
+    step && step[1].startsWith("trigger-") ? step[1].slice(8) : null;
+  if (trigger) return `workflow (${trigger.replace(/-/g, " ")})`;
   if (step) return `custom step ${step[1]}`;
   if (command.includes("babysit-ticket/scripts/tt.sh")) return "babysit-ticket";
   if (command.includes("pr-selfreview-"))
@@ -384,108 +382,3 @@ export const STAGES: Stage[] = [
     ],
   },
 ];
-
-/**
- * Per-session workflows. Each session keeps its own copy of the workflow (made the first time
- * MasterDeck sees it, from the default or the template picked when starting it) and follows it;
- * templates are named workflows to start from. One hook per trigger (below) reads the session's
- * copy, or the default while it has none.
- */
-export interface WorkflowDoc {
-  steps: CustomStep[];
-  /** The template it was copied from (its name), and when. */
-  from: string | null;
-  at: number | null;
-}
-
-export interface WorkflowTemplate {
-  /** 'default' is the workflow new sessions copy (workflow.json). */
-  id: string;
-  name: string;
-  steps: CustomStep[];
-}
-
-export const DEFAULT_TEMPLATE = "default";
-
-export function parseDoc(raw: unknown): WorkflowDoc {
-  const o =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {};
-  return {
-    steps: parseSteps(raw),
-    from: typeof o.from === "string" ? o.from.slice(0, 80) : null,
-    at: typeof o.at === "number" ? o.at : null,
-  };
-}
-
-/** A workflow file as the hooks read it: every step with the note it hands the session. */
-export function docJson(doc: WorkflowDoc, name?: string): string {
-  return (
-    JSON.stringify(
-      {
-        ...(name ? { name } : {}),
-        from: doc.from,
-        at: doc.at,
-        steps: doc.steps.map((s) => ({ ...s, note: stepNote(s) })),
-      },
-      null,
-      2,
-    ) + "\n"
-  );
-}
-
-/** A template's file id from its name. */
-export function templateId(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
-  return !base || base === DEFAULT_TEMPLATE
-    ? `t-${Math.random().toString(36).slice(2, 8)}`
-    : base;
-}
-
-export const validSessionId = (id: unknown): id is string =>
-  typeof id === "string" && /^[A-Za-z0-9-]{8,80}$/.test(id);
-
-/**
- * The hook for one trigger: when it fires, the steps at that trigger in the session's workflow
- * (`<dir>/workflows/sessions/<session id>.json`, else the default `<dir>/workflow.json`) that have
- * not run yet (once per session, or per session and commit) are handed to the session together.
- */
-export function triggerCommand(t: Trigger, dir: string): string {
-  const lines = [`input=$(cat)`];
-  if (t.command) {
-    lines.push(
-      `cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')`,
-    );
-    lines.push(runsOrExit(t.command));
-  }
-  if (t.success)
-    lines.push(
-      `printf '%s' "$input" | jq -r '.tool_response | tostring' | grep -q ${q(t.success)} || exit 0`,
-    );
-  lines.push(`sid=$(printf '%s' "$input" | jq -r '.session_id // ""')`);
-  lines.push(`case "$sid" in ""|*[!A-Za-z0-9-]*) exit 0;; esac`);
-  lines.push(
-    `d=${q(dir)}; f="$d/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$d/workflow.json"; [ -f "$f" ] || exit 0`,
-  );
-  const key =
-    t.once === "commit"
-      ? `$sid-$(git rev-parse HEAD 2>/dev/null || echo none)`
-      : "$sid";
-  const mark =
-    t.once === "always"
-      ? ""
-      : `m="\${TMPDIR:-/tmp}/masterdeck-workflow-$id-${key}"; [ -f "$m" ] && continue; touch "$m"; `;
-  lines.push(
-    `ids=""; for id in $(jq -r --arg t ${q(t.id)} '.steps[]? | select(.trigger == $t) | .id' "$f"); do case "$id" in *[!a-z0-9-]*) continue;; esac; ${mark}ids="$ids $id"; done`,
-  );
-  lines.push(`[ -n "$ids" ] || exit 0`);
-  lines.push(
-    `jq -c --arg ids "$ids" ${q(`($ids | split(" ") | map(select(. != ""))) as $w | {hookSpecificOutput: {hookEventName: ${JSON.stringify(t.event)}, additionalContext: ([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))}}`)} "$f"`,
-  );
-  return `${lines.join("; ")} # ${STEP_MARK}trigger-${t.id}`;
-}

@@ -4,23 +4,30 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import {
-  DEFAULT_TEMPLATE,
-  docJson,
   hookOwner,
-  parseDoc,
   parseSteps,
-  templateId,
-  validSessionId,
   type CustomStep,
   type HookEntry,
+} from "@shared/workflow";
+import {
+  compileFlow,
+  DEFAULT_TEMPLATE,
+  defaultFlow,
+  docJson,
+  parseDoc,
+  templateId,
+  validSessionId,
+  type CompiledStep,
+  type Flow,
   type WorkflowDoc,
   type WorkflowTemplate,
-} from "@shared/workflow";
+} from "@shared/flow";
 
 /**
  * What the Workflow view shows: every hook Claude Code runs (user settings, the workspace's
@@ -161,8 +168,8 @@ export function readSteps(file: string): CustomStep[] {
   }
 }
 
-export function writeSteps(file: string, steps: CustomStep[]): void {
-  writeAtomic(file, docJson({ steps, from: null, at: null }));
+export function writeFlow(file: string, flow: Flow, name?: string): void {
+  writeAtomic(file, docJson({ flow, from: null, at: null }, name));
 }
 
 function writeAtomic(file: string, text: string): void {
@@ -209,19 +216,45 @@ export class WorkflowStore {
       : null;
   }
 
-  /** Rewrite the default so each step carries its note (older files have none). */
+  /** The default as a flow (a missing file: the starting flow). */
+  private defaultDoc(): WorkflowDoc {
+    return existsSync(this.defaultFile)
+      ? parseDoc(readRaw(this.defaultFile))
+      : { flow: defaultFlow(), from: null, at: null };
+  }
+
+  /**
+   * Files from before flows (a list of steps): rewrite them as flows, so the hooks read compiled
+   * plans and the built-ins list. Files are rewritten as they are: a flow file stays the same.
+   */
   migrate(): void {
-    if (existsSync(this.defaultFile))
-      writeSteps(this.defaultFile, readSteps(this.defaultFile));
+    const redo = (f: string, name?: string) => {
+      const raw = readRaw(f) as { flow?: unknown; name?: unknown } | null;
+      if (raw && !raw.flow) {
+        const d = parseDoc(raw);
+        writeAtomic(
+          f,
+          docJson(
+            d,
+            name ?? (typeof raw.name === "string" ? raw.name : undefined),
+          ),
+        );
+      }
+    };
+    if (existsSync(this.defaultFile)) redo(this.defaultFile);
+    else writeFlow(this.defaultFile, defaultFlow());
+    for (const dir of [this.templatesDir, this.sessionsDir])
+      try {
+        for (const f of readdirSync(dir))
+          if (f.endsWith(".json")) redo(join(dir, f));
+      } catch {
+        /* none yet */
+      }
   }
 
   templates(): WorkflowTemplate[] {
     const out: WorkflowTemplate[] = [
-      {
-        id: DEFAULT_TEMPLATE,
-        name: "Default",
-        steps: readSteps(this.defaultFile),
-      },
+      { id: DEFAULT_TEMPLATE, name: "Default", flow: this.defaultDoc().flow },
     ];
     let files: string[] = [];
     try {
@@ -240,7 +273,7 @@ export class WorkflowStore {
           typeof raw?.name === "string" && raw.name.trim()
             ? raw.name.slice(0, 60)
             : id,
-        steps: parseSteps(raw),
+        flow: parseDoc(raw).flow,
       });
     }
     return out;
@@ -251,14 +284,10 @@ export class WorkflowStore {
   }
 
   /** Save a template (a new one when `id` is null); returns its id. */
-  saveTemplate(
-    id: string | null,
-    name: string,
-    steps: CustomStep[],
-  ): string | null {
+  saveTemplate(id: string | null, name: string, flow: Flow): string | null {
     const clean = name.trim().slice(0, 60);
     if (id === DEFAULT_TEMPLATE) {
-      writeSteps(this.defaultFile, steps);
+      writeFlow(this.defaultFile, flow);
       return id;
     }
     if (!clean) return null;
@@ -269,7 +298,7 @@ export class WorkflowStore {
         tid = `${tid.slice(0, 40)}-${Math.random().toString(36).slice(2, 5)}`;
     const file = this.templateFile(tid);
     if (!file) return null;
-    writeAtomic(file, docJson({ steps, from: null, at: null }, clean));
+    writeFlow(file, flow, clean);
     return tid;
   }
 
@@ -339,7 +368,7 @@ export class WorkflowStore {
         delete pending[s.name];
         usedPending = true;
       }
-      this.saveSession(s.sessionId, { steps: t.steps, from: t.name, at: now });
+      this.saveSession(s.sessionId, { flow: t.flow, from: t.name, at: now });
       made++;
     }
     if (usedPending)
@@ -347,17 +376,26 @@ export class WorkflowStore {
     return made;
   }
 
-  /** Whether any workflow has a step (the trigger hooks are needed). */
-  anySteps(): boolean {
-    if (this.templates().some((t) => t.steps.length)) return true;
+  private compiled = new Map<
+    string,
+    { mtime: number; steps: CompiledStep[] }
+  >();
+  /** What a session's workflow compiles to (its copy, else the default); cached by file time. */
+  compiledFor(sessionId: string): CompiledStep[] {
+    const own = validSessionId(sessionId)
+      ? join(this.sessionsDir, `${sessionId}.json`)
+      : null;
+    const f = own && existsSync(own) ? own : this.defaultFile;
+    let mtime = 0;
     try {
-      return readdirSync(this.sessionsDir).some(
-        (f) =>
-          f.endsWith(".json") &&
-          parseSteps(readRaw(join(this.sessionsDir, f))).length > 0,
-      );
+      mtime = statSync(f).mtimeMs;
     } catch {
-      return false;
+      return [];
     }
+    const hit = this.compiled.get(f);
+    if (hit && hit.mtime === mtime) return hit.steps;
+    const steps = compileFlow(parseDoc(readRaw(f)).flow).steps;
+    this.compiled.set(f, { mtime, steps });
+    return steps;
   }
 }

@@ -75,7 +75,9 @@ import {
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { Summaries } from "./summary";
-import { DEFAULT_TEMPLATE, parseSteps, validSessionId } from "@shared/workflow";
+import { DEFAULT_TEMPLATE, parseFlow, validSessionId } from "@shared/flow";
+import { flowActions, type WatchState } from "@shared/flowWatch";
+import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
 import {
@@ -84,6 +86,7 @@ import {
   installDeckHooks,
   installHooks,
   installWorkflowHooks,
+  guardBuiltinHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import {
@@ -163,6 +166,11 @@ const sources = new Sources(
       } catch (e) {
         console.error(`workflow copy: ${String(e)}`);
       }
+    try {
+      runFlowWatch(state);
+    } catch (e) {
+      console.error(`workflow watch: ${String(e)}`);
+    }
     win?.webContents.send(CH.state, state);
     notify(diffEvents(prev, state, focused));
     // Dock badge: the Needs-you count.
@@ -564,12 +572,54 @@ let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 const syncWorkflowHooks = () =>
-  installWorkflowHooks(
-    paths.claudeSettings,
-    paths.home,
-    paths.home,
-    workflows().anySteps(),
+  installWorkflowHooks(paths.claudeSettings, paths.home, paths.home, true);
+
+/** The needs-you and idle triggers: MasterDeck acts on them itself (notifications, a message). */
+let watch: Record<string, WatchState> = {};
+function runFlowWatch(state: AppState): void {
+  const live = state.sessions.filter(
+    (s) =>
+      s.name !== MASTER_NAME && s.state !== "done" && s.state !== "suspended",
   );
+  const r = flowActions(
+    watch,
+    live.map((s) => ({
+      key: s.key,
+      status: sessionStatus(
+        s,
+        state.prStage[s.key],
+        attentionFor(s, state.proposals),
+        state.manualStatus[s.key],
+      ).key,
+    })),
+    (key) => {
+      const s = live.find((x) => x.key === key);
+      return s ? workflows().compiledFor(s.sessionId) : [];
+    },
+    Date.now(),
+  );
+  watch = r.next;
+  const masterUp =
+    state.master.kind === "attached" || state.master.kind === "elsewhere";
+  for (const a of r.actions) {
+    const s = live.find((x) => x.key === a.key);
+    if (!s) continue;
+    notify(
+      a.notify.map((body) => ({
+        title: `${s.name}: workflow`,
+        body,
+        target: { sessionKey: s.key },
+      })),
+    );
+    if (a.message)
+      void sender
+        .send(s, `Workflow step (idle): ${a.message}`, masterUp)
+        .then((res) => {
+          if (!res.ok)
+            console.error(`workflow message to ${s.name}: ${res.message}`);
+        });
+  }
+}
 
 /** Which skills the user removed in the Skills popup. */
 const skillsFile = () => join(paths.home, "skills.json");
@@ -1012,11 +1062,11 @@ function registerIpc(): void {
       ...ops.repos(),
     ]),
     skills: listSkills(paths.skillsDir),
-    steps: workflows().template(DEFAULT_TEMPLATE)?.steps ?? [],
+    flow: workflows().template(DEFAULT_TEMPLATE)?.flow ?? null,
     templates: workflows().templates(),
   }));
   ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
-    workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseSteps(raw));
+    workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
     return syncWorkflowHooks();
   });
   ipcMain.handle(
@@ -1025,7 +1075,7 @@ function registerIpc(): void {
       const tid = workflows().saveTemplate(
         typeof id === "string" ? id : null,
         typeof name === "string" ? name : "",
-        parseSteps(raw),
+        parseFlow(raw),
       );
       if (!tid) return { ok: false, message: "give the template a name" };
       const r = syncWorkflowHooks();
@@ -1046,7 +1096,7 @@ function registerIpc(): void {
     (_e, sid: unknown, raw: unknown, from: unknown) => {
       if (!validSessionId(sid)) return { ok: false, message: "bad session" };
       workflows().saveSession(sid, {
-        steps: parseSteps(raw),
+        flow: parseFlow(raw),
         from: typeof from === "string" ? from.slice(0, 80) : null,
         at: Date.now(),
       });
@@ -1392,6 +1442,9 @@ app.whenReady().then(async () => {
       workflows().migrate();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
+      // Built-ins a workflow can leave out: their hooks check the session's workflow first.
+      const g = guardBuiltinHooks(paths.claudeSettings, paths.home);
+      if (!g.ok) console.error(g.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }

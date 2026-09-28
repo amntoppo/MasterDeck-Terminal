@@ -984,3 +984,98 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .insp-switch:hover { color: var(--text); border-color: var(--accent); }
 .stages.compact .custom-step { flex-wrap: wrap; }
 .stages.compact .custom-step .grow { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex-basis: 100%; order: 2; }
+/* Workflow canvas (FlowEditor) */
+.wf-view { display: flex; flex-direction: column; }
+.wf-view .wf-templates { padding: 10px 18px 0; margin-bottom: 8px; }
+.wf-view .wf-note { flex-basis: auto; font-size: 12px; }
+.wf-hooks { max-height: 38vh; overflow: auto; padding: 0 18px 10px; border-bottom: 1px solid var(--line); }
+.wf-editor { flex: 1; min-height: 0; display: flex; padding: 0 12px 12px; }
+.wf-editor > .empty { margin: 20px; }
+.btn.on { border-color: var(--accent); color: var(--text); }
+.save-badge { font-size: 11.5px; color: var(--muted); padding: 2px 8px; border-radius: 8px; border: 1px solid var(--line); }
+.save-badge.saved { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.save-badge.bad { color: var(--red); border-color: var(--red); }
+
+.flow-ed { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr) 290px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-2); }
+.flow-ed.ro { grid-template-columns: minmax(0, 1fr); border: none; border-radius: 8px; }
+.flow-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.flow-tools { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.flow-tl { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.flow-kinds button.k-then.on { color: var(--accent); }
+.flow-kinds button.k-ok.on { color: var(--green); }
+.flow-kinds button.k-fail.on { color: var(--red); }
+.flow-kinds.vertical { flex-direction: column; align-items: stretch; }
+.flow-kinds.vertical button { text-align: left; }
+.flow-note { font-size: 12px; color: var(--amber); }
+.flow-canvas { flex: 1; min-height: 0; position: relative; }
+.flow-ed .react-flow { --xy-background-color: var(--bg); --xy-minimap-background-color: var(--bg-2); --xy-controls-button-background-color: var(--bg-3); --xy-controls-button-color: var(--text); --xy-controls-button-border-color: var(--line); --xy-edge-stroke: var(--accent); --xy-handle-background-color: var(--accent); --xy-handle-border-color: var(--bg); }
+
+.flow-pal { border-right: 1px solid var(--line); overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; background: var(--bg-2); }
+.fp-sec { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 8px 2px 2px; }
+.fp-sec:first-child { margin-top: 0; }
+.fp-item { text-align: left; border: 1px solid var(--line); border-left-width: 3px; background: var(--bg); color: var(--text); border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12px; cursor: grab; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-item:hover { border-color: var(--line-2); background: var(--bg-3); }
+.fp-item:active { cursor: grabbing; }
+.fp-item:disabled { opacity: .45; cursor: default; }
+.fp-trigger { border-left-color: var(--accent); }
+.fp-instruction { border-left-color: var(--green); }
+.fp-notify { border-left-color: var(--amber); }
+.fp-builtin { border-left-color: var(--purple); }
+.fp-skill { border-left-color: #c084fc; font-family: var(--mono); font-size: 11.5px; }
+.fp-search { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; outline: none; }
+.fp-search:focus { border-color: var(--accent); }
+.fp-skills { display: flex; flex-direction: column; gap: 4px; }
+.fp-empty { font-size: 12px; color: var(--muted); padding: 4px; }
+
+.fb { width: 190px; border: 1px solid var(--line-2); border-top-width: 3px; border-radius: 9px; background: var(--bg-2); color: var(--text); padding: 6px 9px 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); font-size: 12px; }
+.fb.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fb.bad { border-color: var(--red); }
+.fb-trigger { border-top-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
+.fb-skill { border-top-color: #c084fc; }
+.fb-instruction { border-top-color: var(--green); }
+.fb-notify { border-top-color: var(--amber); }
+.fb-builtin { border-top-color: var(--purple); border-style: dashed; border-top-style: solid; }
+.fb-kind { display: flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.fb-warn { background: var(--red); color: #fff; border-radius: 50%; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; }
+.fb-x { margin-left: auto; border: none; background: none; color: var(--faint); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; opacity: 0; }
+.fb:hover .fb-x, .fb.sel .fb-x { opacity: 1; }
+.fb-x:hover { color: var(--red); }
+.fb-title { font-weight: 600; margin-top: 2px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.fb-sub { color: var(--muted); font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fh { width: 10px !important; height: 10px !important; }
+.fe-label { position: absolute; pointer-events: none; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--bg-2); border: 1px solid currentColor; }
+.fe-ok { color: var(--green); }
+.fe-fail { color: var(--red); }
+
+.flow-side { border-left: 1px solid var(--line); overflow: auto; background: var(--bg-2); }
+.fs-form { padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.fs-form label { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.fs-head { display: flex; align-items: center; gap: 6px; }
+.fs-chip { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 8px; border: 1px solid var(--line-2); border-top-width: 1px; color: var(--text); }
+.fs-input, .fs-text { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12.5px; outline: none; }
+.fs-input:focus, .fs-text:focus { border-color: var(--accent); }
+.fs-text { min-height: 72px; resize: vertical; line-height: 1.45; }
+.fs-text.tall { min-height: 140px; }
+.fs-problems { display: flex; flex-direction: column; gap: 4px; }
+.fs-problem { text-align: left; font: inherit; font-size: 12px; color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 35%, transparent); border-radius: 7px; padding: 5px 8px; cursor: pointer; }
+.fs-step { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--bg); }
+.fs-step-h { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.fs-pre { margin: 0; white-space: pre-wrap; font: 11.5px/1.5 var(--mono); color: var(--text); max-height: 260px; overflow: auto; }
+.fs-tip { margin-top: 8px; }
+
+.wf-title { display: flex; align-items: center; gap: 8px; }
+.wf-map { height: 300px; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; cursor: zoom-in; }
+.wf-summary { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.wf-sum-row { display: flex; align-items: center; gap: 6px; }
+.flow-dialog { width: min(1500px, 96vw); height: 90vh; max-width: none; display: flex; flex-direction: column; gap: 8px; }
+.flow-dialog h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.flow-dialog .flow-ed { flex: 1; }
+.flow-kinds:not(.vertical) button { white-space: nowrap; padding: 3px 9px; }
+.flow-pal > *, .fp-skills > * { flex: none; }
+.wf-templates > *, .flow-tools > * { flex-shrink: 0; }
+.wf-view .wf-templates { flex-wrap: wrap; }
+.wf-view .wf-note { flex-shrink: 1; min-width: 0; }
+.flow-ed { grid-template-columns: 176px minmax(0, 1fr) 270px; }
+.flow-ed.ro { grid-template-columns: minmax(0, 1fr); }
+.wf-seg, .flow-tools .seg { flex: none; width: max-content; max-width: 100%; overflow-x: auto; }
+.wf-seg button, .flow-tools .seg button { white-space: nowrap; flex: none; }

@@ -1,3 +1,4 @@
+import { actionCount, type WorkflowTemplate } from "@shared/flow";
 import { useEffect, useRef, useState } from "react";
 import { ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
 import { pendingAssign } from "@shared/derive";
@@ -44,9 +45,7 @@ export function AssignDialog({
   const [configuredModel, setConfiguredModel] = useState<string | null>(null);
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState("default");
-  const [workflows, setWorkflows] = useState<
-    { id: string; name: string; steps: unknown[] }[]
-  >([]);
+  const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([]);
   useEffect(() => {
     void deck()
       .workflowGet()
@@ -288,8 +287,7 @@ export function AssignDialog({
                 >
                   {workflows.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} ({t.steps.length} step
-                      {t.steps.length === 1 ? "" : "s"})
+                      {t.name} ({actionCount(t.flow)} blocks)
                     </option>
                   ))}
                 </select>

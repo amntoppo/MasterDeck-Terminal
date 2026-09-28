@@ -102,28 +102,39 @@ checkout whose branch was once linked to a ticket does not link it.
   text would answer the prompt, so those show **Open** instead.
 - **★ Master (top right, every screen, ⌘⇧M):** shows or hides master-agent's column. Drag its edge
   to resize it. Hiding it doesn't stop or detach master.
-- **Workflow (on the rail):** the path from an issue to a merged PR, stage by stage (issue, Claude
-  session, babysit-ticket, your instructions, work, before the PR, PR hooks, merged), with what MasterDeck
-  and its skills do at each and every hook Claude Code runs there, read live from `~/.claude/settings.json`,
-  your workspace repos' `.claude/settings*.json` and your enabled plugins. **+ Add a skill** attaches any
-  skill in `~/.claude/skills` to a stage (session starts, linked to its issue, after a push, before the
-  PR, PR created, PR merged): a hook in `~/.claude/settings.json` tells the session to run it at that
-  point, in a background subagent or in the session, with your extra instructions. **+ Add an
-  instruction** attaches plain text instead: at that point the session gets it as it is, no skill
-  involved (e.g. after a push: "post the preview URL in the PR description"). Both are saved as soon as
-  they are added, in `~/.claude/masterdeck/workflow.json`; **Edit** opens the step in place (Save, Cancel); a saved edit reaches sessions again, even ones that had the old text. Remove takes the hook out again.
-- **Workflow templates:** the Workflow window edits the **Default** (what every new session copies)
-  or a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
-  templates (not the Default). Templates live in `~/.claude/masterdeck/workflows/templates/`.
-- **A session's own workflow:** each session gets its own copy of the workflow the first time
-  MasterDeck sees it: the Default, or the template picked under **Workflow** in the Start dialog.
-  Open it on the Terminals screen with **Workflow** at the top right (next to **Panel**; the two take
-  turns in the same place). There you add, edit or remove steps for that session only, **Use a
-  template… → Apply** replaces its steps with a template's, and **Save as template** keeps them for
-  later sessions. Changing the Default or a template later doesn't change sessions that already have
-  their copy. Copies are in `~/.claude/masterdeck/workflows/sessions/<session id>.json`; one MasterDeck
-  hook per trigger in `~/.claude/settings.json` reads the session's copy (or the Default, before it
-  has one), replacing the one-hook-per-step setup older versions installed.
+- **Workflow (on the rail):** a canvas where you build what sessions do, from an issue to a merged
+  PR. Drag blocks from the palette on the left (or click one: it lands after the selected block,
+  joined to it) and join them by dragging from a block's right dot to another block:
+  - **Triggers:** session starts, linked to its issue, after a git push, before the PR, PR created,
+    PR merged, **before / after a command** matching a pattern you type (a regular expression, e.g.
+    `npm (run )?test`), **turn finished** (the session does these before it stops, once per turn),
+    **needs you** and **idle for N minutes** (MasterDeck acts on these itself).
+  - **Actions:** a skill (in a background subagent or in the session, with extra instructions), an
+    instruction (text the session is told as it is), or **Notify me** (a desktop notification, after
+    Needs you or Idle; after Idle, instructions are sent to the session as a message).
+  - **Built-ins:** babysit-ticket, the self-review before the PR, and the PR watch. Remove one to turn
+    it off for sessions using that workflow: its hook then skips them.
+  - **Arrows:** *then* (do the next block after this one; several arrows out of a block run side by
+    side), *if it worked* and *if it failed* (dashed green and red: the session follows the one that
+    matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
+    change it. Select a block to edit it on the right; Delete removes the selection. **Tidy up** lines
+    the blocks up.
+  - With nothing selected, the right side shows **what sessions get**: the numbered plan each
+    trigger hands the session, and anything wrong (a block no trigger reaches, a missing pattern).
+  Changes save by themselves. **All hooks** lists every hook Claude Code runs (your settings, your
+  workspace repos, enabled plugins).
+- **Workflow templates:** the Template bar edits the **Default** (what every new session copies) or
+  a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
+  templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.
+- **A session's own workflow:** each session gets its own copy the first time MasterDeck sees it: the
+  Default, or the template picked under **Workflow** in the Start dialog. On the Terminals screen,
+  **Workflow** at the top right (next to **Panel**; the two take turns in the same place) shows its
+  map; **Edit workflow** opens the same editor, full size, for that session only. **Use a template… →
+  Apply** replaces it with a template, and **Save as template** keeps it for later sessions. Changing
+  the Default or a template doesn't change sessions that already have their copy. Copies are in
+  `~/.claude/masterdeck/workflows/sessions/<session id>.json`. One MasterDeck hook per trigger in
+  `~/.claude/settings.json` reads the session's copy (or the Default before it has one); workflows
+  from older versions (a list of steps) are turned into flows at launch.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
   session on it, newest first, each with Resume. The links come from babysit-ticket

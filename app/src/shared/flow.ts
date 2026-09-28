@@ -1,0 +1,745 @@
+/**
+ * Workflows as a graph: trigger blocks, the actions that follow them (skills, instructions,
+ * notifications) and MasterDeck's built-in steps, joined by arrows. An arrow is "then" (do the
+ * next block after this one), or an outcome arrow ("if it worked" / "if it failed") the session
+ * follows from the result. Each trigger's blocks compile to one plan the session is handed when
+ * the trigger fires (by a hook), or to what MasterDeck does itself (needs you, idle).
+ */
+import {
+  parseSteps,
+  runsOrExit,
+  shellQuote as q,
+  TRIGGERS,
+  type CustomStep,
+  type TriggerId,
+} from "./workflow";
+
+export type FlowTrigger =
+  | TriggerId
+  | "command-before"
+  | "command-after"
+  | "turn-end"
+  | "needs-you"
+  | "idle";
+
+export interface FlowTriggerInfo {
+  id: FlowTrigger;
+  label: string;
+  /** Short text on the block. */
+  short: string;
+  hint: string;
+  /** hook: a Claude Code hook hands the session its plan; deck: MasterDeck watches and acts. */
+  runner: "hook" | "deck";
+  /** The hook event (hook runners). */
+  event?: "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop";
+}
+
+const SHORT: Record<TriggerId, string> = {
+  "session-start": "Session starts",
+  linked: "Linked to issue",
+  "after-push": "After git push",
+  "before-pr": "Before PR",
+  "pr-created": "PR created",
+  "pr-merged": "PR merged",
+};
+
+export const FLOW_TRIGGERS: FlowTriggerInfo[] = [
+  ...TRIGGERS.map((t): FlowTriggerInfo => ({
+    id: t.id,
+    label: t.label,
+    short: SHORT[t.id],
+    hint:
+      t.once === "commit"
+        ? "Once per session and commit."
+        : "Once per session.",
+    runner: "hook",
+    event: t.event,
+  })),
+  {
+    id: "command-before",
+    label: "Before a command runs",
+    short: "Before command",
+    hint: "Before a Bash command matching your pattern (a regular expression, e.g. npm test). Once per session and commit.",
+    runner: "hook",
+    event: "PreToolUse",
+  },
+  {
+    id: "command-after",
+    label: "After a command runs",
+    short: "After command",
+    hint: "After a Bash command matching your pattern (a regular expression, e.g. terraform apply). Once per session and commit.",
+    runner: "hook",
+    event: "PostToolUse",
+  },
+  {
+    id: "turn-end",
+    label: "When the session finishes a turn",
+    short: "Turn finished",
+    hint: "When the session stops and would wait for you: it does these first, once per turn.",
+    runner: "hook",
+    event: "Stop",
+  },
+  {
+    id: "needs-you",
+    label: "When the session needs you",
+    short: "Needs you",
+    hint: "When it waits on a prompt, a permission or a question. MasterDeck notifies you (notify blocks only).",
+    runner: "deck",
+  },
+  {
+    id: "idle",
+    label: "When the session is idle for a while",
+    short: "Idle",
+    hint: "When it has been idle for the minutes you set: MasterDeck sends the instructions to it as a message and shows notifications. Once per idle spell.",
+    runner: "deck",
+  },
+];
+
+export const triggerInfo = (id: FlowTrigger): FlowTriggerInfo =>
+  FLOW_TRIGGERS.find((t) => t.id === id)!;
+
+export type BuiltinId = "ticket" | "pr-review" | "pr-watch";
+
+export interface BuiltinInfo {
+  id: BuiltinId;
+  label: string;
+  /** The trigger it belongs to (where its hook runs). */
+  trigger: FlowTrigger;
+  what: string;
+}
+
+export const BUILTINS: BuiltinInfo[] = [
+  {
+    id: "ticket",
+    label: "babysit-ticket",
+    trigger: "linked",
+    what: "Links the session to its issue, moves the card on the board, and links the PR under Development.",
+  },
+  {
+    id: "pr-review",
+    label: "Self-review before the PR",
+    trigger: "before-pr",
+    what: "babysit-pr's gate: review the branch diff and fix findings before `gh pr create`.",
+  },
+  {
+    id: "pr-watch",
+    label: "Watch the PR",
+    trigger: "pr-created",
+    what: "babysit-pr watches the PR: fixes review comments and CI until it is merged or closed.",
+  },
+];
+
+export const builtinInfo = (id: BuiltinId): BuiltinInfo =>
+  BUILTINS.find((b) => b.id === id)!;
+
+export type FlowNode =
+  | {
+      id: string;
+      x: number;
+      y: number;
+      kind: "trigger";
+      trigger: FlowTrigger;
+      pattern?: string;
+      minutes?: number;
+    }
+  | {
+      id: string;
+      x: number;
+      y: number;
+      kind: "skill";
+      skill: string;
+      mode: "background" | "session";
+      instructions: string;
+    }
+  | { id: string; x: number; y: number; kind: "instruction"; text: string }
+  | { id: string; x: number; y: number; kind: "notify"; text: string }
+  | { id: string; x: number; y: number; kind: "builtin"; builtin: BuiltinId };
+
+export type EdgeKind = "then" | "ok" | "fail";
+export interface FlowEdge {
+  id: string;
+  from: string;
+  to: string;
+  kind: EdgeKind;
+}
+export interface Flow {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+}
+
+export const EDGE_LABEL: Record<EdgeKind, string> = {
+  then: "then",
+  ok: "if it worked",
+  fail: "if it failed",
+};
+
+export const newNodeId = (): string =>
+  `n-${Math.random().toString(36).slice(2, 8)}`;
+export const edgeId = (from: string, to: string): string => `e-${from}-${to}`;
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {};
+const str = (v: unknown, max: number): string =>
+  typeof v === "string" ? v.slice(0, max) : "";
+const num = (v: unknown, d: number): number =>
+  typeof v === "number" && Number.isFinite(v) ? Math.round(v) : d;
+const ID = /^[a-z0-9-]{1,24}$/;
+
+/** A flow from JSON: unknown blocks, bad fields and arrows to nothing are dropped. */
+export function parseFlow(raw: unknown): Flow {
+  const o = obj(raw);
+  const nodes: FlowNode[] = [];
+  const seen = new Set<string>();
+  for (const r of Array.isArray(o.nodes) ? o.nodes.map(obj) : []) {
+    const id = str(r.id, 24);
+    if (!ID.test(id) || seen.has(id)) continue;
+    const x = num(r.x, 0);
+    const y = num(r.y, 0);
+    let n: FlowNode | null = null;
+    if (r.kind === "trigger" && FLOW_TRIGGERS.some((t) => t.id === r.trigger)) {
+      n = { id, x, y, kind: "trigger", trigger: r.trigger as FlowTrigger };
+      if (r.trigger === "command-before" || r.trigger === "command-after")
+        n.pattern = str(r.pattern, 200);
+      if (r.trigger === "idle")
+        n.minutes = Math.min(24 * 60, Math.max(1, num(r.minutes, 15)));
+    } else if (r.kind === "skill" && /^[\w:.-]{0,80}$/.test(str(r.skill, 80)))
+      n = {
+        id,
+        x,
+        y,
+        kind: "skill",
+        skill: str(r.skill, 80),
+        mode: r.mode === "session" ? "session" : "background",
+        instructions: str(r.instructions, 2000),
+      };
+    else if (r.kind === "instruction")
+      n = { id, x, y, kind: "instruction", text: str(r.text, 4000) };
+    else if (r.kind === "notify")
+      n = { id, x, y, kind: "notify", text: str(r.text, 300) };
+    else if (r.kind === "builtin" && BUILTINS.some((b) => b.id === r.builtin))
+      n = { id, x, y, kind: "builtin", builtin: r.builtin as BuiltinId };
+    if (!n) continue;
+    seen.add(id);
+    nodes.push(n);
+  }
+  // One of each built-in.
+  const builtins = new Set<string>();
+  const kept = nodes.filter(
+    (n) =>
+      n.kind !== "builtin" ||
+      (!builtins.has(n.builtin) && builtins.add(n.builtin)),
+  );
+  const ids = new Set(kept.map((n) => n.id));
+  const edges: FlowEdge[] = [];
+  const pairs = new Set<string>();
+  for (const r of Array.isArray(o.edges) ? o.edges.map(obj) : []) {
+    const from = str(r.from, 24);
+    const to = str(r.to, 24);
+    if (
+      !ids.has(from) ||
+      !ids.has(to) ||
+      from === to ||
+      pairs.has(`${from}>${to}`)
+    )
+      continue;
+    if (kept.find((n) => n.id === to)?.kind === "trigger") continue;
+    const fromTrigger = kept.find((n) => n.id === from)?.kind === "trigger";
+    const kind: EdgeKind =
+      !fromTrigger && (r.kind === "ok" || r.kind === "fail") ? r.kind : "then";
+    pairs.add(`${from}>${to}`);
+    edges.push({ id: edgeId(from, to), from, to, kind });
+  }
+  return { nodes: kept, edges };
+}
+
+/** Whether an arrow from→to would close a loop. */
+export function makesCycle(flow: Flow, from: string, to: string): boolean {
+  const next = new Map<string, string[]>();
+  for (const e of flow.edges)
+    next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  const stack = [to];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n === from) return true;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    stack.push(...(next.get(n) ?? []));
+  }
+  return false;
+}
+
+/** The workflow every install starts with: each trigger, and the built-ins under theirs. */
+export function defaultFlow(): Flow {
+  return fromSteps([]);
+}
+
+/** A flow from the old list of steps (each hung from its trigger), with every built-in. */
+export function fromSteps(steps: CustomStep[]): Flow {
+  const nodes: FlowNode[] = [];
+  const edges: FlowEdge[] = [];
+  TRIGGERS.forEach((t, i) => {
+    const tid = `t-${t.id}`.slice(0, 24);
+    nodes.push({ id: tid, x: 0, y: 0, kind: "trigger", trigger: t.id });
+    const hang = (n: FlowNode) => {
+      nodes.push(n);
+      edges.push({ id: edgeId(tid, n.id), from: tid, to: n.id, kind: "then" });
+    };
+    for (const b of BUILTINS.filter((b) => b.trigger === t.id))
+      hang({ id: `b-${b.id}`, x: 0, y: 0, kind: "builtin", builtin: b.id });
+    for (const s of steps.filter((s) => s.trigger === t.id)) {
+      const id = `s-${s.id}`.slice(0, 24).replace(/-+$/, "") || `s-${i}`;
+      hang(
+        s.kind === "instruction"
+          ? { id, x: 0, y: 0, kind: "instruction", text: s.instructions }
+          : {
+              id,
+              x: 0,
+              y: 0,
+              kind: "skill",
+              skill: s.skill,
+              mode: s.mode,
+              instructions: s.instructions,
+            },
+      );
+    }
+  });
+  return layoutFlow({ nodes, edges });
+}
+
+/** Place the blocks: each trigger on its own row, what follows it to the right, branches below. */
+export function layoutFlow(flow: Flow, gapX = 290, gapY = 110): Flow {
+  const out = new Map<string, FlowEdge[]>();
+  for (const e of flow.edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
+  const pos = new Map<string, { x: number; y: number }>();
+  let row = 0;
+  const place = (id: string, depth: number) => {
+    if (pos.has(id)) return;
+    pos.set(id, { x: depth * gapX, y: row * gapY });
+    const kids = out.get(id) ?? [];
+    kids.forEach((e, i) => {
+      if (i > 0 && !pos.has(e.to)) row++;
+      place(e.to, depth + 1);
+    });
+  };
+  const triggers = flow.nodes.filter((n) => n.kind === "trigger");
+  for (const t of triggers) {
+    place(t.id, 0);
+    row++;
+  }
+  // Blocks no trigger reaches: a row of their own at the bottom.
+  for (const n of flow.nodes) if (!pos.has(n.id)) (place(n.id, 1), row++);
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => ({ ...n, ...pos.get(n.id)! })),
+  };
+}
+
+/** What a skill block tells the session. */
+function skillText(n: Extract<FlowNode, { kind: "skill" }>): string {
+  const extra = n.instructions.trim() ? ` ${n.instructions.trim()}` : "";
+  if (n.mode === "session")
+    return `Use the ${n.skill} skill for this session's work.${extra}`;
+  return (
+    `Launch a subagent with the Agent tool (general-purpose, in the background; do not wait for it) with this prompt, filled in: ` +
+    `"Use the ${n.skill} skill for the work on branch <branch> in <worktree path>, linked to issue <#N>.${extra} ` +
+    `Do not commit, push or switch branches unless the skill says to; at the end, report what you did." Pass on its report when it arrives.`
+  );
+}
+
+function blockText(n: FlowNode): string | null {
+  switch (n.kind) {
+    case "skill":
+      return n.skill ? skillText(n) : null;
+    case "instruction":
+      return n.text.trim() || null;
+    case "builtin":
+      return `Let ${builtinInfo(n.builtin).label} run first (its own hook tells you what to do).`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The plan for the blocks after `start`: numbered steps in order; several arrows out of a block
+ * run side by side; outcome arrows become "If it worked / If it failed" under the step.
+ */
+function planLines(flow: Flow, start: string): string[] {
+  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
+  const out = new Map<string, FlowEdge[]>();
+  for (const e of flow.edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
+  const numbered = new Map<string, string>();
+  const lines: string[] = [];
+
+  const chain = (first: string[], indent: string, prefix: string) => {
+    // Built-ins with nothing after them add nothing to the plan (their hook speaks for itself).
+    const quiet = (id: string) =>
+      byId.get(id)?.kind === "builtin" && !(out.get(id) ?? []).length;
+    let current = first.filter((id) => !quiet(id));
+    let i = 1;
+    while (current.length) {
+      if (current.length > 1) {
+        lines.push(
+          `${indent}${i === 1 ? "At the same time:" : "Then, at the same time:"}`,
+        );
+        current.forEach((id, k) =>
+          chain(
+            [id],
+            `${indent}  `,
+            `${prefix}${i}${String.fromCharCode(97 + k)}.`,
+          ),
+        );
+        return;
+      }
+      const id = current[0];
+      const n = byId.get(id);
+      if (!n) return;
+      const label = `${prefix}${i}`;
+      const seen = numbered.get(id);
+      if (seen) {
+        lines.push(`${indent}${label}. Go on with step ${seen}.`);
+        return;
+      }
+      const kids = out.get(id) ?? [];
+      // A built-in with nothing after it adds nothing to the plan (its hook speaks for itself).
+      const text = n.kind === "builtin" && !kids.length ? null : blockText(n);
+      if (!text) {
+        current = kids.filter((e) => e.kind === "then").map((e) => e.to);
+        continue;
+      }
+      numbered.set(id, label);
+      lines.push(`${indent}${label}. ${i > 1 ? "Then: " : ""}${text}`);
+      for (const [kind, head] of [
+        ["ok", "If it worked:"],
+        ["fail", "If it failed:"],
+      ] as const) {
+        const branch = kids.filter((e) => e.kind === kind).map((e) => e.to);
+        if (!branch.length) continue;
+        lines.push(`${indent}   ${head}`);
+        chain(branch, `${indent}     `, `${label}.`);
+      }
+      current = kids
+        .filter((e) => e.kind === "then" && !quiet(e.to))
+        .map((e) => e.to);
+      i++;
+    }
+  };
+  chain(
+    (out.get(start) ?? []).map((e) => e.to),
+    "",
+    "",
+  );
+  return lines;
+}
+
+/** What a trigger compiles to: the hook's plan, or MasterDeck's own actions. */
+export interface CompiledStep {
+  /** The trigger block's id and a hash of what it says: a changed plan reaches sessions again. */
+  id: string;
+  trigger: FlowTrigger;
+  pattern?: string;
+  minutes?: number;
+  /** Hook triggers: the text handed to the session. Idle: the message MasterDeck sends. */
+  note: string;
+  /** Deck triggers: notifications to show. */
+  notify?: string[];
+}
+
+export interface Problem {
+  node?: string;
+  text: string;
+}
+
+const hash = (s: string): string => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36).slice(0, 7);
+};
+
+const ENDING: Partial<Record<FlowTrigger, string>> = {
+  "turn-end":
+    "Do these before you finish this turn, then stop as you would have.",
+  "command-before":
+    "Do these before running the command, then run it (unless a step says not to).",
+};
+
+/** The flow as the hooks and MasterDeck run it, and what is wrong with it. */
+export function compileFlow(flow: Flow): {
+  steps: CompiledStep[];
+  builtins: BuiltinId[];
+  problems: Problem[];
+} {
+  const steps: CompiledStep[] = [];
+  const problems: Problem[] = [];
+  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
+  const reached = new Set<string>();
+  const reach = (id: string) => {
+    for (const e of flow.edges.filter((e) => e.from === id))
+      if (!reached.has(e.to)) {
+        reached.add(e.to);
+        reach(e.to);
+      }
+  };
+  for (const n of flow.nodes) {
+    if (n.kind !== "trigger") continue;
+    reach(n.id);
+    const info = triggerInfo(n.trigger);
+    const under = new Set<string>();
+    const walk = (id: string) => {
+      for (const e of flow.edges.filter((e) => e.from === id))
+        if (!under.has(e.to)) {
+          under.add(e.to);
+          walk(e.to);
+        }
+    };
+    walk(n.id);
+    const blocks = [...under].map((id) => byId.get(id)!).filter(Boolean);
+    if (
+      (n.trigger === "command-before" || n.trigger === "command-after") &&
+      blocks.length
+    ) {
+      if (!n.pattern?.trim())
+        problems.push({
+          node: n.id,
+          text: `${info.short}: set the command pattern`,
+        });
+      else
+        try {
+          new RegExp(n.pattern);
+        } catch {
+          problems.push({
+            node: n.id,
+            text: `${info.short}: the pattern is not a valid regular expression`,
+          });
+        }
+    }
+    const notify = blocks
+      .filter((b) => b.kind === "notify")
+      .map((b) => (b as { text: string }).text.trim() || `${info.short}`);
+    if (info.runner === "hook") {
+      for (const b of blocks.filter((b) => b.kind === "notify"))
+        problems.push({
+          node: b.id,
+          text: "Notify works after “Needs you” and “Idle” only",
+        });
+      const lines = planLines(flow, n.id);
+      if (!lines.length) continue;
+      const head = `Workflow step (${info.label[0].toLowerCase()}${info.label.slice(1)}${n.pattern ? `: ${n.pattern}` : ""}):`;
+      const note = [
+        head,
+        ...lines,
+        ENDING[n.trigger] ?? "Then carry on with what you were doing.",
+      ].join("\n");
+      steps.push({
+        id: `${n.id}-${hash(note + (n.pattern ?? ""))}`.slice(0, 40),
+        trigger: n.trigger,
+        ...(n.pattern ? { pattern: n.pattern } : {}),
+        note,
+      });
+    } else {
+      const acts = blocks.filter(
+        (b) => b.kind !== "notify" && b.kind !== "builtin",
+      );
+      if (n.trigger === "needs-you")
+        for (const b of acts)
+          problems.push({
+            node: b.id,
+            text: "After “Needs you”, only notify blocks run (a message would answer its prompt)",
+          });
+      for (const b of blocks.filter((b) => b.kind === "builtin"))
+        problems.push({
+          node: b.id,
+          text: "Built-ins run from their own hook; connect them to their trigger",
+        });
+      const note = n.trigger === "idle" ? planLines(flow, n.id).join("\n") : "";
+      if (!note && !notify.length) continue;
+      steps.push({
+        id: `${n.id}-${hash(note + notify.join("|") + (n.minutes ?? ""))}`.slice(
+          0,
+          40,
+        ),
+        trigger: n.trigger,
+        ...(n.minutes ? { minutes: n.minutes } : {}),
+        note,
+        ...(notify.length ? { notify } : {}),
+      });
+    }
+  }
+  for (const n of flow.nodes) {
+    if (n.kind === "trigger") continue;
+    if (!reached.has(n.id) && n.kind !== "builtin")
+      problems.push({
+        node: n.id,
+        text: "Not connected to a trigger: it never runs",
+      });
+    if (n.kind === "skill" && !n.skill)
+      problems.push({ node: n.id, text: "Pick a skill" });
+    if ((n.kind === "instruction" || n.kind === "notify") && !n.text.trim())
+      problems.push({ node: n.id, text: "Empty: write what it says" });
+  }
+  const builtins = flow.nodes
+    .filter(
+      (n): n is Extract<FlowNode, { kind: "builtin" }> => n.kind === "builtin",
+    )
+    .map((n) => n.builtin);
+  return { steps, builtins, problems };
+}
+
+/** How many blocks do something (not triggers): a template's size. */
+export const actionCount = (flow: Flow): number =>
+  flow.nodes.filter((n) => n.kind !== "trigger").length;
+
+/** Triggers that need a hook (installed once, for everyone; each reads the session's workflow). */
+export const HOOK_TRIGGERS = FLOW_TRIGGERS.filter((t) => t.runner === "hook");
+
+/**
+ * The hook for one trigger: reads the session's workflow (`<dir>/workflows/sessions/<id>.json`,
+ * else the default `<dir>/workflow.json`) and hands over the compiled steps for this trigger that
+ * have not run yet. Command triggers match each step's pattern against the command; the turn-end
+ * trigger asks Claude to go on (once per turn: never while it is already going on because of it).
+ */
+export function flowTriggerCommand(
+  t: FlowTriggerInfo,
+  dir: string,
+  mark: string,
+): string {
+  const legacy = TRIGGERS.find((x) => x.id === t.id);
+  const lines = [`input=$(cat)`];
+  if (legacy?.command) {
+    lines.push(
+      `cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')`,
+    );
+    lines.push(runsOrExit(legacy.command));
+  }
+  if (legacy?.success)
+    lines.push(
+      `printf '%s' "$input" | jq -r '.tool_response | tostring' | grep -q ${q(legacy.success)} || exit 0`,
+    );
+  if (t.id === "command-before" || t.id === "command-after") {
+    lines.push(
+      `cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')`,
+    );
+    lines.push(`[ -n "$cmd" ] || exit 0`);
+  }
+  if (t.id === "turn-end")
+    lines.push(
+      `[ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false')" = true ] && exit 0`,
+    );
+  lines.push(`sid=$(printf '%s' "$input" | jq -r '.session_id // ""')`);
+  lines.push(`case "$sid" in ""|*[!A-Za-z0-9-]*) exit 0;; esac`);
+  lines.push(
+    `d=${q(dir)}; f="$d/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$d/workflow.json"; [ -f "$f" ] || exit 0`,
+  );
+  // Command triggers: the steps whose pattern the command matches (a bad pattern matches nothing).
+  const pick =
+    t.id === "command-before" || t.id === "command-after"
+      ? `jq -r --arg t ${q(t.id)} --arg c "$cmd" '.steps[]? | select(.trigger == $t) | select(.pattern as $p | try ($c | test($p)) catch false) | .id' "$f"`
+      : `jq -r --arg t ${q(t.id)} '.steps[]? | select(.trigger == $t) | .id' "$f"`;
+  const once =
+    t.id === "turn-end"
+      ? ""
+      : t.id === "session-start" || t.id === "linked"
+        ? "$sid"
+        : `$sid-$(git rev-parse HEAD 2>/dev/null || echo none)`;
+  const markLine = once
+    ? `m="\${TMPDIR:-/tmp}/masterdeck-workflow-$id-${once}"; [ -f "$m" ] && continue; touch "$m"; `
+    : "";
+  lines.push(
+    `ids=""; for id in $(${pick}); do case "$id" in *[!a-z0-9-]*) continue;; esac; ${markLine}ids="$ids $id"; done`,
+  );
+  lines.push(`[ -n "$ids" ] || exit 0`);
+  const text = `([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))`;
+  const outp =
+    t.id === "turn-end"
+      ? `{decision: "block", reason: ${text}}`
+      : `{hookSpecificOutput: {hookEventName: ${JSON.stringify(t.event)}, additionalContext: ${text}}}`;
+  lines.push(
+    `jq -c --arg ids "$ids" ${q(`($ids | split(" ") | map(select(. != ""))) as $w | ${outp}`)} "$f"`,
+  );
+  return `${lines.join("; ")} # ${mark}`;
+}
+
+/**
+ * Wrap a built-in's hook command: it skips sessions whose workflow left the built-in out (a
+ * workflow file with a `builtins` list that does not name it).
+ */
+export function guardedBuiltin(
+  id: BuiltinId,
+  command: string,
+  dir: string,
+): string {
+  return (
+    `input=$(cat); sid=$(printf '%s' "$input" | jq -r '.session_id // ""'); ` +
+    `case "$sid" in ""|*[!A-Za-z0-9-]*) ;; *) d=${q(dir)}; f="$d/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$d/workflow.json"; ` +
+    `[ -f "$f" ] && jq -e --arg b ${q(id)} '(.builtins // null) as $x | $x != null and ($x | index($b) | not)' "$f" >/dev/null 2>&1 && exit 0;; esac; ` +
+    `printf '%s' "$input" | { ${command}; } # masterdeck-builtin:${id}`
+  );
+}
+
+/**
+ * Per-session workflows. Each session keeps its own copy of the workflow (made the first time
+ * MasterDeck sees it, from the default or the template picked when starting it) and follows it;
+ * templates are named workflows to start from. One hook per trigger reads the session's copy, or
+ * the default while it has none.
+ */
+export interface WorkflowDoc {
+  flow: Flow;
+  /** The template it was copied from (its name), and when. */
+  from: string | null;
+  at: number | null;
+}
+
+export interface WorkflowTemplate {
+  /** 'default' is the workflow new sessions copy (workflow.json). */
+  id: string;
+  name: string;
+  flow: Flow;
+}
+
+export const DEFAULT_TEMPLATE = "default";
+
+/** A workflow file: its flow, or (older files) its list of steps turned into one. */
+export function parseDoc(raw: unknown): WorkflowDoc {
+  const o = obj(raw);
+  const flow = o.flow ? parseFlow(o.flow) : fromSteps(parseSteps(raw));
+  return {
+    flow,
+    from: typeof o.from === "string" ? o.from.slice(0, 80) : null,
+    at: typeof o.at === "number" ? o.at : null,
+  };
+}
+
+/** A workflow file as MasterDeck and the hooks read it: the flow, and what it compiles to. */
+export function docJson(doc: WorkflowDoc, name?: string): string {
+  const { steps, builtins } = compileFlow(doc.flow);
+  return (
+    JSON.stringify(
+      {
+        ...(name ? { name } : {}),
+        from: doc.from,
+        at: doc.at,
+        flow: doc.flow,
+        steps,
+        builtins,
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+/** A template's file id from its name. */
+export function templateId(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return !base || base === DEFAULT_TEMPLATE
+    ? `t-${Math.random().toString(36).slice(2, 8)}`
+    : base;
+}
+
+export const validSessionId = (id: unknown): id is string =>
+  typeof id === "string" && /^[A-Za-z0-9-]{8,80}$/.test(id);
