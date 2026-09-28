@@ -322,6 +322,11 @@ creation.
 - **Templates:** the Start dialog's Template… menu inserts a saved snippet ("TDD, small PR",
   "Investigate only", "Fix and open PR", "Pair with me", plus yours). **Save as template** stores the
   current text in `~/.claude/masterdeck/templates.json`.
+- **Find (⌘F):** on Terminals it searches the open terminal's text (its scrollback included); on
+  Board and PRs, the text on the screen. A bar opens at the top right: every match is highlighted,
+  the current one brighter; **Enter** / **↓** go to the next, **⇧Enter** / **↑** to the previous, and
+  the terminal or screen scrolls to it. **Esc** closes it. Terminals highlight up to 1,000 matches
+  (all are still counted and reachable); screens update as they change.
 - **History (⌘⇧F, or History in ⌘K):** a popup over any screen. Type to search every session
   transcript (exact text, any case). Results list the sessions, newest first, with snippets. Click a
   snippet to open that conversation on the right, scrolled to the message it came from and outlined,
@@ -432,6 +437,7 @@ cards is in them.
 | `⌘⇧W` | Close the tab (the session keeps running) |
 | `⌘\` | Split two tabs side by side, or close the split |
 | `⌘K` | Command palette |
+| `⌘F` | Find in the open terminal, or on the Board or PRs screen |
 | `⌘⇧F` | History: search every session, jump to the match |
 | `⌘J` | Open the first Needs-you item |
 | `⌘E` | The open session's worktrees (Open in editor) |

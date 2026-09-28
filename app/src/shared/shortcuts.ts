@@ -21,6 +21,7 @@ export type ShortcutId =
   | 'settings'
   | 'shortcuts'
   | 'history'
+  | 'find'
 
 export interface Shortcut {
   id: ShortcutId
@@ -34,6 +35,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'view-prev', keys: '⇧←', what: 'Previous view (Terminals · Board View · PRs · Tasks)', group: 'Move around' },
   { id: 'view-next', keys: '⇧→', what: 'Next view', group: 'Move around' },
   { id: 'needs-you', keys: 'Mod J', what: 'Open the first Needs-you item', group: 'Move around' },
+  { id: 'find', keys: 'Mod F', what: 'Find in the terminal, Board or PRs', group: 'Move around' },
   { id: 'history', keys: 'Mod ⇧F', what: 'History: search every session, jump to the match', group: 'Move around' },
   { id: 'palette', keys: 'Mod K', what: 'Command palette: sessions, tickets, PRs, actions', group: 'Move around' },
   { id: 'tab-prev', keys: '⇧↑', what: 'Previous terminal tab (goes to Terminals)', group: 'Tabs' },
@@ -79,7 +81,7 @@ export function matchShortcut(e: KeyLike, c: KeyContext): { id: ShortcutId; n?: 
   const k = e.key.toLowerCase()
   if (!e.shiftKey) {
     if (/^[1-9]$/.test(k)) return { id: 'tab-n', n: Number(k) }
-    const plain: Record<string, ShortcutId> = { k: 'palette', t: 'new-shell', j: 'needs-you', e: 'worktree', '\\': 'split', ',': 'settings', '/': 'shortcuts' }
+    const plain: Record<string, ShortcutId> = { f: 'find', k: 'palette', t: 'new-shell', j: 'needs-you', e: 'worktree', '\\': 'split', ',': 'settings', '/': 'shortcuts' }
     return plain[k] ? { id: plain[k] } : null
   }
   const shifted: Record<string, ShortcutId> = { w: 'close-tab', m: 'master', g: 'refresh', f: 'history' }

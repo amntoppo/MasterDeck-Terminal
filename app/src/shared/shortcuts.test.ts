@@ -24,6 +24,7 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key('W', { meta: true, shift: true }), mac)).toEqual({ id: 'close-tab' })
     expect(matchShortcut(key('M', { meta: true, shift: true }), mac)).toEqual({ id: 'master' })
     expect(matchShortcut(key('F', { meta: true, shift: true }), mac)).toEqual({ id: 'history' })
+    expect(matchShortcut(key('f', { meta: true }), mac)).toEqual({ id: 'find' })
   })
   it('does not take the default menu combos', () => {
     for (const k of ['r', 'w', 'm', 'h', 'q', '0', 'c', 'v']) expect(matchShortcut(key(k, { meta: true }), mac)).toBeNull()

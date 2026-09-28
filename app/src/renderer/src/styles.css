@@ -924,3 +924,14 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .hd-text mark, .hd-snip mark { background: color-mix(in srgb, var(--amber) 45%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
 .hd-msg.current mark { background: var(--amber); color: #111; }
 .hd-more { align-self: center; }
+/* ⌘F find bar (top right of the screen) */
+.find-slot { position: absolute; top: 56px; z-index: 35; }
+.find-bar { display: flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.find-bar input { width: 220px; border: none; outline: none; background: none; color: var(--text); font: inherit; font-size: 13px; }
+.find-count { min-width: 64px; text-align: right; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.find-count.none { color: var(--red); }
+.find-btn { width: 26px; height: 26px; border: none; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; font-size: 14px; }
+.find-btn:hover:not(:disabled) { background: var(--bg-4); color: var(--text); }
+.find-btn:disabled { opacity: .4; cursor: default; }
+::highlight(md-find) { background-color: rgba(217, 164, 65, .38); color: inherit; }
+::highlight(md-find-current) { background-color: #d9a441; color: #111; }

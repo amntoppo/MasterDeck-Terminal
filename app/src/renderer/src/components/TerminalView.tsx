@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
@@ -26,6 +27,15 @@ const THEME = {
   brightCyan: '#81e6d9',
   white: '#e6e9ef',
   brightWhite: '#ffffff',
+}
+
+/** Terminal views by pane id (one pane can show in Terminals and in Tasks at once), for ⌘F. */
+const searchers = new Map<string, { search: SearchAddon; host: HTMLElement }[]>()
+
+/** The search of a pane's terminal on screen (else the last one opened), or null. */
+export function terminalSearch(paneId: string): SearchAddon | null {
+  const list = searchers.get(paneId) ?? []
+  return (list.find((x) => x.host.offsetParent !== null) ?? list[list.length - 1])?.search ?? null
 }
 
 interface Props {
@@ -66,7 +76,12 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     })
     const f = new FitAddon()
     t.loadAddon(f)
+    // Scans the scrollback only when searched (⌘F); highlights at most 1000 matches.
+    const search = new SearchAddon({ highlightLimit: 1000 })
+    t.loadAddon(search)
     t.open(host.current)
+    const entry = { search, host: host.current }
+    searchers.set(paneId, [...(searchers.get(paneId) ?? []), entry])
     term.current = t
     fit.current = f
     try {
@@ -133,6 +148,9 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       resize.dispose()
       offData()
       offExit()
+      const rest = (searchers.get(paneId) ?? []).filter((x) => x !== entry)
+      if (rest.length) searchers.set(paneId, rest)
+      else searchers.delete(paneId)
       t.dispose()
       term.current = null
     }

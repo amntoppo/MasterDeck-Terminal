@@ -28,6 +28,7 @@ import { Inspector, type InspectorTab } from './components/Inspector'
 import { SettingsView, type SettingsSection } from './components/SettingsView'
 import { WorktreesDialog } from './components/WorktreesDialog'
 import { HistoryDialog } from './components/HistoryDialog'
+import { FindBar, type FindTarget } from './components/FindBar'
 import { cycle, matchShortcut } from '@shared/shortcuts'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { deck, load, save, useAppState } from './deck'
@@ -112,6 +113,9 @@ export function App() {
   const [palette, setPalette] = useState(false)
   // History (⌘⇧F): a popup over any screen.
   const [historyOpen, setHistoryOpen] = useState(false)
+  // ⌘F: find on the Terminals, Board or PRs screen; `at` reopens it (and refocuses) on each press.
+  const [findAt, setFindAt] = useState<number | null>(null)
+  useEffect(() => setFindAt(null), [view])
   const [worktreesFor, setWorktreesFor] = useState<Session | null>(null)
   const [settingsAt, setSettingsAt] = useState<{ section: SettingsSection; at: number } | null>(null)
   const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'shortcuts' | 'setup' | 'skills' | 'skills-first' | null>(null)
@@ -413,6 +417,12 @@ export function App() {
       case 'history':
         setHistoryOpen((o) => !o)
         return done()
+      case 'find':
+        if (view === 'terminals' || view === 'board' || view === 'prs') {
+          setFindAt(Date.now())
+          return done()
+        }
+        return
       case 'shortcuts':
         setSettingsAt({ section: 'keys', at: Date.now() })
         setView('settings')
@@ -523,6 +533,16 @@ export function App() {
   const useMaster = state.config.masterEnabled
   const panelShown = view === 'terminals' && inspOpen
   const masterShown = useMaster && masterOpen
+  // What ⌘F searches: the open terminal, or the Board / PRs screen's text.
+  const findKey = view === 'terminals' ? (activeTab ? paneIdFor(activeTab) : '') : view
+  const findTarget: FindTarget | null =
+    view === 'terminals'
+      ? activeTab && activeTab.kind !== 'pending'
+        ? { kind: 'terminal', paneId: paneIdFor(activeTab) }
+        : null
+      : view === 'board' || view === 'prs'
+        ? { kind: 'dom', root: () => document.querySelector<HTMLElement>('.board-view') }
+        : null
   // rail · sessions · terminal · [panel] · [master]: the other screens cover all but the rail and master.
   const columns = ['var(--rail-w)', `${sideW}px`, 'minmax(0, 1fr)', ...(panelShown ? ['6px', `max(${MIN_PANEL}px, ${inspPct}%)`] : []), ...(masterShown ? ['6px', `max(${MIN_MASTER}px, ${masterPct}%)`] : [])].join(' ')
   const masterAttached = useMaster && state.master.kind === 'attached'
@@ -763,6 +783,11 @@ export function App() {
       )}
       {dialog === 'standup' && <StandupDialog state={state} onClose={() => setDialog(null)} />}
       {dialog === 'sprint-summary' && <SprintSummaryDialog state={state} onClose={() => setDialog(null)} />}
+      {findAt !== null && findTarget && (
+        <div className="find-slot" style={{ right: `calc(var(--right-w, 0px) + ${panelShown ? `max(${MIN_PANEL}px, ${inspPct}%) + 6px` : '0px'} + 14px)` }}>
+          <FindBar key={`${view}:${findKey}:${findAt}`} target={findTarget} onClose={() => setFindAt(null)} />
+        </div>
+      )}
       {historyOpen && <HistoryDialog state={state} onOpenSession={openSession} onClose={() => setHistoryOpen(false)} />}
       {worktreesFor && (
         <WorktreesDialog
