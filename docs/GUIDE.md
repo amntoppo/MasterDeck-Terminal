@@ -109,6 +109,9 @@ checkout whose branch was once linked to a ticket does not link it.
     PR merged, **before / after a command** matching a pattern you type (a regular expression, e.g.
     `npm (run )?test`), **turn finished** (the session does these before it stops, once per turn),
     **needs you** and **idle for N minutes** (MasterDeck acts on these itself).
+  - **Skills:** every skill `/skills` lists, grouped and expandable: yours (`~/.claude/skills`),
+    synced, each enabled plugin's (named `plugin:skill`), and each workspace repo's `.claude/skills`
+    (those work only in sessions in that repo). Searching opens the groups with a match.
   - **Actions:** a skill (in a background subagent or in the session, with extra instructions), an
     instruction (text the session is told as it is), or **Notify me** (a desktop notification, after
     Needs you or Idle; after Idle, instructions are sent to the session as a message).

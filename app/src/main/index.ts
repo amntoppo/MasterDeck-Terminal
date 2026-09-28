@@ -1061,7 +1061,10 @@ function registerIpc(): void {
       paths.masterWorkspace,
       ...ops.repos(),
     ]),
-    skills: listSkills(paths.skillsDir),
+    skills: listSkills(paths.skillsDir, dirname(paths.claudeSettings), [
+      paths.masterWorkspace,
+      ...ops.repos(),
+    ]),
     flow: workflows().template(DEFAULT_TEMPLATE)?.flow ?? null,
     templates: workflows().templates(),
   }));

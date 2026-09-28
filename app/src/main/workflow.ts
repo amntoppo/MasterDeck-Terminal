@@ -132,31 +132,114 @@ export function collectHooks(claudeDir: string, repos: string[]): HookEntry[] {
 }
 
 export interface SkillChoice {
+  /** As Claude Code names it: `name`, or `plugin:name` for a plugin's skill. */
   name: string;
   description: string;
+  /** Where it comes from: "yours", "synced", "plugin <name>" or "project <repo>". */
+  source: string;
 }
 
-/** Skills in ~/.claude/skills that can be attached to a stage: every folder with a SKILL.md. */
-export function listSkills(skillsDir: string): SkillChoice[] {
-  let dirs: string[] = [];
-  try {
-    dirs = readdirSync(skillsDir).filter((d) => !d.startsWith("."));
-  } catch {
-    return [];
+/** The skill folders under `dir`: each folder with a SKILL.md, `depth` levels down at most. */
+function skillFiles(dir: string, depth: number): string[] {
+  const out: string[] = [];
+  const walk = (d: string, left: number) => {
+    let names: string[] = [];
+    try {
+      names = readdirSync(d).filter(
+        (n) => !n.startsWith(".") && n !== "node_modules",
+      );
+    } catch {
+      return;
+    }
+    for (const n of names.sort()) {
+      const sub = join(d, n);
+      const f = join(sub, "SKILL.md");
+      if (existsSync(f)) out.push(f);
+      else if (left > 1) walk(sub, left - 1);
+    }
+  };
+  walk(dir, depth);
+  return out;
+}
+
+function readSkill(file: string, prefix: string, source: string): SkillChoice {
+  const text = readFileSync(file, "utf8").slice(0, 4000);
+  const dir = basename(join(file, ".."));
+  const name =
+    /^name:\s*(.+)$/m
+      .exec(text)?.[1]
+      ?.trim()
+      .replace(/^["']|["']$/g, "") || dir;
+  const description =
+    /^description:\s*(.+)$/m
+      .exec(text)?.[1]
+      ?.trim()
+      .replace(/^["']|["']$/g, "") ?? "";
+  return {
+    name: `${prefix}${name}`,
+    description: description.slice(0, 240),
+    source,
+  };
+}
+
+/** Enabled plugins and where they are installed. */
+function enabledPlugins(claudeDir: string): { name: string; path: string }[] {
+  const settings = readJson(join(claudeDir, "settings.json"));
+  const enabled = Object.entries(
+    (settings?.enabledPlugins as Record<string, unknown>) ?? {},
+  )
+    .filter(([, v]) => v === true)
+    .map(([k]) => k);
+  const installed = (readJson(
+    join(claudeDir, "plugins", "installed_plugins.json"),
+  )?.plugins ?? {}) as Record<string, unknown>;
+  const out: { name: string; path: string }[] = [];
+  for (const id of enabled) {
+    const rec = installed[id];
+    const path = (Array.isArray(rec) ? rec[0] : rec) as
+      { installPath?: string } | undefined;
+    if (path?.installPath)
+      out.push({ name: id.split("@")[0], path: path.installPath });
   }
+  return out;
+}
+
+/**
+ * Every skill Claude Code offers, as /skills lists them: yours in ~/.claude/skills (and the synced
+ * ones under it), your enabled plugins' (named `plugin:skill`), and the workspace repos'
+ * `.claude/skills` (those run only in sessions in that repo). The first of a name wins.
+ */
+export function listSkills(
+  skillsDir: string,
+  claudeDir?: string,
+  repos: string[] = [],
+): SkillChoice[] {
   const out: SkillChoice[] = [];
-  for (const d of dirs.sort()) {
-    const f = join(skillsDir, d, "SKILL.md");
-    if (!existsSync(f)) continue;
-    const text = readFileSync(f, "utf8").slice(0, 4000);
-    const name = /^name:\s*(.+)$/m.exec(text)?.[1]?.trim() || d;
-    const description =
-      /^description:\s*(.+)$/m
-        .exec(text)?.[1]
-        ?.trim()
-        .replace(/^["']|["']$/g, "") ?? "";
-    out.push({ name, description: description.slice(0, 240) });
-  }
+  const seen = new Set<string>();
+  const push = (s: SkillChoice) => {
+    if (seen.has(s.name)) return;
+    seen.add(s.name);
+    out.push(s);
+  };
+  for (const f of skillFiles(skillsDir, 3))
+    push(
+      readSkill(
+        f,
+        "",
+        f.startsWith(join(skillsDir, "synced")) ? "synced" : "yours",
+      ),
+    );
+  if (claudeDir)
+    for (const p of enabledPlugins(claudeDir)) {
+      const dir = existsSync(join(p.path, "skills"))
+        ? join(p.path, "skills")
+        : p.path;
+      for (const f of skillFiles(dir, 3))
+        push(readSkill(f, `${p.name}:`, `plugin ${p.name}`));
+    }
+  for (const repo of [...new Set(repos.map((r) => resolve(r)))])
+    for (const f of skillFiles(join(repo, ".claude", "skills"), 2))
+      push(readSkill(f, "", `project ${basename(repo)}`));
   return out;
 }
 

@@ -47,7 +47,37 @@ import {
   type Problem,
 } from "@shared/flow";
 
-export type Skill = { name: string; description: string };
+export type Skill = { name: string; description: string; source?: string };
+
+/** Skills by where they come from: yours, synced, then each plugin and each project. */
+export function skillGroups(
+  skills: Skill[],
+): { key: string; label: string; skills: Skill[] }[] {
+  const order = (k: string) =>
+    k === "yours" ? 0 : k === "synced" ? 1 : k.startsWith("plugin ") ? 2 : 3;
+  const by = new Map<string, Skill[]>();
+  for (const s of skills) {
+    const k = s.source ?? "yours";
+    by.set(k, [...(by.get(k) ?? []), s]);
+  }
+  const label = (k: string) =>
+    k === "yours"
+      ? "Your skills"
+      : k === "synced"
+        ? "Synced"
+        : k.startsWith("plugin ")
+          ? `Plugin · ${k.slice(7)}`
+          : `Project · ${k.slice(8)}`;
+  return [...by]
+    .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
+    .map(([key, list]) => ({ key, label: label(key), skills: list }));
+}
+
+/** A plugin skill's name without its plugin (the group says which). */
+const shortSkill = (s: Skill): string =>
+  s.source?.startsWith("plugin ")
+    ? s.name.slice(s.name.indexOf(":") + 1)
+    : s.name;
 
 /** What a palette item drops on the canvas. */
 type Drop =
@@ -659,6 +689,7 @@ function Palette({
     </button>
   );
   const needle = q.trim().toLowerCase();
+  const [open, setOpen] = useState<Set<string>>(() => new Set(["yours"]));
   const shown = skills.filter(
     (s) =>
       !needle ||
@@ -708,14 +739,42 @@ function Palette({
         aria-label="Search skills"
       />
       <div className="fp-skills">
-        {shown.map((s) =>
-          item(
-            { kind: "skill", skill: s.name },
-            s.name,
-            "fp-skill",
-            s.description,
-          ),
-        )}
+        {skillGroups(shown).map((g) => {
+          // Searching opens every group with a match.
+          const on = !!needle || open.has(g.key);
+          return (
+            <div key={g.key} className="fp-group">
+              <button
+                className={`fp-ghead ${on ? "on" : ""}`}
+                aria-expanded={on}
+                onClick={() =>
+                  setOpen((o) => {
+                    const n = new Set(o);
+                    if (n.has(g.key)) n.delete(g.key);
+                    else n.add(g.key);
+                    return n;
+                  })
+                }
+              >
+                <span className="fp-caret">{on ? "▾" : "▸"}</span>
+                <span className="fp-glabel">{g.label}</span>
+                <span className="fp-gcount">{g.skills.length}</span>
+              </button>
+              {on && (
+                <div className="fp-gbody">
+                  {g.skills.map((s) =>
+                    item(
+                      { kind: "skill", skill: s.name },
+                      shortSkill(s),
+                      "fp-skill",
+                      `${s.name}${s.description ? `: ${s.description}` : ""}`,
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {!shown.length && <div className="fp-empty">No skill matches.</div>}
       </div>
     </aside>
@@ -819,10 +878,14 @@ function NodeForm({
             {n.skill && !skills.some((s) => s.name === n.skill) && (
               <option value={n.skill}>{n.skill} (not installed)</option>
             )}
-            {skills.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
+            {skillGroups(skills).map((g) => (
+              <optgroup key={g.key} label={g.label}>
+                {g.skills.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
           {skills.find((s) => s.name === n.skill)?.description && (
