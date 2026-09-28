@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
 import { CH, type AssignRequest, type QueueEdit, type SetupTool } from '@shared/ipc'
 import { diffEvents, newlyNeedsInput } from '@shared/notify'
@@ -13,6 +14,7 @@ import { getConfig } from '@shared/appConfig'
 import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
 import { startAssign } from './assign'
 import { toDefaultBranch } from './defaultBranch'
+import { transcriptMessages, transcriptWindow, type TranscriptMessage } from '@shared/history'
 import { openInEditor } from './editor'
 import { configuredModel } from './models'
 import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
@@ -333,6 +335,20 @@ async function startHere(o: { sessionId: string; name: string; cwd: string; pid:
   return r.code === 0 ? { ok: true, message: r.stdout.trim().split('\n')[0] ?? 'started' } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
 }
 
+/** Transcripts read for the History reader, by path and mtime; the last few are kept. */
+const transcriptCache = new Map<string, { mtime: number; messages: TranscriptMessage[] }>()
+async function readTranscript(path: string): Promise<TranscriptMessage[]> {
+  const st = statSync(path)
+  const hit = transcriptCache.get(path)
+  if (hit && hit.mtime === st.mtimeMs) return hit.messages
+  const text = await readFile(path, 'utf8')
+  const messages = transcriptMessages(text.split('\n'))
+  transcriptCache.delete(path)
+  transcriptCache.set(path, { mtime: st.mtimeMs, messages })
+  while (transcriptCache.size > 3) transcriptCache.delete(transcriptCache.keys().next().value!)
+  return messages
+}
+
 async function openEditor(dir: string): Promise<CliResult> {
   return openInEditor(run, dir, join(paths.home, 'editor-probe'), (p) => shell.openPath(p))
 }
@@ -421,6 +437,18 @@ function registerIpc(): void {
   ipcMain.handle(CH.removeWorktree, (_e, repo: string, path: string, force: boolean) => ops.removeWorktree(repo, path, force, liveDirs()))
   ipcMain.handle(CH.removeSession, (_e, bgId: string) => ops.removeSession(bgId))
   ipcMain.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q))
+  ipcMain.handle(CH.historyTranscript, async (_e, p: unknown, query: unknown, focus: unknown) => {
+    // A session transcript under ~/.claude/projects only; the renderer names it from a search hit.
+    if (typeof p !== 'string' || !p.endsWith('.jsonl')) return null
+    const full = resolve(p)
+    if (!full.startsWith(resolve(paths.projectsDir) + sep)) return null
+    try {
+      const all = await readTranscript(full)
+      return transcriptWindow(all, typeof query === 'string' ? query : '', typeof focus === 'string' ? focus : null)
+    } catch {
+      return null
+    }
+  })
   ipcMain.handle(CH.templates, () => ops.templates())
   ipcMain.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) => ops.saveTemplate(t))
   ipcMain.handle(CH.deleteTemplate, (_e, name: string) => ops.deleteTemplate(name))

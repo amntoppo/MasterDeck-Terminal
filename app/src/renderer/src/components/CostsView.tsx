@@ -3,7 +3,7 @@ import { parseTicket, ticketKey, ticketLabel } from '@shared/ticket'
 import { dailySpend, dayOf, sessionSpendBetween, sessionTotal, sumBetween, ticketSpend } from '@shared/costs'
 import { formatCost } from '@shared/format'
 import { formatTokens, mergeByDay, tokenSum, tokensBetween, tokenTitle, type TokensByDay } from '@shared/tokens'
-import { deck } from '../deck'
+import { deck, load, save } from '../deck'
 import type { AppState, Session } from '@shared/types'
 
 interface Props {
@@ -12,9 +12,17 @@ interface Props {
 }
 
 type Range = 'today' | 'week' | '30d' | 'all'
+/** What the screen counts: dollars (the status line) or tokens (the transcripts). */
+type Unit = 'usd' | 'tokens'
 
 export function CostsView({ state, onOpenSession }: Props) {
   const [range, setRange] = useState<Range>('week')
+  const [unit, setUnitState] = useState<Unit>(() => load<Unit>('costsUnit', 'usd'))
+  const setUnit = (u: Unit) => {
+    setUnitState(u)
+    save('costsUnit', u)
+  }
+  const inTokens = unit === 'tokens'
   // Tokens per session and day, from the transcripts; the first load reads their history once.
   const [tokens, setTokens] = useState<Record<string, TokensByDay> | null>(null)
   const now = Date.now()
@@ -37,15 +45,20 @@ export function CostsView({ state, onOpenSession }: Props) {
   const rangeTok = (byDay: TokensByDay | undefined) => (range === 'all' ? tok(byDay, '0000-00-00', '9999-99-99') : tok(byDay, from, today))
   const daily = useMemo(() => dailySpend(book), [book])
   const days14 = Array.from({ length: 14 }, (_, i) => dayOf(now - (13 - i) * 86_400_000))
-  const max14 = Math.max(0.01, ...days14.map((d) => daily[d] ?? 0))
+  // The chart's value per day, in the chosen unit.
+  const dayValue = (d: string) => (inTokens ? tokenSum(tokensBetween(allTokens, d, d)) : (daily[d] ?? 0))
+  const max14 = Math.max(inTokens ? 1 : 0.01, ...days14.map(dayValue))
+  const fmt = (v: number) => (inTokens ? formatTokens(v) : formatCost(v))
 
+  const tokensIn = (byDay: TokensByDay | undefined) => tokenSum(range === 'all' ? tokensBetween(byDay, '0000-00-00', '9999-99-99') : tokensBetween(byDay, from, today))
   const sessions = useMemo(
     () =>
       Object.entries(book)
-        .map(([id, rec]) => ({ id, rec, spend: range === 'all' ? sessionTotal(rec) : sessionSpendBetween(rec, from, today) }))
-        .filter((x) => x.spend > 0.005)
-        .sort((a, b) => b.spend - a.spend),
-    [book, range, from, today],
+        .map(([id, rec]) => ({ id, rec, spend: range === 'all' ? sessionTotal(rec) : sessionSpendBetween(rec, from, today), toks: tokensIn(tokens?.[id]) }))
+        .filter((x) => (inTokens ? x.toks > 0 : x.spend > 0.005))
+        .sort((a, b) => (inTokens ? b.toks - a.toks : b.spend - a.spend)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [book, range, from, today, tokens, inTokens],
   )
   const tickets = useMemo(() => {
     // By ticketKey: two repos can each have a #12.
@@ -86,6 +99,14 @@ export function CostsView({ state, onOpenSession }: Props) {
           from the status line hook, tokens from the transcripts{tokens ? '' : ' (counting…)'} · {Object.keys(book).length} sessions recorded · spend a session had before MasterDeck first saw it counts in All time and per ticket, not per day
         </span>
         <span style={{ flex: 1 }} />
+        <div className="seg unit-seg" role="group" aria-label="Count in">
+          <button className={unit === 'usd' ? 'on' : ''} aria-pressed={unit === 'usd'} onClick={() => setUnit('usd')} title="Dollars, from the status line">
+            USD
+          </button>
+          <button className={unit === 'tokens' ? 'on' : ''} aria-pressed={unit === 'tokens'} onClick={() => setUnit('tokens')} title="Tokens (input, output, cache), from the transcripts">
+            Tokens
+          </button>
+        </div>
         <div className="seg">
           {(['today', 'week', '30d', 'all'] as Range[]).map((r) => (
             <button key={r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>
@@ -96,18 +117,26 @@ export function CostsView({ state, onOpenSession }: Props) {
       </header>
       <div className="panel-body">
         <div className="kpis">
-          <Kpi label="Today" value={formatCost(sumBetween(daily, today, today))} sub={`${tok(allTokens, today, today)} tokens`} />
-          <Kpi label="Last 7 days" value={formatCost(sumBetween(daily, dayOf(now - 6 * 86_400_000), today))} sub={`${tok(allTokens, dayOf(now - 6 * 86_400_000), today)} tokens`} />
-          <Kpi label="Last 30 days" value={formatCost(sumBetween(daily, dayOf(now - 29 * 86_400_000), today))} sub={`${tok(allTokens, dayOf(now - 29 * 86_400_000), today)} tokens`} />
+          {(
+            [
+              ['Today', today],
+              ['Last 7 days', dayOf(now - 6 * 86_400_000)],
+              ['Last 30 days', dayOf(now - 29 * 86_400_000)],
+            ] as [string, string][]
+          ).map(([label, start]) => {
+            const usd = formatCost(sumBetween(daily, start, today))
+            const toks = tok(allTokens, start, today)
+            return <Kpi key={label} label={label} value={inTokens ? toks : usd} sub={inTokens ? usd : `${toks} tokens`} />
+          })}
           <Kpi label="Sessions without cost data" value={String(untracked)} hint="no status line file yet" />
         </div>
         <h3 className="sec">Last 14 days</h3>
-        <div className="bars" role="img" aria-label="Spend per day, last 14 days">
+        <div className="bars" role="img" aria-label={`${inTokens ? 'Tokens' : 'Spend'} per day, last 14 days`}>
           {days14.map((d) => {
-            const v = daily[d] ?? 0
+            const v = dayValue(d)
             return (
-              <div key={d} className="bar-col" title={`${d}: ${formatCost(v)}${tokens ? `\n${tokenTitle(tokensBetween(allTokens, d, d))}` : ''}`}>
-                <span className="bar-val">{v > 0 ? formatCost(v) : ''}</span>
+              <div key={d} className="bar-col" title={`${d}: ${formatCost(daily[d] ?? 0)}${tokens ? `\n${tokenTitle(tokensBetween(allTokens, d, d))}` : ''}`}>
+                <span className="bar-val">{v > 0 ? fmt(v) : ''}</span>
                 <span className={`bar-fill ${d === today ? 'today' : ''}`} style={{ height: `${Math.max(2, (v / max14) * 100)}%` }} />
                 <span className="bar-day">{d.slice(8)}</span>
               </div>
@@ -121,8 +150,8 @@ export function CostsView({ state, onOpenSession }: Props) {
               <thead>
                 <tr>
                   <th>Ticket</th>
-                  <th className="r">In range</th>
-                  <th className="r">Tokens</th>
+                  <th className="r">{inTokens ? 'Tokens' : 'In range'}</th>
+                  <th className="r">{inTokens ? 'Spend' : 'Tokens'}</th>
                   <th className="r">All time</th>
                 </tr>
               </thead>
@@ -130,19 +159,19 @@ export function CostsView({ state, onOpenSession }: Props) {
                 {tickets.length === 0 && (
                   <tr>
                     <td colSpan={4} className="muted">
-                      No ticket spend in this range.
+                      {inTokens ? 'No ticket tokens in this range.' : 'No ticket spend in this range.'}
                     </td>
                   </tr>
                 )}
-                {tickets.map(([n, v]) => (
+                {(inTokens ? [...tickets].sort((a, b) => tokensIn(ticketTokens.get(b[0])) - tokensIn(ticketTokens.get(a[0]))) : tickets).map(([n, v]) => (
                   <tr key={n} className={cap > 0 && (allTime[n] ?? 0) > cap ? 'over' : ''}>
                     <td>
                       {labelOf(n)} <span className="muted">{titles.get(n) ?? ''}</span>
                     </td>
-                    <td className="r">{formatCost(v)}</td>
-                    <td className="r muted">{rangeTok(ticketTokens.get(n))}</td>
+                    <td className="r">{inTokens ? rangeTok(ticketTokens.get(n)) : formatCost(v)}</td>
+                    <td className="r muted">{inTokens ? formatCost(v) : rangeTok(ticketTokens.get(n))}</td>
                     <td className="r">
-                      {formatCost(allTime[n] ?? v)}
+                      {inTokens ? tok(ticketTokens.get(n), '0000-00-00', '9999-99-99') : formatCost(allTime[n] ?? v)}
                       {cap > 0 && (allTime[n] ?? 0) > cap ? ' ⚠' : ''}
                     </td>
                   </tr>
@@ -157,15 +186,15 @@ export function CostsView({ state, onOpenSession }: Props) {
                 <tr>
                   <th>Session</th>
                   <th>Ticket</th>
-                  <th className="r">Spend</th>
-                  <th className="r">Tokens</th>
+                  <th className="r">{inTokens ? 'Tokens' : 'Spend'}</th>
+                  <th className="r">{inTokens ? 'Spend' : 'Tokens'}</th>
                 </tr>
               </thead>
               <tbody>
                 {sessions.length === 0 && (
                   <tr>
                     <td colSpan={4} className="muted">
-                      No spend in this range.
+                      {inTokens ? 'No tokens in this range.' : 'No spend in this range.'}
                     </td>
                   </tr>
                 )}
@@ -177,10 +206,21 @@ export function CostsView({ state, onOpenSession }: Props) {
                         {live && <span className={`dot ${live.state}`} />} {rec.name}
                       </td>
                       <td>{rec.issue !== null ? ticketLabel(rec.issueRepo, rec.issue) : '—'}</td>
-                      <td className="r">{formatCost(spend)}</td>
-                      <td className="r muted" title={tokens?.[id] ? tokenTitle(range === 'all' ? tokensBetween(tokens[id], '0000-00-00', '9999-99-99') : tokensBetween(tokens[id], from, today)) : undefined}>
-                        {rangeTok(tokens?.[id])}
-                      </td>
+                      {inTokens ? (
+                        <>
+                          <td className="r" title={tokens?.[id] ? tokenTitle(range === 'all' ? tokensBetween(tokens[id], '0000-00-00', '9999-99-99') : tokensBetween(tokens[id], from, today)) : undefined}>
+                            {rangeTok(tokens?.[id])}
+                          </td>
+                          <td className="r muted">{formatCost(spend)}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="r">{formatCost(spend)}</td>
+                          <td className="r muted" title={tokens?.[id] ? tokenTitle(range === 'all' ? tokensBetween(tokens[id], '0000-00-00', '9999-99-99') : tokensBetween(tokens[id], from, today)) : undefined}>
+                            {rangeTok(tokens?.[id])}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   )
                 })}

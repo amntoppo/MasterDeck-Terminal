@@ -45,7 +45,6 @@ const VIEWS: [View, string, string][] = [
 ]
 const TOOLS: [View, string][] = [
   ['costs', 'Costs'],
-  ['history', 'History'],
   ['janitor', 'Janitor'],
   ['workflow', 'Workflow'],
 ]

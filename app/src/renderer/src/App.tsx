@@ -8,7 +8,7 @@ import { AssignPopup } from './components/AssignPopup'
 import { BroadcastDialog } from './components/BroadcastDialog'
 import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { CostsView } from './components/CostsView'
-import { HistoryView, JanitorView } from './components/HygieneViews'
+import { JanitorView } from './components/HygieneViews'
 import { PrsView } from './components/PrsView'
 import { SetupDialog } from './components/SetupDialog'
 import { SprintSummaryDialog, StandupDialog } from './components/SummaryDialogs'
@@ -27,6 +27,7 @@ import { Rail } from './components/Rail'
 import { Inspector, type InspectorTab } from './components/Inspector'
 import { SettingsView, type SettingsSection } from './components/SettingsView'
 import { WorktreesDialog } from './components/WorktreesDialog'
+import { HistoryDialog } from './components/HistoryDialog'
 import { cycle, matchShortcut } from '@shared/shortcuts'
 import { TerminalView, typeInto } from './components/TerminalView'
 import { deck, load, save, useAppState } from './deck'
@@ -106,9 +107,11 @@ export function App() {
   const [masterOpen, setMasterOpen] = useState(() => load<boolean>('masterOpen', true))
   const [view, setView] = useState<View>(() => {
     const v = load<string>('view', 'terminals')
-    return (['terminals', 'board', 'prs', 'tasks', 'costs', 'janitor', 'history', 'workflow', 'settings'] as View[]).includes(v as View) ? (v as View) : 'terminals'
+    return (['terminals', 'board', 'prs', 'tasks', 'costs', 'janitor', 'workflow', 'settings'] as View[]).includes(v as View) ? (v as View) : 'terminals'
   })
   const [palette, setPalette] = useState(false)
+  // History (⌘⇧F): a popup over any screen.
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [worktreesFor, setWorktreesFor] = useState<Session | null>(null)
   const [settingsAt, setSettingsAt] = useState<{ section: SettingsSection; at: number } | null>(null)
   const [dialog, setDialog] = useState<'broadcast' | 'standup' | 'sprint-summary' | 'settings' | 'shortcuts' | 'setup' | 'skills' | 'skills-first' | null>(null)
@@ -407,6 +410,9 @@ export function App() {
         setSettingsAt({ section: 'general', at: Date.now() })
         setView('settings')
         return done()
+      case 'history':
+        setHistoryOpen((o) => !o)
+        return done()
       case 'shortcuts':
         setSettingsAt({ section: 'keys', at: Date.now() })
         setView('settings')
@@ -478,6 +484,7 @@ export function App() {
   const runAction = (a: PaletteAction | 'palette') => {
     if (a === 'palette') setPalette(true)
     else if (a === 'refresh') void deck().refresh()
+    else if (a === 'view:history') setHistoryOpen(true)
     else if (a.startsWith('view:')) setView(a.slice(5) as View)
     else if (a === 'new-shell') openShell()
     else if (a === 'start-master') void deck().masterStart()
@@ -618,7 +625,6 @@ export function App() {
       {view === 'costs' && <CostsView state={state} onOpenSession={openSession} />}
       {view === 'janitor' && <JanitorView state={state} />}
       {view === 'workflow' && <WorkflowView state={state} />}
-      {view === 'history' && <HistoryView state={state} onOpenSession={openSession} />}
       {view === 'settings' && <SettingsView settings={state.settings} state={state} onSetup={() => setDialog('setup')} onSkills={() => setDialog('skills')} initial={settingsAt} />}
 
       <main className="workspace">
@@ -757,6 +763,7 @@ export function App() {
       )}
       {dialog === 'standup' && <StandupDialog state={state} onClose={() => setDialog(null)} />}
       {dialog === 'sprint-summary' && <SprintSummaryDialog state={state} onClose={() => setDialog(null)} />}
+      {historyOpen && <HistoryDialog state={state} onOpenSession={openSession} onClose={() => setHistoryOpen(false)} />}
       {worktreesFor && (
         <WorktreesDialog
           session={worktreesFor}

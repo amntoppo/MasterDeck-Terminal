@@ -41,6 +41,7 @@ const api: DeckApi = {
   removeWorktree: (repo, path, force) => ipcRenderer.invoke(CH.removeWorktree, repo, path, force),
   removeSession: (bgId) => ipcRenderer.invoke(CH.removeSession, bgId),
   searchHistory: (q) => ipcRenderer.invoke(CH.searchHistory, q),
+  historyTranscript: (path, query, focus) => ipcRenderer.invoke(CH.historyTranscript, path, query, focus),
   templates: () => ipcRenderer.invoke(CH.templates),
   saveTemplate: (t) => ipcRenderer.invoke(CH.saveTemplate, t),
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),

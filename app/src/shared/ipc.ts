@@ -2,7 +2,7 @@ import type { Ticket } from './ticket'
 import type { MenuAnswer } from './ask'
 import type { PrSummary } from './prSummary'
 import type { Settings } from './settings'
-import type { HistoryHit } from './history'
+import type { HistoryHit, TranscriptWindow } from './history'
 import type { StandupCommit } from './standup'
 import type { WorktreeClass, WorktreeInfo } from './janitor'
 import type { TokensByDay } from './tokens'
@@ -103,6 +103,7 @@ export const CH = {
   removeWorktree: 'janitor:removeWorktree',
   removeSession: 'janitor:removeSession',
   searchHistory: 'history:search',
+  historyTranscript: 'history:transcript',
   templates: 'templates:list',
   saveTemplate: 'templates:save',
   deleteTemplate: 'templates:delete',
@@ -187,6 +188,8 @@ export interface DeckApi {
   removeWorktree(repo: string, path: string, force: boolean): Promise<CliResult>
   removeSession(bgId: string): Promise<CliResult>
   searchHistory(query: string): Promise<HistoryHit[]>
+  /** A found session's conversation, for the History reader (only transcripts under ~/.claude/projects). */
+  historyTranscript(path: string, query: string, focus: string | null): Promise<TranscriptWindow | null>
   templates(): Promise<Template[]>
   saveTemplate(t: Template): Promise<Template[]>
   deleteTemplate(name: string): Promise<Template[]>

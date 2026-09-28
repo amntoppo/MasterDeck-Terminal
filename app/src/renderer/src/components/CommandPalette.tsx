@@ -47,7 +47,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['view:tasks', 'Go to Tasks', 'every session: its step, what it is doing, its PRs'],
   ['view:costs', 'Go to Costs', 'spend per day, ticket, session'],
   ['view:janitor', 'Go to Janitor', 'worktrees and parked sessions'],
-  ['view:history', 'Search session history', 'full-text over transcripts'],
+  ['view:history', 'History: search every session', 'full-text over transcripts · ⌘⇧F'],
   ['view:workflow', 'Go to Workflow', 'issue to merged PR, hooks, your own steps'],
   ['broadcast', 'Broadcast a message…', 'to several sessions'],
   ['standup', 'Standup…', "yesterday's commits, PRs and reports"],

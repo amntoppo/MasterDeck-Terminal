@@ -2,8 +2,8 @@
 
 One window for all your Claude Code sessions, laid out as a command center:
 
-- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, History, Janitor
-  and Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
+- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, Janitor and
+  Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
   on Terminals counts what needs you; one on PRs counts PRs waiting on you.
 - **Terminals:**
   - **Sessions column:** what needs you, then every session grouped by what it needs (Needs you,
@@ -268,9 +268,11 @@ creation.
 - **Costs view ($):** spend today, 7 and 30 days, a 14-day bar chart, and tables per ticket and per
   session. The data is the status line's cumulative cost, recorded per session per day in
   `~/.claude/masterdeck/costs.json`. Spend a session had before MasterDeck first saw it counts as a
-  baseline: it's in All time and ticket totals, but not in any day.
+  baseline: it's in All time and ticket totals, but not in any day. **USD / Tokens** (top right)
+  switches the whole view to tokens: the figures, the chart and both tables (sorted by tokens), with
+  dollars as the second figure. The choice is remembered.
 - **Context warnings:** at the warning level (85% by default), a notification (once), a Needs-you card
-  and a **Compact now** chip in the tab header, which types `/compact`.
+  and **Compact now** in the Details tab, which types `/compact`.
 - **Budget per ticket:** past $X (Settings), a notification (once) and a Needs-you card. Board cards show
   each ticket's spend.
 
@@ -320,9 +322,12 @@ creation.
 - **Templates:** the Start dialog's Template… menu inserts a saved snippet ("TDD, small PR",
   "Investigate only", "Fix and open PR", "Pair with me", plus yours). **Save as template** stores the
   current text in `~/.claude/masterdeck/templates.json`.
-- **History (🔎):** a full-text, any-case search over every session transcript (about 8 s over 1.3 GB).
-  Results show the files touched and snippets, with Open for live sessions and **Resume here** for
-  ended ones.
+- **History (⌘⇧F, or History in ⌘K):** a popup over any screen. Type to search every session
+  transcript (exact text, any case). Results list the sessions, newest first, with snippets. Click a
+  snippet to open that conversation on the right, scrolled to the message it came from and outlined,
+  with the text highlighted. **↑ ↓** step through every match in the conversation. Long
+  conversations load a window around the match, with **show more** at either end. **Open session**
+  (live) or **Resume** (ended), and **Copy id**.
 
 ## Settings (⚙)
 
@@ -427,6 +432,7 @@ cards is in them.
 | `⌘⇧W` | Close the tab (the session keeps running) |
 | `⌘\` | Split two tabs side by side, or close the split |
 | `⌘K` | Command palette |
+| `⌘⇧F` | History: search every session, jump to the match |
 | `⌘J` | Open the first Needs-you item |
 | `⌘E` | The open session's worktrees (Open in editor) |
 | `⌘⇧M` | Show or hide master |

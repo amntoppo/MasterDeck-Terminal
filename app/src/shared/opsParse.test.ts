@@ -33,3 +33,25 @@ describe('summarizeTranscript', () => {
     expect(summarizeTranscript('s', '/p', lines, 'paywall.*dart', 1)).toBeNull()
   })
 })
+
+import { transcriptMessages } from './history'
+
+describe('transcriptMessages and snippet ids', () => {
+  const L = (o: object) => JSON.stringify(o)
+  const lines = [
+    L({ type: 'user', uuid: 'u1', timestamp: '2026-09-28T10:00:00Z', message: { role: 'user', content: 'Fix the Paywall sheet' } }),
+    L({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'Looking at paywall_sheet.dart now.' }, { type: 'tool_use', name: 'Read', input: { file_path: '/r/paywall_sheet.dart' } }] } }),
+    L({ type: 'user', uuid: 'r1', message: { role: 'user', content: [{ type: 'tool_result', content: 'class PaywallSheet {}' }] } }),
+    L({ type: 'assistant', uuid: 'side', isSidechain: true, message: { role: 'assistant', content: 'sub' } }),
+  ]
+  it('reads a conversation, one entry per uuid, without subagents', () => {
+    const m = transcriptMessages(lines)
+    expect(m.map((x) => [x.uuid, x.role])).toEqual([['u1', 'user'], ['a1', 'assistant'], ['r1', 'result']])
+    expect(m[1].text).toContain('⏺ Read {"file_path":"/r/paywall_sheet.dart"}')
+    expect(m[0].at).toBe(Date.parse('2026-09-28T10:00:00Z'))
+  })
+  it('gives each snippet the uuid it came from', () => {
+    const h = summarizeTranscript('s', '/p/s.jsonl', lines, 'paywall_sheet', 1)!
+    expect(h.snippetIds).toEqual(['a1'])
+  })
+})
