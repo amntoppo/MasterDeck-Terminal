@@ -223,6 +223,10 @@ see at a glance where the work stands:
   when you choose No. The answer goes through the hook, so it works for any session, including one
   in another terminal. The terminal shows the prompt too; answering there clears the card. Sessions
   started before the hook was installed fall back to reading the prompt off the screen.
+- **Questions from Needs you:** when Claude asks you questions (its AskUserQuestion tool), the
+  hook holds them too. The card (QUESTION) and the Tasks row show each question with its header and
+  its options with their descriptions: pick one, or several where it says *pick any*, or type your
+  own answer under it. **Submit** sends every answer at once, and Claude reads them as yours.
 - **The task's terminal:** click a task (not its buttons) to show its session's terminal under it,
   shorter than in Terminals; click again to hide it. It is the same terminal as the Terminals tab
   (same session, same output; typing goes to the session), not a new one. Claude's input box stays

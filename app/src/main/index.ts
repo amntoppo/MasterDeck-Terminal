@@ -1,107 +1,195 @@
-import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
-import { CH, type AssignRequest, type QueueEdit, type SetupTool } from '@shared/ipc'
-import { diffEvents, newlyNeedsInput } from '@shared/notify'
-import { inboxNotice, type InboxItem } from '@shared/inbox'
-import { isSafeBgId } from '@shared/paneCommand'
-import { isClaudeCommand, tasklistImage } from '@shared/procs'
-import { MASTER_NAME, sessionForProposal } from '@shared/derive'
-import type { AppState, CliResult, HookStatus, NotifyEvent, PaneSpec, Session, SetupCheck } from '@shared/types'
-import { getConfig } from '@shared/appConfig'
-import { parseGhAccounts, type GhAccount } from '@shared/ghAuth'
-import { startAssign } from './assign'
-import { toDefaultBranch } from './defaultBranch'
-import { transcriptMessages, transcriptWindow, type TranscriptMessage } from '@shared/history'
-import { openInEditor } from './editor'
-import { configuredModel } from './models'
-import { editQueue, isQueueEdit, readQueue, shiftQueue, unshiftQueue } from './queue'
-import { makeGhRunner, readGhCacheStatus } from './ghc'
-import { GitHub } from './github'
-import { Sender } from './send'
-import { Ops } from './ops'
-import { cleanEnv, loginPath, resolveClaude } from './env'
-import { MasterCli } from './masterCli'
-import { resolvePaths } from './paths'
-import { PtyManager } from './ptys'
-import { makeRunner } from './run'
-import { Sources } from './sources'
-import { readRemoved, reinstallSkill, removeSkill, syncSkills, writeRemoved } from './skills'
-import { collectHooks, listSkills, readSteps, writeSteps } from './workflow'
-import { Summaries } from './summary'
-import { parseSteps } from '@shared/workflow'
-import { answerKeys, permissionKey, type MenuAnswer } from '@shared/ask'
-import { asTicket, fullRepo, ticketLabel, ticketRef } from '@shared/ticket'
-import { deckHooksInstalled, hookStatus, installDeckHooks, installHooks, installWorkflowSteps } from './hooks'
-import { DeckHooks } from './deckHooks'
-import { installStatusline, isInstalled, refreshTee, uninstallStatusline } from './statusline'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Notification,
+  shell,
+} from "electron";
+import {
+  CH,
+  type AssignRequest,
+  type QueueEdit,
+  type SetupTool,
+} from "@shared/ipc";
+import { diffEvents, newlyNeedsInput } from "@shared/notify";
+import { inboxNotice, type InboxItem } from "@shared/inbox";
+import { isSafeBgId } from "@shared/paneCommand";
+import { isClaudeCommand, tasklistImage } from "@shared/procs";
+import { MASTER_NAME, sessionForProposal } from "@shared/derive";
+import type {
+  AppState,
+  CliResult,
+  HookStatus,
+  NotifyEvent,
+  PaneSpec,
+  Session,
+  SetupCheck,
+} from "@shared/types";
+import { getConfig } from "@shared/appConfig";
+import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
+import { startAssign } from "./assign";
+import { toDefaultBranch } from "./defaultBranch";
+import {
+  transcriptMessages,
+  transcriptWindow,
+  type TranscriptMessage,
+} from "@shared/history";
+import { openInEditor } from "./editor";
+import { configuredModel } from "./models";
+import {
+  editQueue,
+  isQueueEdit,
+  readQueue,
+  shiftQueue,
+  unshiftQueue,
+} from "./queue";
+import { makeGhRunner, readGhCacheStatus } from "./ghc";
+import { GitHub } from "./github";
+import { Sender } from "./send";
+import { Ops } from "./ops";
+import { cleanEnv, loginPath, resolveClaude } from "./env";
+import { MasterCli } from "./masterCli";
+import { resolvePaths } from "./paths";
+import { PtyManager } from "./ptys";
+import { makeRunner } from "./run";
+import { Sources } from "./sources";
+import {
+  readRemoved,
+  reinstallSkill,
+  removeSkill,
+  syncSkills,
+  writeRemoved,
+} from "./skills";
+import { collectHooks, listSkills, readSteps, writeSteps } from "./workflow";
+import { Summaries } from "./summary";
+import { parseSteps } from "@shared/workflow";
+import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
+import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
+import {
+  deckHooksInstalled,
+  hookStatus,
+  installDeckHooks,
+  installHooks,
+  installWorkflowSteps,
+} from "./hooks";
+import { DeckHooks } from "./deckHooks";
+import {
+  installStatusline,
+  isInstalled,
+  refreshTee,
+  uninstallStatusline,
+} from "./statusline";
 
-const SMOKE = process.env.MASTERDECK_SMOKE === '1'
+const SMOKE = process.env.MASTERDECK_SMOKE === "1";
 // Dev aid: a separate profile so a test run never shares storage with the installed app.
-if (process.env.MASTERDECK_USER_DATA) app.setPath('userData', process.env.MASTERDECK_USER_DATA)
+if (process.env.MASTERDECK_USER_DATA)
+  app.setPath("userData", process.env.MASTERDECK_USER_DATA);
 
-let win: BrowserWindow | null = null
-let latest: AppState | null = null
-let focused: string | null = null
-let pathEnv = process.env.PATH ?? ''
-let claudeBin = 'claude'
+let win: BrowserWindow | null = null;
+let latest: AppState | null = null;
+let focused: string | null = null;
+let pathEnv = process.env.PATH ?? "";
+let claudeBin = "claude";
 
-const paths = resolvePaths(app.getAppPath(), process.resourcesPath, app.isPackaged)
-const env = () => cleanEnv(process.env, pathEnv)
-const run = makeRunner(env)
-const cli = new MasterCli(run, paths.libDir, paths.python)
-const ptys = new PtyManager(env, (channel, ...args) => win?.webContents.send(channel, ...args), () => claudeBin, () => join(paths.home, 'installer'))
+const paths = resolvePaths(
+  app.getAppPath(),
+  process.resourcesPath,
+  app.isPackaged,
+);
+const env = () => cleanEnv(process.env, pathEnv);
+const run = makeRunner(env);
+const cli = new MasterCli(run, paths.libDir, paths.python);
+const ptys = new PtyManager(
+  env,
+  (channel, ...args) => win?.webContents.send(channel, ...args),
+  () => claudeBin,
+  () => join(paths.home, "installer"),
+);
 
 function notify(events: NotifyEvent[]): void {
-  if (SMOKE || !Notification.isSupported()) return
+  if (SMOKE || !Notification.isSupported()) return;
   for (const e of events.slice(0, 4)) {
-    const n = new Notification({ title: e.title, body: e.body, silent: false })
-    n.on('click', () => reveal(e.target))
-    n.show()
+    const n = new Notification({ title: e.title, body: e.body, silent: false });
+    n.on("click", () => reveal(e.target));
+    n.show();
   }
 }
 
-const gh = makeGhRunner(run, paths.libDir, paths.python)
-const github = new GitHub(run, gh)
-const sender = new Sender(ptys, cli, env, () => claudeBin, (key) => latest?.sessions.find((x) => x.key === key))
-const ops = new Ops(run, paths, () => claudeBin, gh)
-const summaries = new Summaries(run, () => claudeBin, join(paths.home, 'summaries'), paths.projectsDir)
-const deckHooks = new DeckHooks(paths.home)
-const sources = new Sources(paths, run, cli, (state) => {
-  const prev = latest
-  latest = state
-  win?.webContents.send(CH.state, state)
-  notify(diffEvents(prev, state, focused))
-  // Dock badge: the Needs-you count.
-  if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length)
-  else if (prev?.settings.dockBadge) app.setBadgeCount(0)
-  // Auto-open: a session that just blocked on a prompt gets its tab (not focused) and a dock bounce.
-  const blocked = newlyNeedsInput(prev, state)
-  if (blocked.length && state.settings.autoOpenNeedsInput) {
-    for (const key of blocked) win?.webContents.send(CH.autoOpen, key)
-    if (process.platform === 'darwin' && !win?.isFocused()) app.dock?.bounce('informational')
-  }
-  if (SMOKE && sources.isHealthy('agents') && sources.isHealthy('ledger')) {
-    console.log(`SMOKE OK sessions=${state.sessions.length} issues=${state.issues.length} master=${state.master.kind}`)
-    app.exit(0)
-  }
-}, () => claudeBin, github, gh, () => readGhCacheStatus())
+const gh = makeGhRunner(run, paths.libDir, paths.python);
+const github = new GitHub(run, gh);
+const sender = new Sender(
+  ptys,
+  cli,
+  env,
+  () => claudeBin,
+  (key) => latest?.sessions.find((x) => x.key === key),
+);
+const ops = new Ops(run, paths, () => claudeBin, gh);
+const summaries = new Summaries(
+  run,
+  () => claudeBin,
+  join(paths.home, "summaries"),
+  paths.projectsDir,
+);
+const deckHooks = new DeckHooks(paths.home);
+const sources = new Sources(
+  paths,
+  run,
+  cli,
+  (state) => {
+    const prev = latest;
+    latest = state;
+    win?.webContents.send(CH.state, state);
+    notify(diffEvents(prev, state, focused));
+    // Dock badge: the Needs-you count.
+    if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length);
+    else if (prev?.settings.dockBadge) app.setBadgeCount(0);
+    // Auto-open: a session that just blocked on a prompt gets its tab (not focused) and a dock bounce.
+    const blocked = newlyNeedsInput(prev, state);
+    if (blocked.length && state.settings.autoOpenNeedsInput) {
+      for (const key of blocked) win?.webContents.send(CH.autoOpen, key);
+      if (process.platform === "darwin" && !win?.isFocused())
+        app.dock?.bounce("informational");
+    }
+    if (SMOKE && sources.isHealthy("agents") && sources.isHealthy("ledger")) {
+      console.log(
+        `SMOKE OK sessions=${state.sessions.length} issues=${state.issues.length} master=${state.master.kind}`,
+      );
+      app.exit(0);
+    }
+  },
+  () => claudeBin,
+  github,
+  gh,
+  () => readGhCacheStatus(),
+);
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
-function reveal(target: NotifyEvent['target']): void {
-  if (!win) return
-  if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
-  if (target.itemId) win.webContents.send(CH.showInboxItem, target.itemId)
-  else if (target.sessionKey) win.webContents.send(CH.focusSession, target.sessionKey)
-  else win.webContents.send(CH.showNeedsYou)
+function reveal(target: NotifyEvent["target"]): void {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  if (target.itemId) win.webContents.send(CH.showInboxItem, target.itemId);
+  else if (target.sessionKey)
+    win.webContents.send(CH.focusSession, target.sessionKey);
+  else win.webContents.send(CH.showNeedsYou);
 }
 
 /** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
-const shown = new Set<Notification>()
+const shown = new Set<Notification>();
 
 /**
  * A new Needs-you item's notification (Settings: "Notify me…"). Clicking it opens the item. On
@@ -109,75 +197,154 @@ const shown = new Set<Notification>()
  * field for a question; both go through the inbox like the cards do.
  */
 function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
-  if (SMOKE || !Notification.isSupported() || !latest?.settings.notifyNeedsYou) return
-  const n = inboxNotice(entry)
-  if (!n) return
-  const mac = process.platform === 'darwin'
+  if (SMOKE || !Notification.isSupported() || !latest?.settings.notifyNeedsYou)
+    return;
+  const n = inboxNotice(entry);
+  if (!n) return;
+  const mac = process.platform === "darwin";
   const note = new Notification({
     title: n.title,
     body: n.body,
     silent: false,
-    ...(mac && n.action ? { actions: [{ type: 'button' as const, text: n.action.label }] } : {}),
-    ...(mac && n.reply ? { hasReply: true, replyPlaceholder: 'Reply…' } : {}),
-  })
-  const id = entry.item.id
+    ...(mac && n.action
+      ? { actions: [{ type: "button" as const, text: n.action.label }] }
+      : {}),
+    ...(mac && n.reply ? { hasReply: true, replyPlaceholder: "Reply…" } : {}),
+  });
+  const id = entry.item.id;
   const done = (r: CliResult) => {
-    if (!r.ok) notify([{ title: 'Could not do that', body: r.message, target: n.target }])
-  }
-  note.on('click', () => reveal(n.target))
-  note.on('action', () => n.action && void sources.inbox.act(id, n.action.type, { by: 'notification' }, runInboxAction).then((r) => (sources.changed(), done(r))))
-  note.on('reply', (_e, text) => void sources.inbox.act(id, 'reply', { text, by: 'notification' }, runInboxAction).then((r) => (sources.changed(), done(r))))
-  note.on('close', () => shown.delete(note))
-  shown.add(note)
-  note.show()
+    if (!r.ok)
+      notify([
+        { title: "Could not do that", body: r.message, target: n.target },
+      ]);
+  };
+  note.on("click", () => reveal(n.target));
+  note.on(
+    "action",
+    () =>
+      n.action &&
+      void sources.inbox
+        .act(id, n.action.type, { by: "notification" }, runInboxAction)
+        .then((r) => (sources.changed(), done(r))),
+  );
+  note.on(
+    "reply",
+    (_e, text) =>
+      void sources.inbox
+        .act(id, "reply", { text, by: "notification" }, runInboxAction)
+        .then((r) => (sources.changed(), done(r))),
+  );
+  note.on("close", () => shown.delete(note));
+  shown.add(note);
+  note.show();
 }
 
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
-sources.inbox.on('event', (e) => {
-  if (e.type === 'added') notifyItem(e.entry)
-})
+sources.inbox.on("event", (e) => {
+  if (e.type === "added") notifyItem(e.entry);
+});
 
 /** Answer the menu on a session's screen, if it is still the question the user saw. */
-async function answerMenuFor(key: string, question: unknown, answer: unknown): Promise<CliResult> {
-  const s = latest?.sessions.find((x) => x.key === key)
-  if (!s) return { ok: false, message: 'session not found' }
+async function answerMenuFor(
+  key: string,
+  question: unknown,
+  answer: unknown,
+): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.key === key);
+  if (!s) return { ok: false, message: "session not found" };
+  // Questions MasterDeck's hook holds (AskUserQuestion): all answered at once, through the hook.
+  const asked = latest?.menus[key]?.asked;
+  if (asked && question === `asked:${asked.requestId}`) {
+    const o = (answer ?? {}) as { answers?: unknown };
+    const answers =
+      o.answers && typeof o.answers === "object"
+        ? (Object.fromEntries(
+            Object.entries(o.answers as Record<string, unknown>).filter(
+              ([, v]) => typeof v === "string",
+            ),
+          ) as Record<string, string>)
+        : {};
+    const r = sources.answerHookQuestions(asked.requestId, answers);
+    return r.ok ? { ok: true, message: `${s.name}: answered` } : r;
+  }
   // A permission MasterDeck's hook holds: answered through the hook, in any terminal, no keys.
-  const held = latest?.menus[key]?.permission
-  if (held?.requestId && typeof question === 'string' && question === `permission:${permissionKey(held)}`) {
-    const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
-    const n = Array.isArray(o.picks) && o.picks.length === 1 && typeof o.picks[0] === 'number' ? o.picks[0] : -1
-    const r = sources.answerHookRequest(held.requestId, n, typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined)
-    return r.ok ? { ok: true, message: `${s.name}: ${r.message}` } : r
+  const held = latest?.menus[key]?.permission;
+  if (
+    held?.requestId &&
+    typeof question === "string" &&
+    question === `permission:${permissionKey(held)}`
+  ) {
+    const o = (answer ?? {}) as { picks?: unknown; text?: unknown };
+    const n =
+      Array.isArray(o.picks) &&
+      o.picks.length === 1 &&
+      typeof o.picks[0] === "number"
+        ? o.picks[0]
+        : -1;
+    const r = sources.answerHookRequest(
+      held.requestId,
+      n,
+      typeof o.text === "string" ? o.text.slice(0, 2000) : undefined,
+    );
+    return r.ok ? { ok: true, message: `${s.name}: ${r.message}` } : r;
   }
   // Read the screen again: answer only the question the user saw.
-  const menu = await sources.readMenu(s)
-  if (menu?.permission || (typeof question === 'string' && question.startsWith('permission:'))) {
-    if (!menu?.permission || `permission:${permissionKey(menu.permission)}` !== question) {
-      void sources.pollMenus()
-      return { ok: false, message: `${s.name}: the permission on its screen changed; look again` }
+  const menu = await sources.readMenu(s);
+  if (
+    menu?.permission ||
+    (typeof question === "string" && question.startsWith("permission:"))
+  ) {
+    if (
+      !menu?.permission ||
+      `permission:${permissionKey(menu.permission)}` !== question
+    ) {
+      void sources.pollMenus();
+      return {
+        ok: false,
+        message: `${s.name}: the permission on its screen changed; look again`,
+      };
     }
-    const pick = (answer as { picks?: unknown } | null)?.picks
-    const n = Array.isArray(pick) && pick.length === 1 && typeof pick[0] === 'number' ? pick[0] : -1
-    if (!Number.isInteger(n) || n < 0 || n >= menu.permission.options.length || n > 8) return { ok: false, message: 'no such option' }
-    const r = await sender.answerMenu(s, [{ keys: String(n + 1), wait: 700 }])
-    void sources.pollMenus()
-    return r.ok ? { ok: true, message: `${s.name}: ${menu.permission.options[n]}` } : r
+    const pick = (answer as { picks?: unknown } | null)?.picks;
+    const n =
+      Array.isArray(pick) && pick.length === 1 && typeof pick[0] === "number"
+        ? pick[0]
+        : -1;
+    if (
+      !Number.isInteger(n) ||
+      n < 0 ||
+      n >= menu.permission.options.length ||
+      n > 8
+    )
+      return { ok: false, message: "no such option" };
+    const r = await sender.answerMenu(s, [{ keys: String(n + 1), wait: 700 }]);
+    void sources.pollMenus();
+    return r.ok
+      ? { ok: true, message: `${s.name}: ${menu.permission.options[n]}` }
+      : r;
   }
-  const now = menu?.question?.question ?? null
-  if (!menu || now !== (typeof question === 'string' ? question : null)) {
-    void sources.pollMenus()
-    return { ok: false, message: `${s.name}: the question on its screen changed; look again` }
+  const now = menu?.question?.question ?? null;
+  if (!menu || now !== (typeof question === "string" ? question : null)) {
+    void sources.pollMenus();
+    return {
+      ok: false,
+      message: `${s.name}: the question on its screen changed; look again`,
+    };
   }
-  let a: MenuAnswer | 'submit' = 'submit'
-  if (answer !== 'submit') {
-    const o = (answer ?? {}) as { picks?: unknown; text?: unknown }
-    a = { picks: Array.isArray(o.picks) ? o.picks.filter((p): p is number => typeof p === 'number') : [], text: typeof o.text === 'string' ? o.text.slice(0, 2000) : undefined }
+  let a: MenuAnswer | "submit" = "submit";
+  if (answer !== "submit") {
+    const o = (answer ?? {}) as { picks?: unknown; text?: unknown };
+    a = {
+      picks: Array.isArray(o.picks)
+        ? o.picks.filter((p): p is number => typeof p === "number")
+        : [],
+      text: typeof o.text === "string" ? o.text.slice(0, 2000) : undefined,
+    };
   }
-  const steps = answerKeys(menu, a)
-  if (typeof steps === 'string') return { ok: false, message: steps }
-  const r = await sender.answerMenu(s, steps)
-  void sources.pollMenus()
-  return r
+  const steps = answerKeys(menu, a);
+  if (typeof steps === "string") return { ok: false, message: steps };
+  const r = await sender.answerMenu(s, steps);
+  void sources.pollMenus();
+  return r;
 }
 
 /**
@@ -185,69 +352,102 @@ async function answerMenuFor(key: string, question: unknown, answer: unknown): P
  * phone all use. The inbox has checked the item is still open; this checks the session is still in
  * a state where the action makes sense, then uses the same code as the rest of the app.
  */
-async function runInboxAction(item: InboxItem, type: string, payload: Record<string, unknown>): Promise<CliResult> {
-  const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
-  const d = item.detail
+async function runInboxAction(
+  item: InboxItem,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<CliResult> {
+  const masterUp =
+    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const d = item.detail;
   const owner = (): Session | undefined => {
-    if (item.sessionKey) return latest?.sessions.find((x) => x.key === item.sessionKey)
-    if (d.type === 'proposal') return latest ? (sessionForProposal(d.proposal, latest.sessions) ?? undefined) : undefined
-    return undefined
-  }
-  const text = typeof payload.text === 'string' ? payload.text.slice(0, 20_000) : ''
+    if (item.sessionKey)
+      return latest?.sessions.find((x) => x.key === item.sessionKey);
+    if (d.type === "proposal")
+      return latest
+        ? (sessionForProposal(d.proposal, latest.sessions) ?? undefined)
+        : undefined;
+    return undefined;
+  };
+  const text =
+    typeof payload.text === "string" ? payload.text.slice(0, 20_000) : "";
   switch (type) {
-    case 'reply':
-    case 'option': {
-      const s = owner()
-      if (!s) return { ok: false, message: 'no live session to reply to' }
-      const msg = type === 'option' && typeof payload.key === 'string' ? `${payload.key}: ${text}` : text
-      if (!msg.trim()) return { ok: false, message: 'nothing to send' }
-      return sender.send(s, msg, !!masterUp)
+    case "reply":
+    case "option": {
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session to reply to" };
+      const msg =
+        type === "option" && typeof payload.key === "string"
+          ? `${payload.key}: ${text}`
+          : text;
+      if (!msg.trim()) return { ok: false, message: "nothing to send" };
+      return sender.send(s, msg, !!masterUp);
     }
-    case 'menu':
-      if (!item.sessionKey) return { ok: false, message: 'no session' }
-      return answerMenuFor(item.sessionKey, payload.question, payload.answer)
-    case 'continue':
-    case 'compact': {
-      const s = owner()
-      if (!s) return { ok: false, message: 'no live session' }
-      if (type === 'continue' && s.state !== 'idle') return { ok: false, message: `${s.name} is ${s.state}, not idle` }
-      return sender.send(s, type === 'continue' ? 'continue' : '/compact', !!masterUp)
+    case "menu":
+      if (!item.sessionKey) return { ok: false, message: "no session" };
+      return answerMenuFor(item.sessionKey, payload.question, payload.answer);
+    case "continue":
+    case "compact": {
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      if (type === "continue" && s.state !== "idle")
+        return { ok: false, message: `${s.name} is ${s.state}, not idle` };
+      return sender.send(
+        s,
+        type === "continue" ? "continue" : "/compact",
+        !!masterUp,
+      );
     }
-    case 'approve':
-    case 'reject':
-      if (d.type !== 'proposal') return { ok: false, message: 'not a proposal' }
-      return type === 'approve' ? cli.approve([d.proposal.id]) : cli.reject([d.proposal.id])
-    case 'send': {
-      if (d.type !== 'offer') return { ok: false, message: 'not a PR offer' }
+    case "approve":
+    case "reject":
+      if (d.type !== "proposal")
+        return { ok: false, message: "not a proposal" };
+      return type === "approve"
+        ? cli.approve([d.proposal.id])
+        : cli.reject([d.proposal.id]);
+    case "send": {
+      if (d.type !== "offer") return { ok: false, message: "not a PR offer" };
       // master's own proposal: approving it lets master send it (and track it).
       if (d.offer.proposal) {
-        const r = await cli.approve([d.offer.proposal.id])
-        return r.ok ? { ok: true, message: 'approved; master sends it' } : r
+        const r = await cli.approve([d.offer.proposal.id]);
+        return r.ok ? { ok: true, message: "approved; master sends it" } : r;
       }
-      const s = owner()
-      if (!s) return { ok: false, message: 'no session owns this PR; start one' }
-      const r = await sender.send(s, d.offer.message, !!masterUp)
-      return r.ok ? { ok: true, message: `sent to ${s.name}` } : r
+      const s = owner();
+      if (!s)
+        return { ok: false, message: "no session owns this PR; start one" };
+      const r = await sender.send(s, d.offer.message, !!masterUp);
+      return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
     default:
-      return { ok: false, message: `${type} is done in the window` }
+      return { ok: false, message: `${type} is done in the window` };
   }
 }
 
 function statuslineOpts() {
-  return { settingsPath: paths.claudeSettings, home: paths.home, scriptPath: paths.installedTee, python: paths.python }
+  return {
+    settingsPath: paths.claudeSettings,
+    home: paths.home,
+    scriptPath: paths.installedTee,
+    python: paths.python,
+  };
 }
 
 function installHook(): CliResult {
   try {
-    mkdirSync(paths.home, { recursive: true })
-    copyFileSync(paths.bundledTee, paths.installedTee)
+    mkdirSync(paths.home, { recursive: true });
+    copyFileSync(paths.bundledTee, paths.installedTee);
   } catch (e) {
-    return { ok: false, message: `could not copy the status line script: ${String(e)}` }
+    return {
+      ok: false,
+      message: `could not copy the status line script: ${String(e)}`,
+    };
   }
-  const r = installStatusline(statuslineOpts())
-  sources.statuslineInstalled = isInstalled(paths.claudeSettings, paths.installedTee)
-  return r
+  const r = installStatusline(statuslineOpts());
+  sources.statuslineInstalled = isInstalled(
+    paths.claudeSettings,
+    paths.installedTee,
+  );
+  return r;
 }
 
 /**
@@ -255,44 +455,70 @@ function installHook(): CliResult {
  * `tt.sh link`, told which session and folder through TT_SESSION / TT_CWD. Like any
  * babysit-ticket link, it moves the ticket to In Dev (forward only).
  */
-async function linkSession(raw: unknown, sessionId: string, cwd: string | null): Promise<CliResult> {
-  const t = asTicket(raw)
-  if (!t) return { ok: false, message: 'bad issue' }
-  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return { ok: false, message: 'bad session id' }
-  if (!existsSync(paths.babysitTt)) return { ok: false, message: `babysit-ticket not found at ${paths.babysitTt}` }
-  const dir = cwd && existsSync(cwd) ? cwd : homedir()
-  const r = await run('bash', [paths.babysitTt, 'link', ticketRef(t.repo, t.number)], {
-    cwd: dir,
-    timeoutMs: 60_000,
-    env: { TT_SESSION: sessionId, TT_CWD: dir },
-  })
-  sources.reloadLinks()
-  const out = (r.stdout.trim() || r.stderr.trim()).split('\n').filter(Boolean)
-  return r.code === 0 ? { ok: true, message: out[0] ?? `linked to ${ticketLabel(t.repo, t.number)}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
+async function linkSession(
+  raw: unknown,
+  sessionId: string,
+  cwd: string | null,
+): Promise<CliResult> {
+  const t = asTicket(raw);
+  if (!t) return { ok: false, message: "bad issue" };
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId))
+    return { ok: false, message: "bad session id" };
+  if (!existsSync(paths.babysitTt))
+    return {
+      ok: false,
+      message: `babysit-ticket not found at ${paths.babysitTt}`,
+    };
+  const dir = cwd && existsSync(cwd) ? cwd : homedir();
+  const r = await run(
+    "bash",
+    [paths.babysitTt, "link", ticketRef(t.repo, t.number)],
+    {
+      cwd: dir,
+      timeoutMs: 60_000,
+      env: { TT_SESSION: sessionId, TT_CWD: dir },
+    },
+  );
+  sources.reloadLinks();
+  const out = (r.stdout.trim() || r.stderr.trim()).split("\n").filter(Boolean);
+  return r.code === 0
+    ? {
+        ok: true,
+        message: out[0] ?? `linked to ${ticketLabel(t.repo, t.number)}`,
+      }
+    : { ok: false, message: out.at(-1) ?? `exit ${r.code}` };
 }
 
 /** Is `pid` a running claude process? Guards the stop against a pid reused by something else. */
 async function isClaudePid(pid: number): Promise<boolean> {
-  if (!Number.isInteger(pid) || pid <= 1) return false
-  if (process.platform === 'win32') {
-    const r = await run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeoutMs: 10_000 })
-    const image = tasklistImage(r.stdout)
-    return image !== null && isClaudeCommand(image)
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  if (process.platform === "win32") {
+    const r = await run(
+      "tasklist",
+      ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"],
+      { timeoutMs: 10_000 },
+    );
+    const image = tasklistImage(r.stdout);
+    return image !== null && isClaudeCommand(image);
   }
-  const r = await run('ps', ['-p', String(pid), '-o', 'comm='], { timeoutMs: 10_000 })
-  return r.code === 0 && isClaudeCommand(r.stdout)
+  const r = await run("ps", ["-p", String(pid), "-o", "comm="], {
+    timeoutMs: 10_000,
+  });
+  return r.code === 0 && isClaudeCommand(r.stdout);
 }
 
 async function stopPid(pid: number): Promise<void> {
-  if (process.platform === 'win32') await run('taskkill', ['/PID', String(pid)], { timeoutMs: 10_000 })
+  if (process.platform === "win32")
+    await run("taskkill", ["/PID", String(pid)], { timeoutMs: 10_000 });
   else {
     try {
-      process.kill(pid, 'SIGTERM')
+      process.kill(pid, "SIGTERM");
     } catch {
       // already gone
     }
   }
-  for (let i = 0; i < 20 && (await isClaudePid(pid)); i++) await new Promise((r) => setTimeout(r, 250))
+  for (let i = 0; i < 20 && (await isClaudePid(pid)); i++)
+    await new Promise((r) => setTimeout(r, 250));
 }
 
 /**
@@ -301,59 +527,110 @@ async function stopPid(pid: number): Promise<void> {
  * but only when its pid really is a claude process.
  */
 /** `claude --bg --resume <id>`: continue a stopped session in the background under the same id. */
-async function resumeBg(id: string, name: string, cwd: string | null): Promise<CliResult> {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, message: 'bad session id' }
+async function resumeBg(
+  id: string,
+  name: string,
+  cwd: string | null,
+): Promise<CliResult> {
+  if (!/^[0-9a-f-]{36}$/i.test(id))
+    return { ok: false, message: "bad session id" };
   // A name we can't pass safely is left out: the session keeps the one it has.
-  const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name) ? ['-n', name] : []
-  const r = await run(claudeBin, ['--bg', '--resume', id, ...named], { cwd: cwd && existsSync(cwd) ? cwd : homedir(), timeoutMs: 60_000 })
-  return r.code === 0 ? { ok: true, message: name } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+  const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name)
+    ? ["-n", name]
+    : [];
+  const r = await run(claudeBin, ["--bg", "--resume", id, ...named], {
+    cwd: cwd && existsSync(cwd) ? cwd : homedir(),
+    timeoutMs: 60_000,
+  });
+  return r.code === 0
+    ? { ok: true, message: name }
+    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
 }
 
 /** The workflow's custom steps (their hooks live in ~/.claude/settings.json). */
-const workflowFile = () => join(paths.home, 'workflow.json')
+const workflowFile = () => join(paths.home, "workflow.json");
 
 /** Which skills the user removed in the Skills popup. */
-const skillsFile = () => join(paths.home, 'skills.json')
+const skillsFile = () => join(paths.home, "skills.json");
 
 /** The hook that belongs to a skill (off when the skill is removed). */
-const SKILL_HOOK: Record<string, keyof HookStatus> = { 'babysit-ticket': 'ticket', 'babysit-pr': 'pr', queue: 'queue' }
+const SKILL_HOOK: Record<string, keyof HookStatus> = {
+  "babysit-ticket": "ticket",
+  "babysit-pr": "pr",
+  queue: "queue",
+};
 
 function refreshSkills(): void {
-  sources.setSkills(syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion(), readRemoved(skillsFile())).skills)
+  sources.setSkills(
+    syncSkills(
+      paths.bundledSkills,
+      paths.skillsDir,
+      app.getVersion(),
+      readRemoved(skillsFile()),
+    ).skills,
+  );
 }
 
-async function startHere(o: { sessionId: string; name: string; cwd: string; pid: number | null; stopOther: boolean }): Promise<CliResult> {
-  if (!/^[0-9a-f-]{36}$/i.test(o.sessionId)) return { ok: false, message: 'bad session id' }
-  if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(o.name)) return { ok: false, message: `bad session name: ${o.name}` }
+async function startHere(o: {
+  sessionId: string;
+  name: string;
+  cwd: string;
+  pid: number | null;
+  stopOther: boolean;
+}): Promise<CliResult> {
+  if (!/^[0-9a-f-]{36}$/i.test(o.sessionId))
+    return { ok: false, message: "bad session id" };
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(o.name))
+    return { ok: false, message: `bad session name: ${o.name}` };
   if (o.stopOther && o.pid !== null) {
-    if (!(await isClaudePid(o.pid))) return { ok: false, message: `pid ${o.pid} is not a running claude process; nothing was stopped` }
-    await stopPid(o.pid)
-    if (await isClaudePid(o.pid)) return { ok: false, message: `pid ${o.pid} did not stop; close it in its terminal and try again` }
+    if (!(await isClaudePid(o.pid)))
+      return {
+        ok: false,
+        message: `pid ${o.pid} is not a running claude process; nothing was stopped`,
+      };
+    await stopPid(o.pid);
+    if (await isClaudePid(o.pid))
+      return {
+        ok: false,
+        message: `pid ${o.pid} did not stop; close it in its terminal and try again`,
+      };
   }
-  const cwd = o.cwd && existsSync(o.cwd) ? o.cwd : homedir()
-  const r = await run(claudeBin, ['--bg', '--resume', o.sessionId, '-n', o.name], { cwd, timeoutMs: 60_000 })
-  return r.code === 0 ? { ok: true, message: r.stdout.trim().split('\n')[0] ?? 'started' } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+  const cwd = o.cwd && existsSync(o.cwd) ? o.cwd : homedir();
+  const r = await run(
+    claudeBin,
+    ["--bg", "--resume", o.sessionId, "-n", o.name],
+    { cwd, timeoutMs: 60_000 },
+  );
+  return r.code === 0
+    ? { ok: true, message: r.stdout.trim().split("\n")[0] ?? "started" }
+    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
 }
 
 /** Transcripts read for the History reader, by path and mtime; the last few are kept. */
-const transcriptCache = new Map<string, { mtime: number; messages: TranscriptMessage[] }>()
+const transcriptCache = new Map<
+  string,
+  { mtime: number; messages: TranscriptMessage[] }
+>();
 async function readTranscript(path: string): Promise<TranscriptMessage[]> {
-  const st = statSync(path)
-  const hit = transcriptCache.get(path)
-  if (hit && hit.mtime === st.mtimeMs) return hit.messages
-  const text = await readFile(path, 'utf8')
-  const messages = transcriptMessages(text.split('\n'))
-  transcriptCache.delete(path)
-  transcriptCache.set(path, { mtime: st.mtimeMs, messages })
-  while (transcriptCache.size > 3) transcriptCache.delete(transcriptCache.keys().next().value!)
-  return messages
+  const st = statSync(path);
+  const hit = transcriptCache.get(path);
+  if (hit && hit.mtime === st.mtimeMs) return hit.messages;
+  const text = await readFile(path, "utf8");
+  const messages = transcriptMessages(text.split("\n"));
+  transcriptCache.delete(path);
+  transcriptCache.set(path, { mtime: st.mtimeMs, messages });
+  while (transcriptCache.size > 3)
+    transcriptCache.delete(transcriptCache.keys().next().value!);
+  return messages;
 }
 
 async function openEditor(dir: string): Promise<CliResult> {
-  return openInEditor(run, dir, join(paths.home, 'editor-probe'), (p) => shell.openPath(p))
+  return openInEditor(run, dir, join(paths.home, "editor-probe"), (p) =>
+    shell.openPath(p),
+  );
 }
 
-let masterStartingUntil = 0
+let masterStartingUntil = 0;
 
 /**
  * Start master-agent in the background. Refused unless the session list is known to be current and
@@ -361,287 +638,470 @@ let masterStartingUntil = 0
  * (two sessions named master-agent make the CLI refuse every write).
  */
 async function startMaster(): Promise<CliResult> {
-  if (!getConfig().masterEnabled) return { ok: false, message: 'master-agent is turned off (Settings → Set up MasterDeck → Preferences)' }
-  if (!sources.isHealthy('agents')) return { ok: false, message: 'the session list is not loaded yet; try again in a few seconds' }
-  if (latest && latest.master.kind !== 'absent') return { ok: false, message: `master is already ${latest.master.kind}` }
-  if (Date.now() < masterStartingUntil) return { ok: false, message: 'master-agent is already starting' }
-  masterStartingUntil = Date.now() + 90_000
-  const r = await run(claudeBin, ['--bg', '-n', MASTER_NAME, '/master'], { cwd: paths.masterWorkspace, timeoutMs: 60_000 })
-  if (r.code !== 0) masterStartingUntil = 0
-  return r.code === 0 ? { ok: true, message: r.stdout.trim() } : { ok: false, message: (r.stderr || r.stdout).trim() }
+  if (!getConfig().masterEnabled)
+    return {
+      ok: false,
+      message:
+        "master-agent is turned off (Settings → Set up MasterDeck → Preferences)",
+    };
+  if (!sources.isHealthy("agents"))
+    return {
+      ok: false,
+      message: "the session list is not loaded yet; try again in a few seconds",
+    };
+  if (latest && latest.master.kind !== "absent")
+    return { ok: false, message: `master is already ${latest.master.kind}` };
+  if (Date.now() < masterStartingUntil)
+    return { ok: false, message: "master-agent is already starting" };
+  masterStartingUntil = Date.now() + 90_000;
+  const r = await run(claudeBin, ["--bg", "-n", MASTER_NAME, "/master"], {
+    cwd: paths.masterWorkspace,
+    timeoutMs: 60_000,
+  });
+  if (r.code !== 0) masterStartingUntil = 0;
+  return r.code === 0
+    ? { ok: true, message: r.stdout.trim() }
+    : { ok: false, message: (r.stderr || r.stdout).trim() };
 }
 
 /** Folders live sessions work in (a worktree containing one is IN USE), from the main process's own state. */
 function liveDirs(): string[] {
-  const s = latest
-  if (!s) return []
-  const dirs: string[] = []
+  const s = latest;
+  if (!s) return [];
+  const dirs: string[] = [];
   for (const x of s.sessions) {
-    if (x.state === 'done') continue
-    if (x.cwd) dirs.push(x.cwd)
-    const cur = s.stats[x.sessionId]?.currentDir ?? s.tails[x.sessionId]?.cwd
-    if (cur) dirs.push(cur)
+    if (x.state === "done") continue;
+    if (x.cwd) dirs.push(x.cwd);
+    const cur = s.stats[x.sessionId]?.currentDir ?? s.tails[x.sessionId]?.cwd;
+    if (cur) dirs.push(cur);
   }
-  for (const g of Object.values(s.git)) dirs.push(g.dir)
-  return dirs
+  for (const g of Object.values(s.git)) dirs.push(g.dir);
+  return dirs;
 }
 
 function registerIpc(): void {
-  ipcMain.handle(CH.getState, () => latest)
-  ipcMain.handle(CH.approve, (_e, id: number) => cli.approve([id]))
-  ipcMain.handle(CH.reject, (_e, id: number) => cli.reject([id]))
-  ipcMain.handle(CH.draftAssign, (_e, issue: unknown, title?: string, url?: string) => {
-    const t = asTicket(issue)
-    return t ? cli.draftAssign(t, title, url) : { ok: false, message: 'bad issue' }
-  })
-  ipcMain.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint))
+  ipcMain.handle(CH.getState, () => latest);
+  ipcMain.handle(CH.approve, (_e, id: number) => cli.approve([id]));
+  ipcMain.handle(CH.reject, (_e, id: number) => cli.reject([id]));
+  ipcMain.handle(
+    CH.draftAssign,
+    (_e, issue: unknown, title?: string, url?: string) => {
+      const t = asTicket(issue);
+      return t
+        ? cli.draftAssign(t, title, url)
+        : { ok: false, message: "bad issue" };
+    },
+  );
+  ipcMain.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
   ipcMain.handle(CH.sendText, async (_e, key: string, text: string) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { ok: false, message: 'session not found' }
-    const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
-    return sender.send(s, text, !!masterUp)
-  })
-  ipcMain.handle(CH.answerMenu, (_e, key: string, question: string | null, answer: unknown) => answerMenuFor(String(key), question, answer))
-  ipcMain.handle(CH.inboxAct, async (_e, id: unknown, type: unknown, payload: unknown) => {
-    if (typeof id !== 'string' || typeof type !== 'string') return { ok: false, message: 'bad inbox action' }
-    const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
-    const r = await sources.inbox.act(id, type, p, runInboxAction)
-    sources.changed()
-    return r
-  })
-  ipcMain.handle(CH.queueList, (_e, sessionId: string) => readQueue(String(sessionId)))
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const masterUp =
+      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+    return sender.send(s, text, !!masterUp);
+  });
+  ipcMain.handle(
+    CH.answerMenu,
+    (_e, key: string, question: string | null, answer: unknown) =>
+      answerMenuFor(String(key), question, answer),
+  );
+  ipcMain.handle(
+    CH.inboxAct,
+    async (_e, id: unknown, type: unknown, payload: unknown) => {
+      if (typeof id !== "string" || typeof type !== "string")
+        return { ok: false, message: "bad inbox action" };
+      const p =
+        payload && typeof payload === "object"
+          ? (payload as Record<string, unknown>)
+          : {};
+      const r = await sources.inbox.act(id, type, p, runInboxAction);
+      sources.changed();
+      return r;
+    },
+  );
+  ipcMain.handle(CH.queueList, (_e, sessionId: string) =>
+    readQueue(String(sessionId)),
+  );
   ipcMain.handle(CH.queueEdit, (_e, sessionId: string, edit: QueueEdit) =>
-    isQueueEdit(edit) ? editQueue(String(sessionId), edit) : { ok: false, message: 'bad queue edit', items: [] },
-  )
+    isQueueEdit(edit)
+      ? editQueue(String(sessionId), edit)
+      : { ok: false, message: "bad queue edit", items: [] },
+  );
   ipcMain.handle(CH.queueSendNext, async (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { ok: false, message: 'session not found' }
-    const next = shiftQueue(s.sessionId)
-    if (next === null) return { ok: false, message: 'the queue is empty' }
-    const masterUp = latest?.master.kind === 'attached' || latest?.master.kind === 'elsewhere'
-    const r = await sender.send(s, next, !!masterUp)
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const next = shiftQueue(s.sessionId);
+    if (next === null) return { ok: false, message: "the queue is empty" };
+    const masterUp =
+      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+    const r = await sender.send(s, next, !!masterUp);
     // Not sent: back to the front, so the Stop hook still runs it later.
-    if (!r.ok) unshiftQueue(s.sessionId, next)
-    return r
-  })
-  ipcMain.handle(CH.getSettings, () => sources.getSettings())
+    if (!r.ok) unshiftQueue(s.sessionId, next);
+    return r;
+  });
+  ipcMain.handle(CH.getSettings, () => sources.getSettings());
   ipcMain.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
-    const t = asTicket(issue)
-    if (!t) return { ok: false, message: 'bad issue' }
-    const r = await ops.setStatus(t, status)
-    if (r.ok) sources.noteStatus(t, status)
-    return r
-  })
-  ipcMain.handle(CH.standupCommits, (_e, since: number, dirs: string[], until?: number) => ops.standupCommits(since, [...dirs, ...ops.repos()], until))
-  ipcMain.handle(CH.janitor, (_e, dirs: string[], force?: boolean) => ops.janitor(dirs, force === true))
-  ipcMain.handle(CH.removeWorktree, (_e, repo: string, path: string, force: boolean) => ops.removeWorktree(repo, path, force, liveDirs()))
-  ipcMain.handle(CH.removeSession, (_e, bgId: string) => ops.removeSession(bgId))
-  ipcMain.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q))
-  ipcMain.handle(CH.historyTranscript, async (_e, p: unknown, query: unknown, focus: unknown) => {
-    // A session transcript under ~/.claude/projects only; the renderer names it from a search hit.
-    if (typeof p !== 'string' || !p.endsWith('.jsonl')) return null
-    const full = resolve(p)
-    if (!full.startsWith(resolve(paths.projectsDir) + sep)) return null
-    try {
-      const all = await readTranscript(full)
-      return transcriptWindow(all, typeof query === 'string' ? query : '', typeof focus === 'string' ? focus : null)
-    } catch {
-      return null
-    }
-  })
-  ipcMain.handle(CH.templates, () => ops.templates())
-  ipcMain.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) => ops.saveTemplate(t))
-  ipcMain.handle(CH.deleteTemplate, (_e, name: string) => ops.deleteTemplate(name))
-  ipcMain.handle(CH.resumeSession, (_e, id: string, name: string, cwd: string | null) => resumeBg(id, name, cwd))
-  ipcMain.handle(CH.resumeStopped, () => sources.resumeStopped())
-  ipcMain.handle(CH.tokensByDay, (_e, ids: unknown) => sources.tokensByDay(Array.isArray(ids) ? ids : []))
-  ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped())
-  ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s))
-  ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) => startHere(o))
-  ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url))
+    const t = asTicket(issue);
+    if (!t) return { ok: false, message: "bad issue" };
+    const r = await ops.setStatus(t, status);
+    if (r.ok) sources.noteStatus(t, status);
+    return r;
+  });
+  ipcMain.handle(
+    CH.standupCommits,
+    (_e, since: number, dirs: string[], until?: number) =>
+      ops.standupCommits(since, [...dirs, ...ops.repos()], until),
+  );
+  ipcMain.handle(CH.janitor, (_e, dirs: string[], force?: boolean) =>
+    ops.janitor(dirs, force === true),
+  );
+  ipcMain.handle(
+    CH.removeWorktree,
+    (_e, repo: string, path: string, force: boolean) =>
+      ops.removeWorktree(repo, path, force, liveDirs()),
+  );
+  ipcMain.handle(CH.removeSession, (_e, bgId: string) =>
+    ops.removeSession(bgId),
+  );
+  ipcMain.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q));
+  ipcMain.handle(
+    CH.historyTranscript,
+    async (_e, p: unknown, query: unknown, focus: unknown) => {
+      // A session transcript under ~/.claude/projects only; the renderer names it from a search hit.
+      if (typeof p !== "string" || !p.endsWith(".jsonl")) return null;
+      const full = resolve(p);
+      if (!full.startsWith(resolve(paths.projectsDir) + sep)) return null;
+      try {
+        const all = await readTranscript(full);
+        return transcriptWindow(
+          all,
+          typeof query === "string" ? query : "",
+          typeof focus === "string" ? focus : null,
+        );
+      } catch {
+        return null;
+      }
+    },
+  );
+  ipcMain.handle(CH.templates, () => ops.templates());
+  ipcMain.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) =>
+    ops.saveTemplate(t),
+  );
+  ipcMain.handle(CH.deleteTemplate, (_e, name: string) =>
+    ops.deleteTemplate(name),
+  );
+  ipcMain.handle(
+    CH.resumeSession,
+    (_e, id: string, name: string, cwd: string | null) =>
+      resumeBg(id, name, cwd),
+  );
+  ipcMain.handle(CH.resumeStopped, () => sources.resumeStopped());
+  ipcMain.handle(CH.tokensByDay, (_e, ids: unknown) =>
+    sources.tokensByDay(Array.isArray(ids) ? ids : []),
+  );
+  ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped());
+  ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s));
+  ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
+    startHere(o),
+  );
+  ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url));
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   ipcMain.handle(CH.shellPrepare, (_e, dir: unknown) =>
-    typeof dir === 'string' && dir && dir === getConfig().workspace ? toDefaultBranch(run, dir) : { ok: true, message: null },
-  )
+    typeof dir === "string" && dir && dir === getConfig().workspace
+      ? toDefaultBranch(run, dir)
+      : { ok: true, message: null },
+  );
   ipcMain.handle(CH.ticketMemory, (_e, ticket: unknown) => {
-    const t = asTicket(ticket)
-    return t ? sources.ticketMemory(t) : []
-  })
+    const t = asTicket(ticket);
+    return t ? sources.ticketMemory(t) : [];
+  });
   ipcMain.handle(CH.issueBody, (_e, ticket: unknown) => {
-    const t = asTicket(ticket)
-    return t ? github.issueBody(t) : { ok: false, message: 'bad ticket' }
-  })
-  ipcMain.handle(CH.assignIssue, async (_e, issue: unknown, login: string, current: string[]) => {
-    const t = asTicket(issue)
-    if (!t) return { ok: false, message: 'bad issue' }
-    const r = await github.assign(t, login, current)
-    if (r.ok) sources.noteAssigned(t, login)
-    return r
-  })
-  ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req))
-  ipcMain.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings))
+    const t = asTicket(ticket);
+    return t ? github.issueBody(t) : { ok: false, message: "bad ticket" };
+  });
+  ipcMain.handle(
+    CH.assignIssue,
+    async (_e, issue: unknown, login: string, current: string[]) => {
+      const t = asTicket(issue);
+      if (!t) return { ok: false, message: "bad issue" };
+      const r = await github.assign(t, login, current);
+      if (r.ok) sources.noteAssigned(t, login);
+      return r;
+    },
+  );
+  ipcMain.handle(CH.assign, (_e, req: AssignRequest) => startAssign(cli, req));
+  ipcMain.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
-  ipcMain.handle(CH.refresh, () => sources.refreshGithub(true))
-  ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true))
-  ipcMain.handle(CH.setupCheck, () => setupCheck())
-  ipcMain.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool))
-  ipcMain.handle(CH.ghAccounts, () => ghAccounts())
+  ipcMain.handle(CH.refresh, () => sources.refreshGithub(true));
+  ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true));
+  ipcMain.handle(CH.setupCheck, () => setupCheck());
+  ipcMain.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
+  ipcMain.handle(CH.ghAccounts, () => ghAccounts());
   ipcMain.handle(CH.ghSwitch, async (_e, login: string) => {
-    const { accounts } = await ghAccounts()
-    if (!accounts.some((a) => a.login === login)) return { ok: false, message: `gh is not logged in to ${login}` }
-    const r = await run('gh', ['auth', 'switch', '--hostname', 'github.com', '--user', login], { timeoutMs: 20_000 })
-    return r.code === 0 ? { ok: true, message: `gh now uses ${login}` } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
-  })
+    const { accounts } = await ghAccounts();
+    if (!accounts.some((a) => a.login === login))
+      return { ok: false, message: `gh is not logged in to ${login}` };
+    const r = await run(
+      "gh",
+      ["auth", "switch", "--hostname", "github.com", "--user", login],
+      { timeoutMs: 20_000 },
+    );
+    return r.code === 0
+      ? { ok: true, message: `gh now uses ${login}` }
+      : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  });
   ipcMain.handle(CH.ghOwners, async () => {
     // Straight to gh, not the shared cache: it is not per account.
     const [user, orgs] = await Promise.all([
-      run('gh', ['api', 'user', '--jq', '.login'], { timeoutMs: 20_000 }),
-      run('gh', ['api', 'user/orgs', '--paginate', '--jq', '.[].login'], { timeoutMs: 30_000 }),
-    ])
-    const login = user.stdout.trim()
-    if (user.code !== 0 || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return { user: null, orgs: [], error: (user.stderr || user.stdout).trim().slice(0, 300) || 'gh is not logged in' }
+      run("gh", ["api", "user", "--jq", ".login"], { timeoutMs: 20_000 }),
+      run("gh", ["api", "user/orgs", "--paginate", "--jq", ".[].login"], {
+        timeoutMs: 30_000,
+      }),
+    ]);
+    const login = user.stdout.trim();
+    if (user.code !== 0 || !/^[A-Za-z0-9-]{1,39}$/.test(login))
+      return {
+        user: null,
+        orgs: [],
+        error:
+          (user.stderr || user.stdout).trim().slice(0, 300) ||
+          "gh is not logged in",
+      };
     return {
       user: login,
-      orgs: orgs.stdout.split('\n').map((x) => x.trim()).filter((x) => /^[A-Za-z0-9-]{1,39}$/.test(x)),
-      ...(orgs.code !== 0 ? { error: `organizations: ${(orgs.stderr || orgs.stdout).trim().slice(0, 200)}` } : {}),
-    }
-  })
-  ipcMain.handle(CH.configDetectAll, () => cli.configDetectAll())
+      orgs: orgs.stdout
+        .split("\n")
+        .map((x) => x.trim())
+        .filter((x) => /^[A-Za-z0-9-]{1,39}$/.test(x)),
+      ...(orgs.code !== 0
+        ? {
+            error: `organizations: ${(orgs.stderr || orgs.stdout).trim().slice(0, 200)}`,
+          }
+        : {}),
+    };
+  });
+  ipcMain.handle(CH.configDetectAll, () => cli.configDetectAll());
   ipcMain.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
-    typeof owner === 'string' ? cli.configDetect(owner.trim(), typeof project === 'number' ? project : undefined) : { ok: false, message: 'owner required' },
-  )
+    typeof owner === "string"
+      ? cli.configDetect(
+          owner.trim(),
+          typeof project === "number" ? project : undefined,
+        )
+      : { ok: false, message: "owner required" },
+  );
   ipcMain.handle(CH.configSave, async (_e, patch: unknown) => {
-    const r = await cli.configSave(patch)
-    if (r.ok) sources.loadConfig()
-    return r
-  })
+    const r = await cli.configSave(patch);
+    if (r.ok) sources.loadConfig();
+    return r;
+  });
   ipcMain.handle(CH.pickFolder, async (_e, start: unknown) => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'], defaultPath: typeof start === 'string' && start ? start : homedir() })
-    return r.canceled ? null : (r.filePaths[0] ?? null)
-  })
+    const r = await dialog.showOpenDialog(win!, {
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: typeof start === "string" && start ? start : homedir(),
+    });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
   ipcMain.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, { ticket: !!which?.ticket, pr: !!which?.pr, queue: !!which?.queue })
-    sources.setHooks(hookStatus(paths.claudeSettings))
-    return r
-  })
+    const r = installHooks(paths.claudeSettings, paths.home, {
+      ticket: !!which?.ticket,
+      pr: !!which?.pr,
+      queue: !!which?.queue,
+    });
+    sources.setHooks(hookStatus(paths.claudeSettings));
+    return r;
+  });
   ipcMain.handle(CH.skillReinstall, (_e, name: unknown) => {
-    if (typeof name !== 'string') return { ok: false, message: 'bad skill name' }
-    const r = reinstallSkill(paths.bundledSkills, paths.skillsDir, name, app.getVersion())
+    if (typeof name !== "string")
+      return { ok: false, message: "bad skill name" };
+    const r = reinstallSkill(
+      paths.bundledSkills,
+      paths.skillsDir,
+      name,
+      app.getVersion(),
+    );
     // Added back: no longer one the user removed.
-    if (r.ok) writeRemoved(skillsFile(), readRemoved(skillsFile()).filter((x) => x !== name))
-    refreshSkills()
-    return r
-  })
+    if (r.ok)
+      writeRemoved(
+        skillsFile(),
+        readRemoved(skillsFile()).filter((x) => x !== name),
+      );
+    refreshSkills();
+    return r;
+  });
   ipcMain.handle(CH.summaryGet, (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { summary: null, stale: false }
-    const summary = summaries.get(s.sessionId)
-    const t = sources.sessionFacts(s.sessionId, s.key).transcript
-    const size = t && existsSync(t) ? statSync(t).size : 0
-    return { summary, stale: !!summary && size > summary.size }
-  })
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { summary: null, stale: false };
+    const summary = summaries.get(s.sessionId);
+    const t = sources.sessionFacts(s.sessionId, s.key).transcript;
+    const size = t && existsSync(t) ? statSync(t).size : 0;
+    return { summary, stale: !!summary && size > summary.size };
+  });
   ipcMain.handle(CH.summaryMake, async (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { ok: false, message: 'session not found' }
-    const f = sources.sessionFacts(s.sessionId, s.key)
-    if (!f.transcript) return { ok: false, message: 'no transcript for this session yet' }
-    return summaries.make({ sessionId: s.sessionId, name: s.name, transcript: f.transcript, cwd: f.cwd ?? s.cwd, issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null, prs: f.prs })
-  })
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const f = sources.sessionFacts(s.sessionId, s.key);
+    if (!f.transcript)
+      return { ok: false, message: "no transcript for this session yet" };
+    return summaries.make({
+      sessionId: s.sessionId,
+      name: s.name,
+      transcript: f.transcript,
+      cwd: f.cwd ?? s.cwd,
+      issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null,
+      prs: f.prs,
+    });
+  });
   ipcMain.handle(CH.summaryPost, async (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key)
-    if (!s) return { ok: false, message: 'session not found' }
-    if (s.issue === null) return { ok: false, message: 'this session is not linked to an issue' }
-    const summary = summaries.get(s.sessionId)
-    if (!summary) return { ok: false, message: 'no summary yet' }
-    const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`
-    const r = await run('gh', ['issue', 'comment', String(s.issue), '-R', fullRepo(s.issueRepo), '--body-file', '-'], { stdin: body, timeoutMs: 30_000 })
-    return r.code === 0 ? { ok: true, message: r.stdout.trim() || 'posted' } : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
-  })
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    if (s.issue === null)
+      return { ok: false, message: "this session is not linked to an issue" };
+    const summary = summaries.get(s.sessionId);
+    if (!summary) return { ok: false, message: "no summary yet" };
+    const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`;
+    const r = await run(
+      "gh",
+      [
+        "issue",
+        "comment",
+        String(s.issue),
+        "-R",
+        fullRepo(s.issueRepo),
+        "--body-file",
+        "-",
+      ],
+      { stdin: body, timeoutMs: 30_000 },
+    );
+    return r.code === 0
+      ? { ok: true, message: r.stdout.trim() || "posted" }
+      : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  });
   ipcMain.handle(CH.workflowGet, () => ({
-    hooks: collectHooks(dirname(paths.claudeSettings), [paths.masterWorkspace, ...ops.repos()]),
+    hooks: collectHooks(dirname(paths.claudeSettings), [
+      paths.masterWorkspace,
+      ...ops.repos(),
+    ]),
     skills: listSkills(paths.skillsDir),
     steps: readSteps(workflowFile()),
-  }))
+  }));
   ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
-    const steps = parseSteps(raw)
-    const r = installWorkflowSteps(paths.claudeSettings, paths.home, steps)
-    if (r.ok) writeSteps(workflowFile(), steps)
-    return r
-  })
+    const steps = parseSteps(raw);
+    const r = installWorkflowSteps(paths.claudeSettings, paths.home, steps);
+    if (r.ok) writeSteps(workflowFile(), steps);
+    return r;
+  });
   ipcMain.handle(CH.skillRemove, (_e, name: unknown) => {
-    if (typeof name !== 'string') return { ok: false, message: 'bad skill name' }
-    const r = removeSkill(paths.bundledSkills, paths.skillsDir, name)
+    if (typeof name !== "string")
+      return { ok: false, message: "bad skill name" };
+    const r = removeSkill(paths.bundledSkills, paths.skillsDir, name);
     if (r.ok) {
-      writeRemoved(skillsFile(), [...readRemoved(skillsFile()), name])
+      writeRemoved(skillsFile(), [...readRemoved(skillsFile()), name]);
       // Its hook would call a script that is gone: turn it off too.
-      const key = SKILL_HOOK[name]
-      const hooks = hookStatus(paths.claudeSettings)
+      const key = SKILL_HOOK[name];
+      const hooks = hookStatus(paths.claudeSettings);
       if (key && hooks[key]) {
-        installHooks(paths.claudeSettings, paths.home, { ...hooks, [key]: false })
-        sources.setHooks(hookStatus(paths.claudeSettings))
+        installHooks(paths.claudeSettings, paths.home, {
+          ...hooks,
+          [key]: false,
+        });
+        sources.setHooks(hookStatus(paths.claudeSettings));
       }
     }
-    refreshSkills()
-    return r
-  })
-  ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) => typeof maxAgeMs === 'number' && maxAgeMs > 0 ? sources.refreshTeamPrs(maxAgeMs) : sources.refreshTeamPrs(0, true))
-  ipcMain.handle(CH.linkSession, (_e, issue: unknown, sessionId: string, cwd: string | null) => linkSession(issue, sessionId, cwd))
-  ipcMain.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open))
+    refreshSkills();
+    return r;
+  });
+  ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) =>
+    typeof maxAgeMs === "number" && maxAgeMs > 0
+      ? sources.refreshTeamPrs(maxAgeMs)
+      : sources.refreshTeamPrs(0, true),
+  );
+  ipcMain.handle(
+    CH.linkSession,
+    (_e, issue: unknown, sessionId: string, cwd: string | null) =>
+      linkSession(issue, sessionId, cwd),
+  );
+  ipcMain.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
   ipcMain.on(CH.setFocus, (_e, id: string | null) => {
-    focused = id
-    sources.setFocus(id)
-  })
-  ipcMain.on(CH.setVisible, (_e, ids: string[]) => sources.setVisible(ids))
+    focused = id;
+    sources.setFocus(id);
+  });
+  ipcMain.on(CH.setVisible, (_e, ids: string[]) => sources.setVisible(ids));
   ipcMain.on(CH.openExternal, (_e, url: string) => {
-    if (/^https:\/\//.test(url)) void shell.openExternal(url)
-  })
-  ipcMain.handle(CH.openEditor, (_e, dir: string) => openEditor(dir))
-  ipcMain.on(CH.copy, (_e, text: string) => clipboard.writeText(text))
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
+  });
+  ipcMain.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
+  ipcMain.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
   ipcMain.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
-    if (!isSafeBgId(bgId)) return { ok: false, message: 'bad background id' }
+    if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
     const choice = await dialog.showMessageBox(win!, {
-      type: 'warning',
-      buttons: ['Cancel', 'Stop session'],
+      type: "warning",
+      buttons: ["Cancel", "Stop session"],
       defaultId: 0,
       cancelId: 0,
       message: `Stop ${name}?`,
-      detail: 'The background session ends. Its conversation is kept and can be resumed later.',
-    })
-    if (choice.response !== 1) return { ok: false, message: 'cancelled' }
-    const r = await run(claudeBin, ['stop', bgId], { timeoutMs: 30_000 })
+      detail:
+        "The background session ends. Its conversation is kept and can be resumed later.",
+    });
+    if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    const r = await run(claudeBin, ["stop", bgId], { timeoutMs: 30_000 });
     // Read the session list now: a stopped session leaves the sidebar at once.
-    await sources.refreshAgents()
-    return r.code === 0 ? { ok: true, message: 'stopped' } : { ok: false, message: (r.stderr || r.stdout).trim() }
-  })
-  ipcMain.handle(CH.stopOtherSession, async (_e, pid: unknown, name: string) => {
-    if (typeof pid !== 'number' || !(await isClaudePid(pid))) return { ok: false, message: 'that session is not a running claude process here' }
-    const choice = await dialog.showMessageBox(win!, {
-      type: 'warning',
-      buttons: ['Cancel', 'Stop session'],
-      defaultId: 0,
-      cancelId: 0,
-      message: `Stop ${String(name).slice(0, 80)}?`,
-      detail: 'It runs in another terminal; its claude process is stopped there. The conversation is kept and can be resumed later.',
-    })
-    if (choice.response !== 1) return { ok: false, message: 'cancelled' }
-    await stopPid(pid)
-    await sources.refreshAgents()
-    return (await isClaudePid(pid)) ? { ok: false, message: 'it did not stop; close it in its terminal' } : { ok: true, message: 'stopped' }
-  })
+    await sources.refreshAgents();
+    return r.code === 0
+      ? { ok: true, message: "stopped" }
+      : { ok: false, message: (r.stderr || r.stdout).trim() };
+  });
+  ipcMain.handle(
+    CH.stopOtherSession,
+    async (_e, pid: unknown, name: string) => {
+      if (typeof pid !== "number" || !(await isClaudePid(pid)))
+        return {
+          ok: false,
+          message: "that session is not a running claude process here",
+        };
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Stop session"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Stop ${String(name).slice(0, 80)}?`,
+        detail:
+          "It runs in another terminal; its claude process is stopped there. The conversation is kept and can be resumed later.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+      await stopPid(pid);
+      await sources.refreshAgents();
+      return (await isClaudePid(pid))
+        ? { ok: false, message: "it did not stop; close it in its terminal" }
+        : { ok: true, message: "stopped" };
+    },
+  );
   ipcMain.handle(CH.setManualStatus, (_e, key: unknown, status: unknown) =>
-    typeof key === 'string' && key.length < 200 ? sources.setManualStatus(key, status) : { ok: false, message: 'bad session' },
-  )
-  ipcMain.handle(CH.statuslineInstall, () => installHook())
+    typeof key === "string" && key.length < 200
+      ? sources.setManualStatus(key, status)
+      : { ok: false, message: "bad session" },
+  );
+  ipcMain.handle(CH.statuslineInstall, () => installHook());
   ipcMain.handle(CH.statuslineUninstall, () => {
-    const r = uninstallStatusline(statuslineOpts())
-    sources.statuslineInstalled = isInstalled(paths.claudeSettings, paths.installedTee)
-    return r
-  })
-  ipcMain.handle(CH.masterStart, () => startMaster())
-  ipcMain.handle(CH.ptyOpen, (_e, id: string, spec: PaneSpec, cols: number, rows: number) => ptys.open(id, spec, cols, rows))
-  ipcMain.on(CH.ptyWrite, (_e, id: string, data: string) => ptys.write(id, data))
-  ipcMain.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
-  ipcMain.on(CH.ptyClose, (_e, id: string) => ptys.close(id))
+    const r = uninstallStatusline(statuslineOpts());
+    sources.statuslineInstalled = isInstalled(
+      paths.claudeSettings,
+      paths.installedTee,
+    );
+    return r;
+  });
+  ipcMain.handle(CH.masterStart, () => startMaster());
+  ipcMain.handle(
+    CH.ptyOpen,
+    (_e, id: string, spec: PaneSpec, cols: number, rows: number) =>
+      ptys.open(id, spec, cols, rows),
+  );
+  ipcMain.on(CH.ptyWrite, (_e, id: string, data: string) =>
+    ptys.write(id, data),
+  );
+  ipcMain.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) =>
+    ptys.resize(id, cols, rows),
+  );
+  ipcMain.on(CH.ptyClose, (_e, id: string) => ptys.close(id));
 }
 
 function createWindow(): void {
@@ -651,164 +1111,218 @@ function createWindow(): void {
     minWidth: 1000,
     minHeight: 600,
     show: false,
-    title: 'MasterDeck',
-    backgroundColor: '#0f1117',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    title: "MasterDeck",
+    backgroundColor: "#0f1117",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
-  })
-  win.on('ready-to-show', () => {
-    if (!SMOKE) win?.show()
-  })
+  });
+  win.on("ready-to-show", () => {
+    if (!SMOKE) win?.show();
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//.test(url)) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else void win.loadFile(join(__dirname, '../renderer/index.html'))
-  win.on('closed', () => {
-    win = null
-  })
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  if (process.env.ELECTRON_RENDERER_URL)
+    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
+  else void win.loadFile(join(__dirname, "../renderer/index.html"));
+  win.on("closed", () => {
+    win = null;
+  });
 }
 
 /** What Setup needs to know: which tools are on PATH and who gh is logged in as. */
 /** One tool of Setup's first step. */
-async function setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }> {
+async function setupTool(
+  tool: SetupTool,
+): Promise<{ ok: boolean; detail: string }> {
   const cmd: Record<SetupTool, [string, string[]]> = {
-    claude: [claudeBin, ['--version']],
-    gh: ['gh', ['--version']],
-    python: [paths.python, ['--version']],
-    git: ['git', ['--version']],
-    jq: ['jq', ['--version']],
-  }
-  const c = cmd[tool]
-  if (!c) return { ok: false, detail: 'unknown tool' }
+    claude: [claudeBin, ["--version"]],
+    gh: ["gh", ["--version"]],
+    python: [paths.python, ["--version"]],
+    git: ["git", ["--version"]],
+    jq: ["jq", ["--version"]],
+  };
+  const c = cmd[tool];
+  if (!c) return { ok: false, detail: "unknown tool" };
   // Tests of the install flow: these tools read as missing.
-  if ((process.env.MASTERDECK_SETUP_MISSING ?? '').split(',').includes(tool)) return { ok: false, detail: 'not found (MASTERDECK_SETUP_MISSING)' }
-  const r = await run(c[0], c[1], { timeoutMs: 15_000 })
-  return { ok: r.code === 0, detail: (r.stdout || r.stderr).trim().split('\n')[0].slice(0, 80) }
+  if ((process.env.MASTERDECK_SETUP_MISSING ?? "").split(",").includes(tool))
+    return { ok: false, detail: "not found (MASTERDECK_SETUP_MISSING)" };
+  const r = await run(c[0], c[1], { timeoutMs: 15_000 });
+  return {
+    ok: r.code === 0,
+    detail: (r.stdout || r.stderr).trim().split("\n")[0].slice(0, 80),
+  };
 }
 
-async function ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }> {
-  const r = await run('gh', ['auth', 'status', '--hostname', 'github.com'], { timeoutMs: 20_000 })
-  const accounts = parseGhAccounts(r.stdout + '\n' + r.stderr)
-  return accounts.length ? { accounts } : { accounts, error: (r.stderr || r.stdout).trim().slice(0, 300) || 'gh is not logged in' }
+async function ghAccounts(): Promise<{
+  accounts: GhAccount[];
+  error?: string;
+}> {
+  const r = await run("gh", ["auth", "status", "--hostname", "github.com"], {
+    timeoutMs: 20_000,
+  });
+  const accounts = parseGhAccounts(r.stdout + "\n" + r.stderr);
+  return accounts.length
+    ? { accounts }
+    : {
+        accounts,
+        error:
+          (r.stderr || r.stdout).trim().slice(0, 300) || "gh is not logged in",
+      };
 }
 
 async function setupCheck(): Promise<SetupCheck> {
-  const ok = async (cmd: string, args: string[]) => (await run(cmd, args, { timeoutMs: 15_000 })).code === 0
+  const ok = async (cmd: string, args: string[]) =>
+    (await run(cmd, args, { timeoutMs: 15_000 })).code === 0;
   const [ghOk, py, jq, git, user, status] = await Promise.all([
-    ok('gh', ['--version']),
-    ok(paths.python, ['--version']),
-    ok('jq', ['--version']),
-    ok('git', ['--version']),
-    run('gh', ['api', 'user', '--jq', '.login'], { timeoutMs: 20_000 }),
-    run('gh', ['auth', 'status'], { timeoutMs: 20_000 }),
-  ])
-  const login = user.code === 0 ? user.stdout.trim() : ''
+    ok("gh", ["--version"]),
+    ok(paths.python, ["--version"]),
+    ok("jq", ["--version"]),
+    ok("git", ["--version"]),
+    run("gh", ["api", "user", "--jq", ".login"], { timeoutMs: 20_000 }),
+    run("gh", ["auth", "status"], { timeoutMs: 20_000 }),
+  ]);
+  const login = user.code === 0 ? user.stdout.trim() : "";
   // Several accounts print a block each: the scopes that count are the active account's.
-  const accounts = parseGhAccounts(status.stdout + '\n' + status.stderr)
-  const scopes = (accounts.find((a) => a.active) ?? accounts[0])?.scopes.join(',') ?? ''
-  const claudeOk = await ok(claudeBin, ['--version'])
+  const accounts = parseGhAccounts(status.stdout + "\n" + status.stderr);
+  const scopes =
+    (accounts.find((a) => a.active) ?? accounts[0])?.scopes.join(",") ?? "";
+  const claudeOk = await ok(claudeBin, ["--version"]);
   return {
     claude: claudeOk ? claudeBin : null,
     gh: ghOk,
     ghUser: /^[A-Za-z0-9-]{1,39}$/.test(login) ? login : null,
-    ghScopes: scopes.split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean),
+    ghScopes: scopes
+      .split(",")
+      .map((s) => s.trim().replace(/^'|'$/g, ""))
+      .filter(Boolean),
     python: py,
     jq,
     git,
-  }
+  };
 }
 
 // Windows shows notifications only for an app with this id (the one the installer registers).
-if (process.platform === 'win32') app.setAppUserModelId('io.github.amntoppo.masterdeck')
+if (process.platform === "win32")
+  app.setAppUserModelId("io.github.amntoppo.masterdeck");
 
 app.whenReady().then(async () => {
-  app.setName('MasterDeck')
-  pathEnv = await loginPath()
-  claudeBin = await resolveClaude(env())
-  registerIpc()
-  sources.setLinker(linkSession)
-  sources.statuslineInstalled = isInstalled(paths.claudeSettings, paths.installedTee)
+  app.setName("MasterDeck");
+  pathEnv = await loginPath();
+  claudeBin = await resolveClaude(env());
+  registerIpc();
+  sources.setLinker(linkSession);
+  sources.statuslineInstalled = isInstalled(
+    paths.claudeSettings,
+    paths.installedTee,
+  );
   if (sources.statuslineInstalled) {
     // settings.json points at the installed copy: keep it present and current with this app version.
-    const r = refreshTee(paths.bundledTee, paths.installedTee)
-    if (r) console.error(r)
-  } else if (!SMOKE && process.env.MASTERDECK_NO_HOOK !== '1') {
-    const r = installHook()
-    if (!r.ok) console.error(r.message)
+    const r = refreshTee(paths.bundledTee, paths.installedTee);
+    if (r) console.error(r);
+  } else if (!SMOKE && process.env.MASTERDECK_NO_HOOK !== "1") {
+    const r = installHook();
+    if (!r.ok) console.error(r.message);
   }
   // Bundled skills: install the missing ones, update our own unmodified copies.
-  if (process.env.MASTERDECK_NO_SKILLS !== '1') {
-    const r = syncSkills(paths.bundledSkills, paths.skillsDir, app.getVersion(), readRemoved(skillsFile()))
-    for (const e of r.errors) console.error(e)
-    sources.setSkills(r.skills)
+  if (process.env.MASTERDECK_NO_SKILLS !== "1") {
+    const r = syncSkills(
+      paths.bundledSkills,
+      paths.skillsDir,
+      app.getVersion(),
+      readRemoved(skillsFile()),
+    );
+    for (const e of r.errors) console.error(e);
+    sources.setSkills(r.skills);
   }
-  sources.setHooks(hookStatus(paths.claudeSettings))
+  sources.setHooks(hookStatus(paths.claudeSettings));
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
-  if (process.platform !== 'win32') {
+  if (process.platform !== "win32") {
     try {
-      deckHooks.setup()
+      deckHooks.setup();
       sources.setDeckHooks(deckHooks, (sid) => {
-        const s = summaries.get(sid)
-        return s ? { text: s.text, at: s.at } : null
-      })
-      if (!SMOKE && process.env.MASTERDECK_NO_HOOK !== '1' && !deckHooksInstalled(paths.claudeSettings)) {
-        const r = installDeckHooks(paths.claudeSettings, paths.home, deckHooks.script)
-        if (!r.ok) console.error(r.message)
+        const s = summaries.get(sid);
+        return s ? { text: s.text, at: s.at } : null;
+      });
+      if (
+        !SMOKE &&
+        process.env.MASTERDECK_NO_HOOK !== "1" &&
+        !deckHooksInstalled(paths.claudeSettings)
+      ) {
+        const r = installDeckHooks(
+          paths.claudeSettings,
+          paths.home,
+          deckHooks.script,
+        );
+        if (!r.ok) console.error(r.message);
       }
     } catch (e) {
-      console.error(`MasterDeck hooks: ${String(e)}`)
+      console.error(`MasterDeck hooks: ${String(e)}`);
     }
   }
-  createWindow()
-  sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd))
-  sources.start()
+  createWindow();
+  sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
+  sources.start();
   if (SMOKE) {
     setTimeout(() => {
-      console.log('SMOKE FAIL: no healthy state within 30 s', JSON.stringify(latest?.errors ?? []))
-      app.exit(1)
-    }, 30_000)
+      console.log(
+        "SMOKE FAIL: no healthy state within 30 s",
+        JSON.stringify(latest?.errors ?? []),
+      );
+      app.exit(1);
+    }, 30_000);
   }
   // Dev aid: MASTERDECK_CAPTURE=<png> saves a screenshot of the window (after running
   // MASTERDECK_CAPTURE_JS in the page, if set) and quits.
-  const capture = process.env.MASTERDECK_CAPTURE
+  const capture = process.env.MASTERDECK_CAPTURE;
   if (capture) {
     // Test runs only: the capture script can ask for named screenshots along the way.
-    ipcMain.handle('test:shot', async (_e, name: string) => {
-      const img = await win?.webContents.capturePage()
-      const file = join(dirname(capture), `${String(name).replace(/[^\w.-]/g, '_')}.png`)
-      if (img) writeFileSync(file, img.toPNG())
-      return file
-    })
+    ipcMain.handle("test:shot", async (_e, name: string) => {
+      const img = await win?.webContents.capturePage();
+      const file = join(
+        dirname(capture),
+        `${String(name).replace(/[^\w.-]/g, "_")}.png`,
+      );
+      if (img) writeFileSync(file, img.toPNG());
+      return file;
+    });
     setTimeout(async () => {
-      const js = process.env.MASTERDECK_CAPTURE_JS
-      if (js) console.log('capture js:', await win?.webContents.executeJavaScript(js).catch((e) => `error ${e}`))
-      setTimeout(async () => {
-        const img = await win?.webContents.capturePage()
-        if (img) writeFileSync(capture, img.toPNG())
-        console.log(`captured ${capture}`)
-        app.exit(0)
-      }, Number(process.env.MASTERDECK_CAPTURE_WAIT ?? 4000))
-    }, 8000)
+      const js = process.env.MASTERDECK_CAPTURE_JS;
+      if (js)
+        console.log(
+          "capture js:",
+          await win?.webContents
+            .executeJavaScript(js)
+            .catch((e) => `error ${e}`),
+        );
+      setTimeout(
+        async () => {
+          const img = await win?.webContents.capturePage();
+          if (img) writeFileSync(capture, img.toPNG());
+          console.log(`captured ${capture}`);
+          app.exit(0);
+        },
+        Number(process.env.MASTERDECK_CAPTURE_WAIT ?? 4000),
+      );
+    }, 8000);
   }
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
 
-app.on('window-all-closed', () => app.quit())
+app.on("window-all-closed", () => app.quit());
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
-app.on('will-quit', () => {
-  sender.killAll()
-  ptys.closeAll()
-  sources.stop()
-})
-
+app.on("will-quit", () => {
+  sender.killAll();
+  ptys.closeAll();
+  sources.stop();
+});
