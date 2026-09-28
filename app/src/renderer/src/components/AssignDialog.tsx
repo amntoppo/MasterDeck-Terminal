@@ -283,7 +283,7 @@ export function AssignDialog({
                   className="fsel full"
                   value={workflow}
                   onChange={(e) => setWorkflow(e.target.value)}
-                  title="The session gets its own copy of this workflow; change it later from its Workflow panel"
+                  title="The session gets its own copy of this workflow; change it later from its Details (Workflow → Edit)"
                 >
                   {workflows.map((t) => (
                     <option key={t.id} value={t.id}>

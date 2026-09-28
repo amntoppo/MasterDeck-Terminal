@@ -86,7 +86,7 @@ export function SaveBadge({ state }: { state: SaveState }) {
 /**
  * The Workflow window: the Default (what every new session copies) and the templates, each edited
  * on the canvas; on demand, every hook Claude Code runs. A session's own copy is edited from its
- * Workflow panel (Terminals), with the same editor.
+ * Details (Workflow → Edit), with the same editor.
  */
 export function WorkflowView(_: { state: AppState }) {
   const [data, setData] = useState<Data | null>(null);

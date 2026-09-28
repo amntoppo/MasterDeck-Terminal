@@ -955,7 +955,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .cleanup-bar { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
 .cleanup-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .cleanup-actions .btn { font-size: 12px; padding: 4px 10px; }
-/* Workflow templates (Workflow window) and a session's Workflow panel */
+/* Workflow templates (Workflow window) */
 .wf-templates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .wf-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .wf-seg button { display: inline-flex; align-items: center; gap: 6px; }
