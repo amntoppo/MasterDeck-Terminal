@@ -140,7 +140,8 @@ export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposa
   const assign = mine.find((p) => p.kind === 'ASSIGN' && p.status !== 'rejected')
   // Spawning, or spawned but not yet linked to the issue (babysit-ticket does that while setting up).
   if (assign && (assign.status === 'approved' || (assign.status === 'sent' && !s))) return badge('onboarding')
-  if (s?.state === 'working' && !s.waitingOn) return badge('working')
+  if (s?.state === 'working' && !s.waitingOn && !s.busyWith) return badge('working')
+  if (s?.busyWith && !s.asking) return badge('working', s.busyWith)
   if (s?.asking) return badge('question', s.asking.replace(/\s+/g, ' ').slice(-200))
   const stage = s ? stages[s.key] : undefined
   if (stage) return badge(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)

@@ -53,7 +53,7 @@ import { loadCache, saveCache } from './cache'
 import type { GhRunner } from './ghc'
 import { GitHub } from './github'
 import { mtime, readHead, readNewLines, readTail, TranscriptIndex, type FollowState } from './files'
-import { asksQuestion, describePending, openTasks, stillPending, turnEnded, type PendingTask } from '@shared/activity'
+import { asksQuestion, describePending, isBusyWork, openTasks, stillPending, turnEnded, type PendingTask } from '@shared/activity'
 import { newWorktreeScan, scanWorktreeLines, type SessionWorktree, type WorktreeScan } from '@shared/worktrees'
 import { linkedWorktree } from './worktreeInfo'
 import type { DeckHooks } from './deckHooks'
@@ -1259,8 +1259,10 @@ export class Sources {
       if (s.state === 'working' && !t.ended) return s
       const pending = stillPending(t.tasks, now)
       if (s.state === 'working' && !pending.length) return s
+      const busy = pending.filter(isBusyWork)
+      const wait = pending.filter((x) => !isBusyWork(x))
       const asking = asksQuestion(this.askOf(s.sessionId)?.said ?? null)
-      return pending.length || asking ? { ...s, waitingOn: pending.length ? describePending(pending) : null, asking } : s
+      return pending.length || asking ? { ...s, waitingOn: wait.length ? describePending(wait) : null, busyWith: busy.length ? describePending(busy) : null, asking } : s
     })
   }
 
@@ -1274,7 +1276,7 @@ export class Sources {
       if (s.state === 'done' || s.state === 'suspended') return s
       if (this.hookRequests.some((r) => r.sessionId === s.sessionId)) return s.state === 'needs-input' ? s : { ...s, state: 'needs-input' }
       const n = this.deck!.sessions[s.sessionId]?.notice
-      if (s.state === 'working' && !s.waitingOn && n?.type === 'idle_prompt' && n.at > (this.lastWrite[s.sessionId] ?? 0)) return { ...s, state: 'idle' }
+      if (s.state === 'working' && !s.waitingOn && !s.busyWith && n?.type === 'idle_prompt' && n.at > (this.lastWrite[s.sessionId] ?? 0)) return { ...s, state: 'idle' }
       return s
     })
   }

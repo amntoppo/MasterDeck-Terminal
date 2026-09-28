@@ -189,7 +189,7 @@ function TaskRow({
   else if (menu?.question) now1 = `Asks: ${menu.question.question}`
   else if (status.key === 'needs-input') now1 = ask?.said?.text ? `Asks: ${ask.said.text}` : 'Waiting on a prompt or a permission'
   else if (status.key === 'question' || status.key === 'blocked') now1 = status.why
-  else if (status.key === 'working') now1 = tail?.lastTool ? `Running ${tail.lastTool}` : ''
+  else if (status.key === 'working') now1 = s.busyWith ? `Running in the background: ${s.busyWith}` : tail?.lastTool ? `Running ${tail.lastTool}` : ''
   else if (act.key === 'question' && s.asking) now1 = `Asks: ${s.asking.replace(/\s+/g, ' ').slice(-240)}`
   else if (act.key === 'waiting' && s.waitingOn) now1 = `Waiting on ${s.waitingOn}`
   else if (status.why) now1 = status.why

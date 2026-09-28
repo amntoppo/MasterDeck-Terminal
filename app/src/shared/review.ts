@@ -114,7 +114,7 @@ export function attentionFor(s: Session, proposals: Proposal[]): Proposal | null
  * stands, then idle. Suspended and ended sessions keep those.
  */
 export function sessionStatus(
-  s: Pick<Session, 'state' | 'waitingOn' | 'asking'>,
+  s: Pick<Session, 'state' | 'waitingOn' | 'asking' | 'busyWith'>,
   stage: PrStage | null | undefined,
   attention: Proposal | null,
   manual?: StatusKey | null,
@@ -124,12 +124,14 @@ export function sessionStatus(
   // Set by hand (the status popup): it wins until set back to automatic; a prompt waiting still shows.
   if (manual && manual in STATUS_TEXT && s.state !== 'done') return { ...out(manual, 'set by you'), manual: true }
   // Busy only because of background work it started (turn over, a Monitor live): see waitingOn below.
-  if (s.state === 'working' && !s.waitingOn) return out('working')
+  if (s.state === 'working' && !s.waitingOn && !s.busyWith) return out('working')
   if (s.state === 'suspended' || s.state === 'done') return out(s.state)
   if (attention?.status === 'question') return out('question', attention.note?.trim() || 'it asked master a question')
   if (attention?.status === 'blocked') return out('blocked', attention.note?.trim() || 'it reported a blocker')
   // Idle (or busy only on background work), from here on. Asking the user something in its last message: a question for you.
   if (s.asking) return out('question', oneLine(s.asking))
+  // Its background agents or commands still run: still working.
+  if (s.busyWith) return out('working', s.busyWith)
   if (stage) return out(stage.kind, `PR ${stage.prs.map((n) => `#${n}`).join(', ')}: ${stage.why}`)
   // Waiting on a Monitor, a background command or agent, or a wakeup: not on you.
   if (s.waitingOn) return out('waiting', s.waitingOn)

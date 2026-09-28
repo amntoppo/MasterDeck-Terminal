@@ -101,11 +101,12 @@ export type ActivityKey = 'working' | 'needs-input' | 'question' | 'waiting' | '
  * a prompt, asking you something, waiting on background work it started, or idle (none of those:
  * waiting for your next instruction).
  */
-export function activityOf(s: Pick<Session, 'state' | 'waitingOn' | 'asking'>): { key: ActivityKey; text: string } {
-  if (s.state === 'working' && !s.waitingOn) return { key: 'working', text: 'Working' }
+export function activityOf(s: Pick<Session, 'state' | 'waitingOn' | 'asking' | 'busyWith'>): { key: ActivityKey; text: string } {
+  if (s.state === 'working' && !s.waitingOn && !s.busyWith) return { key: 'working', text: 'Working' }
   if (s.state === 'needs-input') return { key: 'needs-input', text: 'Needs Input' }
   if (s.state === 'suspended' || s.state === 'done') return { key: 'parked', text: s.state === 'done' ? 'Ended' : 'Parked' }
   if (s.asking) return { key: 'question', text: 'Asked you' }
+  if (s.busyWith) return { key: 'working', text: 'Working' }
   if (s.waitingOn) return { key: 'waiting', text: 'Waiting' }
   return { key: 'idle', text: 'Idle' }
 }

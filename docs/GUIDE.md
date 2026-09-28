@@ -157,8 +157,9 @@ checkout whose branch was once linked to a ticket does not link it.
   instructions after its last PR merged; a new PR then shows its own status, and once that is merged
   too the session is Merged again, however many PRs it takes), **Approved**, **Changes Requested**,
   **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
-  then **Waiting** (its turn is over but a Monitor, background command or agent, or scheduled
-  wakeup it started is still running; hover for which); otherwise **Idle**: nothing running, no
+  **Working** also while background agents or background commands it started still run (its turn
+  is over, but the work isn't; hover for which), then **Waiting** (a Monitor or a scheduled wakeup
+  it set up is still pending; hover for which); otherwise **Idle**: nothing running, no
   question, waiting for your next instruction. Ready for Review: the automated review check (e.g. `claude-review`) passed or
   failed, or nothing new was said on the PR for 20 minutes (Settings), and the session is not
   working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a

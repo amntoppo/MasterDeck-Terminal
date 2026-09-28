@@ -55,6 +55,9 @@ export function stillPending(tasks: PendingTask[], now: number): PendingTask[] {
 /** Background work started in these lines that has not reported back or been stopped (time aside). */
 export function openTasks(lines: string[]): PendingTask[] {
   const open = new Map<string, PendingTask>()
+  // Agent calls: async by default (no run_in_background flag); only the result says so
+  // ("Async agent launched successfully … agentId: …"). Held here until the result comes.
+  const maybe = new Map<string, PendingTask>()
   // Background task ids (from tool results and notifications) → the tool_use that started them.
   const byTask = new Map<string, string>()
   const end = (taskId: string | null, toolUseId: string | null) => {
@@ -87,8 +90,20 @@ export function openTasks(lines: string[]): PendingTask[] {
         }
         const t = launched(name, input, str(b.id), at)
         if (t) open.set(t.id, t)
+        else if (name === 'Agent' || name === 'Task')
+          maybe.set(str(b.id), { id: str(b.id), kind: 'agent', label: (str(input.description) || 'a background agent').slice(0, 120), startedAt: at, expiresAt: null })
       } else if (d.type === 'user' && b.type === 'tool_result') {
         const id = str(b.tool_use_id)
+        const pending = maybe.get(id)
+        if (pending) {
+          maybe.delete(id)
+          const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((c) => str(obj(c).text)).join('\n') : ''
+          if (b.is_error === true || !/async agent launched/i.test(text)) continue
+          open.set(id, pending)
+          const agent = /agentId:\s*([A-Za-z0-9_-]{5,})/.exec(text)?.[1]
+          if (agent) byTask.set(agent, id)
+          continue
+        }
         if (!open.has(id)) continue
         if (b.is_error === true) {
           open.delete(id)
@@ -154,3 +169,6 @@ export function turnEnded(lines: string[]): boolean {
   }
   return false
 }
+
+/** Background work that is work (agents, commands): the session counts as working while it runs. */
+export const isBusyWork = (t: PendingTask): boolean => t.kind === 'agent' || t.kind === 'shell'

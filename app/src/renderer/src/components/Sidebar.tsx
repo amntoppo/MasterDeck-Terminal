@@ -499,6 +499,7 @@ function SessionRow({
       <div className="srow-sub">
         <span className={`st-${status?.key ?? s.state}`}>{s.kind === 'interactive' && plain ? 'another terminal' : text}</span>
         {s.startedAt ? <span> · {formatAgo(now - s.startedAt)}</span> : null}
+        {s.busyWith && <span title={s.busyWith}> · {s.busyWith}</span>}
         {s.waitingOn && <span title={s.waitingOn}> · {s.waitingOn}</span>}
       </div>
     </div>

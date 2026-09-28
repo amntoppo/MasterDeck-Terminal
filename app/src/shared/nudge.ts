@@ -19,7 +19,7 @@ export function idleNudges(sessions: Session[], proposals: Proposal[], lastActiv
   for (const s of sessions) {
     if (s.name === MASTER_NAME || s.state === 'done' || s.state === 'suspended' || s.state === 'working') continue
     // Waiting on its own Monitor or background task: quiet on purpose.
-    if (s.state === 'idle' && s.waitingOn) continue
+    if (s.state === 'idle' && (s.waitingOn || s.busyWith)) continue
     const last = lastActivity[s.sessionId]
     if (last === undefined) continue
     const quiet = Math.floor((now - last) / 60_000)

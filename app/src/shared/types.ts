@@ -30,8 +30,10 @@ export interface Session {
   issue: number | null
   /** The issue's repo (owner/name); null: the primary issue repo. */
   issueRepo?: string | null
-  /** Idle but waiting on background work it started (a Monitor, a background command or agent, a wakeup). */
+  /** Idle but waiting on something it set up to wake it (a Monitor, a scheduled wakeup). */
   waitingOn?: string | null
+  /** Its turn is over but background work it started is running (an agent, a command): working. */
+  busyWith?: string | null
   /** Idle and its last message asks the user something. */
   asking?: string | null
 }

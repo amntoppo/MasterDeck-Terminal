@@ -84,3 +84,24 @@ describe('sessionStatus with activity', () => {
     expect(sessionStatus({ state: 'idle', waitingOn: 'monitor: review' }, { kind: 'in-review', prs: [1], why: '' }, null).key).toBe('in-review')
   })
 })
+
+describe('background agents (async by default)', () => {
+  it('counts an Agent call whose result says it launched, until its notification', () => {
+    const lines = [
+      use(0, 'ag1', 'Agent', { description: 'Implement Task 1', prompt: 'p', subagent_type: 'general-purpose' }),
+      result(0, 'ag1', 'Async agent launched successfully. (This tool result is internal metadata.)\nagentId: ab9784b045241c470 (internal ID)'),
+    ]
+    expect(pendingTasks(lines, now(2))).toMatchObject([{ kind: 'agent', label: 'Implement Task 1' }])
+    const done = note(5, '<task-id>ab9784b045241c470</task-id><tool-use-id>ag1</tool-use-id><status>completed</status>')
+    expect(pendingTasks([...lines, done], now(6))).toEqual([])
+  })
+  it('ignores an Agent call that ran in the foreground', () => {
+    const lines = [use(0, 'ag2', 'Agent', { description: 'Explore', prompt: 'p' }), result(1, 'ag2', 'Here is what I found: …')]
+    expect(pendingTasks(lines, now(2))).toEqual([])
+  })
+  it('makes the session Working while agents run, Waiting only for monitors', () => {
+    expect(sessionStatus({ state: 'idle', busyWith: 'background agent: Implement Task 1' }, null, null)).toMatchObject({ key: 'working', why: 'background agent: Implement Task 1' })
+    expect(sessionStatus({ state: 'working', busyWith: 'background agent: x', waitingOn: 'monitor: CI' }, { kind: 'in-review', prs: [1], why: '' }, null).key).toBe('working')
+    expect(sessionStatus({ state: 'idle', waitingOn: 'monitor: CI' }, null, null).key).toBe('waiting')
+  })
+})
