@@ -56,6 +56,8 @@ const api: DeckApi = {
   templates: () => ipcRenderer.invoke(CH.templates),
   saveTemplate: (t) => ipcRenderer.invoke(CH.saveTemplate, t),
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),
+  workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
+  startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
   resumeSession: (id, name, cwd) =>
     ipcRenderer.invoke(CH.resumeSession, id, name, cwd),
   resumeStopped: () => ipcRenderer.invoke(CH.resumeStopped),

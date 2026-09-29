@@ -9,7 +9,7 @@ One window for all your Claude Code sessions, laid out as a command center:
   - **Sessions column:** what needs you, then every session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
     sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
-    side by side; **+ Shell** opens a shell.
+    side by side; **+** opens the new-terminal / new-session menu.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
     ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**
@@ -75,7 +75,17 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 
 ## Shells and manual sessions
 
-**+ Shell** (Sessions header) opens a terminal in the workspace from Setup. If that workspace is a
+**+** (Sessions header) opens a menu:
+- **New terminal** (⌘T): a shell in the workspace from Setup (see below).
+- **New Claude session…**: a background Claude session without a ticket. Pick its **workspace**
+  (the workspace, one of its repos, or any other folder), its **name** (filled in as
+  `<folder>-<n>`), an optional **first message** (without one it starts idle, waiting in its
+  terminal), the **model**, the **workflow** template it starts with, and its **permissions**
+  (as in your settings, plan first, accept edits, auto, or ask for everything). It opens in a tab.
+- **Terminal in a repo ›**: a shell in any repo of the workspace.
+- **Start from an issue…** (⌘K) and **Resume a past session…** (⌘⇧F).
+
+**New terminal** opens a terminal in the workspace from Setup. If that workspace is a
 git checkout on some other branch, it is first put on its default branch (origin's HEAD, else
 main, master or dev): changes on the old branch are stashed, untracked files included, under a
 message naming that branch (`git stash list`; `git stash pop` on that branch brings them back),
@@ -512,7 +522,7 @@ cards is in them.
 | `⇧←` / `⇧→` | Previous / next view: Terminals, Board View, PRs, Tasks |
 | `⇧↑` / `⇧↓` | Previous / next terminal tab (switches to Terminals) |
 | `⌘1`–`⌘9` | Terminal tab 1–9 |
-| `⌘T` | New shell in the workspace (+ Shell) |
+| `⌘T` | New terminal in the workspace (+ menu) |
 | `⌘⇧W` | Close the tab (the session keeps running) |
 | `⌘\` | Split two tabs side by side, or close the split |
 | `⌘K` | Command palette |

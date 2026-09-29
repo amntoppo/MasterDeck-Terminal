@@ -14,7 +14,7 @@ import {
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
   BrowserWindow,
@@ -1058,6 +1058,81 @@ function registerIpc(): void {
   ipcMain.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // The + menu: the workspace and its repos, to open a terminal or a session in.
+  ipcMain.handle(CH.workspaceRepos, () => {
+    const seen = new Set<string>();
+    return [paths.masterWorkspace, ...ops.repos()]
+      .filter((p) => typeof p === "string" && p && existsSync(p))
+      .map((p) => resolve(p))
+      .filter((p) => !seen.has(p) && seen.add(p))
+      .map((p) => ({ name: basename(p), path: p }));
+  });
+  // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
+  ipcMain.handle(CH.startClaude, async (_e, raw: unknown) => {
+    const o = (raw ?? {}) as {
+      name?: unknown;
+      cwd?: unknown;
+      prompt?: unknown;
+      model?: unknown;
+      workflow?: unknown;
+      mode?: unknown;
+    };
+    const mode =
+      typeof o.mode === "string" &&
+      ["plan", "acceptEdits", "auto", "manual"].includes(o.mode)
+        ? o.mode
+        : "";
+    const name = typeof o.name === "string" ? o.name.trim() : "";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
+      return {
+        ok: false,
+        message: "name: letters, digits, dot, dash and underscore",
+      };
+    if (latest?.sessions.some((s) => s.name === name && s.state !== "done"))
+      return {
+        ok: false,
+        message: `a session named ${name} is already running`,
+      };
+    const cwd = typeof o.cwd === "string" ? o.cwd : "";
+    if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory())
+      return { ok: false, message: "pick a folder that exists" };
+    const prompt = typeof o.prompt === "string" ? o.prompt.trim() : "";
+    // A message starting with "-" would read as a flag.
+    if (prompt.startsWith("-"))
+      return { ok: false, message: "the first message can't start with -" };
+    const model =
+      typeof o.model === "string" && /^[\w.[\]-]{1,80}$/.test(o.model)
+        ? o.model
+        : "";
+    if (
+      typeof o.workflow === "string" &&
+      o.workflow &&
+      o.workflow !== DEFAULT_TEMPLATE
+    )
+      workflows().setPending(name, o.workflow);
+    const r = await run(
+      claudeBin,
+      [
+        "--bg",
+        "-n",
+        name,
+        ...(model ? ["--model", model] : []),
+        ...(mode ? ["--permission-mode", mode] : []),
+        ...(prompt ? [prompt] : []),
+      ],
+      {
+        cwd,
+        timeoutMs: 60_000,
+      },
+    );
+    if (r.code !== 0)
+      return {
+        ok: false,
+        message: (r.stderr || r.stdout).trim().slice(0, 300),
+      };
+    void sources.refreshAgents();
+    return { ok: true, message: name };
+  });
   ipcMain.handle(
     CH.resumeSession,
     (_e, id: string, name: string, cwd: string | null) =>

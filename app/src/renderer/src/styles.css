@@ -1148,3 +1148,22 @@ body.resizing .wf-builder-term, body.resizing .react-flow { pointer-events: none
 .fp-monitor { border-left-color: #2dd4bf; }
 .fb-monitor { border-top-color: #2dd4bf; }
 .wf-draft-chip.mon { color: #2dd4bf; }
+/* The + menu in the Sessions column, and the New Claude session dialog */
+.col-btn.new-btn { font-size: 16px; line-height: 1; padding: 3px 10px; font-weight: 600; }
+.col-btn.new-btn.on { border-color: var(--accent); color: var(--text); }
+.new-menu { position: fixed; z-index: 60; min-width: 250px; -webkit-app-region: no-drag; }
+.new-menu button { display: flex; align-items: center; gap: 10px; color: var(--text); }
+.new-menu button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-menu kbd { font: 10.5px var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.new-menu-sec { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 3px; }
+.dialog.new-session { width: min(560px, 94vw); display: flex; flex-direction: column; gap: 6px; }
+.dialog.new-session label { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.dialog.new-session input, .dialog.new-session textarea { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 7px; padding: 7px 9px; font: inherit; font-size: 13px; outline: none; }
+.dialog.new-session textarea { min-height: 90px; resize: vertical; line-height: 1.45; }
+.dialog.new-session input:focus, .dialog.new-session textarea:focus { border-color: var(--accent); }
+.ns-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ns-grid > div { display: flex; flex-direction: column; gap: 4px; }
+.dialog.new-session .form-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.new-sub-wrap { position: relative; }
+.new-caret { border: none !important; font-size: 13px !important; }
+.new-sub { position: absolute; left: calc(100% + 2px); top: -4px; right: auto; min-width: 220px; max-height: min(60vh, 420px); overflow: auto; }

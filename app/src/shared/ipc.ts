@@ -153,6 +153,8 @@ export const CH = {
   saveTemplate: "templates:save",
   deleteTemplate: "templates:delete",
   resumeSession: "session:resume",
+  workspaceRepos: "app:workspaceRepos",
+  startClaude: "session:startClaude",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
   dismissStopped: "session:dismissStopped",
@@ -280,6 +282,17 @@ export interface DeckApi {
   saveTemplate(t: Template): Promise<Template[]>;
   deleteTemplate(name: string): Promise<Template[]>;
   /** Resume an ended session's conversation in the background (history search). */
+  /** The workspace and its repos (the + menu). */
+  workspaceRepos(): Promise<{ name: string; path: string }[]>;
+  /** Start a Claude session without a ticket, in a folder (the + menu). */
+  startClaude(req: {
+    name: string;
+    cwd: string;
+    prompt?: string;
+    model?: string;
+    workflow?: string;
+    mode?: string;
+  }): Promise<CliResult>;
   resumeSession(
     sessionId: string,
     name: string,

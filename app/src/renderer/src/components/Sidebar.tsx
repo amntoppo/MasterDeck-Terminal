@@ -8,6 +8,7 @@ import {
   sessionForProposal,
 } from "@shared/derive";
 import { inOrder, moveBefore, trimOrder, withNew } from "@shared/sessionOrder";
+import { NewMenu, type NewAction } from "./NewMenu";
 import { StatusDialog } from "./StatusDialog";
 import { SessionMenu } from "./SessionMenu";
 import { attentionFor, sessionStatus } from "@shared/review";
@@ -39,6 +40,8 @@ interface Props {
   onOpenSession: (s: Session) => void;
   onIssue: (issue: Issue) => void;
   onNewShell: () => void;
+  /** The + menu (new terminal, Claude session, from an issue, resume). */
+  onNew?: (a: NewAction) => void;
   needsYouRef: React.RefObject<HTMLDivElement | null>;
   /** Open this Needs-you item's popup (a notification was clicked); `at` makes each click count. */
   showItem?: { id: string; at: number } | null;
@@ -86,6 +89,7 @@ export function Sidebar({
   onOpenSession,
   onIssue,
   onNewShell,
+  onNew,
   needsYouRef,
   showItem,
   onStartWith,
@@ -286,13 +290,17 @@ export function Sidebar({
             {split ? "Unsplit" : "Split"}
           </button>
         )}
-        <button
-          className="col-btn"
-          onClick={onNewShell}
-          title="New shell in the workspace  ⌘T"
-        >
-          + Shell
-        </button>
+        {onNew ? (
+          <NewMenu onPick={onNew} />
+        ) : (
+          <button
+            className="col-btn"
+            onClick={onNewShell}
+            title="New shell in the workspace  ⌘T"
+          >
+            +
+          </button>
+        )}
       </div>
       <div className="scroll">
         <div className="section" ref={needsYouRef}>

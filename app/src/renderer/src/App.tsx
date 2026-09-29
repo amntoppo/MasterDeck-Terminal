@@ -36,6 +36,11 @@ import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { TasksView } from "./components/TasksView";
 import { Rail } from "./components/Rail";
+import {
+  NewSessionDialog,
+  type NewAction,
+  type NewSessionReq,
+} from "./components/NewMenu";
 import { Inspector, type InspectorTab } from "./components/Inspector";
 import { SettingsView, type SettingsSection } from "./components/SettingsView";
 import { WorktreesDialog } from "./components/WorktreesDialog";
@@ -59,6 +64,8 @@ type Tab =
       req?: AssignRequest;
       /** Or: a session from another terminal, resumed here. */
       here?: HereOpts;
+      /** Or: a new Claude session without a ticket (the + menu). */
+      claude?: NewSessionReq;
       error?: string;
       proposalId?: number;
     };
@@ -377,6 +384,46 @@ export function App() {
     [activate],
   );
 
+  // The + menu's New Claude session: a "Starting…" tab until the session shows up by name.
+  const startClaude = useCallback(
+    (req: NewSessionReq) => {
+      const id = `pending:${req.name}:${Date.now()}`;
+      setView("terminals");
+      setTabs((cur) => [
+        ...cur,
+        {
+          id,
+          kind: "pending",
+          name: req.name,
+          issue: 0,
+          startedAt: Date.now(),
+          claude: req,
+        },
+      ]);
+      activate(id);
+      void deck()
+        .startClaude(req)
+        .then((r) => {
+          if (!r.ok)
+            setTabs((cur) =>
+              cur.map((t) =>
+                t.id === id && t.kind === "pending"
+                  ? { ...t, error: r.message }
+                  : t,
+              ),
+            );
+        });
+    },
+    [activate],
+  );
+  const [newSession, setNewSession] = useState(false);
+  const onNew = (a: NewAction) => {
+    if (a.kind === "terminal") void openShell(a.cwd);
+    else if (a.kind === "claude") setNewSession(true);
+    else if (a.kind === "issue") setPalette(true);
+    else setHistoryOpen(true);
+  };
+
   const retryStart = useCallback(
     (id: string) => {
       setTabs((cur) =>
@@ -388,6 +435,21 @@ export function App() {
       );
       const t = tabs.find((x) => x.id === id);
       if (t?.kind !== "pending") return;
+      if (t.claude) {
+        void deck()
+          .startClaude(t.claude)
+          .then((r) => {
+            if (!r.ok)
+              setTabs((cur) =>
+                cur.map((x) =>
+                  x.id === id && x.kind === "pending"
+                    ? { ...x, error: r.message }
+                    : x,
+                ),
+              );
+          });
+        return;
+      }
       if (t.here) {
         // The other copy was already stopped (or left running on purpose): don't stop anything again.
         void deck()
@@ -840,6 +902,7 @@ export function App() {
         onOpenSession={openSession}
         onIssue={onIssue}
         onNewShell={() => openShell()}
+        onNew={onNew}
         needsYouRef={needsYouRef}
         showItem={showItem}
         view={view}
@@ -963,7 +1026,7 @@ export function App() {
                 Pick a session or an issue on the left, or open a shell.
               </div>
               <button className="btn" onClick={() => openShell()}>
-                + Shell
+                New terminal
               </button>
             </div>
           )}
@@ -1161,6 +1224,15 @@ export function App() {
             onClose={() => setFindAt(null)}
           />
         </div>
+      )}
+      {newSession && (
+        <NewSessionDialog
+          taken={state.sessions
+            .filter((x) => x.state !== "done")
+            .map((x) => x.name)}
+          onStart={startClaude}
+          onClose={() => setNewSession(false)}
+        />
       )}
       {historyOpen && (
         <HistoryDialog
