@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { cardBadge, cardsIn, NO_STATUS, parseBoard, visibleColumns } from './board'
+import { cardBadge, cardsIn, moveColumn, NO_STATUS, orderColumns, parseBoard, saveColumnOrder, visibleColumns } from './board'
 import type { Board, Proposal, Session } from './types'
 
 const live = JSON.parse(readFileSync(resolve(__dirname, '../../test/fixtures/board.json'), 'utf8'))
@@ -83,5 +83,21 @@ describe('cardBadge', () => {
   })
   it('a session that is done does not count; CHAT proposals are ignored', () => {
     expect(kind([sess({ state: 'done' })], [prop({ kind: 'CHAT', status: 'question' })])).toBe('none')
+  })
+})
+
+describe('column order', () => {
+  it('orders known columns and keeps new ones in place', () => {
+    expect(orderColumns(['A', 'B', 'N', 'C'], ['C', 'A', 'B'])).toEqual(['C', 'A', 'N', 'B'])
+    expect(orderColumns(['A', 'B'], [])).toEqual(['A', 'B'])
+  })
+  it('moves a column', () => {
+    expect(moveColumn(['A', 'B', 'C', 'D'], 'A', 3)).toEqual(['B', 'C', 'D', 'A'])
+    expect(moveColumn(['A', 'B', 'C', 'D'], 'D', 0)).toEqual(['D', 'A', 'B', 'C'])
+    expect(moveColumn(['A', 'B'], 'X', 0)).toEqual(['A', 'B'])
+  })
+  it('saves a new order and keeps hidden columns in their slots', () => {
+    expect(saveColumnOrder(['A', 'H', 'B', 'C'], ['C', 'A', 'B'])).toEqual(['C', 'H', 'A', 'B'])
+    expect(saveColumnOrder([], ['B', 'A'])).toEqual(['B', 'A'])
   })
 })

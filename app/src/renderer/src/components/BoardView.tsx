@@ -8,7 +8,15 @@ import {
 import { nextTabName, ViewTabs } from "./ViewTabs";
 import { fullRepo, ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cardBadge, cardsIn, visibleColumns } from "@shared/board";
+import {
+  cardBadge,
+  cardsIn,
+  moveColumn,
+  orderColumns,
+  saveColumnOrder,
+  visibleColumns,
+} from "@shared/board";
+import { createPortal } from "react-dom";
 import type { PastSession } from "@shared/pastSessions";
 import {
   applyFilters,
@@ -131,6 +139,17 @@ function columnColor(col: string): string {
   return COLUMN_COLOR[col] ?? GROUP_COLOR[statusGroup(col)];
 }
 
+const COL_ORDER_KEY = "boardColumnOrder";
+
+/** A column being moved: where it would land, and where its lifted heading is drawn. */
+interface ColDrag {
+  col: string;
+  to: number;
+  x: number;
+  y: number;
+  w: number;
+}
+
 export function BoardView({
   state,
   onOpenSession,
@@ -164,6 +183,14 @@ export function BoardView({
   );
   useEffect(() => save("ticketPanelW", panelW), [panelW]);
   const [created, setCreated] = useState<string | null>(null);
+  // Column order: long-press a column's heading, then drag it; saved for every tab.
+  const [colOrder, setColOrder] = useState<string[]>(() =>
+    load<string[]>(COL_ORDER_KEY, []),
+  );
+  useEffect(() => save(COL_ORDER_KEY, colOrder), [colOrder]);
+  const [colDrag, setColDrag] = useState<ColDrag | null>(null);
+  const colsEl = useRef<HTMLDivElement>(null);
+  const shownCols = useRef<string[]>([]);
   useEffect(
     () =>
       deck().onTicketsCreated((t) => {
@@ -305,10 +332,109 @@ export function BoardView({
     (s) => !s.completed && inSprint(s.startDate, s.duration, now),
   );
   const columns = shown
-    ? visibleColumns(shown, f.projects).filter(
-        (c) => !f.hiddenColumns.includes(c),
+    ? orderColumns(
+        visibleColumns(shown, f.projects).filter(
+          (c) => !f.hiddenColumns.includes(c),
+        ),
+        colOrder,
       )
     : [];
+  shownCols.current = columns;
+  const laidOut = colDrag ? moveColumn(columns, colDrag.col, colDrag.to) : columns;
+
+  // Long press (350ms, without moving) lifts a column; it then follows the pointer, and the
+  // board scrolls when the pointer nears its left or right edge. Esc puts it back.
+  const pressColumn = (e: React.PointerEvent<HTMLDivElement>, col: string) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    const head = e.currentTarget.getBoundingClientRect();
+    const off = { x: e.clientX - head.left, y: e.clientY - head.top };
+    const start = { x: e.clientX, y: e.clientY };
+    let at = start;
+    let lifted = false;
+    let to = shownCols.current.indexOf(col);
+    let frame = 0;
+    const slot = () => {
+      const box = colsEl.current;
+      const els = box?.querySelectorAll<HTMLElement>(":scope > .board-col");
+      if (!box || !els?.length) return to;
+      const first = els[0].getBoundingClientRect().left;
+      const pitch =
+        els.length > 1
+          ? els[1].getBoundingClientRect().left - first
+          : els[0].offsetWidth;
+      const i = Math.floor((at.x - off.x + head.width / 2 - first) / pitch);
+      return Math.max(0, Math.min(i, shownCols.current.length - 1));
+    };
+    const update = () => {
+      to = slot();
+      setColDrag({ col, to, x: at.x - off.x, y: at.y - off.y, w: head.width });
+    };
+    const scroll = () => {
+      const box = colsEl.current;
+      if (box) {
+        const r = box.getBoundingClientRect();
+        const edge = Math.min(80, r.width / 4);
+        const left = at.x - r.left;
+        const right = r.right - at.x;
+        const step =
+          left < edge
+            ? -Math.ceil(((edge - left) / edge) * 22)
+            : right < edge
+              ? Math.ceil(((edge - right) / edge) * 22)
+              : 0;
+        if (step) {
+          box.scrollLeft += step;
+          update();
+        }
+      }
+      frame = requestAnimationFrame(scroll);
+    };
+    const lift = () => {
+      lifted = true;
+      document.body.classList.add("col-dragging");
+      update();
+      frame = requestAnimationFrame(scroll);
+    };
+    const timer = window.setTimeout(lift, 350);
+    const move = (ev: PointerEvent) => {
+      at = { x: ev.clientX, y: ev.clientY };
+      if (lifted) update();
+      else if (Math.hypot(at.x - start.x, at.y - start.y) > 6) end(false);
+    };
+    const end = (keep: boolean) => {
+      clearTimeout(timer);
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", esc, true);
+      document.body.classList.remove("col-dragging");
+      if (!lifted) return;
+      setColDrag(null);
+      if (keep)
+        setColOrder((o) =>
+          saveColumnOrder(o, moveColumn(shownCols.current, col, to)),
+        );
+      // The release would otherwise count as a click on whatever is under it.
+      const swallow = (ev: MouseEvent) => (
+        ev.stopPropagation(),
+        ev.preventDefault()
+      );
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+    };
+    const up = () => end(true);
+    const cancel = () => end(false);
+    const esc = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.stopPropagation();
+      end(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", esc, true);
+  };
   const boards = b?.projects?.length
     ? b.projects
     : state.config.projects.map((p) => ({
@@ -629,13 +755,13 @@ export function BoardView({
             </button>
           </div>
         ) : (
-          <div className="board-cols">
-            {columns.map((col) => {
+          <div className="board-cols" ref={colsEl}>
+            {laidOut.map((col) => {
               const cards = cardsIn(shown, col);
               return (
                 <div
                   key={col}
-                  className={`board-col ${dragOver === col ? "drop" : ""}`}
+                  className={`board-col ${dragOver === col ? "drop" : ""} ${colDrag?.col === col ? "lifted" : ""}`}
                   onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes("text/masterdeck-card"))
                       return;
@@ -645,7 +771,11 @@ export function BoardView({
                   onDragLeave={() => setDragOver((d) => (d === col ? null : d))}
                   onDrop={(e) => drop(col, e)}
                 >
-                  <div className="board-col-head">
+                  <div
+                    className="board-col-head"
+                    onPointerDown={(e) => pressColumn(e, col)}
+                    title="Hold to move this column"
+                  >
                     <span
                       className="ring"
                       style={{ borderColor: columnColor(col) }}
@@ -702,6 +832,23 @@ export function BoardView({
           </div>
         )}
         {created && <div className="ticket-toast">{created}</div>}
+        {colDrag &&
+          createPortal(
+            <div
+              className="col-ghost"
+              style={{ left: colDrag.x, top: colDrag.y, width: colDrag.w }}
+            >
+              <span
+                className="ring"
+                style={{ borderColor: columnColor(colDrag.col) }}
+              />
+              <strong>{colDrag.col}</strong>
+              <span className="count">
+                {shown ? cardsIn(shown, colDrag.col).length : 0}
+              </span>
+            </div>,
+            document.body,
+          )}
       </section>
       {ticketCtx && (
         <NewTicketDialog

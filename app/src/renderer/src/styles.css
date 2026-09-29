@@ -1199,3 +1199,10 @@ body.resizing .ticket-panel { pointer-events: none; }
 /* Leave room for the floating Master button at the top right. */
 .ticket-panel .wf-builder-head { padding-right: 130px; }
 .app.master-off .ticket-panel .wf-builder-head { padding-right: 12px; }
+.board-col-head { cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+.board-col-head .col-add { cursor: pointer; }
+.board-col.lifted { opacity: 0.35; border-style: dashed; border-color: var(--accent); }
+.col-ghost { position: fixed; z-index: 1000; pointer-events: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 13px; background: var(--bg-2); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.35); transform: rotate(-1.5deg); }
+.col-ghost .ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); flex: none; }
+.col-ghost .count { background: var(--bg-3); border-radius: 9px; padding: 0 7px; font-size: 11px; color: var(--muted); }
+body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-select: none !important; }

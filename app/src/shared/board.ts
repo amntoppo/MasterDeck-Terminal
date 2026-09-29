@@ -151,3 +151,32 @@ export function cardBadge(issue: Ticket, sessions: Session[], proposals: Proposa
   if (past.length) return badge('stopped', `${past[0].name}: stopped, can be resumed`)
   return badge('none')
 }
+
+/**
+ * Columns in the user's saved order. Columns the order names are placed, in that order, into the
+ * slots they already fill; columns it doesn't name (new ones) keep their place.
+ */
+export function orderColumns(cols: string[], order: string[]): string[] {
+  const rank = new Map(order.map((c, i) => [c, i]))
+  const known = cols.filter((c) => rank.has(c)).sort((a, b) => rank.get(a)! - rank.get(b)!)
+  let k = 0
+  return cols.map((c) => (rank.has(c) ? known[k++] : c))
+}
+
+/** `cols` (the shown order) with `col` moved to index `to`. */
+export function moveColumn(cols: string[], col: string, to: number): string[] {
+  const rest = cols.filter((c) => c !== col)
+  if (rest.length === cols.length) return cols
+  const i = Math.max(0, Math.min(to, rest.length))
+  return [...rest.slice(0, i), col, ...rest.slice(i)]
+}
+
+/**
+ * The saved order after the shown columns were rearranged to `shown`: columns not on screen
+ * (hidden, or empty in this sprint) keep their slots, the shown ones fill theirs in the new order.
+ */
+export function saveColumnOrder(order: string[], shown: string[]): string[] {
+  const all = [...order, ...shown.filter((c) => !order.includes(c))]
+  let k = 0
+  return all.map((c) => (shown.includes(c) ? shown[k++] : c))
+}
