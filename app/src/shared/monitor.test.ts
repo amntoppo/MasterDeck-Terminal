@@ -88,7 +88,9 @@ describe("monitors", () => {
     expect(m.id).toBe("pr-ci");
     expect(m.path).toBe(join(home, "workflows", "monitors", "pr-ci.sh"));
     expect(readFileSync(m.path, "utf8")).toBe("echo event\n");
-    expect(statSync(m.path).mode & 0o111).toBeTruthy();
+    // Windows has no executable bit (the script is run with bash either way).
+    if (process.platform !== "win32")
+      expect(statSync(m.path).mode & 0o111).toBeTruthy();
     expect(w.deleteMonitor("pr-ci")).toBe(true);
     expect(w.monitors()).toEqual([]);
   });
