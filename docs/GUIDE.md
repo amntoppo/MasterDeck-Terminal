@@ -122,6 +122,7 @@ checkout whose branch was once linked to a ticket does not link it.
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
     change it. Select a block or an arrow and its settings open in a card over the canvas (click
     the canvas or × to close it); Delete removes the selection. **Tidy up** lines the blocks up.
+  - Drag the palette's right edge to make it wider or narrower (remembered; double-click resets).
   - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
     count in the toolbar; click the count to step through them.
   Changes save by themselves. **All hooks** lists every hook Claude Code runs (your settings, your

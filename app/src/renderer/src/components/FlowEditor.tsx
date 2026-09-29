@@ -27,6 +27,7 @@ import {
   type NodeProps,
   type EdgeChange,
 } from "@xyflow/react";
+import { load as loadPref, save as savePref } from "../deck";
 import "@xyflow/react/dist/style.css";
 import {
   BUILTINS,
@@ -85,6 +86,9 @@ type Drop =
   | { kind: "skill"; skill: string }
   | { kind: "instruction" }
   | { kind: "notify" };
+
+/** The palette's default width (px). */
+const PAL_W = 176;
 
 const DRAG_TYPE = "application/x-masterdeck-block";
 
@@ -502,9 +506,48 @@ function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
   const selEdge =
     sel?.type === "edge" ? flow.edges.find((e) => e.id === sel.id) : undefined;
   const dark = useDark();
+  // The palette's width, dragged at its right edge (remembered; double-click resets).
+  const [palW, setPalW] = useState<number>(() =>
+    loadPref<number>("flowPalW", PAL_W),
+  );
+  useEffect(() => savePref("flowPalW", palW), [palW]);
+  const edRef = useRef<HTMLDivElement>(null);
+  const dragPal = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const left = edRef.current?.getBoundingClientRect().left ?? 0;
+    const move = (ev: MouseEvent) =>
+      setPalW(Math.round(Math.min(Math.max(ev.clientX - left, 140), 420)));
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.classList.remove("resizing");
+    };
+    document.body.classList.add("resizing");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   return (
-    <div className={`flow-ed ${readOnly ? "ro" : ""}`}>
+    <div
+      ref={edRef}
+      className={`flow-ed ${readOnly ? "ro" : ""}`}
+      style={
+        readOnly
+          ? undefined
+          : ({ "--pal-w": `${palW}px` } as React.CSSProperties)
+      }
+    >
+      {!readOnly && (
+        <div
+          className="fp-resize"
+          style={{ left: palW - 3 }}
+          onMouseDown={dragPal}
+          onDoubleClick={() => setPalW(PAL_W)}
+          title="Drag to resize the blocks list · double-click to reset"
+          role="separator"
+          aria-orientation="vertical"
+        />
+      )}
       {!readOnly && (
         <Palette flow={flow} skills={skills} onAdd={(d) => add(d)} />
       )}
