@@ -13,6 +13,11 @@
 #   tt.sh sync [--quiet]        check recorded PRs; merged -> Dev Done
 #   tt.sh unlink                forget this session's link
 #   tt.sh hook                  PostToolUse/SessionStart handler (reads hook JSON on stdin)
+#   tt.sh create --title T [--repo owner/name] [--body-file F] [--project owner/N] [--status S]
+#                [--assignee a,b] [--label L]... [--milestone M] [--sprint <title|@current>]
+#                [--sprint-field Sprint] [--dry-run]
+#                               open an issue, put it on the board with that status (and sprint);
+#                               prints {"ok","url","number","project","status","sprint"} as JSON
 #
 # State: ~/.claude/babysit-ticket/state.json. Nothing here ever closes an issue directly —
 # but a PR linked under Development closes it on merge (GitHub offers no non-closing PR
@@ -361,6 +366,87 @@ cmd_hook() {
   emit PostToolUse "${res:-$(label "$n"): merge not confirmed yet (auto-merge?) — run sync later}"
 }
 
+# create: a new issue, added to a board with its status and sprint. MasterDeck's New ticket
+# dialog and its board session both use it. --dry-run checks everything and prints the plan.
+cmd_create() {
+  local repo="" title="" body="" status="" project="" assignee="" milestone="" sprint="" sfield="Sprint" dry="" l
+  local labels=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) repo="${2:-}"; shift 2 ;;
+      --title) title="${2:-}"; shift 2 ;;
+      --body-file) body="${2:-}"; shift 2 ;;
+      --status) status="${2:-}"; shift 2 ;;
+      --project) project="${2:-}"; shift 2 ;;
+      --assignee) assignee="${2:-}"; shift 2 ;;
+      --label) labels+=("${2:-}"); shift 2 ;;
+      --milestone) milestone="${2:-}"; shift 2 ;;
+      --sprint) sprint="${2:-}"; shift 2 ;;
+      --sprint-field) sfield="${2:-}"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      *) die "create: unknown option $1" ;;
+    esac
+  done
+  [ -n "$repo" ] || repo="$PRIMARY"
+  [[ "$repo" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || die "create: bad --repo '$repo' (owner/name)"
+  [ -n "${title//[[:space:]]/}" ] || die "create: --title is required"
+  [ -z "$body" ] || [ -f "$body" ] || die "create: no such body file $body"
+  [[ "$sfield" =~ ^[^\"]+$ ]] || die "create: bad --sprint-field"
+  [ -n "$project" ] || project="$(jq -r '.[0].key // empty' <<<"$PROJECTS_JSON")"
+  if [ -n "$project" ]; then
+    jq -e --arg k "$project" 'any(.[]; .key == $k)' <<<"$PROJECTS_JSON" >/dev/null || die "create: $project is not a configured board"
+    use_project "$project" || die "create: could not read board $project"
+  fi
+  local opt=""
+  if [ -n "$status" ]; then
+    [ -n "$project" ] || die "create: no board to set the status on"
+    opt="$(option_id "$status")" || opt=""
+    [ -n "$opt" ] || die "create: unknown status '$status' on board $project"
+  fi
+  local args=(issue create -R "$repo" --title "$title")
+  if [ -n "$body" ]; then args+=(--body-file "$body"); else args+=(--body ""); fi
+  [ -n "$assignee" ] && args+=(--assignee "$assignee")
+  for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done
+  [ -n "$milestone" ] && args+=(--milestone "$milestone")
+  if [ -n "$dry" ]; then
+    jq -n --arg repo "$repo" --arg title "$title" --arg project "$project" --arg status "$status" \
+      --arg assignee "$assignee" --arg milestone "$milestone" --arg sprint "$sprint" \
+      --argjson labels "$(printf '%s\n' ${labels[@]+"${labels[@]}"} | jq -R . | jq -sc 'map(select(. != ""))')" \
+      '{ok: true, dryRun: true, repo: $repo, title: $title, project: $project, status: $status,
+        assignee: $assignee, labels: $labels, milestone: $milestone, sprint: $sprint}'
+    return 0
+  fi
+  local out url num item="" moved="" sp="" q fid it
+  out="$(command gh "${args[@]}" 2>&1)" || die "create: gh issue create failed: $(tail -1 <<<"$out")"
+  url="$(grep -Eo 'https://github.com/[^ ]+/issues/[0-9]+' <<<"$out" | tail -1)"
+  [ -n "$url" ] || die "create: no issue URL in gh's answer: $(tail -1 <<<"$out")"
+  num="${url##*/}"
+  if [ -n "$project" ]; then
+    item="$(command gh project item-add "${project#*/}" --owner "${project%/*}" --url "$url" --format json 2>/dev/null | jq -r '.id // empty')"
+    if [ -z "$item" ]; then
+      jq -n --arg url "$url" --argjson n "$num" --arg project "$project" \
+        '{ok: false, url: $url, number: $n, project: $project, error: "the issue was created but could not be added to the board"}'
+      return 1
+    fi
+    if [ -n "$opt" ] && command gh project item-edit --project-id "$PROJECT_ID" --id "$item" \
+        --field-id "$STATUS_FIELD_ID" --single-select-option-id "$opt" >/dev/null 2>&1; then moved="$status"; fi
+    if [ -n "$sprint" ]; then
+      q="$(command gh api graphql -f query='query{node(id:"'"$PROJECT_ID"'"){... on ProjectV2{field(name:"'"$sfield"'"){... on ProjectV2IterationField{id configuration{iterations{id title startDate duration}}}}}}}' 2>/dev/null)"
+      fid="$(jq -r '.data.node.field.id // empty' <<<"$q")"
+      if [ "$sprint" = "@current" ]; then
+        it="$(jq -r '[.data.node.field.configuration.iterations[]? | select((.startDate | strptime("%Y-%m-%d") | mktime) <= now
+               and ((.startDate | strptime("%Y-%m-%d") | mktime) + .duration * 86400) > now)][0].id // empty' <<<"$q")"
+      else
+        it="$(jq -r --arg t "$sprint" '[.data.node.field.configuration.iterations[]? | select(.title == $t)][0].id // empty' <<<"$q")"
+      fi
+      if [ -n "$fid" ] && [ -n "$it" ] && command gh project item-edit --project-id "$PROJECT_ID" --id "$item" \
+          --field-id "$fid" --iteration-id "$it" >/dev/null 2>&1; then sp="$sprint"; fi
+    fi
+  fi
+  jq -n --arg url "$url" --argjson n "$num" --arg project "$project" --arg status "$moved" --arg sprint "$sp" \
+    '{ok: true, url: $url, number: $n, project: $project, status: $status, sprint: $sprint}'
+}
+
 sub="${1:-show}"; shift || true
 if [ "${CFG_CONFIGURED:-0}" != 1 ]; then
   # Not set up yet: hooks stay silent, commands say how to fix it.
@@ -378,5 +464,6 @@ case "$sub" in
   sync) cmd_sync "$([ "${1:-}" = "--quiet" ] && echo quiet)" ;;
   unlink) cmd_unlink ;;
   hook) cmd_hook || true; exit 0 ;;   # a hook must never fail the tool call
-  *) die "unknown command '$sub' (candidates|hints|link|branch|show|set|pr|sync|unlink|hook)" ;;
+  create) cmd_create "$@" ;;
+  *) die "unknown command '$sub' (candidates|hints|link|branch|show|set|pr|sync|unlink|hook|create)" ;;
 esac

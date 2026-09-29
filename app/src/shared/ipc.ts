@@ -19,6 +19,22 @@ import type { FlowProgress } from "./flowTrack";
 import type { DraftCheck, DraftMonitor, DraftSkill } from "./flowBuilder";
 
 /** A workflow the builder session wrote, as MasterDeck read and checked it. */
+/** A ticket to create from the Board. */
+export interface NewTicket {
+  repo: string;
+  title: string;
+  body: string;
+  /** The board (owner/number) and the status (column) it goes in. */
+  project: string;
+  status: string;
+  assignees: string[];
+  labels: string[];
+  milestone: string;
+  /** A sprint title, "@current", or "" for none; `sprintField` is the board's iteration field. */
+  sprint: string;
+  sprintField: string;
+}
+
 export interface WorkflowDraft {
   name: string | null;
   flow: Flow;
@@ -154,6 +170,10 @@ export const CH = {
   deleteTemplate: "templates:delete",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
+  ticketCreate: "ticket:create",
+  ticketBuilderPrepare: "ticket:builderPrepare",
+  ticketsCreated: "ticket:created",
+  ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
@@ -282,6 +302,22 @@ export interface DeckApi {
   saveTemplate(t: Template): Promise<Template[]>;
   deleteTemplate(name: string): Promise<Template[]>;
   /** Resume an ended session's conversation in the background (history search). */
+  /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */
+  ticketCreate(
+    req: NewTicket & { dryRun?: boolean },
+  ): Promise<CliResult & { url?: string; number?: number }>;
+  /** Set up the Board's ticket session: its briefing and where the + was clicked. */
+  ticketBuilderPrepare(
+    ctx: unknown,
+  ): Promise<CliResult & { canContinue: boolean }>;
+  /** Tickets the Board's session created. */
+  onTicketsCreated(
+    cb: (t: { url: string; number: number }[]) => void,
+  ): () => void;
+  /** Labels, open milestones and assignable people of a repo. */
+  ticketRepoMeta(
+    repo: string,
+  ): Promise<{ labels: string[]; milestones: string[]; assignees: string[] }>;
   /** The workspace and its repos (the + menu). */
   workspaceRepos(): Promise<{ name: string; path: string }[]>;
   /** Start a Claude session without a ticket, in a folder (the + menu). */

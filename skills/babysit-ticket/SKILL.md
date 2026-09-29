@@ -105,3 +105,11 @@ in it if it should be.
   **all** of them are merged.
 - `tt hints` ignores plain `#34` in a code repo's commits, because that's the repo's own issue,
   not a board ticket; `<repo>#34` naming a selected repo counts.
+
+## Creating a ticket
+
+`tt.sh create --title "<title>" [--repo owner/name] [--body-file F] [--project owner/N] [--status "<column>"]
+[--assignee a,b] [--label L]... [--milestone M] [--sprint "<title>|@current"] [--sprint-field Sprint] [--dry-run]`
+opens an issue and puts it on the board with that status (and sprint); it prints JSON (`ok`, `url`,
+`number`, `status`, `sprint`). `--dry-run` checks everything and creates nothing. MasterDeck's New ticket
+dialog and its Board session use it.

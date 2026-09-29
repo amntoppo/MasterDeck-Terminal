@@ -31,6 +31,8 @@ export class PtyManager {
     private installerDir: () => string = () => homedir(),
     /** The workflow builder's folder (its CLAUDE.md and drafts). */
     private builderDir: () => string = () => homedir(),
+    /** The Board's ticket session's folder. */
+    private ticketDir: () => string = () => homedir(),
   ) {}
 
   open(id: string, spec: PaneSpec, cols: number, rows: number): PtyOpenResult {
@@ -83,6 +85,10 @@ export class PtyManager {
     }
     if (spec.kind === "builder") {
       cmd.cwd = this.builderDir();
+      mkdirSync(cmd.cwd, { recursive: true });
+    }
+    if (spec.kind === "ticket-builder") {
+      cmd.cwd = this.ticketDir();
       mkdirSync(cmd.cwd, { recursive: true });
     }
     const pane: Pane = { proc: null, buffer: "", seq: 0, exited: false };

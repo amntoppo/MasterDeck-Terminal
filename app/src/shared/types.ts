@@ -385,4 +385,6 @@ export type PaneSpec =
   /** Onboarding: a Claude session that installs the missing tools (ids from shared/install.ts). */
   | { kind: "installer"; tools: string[] }
   /** The workflow builder (Workflow window): a Claude session in its own folder; `resume` continues its last chat. */
-  | { kind: "builder"; resume: boolean };
+  | { kind: "builder"; resume: boolean }
+  /** The Board's ticket session (Create with Claude); `prompt`: its first message, if any. */
+  | { kind: "ticket-builder"; resume: boolean; prompt?: string };

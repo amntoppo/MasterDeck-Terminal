@@ -391,6 +391,22 @@ creation.
 
 ## Board extras
 
+- **New ticket (+ on a column):** each column's header has a **+**. It opens a dialog for an issue
+  that lands in that column: title, description (Markdown), repository, status, board (with
+  several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
+  column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
+  the Board shows. **Create ticket** runs babysit-ticket's `tt.sh create`: the issue, added to the
+  board with its status and sprint.
+- **Create with Claude:** from that dialog, a Claude session opens on the right of the Board (only
+  there; it keeps running while you look at another view, and its edge drags to resize). It knows
+  the boards, columns, sprints, repos and people, and where the + was clicked (its folder,
+  `~/.claude/masterdeck/ticket-builder/`, has `CLAUDE.md` and `context.json`). Ask for a ticket, or
+  several ("split this into tickets"); it writes them and creates them on the board with
+  `./create-ticket.sh` (the one command it may run without asking), and the Board refreshes with a
+  note of what it created. What you typed in the dialog is handed over as a draft it shows you
+  before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
+  command). **New chat** starts over.
+
 - **Drag cards** between columns. The status moves through babysit-ticket (`tt.sh set --force`,
   against a temporary state folder, so no real session is touched). Moving backwards asks first; a
   failure puts the card back.

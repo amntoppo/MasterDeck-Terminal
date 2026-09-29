@@ -1167,3 +1167,35 @@ body.resizing .wf-builder-term, body.resizing .react-flow { pointer-events: none
 .new-sub-wrap { position: relative; }
 .new-caret { border: none !important; font-size: 13px !important; }
 .new-sub { position: absolute; left: calc(100% + 2px); top: -4px; right: auto; min-width: 220px; max-height: min(60vh, 420px); overflow: auto; }
+/* Board: + per column, New ticket dialog, and the Tickets with Claude panel */
+.col-add { border: 1px solid transparent; background: none; color: var(--muted); border-radius: 6px; width: 22px; height: 22px; font-size: 15px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.col-add:hover { color: var(--text); border-color: var(--line-2); background: var(--bg-3); }
+.dialog.new-ticket { width: min(640px, 94vw); display: flex; flex-direction: column; gap: 6px; max-height: 90vh; overflow: auto; }
+.dialog.new-ticket h3 { display: flex; align-items: baseline; gap: 8px; }
+.dialog.new-ticket label { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.dialog.new-ticket input, .dialog.new-ticket textarea { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 7px; padding: 7px 9px; font: inherit; font-size: 13px; outline: none; }
+.dialog.new-ticket textarea { min-height: 140px; resize: vertical; line-height: 1.45; }
+.dialog.new-ticket input:focus, .dialog.new-ticket textarea:focus { border-color: var(--accent); }
+.dialog.new-ticket .ns-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.nt-buttons { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.nt-claude { display: inline-flex; align-items: center; gap: 6px; color: #d97757; border-color: color-mix(in srgb, #d97757 45%, transparent); }
+.nt-claude:hover { background: color-mix(in srgb, #d97757 12%, transparent); }
+.claude-mark { color: #d97757; flex: none; }
+.nt-done { display: flex; flex-direction: column; gap: 8px; }
+.mp { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; border: 1px solid var(--line-2); border-radius: 7px; padding: 4px; background: var(--bg); min-height: 34px; }
+.mp-chip { display: inline-flex; align-items: center; gap: 3px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 12px; padding: 1px 4px 1px 9px; font-size: 12px; }
+.mp-chip button { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 3px; }
+.mp-chip button:hover { color: var(--red); }
+.mp-add { border: none; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 3px; outline: none; flex: 1; min-width: 120px; }
+.ticket-panel { position: absolute; top: 0; bottom: 0; right: var(--right-w, 0px); z-index: 21; display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line); }
+.ticket-panel .wf-builder-head { height: 48px; box-sizing: border-box; -webkit-app-region: drag; }
+.ticket-panel .wf-builder-head > * { -webkit-app-region: no-drag; }
+.ticket-panel .wf-builder-head b { display: inline-flex; align-items: center; gap: 6px; }
+.ticket-split { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 22; cursor: col-resize; }
+.ticket-split::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: var(--line); }
+.ticket-split:hover::after, body.resizing .ticket-split::after { background: var(--accent); }
+body.resizing .ticket-panel { pointer-events: none; }
+.ticket-toast { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-3); border: 1px solid var(--green); color: var(--text); padding: 7px 14px; border-radius: 9px; font-size: 13px; z-index: 5; }
+/* Leave room for the floating Master button at the top right. */
+.ticket-panel .wf-builder-head { padding-right: 130px; }
+.app.master-off .ticket-panel .wf-builder-head { padding-right: 12px; }

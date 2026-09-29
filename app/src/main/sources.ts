@@ -52,6 +52,7 @@ import {
   type PrScanState,
 } from "@shared/prscan";
 import { BUILDER_NAME } from "@shared/flowBuilder";
+import { TICKET_BUILDER_NAME } from "@shared/ticketBuilder";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -1823,6 +1824,9 @@ export class Sources {
             this.rawSessions.filter(
               (s) =>
                 s.name !== BUILDER_NAME &&
+                s.name !== TICKET_BUILDER_NAME &&
+                resolve(s.cwd || "/") !==
+                  resolve(join(this.paths.home, "ticket-builder")) &&
                 resolve(s.cwd || "/") !==
                   resolve(join(this.paths.home, "workflow-builder")),
             ),

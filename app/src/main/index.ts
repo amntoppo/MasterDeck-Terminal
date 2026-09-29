@@ -10,10 +10,12 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  mkdtempSync,
+  chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -89,6 +91,8 @@ import {
   setMonitors,
   type MonitorDef,
 } from "@shared/flow";
+import { ticketContext } from "@shared/ticketBuilder";
+import { shellQuote } from "@shared/workflow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
 import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
 import {
@@ -146,6 +150,7 @@ const ptys = new PtyManager(
   () => claudeBin,
   () => join(paths.home, "installer"),
   () => builderDir(),
+  () => ticketDir(),
 );
 
 function notify(events: NotifyEvent[]): void {
@@ -592,6 +597,50 @@ async function resumeBg(
     ? { ok: true, message: name }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
 }
+
+/** The Board's ticket session works here: its CLAUDE.md, context.json, create-ticket.sh, created.jsonl. */
+const ticketDir = () => join(paths.home, "ticket-builder");
+let ticketsSeen = -1;
+/** Tickets the Board's session created (created.jsonl grew): refresh the board, and tell the page. */
+function readCreatedTickets(): void {
+  let lines: string[] = [];
+  try {
+    lines = readFileSync(join(ticketDir(), "created.jsonl"), "utf8")
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    if (ticketsSeen < 0) ticketsSeen = 0;
+    return;
+  }
+  // At launch: the ones already there are old news.
+  if (ticketsSeen < 0) ticketsSeen = lines.length;
+  if (lines.length <= ticketsSeen) return;
+  const fresh = lines.slice(ticketsSeen);
+  ticketsSeen = lines.length;
+  const made = fresh.flatMap((l) => {
+    try {
+      const o = JSON.parse(l) as {
+        ok?: boolean;
+        url?: string;
+        number?: number;
+      };
+      return o.ok && o.url ? [{ url: o.url, number: o.number ?? 0 }] : [];
+    } catch {
+      return [];
+    }
+  });
+  if (!made.length) return;
+  void sources.refreshGithub(true);
+  win?.webContents.send(CH.ticketsCreated, made);
+}
+
+const repoMetaCache = new Map<
+  string,
+  {
+    at: number;
+    meta: { labels: string[]; milestones: string[]; assignees: string[] };
+  }
+>();
 
 /** The Workflow window's builder session works here: its CLAUDE.md, current.json, drafts. */
 const builderDir = () => join(paths.home, "workflow-builder");
@@ -1058,6 +1107,214 @@ function registerIpc(): void {
   ipcMain.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // New ticket (Board): an issue created, put on the board with its status and sprint, by
+  // babysit-ticket's `tt.sh create` (the Board's Claude session uses the same command).
+  ipcMain.handle(CH.ticketCreate, async (_e, raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const str = (v: unknown, n: number) =>
+      typeof v === "string" ? v.slice(0, n) : "";
+    const list = (v: unknown) =>
+      Array.isArray(v)
+        ? v
+            .filter((x): x is string => typeof x === "string" && !!x.trim())
+            .slice(0, 20)
+        : [];
+    const title = str(o.title, 256).trim();
+    if (!title) return { ok: false, message: "give it a title" };
+    if (!existsSync(paths.babysitTt))
+      return {
+        ok: false,
+        message: `babysit-ticket not found at ${paths.babysitTt}`,
+      };
+    const dir = mkdtempSync(join(tmpdir(), "masterdeck-ticket-"));
+    try {
+      const bodyFile = join(dir, "body.md");
+      writeFileSync(bodyFile, str(o.body, 60_000));
+      const args = [
+        paths.babysitTt,
+        "create",
+        "--title",
+        title,
+        "--body-file",
+        bodyFile,
+      ];
+      const add = (flag: string, v: string) => v && args.push(flag, v);
+      add("--repo", str(o.repo, 140));
+      add("--project", str(o.project, 140));
+      add("--status", str(o.status, 100));
+      add("--assignee", list(o.assignees).join(","));
+      for (const l of list(o.labels)) args.push("--label", l);
+      add("--milestone", str(o.milestone, 200));
+      add("--sprint", str(o.sprint, 200));
+      add("--sprint-field", str(o.sprintField, 100));
+      if (o.dryRun === true) args.push("--dry-run");
+      const r = await run("bash", args, { cwd: dir, timeoutMs: 90_000 });
+      let res: {
+        ok?: boolean;
+        url?: string;
+        number?: number;
+        error?: string;
+        status?: string;
+        sprint?: string;
+      } = {};
+      // tt.sh prints one JSON object (after anything gh said).
+      try {
+        res = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+      } catch {
+        /* no JSON: an error on stderr */
+      }
+      if (r.code !== 0 || !res.ok)
+        return {
+          ok: false,
+          message: res.error
+            ? `${res.error}${res.url ? `: ${res.url}` : ""}`
+            : (r.stderr || r.stdout)
+                .trim()
+                .split("\n")
+                .pop()
+                ?.replace(/^babysit-ticket: /, "") ||
+              "could not create the issue",
+          url: res.url,
+        };
+      if (o.dryRun !== true) void sources.refreshGithub(true);
+      const extra = [
+        res.status ? `in ${res.status}` : "",
+        res.sprint
+          ? `sprint ${res.sprint === "@current" ? "(current)" : res.sprint}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return {
+        ok: true,
+        message:
+          o.dryRun === true
+            ? "checked (dry run)"
+            : `created #${res.number}${extra ? ` ${extra}` : ""}`,
+        url: res.url,
+        number: res.number,
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  // Create with Claude (Board): the ticket session's folder gets the boards, the people, where
+  // the + was clicked, and a create command it may run without asking.
+  ipcMain.handle(CH.ticketBuilderPrepare, (_e, ctx: unknown) => {
+    const cfg = latest?.config;
+    if (!cfg)
+      return {
+        ok: false,
+        message: "the board is not loaded yet",
+        canContinue: false,
+      };
+    const dir = ticketDir();
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    const script = join(dir, "create-ticket.sh");
+    const log = join(dir, "created.jsonl");
+    writeFileSync(
+      script,
+      [
+        "#!/usr/bin/env bash",
+        "# Written by MasterDeck: create one ticket on the board (babysit-ticket's tt.sh create) and log it.",
+        `out="$(bash ${shellQuote(paths.babysitTt)} create "$@")"; code=$?`,
+        `printf '%s\\n' "$out"`,
+        `case " $* " in *" --dry-run "*) ;; *) [ $code -eq 0 ] && printf '%s' "$out" | jq -c . >> ${shellQuote(log)} 2>/dev/null ;; esac`,
+        "exit $code",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(script, 0o755);
+    // The Bash it may run unasked: the create command, and reading GitHub.
+    writeFileSync(
+      join(dir, ".claude", "settings.json"),
+      JSON.stringify(
+        {
+          permissions: {
+            allow: [
+              "Bash(./create-ticket.sh:*)",
+              `Bash(${script}:*)`,
+              "Bash(gh issue view:*)",
+              "Bash(gh issue list:*)",
+              "Bash(gh label list:*)",
+              "Bash(gh search issues:*)",
+            ],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    const people = [
+      ...new Set([
+        ...(latest?.me ? [latest.me] : []),
+        ...(latest?.board?.cards.flatMap((c) => c.assignees) ?? []),
+      ]),
+    ];
+    writeFileSync(
+      join(dir, "CLAUDE.md"),
+      ticketContext(cfg, latest?.sprints ?? [], people, latest?.me ?? null),
+    );
+    writeFileSync(
+      join(dir, "context.json"),
+      JSON.stringify(ctx ?? {}, null, 2) + "\n",
+    );
+    const proj = join(paths.projectsDir, dir.replace(/[^A-Za-z0-9]/g, "-"));
+    let canContinue = false;
+    try {
+      canContinue = readdirSync(proj).some((f) => f.endsWith(".jsonl"));
+    } catch {
+      /* first time */
+    }
+    return { ok: true, message: "ready", canContinue };
+  });
+  // Labels, milestones and people who can be assigned in a repo (the New ticket dialog), cached a while.
+  ipcMain.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {
+    if (
+      typeof repo !== "string" ||
+      !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)
+    )
+      return { labels: [], milestones: [], assignees: [] };
+    const hit = repoMetaCache.get(repo);
+    if (hit && Date.now() - hit.at < 5 * 60_000) return hit.meta;
+    const lines = async (args: string[]) => {
+      const r = await run("gh", args, { timeoutMs: 30_000 });
+      return r.code === 0
+        ? r.stdout
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+        : [];
+    };
+    const [labels, milestones, assignees] = await Promise.all([
+      lines([
+        "label",
+        "list",
+        "-R",
+        repo,
+        "--limit",
+        "200",
+        "--json",
+        "name",
+        "-q",
+        ".[].name",
+      ]),
+      lines([
+        "api",
+        `repos/${repo}/milestones?state=open&per_page=100`,
+        "-q",
+        ".[].title",
+      ]),
+      lines(["api", `repos/${repo}/assignees?per_page=100`, "-q", ".[].login"]),
+    ]);
+    const meta = {
+      labels: labels.sort((a, b) => a.localeCompare(b)),
+      milestones,
+      assignees: assignees.sort((a, b) => a.localeCompare(b)),
+    };
+    repoMetaCache.set(repo, { at: Date.now(), meta });
+    return meta;
+  });
   // The + menu: the workspace and its repos, to open a terminal or a session in.
   ipcMain.handle(CH.workspaceRepos, () => {
     const seen = new Set<string>();
@@ -1904,8 +2161,13 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
-  // The builder's drafts: a cheap check each second (a stat).
+  // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
+    try {
+      readCreatedTickets();
+    } catch (e) {
+      console.error(`tickets: ${String(e)}`);
+    }
     try {
       readDraft();
     } catch (e) {

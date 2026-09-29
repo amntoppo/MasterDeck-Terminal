@@ -22,6 +22,21 @@ export function paneCommand(
     return { file: claude, args: [installPrompt(spec.tools, platform)] };
   // Its own folder (set by the pane manager); only project settings, so the user's hooks (workflow
   // steps, MasterDeck's) don't reach it; edits in its folder (draft.json) without asking.
+  // The Board's ticket session: its own folder too; project settings allow its create command.
+  if (spec.kind === "ticket-builder")
+    return {
+      file: claude,
+      args: [
+        ...(spec.resume ? ["--continue"] : []),
+        "-n",
+        "md-ticket-builder",
+        "--setting-sources",
+        "project,local",
+        "--permission-mode",
+        "acceptEdits",
+        ...(spec.prompt && !spec.prompt.startsWith("-") ? [spec.prompt] : []),
+      ],
+    };
   if (spec.kind === "builder")
     return {
       file: claude,

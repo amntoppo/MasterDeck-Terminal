@@ -56,6 +56,11 @@ const api: DeckApi = {
   templates: () => ipcRenderer.invoke(CH.templates),
   saveTemplate: (t) => ipcRenderer.invoke(CH.saveTemplate, t),
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),
+  ticketBuilderPrepare: (ctx) =>
+    ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),
+  onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),
+  ticketCreate: (req) => ipcRenderer.invoke(CH.ticketCreate, req),
+  ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),
   workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
   startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
   resumeSession: (id, name, cwd) =>
