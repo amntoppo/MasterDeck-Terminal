@@ -120,10 +120,10 @@ checkout whose branch was once linked to a ticket does not link it.
   - **Arrows:** *then* (do the next block after this one; several arrows out of a block run side by
     side), *if it worked* and *if it failed* (dashed green and red: the session follows the one that
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
-    change it. Select a block to edit it on the right; Delete removes the selection. **Tidy up** lines
-    the blocks up.
-  - With nothing selected, the right side shows **what sessions get**: the numbered plan each
-    trigger hands the session, and anything wrong (a block no trigger reaches, a missing pattern).
+    change it. Select a block or an arrow and its settings open in a card over the canvas (click
+    the canvas or × to close it); Delete removes the selection. **Tidy up** lines the blocks up.
+  - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
+    count in the toolbar; click the count to step through them.
   Changes save by themselves. **All hooks** lists every hook Claude Code runs (your settings, your
   workspace repos, enabled plugins).
 - **Build with Claude:** the button in the Workflow window's header opens a Claude session on the
@@ -133,7 +133,8 @@ checkout whose branch was once linked to a ticket does not link it.
   `~/.claude/masterdeck/workflow-builder/`, as `CLAUDE.md` and `current.json`). It writes its
   workflow to `draft.json`; MasterDeck checks it (`check.json`, which the session reads back to fix
   problems) and shows it on the canvas with **Apply to <workflow>**, **Save as template**,
-  **Discard** and a switch back to the current one. The session runs with your project settings
+  **Discard** and a switch back to the current one. Drag the line between the canvas and the
+  builder to resize it (double-click resets it). The session runs with your project settings
   only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
   doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
   The first time, Claude may ask you to trust its folder.

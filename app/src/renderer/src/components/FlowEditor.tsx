@@ -44,7 +44,6 @@ import {
   type Flow,
   type FlowNode,
   type FlowTrigger,
-  type Problem,
 } from "@shared/flow";
 
 export type Skill = { name: string; description: string; source?: string };
@@ -550,6 +549,24 @@ function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
             </button>
             {note && <span className="flow-note">{note}</span>}
             <span style={{ flex: 1 }} />
+            {compiled.problems.length > 0 && (
+              <button
+                className="flow-problems"
+                title={compiled.problems.map((p) => p.text).join("\n")}
+                onClick={() => {
+                  // Step through the blocks with a problem.
+                  const ids = compiled.problems
+                    .map((p) => p.node)
+                    .filter((x): x is string => !!x);
+                  if (!ids.length) return;
+                  const i = sel?.type === "node" ? ids.indexOf(sel.id) : -1;
+                  setSel({ type: "node", id: ids[(i + 1) % ids.length] });
+                }}
+              >
+                {compiled.problems.length} problem
+                {compiled.problems.length === 1 ? "" : "s"}
+              </button>
+            )}
             {toolbar}
           </div>
         )}
@@ -585,45 +602,47 @@ function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
             <Background gap={18} size={1} />
             <Controls showInteractive={false} />
           </ReactFlow>
+          {/* The selected block or arrow's settings: a card over the canvas, only while selected. */}
+          {!readOnly && (selNode || selEdge) && (
+            <div className="flow-pop" onMouseDown={(e) => e.stopPropagation()}>
+              <button
+                className="flow-pop-x"
+                onClick={() => setSel(null)}
+                aria-label="Close"
+                title="Close (click the canvas)"
+              >
+                ×
+              </button>
+              {selNode ? (
+                <NodeForm
+                  key={selNode.id}
+                  node={selNode}
+                  skills={skills}
+                  problem={problemOf.get(selNode.id) ?? null}
+                  onChange={(p) => update(selNode.id, p)}
+                  onDelete={() => remove([selNode.id])}
+                />
+              ) : selEdge ? (
+                <EdgeForm
+                  edge={selEdge}
+                  fromTrigger={
+                    flow.nodes.find((n) => n.id === selEdge.from)?.kind ===
+                    "trigger"
+                  }
+                  onKind={(k) => setEdgeKind(selEdge.id, k)}
+                  onDelete={() => (
+                    setFlow((f) => ({
+                      ...f,
+                      edges: f.edges.filter((e) => e.id !== selEdge.id),
+                    })),
+                    setSel(null)
+                  )}
+                />
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
-      {!readOnly && (
-        <aside className="flow-side">
-          {selNode ? (
-            <NodeForm
-              key={selNode.id}
-              node={selNode}
-              skills={skills}
-              problem={problemOf.get(selNode.id) ?? null}
-              onChange={(p) => update(selNode.id, p)}
-              onDelete={() => remove([selNode.id])}
-            />
-          ) : selEdge ? (
-            <EdgeForm
-              edge={selEdge}
-              fromTrigger={
-                flow.nodes.find((n) => n.id === selEdge.from)?.kind ===
-                "trigger"
-              }
-              onKind={(k) => setEdgeKind(selEdge.id, k)}
-              onDelete={() => (
-                setFlow((f) => ({
-                  ...f,
-                  edges: f.edges.filter((e) => e.id !== selEdge.id),
-                })),
-                setSel(null)
-              )}
-            />
-          ) : (
-            <Preview
-              flow={flow}
-              problems={compiled.problems}
-              steps={compiled.steps}
-              onPick={(id) => setSel({ type: "node", id })}
-            />
-          )}
-        </aside>
-      )}
     </div>
   );
 }
@@ -995,69 +1014,6 @@ function EdgeForm({
         {fromTrigger
           ? 'Arrows from a trigger start the plan: always "then".'
           : "Outcome arrows: the session follows the one that matches how the step went. Several arrows of the same kind run side by side."}
-      </div>
-    </div>
-  );
-}
-
-/** Nothing selected: what each trigger hands the session, and what is wrong. */
-function Preview({
-  flow,
-  problems,
-  steps,
-  onPick,
-}: {
-  flow: Flow;
-  problems: Problem[];
-  steps: ReturnType<typeof compileFlow>["steps"];
-  onPick: (id: string) => void;
-}) {
-  const title = (id: string) => {
-    const n = flow.nodes.find((x) => x.id === id);
-    return n ? blockTitle(n) : id;
-  };
-  return (
-    <div className="fs-form">
-      <div className="fs-head">
-        <span className="fs-chip">What sessions get</span>
-      </div>
-      {problems.length > 0 && (
-        <div className="fs-problems">
-          {problems.map((p, i) => (
-            <button
-              key={i}
-              className="fs-problem"
-              onClick={() => p.node && onPick(p.node)}
-            >
-              {p.node && <b>{title(p.node)}: </b>}
-              {p.text}
-            </button>
-          ))}
-        </div>
-      )}
-      {!steps.length && (
-        <div className="meta">
-          Nothing yet: drag a trigger in, then an action, and join them with an
-          arrow.
-        </div>
-      )}
-      {steps.map((s) => (
-        <div key={s.id} className="fs-step">
-          <div className="fs-step-h">
-            {triggerInfo(s.trigger).label}
-            {s.pattern ? <code> {s.pattern}</code> : null}
-            {s.minutes ? ` (${s.minutes} min)` : ""}
-          </div>
-          {s.note && <pre className="fs-pre">{s.note}</pre>}
-          {s.notify?.map((t) => (
-            <div key={t} className="meta">
-              Notification: {t}
-            </div>
-          ))}
-        </div>
-      ))}
-      <div className="meta fs-tip">
-        Select a block or an arrow to change it. Changes save by themselves.
       </div>
     </div>
   );

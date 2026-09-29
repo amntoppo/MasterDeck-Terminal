@@ -7,7 +7,7 @@ import {
   type WorkflowTemplate,
 } from "@shared/flow";
 import type { AppState } from "@shared/types";
-import { deck } from "../deck";
+import { deck, load as loadPref, save as savePref } from "../deck";
 import { FlowEditor, type Skill } from "./FlowEditor";
 import { TerminalView } from "./TerminalView";
 import type { WorkflowDraft } from "@shared/ipc";
@@ -105,6 +105,31 @@ export function WorkflowView(_: { state: AppState }) {
     resume: boolean;
   } | null>(null);
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
+  // The builder's width (px), dragged at its left edge; double-click resets it.
+  const [builderW, setBuilderW] = useState<number>(() =>
+    loadPref<number>("builderW", 560),
+  );
+  useEffect(() => savePref("builderW", builderW), [builderW]);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const dragBuilder = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const box = editorRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const move = (ev: MouseEvent) =>
+      setBuilderW(
+        Math.round(
+          Math.min(Math.max(box.right - ev.clientX, 320), box.width - 420),
+        ),
+      );
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.classList.remove("resizing");
+    };
+    document.body.classList.add("resizing");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
   const [showDraft, setShowDraft] = useState(true);
   useEffect(() => {
     void deck().workflowDraftGet().then(setDraft);
@@ -372,7 +397,7 @@ export function WorkflowView(_: { state: AppState }) {
           </table>
         </div>
       )}
-      <div className="wf-editor">
+      <div className="wf-editor" ref={editorRef}>
         <div className="wf-canvas">
           {draft && current && (
             <div className={`wf-draft ${draft.check.ok ? "ok" : "bad"}`}>
@@ -430,7 +455,21 @@ export function WorkflowView(_: { state: AppState }) {
           )}
         </div>
         {builder && (
-          <aside className="wf-builder" aria-label="Workflow builder">
+          <div
+            className="wf-split"
+            onMouseDown={dragBuilder}
+            onDoubleClick={() => setBuilderW(560)}
+            title="Drag to resize the builder · double-click to reset"
+            role="separator"
+            aria-orientation="vertical"
+          />
+        )}
+        {builder && (
+          <aside
+            className="wf-builder"
+            aria-label="Workflow builder"
+            style={{ width: builderW }}
+          >
             <div className="wf-builder-head">
               <b>✦ Workflow builder</b>
               <span className="muted small">
