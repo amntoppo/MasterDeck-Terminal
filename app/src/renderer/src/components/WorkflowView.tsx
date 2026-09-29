@@ -9,6 +9,8 @@ import {
 import type { AppState } from "@shared/types";
 import { deck } from "../deck";
 import { FlowEditor, type Skill } from "./FlowEditor";
+import { TerminalView } from "./TerminalView";
+import type { WorkflowDraft } from "@shared/ipc";
 
 type Data = {
   hooks: HookEntry[];
@@ -97,6 +99,20 @@ export function WorkflowView(_: { state: AppState }) {
     name: string;
   } | null>(null);
   const [showHooks, setShowHooks] = useState(false);
+  // The builder: a Claude session on the right that writes workflows from a prompt.
+  const [builder, setBuilder] = useState<{
+    gen: number;
+    resume: boolean;
+  } | null>(null);
+  const [draft, setDraft] = useState<WorkflowDraft | null>(null);
+  const [showDraft, setShowDraft] = useState(true);
+  useEffect(() => {
+    void deck().workflowDraftGet().then(setDraft);
+    return deck().onWorkflowDraft((d) => {
+      setDraft(d);
+      setShowDraft(true);
+    });
+  }, []);
 
   const load = useCallback(async () => {
     const w = await deck().workflowGet();
@@ -158,6 +174,54 @@ export function WorkflowView(_: { state: AppState }) {
     }
   };
 
+  // The builder works on the workflow open here: its folder gets it (and the format) first.
+  const openBuilder = async (fresh: boolean) => {
+    if (!current) return;
+    const r = await deck().workflowBuilderPrepare(current.id);
+    if (!r.ok) return setMsg(r.message);
+    if (builder) deck().ptyClose(`workflow-builder:${builder.gen}`);
+    setBuilder({
+      gen: (builder?.gen ?? 0) + 1,
+      resume: !fresh && r.canContinue,
+    });
+  };
+  useEffect(() => {
+    if (builder && current) void deck().workflowBuilderPrepare(current.id);
+    // Only when the open workflow changes: current.json follows it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+  const closeBuilder = () => {
+    if (builder) deck().ptyClose(`workflow-builder:${builder.gen}`);
+    setBuilder(null);
+  };
+  const applyDraft = async (asNew: boolean) => {
+    if (!draft || !current) return;
+    const r = asNew
+      ? await deck().workflowTemplateSave(
+          null,
+          draft.name ?? "From the builder",
+          draft.flow,
+        )
+      : current.id === DEFAULT_TEMPLATE
+        ? await deck().workflowSave(draft.flow)
+        : await deck().workflowTemplateSave(
+            current.id,
+            current.name,
+            draft.flow,
+          );
+    setMsg(
+      r.ok
+        ? asNew
+          ? `saved as “${draft.name ?? "From the builder"}”`
+          : `applied to ${current.name}`
+        : r.message,
+    );
+    if (!r.ok) return;
+    await deck().workflowDraftDiscard();
+    await load();
+    if (asNew && "id" in r && r.id) setTid(r.id as string);
+  };
+
   const byEvent = new Map<string, HookEntry[]>();
   for (const h of data?.hooks ?? [])
     byEvent.set(h.event, [...(byEvent.get(h.event) ?? []), h]);
@@ -172,6 +236,13 @@ export function WorkflowView(_: { state: AppState }) {
         </span>
         <span style={{ flex: 1 }} />
         {msg && <span className="muted">{msg}</span>}
+        <button
+          className={`btn ${builder ? "on" : "primary"}`}
+          onClick={() => (builder ? closeBuilder() : void openBuilder(false))}
+          title="A Claude session that builds a workflow from what you ask: it knows the format, your skills and this workflow"
+        >
+          {builder ? "Close builder" : "✦ Build with Claude"}
+        </button>
         <button
           className={`btn ${showHooks ? "on" : ""}`}
           onClick={() => setShowHooks((s) => !s)}
@@ -302,16 +373,101 @@ export function WorkflowView(_: { state: AppState }) {
         </div>
       )}
       <div className="wf-editor">
-        {!data || !current ? (
-          <div className="empty">Reading the workflows…</div>
-        ) : (
-          <FlowEditor
-            key={current.id}
-            flow={current.flow}
-            skills={data.skills}
-            onChange={onChange}
-            toolbar={<SaveBadge state={saveState} />}
-          />
+        <div className="wf-canvas">
+          {draft && current && (
+            <div className={`wf-draft ${draft.check.ok ? "ok" : "bad"}`}>
+              <span className="wf-draft-t">
+                <b>Claude's draft</b>
+                {draft.name ? ` · ${draft.name}` : ""} ·{" "}
+                {draft.flow.nodes.length} blocks ·{" "}
+                {draft.check.ok
+                  ? "no problems"
+                  : `${draft.check.problems.length + draft.check.dropped.length} problem(s)`}
+              </span>
+              <span style={{ flex: 1 }} />
+              <button className="btn" onClick={() => setShowDraft((v) => !v)}>
+                {showDraft ? `Show ${current.name}` : "Show draft"}
+              </button>
+              <button
+                className="btn"
+                onClick={() => void deck().workflowDraftDiscard()}
+              >
+                Discard
+              </button>
+              <button
+                className="btn"
+                onClick={() => void applyDraft(true)}
+                title="Keep it as a new template"
+              >
+                Save as template
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => void applyDraft(false)}
+                title={`Replace ${current.name} with the draft`}
+              >
+                Apply to {current.name}
+              </button>
+            </div>
+          )}
+          {!data || !current ? (
+            <div className="empty">Reading the workflows…</div>
+          ) : draft && showDraft ? (
+            <FlowEditor
+              key={`draft:${draft.at}`}
+              flow={draft.flow}
+              skills={data.skills}
+              readOnly
+            />
+          ) : (
+            <FlowEditor
+              key={current.id}
+              flow={current.flow}
+              skills={data.skills}
+              onChange={onChange}
+              toolbar={<SaveBadge state={saveState} />}
+            />
+          )}
+        </div>
+        {builder && (
+          <aside className="wf-builder" aria-label="Workflow builder">
+            <div className="wf-builder-head">
+              <b>✦ Workflow builder</b>
+              <span className="muted small">
+                works on {current?.name ?? "the Default"}
+              </span>
+              <span style={{ flex: 1 }} />
+              <button
+                className="btn"
+                onClick={() => void openBuilder(true)}
+                title="Start a new conversation"
+              >
+                New chat
+              </button>
+              <button
+                className="insp-hide"
+                onClick={closeBuilder}
+                aria-label="Close the builder"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="wf-builder-term">
+              <TerminalView
+                key={builder.gen}
+                paneId={`workflow-builder:${builder.gen}`}
+                spec={{ kind: "builder", resume: builder.resume }}
+                visible
+                focusOnShow
+              />
+            </div>
+            <div className="wf-builder-tip muted">
+              Ask for a workflow, e.g. “after a push run the tests; if they fail
+              fix them, if they pass post the preview URL”. Its draft shows on
+              the canvas to apply.
+            </div>
+          </aside>
         )}
       </div>
     </section>

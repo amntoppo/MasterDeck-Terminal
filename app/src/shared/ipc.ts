@@ -11,6 +11,19 @@ import type { HookEntry } from "./workflow";
 import type { Flow, WorkflowDoc, WorkflowTemplate } from "./flow";
 import type { FlowProgress } from "./flowTrack";
 
+/** A workflow the builder session wrote, as MasterDeck read and checked it. */
+export interface WorkflowDraft {
+  name: string | null;
+  flow: Flow;
+  check: {
+    ok: boolean;
+    problems: string[];
+    dropped: string[];
+    plans: { trigger: string; note: string }[];
+  };
+  at: number;
+}
+
 export interface WorkflowStatus extends FlowProgress {
   /** The template its copy came from; null: it follows the Default. */
   from: string | null;
@@ -98,6 +111,10 @@ export const CH = {
   workflowTemplateDelete: "workflow:templateDelete",
   sessionWorkflowGet: "workflow:sessionGet",
   workflowStatus: "workflow:status",
+  workflowBuilderPrepare: "workflow:builderPrepare",
+  workflowDraft: "workflow:draft",
+  workflowDraftGet: "workflow:draftGet",
+  workflowDraftDiscard: "workflow:draftDiscard",
   sessionWorkflowSave: "workflow:sessionSave",
   linkSession: "session:link",
   setSprint: "board:sprint",
@@ -322,6 +339,14 @@ export interface DeckApi {
     flow: Flow,
   ): Promise<CliResult & { id?: string }>;
   workflowTemplateDelete(id: string): Promise<CliResult>;
+  /** Set up the workflow builder's folder for the workflow open on the canvas. */
+  workflowBuilderPrepare(
+    templateId: string,
+  ): Promise<CliResult & { canContinue: boolean }>;
+  /** The builder's latest draft (checked), and each new one as it is written. */
+  workflowDraftGet(): Promise<WorkflowDraft | null>;
+  onWorkflowDraft(cb: (d: WorkflowDraft | null) => void): () => void;
+  workflowDraftDiscard(): Promise<CliResult>;
   /** What a session's workflow last did (the Workflow line in Details). */
   workflowStatus(sessionId: string): Promise<WorkflowStatus | null>;
   /** A session's own workflow; null while it follows the default. */

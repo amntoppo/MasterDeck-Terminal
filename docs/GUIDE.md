@@ -126,6 +126,17 @@ checkout whose branch was once linked to a ticket does not link it.
     trigger hands the session, and anything wrong (a block no trigger reaches, a missing pattern).
   Changes save by themselves. **All hooks** lists every hook Claude Code runs (your settings, your
   workspace repos, enabled plugins).
+- **Build with Claude:** the button in the Workflow window's header opens a Claude session on the
+  right that builds workflows from what you ask ("after a push run the tests; if they fail fix
+  them, if they pass post the preview URL"). It knows the format, every trigger and built-in, your
+  skills and the workflow open on the canvas (MasterDeck writes them into its folder,
+  `~/.claude/masterdeck/workflow-builder/`, as `CLAUDE.md` and `current.json`). It writes its
+  workflow to `draft.json`; MasterDeck checks it (`check.json`, which the session reads back to fix
+  problems) and shows it on the canvas with **Apply to <workflow>**, **Save as template**,
+  **Discard** and a switch back to the current one. The session runs with your project settings
+  only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
+  doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
+  The first time, Claude may ask you to trust its folder.
 - **Workflow templates:** the Template bar edits the **Default** (what every new session copies) or
   a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.

@@ -51,6 +51,7 @@ import {
   scanLines,
   type PrScanState,
 } from "@shared/prscan";
+import { BUILDER_NAME } from "@shared/flowBuilder";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -1817,7 +1818,16 @@ export class Sources {
     const sessions = this.withHookState(
       this.withActivity(
         applyFreshness(
-          attachIssues(this.rawSessions, this.issueOf()),
+          attachIssues(
+            // The Workflow window's builder is MasterDeck's own, not the user's work.
+            this.rawSessions.filter(
+              (s) =>
+                s.name !== BUILDER_NAME &&
+                resolve(s.cwd || "/") !==
+                  resolve(join(this.paths.home, "workflow-builder")),
+            ),
+            this.issueOf(),
+          ),
           this.lastWrite,
           now,
         ),

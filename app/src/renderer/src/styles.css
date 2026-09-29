@@ -1108,3 +1108,14 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .wfw-line { font-size: 12px; line-height: 1.45; color: var(--text); word-break: break-word; }
 .wfw-next { font-size: 11.5px; margin-top: 6px; }
 .wfw-builtin { color: var(--purple); font-weight: 600; }
+/* Workflow builder (a Claude session on the right of the Workflow window) and its drafts */
+.wf-editor { gap: 10px; }
+.wf-canvas { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.wf-canvas > .flow-ed { flex: 1; }
+.wf-draft { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); font-size: 12.5px; }
+.wf-draft.bad { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--bg-2)); }
+.wf-builder { flex: none; width: min(46%, 640px); min-width: 360px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.wf-builder-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.wf-builder-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wf-builder-term > * { flex: 1; min-height: 0; }
+.wf-builder-tip { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--line); }

@@ -2,7 +2,10 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
+  readFileSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
@@ -78,6 +81,12 @@ import { Summaries } from "./summary";
 import { DEFAULT_TEMPLATE, parseFlow, validSessionId } from "@shared/flow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
 import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
+import {
+  builderContext,
+  checkDraft,
+  normalizeDraft,
+} from "@shared/flowBuilder";
+import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
@@ -122,6 +131,7 @@ const ptys = new PtyManager(
   (channel, ...args) => win?.webContents.send(channel, ...args),
   () => claudeBin,
   () => join(paths.home, "installer"),
+  () => builderDir(),
 );
 
 function notify(events: NotifyEvent[]): void {
@@ -567,6 +577,57 @@ async function resumeBg(
   return r.code === 0
     ? { ok: true, message: name }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+}
+
+/** The Workflow window's builder session works here: its CLAUDE.md, current.json, drafts. */
+const builderDir = () => join(paths.home, "workflow-builder");
+
+/** The builder's latest draft, checked; null when there is none (or it was applied or discarded). */
+let builderDraft: WorkflowDraft | null = null;
+let draftMtime = 0;
+function readDraft(): void {
+  const f = join(builderDir(), "draft.json");
+  let mtime = 0;
+  try {
+    mtime = statSync(f).mtimeMs;
+  } catch {
+    if (builderDraft) {
+      builderDraft = null;
+      win?.webContents.send(CH.workflowDraft, null);
+    }
+    draftMtime = 0;
+    return;
+  }
+  if (mtime === draftMtime) return;
+  draftMtime = mtime;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(f, "utf8"));
+  } catch (e) {
+    // Mid-write, or not JSON: say so, for the builder to fix.
+    writeFileSync(
+      join(builderDir(), "check.json"),
+      JSON.stringify(
+        {
+          ok: false,
+          problems: [`draft.json is not valid JSON: ${String(e)}`],
+          dropped: [],
+          plans: [],
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    return;
+  }
+  const check = checkDraft(raw);
+  writeFileSync(
+    join(builderDir(), "check.json"),
+    JSON.stringify(check, null, 2) + "\n",
+  );
+  const { name, flow } = normalizeDraft(raw);
+  builderDraft = { name, flow, check, at: mtime };
+  win?.webContents.send(CH.workflowDraft, builderDraft);
 }
 
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
@@ -1094,6 +1155,46 @@ function registerIpc(): void {
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
   });
+  // The builder: its folder gets the format, the skills and the open workflow before it starts.
+  ipcMain.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
+    const t =
+      (typeof templateId === "string" && workflows().template(templateId)) ||
+      workflows().template(DEFAULT_TEMPLATE);
+    if (!t) return { ok: false, message: "no workflow", canContinue: false };
+    const dir = builderDir();
+    mkdirSync(dir, { recursive: true });
+    const skills = listSkills(paths.skillsDir, dirname(paths.claudeSettings), [
+      paths.masterWorkspace,
+      ...ops.repos(),
+    ]);
+    writeFileSync(
+      join(dir, "CLAUDE.md"),
+      builderContext(skills, { id: t.id, name: t.name }),
+    );
+    writeFileSync(
+      join(dir, "current.json"),
+      JSON.stringify({ id: t.id, name: t.name, flow: t.flow }, null, 2) + "\n",
+    );
+    // A chat to continue: Claude keeps this folder's transcripts under ~/.claude/projects.
+    const proj = join(paths.projectsDir, dir.replace(/[^A-Za-z0-9]/g, "-"));
+    let canContinue = false;
+    try {
+      canContinue = readdirSync(proj).some((f) => f.endsWith(".jsonl"));
+    } catch {
+      /* first time */
+    }
+    return { ok: true, message: "ready", canContinue };
+  });
+  ipcMain.handle(CH.workflowDraftGet, () => builderDraft);
+  ipcMain.handle(CH.workflowDraftDiscard, () => {
+    try {
+      unlinkSync(join(builderDir(), "draft.json"));
+    } catch {
+      /* already gone */
+    }
+    readDraft();
+    return { ok: true, message: "discarded" };
+  });
   ipcMain.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
     const s = latest?.sessions.find((x) => x.sessionId === sid);
@@ -1485,6 +1586,14 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  // The builder's drafts: a cheap check each second (a stat).
+  setInterval(() => {
+    try {
+      readDraft();
+    } catch (e) {
+      console.error(`workflow draft: ${String(e)}`);
+    }
+  }, 1000);
   createWindow();
   sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
   sources.start();
