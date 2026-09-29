@@ -38,7 +38,8 @@ export const TRIGGERS: Trigger[] = [
     id: "linked",
     label: "When a session is linked to its issue",
     event: "PostToolUse",
-    command: `tt\\.sh"?[[:space:]]+link`,
+    // tt.sh, or tt.sh through a variable (T=…/tt.sh; $T link …); its answer confirms it.
+    command: `(tt\\.sh"?|\\$\\{?[A-Za-z_]+\\}?"?)[[:space:]]+link[[:space:]]`,
     success: "linked session to #",
     once: "session",
   },

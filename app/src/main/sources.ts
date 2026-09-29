@@ -52,6 +52,12 @@ import {
   type PrScanState,
 } from "@shared/prscan";
 import {
+  newFlowTrack,
+  scanFlowLines,
+  type FlowTrackState,
+} from "@shared/flowTrack";
+import type { FlowTrigger } from "@shared/flow";
+import {
   parseStatusline,
   parseTranscriptTail,
   statsFromTranscript,
@@ -238,7 +244,12 @@ export class Sources {
   /** Transcript followers for PR detection, by transcript path. */
   private follows: Record<
     string,
-    { st: FollowState; scan: PrScanState; wt: WorktreeScan }
+    {
+      st: FollowState;
+      scan: PrScanState;
+      wt: WorktreeScan;
+      flow: FlowTrackState;
+    }
   > = {};
   /** Worktree candidates per Session.key, from all its transcripts (a resume adds one). */
   private worktreeScans: Record<string, WorktreeScan> = {};
@@ -1343,16 +1354,35 @@ export class Sources {
       st: { path, offset: 0, rest: "" },
       scan: newPrScanState(),
       wt: newWorktreeScan(),
+      flow: newFlowTrack(),
     });
     // From the start of the transcript: a PR opened early in a long session counts too.
     const lines = readNewLines(f.st, Infinity);
     const found = scanLines(lines, f.scan);
     scanWorktreeLines(lines, f.wt, homedir());
+    // Where it is in its workflow: a resumed session's transcripts add up under one key.
+    scanFlowLines(lines, f.flow);
+    const track = (this.flowTracks[key] ??= newFlowTrack());
+    for (const [t, at] of Object.entries(f.flow.reached))
+      if ((track.reached[t as FlowTrigger] ?? 0) < at)
+        track.reached[t as FlowTrigger] = at;
+    if (lines.length) {
+      track.commands = [
+        ...track.commands,
+        ...f.flow.commands.filter((c) => !track.commands.includes(c)),
+      ].slice(-60);
+    }
     const all = (this.worktreeScans[key] ??= newWorktreeScan());
     for (const p of f.wt.paths) if (!all.paths.includes(p)) all.paths.push(p);
     // Most recent last; a resumed session adds a second transcript to the same key.
     this.notePrs(key, f.scan.urls);
     return found;
+  }
+
+  private flowTracks: Record<string, FlowTrackState> = {};
+  /** What a session's transcripts show of its workflow (see shared/flowTrack). */
+  flowTrackOf(key: string): FlowTrackState | null {
+    return this.flowTracks[key] ?? null;
   }
 
   /** The session's worktrees that still exist, each with its repo and branch (read from .git files). */

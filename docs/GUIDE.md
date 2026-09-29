@@ -131,9 +131,13 @@ checkout whose branch was once linked to a ticket does not link it.
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.
 - **A session's own workflow:** each session gets its own copy the first time MasterDeck sees it: the
   Default, or the template picked under **Workflow** in the Start dialog. Its **Details** tab shows a
-  **Workflow** line: the step its workflow handed it last (the trigger and the plan's first lines;
-  click for all of it), pulsing as **running** while the session is still on it (it has not finished
-  its turn since), else *ran N min ago*, and which triggers come next. **Edit** opens the same editor
+  **Workflow** line: the workflow point the session reached last (linked to its issue, pushed, PR
+  created, merged…), read from its transcript (the commands it ran), its PRs on GitHub and the
+  hooks' log, with what the workflow does there (built-ins and the plan's first lines; click for
+  all of it). It pulses as **running** while the session works on that step (since its last turn
+  end) or waits on the watch a built-in started there, else it shows how long ago; *Next* lists
+  the points still ahead. A session keeps the hooks it started with (Claude Code reads them once),
+  so this works for sessions older than a workflow change too. **Edit** opens the same editor
   as the Workflow window, full size, for that session only, with **Use a template… → Apply** and
   **Save as template**. Changing the Default or a template doesn't change sessions that already have
   their copy. Copies are in `~/.claude/masterdeck/workflows/sessions/<session id>.json`, and each run

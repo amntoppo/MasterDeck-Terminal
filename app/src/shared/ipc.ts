@@ -8,15 +8,12 @@ import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
 import type { HookEntry } from "./workflow";
-import type { Flow, FlowTrigger, WorkflowDoc, WorkflowTemplate } from "./flow";
+import type { Flow, WorkflowDoc, WorkflowTemplate } from "./flow";
+import type { FlowProgress } from "./flowTrack";
 
-export interface WorkflowStatus {
+export interface WorkflowStatus extends FlowProgress {
   /** The template its copy came from; null: it follows the Default. */
   from: string | null;
-  /** The triggers its workflow has steps for. */
-  triggers: FlowTrigger[];
-  /** The last step that ran: when, which trigger, what the session was handed. */
-  run: { at: number; trigger: string; note: string; notify: string[] } | null;
 }
 import type { SessionSummary } from "./summary";
 

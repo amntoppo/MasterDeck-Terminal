@@ -26,9 +26,10 @@ const triggerName = (t: string): string => {
 };
 
 /**
- * The Workflow line in a session's Details: the step its workflow handed it last, shown as running
- * while the session is still on it (it has not finished its turn since), else when it ran; and
- * Edit, which opens the session's workflow in the editor.
+ * The Workflow line in a session's Details: the workflow point it reached last (from its
+ * transcript, its PRs and the hooks' log; see shared/flowTrack) with what the workflow does there,
+ * shown as running while the session is on it; the points still ahead; and Edit, which opens the
+ * session's workflow in the editor.
  */
 export function WorkflowWidget({
   session: s,
@@ -51,23 +52,10 @@ export function WorkflowWidget({
     return () => clearInterval(id);
   }, [load]);
 
-  const run = st?.run ?? null;
-  const stoppedAt = state.hookInfo[s.key]?.stoppedAt ?? 0;
-  const ongoing =
-    !!run &&
-    run.at > stoppedAt &&
-    (s.state === "working" || s.busyWith != null) &&
-    now - run.at < 3 * 3600_000;
-  const lines =
-    run?.note
-      .split("\n")
-      .filter(
-        (l) =>
-          l.trim() && !/^Workflow step|^Then carry on|^Do these before/.test(l),
-      ) ?? [];
-  const next = [...new Set(st?.triggers ?? [])].filter(
-    (t) => t !== run?.trigger,
-  );
+  const cur = st?.current ?? null;
+  const ongoing = !!cur?.ongoing;
+  const lines = cur?.lines ?? [];
+  const next = st?.next ?? [];
 
   return (
     <section className={`dsec wfw ${ongoing ? "on" : ""}`}>
@@ -88,7 +76,7 @@ export function WorkflowWidget({
           Edit
         </button>
       </div>
-      {run ? (
+      {cur ? (
         <div
           className="wfw-step"
           onClick={() => setMore((m) => !m)}
@@ -100,25 +88,28 @@ export function WorkflowWidget({
           />
           <div className="wfw-main">
             <div className="wfw-title">
-              <b>{triggerName(run.trigger)}</b>
+              <b>{triggerName(cur.trigger)}</b>
               <span className={ongoing ? "wfw-live" : "muted"}>
                 {ongoing
-                  ? ` · running ${formatAgo(now - run.at)}`
-                  : ` · ran ${formatAgo(now - run.at)} ago`}
+                  ? ` · running · ${formatAgo(now - cur.at)}`
+                  : ` · ${formatAgo(now - cur.at)} ago`}
               </span>
             </div>
+            {cur.builtins.length === 0 && lines.length === 0 && (
+              <div className="wfw-line muted">Nothing to do at this point</div>
+            )}
+            {cur.builtins.map((b) => (
+              <div key={b} className="wfw-line wfw-builtin">
+                {b}
+              </div>
+            ))}
             {(more ? lines : lines.slice(0, 2)).map((l, i) => (
               <div key={i} className="wfw-line">
-                {l.trim()}
+                {l}
               </div>
             ))}
             {!more && lines.length > 2 && (
               <div className="wfw-line muted">+{lines.length - 2} more</div>
-            )}
-            {run.notify.length > 0 && (
-              <div className="wfw-line muted">
-                Notified: {run.notify.join(" · ")}
-              </div>
             )}
           </div>
         </div>
@@ -126,13 +117,17 @@ export function WorkflowWidget({
         <div className="wfw-step idle">
           <span className="wfw-dot" aria-hidden="true" />
           <div className="wfw-main">
-            <div className="wfw-title muted">No step has run yet</div>
+            <div className="wfw-title muted">Not at a workflow step yet</div>
           </div>
         </div>
       )}
-      {next.length > 0 && (
+      {(next.length > 0 || (st?.anytime.length ?? 0) > 0) && (
         <div className="wfw-next muted">
-          Next on: {next.map(triggerName).join(" · ")}
+          {next.length > 0 && <>Next: {next.map(triggerName).join(" → ")}</>}
+          {next.length > 0 && (st?.anytime.length ?? 0) > 0 && " · "}
+          {(st?.anytime.length ?? 0) > 0 && (
+            <>Also on: {st!.anytime.map(triggerName).join(", ")}</>
+          )}
         </div>
       )}
       {open && (

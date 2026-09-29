@@ -77,6 +77,8 @@ import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { Summaries } from "./summary";
 import { DEFAULT_TEMPLATE, parseFlow, validSessionId } from "@shared/flow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
+import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
+import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
@@ -1094,21 +1096,33 @@ function registerIpc(): void {
   });
   ipcMain.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
+    const s = latest?.sessions.find((x) => x.sessionId === sid);
     const doc = workflows().sessionDoc(sid);
+    const flow = doc?.flow ?? workflows().template(DEFAULT_TEMPLATE)?.flow;
+    if (!flow) return null;
+    // Every sign of a trigger point being reached: the transcript, the PRs, the hook log.
+    const events: FlowEvent[] = [];
+    const track = s ? sources.flowTrackOf(s.key) : null;
+    for (const [t, at] of Object.entries(track?.reached ?? {}))
+      events.push({ trigger: t as FlowTrigger, at: at as number });
+    if (track) events.push(...commandEvents(flow, track.commands));
+    for (const url of latest?.sessionPrs[sid] ?? []) {
+      const pr = latest?.prLive[url];
+      if (pr?.createdAt)
+        events.push({ trigger: "pr-created", at: pr.createdAt });
+      if (pr?.mergedAt) events.push({ trigger: "pr-merged", at: pr.mergedAt });
+    }
+    if (s?.startedAt)
+      events.push({ trigger: "session-start", at: s.startedAt });
+    const stoppedAt = s ? (latest?.hookInfo[s.key]?.stoppedAt ?? 0) : 0;
+    if (stoppedAt) events.push({ trigger: "turn-end", at: stoppedAt });
     const run = workflows().lastRun(sid);
-    const steps = workflows().compiledFor(sid);
-    const ran = run ? steps.filter((x) => run.ids.includes(x.id)) : [];
+    if (run) events.push({ trigger: run.trigger as FlowTrigger, at: run.at });
+    const working = !!s && (s.state === "working" || !!s.busyWith);
+    const watching = !!s && !!s.waitingOn;
     return {
       from: doc?.from ?? null,
-      triggers: steps.map((x) => x.trigger),
-      run: run
-        ? {
-            at: run.at,
-            trigger: run.trigger,
-            note: ran.map((x) => x.note).join("\n\n"),
-            notify: ran.flatMap((x) => x.notify ?? []),
-          }
-        : null,
+      ...flowProgress(flow, events, stoppedAt, working, watching),
     };
   });
   ipcMain.handle(CH.sessionWorkflowGet, (_e, sid: unknown) =>
