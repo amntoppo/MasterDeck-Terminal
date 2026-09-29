@@ -9,6 +9,7 @@ import {
   type FlowTrigger,
   type WorkflowDoc,
   type WorkflowTemplate,
+  setMonitors,
 } from "@shared/flow";
 import type { WorkflowStatus } from "@shared/ipc";
 import { formatAgo } from "@shared/format";
@@ -175,6 +176,7 @@ export function SessionWorkflowDialog({
     ]);
     setDoc(d);
     setCustomTriggers(w.triggers);
+    setMonitors(w.monitors);
     setLib({ templates: w.templates, skills: w.skills });
   }, [sid]);
   useEffect(() => void load(), [load]);

@@ -1145,3 +1145,6 @@ body.resizing .wf-builder-term, body.resizing .react-flow { pointer-events: none
 .wf-draft-chip.skill { color: #c084fc; }
 .wf-draft-chip.warn { color: var(--amber); }
 .fp-custom { border-left-style: dashed; }
+.fp-monitor { border-left-color: #2dd4bf; }
+.fb-monitor { border-top-color: #2dd4bf; }
+.wf-draft-chip.mon { color: #2dd4bf; }

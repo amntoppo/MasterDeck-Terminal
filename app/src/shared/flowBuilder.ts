@@ -19,6 +19,9 @@ import {
   parseFlow,
   type CustomTrigger,
   type Flow,
+  parseMonitor,
+  type MonitorDef,
+  findMonitor,
 } from "./flow";
 
 export const BUILDER_NAME = "md-workflow-builder";
@@ -111,6 +114,7 @@ export function normalizeDraft(raw: unknown): {
   name: string | null;
   flow: Flow;
   triggers: CustomTrigger[];
+  monitors: MonitorDef[];
 } {
   const o = obj(raw);
   const f = obj(o.flow ?? o);
@@ -142,6 +146,9 @@ export function normalizeDraft(raw: unknown): {
   const triggers = (Array.isArray(o.triggers) ? o.triggers : [])
     .map(parseCustomTrigger)
     .filter((t): t is CustomTrigger => !!t);
+  const monitors = (Array.isArray(o.monitors) ? o.monitors : [])
+    .map((m) => parseMonitor(m))
+    .filter((m): m is MonitorDef => !!m);
   return {
     name:
       typeof o.name === "string" && o.name.trim()
@@ -149,7 +156,47 @@ export function normalizeDraft(raw: unknown): {
         : null,
     flow,
     triggers,
+    monitors,
   };
+}
+
+/** A monitor the builder defined (in the draft) with its script (monitors/<id>.sh), as MasterDeck read it. */
+export interface DraftMonitor {
+  def: MonitorDef;
+  problems: string[];
+}
+
+/**
+ * Check a drafted monitor's script: it must exist and parse (`syntax`: bash -n's complaint, if
+ * any), and should flush its output per line (a buffered pipe emits nothing until it ends).
+ */
+export function readDraftMonitor(
+  def: MonitorDef,
+  script: string | null,
+  syntax: string | null,
+): DraftMonitor {
+  const problems: string[] = [];
+  if (script === null)
+    problems.push(
+      `monitors/${def.id}.sh: missing (write the watch script there)`,
+    );
+  else {
+    if (syntax)
+      problems.push(`monitors/${def.id}.sh: ${syntax.split("\n")[0]}`);
+    if (
+      /\|\s*grep\b(?![^|]*--line-buffered)/.test(script) &&
+      /tail\s+-f|while\s+true|inotifywait/.test(script)
+    )
+      problems.push(
+        `monitors/${def.id}.sh: grep in a live pipe needs --line-buffered, or events sit in its buffer`,
+      );
+    if (!script.trim()) problems.push(`monitors/${def.id}.sh: empty`);
+  }
+  if (!def.description)
+    problems.push(
+      `monitor ${def.id}: add a description (it is shown in every notification)`,
+    );
+  return { def, problems };
 }
 
 export interface DraftCheck {
@@ -172,9 +219,14 @@ export function checkDraft(
     library?: CustomTrigger[];
     installedSkills?: string[];
     skills?: DraftSkill[];
+    /** Monitors in the library, and the ones the builder drafted (paths set to their scripts). */
+    monitorLibrary?: MonitorDef[];
+    monitors?: DraftMonitor[];
   } = {},
 ): DraftCheck {
   const { flow, triggers } = normalizeDraft(raw);
+  const draftMons = (ctx.monitors ?? []).map((m) => m.def);
+  const monLib = ctx.monitorLibrary ?? [];
   const f = obj(obj(raw).flow ?? raw);
   const given = Array.isArray(f.nodes) ? f.nodes.length : 0;
   const dropped: string[] = [];
@@ -201,10 +253,17 @@ export function checkDraft(
       warnings.push(
         `trigger ${t.id} replaces the one in the library with the same id`,
       );
-  const c = compileFlow(flow, [
-    ...triggers,
-    ...library.filter((l) => !triggers.some((t) => t.id === l.id)),
-  ]);
+  const c = compileFlow(
+    flow,
+    [
+      ...triggers,
+      ...library.filter((l) => !triggers.some((t) => t.id === l.id)),
+    ],
+    [
+      ...draftMons,
+      ...monLib.filter((l) => !draftMons.some((m) => m.id === l.id)),
+    ],
+  );
   const problems = c.problems.map((p) => {
     const n = p.node ? flow.nodes.find((x) => x.id === p.node) : null;
     return n ? `${n.id} (${n.kind}): ${p.text}` : p.text;
@@ -241,6 +300,19 @@ export function checkDraft(
         problems.push(
           `${n.id} (skill): no skill named ${n.skill}; use one from the list, or write it in skills/${n.skill}/SKILL.md`,
         );
+  for (const m of ctx.monitors ?? []) {
+    problems.push(...m.problems);
+    if (monLib.some((l) => l.id === m.def.id))
+      warnings.push(
+        `monitor ${m.def.id} replaces the one in the library with the same id`,
+      );
+  }
+  const monBlocks = new Set(
+    flow.nodes.flatMap((n) => (n.kind === "monitor" ? [n.monitor] : [])),
+  );
+  for (const m of draftMons)
+    if (!monBlocks.has(m.id))
+      warnings.push(`monitor ${m.id} is defined but no monitor block uses it`);
   const skillBlocks = new Set(
     flow.nodes.flatMap((n) => (n.kind === "skill" ? [n.skill] : [])),
   );
@@ -261,7 +333,16 @@ export function builderContext(
   skills: { name: string; description: string; source?: string }[],
   current: { id: string; name: string },
   library: CustomTrigger[] = [],
+  monitorLibrary: MonitorDef[] = [],
 ): string {
+  const monList = monitorLibrary.length
+    ? monitorLibrary
+        .map(
+          (m) =>
+            `- \`${m.id}\` (${m.name}): ${m.description}${m.rearm ? " Re-armed on expiry" + (m.until ? ` until ${m.until}` : "") + "." : ""}`,
+        )
+        .join("\n")
+    : "- (none yet)";
   const triggers = FLOW_TRIGGERS.map(
     (t) =>
       `- \`${t.id}\`: ${t.label}. ${t.hint}${t.id.startsWith("command") ? " Needs `pattern`." : ""}${t.id === "idle" ? " Takes `minutes`." : ""}`,
@@ -290,7 +371,7 @@ export function builderContext(
 
 You build MasterDeck workflows from what the user asks. A workflow says what every Claude Code
 session following it does at points of its work (a trigger), as blocks joined by arrows. When the
-workflow needs a trigger or a skill that doesn't exist yet, you create it too.
+workflow needs a trigger, a skill or a monitor that doesn't exist yet, you create it too.
 
 The user sees this conversation next to MasterDeck's Workflow canvas. The workflow open there is
 **${current.name}** (id \`${current.id}\`), in \`current.json\` (re-read it: the user may switch).
@@ -307,11 +388,11 @@ The user sees this conversation next to MasterDeck's Workflow canvas. The workfl
 4. Wait a moment, then read \`check.json\`: MasterDeck checks each draft there (\`ok\`, \`problems\`,
    \`dropped\`, \`warnings\`, and \`plans\`: the exact text each trigger will hand sessions). Fix every
    problem and write again until \`ok\` is true.
-5. Tell the user in a few lines what the workflow does, and which triggers and skills you created.
-   They apply it on the canvas (Apply, or Save as template), which installs your new triggers and
-   skills; if they discard it, those are thrown away too. You never install anything yourself.
+5. Tell the user in a few lines what the workflow does, and which triggers, skills and monitors
+   you created. They apply it on the canvas (Apply, or Save as template), which installs them; if
+   they discard it, those are thrown away too. You never install anything yourself.
 
-Only write in this folder (\`draft.json\`, \`skills/\`). Don't edit other files, and don't touch
+Only write in this folder (\`draft.json\`, \`skills/\`, \`monitors/\`). Don't edit other files, and don't touch
 \`~/.claude\`, \`~/.claude/settings.json\` or MasterDeck's own files.
 
 ## draft.json
@@ -324,6 +405,7 @@ Only write in this folder (\`draft.json\`, \`skills/\`). Don't edit other files,
     edges: { from: string; to: string; kind: 'then' | 'ok' | 'fail' }[]
   }
   triggers?: CustomTrigger[]   // new triggers this workflow uses (see "Creating triggers")
+  monitors?: Monitor[]         // new monitors it arms (see "Creating monitors")
 }
 type Node =
   | { id: string; kind: 'trigger'; trigger: string; pattern?: string; minutes?: number }
@@ -331,6 +413,7 @@ type Node =
   | { id: string; kind: 'instruction'; text: string }
   | { id: string; kind: 'notify'; text: string }
   | { id: string; kind: 'builtin'; builtin: 'ticket' | 'pr-review' | 'pr-watch' }
+  | { id: string; kind: 'monitor'; monitor: string; args: string; instructions: string }
 \`\`\`
 
 Ids: short, lowercase letters, digits and dashes (e.g. \`push\`, \`run-tests\`).
@@ -384,6 +467,59 @@ description: <when to use it: one or two sentences, specific enough to pick it>
 \`\`\`
 
 Then use it in a skill block (\`skill: "<name>"\`).
+
+## Monitors
+
+A monitor is a watch script whose every output line is an event that wakes the session (Claude
+Code's Monitor tool): new review comments, CI results, errors in a log, a deploy finishing. A
+\`monitor\` block arms one at its trigger; the session acts on each event.
+
+Monitors in the library (use as \`{ "kind": "monitor", "monitor": "<id>", "args": "...", "instructions": "..." }\`):
+
+${monList}
+
+\`args\` are passed to the script (e.g. \`"<PR number>"\`: the session fills in \`<...>\`);
+\`instructions\` say what to do on each event (the monitor's \`onEvent\` otherwise).
+
+## Creating monitors
+
+When the workflow needs to watch something no listed monitor covers, define it in \`draft.json\`'s
+\`monitors\` list and write its script to \`monitors/<id>.sh\`:
+
+\`\`\`ts
+type Monitor = {
+  id: string            // lowercase letters, digits, dashes
+  name: string          // short: "CI on the PR"
+  description: string   // what it watches; shown in every notification
+  timeoutMin: number    // 1-30: it expires then (Claude Code's limit is 30 minutes)
+  rearm: boolean        // arm it again each time it expires
+  until: string         // when to stop re-arming: "the PR is merged or closed"
+  onEvent: string       // what to do on each event, by default
+}
+\`\`\`
+
+The script (bash; arguments in \`$1\`, \`$2\`…): each stdout line is one event, so print only lines
+worth acting on. Rules:
+- Every pipe stage must flush per line: \`grep --line-buffered\`, \`awk\` with \`fflush()\`; never \`head\`.
+- Poll remote APIs every 30s or more; don't let one failed call end it (\`|| true\`).
+- Cover failures, not only success: emit on every terminal state (failed, cancelled, timed out).
+- Exit when the watched thing is over (e.g. the PR is merged); otherwise it runs until it expires.
+- Nothing to watch (no checks, no such PR, no log file): print one line saying so and exit;
+  silence looks the same as "still waiting".
+
+Example \`monitors/pr-ci.sh\`, emitting each finished check of PR \`$1\` and exiting when all are done:
+
+\`\`\`bash
+prev=""
+while true; do
+  s=$(gh pr checks "$1" --json name,bucket 2>/dev/null || echo '[]')
+  cur=$(echo "$s" | jq -r '.[] | select(.bucket!="pending") | "\\(.name): \\(.bucket)"' | sort)
+  comm -13 <(echo "$prev") <(echo "$cur")
+  prev=$cur
+  echo "$s" | jq -e 'length > 0 and all(.bucket!="pending")' >/dev/null && break
+  sleep 30
+done
+\`\`\`
 
 ## Built-ins
 

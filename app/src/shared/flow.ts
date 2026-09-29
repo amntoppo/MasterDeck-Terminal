@@ -300,7 +300,84 @@ export type FlowNode =
     }
   | { id: string; x: number; y: number; kind: "instruction"; text: string }
   | { id: string; x: number; y: number; kind: "notify"; text: string }
-  | { id: string; x: number; y: number; kind: "builtin"; builtin: BuiltinId };
+  | { id: string; x: number; y: number; kind: "builtin"; builtin: BuiltinId }
+  /** Arm a monitor from the library: `args` go to its script, `instructions` say what to do per event. */
+  | {
+      id: string;
+      x: number;
+      y: number;
+      kind: "monitor";
+      monitor: string;
+      args: string;
+      instructions: string;
+    };
+
+/**
+ * A monitor: a script whose every output line is an event that wakes the session (Claude Code's
+ * Monitor tool). Workflows arm it at a trigger; the session acts on each event.
+ */
+export interface MonitorDef {
+  /** Lowercase letters, digits, dashes. */
+  id: string;
+  name: string;
+  /** What it watches; shown in each notification. */
+  description: string;
+  /** Minutes before it expires (Claude Code allows at most 30). */
+  timeoutMin: number;
+  /** Re-arm it each time it expires. */
+  rearm: boolean;
+  /** When to stop re-arming (e.g. "the PR is merged or closed"). */
+  until: string;
+  /** What to do on each event, unless the block says otherwise. */
+  onEvent: string;
+  /** The script's absolute path (set when MasterDeck loads it). */
+  path: string;
+}
+
+export function parseMonitor(raw: unknown, path = ""): MonitorDef | null {
+  const o = obj(raw);
+  const id = str(o.id, 40).toLowerCase();
+  if (!/^[a-z0-9-]{1,40}$/.test(id)) return null;
+  return {
+    id,
+    name: str(o.name, 60).trim() || id,
+    description: str(o.description, 300).trim(),
+    timeoutMin: Math.min(30, Math.max(1, num(o.timeoutMin, 30))),
+    rearm: o.rearm !== false,
+    until: str(o.until, 200).trim(),
+    onEvent: str(o.onEvent, 1000).trim(),
+    path: path || str(o.path, 500),
+  };
+}
+
+let monitors: MonitorDef[] = [];
+export function setMonitors(list: MonitorDef[]): void {
+  monitors = list;
+}
+export const monitorList = (): MonitorDef[] => monitors;
+export const findMonitor = (
+  id: string,
+  extra: MonitorDef[] = [],
+): MonitorDef | undefined =>
+  extra.find((m) => m.id === id) ?? monitors.find((m) => m.id === id);
+
+/** What a monitor block tells the session: arm it (exactly), re-arm it, and act on each event. */
+export function monitorText(
+  m: MonitorDef,
+  args: string,
+  instructions: string,
+): string {
+  const cmd = `bash '${m.path.replace(/'/g, "'\\''")}'${args.trim() ? ` ${args.trim()}` : ""}`;
+  const act = instructions.trim() || m.onEvent || "act on it";
+  return (
+    `Arm a monitor with the Monitor tool: command \`${cmd}\`${args.includes("<") ? " (fill in the <...> parts)" : ""}, ` +
+    `description "${m.name}${m.description ? `: ${m.description}` : ""}", timeout_ms ${m.timeoutMin * 60_000}. ` +
+    (m.rearm
+      ? `When it expires, arm it again${m.until ? `, until ${m.until}` : ""}. `
+      : "") +
+    `On each event it emits: ${act}`
+  );
+}
 
 export type EdgeKind = "then" | "ok" | "fail";
 export interface FlowEdge {
@@ -372,6 +449,19 @@ export function parseFlow(raw: unknown): Flow {
       n = { id, x, y, kind: "notify", text: str(r.text, 300) };
     else if (r.kind === "builtin" && BUILTINS.some((b) => b.id === r.builtin))
       n = { id, x, y, kind: "builtin", builtin: r.builtin as BuiltinId };
+    else if (
+      r.kind === "monitor" &&
+      /^[a-z0-9-]{1,40}$/.test(str(r.monitor, 40))
+    )
+      n = {
+        id,
+        x,
+        y,
+        kind: "monitor",
+        monitor: str(r.monitor, 40),
+        args: str(r.args, 300),
+        instructions: str(r.instructions, 2000),
+      };
     if (!n) continue;
     seen.add(id);
     nodes.push(n);
@@ -501,8 +591,12 @@ function skillText(n: Extract<FlowNode, { kind: "skill" }>): string {
   );
 }
 
-function blockText(n: FlowNode): string | null {
+function blockText(n: FlowNode, mons: MonitorDef[] = []): string | null {
   switch (n.kind) {
+    case "monitor": {
+      const m = findMonitor(n.monitor, mons);
+      return m ? monitorText(m, n.args, n.instructions) : null;
+    }
     case "skill":
       return n.skill ? skillText(n) : null;
     case "instruction":
@@ -518,7 +612,11 @@ function blockText(n: FlowNode): string | null {
  * The plan for the blocks after `start`: numbered steps in order; several arrows out of a block
  * run side by side; outcome arrows become "If it worked / If it failed" under the step.
  */
-function planLines(flow: Flow, start: string): string[] {
+function planLines(
+  flow: Flow,
+  start: string,
+  mons: MonitorDef[] = [],
+): string[] {
   const byId = new Map(flow.nodes.map((n) => [n.id, n]));
   const out = new Map<string, FlowEdge[]>();
   for (const e of flow.edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
@@ -556,7 +654,8 @@ function planLines(flow: Flow, start: string): string[] {
       }
       const kids = out.get(id) ?? [];
       // A built-in with nothing after it adds nothing to the plan (its hook speaks for itself).
-      const text = n.kind === "builtin" && !kids.length ? null : blockText(n);
+      const text =
+        n.kind === "builtin" && !kids.length ? null : blockText(n, mons);
       if (!text) {
         current = kids.filter((e) => e.kind === "then").map((e) => e.to);
         continue;
@@ -623,6 +722,7 @@ const ENDING: Partial<Record<FlowTrigger, string>> = {
 export function compileFlow(
   flow: Flow,
   extra: CustomTrigger[] = [],
+  extraMonitors: MonitorDef[] = [],
 ): {
   steps: CompiledStep[];
   builtins: BuiltinId[];
@@ -691,7 +791,7 @@ export function compileFlow(
           node: b.id,
           text: "Notify works after “Needs you” and “Idle” only",
         });
-      const lines = planLines(flow, n.id);
+      const lines = planLines(flow, n.id, extraMonitors);
       if (!lines.length) continue;
       // Lowercase the first letter, unless it starts an acronym ("SQL migration edited").
       const label = /^[A-Z][A-Z]/.test(info.label)
@@ -738,7 +838,10 @@ export function compileFlow(
           node: b.id,
           text: "Built-ins run from their own hook; connect them to their trigger",
         });
-      const note = n.trigger === "idle" ? planLines(flow, n.id).join("\n") : "";
+      const note =
+        n.trigger === "idle"
+          ? planLines(flow, n.id, extraMonitors).join("\n")
+          : "";
       if (!note && !notify.length) continue;
       steps.push({
         id: `${n.id}-${hash(note + notify.join("|") + (n.minutes ?? ""))}`.slice(
@@ -758,6 +861,11 @@ export function compileFlow(
       problems.push({
         node: n.id,
         text: "Not connected to a trigger: it never runs",
+      });
+    if (n.kind === "monitor" && !findMonitor(n.monitor, extraMonitors))
+      problems.push({
+        node: n.id,
+        text: `Unknown monitor ${n.monitor}: it is not in the monitor library`,
       });
     if (n.kind === "skill" && !n.skill)
       problems.push({ node: n.id, text: "Pick a skill" });

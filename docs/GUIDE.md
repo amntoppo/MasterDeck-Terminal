@@ -152,6 +152,16 @@ checkout whose branch was once linked to a ticket does not link it.
   they are). They are installed only when you **Apply** or **Save as template** (the skill into
   `~/.claude/skills`, the trigger into the library); **Discard** asks first and lists everything it
   throws away. A skill named like an existing one is refused.
+- **Monitors:** a monitor is a watch script whose every output line is an event that wakes the
+  session (Claude Code's Monitor tool): CI results on a PR, errors in a log, new review comments.
+  A **Monitor** block (palette → Monitors) arms one at its trigger: the session is told the exact
+  command, its timeout (at most 30 minutes), whether to re-arm it when it expires and until when,
+  and what to do on each event. A block can pass arguments to the script (e.g. `<PR number>`,
+  filled in by the session) and override what to do per event. The library lives in
+  `~/.claude/masterdeck/workflows/monitors/` (a definition and an executable `<id>.sh` each).
+  The builder creates them too: it defines the monitor in its draft and writes the script to
+  `monitors/<id>.sh`; MasterDeck checks it (`bash -n`, unbuffered pipes, a description) and
+  installs it on Apply / Save as template; Discard lists it with the rest.
 - **Workflow templates:** the Template bar edits the **Default** (what every new session copies) or
   a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.

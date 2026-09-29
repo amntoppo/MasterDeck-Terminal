@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -85,6 +86,8 @@ import {
   parseFlow,
   setCustomTriggers,
   validSessionId,
+  setMonitors,
+  type MonitorDef,
 } from "@shared/flow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
 import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
@@ -94,6 +97,8 @@ import {
   normalizeDraft,
   readDraftSkill,
   type DraftSkill,
+  readDraftMonitor,
+  type DraftMonitor,
 } from "@shared/flowBuilder";
 import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
@@ -595,6 +600,29 @@ const builderDir = () => join(paths.home, "workflow-builder");
 let builderDraft: WorkflowDraft | null = null;
 let draftSig = "";
 const draftSkillsDir = () => join(builderDir(), "skills");
+const draftMonitorsDir = () => join(builderDir(), "monitors");
+
+/** The monitors a draft defines, each with its script (monitors/<id>.sh) read and syntax-checked. */
+function draftMonitors(defs: MonitorDef[]): DraftMonitor[] {
+  return defs.map((d) => {
+    const path = join(draftMonitorsDir(), `${d.id}.sh`);
+    let script: string | null = null;
+    try {
+      script = readFileSync(path, "utf8");
+    } catch {
+      /* not written */
+    }
+    let syntax: string | null = null;
+    if (script !== null) {
+      const r = spawnSync("bash", ["-n", path], {
+        encoding: "utf8",
+        timeout: 5000,
+      });
+      if (r.status !== 0) syntax = (r.stderr || "does not parse").trim();
+    }
+    return readDraftMonitor({ ...d, path }, script, syntax);
+  });
+}
 
 /** The skills the builder wrote (skills/<name>/), each read and checked. */
 function draftSkills(): DraftSkill[] {
@@ -633,14 +661,13 @@ function draftSignature(): string {
   } catch {
     return "";
   }
-  try {
-    for (const e of readdirSync(draftSkillsDir(), { recursive: true })
-      .map(String)
-      .sort())
-      parts.push(`${e}:${statSync(join(draftSkillsDir(), e)).mtimeMs}`);
-  } catch {
-    /* no skills */
-  }
+  for (const dir of [draftSkillsDir(), draftMonitorsDir()])
+    try {
+      for (const e of readdirSync(dir, { recursive: true }).map(String).sort())
+        parts.push(`${dir}/${e}:${statSync(join(dir, e)).mtimeMs}`);
+    } catch {
+      /* none */
+    }
   return parts.join("|");
 }
 
@@ -683,17 +710,29 @@ function readDraft(force = false): void {
     paths.masterWorkspace,
     ...ops.repos(),
   ]).map((x) => x.name);
+  const norm = normalizeDraft(raw);
+  const monitors = draftMonitors(norm.monitors);
   const check = checkDraft(raw, {
     library: workflows().triggers(),
     installedSkills: installed,
     skills,
+    monitorLibrary: workflows().monitors(),
+    monitors,
   });
   writeFileSync(
     join(builderDir(), "check.json"),
     JSON.stringify(check, null, 2) + "\n",
   );
-  const { name, flow, triggers } = normalizeDraft(raw);
-  builderDraft = { name, flow, triggers, skills, check, at: Date.now() };
+  const { name, flow, triggers } = norm;
+  builderDraft = {
+    name,
+    flow,
+    triggers,
+    skills,
+    monitors,
+    check,
+    at: Date.now(),
+  };
   win?.webContents.send(CH.workflowDraft, builderDraft);
 }
 
@@ -706,6 +745,7 @@ function clearDraft(): void {
       /* already gone */
     }
   rmSync(draftSkillsDir(), { recursive: true, force: true });
+  rmSync(draftMonitorsDir(), { recursive: true, force: true });
   readDraft(true);
 }
 
@@ -720,6 +760,7 @@ const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
 const syncWorkflowHooks = () => {
   const customs = workflows().triggers();
   setCustomTriggers(customs);
+  setMonitors(workflows().monitors());
   return installWorkflowHooks(
     paths.claudeSettings,
     paths.home,
@@ -1224,6 +1265,7 @@ function registerIpc(): void {
     flow: workflows().template(DEFAULT_TEMPLATE)?.flow ?? null,
     templates: workflows().templates(),
     triggers: workflows().triggers(),
+    monitors: workflows().monitors(),
   }));
   ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
@@ -1266,6 +1308,7 @@ function registerIpc(): void {
         skills,
         { id: t.id, name: t.name },
         workflows().triggers(),
+        workflows().monitors(),
       ),
     );
     writeFileSync(
@@ -1302,6 +1345,11 @@ function registerIpc(): void {
             `${d.skills.length} new skill${d.skills.length === 1 ? "" : "s"}: ${d.skills.map((x) => x.name).join(", ")}`,
           ]
         : []),
+      ...(d.monitors.length
+        ? [
+            `${d.monitors.length} new monitor${d.monitors.length === 1 ? "" : "s"}: ${d.monitors.map((x) => x.def.name).join(", ")}`,
+          ]
+        : []),
     ];
     const choice = await dialog.showMessageBox(win!, {
       type: "warning",
@@ -1325,6 +1373,12 @@ function registerIpc(): void {
     const clash = d.check.problems.find((p) => /already exists/.test(p));
     if (clash)
       return { ok: false, message: `${clash}. Ask the builder to rename it.` };
+    const badMon = d.monitors.find((x) => x.problems.length);
+    if (badMon)
+      return {
+        ok: false,
+        message: `monitor ${badMon.def.id} is not ready: ${badMon.problems[0]}`,
+      };
     const bad = d.skills.filter((x) => x.problems.length);
     if (bad.length)
       return {
@@ -1332,6 +1386,12 @@ function registerIpc(): void {
         message: `skill ${bad[0].name} is not ready: ${bad[0].problems[0]}`,
       };
     for (const tr of d.triggers) workflows().saveTrigger(tr);
+    // Monitors: the definition and its script, into the library (their blocks then point there).
+    for (const m of d.monitors)
+      workflows().saveMonitor(
+        m.def,
+        readFileSync(join(draftMonitorsDir(), `${m.def.id}.sh`), "utf8"),
+      );
     for (const sk of d.skills) {
       mkdirSync(paths.skillsDir, { recursive: true });
       cpSync(join(draftSkillsDir(), sk.name), join(paths.skillsDir, sk.name), {
@@ -1362,11 +1422,14 @@ function registerIpc(): void {
       d.skills.length
         ? `${d.skills.length} skill${d.skills.length === 1 ? "" : "s"}`
         : "",
+      d.monitors.length
+        ? `${d.monitors.length} monitor${d.monitors.length === 1 ? "" : "s"}`
+        : "",
     ].filter(Boolean);
     return {
       ok: true,
       id,
-      message: `saved${extra.length ? `, with ${extra.join(" and ")} installed` : ""}${hooks.ok ? "" : ` (hooks: ${hooks.message})`}`,
+      message: `saved${extra.length ? `, with ${extra.join(", ")} installed` : ""}${hooks.ok ? "" : ` (hooks: ${hooks.message})`}`,
     };
   });
   ipcMain.handle(CH.workflowTriggerDelete, (_e, id: unknown) => {

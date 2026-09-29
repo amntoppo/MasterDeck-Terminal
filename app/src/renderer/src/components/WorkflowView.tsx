@@ -7,6 +7,7 @@ import {
   setCustomTriggers,
   type Flow,
   type WorkflowTemplate,
+  setMonitors,
 } from "@shared/flow";
 import type { AppState } from "@shared/types";
 import { deck, load as loadPref, save as savePref } from "../deck";
@@ -145,6 +146,7 @@ export function WorkflowView(_: { state: AppState }) {
     const w = await deck().workflowGet();
     // The custom trigger library: the editor, the compiler and block titles use it.
     setCustomTriggers(w.triggers);
+    setMonitors(w.monitors);
     setData({ hooks: w.hooks, skills: w.skills, templates: w.templates });
   }, []);
   useEffect(() => void load(), [load]);
@@ -428,6 +430,17 @@ export function WorkflowView(_: { state: AppState }) {
                   {draft.skills.length === 1 ? "" : "s"}
                 </span>
               )}
+              {draft.monitors.length > 0 && (
+                <span
+                  className="wf-draft-chip mon"
+                  title={draft.monitors
+                    .map((m) => `${m.def.name}: ${m.def.description}`)
+                    .join("\n")}
+                >
+                  + {draft.monitors.length} new monitor
+                  {draft.monitors.length === 1 ? "" : "s"}
+                </span>
+              )}
               {draft.check.warnings.length > 0 && (
                 <span
                   className="wf-draft-chip warn"
@@ -471,6 +484,7 @@ export function WorkflowView(_: { state: AppState }) {
               flow={draft.flow}
               skills={data.skills}
               extraTriggers={draft.triggers}
+              extraMonitors={draft.monitors.map((m) => m.def)}
               readOnly
             />
           ) : (

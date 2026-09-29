@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   appendFileSync,
+  chmodSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -19,7 +20,9 @@ import {
 import {
   compileFlow,
   parseCustomTrigger,
+  parseMonitor,
   type CustomTrigger,
+  type MonitorDef,
   DEFAULT_TEMPLATE,
   defaultFlow,
   docJson,
@@ -596,5 +599,53 @@ export class WorkflowStore {
     if (!existsSync(f)) return false;
     unlinkSync(f);
     return true;
+  }
+
+  private get monitorsDir(): string {
+    return join(this.home, "workflows", "monitors");
+  }
+
+  /** The monitor library (workflows/monitors/<id>.json with its script <id>.sh). */
+  monitors(): MonitorDef[] {
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.monitorsDir).filter((f) => f.endsWith(".json"));
+    } catch {
+      return [];
+    }
+    return files
+      .sort()
+      .map((f) => {
+        const script = join(this.monitorsDir, `${f.slice(0, -5)}.sh`);
+        return existsSync(script)
+          ? parseMonitor(readRaw(join(this.monitorsDir, f)), script)
+          : null;
+      })
+      .filter((m): m is MonitorDef => !!m);
+  }
+
+  /** Install a monitor: its definition and its script (made executable). */
+  saveMonitor(m: MonitorDef, script: string): void {
+    const path = join(this.monitorsDir, `${m.id}.sh`);
+    writeAtomic(path, script.endsWith("\n") ? script : `${script}\n`);
+    chmodSync(path, 0o755);
+    const { path: _p, ...def } = m;
+    writeAtomic(
+      join(this.monitorsDir, `${m.id}.json`),
+      JSON.stringify(def, null, 2) + "\n",
+    );
+  }
+
+  deleteMonitor(id: string): boolean {
+    if (!/^[a-z0-9-]{1,40}$/.test(id)) return false;
+    let gone = false;
+    for (const f of [`${id}.json`, `${id}.sh`])
+      try {
+        unlinkSync(join(this.monitorsDir, f));
+        gone = true;
+      } catch {
+        /* not there */
+      }
+    return gone;
   }
 }

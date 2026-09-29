@@ -49,6 +49,9 @@ import {
   type Flow,
   type FlowNode,
   type FlowTrigger,
+  findMonitor,
+  monitorList,
+  type MonitorDef,
 } from "@shared/flow";
 
 export type Skill = { name: string; description: string; source?: string };
@@ -89,7 +92,8 @@ type Drop =
   | { kind: "builtin"; builtin: BuiltinId }
   | { kind: "skill"; skill: string }
   | { kind: "instruction" }
-  | { kind: "notify" };
+  | { kind: "notify" }
+  | { kind: "monitor"; monitor: string };
 
 /** The palette's default width (px). */
 const PAL_W = 176;
@@ -125,13 +129,24 @@ function makeNode(d: Drop, x: number, y: number): FlowNode {
       return { id, x, y, kind: "instruction", text: "" };
     case "notify":
       return { id, x, y, kind: "notify", text: "" };
+    case "monitor":
+      return {
+        id,
+        x,
+        y,
+        kind: "monitor",
+        monitor: d.monitor,
+        args: "",
+        instructions: "",
+      };
   }
 }
 
 type BlockData = {
   node: FlowNode;
-  /** A draft's own custom triggers (not in the library yet). */
+  /** A draft's own custom triggers and monitors (not in the library yet). */
   extra: CustomTrigger[];
+  mons: MonitorDef[];
   problem: string | null;
   readOnly: boolean;
   onDelete: (id: string) => void;
@@ -143,9 +158,14 @@ const KIND_LABEL: Record<FlowNode["kind"], string> = {
   instruction: "Instruction",
   notify: "Notify",
   builtin: "Built-in",
+  monitor: "Monitor",
 };
 
-function blockTitle(n: FlowNode, extra: CustomTrigger[] = []): string {
+function blockTitle(
+  n: FlowNode,
+  extra: CustomTrigger[] = [],
+  mons: MonitorDef[] = [],
+): string {
   switch (n.kind) {
     case "trigger":
       return triggerInfo(n.trigger, extra).short;
@@ -157,6 +177,10 @@ function blockTitle(n: FlowNode, extra: CustomTrigger[] = []): string {
       return n.text.trim() || "Write the notification";
     case "builtin":
       return builtinInfo(n.builtin).label;
+    case "monitor":
+      return (
+        findMonitor(n.monitor, mons)?.name ?? `Unknown monitor ${n.monitor}`
+      );
   }
 }
 
@@ -172,6 +196,8 @@ function blockSub(n: FlowNode): string | null {
   if (n.kind === "skill")
     return `${n.mode === "background" ? "background subagent" : "in the session"}${n.instructions.trim() ? ` · ${n.instructions.trim()}` : ""}`;
   if (n.kind === "builtin") return "runs from its own hook";
+  if (n.kind === "monitor")
+    return `watches${n.args.trim() ? ` · ${n.args.trim()}` : ""}${n.instructions.trim() ? ` · ${n.instructions.trim()}` : ""}`;
   return null;
 }
 
@@ -206,7 +232,7 @@ const Block = memo(function Block({
           </button>
         )}
       </div>
-      <div className="fb-title">{blockTitle(n, data.extra)}</div>
+      <div className="fb-title">{blockTitle(n, data.extra, data.mons)}</div>
       {blockSub(n) && <div className="fb-sub">{blockSub(n)}</div>}
       <Handle type="source" position={Position.Right} className="fh" />
     </div>
@@ -262,6 +288,8 @@ interface Props {
   readOnly?: boolean;
   /** Custom triggers a draft brings (shown and checked as if installed). */
   extraTriggers?: CustomTrigger[];
+  /** Monitors a draft brings. */
+  extraMonitors?: MonitorDef[];
   /** Shown above the canvas on the right (Save state, buttons). */
   toolbar?: React.ReactNode;
 }
@@ -287,6 +315,7 @@ function Editor({
   readOnly,
   toolbar,
   extraTriggers = [],
+  extraMonitors = [],
 }: Props) {
   const [flow, setFlowRaw] = useState<Flow>(initial);
   const [sel, setSel] = useState<{ type: "node" | "edge"; id: string } | null>(
@@ -314,8 +343,8 @@ function Editor({
   };
 
   const compiled = useMemo(
-    () => compileFlow(flow, extraTriggers),
-    [flow, extraTriggers],
+    () => compileFlow(flow, extraTriggers, extraMonitors),
+    [flow, extraTriggers, extraMonitors],
   );
   const problemOf = useMemo(() => {
     const m = new Map<string, string>();
@@ -346,12 +375,21 @@ function Editor({
         data: {
           node: n,
           extra: extraTriggers,
+          mons: extraMonitors,
           problem: problemOf.get(n.id) ?? null,
           readOnly: !!readOnly,
           onDelete: (id: string) => remove([id]),
         },
       })),
-    [flow.nodes, sel, problemOf, readOnly, remove, extraTriggers],
+    [
+      flow.nodes,
+      sel,
+      problemOf,
+      readOnly,
+      remove,
+      extraTriggers,
+      extraMonitors,
+    ],
   );
   const edges: Edge<{ kind: EdgeKind }>[] = useMemo(
     () =>
@@ -804,6 +842,7 @@ function Palette({
         </>
       )}
       <div className="fp-sec">Actions</div>
+
       {item(
         { kind: "instruction" },
         "Instruction",
@@ -815,6 +854,19 @@ function Palette({
         "Notify me",
         "fp-notify",
         "A desktop notification (after Needs you or Idle)",
+      )}
+      {monitorList().length > 0 && (
+        <>
+          <div className="fp-sec">Monitors</div>
+          {monitorList().map((m) =>
+            item(
+              { kind: "monitor", monitor: m.id },
+              m.name,
+              "fp-monitor",
+              `${m.description} (monitor${m.rearm ? ", re-armed on expiry" : ""})`,
+            ),
+          )}
+        </>
       )}
       <div className="fp-sec">Built-ins</div>
       {BUILTINS.map((b) =>
@@ -1049,6 +1101,45 @@ function NodeForm({
           </div>
         </>
       )}
+      {n.kind === "monitor" &&
+        (() => {
+          const m = findMonitor(n.monitor);
+          return (
+            <>
+              <div className="meta">
+                {m ? (
+                  <>
+                    <b>{m.name}</b>: {m.description} Expires after{" "}
+                    {m.timeoutMin} min
+                    {m.rearm
+                      ? `, re-armed${m.until ? ` until ${m.until}` : ""}`
+                      : ""}
+                    . Script: <code>{m.path}</code>
+                  </>
+                ) : (
+                  `Unknown monitor ${n.monitor}: it is not in the monitor library.`
+                )}
+              </div>
+              <label>Arguments for its script</label>
+              <input
+                className="fs-input mono"
+                value={n.args}
+                placeholder='e.g. "<PR number>" (the session fills in <...>)'
+                onChange={(e) => onChange({ args: e.target.value })}
+              />
+              <label>On each event</label>
+              <textarea
+                className="fs-text"
+                value={n.instructions}
+                placeholder={
+                  m?.onEvent ||
+                  "What the session does when the monitor emits an event"
+                }
+                onChange={(e) => onChange({ instructions: e.target.value })}
+              />
+            </>
+          );
+        })()}
       {n.kind === "builtin" && (
         <div className="meta">
           {builtinInfo(n.builtin).what} Remove it to turn it off for sessions

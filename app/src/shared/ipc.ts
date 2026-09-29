@@ -13,9 +13,10 @@ import type {
   Flow,
   WorkflowDoc,
   WorkflowTemplate,
+  MonitorDef,
 } from "./flow";
 import type { FlowProgress } from "./flowTrack";
-import type { DraftCheck, DraftSkill } from "./flowBuilder";
+import type { DraftCheck, DraftMonitor, DraftSkill } from "./flowBuilder";
 
 /** A workflow the builder session wrote, as MasterDeck read and checked it. */
 export interface WorkflowDraft {
@@ -24,6 +25,7 @@ export interface WorkflowDraft {
   /** New triggers and skills the builder made for it (installed only when it is applied). */
   triggers: CustomTrigger[];
   skills: DraftSkill[];
+  monitors: DraftMonitor[];
   check: DraftCheck;
   at: number;
 }
@@ -337,6 +339,8 @@ export interface DeckApi {
     templates: WorkflowTemplate[];
     /** The custom trigger library. */
     triggers: CustomTrigger[];
+    /** The monitor library. */
+    monitors: MonitorDef[];
   }>;
   /** Save the default workflow (what new sessions copy). */
   workflowSave(flow: Flow): Promise<CliResult>;
