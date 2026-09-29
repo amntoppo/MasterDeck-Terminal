@@ -141,6 +141,15 @@ function columnColor(col: string): string {
 
 const COL_ORDER_KEY = "boardColumnOrder";
 
+/** How far to scroll this frame when `pos` is within `edge` px of `start` or `end`: faster nearer. */
+function edgeStep(pos: number, start: number, end: number, edge = 80): number {
+  const e = Math.min(edge, (end - start) / 4);
+  if (pos - start < e)
+    return -Math.ceil(((e - Math.max(0, pos - start)) / e) * 22);
+  if (end - pos < e) return Math.ceil(((e - Math.max(0, end - pos)) / e) * 22);
+  return 0;
+}
+
 /** A column being moved: where it would land, and where its lifted heading is drawn. */
 interface ColDrag {
   col: string;
@@ -340,7 +349,52 @@ export function BoardView({
       )
     : [];
   shownCols.current = columns;
-  const laidOut = colDrag ? moveColumn(columns, colDrag.col, colDrag.to) : columns;
+  // A card dragged near the board's left or right edge scrolls it sideways, and near the top or
+  // bottom of a column scrolls that column. Native drags send no pointer moves, so the position
+  // comes from dragover; the loop stops once they stop coming (the drag ended or left the window).
+  useEffect(() => {
+    let at: { x: number; y: number } | null = null;
+    let last = 0;
+    let frame = 0;
+    const tick = () => {
+      frame = 0;
+      if (!at || performance.now() - last > 400) return (at = null);
+      const box = colsEl.current;
+      if (box) {
+        const r = box.getBoundingClientRect();
+        box.scrollLeft += edgeStep(at.x, r.left, r.right);
+        const body = document
+          .elementFromPoint(at.x, at.y)
+          ?.closest<HTMLElement>(".board-col-body");
+        if (body) {
+          const b = body.getBoundingClientRect();
+          body.scrollTop += edgeStep(at.y, b.top, b.bottom, 60);
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    const over = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("text/masterdeck-card")) return;
+      at = { x: e.clientX, y: e.clientY };
+      last = performance.now();
+      if (!frame) frame = requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      at = null;
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragend", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragend", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+  const laidOut = colDrag
+    ? moveColumn(columns, colDrag.col, colDrag.to)
+    : columns;
 
   // Long press (350ms, without moving) lifts a column; it then follows the pointer, and the
   // board scrolls when the pointer nears its left or right edge. Esc puts it back.
@@ -373,15 +427,7 @@ export function BoardView({
       const box = colsEl.current;
       if (box) {
         const r = box.getBoundingClientRect();
-        const edge = Math.min(80, r.width / 4);
-        const left = at.x - r.left;
-        const right = r.right - at.x;
-        const step =
-          left < edge
-            ? -Math.ceil(((edge - left) / edge) * 22)
-            : right < edge
-              ? Math.ceil(((edge - right) / edge) * 22)
-              : 0;
+        const step = edgeStep(at.x, r.left, r.right);
         if (step) {
           box.scrollLeft += step;
           update();

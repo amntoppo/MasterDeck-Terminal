@@ -395,6 +395,8 @@ creation.
   right; the other columns make room. Near the board's edge it scrolls, so a column can go past
   what's on screen. Release to drop, Esc to put it back. The order is saved and applies to every
   tab; columns you hide keep their place.
+- **Dragging a card** to another column scrolls the board the same way near its left or right
+  edge, and scrolls a long column near its top or bottom.
 - **New ticket (+ on a column):** each column's header has a **+**. It opens a dialog for an issue
   that lands in that column: title, description (Markdown), repository, status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
