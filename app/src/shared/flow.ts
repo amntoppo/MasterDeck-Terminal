@@ -20,7 +20,9 @@ export type FlowTrigger =
   | "command-after"
   | "turn-end"
   | "needs-you"
-  | "idle";
+  | "idle"
+  /** A trigger defined by the user or the builder (see CustomTrigger). */
+  | `custom:${string}`;
 
 export interface FlowTriggerInfo {
   id: FlowTrigger;
@@ -31,7 +33,8 @@ export interface FlowTriggerInfo {
   /** hook: a Claude Code hook hands the session its plan; deck: MasterDeck watches and acts. */
   runner: "hook" | "deck";
   /** The hook event (hook runners). */
-  event?: "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop";
+  event?:
+    "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop" | "UserPromptSubmit";
 }
 
 const SHORT: Record<TriggerId, string> = {
@@ -95,8 +98,152 @@ export const FLOW_TRIGGERS: FlowTriggerInfo[] = [
   },
 ];
 
-export const triggerInfo = (id: FlowTrigger): FlowTriggerInfo =>
-  FLOW_TRIGGERS.find((t) => t.id === id)!;
+/**
+ * A trigger defined by the user (or the workflow builder): a Claude Code hook event, the tool it
+ * applies to, and a pattern on the command, the file, the prompt or the tool's output.
+ */
+export interface CustomTrigger {
+  /** Lowercase letters, digits, dashes; used as `custom:<id>` in flows. */
+  id: string;
+  name: string;
+  description: string;
+  event: "PreToolUse" | "PostToolUse" | "UserPromptSubmit";
+  /** A regular expression on the tool name (e.g. `Bash`, `Edit|Write`); empty: any tool. */
+  tool: string;
+  /** What `pattern` is matched against: the Bash command, the file path, or the prompt. */
+  field: "command" | "file" | "prompt";
+  /** A regular expression; empty: always. */
+  pattern: string;
+  /** PostToolUse: a regular expression the tool's output must match (e.g. `FAIL|Error`). */
+  output: string;
+  once: "always" | "session" | "commit";
+}
+
+export const CUSTOM_PREFIX = "custom:";
+export const isCustomTrigger = (t: string): t is `custom:${string}` =>
+  /^custom:[a-z0-9-]{1,40}$/.test(t);
+
+/** Validate a custom trigger from JSON; null when it can't be used. */
+export function parseCustomTrigger(raw: unknown): CustomTrigger | null {
+  const o = obj(raw);
+  const id = str(o.id, 40).toLowerCase();
+  if (!/^[a-z0-9-]{1,40}$/.test(id)) return null;
+  const event =
+    o.event === "PreToolUse" ||
+    o.event === "PostToolUse" ||
+    o.event === "UserPromptSubmit"
+      ? o.event
+      : null;
+  if (!event) return null;
+  const field =
+    o.field === "file" || o.field === "prompt" ? o.field : "command";
+  const once = o.once === "always" || o.once === "session" ? o.once : "commit";
+  return {
+    id,
+    name: str(o.name, 60).trim() || id,
+    description: str(o.description, 300).trim(),
+    event,
+    tool: event === "UserPromptSubmit" ? "" : str(o.tool, 100),
+    field: event === "UserPromptSubmit" ? "prompt" : field,
+    pattern: str(o.pattern, 300),
+    output: event === "PostToolUse" ? str(o.output, 300) : "",
+    once,
+  };
+}
+
+/** What is wrong with a custom trigger (bad regular expressions, a prompt field on a tool event). */
+export function customTriggerProblems(c: CustomTrigger): string[] {
+  const out: string[] = [];
+  for (const [k, v] of [
+    ["tool", c.tool],
+    ["pattern", c.pattern],
+    ["output", c.output],
+  ] as const)
+    if (v)
+      try {
+        new RegExp(v);
+      } catch {
+        out.push(`${c.id}: ${k} is not a valid regular expression`);
+      }
+  if (c.field === "prompt" && c.event !== "UserPromptSubmit")
+    out.push(`${c.id}: field "prompt" only works with UserPromptSubmit`);
+  if (!c.pattern && !c.output && !c.tool && c.event !== "UserPromptSubmit")
+    out.push(
+      `${c.id}: matches every tool call; give it a tool, a pattern or an output`,
+    );
+  return out;
+}
+
+/** The custom triggers the editor and the compiler know (MasterDeck's library). */
+let customs: CustomTrigger[] = [];
+export function setCustomTriggers(list: CustomTrigger[]): void {
+  customs = list;
+}
+export const customTriggerList = (): CustomTrigger[] => customs;
+
+const CUSTOM_EVENT_TEXT: Record<CustomTrigger["event"], string> = {
+  PreToolUse: "Before",
+  PostToolUse: "After",
+  UserPromptSubmit: "When you send a prompt",
+};
+
+export function customInfo(c: CustomTrigger): FlowTriggerInfo {
+  const what = [
+    CUSTOM_EVENT_TEXT[c.event],
+    c.tool
+      ? `${c.tool} calls`
+      : c.event === "UserPromptSubmit"
+        ? ""
+        : "any tool call",
+    c.pattern ? `where the ${c.field} matches ${c.pattern}` : "",
+    c.output ? `with output matching ${c.output}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const once =
+    c.once === "always"
+      ? "Every time."
+      : c.once === "session"
+        ? "Once per session."
+        : "Once per session and commit.";
+  return {
+    id: `custom:${c.id}`,
+    label: c.name,
+    short: c.name,
+    hint: `${c.description ? `${c.description} ` : ""}${what}. ${once}`,
+    runner: "hook",
+    event: c.event,
+  };
+}
+
+/** A trigger's description; custom ones from `extra` (a draft's) or the library. */
+export const triggerInfo = (
+  id: FlowTrigger,
+  extra: CustomTrigger[] = [],
+): FlowTriggerInfo => {
+  const known = FLOW_TRIGGERS.find((t) => t.id === id);
+  if (known) return known;
+  const cid = String(id).slice(CUSTOM_PREFIX.length);
+  const c =
+    extra.find((x) => x.id === cid) ?? customs.find((x) => x.id === cid);
+  if (c) return customInfo(c);
+  return {
+    id,
+    label: `Unknown trigger ${cid}`,
+    short: cid,
+    hint: "This custom trigger is not in the library (deleted?).",
+    runner: "hook",
+  };
+};
+
+/** Whether a trigger id is one MasterDeck knows (built-in, or a custom one in the library or `extra`). */
+export const knownTrigger = (
+  id: string,
+  extra: CustomTrigger[] = [],
+): boolean =>
+  FLOW_TRIGGERS.some((t) => t.id === id) ||
+  (isCustomTrigger(id) &&
+    [...extra, ...customs].some((c) => `custom:${c.id}` === id));
 
 export type BuiltinId = "ticket" | "pr-review" | "pr-watch";
 
@@ -197,7 +344,13 @@ export function parseFlow(raw: unknown): Flow {
     const x = num(r.x, 0);
     const y = num(r.y, 0);
     let n: FlowNode | null = null;
-    if (r.kind === "trigger" && FLOW_TRIGGERS.some((t) => t.id === r.trigger)) {
+    // Custom triggers are kept even when unknown here: the check reports them.
+    if (
+      r.kind === "trigger" &&
+      typeof r.trigger === "string" &&
+      (FLOW_TRIGGERS.some((t) => t.id === r.trigger) ||
+        isCustomTrigger(r.trigger))
+    ) {
       n = { id, x, y, kind: "trigger", trigger: r.trigger as FlowTrigger };
       if (r.trigger === "command-before" || r.trigger === "command-after")
         n.pattern = str(r.pattern, 200);
@@ -444,6 +597,8 @@ export interface CompiledStep {
   note: string;
   /** Deck triggers: notifications to show. */
   notify?: string[];
+  /** Custom triggers: what the hook matches (copied from the definition, so a session file has all it needs). */
+  custom?: Omit<CustomTrigger, "id" | "name" | "description">;
 }
 
 export interface Problem {
@@ -465,7 +620,10 @@ const ENDING: Partial<Record<FlowTrigger, string>> = {
 };
 
 /** The flow as the hooks and MasterDeck run it, and what is wrong with it. */
-export function compileFlow(flow: Flow): {
+export function compileFlow(
+  flow: Flow,
+  extra: CustomTrigger[] = [],
+): {
   steps: CompiledStep[];
   builtins: BuiltinId[];
   problems: Problem[];
@@ -484,7 +642,17 @@ export function compileFlow(flow: Flow): {
   for (const n of flow.nodes) {
     if (n.kind !== "trigger") continue;
     reach(n.id);
-    const info = triggerInfo(n.trigger);
+    const info = triggerInfo(n.trigger, extra);
+    const def = isCustomTrigger(n.trigger)
+      ? [...extra, ...customs].find((c) => `custom:${c.id}` === n.trigger)
+      : undefined;
+    if (isCustomTrigger(n.trigger) && !def) {
+      problems.push({
+        node: n.id,
+        text: `Unknown trigger ${n.trigger.slice(7)}: it is not in the trigger library`,
+      });
+      continue;
+    }
     const under = new Set<string>();
     const walk = (id: string) => {
       for (const e of flow.edges.filter((e) => e.from === id))
@@ -525,17 +693,35 @@ export function compileFlow(flow: Flow): {
         });
       const lines = planLines(flow, n.id);
       if (!lines.length) continue;
-      const head = `Workflow step (${info.label[0].toLowerCase()}${info.label.slice(1)}${n.pattern ? `: ${n.pattern}` : ""}):`;
+      // Lowercase the first letter, unless it starts an acronym ("SQL migration edited").
+      const label = /^[A-Z][A-Z]/.test(info.label)
+        ? info.label
+        : `${info.label[0].toLowerCase()}${info.label.slice(1)}`;
+      const head = `Workflow step (${label}${n.pattern ? `: ${n.pattern}` : ""}):`;
       const note = [
         head,
         ...lines,
         ENDING[n.trigger] ?? "Then carry on with what you were doing.",
       ].join("\n");
+      const custom = def
+        ? {
+            event: def.event,
+            tool: def.tool,
+            field: def.field,
+            pattern: def.pattern,
+            output: def.output,
+            once: def.once,
+          }
+        : undefined;
       steps.push({
-        id: `${n.id}-${hash(note + (n.pattern ?? ""))}`.slice(0, 40),
+        id: `${n.id}-${hash(note + (n.pattern ?? "") + (custom ? JSON.stringify(custom) : ""))}`.slice(
+          0,
+          40,
+        ),
         trigger: n.trigger,
         ...(n.pattern ? { pattern: n.pattern } : {}),
         note,
+        ...(custom ? { custom } : {}),
       });
     } else {
       const acts = blocks.filter(
@@ -747,3 +933,40 @@ export function templateId(name: string): string {
 
 export const validSessionId = (id: unknown): id is string =>
   typeof id === "string" && /^[A-Za-z0-9-]{8,80}$/.test(id);
+
+/**
+ * The hook for custom triggers on one event: for each compiled step of a custom trigger on this
+ * event in the session's workflow (else the default), check the tool, the pattern (on the Bash
+ * command, the file path or the prompt) and the output, run it once (per its setting), and hand
+ * the session the plans that matched. `matcher`-less: the steps say which tools they want.
+ */
+export function customTriggerCommand(
+  event: CustomTrigger["event"],
+  dir: string,
+  mark: string,
+): string {
+  const pick =
+    `. as $in | $wf[0].steps[]? | select(.custom.event == $ev) | . as $s | ` +
+    `select(($s.custom.tool // "") == "" or (($in.tool_name // "") | try test("^(" + $s.custom.tool + ")$") catch false)) | ` +
+    `select(($s.custom.pattern // "") == "" or ((if $s.custom.field == "file" then ($in.tool_input.file_path // $in.tool_input.notebook_path // $in.tool_input.path // "") ` +
+    `elif $s.custom.field == "prompt" then ($in.prompt // "") else ($in.tool_input.command // "") end) | tostring | try test($s.custom.pattern) catch false)) | ` +
+    `select(($s.custom.output // "") == "" or (($in.tool_response // "") | tostring | try test($s.custom.output) catch false)) | ` +
+    `"\\($s.id) \\($s.custom.once // "commit")"`;
+  const lines = [
+    `input=$(cat)`,
+    `sid=$(printf '%s' "$input" | jq -r '.session_id // ""')`,
+    `case "$sid" in ""|*[!A-Za-z0-9-]*) exit 0;; esac`,
+    `d=${q(dir)}; f="$d/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$d/workflow.json"; [ -f "$f" ] || exit 0`,
+    `grep -q '"custom"' "$f" || exit 0`,
+    `hits=$(printf '%s' "$input" | jq -r --arg ev ${q(event)} --slurpfile wf "$f" ${q(pick)} 2>/dev/null)`,
+    `[ -n "$hits" ] || exit 0`,
+    `ids=""; for h in $(printf '%s' "$hits" | tr ' ' ':'); do id=\${h%%:*}; once=\${h#*:}; case "$id" in ""|*[!a-z0-9-]*) continue;; esac; ` +
+      `case "$once" in always) ;; session) m="\${TMPDIR:-/tmp}/masterdeck-workflow-$id-$sid"; [ -f "$m" ] && continue; touch "$m";; ` +
+      `*) m="\${TMPDIR:-/tmp}/masterdeck-workflow-$id-$sid-$(git rev-parse HEAD 2>/dev/null || echo none)"; [ -f "$m" ] && continue; touch "$m";; esac; ` +
+      `ids="$ids $id"; done`,
+    `[ -n "$ids" ] || exit 0`,
+    `mkdir -p "$d/workflows" 2>/dev/null; printf '{"at":%s000,"sid":"%s","trigger":"custom","ids":"%s"}\\n' "$(date +%s)" "$sid" "$ids" >> "$d/workflows/runs.jsonl" 2>/dev/null`,
+    `jq -c --arg ids "$ids" ${q(`($ids | split(" ") | map(select(. != ""))) as $w | {hookSpecificOutput: {hookEventName: ${JSON.stringify(event)}, additionalContext: ([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))}}`)} "$f"`,
+  ];
+  return `${lines.join("; ")} # ${mark}`;
+}

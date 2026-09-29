@@ -232,9 +232,7 @@ export function flowProgress(
     ...LIFECYCLE.map((t, i) => (latest.has(t) ? i : -1)),
   );
   const next = LIFECYCLE.filter((t, i) => i > furthest && active.includes(t));
-  const anytime = FLOW_TRIGGERS.map((t) => t.id).filter(
-    (t) => !LIFECYCLE.includes(t) && active.includes(t),
-  );
+  const anytime = active.filter((t) => !LIFECYCLE.includes(t));
   return { current, next, anytime };
 }
 

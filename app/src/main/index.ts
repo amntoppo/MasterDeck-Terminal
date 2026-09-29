@@ -2,8 +2,10 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  cpSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -78,13 +80,20 @@ import {
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { Summaries } from "./summary";
-import { DEFAULT_TEMPLATE, parseFlow, validSessionId } from "@shared/flow";
+import {
+  DEFAULT_TEMPLATE,
+  parseFlow,
+  setCustomTriggers,
+  validSessionId,
+} from "@shared/flow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
 import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
 import {
   builderContext,
   checkDraft,
   normalizeDraft,
+  readDraftSkill,
+  type DraftSkill,
 } from "@shared/flowBuilder";
 import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
@@ -584,22 +593,70 @@ const builderDir = () => join(paths.home, "workflow-builder");
 
 /** The builder's latest draft, checked; null when there is none (or it was applied or discarded). */
 let builderDraft: WorkflowDraft | null = null;
-let draftMtime = 0;
-function readDraft(): void {
-  const f = join(builderDir(), "draft.json");
-  let mtime = 0;
+let draftSig = "";
+const draftSkillsDir = () => join(builderDir(), "skills");
+
+/** The skills the builder wrote (skills/<name>/), each read and checked. */
+function draftSkills(): DraftSkill[] {
+  let dirs: string[] = [];
   try {
-    mtime = statSync(f).mtimeMs;
+    dirs = readdirSync(draftSkillsDir(), { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort();
   } catch {
+    return [];
+  }
+  return dirs.map((name) => {
+    const dir = join(draftSkillsDir(), name);
+    let text: string | null = null;
+    try {
+      text = readFileSync(join(dir, "SKILL.md"), "utf8");
+    } catch {
+      /* none yet */
+    }
+    let files = 0;
+    try {
+      files = readdirSync(dir, { recursive: true }).length;
+    } catch {
+      /* gone */
+    }
+    return readDraftSkill(name, text, files);
+  });
+}
+
+/** What changed in the builder's folder: the draft and its skills (names, times). */
+function draftSignature(): string {
+  const parts: string[] = [];
+  try {
+    parts.push(String(statSync(join(builderDir(), "draft.json")).mtimeMs));
+  } catch {
+    return "";
+  }
+  try {
+    for (const e of readdirSync(draftSkillsDir(), { recursive: true })
+      .map(String)
+      .sort())
+      parts.push(`${e}:${statSync(join(draftSkillsDir(), e)).mtimeMs}`);
+  } catch {
+    /* no skills */
+  }
+  return parts.join("|");
+}
+
+function readDraft(force = false): void {
+  const f = join(builderDir(), "draft.json");
+  const sig = draftSignature();
+  if (!sig) {
     if (builderDraft) {
       builderDraft = null;
       win?.webContents.send(CH.workflowDraft, null);
     }
-    draftMtime = 0;
+    draftSig = "";
     return;
   }
-  if (mtime === draftMtime) return;
-  draftMtime = mtime;
+  if (sig === draftSig && !force) return;
+  draftSig = sig;
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(f, "utf8"));
@@ -612,6 +669,7 @@ function readDraft(): void {
           ok: false,
           problems: [`draft.json is not valid JSON: ${String(e)}`],
           dropped: [],
+          warnings: [],
           plans: [],
         },
         null,
@@ -620,22 +678,56 @@ function readDraft(): void {
     );
     return;
   }
-  const check = checkDraft(raw);
+  const skills = draftSkills();
+  const installed = listSkills(paths.skillsDir, dirname(paths.claudeSettings), [
+    paths.masterWorkspace,
+    ...ops.repos(),
+  ]).map((x) => x.name);
+  const check = checkDraft(raw, {
+    library: workflows().triggers(),
+    installedSkills: installed,
+    skills,
+  });
   writeFileSync(
     join(builderDir(), "check.json"),
     JSON.stringify(check, null, 2) + "\n",
   );
-  const { name, flow } = normalizeDraft(raw);
-  builderDraft = { name, flow, check, at: mtime };
+  const { name, flow, triggers } = normalizeDraft(raw);
+  builderDraft = { name, flow, triggers, skills, check, at: Date.now() };
   win?.webContents.send(CH.workflowDraft, builderDraft);
+}
+
+/** Throw the builder's draft away: the workflow, its triggers and its skills (nothing was installed). */
+function clearDraft(): void {
+  for (const f of ["draft.json", "check.json"])
+    try {
+      unlinkSync(join(builderDir(), f));
+    } catch {
+      /* already gone */
+    }
+  rmSync(draftSkillsDir(), { recursive: true, force: true });
+  readDraft(true);
 }
 
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
 let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
-const syncWorkflowHooks = () =>
-  installWorkflowHooks(paths.claudeSettings, paths.home, paths.home, true);
+/**
+ * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
+ * The custom trigger library is registered first, so compiling and the editor know it.
+ */
+const syncWorkflowHooks = () => {
+  const customs = workflows().triggers();
+  setCustomTriggers(customs);
+  return installWorkflowHooks(
+    paths.claudeSettings,
+    paths.home,
+    paths.home,
+    true,
+    customs.map((c) => c.event),
+  );
+};
 
 /** The needs-you and idle triggers: MasterDeck acts on them itself (notifications, a message). */
 let watch: Record<string, WatchState> = {};
@@ -1131,6 +1223,7 @@ function registerIpc(): void {
     ]),
     flow: workflows().template(DEFAULT_TEMPLATE)?.flow ?? null,
     templates: workflows().templates(),
+    triggers: workflows().triggers(),
   }));
   ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
@@ -1169,7 +1262,11 @@ function registerIpc(): void {
     ]);
     writeFileSync(
       join(dir, "CLAUDE.md"),
-      builderContext(skills, { id: t.id, name: t.name }),
+      builderContext(
+        skills,
+        { id: t.id, name: t.name },
+        workflows().triggers(),
+      ),
     );
     writeFileSync(
       join(dir, "current.json"),
@@ -1186,14 +1283,97 @@ function registerIpc(): void {
     return { ok: true, message: "ready", canContinue };
   });
   ipcMain.handle(CH.workflowDraftGet, () => builderDraft);
-  ipcMain.handle(CH.workflowDraftDiscard, () => {
-    try {
-      unlinkSync(join(builderDir(), "draft.json"));
-    } catch {
-      /* already gone */
+  // Discard asks first: it throws away the draft and every trigger and skill Claude made for it.
+  ipcMain.handle(CH.workflowDraftDiscard, async () => {
+    const d = builderDraft;
+    if (!d) {
+      clearDraft();
+      return { ok: true, message: "nothing to discard" };
     }
-    readDraft();
+    const lines = [
+      `The workflow${d.name ? ` "${d.name}"` : ""} (${d.flow.nodes.length} blocks)`,
+      ...(d.triggers.length
+        ? [
+            `${d.triggers.length} new trigger${d.triggers.length === 1 ? "" : "s"}: ${d.triggers.map((t) => t.name).join(", ")}`,
+          ]
+        : []),
+      ...(d.skills.length
+        ? [
+            `${d.skills.length} new skill${d.skills.length === 1 ? "" : "s"}: ${d.skills.map((x) => x.name).join(", ")}`,
+          ]
+        : []),
+    ];
+    const choice = await dialog.showMessageBox(win!, {
+      type: "warning",
+      buttons: ["Cancel", "Discard"],
+      defaultId: 0,
+      cancelId: 0,
+      message: "Discard Claude's draft?",
+      detail: `This deletes:\n${lines.map((l) => `• ${l}`).join("\n")}\n\nNone of it was installed.`,
+    });
+    if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    clearDraft();
     return { ok: true, message: "discarded" };
+  });
+  // Apply (to the open workflow) or save as a new template: install the draft's triggers and
+  // skills first, then save the workflow, then clear the draft.
+  ipcMain.handle(CH.workflowDraftApply, (_e, target: unknown) => {
+    readDraft(true);
+    const d = builderDraft;
+    if (!d) return { ok: false, message: "no draft" };
+    const t = (target ?? {}) as { templateId?: unknown; newName?: unknown };
+    const clash = d.check.problems.find((p) => /already exists/.test(p));
+    if (clash)
+      return { ok: false, message: `${clash}. Ask the builder to rename it.` };
+    const bad = d.skills.filter((x) => x.problems.length);
+    if (bad.length)
+      return {
+        ok: false,
+        message: `skill ${bad[0].name} is not ready: ${bad[0].problems[0]}`,
+      };
+    for (const tr of d.triggers) workflows().saveTrigger(tr);
+    for (const sk of d.skills) {
+      mkdirSync(paths.skillsDir, { recursive: true });
+      cpSync(join(draftSkillsDir(), sk.name), join(paths.skillsDir, sk.name), {
+        recursive: true,
+      });
+    }
+    const hooks = syncWorkflowHooks();
+    let id: string | null;
+    if (typeof t.newName === "string")
+      id = workflows().saveTemplate(
+        null,
+        t.newName || d.name || "From the builder",
+        d.flow,
+      );
+    else {
+      const tid =
+        typeof t.templateId === "string" ? t.templateId : DEFAULT_TEMPLATE;
+      const cur = workflows().template(tid);
+      id = cur ? workflows().saveTemplate(tid, cur.name, d.flow) : null;
+    }
+    if (!id) return { ok: false, message: "could not save the workflow" };
+    syncWorkflowHooks();
+    clearDraft();
+    const extra = [
+      d.triggers.length
+        ? `${d.triggers.length} trigger${d.triggers.length === 1 ? "" : "s"}`
+        : "",
+      d.skills.length
+        ? `${d.skills.length} skill${d.skills.length === 1 ? "" : "s"}`
+        : "",
+    ].filter(Boolean);
+    return {
+      ok: true,
+      id,
+      message: `saved${extra.length ? `, with ${extra.join(" and ")} installed` : ""}${hooks.ok ? "" : ` (hooks: ${hooks.message})`}`,
+    };
+  });
+  ipcMain.handle(CH.workflowTriggerDelete, (_e, id: unknown) => {
+    if (typeof id !== "string" || !workflows().deleteTrigger(id))
+      return { ok: false, message: "no such trigger" };
+    syncWorkflowHooks();
+    return { ok: true, message: "trigger deleted" };
   });
   ipcMain.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;

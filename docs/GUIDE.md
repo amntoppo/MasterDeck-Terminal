@@ -139,6 +139,19 @@ checkout whose branch was once linked to a ticket does not link it.
   only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
   doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
   The first time, Claude may ask you to trust its folder.
+- **Custom triggers:** besides the built-in triggers, a workflow can use triggers of your own: a
+  Claude Code hook event (before a tool, after it, or when you send a prompt), the tool it applies
+  to (e.g. `Bash`, `Edit|Write`), a regular expression on the command, the file path or the prompt,
+  optionally one on the tool's output (e.g. `FAIL`), and how often it may fire. They live in
+  `~/.claude/masterdeck/workflows/triggers/` and show under **Custom triggers** in the palette.
+  MasterDeck adds one hook per event they use to `~/.claude/settings.json`.
+- **The builder creates triggers and skills:** when a workflow needs a trigger or a skill that
+  doesn't exist ("whenever a SQL migration is edited, review it for locks and missing rollbacks"),
+  the builder defines the trigger in its draft and writes the skill (`skills/<name>/SKILL.md` in its
+  folder). The draft's banner shows **+ N new triggers** and **+ N new skills** (hover for what
+  they are). They are installed only when you **Apply** or **Save as template** (the skill into
+  `~/.claude/skills`, the trigger into the library); **Discard** asks first and lists everything it
+  throws away. A skill named like an existing one is refused.
 - **Workflow templates:** the Template bar edits the **Default** (what every new session copies) or
   a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.

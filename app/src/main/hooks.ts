@@ -11,10 +11,12 @@ import { dirname, join } from "node:path";
 import type { CliResult, HookStatus } from "@shared/types";
 import { STEP_MARK } from "@shared/workflow";
 import {
+  customTriggerCommand,
   flowTriggerCommand,
   guardedBuiltin,
   HOOK_TRIGGERS,
   type BuiltinId,
+  type CustomTrigger,
 } from "@shared/flow";
 import { DECK_EVENTS } from "@shared/deckHooks";
 
@@ -188,6 +190,8 @@ export function installWorkflowHooks(
   backupDir: string,
   dir: string,
   on: boolean,
+  /** The events custom triggers in the library use: one hook each, for every tool. */
+  customEvents: CustomTrigger["event"][] = [],
 ): CliResult {
   if (process.platform === "win32")
     return {
@@ -197,11 +201,32 @@ export function installWorkflowHooks(
     };
   try {
     const s = read(settingsPath);
-    const want = on
-      ? HOOK_TRIGGERS.map((t) => ({
-          t,
-          cmd: flowTriggerCommand(t, dir, `${STEP_MARK}trigger-${t.id}`),
-        }))
+    const want: {
+      event: string;
+      matcher: string | undefined;
+      cmd: string;
+      mark: string;
+    }[] = on
+      ? [
+          ...HOOK_TRIGGERS.map((t) => ({
+            event: t.event!,
+            matcher:
+              t.event === "PreToolUse" || t.event === "PostToolUse"
+                ? "Bash"
+                : undefined,
+            cmd: flowTriggerCommand(t, dir, `${STEP_MARK}trigger-${t.id}`),
+            mark: `${STEP_MARK}trigger-${t.id}`,
+          })),
+          ...[...new Set(customEvents)].map((ev) => {
+            const mark = `${STEP_MARK}custom-${ev.toLowerCase()}`;
+            return {
+              event: ev,
+              matcher: undefined,
+              cmd: customTriggerCommand(ev, dir, mark),
+              mark,
+            };
+          }),
+        ]
       : [];
     const current = Object.values(s.hooks ?? {})
       .flatMap((list) =>
@@ -216,17 +241,7 @@ export function installWorkflowHooks(
     )
       return { ok: true, message: "workflow saved" };
     for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK);
-    for (const { t, cmd } of want)
-      add(
-        s,
-        t.event!,
-        t.event === "PreToolUse" || t.event === "PostToolUse"
-          ? "Bash"
-          : undefined,
-        cmd,
-        `${STEP_MARK}trigger-${t.id}`,
-        10,
-      );
+    for (const w of want) add(s, w.event, w.matcher, w.cmd, w.mark, 10);
     write(settingsPath, backupDir, s);
     return { ok: true, message: "workflow saved" };
   } catch (e) {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { builderContext, checkDraft, normalizeDraft } from "./flowBuilder";
+import {
+  builderContext,
+  checkDraft,
+  normalizeDraft,
+  readDraftSkill,
+} from "./flowBuilder";
 import { paneCommand } from "./paneCommand";
 
 describe("workflow builder drafts", () => {
@@ -88,5 +93,71 @@ describe("workflow builder drafts", () => {
       "--permission-mode",
       "acceptEdits",
     ]);
+  });
+  it("checks new triggers and skills the builder made", () => {
+    const raw = {
+      flow: {
+        nodes: [
+          { id: "mig", kind: "trigger", trigger: "custom:migration-edited" },
+          {
+            id: "chk",
+            kind: "skill",
+            skill: "check-migration",
+            mode: "session",
+            instructions: "",
+          },
+        ],
+        edges: [{ from: "mig", to: "chk" }],
+      },
+      triggers: [
+        {
+          id: "migration-edited",
+          name: "Migration edited",
+          event: "PostToolUse",
+          tool: "Edit|Write",
+          field: "file",
+          pattern: "migrations/.*\\.sql$",
+          output: "",
+          once: "session",
+        },
+      ],
+    };
+    const skill = readDraftSkill(
+      "check-migration",
+      "---\nname: check-migration\ndescription: Check a SQL migration before it ships\n---\n\n# Check\n\nRead the migration, look for locking changes and missing down steps, report.",
+      1,
+    );
+    expect(skill.problems).toEqual([]);
+    const ok = checkDraft(raw, {
+      installedSkills: ["babysit-pr"],
+      skills: [skill],
+    });
+    expect(ok.ok).toBe(true);
+    expect(ok.plans[0].trigger).toBe("custom:migration-edited");
+    // No skill written: the block points at nothing.
+    expect(
+      checkDraft(raw, { installedSkills: ["babysit-pr"] }).problems.join(),
+    ).toMatch(/no skill named check-migration/);
+    // A name that already exists is refused; a thin skill is flagged.
+    expect(
+      checkDraft(raw, {
+        installedSkills: ["check-migration"],
+        skills: [skill],
+      }).problems.join(),
+    ).toMatch(/already exists/);
+    expect(
+      readDraftSkill("Bad_Name", "hello", 1).problems.length,
+    ).toBeGreaterThan(1);
+    // A trigger no block uses is a note, not a problem.
+    const extra = checkDraft(
+      {
+        ...raw,
+        triggers: [...raw.triggers, { ...raw.triggers[0], id: "unused" }],
+      },
+      { installedSkills: [], skills: [skill] },
+    );
+    expect(extra.warnings.join()).toMatch(
+      /unused is defined but no trigger block uses it/,
+    );
   });
 });

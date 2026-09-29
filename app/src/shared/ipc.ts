@@ -8,19 +8,23 @@ import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
 import type { HookEntry } from "./workflow";
-import type { Flow, WorkflowDoc, WorkflowTemplate } from "./flow";
+import type {
+  CustomTrigger,
+  Flow,
+  WorkflowDoc,
+  WorkflowTemplate,
+} from "./flow";
 import type { FlowProgress } from "./flowTrack";
+import type { DraftCheck, DraftSkill } from "./flowBuilder";
 
 /** A workflow the builder session wrote, as MasterDeck read and checked it. */
 export interface WorkflowDraft {
   name: string | null;
   flow: Flow;
-  check: {
-    ok: boolean;
-    problems: string[];
-    dropped: string[];
-    plans: { trigger: string; note: string }[];
-  };
+  /** New triggers and skills the builder made for it (installed only when it is applied). */
+  triggers: CustomTrigger[];
+  skills: DraftSkill[];
+  check: DraftCheck;
   at: number;
 }
 
@@ -115,6 +119,8 @@ export const CH = {
   workflowDraft: "workflow:draft",
   workflowDraftGet: "workflow:draftGet",
   workflowDraftDiscard: "workflow:draftDiscard",
+  workflowDraftApply: "workflow:draftApply",
+  workflowTriggerDelete: "workflow:triggerDelete",
   sessionWorkflowSave: "workflow:sessionSave",
   linkSession: "session:link",
   setSprint: "board:sprint",
@@ -329,6 +335,8 @@ export interface DeckApi {
     /** The default workflow. */
     flow: Flow | null;
     templates: WorkflowTemplate[];
+    /** The custom trigger library. */
+    triggers: CustomTrigger[];
   }>;
   /** Save the default workflow (what new sessions copy). */
   workflowSave(flow: Flow): Promise<CliResult>;
@@ -346,7 +354,14 @@ export interface DeckApi {
   /** The builder's latest draft (checked), and each new one as it is written. */
   workflowDraftGet(): Promise<WorkflowDraft | null>;
   onWorkflowDraft(cb: (d: WorkflowDraft | null) => void): () => void;
+  /** Discard the draft (after asking): the workflow, its new triggers and skills. */
   workflowDraftDiscard(): Promise<CliResult>;
+  /** Install the draft's triggers and skills, then save it to a template (or a new one). */
+  workflowDraftApply(
+    target: { templateId: string } | { newName: string },
+  ): Promise<CliResult & { id?: string }>;
+  /** Remove a custom trigger from the library. */
+  workflowTriggerDelete(id: string): Promise<CliResult>;
   /** What a session's workflow last did (the Workflow line in Details). */
   workflowStatus(sessionId: string): Promise<WorkflowStatus | null>;
   /** A session's own workflow; null while it follows the default. */

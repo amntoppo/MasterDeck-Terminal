@@ -18,6 +18,8 @@ import {
 } from "@shared/workflow";
 import {
   compileFlow,
+  parseCustomTrigger,
+  type CustomTrigger,
   DEFAULT_TEMPLATE,
   defaultFlow,
   docJson,
@@ -561,5 +563,38 @@ export class WorkflowStore {
       this.runs = { mtime, last };
     }
     return this.runs.last.get(sessionId) ?? null;
+  }
+
+  private get triggersDir(): string {
+    return join(this.home, "workflows", "triggers");
+  }
+
+  /** The custom trigger library (workflows/triggers/<id>.json). */
+  triggers(): CustomTrigger[] {
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.triggersDir).filter((f) => f.endsWith(".json"));
+    } catch {
+      return [];
+    }
+    return files
+      .sort()
+      .map((f) => parseCustomTrigger(readRaw(join(this.triggersDir, f))))
+      .filter((t): t is CustomTrigger => !!t);
+  }
+
+  saveTrigger(t: CustomTrigger): void {
+    writeAtomic(
+      join(this.triggersDir, `${t.id}.json`),
+      JSON.stringify(t, null, 2) + "\n",
+    );
+  }
+
+  deleteTrigger(id: string): boolean {
+    if (!/^[a-z0-9-]{1,40}$/.test(id)) return false;
+    const f = join(this.triggersDir, `${id}.json`);
+    if (!existsSync(f)) return false;
+    unlinkSync(f);
+    return true;
   }
 }

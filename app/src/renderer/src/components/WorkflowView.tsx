@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { HookEntry } from "@shared/workflow";
 import {
   actionCount,
+  customInfo,
   DEFAULT_TEMPLATE,
+  setCustomTriggers,
   type Flow,
   type WorkflowTemplate,
 } from "@shared/flow";
@@ -141,6 +143,8 @@ export function WorkflowView(_: { state: AppState }) {
 
   const load = useCallback(async () => {
     const w = await deck().workflowGet();
+    // The custom trigger library: the editor, the compiler and block titles use it.
+    setCustomTriggers(w.triggers);
     setData({ hooks: w.hooks, skills: w.skills, templates: w.templates });
   }, []);
   useEffect(() => void load(), [load]);
@@ -219,32 +223,22 @@ export function WorkflowView(_: { state: AppState }) {
     if (builder) deck().ptyClose(`workflow-builder:${builder.gen}`);
     setBuilder(null);
   };
+  // Apply or save: MasterDeck installs the draft's new triggers and skills, then saves it.
   const applyDraft = async (asNew: boolean) => {
     if (!draft || !current) return;
-    const r = asNew
-      ? await deck().workflowTemplateSave(
-          null,
-          draft.name ?? "From the builder",
-          draft.flow,
-        )
-      : current.id === DEFAULT_TEMPLATE
-        ? await deck().workflowSave(draft.flow)
-        : await deck().workflowTemplateSave(
-            current.id,
-            current.name,
-            draft.flow,
-          );
+    const r = await deck().workflowDraftApply(
+      asNew
+        ? { newName: draft.name ?? "From the builder" }
+        : { templateId: current.id },
+    );
     setMsg(
       r.ok
-        ? asNew
-          ? `saved as “${draft.name ?? "From the builder"}”`
-          : `applied to ${current.name}`
+        ? `${asNew ? `“${draft.name ?? "From the builder"}”` : current.name} ${r.message}`
         : r.message,
     );
     if (!r.ok) return;
-    await deck().workflowDraftDiscard();
     await load();
-    if (asNew && "id" in r && r.id) setTid(r.id as string);
+    if (asNew && r.id) setTid(r.id);
   };
 
   const byEvent = new Map<string, HookEntry[]>();
@@ -409,6 +403,40 @@ export function WorkflowView(_: { state: AppState }) {
                   ? "no problems"
                   : `${draft.check.problems.length + draft.check.dropped.length} problem(s)`}
               </span>
+              {draft.triggers.length > 0 && (
+                <span
+                  className="wf-draft-chip trig"
+                  title={draft.triggers
+                    .map((t) => `${t.name}: ${customInfo(t).hint}`)
+                    .join("\n")}
+                >
+                  + {draft.triggers.length} new trigger
+                  {draft.triggers.length === 1 ? "" : "s"}
+                </span>
+              )}
+              {draft.skills.length > 0 && (
+                <span
+                  className="wf-draft-chip skill"
+                  title={draft.skills
+                    .map(
+                      (x) =>
+                        `${x.name}: ${x.description || "(no description)"}`,
+                    )
+                    .join("\n")}
+                >
+                  + {draft.skills.length} new skill
+                  {draft.skills.length === 1 ? "" : "s"}
+                </span>
+              )}
+              {draft.check.warnings.length > 0 && (
+                <span
+                  className="wf-draft-chip warn"
+                  title={draft.check.warnings.join("\n")}
+                >
+                  {draft.check.warnings.length} note
+                  {draft.check.warnings.length === 1 ? "" : "s"}
+                </span>
+              )}
               <span style={{ flex: 1 }} />
               <button className="btn" onClick={() => setShowDraft((v) => !v)}>
                 {showDraft ? `Show ${current.name}` : "Show draft"}
@@ -442,6 +470,7 @@ export function WorkflowView(_: { state: AppState }) {
               key={`draft:${draft.at}`}
               flow={draft.flow}
               skills={data.skills}
+              extraTriggers={draft.triggers}
               readOnly
             />
           ) : (

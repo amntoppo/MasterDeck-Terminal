@@ -1140,3 +1140,8 @@ body.resizing .wf-builder-term, body.resizing .react-flow { pointer-events: none
 .fp-resize::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 2px; background: transparent; transition: background .15s; }
 .fp-resize:hover::after, body.resizing .fp-resize::after { background: var(--accent); }
 .fp-resize::after { right: auto; left: 2px; }
+.wf-draft-chip { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 9px; border: 1px solid currentColor; cursor: help; }
+.wf-draft-chip.trig { color: var(--accent); }
+.wf-draft-chip.skill { color: #c084fc; }
+.wf-draft-chip.warn { color: var(--amber); }
+.fp-custom { border-left-style: dashed; }

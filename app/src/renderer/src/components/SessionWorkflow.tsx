@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   actionCount,
   DEFAULT_TEMPLATE,
+  setCustomTriggers,
   triggerInfo,
   type Flow,
   type FlowTrigger,
@@ -173,6 +174,7 @@ export function SessionWorkflowDialog({
       deck().workflowGet(),
     ]);
     setDoc(d);
+    setCustomTriggers(w.triggers);
     setLib({ templates: w.templates, skills: w.skills });
   }, [sid]);
   useEffect(() => void load(), [load]);

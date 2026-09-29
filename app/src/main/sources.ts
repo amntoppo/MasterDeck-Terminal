@@ -1365,7 +1365,7 @@ export class Sources {
     scanFlowLines(lines, f.flow);
     const track = (this.flowTracks[key] ??= newFlowTrack());
     for (const [t, at] of Object.entries(f.flow.reached))
-      if ((track.reached[t as FlowTrigger] ?? 0) < at)
+      if (at && (track.reached[t as FlowTrigger] ?? 0) < at)
         track.reached[t as FlowTrigger] = at;
     if (lines.length) {
       track.commands = [

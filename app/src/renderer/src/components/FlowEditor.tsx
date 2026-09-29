@@ -36,6 +36,10 @@ import {
   EDGE_LABEL,
   edgeId,
   FLOW_TRIGGERS,
+  customInfo,
+  customTriggerList,
+  isCustomTrigger,
+  type CustomTrigger,
   layoutFlow,
   makesCycle,
   newNodeId,
@@ -126,6 +130,8 @@ function makeNode(d: Drop, x: number, y: number): FlowNode {
 
 type BlockData = {
   node: FlowNode;
+  /** A draft's own custom triggers (not in the library yet). */
+  extra: CustomTrigger[];
   problem: string | null;
   readOnly: boolean;
   onDelete: (id: string) => void;
@@ -139,10 +145,10 @@ const KIND_LABEL: Record<FlowNode["kind"], string> = {
   builtin: "Built-in",
 };
 
-function blockTitle(n: FlowNode): string {
+function blockTitle(n: FlowNode, extra: CustomTrigger[] = []): string {
   switch (n.kind) {
     case "trigger":
-      return triggerInfo(n.trigger).short;
+      return triggerInfo(n.trigger, extra).short;
     case "skill":
       return n.skill || "Pick a skill";
     case "instruction":
@@ -155,6 +161,8 @@ function blockTitle(n: FlowNode): string {
 }
 
 function blockSub(n: FlowNode): string | null {
+  if (n.kind === "trigger" && isCustomTrigger(n.trigger))
+    return "custom trigger";
   if (n.kind === "trigger")
     return n.trigger === "idle"
       ? `for ${n.minutes ?? 15} min`
@@ -198,7 +206,7 @@ const Block = memo(function Block({
           </button>
         )}
       </div>
-      <div className="fb-title">{blockTitle(n)}</div>
+      <div className="fb-title">{blockTitle(n, data.extra)}</div>
       {blockSub(n) && <div className="fb-sub">{blockSub(n)}</div>}
       <Handle type="source" position={Position.Right} className="fh" />
     </div>
@@ -252,6 +260,8 @@ interface Props {
   onChange?: (flow: Flow) => void;
   skills: Skill[];
   readOnly?: boolean;
+  /** Custom triggers a draft brings (shown and checked as if installed). */
+  extraTriggers?: CustomTrigger[];
   /** Shown above the canvas on the right (Save state, buttons). */
   toolbar?: React.ReactNode;
 }
@@ -270,7 +280,14 @@ export function FlowEditor(props: Props) {
   );
 }
 
-function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
+function Editor({
+  flow: initial,
+  onChange,
+  skills,
+  readOnly,
+  toolbar,
+  extraTriggers = [],
+}: Props) {
   const [flow, setFlowRaw] = useState<Flow>(initial);
   const [sel, setSel] = useState<{ type: "node" | "edge"; id: string } | null>(
     null,
@@ -296,7 +313,10 @@ function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
     setTimeout(() => setNote((c) => (c === m ? null : c)), 3000);
   };
 
-  const compiled = useMemo(() => compileFlow(flow), [flow]);
+  const compiled = useMemo(
+    () => compileFlow(flow, extraTriggers),
+    [flow, extraTriggers],
+  );
   const problemOf = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of compiled.problems)
@@ -325,12 +345,13 @@ function Editor({ flow: initial, onChange, skills, readOnly, toolbar }: Props) {
         selected: sel?.type === "node" && sel.id === n.id,
         data: {
           node: n,
+          extra: extraTriggers,
           problem: problemOf.get(n.id) ?? null,
           readOnly: !!readOnly,
           onDelete: (id: string) => remove([id]),
         },
       })),
-    [flow.nodes, sel, problemOf, readOnly, remove],
+    [flow.nodes, sel, problemOf, readOnly, remove, extraTriggers],
   );
   const edges: Edge<{ kind: EdgeKind }>[] = useMemo(
     () =>
@@ -769,6 +790,19 @@ function Palette({
           `${t.label}. ${t.hint}`,
         ),
       )}
+      {customTriggerList().length > 0 && (
+        <>
+          <div className="fp-sec">Custom triggers</div>
+          {customTriggerList().map((c) =>
+            item(
+              { kind: "trigger", trigger: `custom:${c.id}` },
+              c.name,
+              "fp-trigger fp-custom",
+              customInfo(c).hint,
+            ),
+          )}
+        </>
+      )}
       <div className="fp-sec">Actions</div>
       {item(
         { kind: "instruction" },
@@ -889,6 +923,15 @@ function NodeForm({
                 {t.label}
               </option>
             ))}
+            {customTriggerList().length > 0 && (
+              <optgroup label="Custom triggers">
+                {customTriggerList().map((c) => (
+                  <option key={c.id} value={`custom:${c.id}`}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <div className="meta">{triggerInfo(n.trigger).hint}</div>
           {(n.trigger === "command-before" ||
