@@ -35,7 +35,17 @@ export function ciMessage(pr: Pr): string {
 export function reviewMessage(pr: Pr): string {
   const n = label(pr)
   const k = pr.unresolvedThreads
-  return `${n}: address ${k} unresolved review thread${k === 1 ? '' : 's'} on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\nRead each unresolved thread, fix what is valid, reply, and resolve it. Do not merge.\n\n${REPLY(n)}`
+  const c = pr.prComments ?? 0
+  const what = [
+    ...(k ? [`${k} unresolved review thread${k === 1 ? '' : 's'}`] : []),
+    ...(c ? [`${c} new PR comment${c === 1 ? '' : 's'}`] : []),
+  ].join(' and ')
+  const todo =
+    (k ? 'Read each unresolved thread, fix what is valid, reply, and resolve it. ' : '') +
+    (c
+      ? `Read the PR's conversation (\`gh pr view ${pr.number} --repo ${pr.repoFull || `${getConfig().owner}/${pr.repo}`} --comments\`): comments and review summaries (e.g. Changes requested) since your last reply; fix what is valid and reply on the PR. `
+      : '')
+  return `${n}: address ${what} on ${pr.repo}#${pr.number}\n\nPR: ${pr.url}\n${todo}Do not merge.\n\n${REPLY(n)}`
 }
 
 function matching(p: Proposal, pr: Pr, kind: 'CI' | 'REVIEW'): boolean {
@@ -43,7 +53,8 @@ function matching(p: Proposal, pr: Pr, kind: 'CI' | 'REVIEW'): boolean {
 }
 
 /**
- * Offers for my PRs that need their session: failing CI, or unresolved review threads. Each is
+ * Offers for my PRs that need their session: failing CI, or review feedback (unresolved code threads,
+ * or PR comments and review summaries since my last reply). Each is
  * matched to master's proposal when there is one. `dismissed` holds offer ids the user waved off
  * (the id changes when the situation changes: a new thread count or a new failure).
  */
@@ -55,8 +66,8 @@ export function prOffers(prs: Pr[], sessions: Session[], sessionPrs: Record<stri
       const id = `ci:${pr.url}`
       if (!dismissed.has(id)) out.push({ id, pr, kind: 'ci', owner, proposal: proposals.find((p) => matching(p, pr, 'CI')) ?? null, message: ciMessage(pr) })
     }
-    if (pr.unresolvedThreads > 0) {
-      const id = `review:${pr.url}:${pr.unresolvedThreads}`
+    if (pr.unresolvedThreads > 0 || (pr.prComments ?? 0) > 0) {
+      const id = `review:${pr.url}:${pr.unresolvedThreads}${pr.prComments ? `:${pr.lastPrCommentAt ?? ''}` : ''}`
       if (!dismissed.has(id)) out.push({ id, pr, kind: 'review', owner, proposal: proposals.find((p) => matching(p, pr, 'REVIEW')) ?? null, message: reviewMessage(pr) })
     }
   }

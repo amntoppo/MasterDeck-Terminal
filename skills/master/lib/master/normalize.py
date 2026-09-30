@@ -86,12 +86,40 @@ def _last_comment_author(t: dict) -> "str | None":
     return (nodes[-1].get("author") or {}).get("login")
 
 
+# Bots whose PR comments are review feedback; other bots (deploy previews, coverage) are noise.
+REVIEW_BOTS = {"claude", "claude[bot]"}
+
+
+def _counts(login: "str | None", me: "str | None") -> bool:
+    if not login or login == me:
+        return False
+    return not login.endswith("[bot]") or login.lower() in REVIEW_BOTS
+
+
+def _pr_comments(node: dict, me: "str | None") -> list:
+    """Timestamps of feedback on the PR outside the code threads that came after my last word:
+    ordinary PR comments (an edit counts: a reviewer bot fills its comment in later) and
+    review summaries (a body, or Changes requested). Comments and reviews of mine mark
+    what I have answered."""
+    comments = [c for c in ((node.get("comments") or {}).get("nodes") or []) if isinstance(c, dict)]
+    reviews = [r for r in ((node.get("reviews") or {}).get("nodes") or []) if isinstance(r, dict)]
+    who = lambda x: (x.get("author") or {}).get("login")
+    mine = [c.get("updatedAt") for c in comments if me and who(c) == me] + \
+           [r.get("submittedAt") for r in reviews if me and who(r) == me]
+    last_mine = max((t for t in mine if t), default="")
+    theirs = [c.get("updatedAt") for c in comments if _counts(who(c), me)] + \
+             [r.get("submittedAt") for r in reviews if _counts(who(r), me)
+              and (r.get("state") == "CHANGES_REQUESTED" or (r.get("body") or "").strip())]
+    return sorted(t for t in theirs if t and t > last_mine)
+
+
 def _pr(node: dict, me: str | None) -> dict:
     # A thread whose last comment is mine doesn't need a session's attention: replying to
     # a thread without resolving it must not re-propose "address N threads" forever.
     unresolved = [t for t in node["reviewThreads"]["nodes"]
                   if not t["isResolved"] and (me is None or _last_comment_author(t) != me)]
     stamps = [t["comments"]["nodes"][-1]["createdAt"] for t in unresolved if t["comments"]["nodes"]]
+    convo = _pr_comments(node, me)
     commits = node["commits"]["nodes"]
     commit = commits[0]["commit"] if commits else {}
     rollup = commit.get("statusCheckRollup")
@@ -108,6 +136,8 @@ def _pr(node: dict, me: str | None) -> dict:
         "review_requested": False,
         "unresolved_threads": len(unresolved),
         "last_unresolved_at": max(stamps) if stamps else None,
+        "pr_comments": len(convo),
+        "last_pr_comment_at": convo[-1] if convo else None,
         "ci": rollup["state"].lower() if rollup else None,
         "head_oid": commit.get("oid"),
         "head_ref": node.get("headRefName"),

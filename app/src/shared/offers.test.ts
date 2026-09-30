@@ -19,6 +19,14 @@ describe('prOffers', () => {
     expect(prOffers([pr({ unresolvedThreads: 2 })], [], {}, [], new Set([`review:${url}:2`]))).toEqual([])
     expect(prOffers([pr({ unresolvedThreads: 3 })], [], {}, [], new Set([`review:${url}:2`]))).toHaveLength(1)
   })
+  it('offers PR comments and review summaries too, not only code threads', () => {
+    const url = 'https://github.com/acme/mobile-app/pull/137'
+    const [o] = prOffers([pr({ prComments: 1, lastPrCommentAt: '2026-09-30T01:00:00Z' })], [], {}, [], new Set())
+    expect(o.id).toBe(`review:${url}:0:2026-09-30T01:00:00Z`)
+    expect(o.message).toMatch(/^#1036: address 1 new PR comment on mobile-app#137\n/)
+    expect(o.message).toContain('--comments')
+    expect(prOffers([pr({ prComments: 1, lastPrCommentAt: 't' })], [], {}, [], new Set([`review:${url}:0:t`]))).toEqual([])
+  })
   it('ownerOf prefers the session that opened the PR', () => {
     const maker = s({ sessionId: 's2', key: 'k2', name: 'maker', issue: null })
     expect(ownerOf(pr({}), [s({}), maker], { s2: ['https://github.com/acme/mobile-app/pull/137'] })?.name).toBe('maker')

@@ -147,6 +147,7 @@ while true; do
       query($owner:String!, $repo:String!, $pr:Int!) {
         repository(owner:$owner, name:$repo) { pullRequest(number:$pr) {
           state mergeable baseRefName
+          reviews(last:30) { nodes { databaseId state submittedAt author { login } body } }
           reviewThreads(first:100) { nodes {
             isResolved
             comments(last:1) { nodes { databaseId updatedAt author { login } body } } } } } } }' \
@@ -166,6 +167,12 @@ while true; do
         | "\($tag) THREAD \(.databaseId) \(.updatedAt) \(.author.login): \(.body | gsub("\\s+"; " ") | .[0:180])"' <<<"$pull" ;
       jq -r --arg tag "$tag" '
         .[] | "\($tag) ISSUE \(.id) \(.updated_at) \(.user.login): \(.body | gsub("\\s+"; " ") | .[0:180])"' <<<"$comments" ;
+      # Review summaries: the note a reviewer leaves with a review, and every Changes requested
+      # (even without a note). Reviews that only carry code threads are covered above.
+      jq -r --arg tag "$tag" '
+        .data.repository.pullRequest.reviews.nodes[]
+        | select(.state == "CHANGES_REQUESTED" or ((.body // "") | test("\\S")))
+        | "\($tag) REVIEW \(.databaseId) \(.submittedAt) \(.author.login) \(.state): \((.body // "") | gsub("\\s+"; " ") | .[0:180])"' <<<"$pull" ;
       # Stalled Claude review: a claude[bot] status comment that never reached "Claude
       # finished", still shows an unchecked task box (or "is reviewing"), and has not been
       # edited for 10+ minutes. The "finished" test comes FIRST and is what makes this
@@ -190,6 +197,11 @@ while true; do
   sleep 45
 done
 ```
+
+The three kinds of line are `THREAD` (a comment on the code), `ISSUE` (an ordinary comment on the
+PR) and `REVIEW` (a review's summary, e.g. `CHANGES_REQUESTED: please split this`). All three are
+feedback to act on; for a `REVIEW` line read the full review with
+`gh api repos/<owner>/<repo>/pulls/<num>/reviews/<id>` when the line is cut short.
 
 Each poll costs **one GraphQL and one REST call** (it was three GraphQL and two REST), and with
 `ghc` installed, sessions watching the same PR within ~40s share them.

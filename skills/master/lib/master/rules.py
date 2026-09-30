@@ -74,14 +74,20 @@ def _assign(i: dict) -> dict:
 def _review(pr: dict, ref: tuple, owner: dict) -> dict:
     repo, n = ref
     lab = refs.label(repo, n)
-    k = pr["unresolved_threads"]
-    first = f"{lab}: address {k} unresolved review thread{'s' if k != 1 else ''} on {pr['repo']}#{pr['number']}"
-    msg = (f"{first}\n\nPR: {pr['url']}\nRead each unresolved thread, fix what is valid, reply, and resolve it. "
-           f"Do not merge.\n\n" + REPLY.format(n=lab))
-    return {"kind": "REVIEW", "issue": n, "repo": repo,
-            "source": f"{pr['repo']}#{pr['number']}:threads:{pr['last_unresolved_at']}",
+    k = pr["unresolved_threads"] if pr.get("last_unresolved_at") else 0
+    c = pr.get("pr_comments") or 0
+    what = " and ".join(
+        ([f"{k} unresolved review thread{'s' if k != 1 else ''}"] if k else [])
+        + ([f"{c} new PR comment{'s' if c != 1 else ''}"] if c else []))
+    first = f"{lab}: address {what} on {pr['repo']}#{pr['number']}"
+    todo = ("Read each unresolved thread, fix what is valid, reply, and resolve it. " if k else "") + \
+           (f"Read the PR's conversation (`gh pr view {pr['number']} --repo {pr.get('repo_full') or config.OWNER + '/' + pr['repo']} --comments`): "
+            "comments and review summaries (e.g. Changes requested) since your last reply; fix what is valid and reply on the PR. " if c else "")
+    msg = f"{first}\n\nPR: {pr['url']}\n{todo}Do not merge.\n\n" + REPLY.format(n=lab)
+    source = f"{pr['repo']}#{pr['number']}:threads:{pr['last_unresolved_at']}" + (f":comments:{pr['last_pr_comment_at']}" if c else "")
+    return {"kind": "REVIEW", "issue": n, "repo": repo, "source": source,
             "target": {"session": owner["name"]}, "message": msg,
-            "summary": f"{k} unresolved thread{'s' if k != 1 else ''} on {pr['repo']}#{pr['number']}"}
+            "summary": f"{what} on {pr['repo']}#{pr['number']}".replace("unresolved review thread", "unresolved thread")}
 
 
 def _ci(pr: dict, ref: tuple, owner: dict) -> dict:
@@ -140,7 +146,7 @@ def propose(prev: "dict | None", cur: dict, now_iso: str) -> list:
             owner = join.owner_of(sess, ref[1], ref[0]) if ref else None
             if owner is None or owner["status"] == "dead":
                 continue
-            if pr["unresolved_threads"] > 0 and pr["last_unresolved_at"]:
+            if (pr["unresolved_threads"] > 0 and pr["last_unresolved_at"]) or pr.get("pr_comments"):
                 out.append(_review(pr, ref, owner))
             if pr["ci"] in ("failure", "error"):
                 out.append(_ci(pr, ref, owner))

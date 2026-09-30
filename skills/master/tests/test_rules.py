@@ -23,10 +23,11 @@ def sess(name, issue_n, status="idle", link="explicit", sid=None, head="h1", idl
             "prs": list(prs), "branch_head": head, "idle_since": idle_since}
 
 
-def pr(n=55, threads=0, last=None, ci=None, refs=939, mine=True, oid="o1"):
+def pr(n=55, threads=0, last=None, ci=None, refs=939, mine=True, oid="o1", comments=0, last_comment=None):
     return {"url": f"https://github.com/acme/mobile-app/pull/{n}", "repo": "mobile-app",
             "number": n, "title": f"PR {n}", "author_is_me": mine, "review_requested": False,
             "unresolved_threads": threads, "last_unresolved_at": last, "ci": ci, "head_oid": oid,
+            "pr_comments": comments, "last_pr_comment_at": last_comment,
             "head_ref": "feat/x", "refs_issue": refs, "updated_at": NOW}
 
 
@@ -139,6 +140,22 @@ class ReviewAndCiTest(unittest.TestCase):
                         pr(3, threads=1, last="t", refs=1, mine=False)],
                    sessions=[sess("d", 1, status="dead")])
         self.assertEqual([c for c in rules.propose(None, cur, NOW) if c["kind"] in ("REVIEW", "CI")], [])
+
+    def test_pr_comments_alone_make_a_review(self):
+        cur = snap(issues=[issue(939)], prs=[pr(comments=1, last_comment="2026-09-24T10:00:00Z")],
+                   sessions=[sess("paywall", 939)])
+        [c] = [c for c in rules.propose(None, cur, NOW) if c["kind"] == "REVIEW"]
+        self.assertEqual(c["source"], "mobile-app#55:threads:None:comments:2026-09-24T10:00:00Z")
+        self.assertTrue(c["message"].startswith("#939: address 1 new PR comment on mobile-app#55\n"))
+        self.assertIn("--comments", c["message"])
+        self.assertEqual(c["summary"], "1 new PR comment on mobile-app#55")
+
+    def test_threads_and_comments_together(self):
+        cur = snap(issues=[issue(939)], prs=[pr(threads=2, last="t1", comments=2, last_comment="t2")],
+                   sessions=[sess("paywall", 939)])
+        [c] = [c for c in rules.propose(None, cur, NOW) if c["kind"] == "REVIEW"]
+        self.assertEqual(c["summary"], "2 unresolved threads and 2 new PR comments on mobile-app#55")
+        self.assertEqual(c["source"], "mobile-app#55:threads:t1:comments:t2")
 
     def test_prs_source_down_blocks_review(self):
         cur = snap(issues=[issue(939)], prs=[pr(threads=1, last="t")], sessions=[sess("p", 939)],

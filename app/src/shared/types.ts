@@ -59,6 +59,9 @@ export interface Pr {
   number: number;
   title: string;
   unresolvedThreads: number;
+  /** PR comments and review summaries from others since my last comment or review (master's sweep). */
+  prComments?: number;
+  lastPrCommentAt?: string | null;
   ci: string | null;
   headRef: string;
   refsIssue: number | null;

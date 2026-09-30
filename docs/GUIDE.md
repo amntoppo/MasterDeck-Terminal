@@ -385,9 +385,13 @@ creation.
   - Closed PRs come without CI and threads: the full query times out on 100 closed PRs.
 - **Fix CI / Address comments:** sent to the owning session in master's wording. With no session, the
   Start dialog opens with that instruction filled in.
-- **Auto-babysit:** failing CI or unresolved threads on my PRs appear as offers, in Needs you and at
+- **Auto-babysit:** failing CI or review feedback on my PRs appear as offers, in Needs you and at
   the top of the PRs view. **Approve & send** uses master's own REVIEW/CI proposal when there is one;
   otherwise the offer goes straight to the session. Dismiss hides it until the situation changes.
+  Review feedback is unresolved comments on the code, plus ordinary PR comments and review
+  summaries (a note left with a review, or any Changes requested) from others since your last
+  comment or review on the PR. Bots count only when they are the Claude reviewer; deploy-preview
+  and other bot comments do not.
 
 ## Board extras
 

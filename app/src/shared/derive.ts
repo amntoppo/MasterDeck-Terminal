@@ -54,6 +54,8 @@ export function parseSnapshot(raw: unknown): ParsedSnapshot {
       number,
       title: s(p.title) ?? '',
       unresolvedThreads: n(p.unresolved_threads) ?? 0,
+      prComments: n(p.pr_comments) ?? 0,
+      lastPrCommentAt: s(p.last_pr_comment_at),
       ci: s(p.ci),
       headRef: s(p.head_ref) ?? '',
       refsIssue: n(p.refs_issue),

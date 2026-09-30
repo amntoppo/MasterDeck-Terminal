@@ -18,7 +18,7 @@ def board_item(n, status, sprint_start=None, assignees=(ME,), typ="Issue", durat
 
 
 def pr_node(number, repo="mobile-app", author=ME, threads=(), ci=None, body="",
-            head_oid="abc123", updated="2026-09-24T09:00:00Z", head_ref="feat/x"):
+            head_oid="abc123", updated="2026-09-24T09:00:00Z", head_ref="feat/x", comments=(), reviews=()):
     """threads: list of (is_resolved, last_comment_iso) or (is_resolved, last_comment_iso,
     last_comment_author), default author "reviewer"."""
     def _thread(t):
@@ -32,6 +32,9 @@ def pr_node(number, repo="mobile-app", author=ME, threads=(), ci=None, body="",
         "repository": {"name": repo, "nameWithOwner": f"acme/{repo}"},
         "author": {"login": author} if author else None,
         "reviewThreads": {"nodes": [_thread(t) for t in threads]},
+        "comments": {"nodes": [{"updatedAt": ts, "author": {"login": who}} for who, ts in comments]},
+        "reviews": {"nodes": [{"state": st, "submittedAt": ts, "body": b, "author": {"login": who}}
+                              for who, st, ts, b in reviews]},
         "commits": {"nodes": [{"commit": {"oid": head_oid,
                                           "statusCheckRollup": {"state": ci} if ci else None}}]},
     }

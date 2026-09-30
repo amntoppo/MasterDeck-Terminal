@@ -17,6 +17,8 @@ query($q: String!) {
         repository { name nameWithOwner }
         author { login }
         reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { nodes { createdAt author { login } } } } }
+        comments(last: 30) { nodes { updatedAt author { login } } }
+        reviews(last: 30) { nodes { state submittedAt body author { login } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
       }
     }

@@ -25,9 +25,28 @@ class PrsTest(unittest.TestCase):
         self.assertEqual(pr, {
             "url": "https://github.com/acme/mobile-app/pull/55", "repo": "mobile-app", "repo_full": "acme/mobile-app",
             "number": 55, "title": "PR 55", "author_is_me": True, "review_requested": False,
-            "unresolved_threads": 0, "last_unresolved_at": None, "ci": "failure",
+            "unresolved_threads": 0, "last_unresolved_at": None, "pr_comments": 0, "last_pr_comment_at": None,
+            "ci": "failure",
             "head_oid": "def456", "head_ref": "feat/x", "refs_issue": 939, "refs_repo": None,
             "updated_at": "2026-09-24T09:00:00Z"})
+
+    def test_pr_comments_and_review_summaries_after_my_last_word(self):
+        node = pr_node(7, comments=[("reviewer", "2026-09-24T08:00:00Z"),        # before my reply
+                                    (ME, "2026-09-24T08:30:00Z"),                # my reply
+                                    ("reviewer", "2026-09-24T09:00:00Z"),        # new
+                                    ("vercel[bot]", "2026-09-24T09:10:00Z"),     # noise bot
+                                    ("claude[bot]", "2026-09-24T09:20:00Z")],    # reviewer bot
+                       reviews=[("lead", "CHANGES_REQUESTED", "2026-09-24T09:30:00Z", ""),
+                                ("lead", "COMMENTED", "2026-09-24T09:31:00Z", ""),   # only code threads
+                                ("lead", "APPROVED", "2026-09-24T09:32:00Z", "")])
+        [pr] = normalize.prs([node], [], ME)
+        self.assertEqual((pr["pr_comments"], pr["last_pr_comment_at"]), (3, "2026-09-24T09:30:00Z"))
+
+    def test_my_review_answers_earlier_comments(self):
+        node = pr_node(8, comments=[("reviewer", "2026-09-24T08:00:00Z")],
+                       reviews=[(ME, "COMMENTED", "2026-09-24T08:05:00Z", "Fixed in abc")])
+        [pr] = normalize.prs([node], [], ME)
+        self.assertEqual((pr["pr_comments"], pr["last_pr_comment_at"]), (0, None))
 
     def test_no_ci_and_no_ref(self):
         [pr] = normalize.prs([pr_node(2)], [], ME)
