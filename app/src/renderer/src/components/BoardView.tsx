@@ -571,16 +571,8 @@ export function BoardView({
             : undefined
         }
       >
-        <ViewTabs
-          tabs={tabs}
-          activeId={tab.id}
-          onSelect={setTabId}
-          onAdd={addTab}
-          onClose={closeTab}
-          onRename={renameTab}
-          addTitle="Another board tab, with its own repos, boards and filters"
-        />
         <header className="board-head">
+          <h2>Board</h2>
           <select
             className="sprint-pick"
             value={state.selectedSprint}
@@ -643,6 +635,15 @@ export function BoardView({
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </header>
+        <ViewTabs
+          tabs={tabs}
+          activeId={tab.id}
+          onSelect={setTabId}
+          onAdd={addTab}
+          onClose={closeTab}
+          onRename={renameTab}
+          addTitle="Another board tab, with its own repos, boards and filters"
+        />
 
         <div className="filter-bar">
           {repos.length > 1 && (

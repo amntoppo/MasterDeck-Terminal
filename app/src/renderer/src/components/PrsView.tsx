@@ -115,7 +115,6 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
 
   return (
     <section className="board-view panel">
-      <ViewTabs tabs={tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
       <header className="board-head">
         <h2>Pull requests</h2>
         <div className="seg">
@@ -133,6 +132,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </header>
+      <ViewTabs tabs={tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
 
       <div className="filter-bar">
         <select className={`fsel ${f.state !== 'open' ? 'active' : ''}`} value={f.state} onChange={(e) => set({ state: e.target.value as PrFilters['state'] })} title="State">

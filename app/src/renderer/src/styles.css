@@ -1216,3 +1216,5 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .mon-pick .mon-name { flex: 1; font-weight: 500; }
 .mon-list { margin-top: 4px; padding: 2px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 7px; }
 .mon-list .mon-row + .mon-row { border-top: 1px solid var(--line); }
+.board-head .seg { flex: none; }
+.board-head .seg button { flex: none; white-space: nowrap; }
