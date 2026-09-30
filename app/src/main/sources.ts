@@ -1503,7 +1503,9 @@ export class Sources {
 
   /**
    * PRs of every live session, open in a tab or not, every two minutes while open: new comments
-   * restart its Ready-for-Review timer. Merged and closed PRs are not fetched again.
+   * restart its Ready-for-Review timer. Merged and closed PRs are not fetched again. Each pass
+   * also reads what every live session's transcript gained, so a PR it just opened is found (and
+   * fetched) now, not at the next hourly GitHub snapshot.
    */
   private async pollReview(): Promise<void> {
     if (this.reviewRunning || this.githubPaused()) return;
@@ -1511,11 +1513,10 @@ export class Sources {
     try {
       const now = Date.now();
       for (const s of this.lastSessions) {
-        if (
-          s.state === "done" ||
-          s.name === MASTER_NAME ||
-          now - (this.prFetchedAt[s.sessionId] ?? 0) < REVIEW_MS
-        )
+        if (s.state === "done" || s.name === MASTER_NAME) continue;
+        const tp = this.transcripts.find(s.sessionId, now);
+        const created = tp ? this.followPrs(tp, s.key) : false;
+        if (!created && now - (this.prFetchedAt[s.sessionId] ?? 0) < REVIEW_MS)
           continue;
         const urls = this.prUrlsFor(s.sessionId, s.key);
         if (
