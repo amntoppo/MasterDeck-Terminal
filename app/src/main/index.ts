@@ -1,3 +1,5 @@
+import { Watches } from "./watches";
+import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
@@ -172,6 +174,46 @@ const sender = new Sender(
   (key) => latest?.sessions.find((x) => x.key === key),
 );
 const ops = new Ops(run, paths, () => claudeBin, gh);
+// Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
+const watches = new Watches(
+  join(paths.home, "watches.json"),
+  env,
+  (s, text) =>
+    sender.send(
+      s,
+      text,
+      latest?.master.kind === "attached" ||
+        latest?.master.kind === "elsewhere",
+    ),
+  () => sources.changed(),
+);
+/** Monitor calls already answered (the hook removes its file once it read the answer). */
+const answeredWatches = new Map<string, number>();
+/** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
+function pumpWatches(): void {
+  const by = sources.getSettings().monitorsBy;
+  const now = Date.now();
+  for (const [id, at] of answeredWatches)
+    if (now - at > 60_000) answeredWatches.delete(id);
+  for (const r of deckHooks.watchRequests()) {
+    // The hook gives up after 10s: a file older than that is left over (the hook was killed).
+    const age = now - Number(r.id.split("-")[0]) * 1000;
+    if (answeredWatches.has(r.id) || !(age < 20_000)) {
+      if (!(age < 20_000)) deckHooks.answerWatch(r.id, null);
+      continue;
+    }
+    answeredWatches.set(r.id, now);
+    const req = parseWatchRequest(r.text);
+    // Not ours to run (setting off, a WebSocket monitor, a bad file): Claude Code runs it.
+    if (!req || by !== "masterdeck") {
+      deckHooks.answerWatch(r.id, null);
+      continue;
+    }
+    const { already } = watches.add(req);
+    deckHooks.answerWatch(r.id, handedOver(req.description, already));
+  }
+  watches.deliver(latest?.sessions ?? []);
+}
 const summaries = new Summaries(
   run,
   () => claudeBin,
@@ -1401,6 +1443,9 @@ function registerIpc(): void {
   );
   ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped());
   ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s));
+  ipcMain.handle(CH.watchStop, (_e, id: unknown) =>
+    typeof id === "string" ? watches.stop(id) : false,
+  );
   ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
@@ -2129,6 +2174,11 @@ app.whenReady().then(async () => {
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
+      deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
+      sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
+      sources.setWatchInfo(() => watches.info());
+      watches.load();
+      setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
         const s = summaries.get(sid);
         return s ? { text: s.text, at: s.at } : null;
@@ -2230,6 +2280,7 @@ app.on("window-all-closed", () => app.quit());
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
   sender.killAll();
+  watches.killAll();
   ptys.closeAll();
   sources.stop();
 });

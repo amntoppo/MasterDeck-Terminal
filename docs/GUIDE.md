@@ -456,6 +456,21 @@ Stored in `~/.claude/masterdeck/settings.json`.
   at launch and updates its own unchanged copies. A skill you edited, your own copy, or a symlink
   is left alone; **Replace with bundled** swaps it (the old folder goes to
   `~/.claude/skills/.masterdeck-backup/`).
+- **Monitors run by** (Sessions): who runs the monitors sessions arm (PR review comments, merge
+  readiness, deploys, a workflow's monitor blocks).
+  - **Claude Code** (default): each monitor stops after 30 minutes, Claude Code's limit, and the
+    session re-arms it; each re-arm is a short turn.
+  - **MasterDeck:** MasterDeck's hook catches the session's Monitor call and MasterDeck runs the same
+    script with no time limit. Claude is told so and does not re-arm it. What the script prints
+    waits until the session's turn is over, then reaches it as one message starting
+    `[MasterDeck monitor: <description>]`. It ends when the script exits (the session gets a last
+    message) or when you press **Stop** in Details. The monitors are kept in
+    `~/.claude/masterdeck/watches.json` and start again when MasterDeck does. Only while MasterDeck
+    is open: when it is closed, a new Monitor call goes to Claude Code as usual.
+  - Sessions read their hooks when they start, so one started before MasterDeck 0.6.1 keeps
+    Claude Code's monitors until it is restarted.
+  - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
+    its events and a Stop button. With several, they open as a list.
 
 ## Links survive a resume
 

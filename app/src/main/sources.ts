@@ -1,3 +1,4 @@
+import type { WatchInfo } from "@shared/watches";
 import {
   existsSync,
   mkdirSync,
@@ -702,9 +703,18 @@ export class Sources {
     return this.settings;
   }
 
+  /** Monitors MasterDeck runs (main/watches), for the state and the sessions' status. */
+  private watchInfo: () => WatchInfo[] = () => [];
+  setWatchInfo(f: () => WatchInfo[]): void {
+    this.watchInfo = f;
+  }
+  /** Told of every settings change (the hook's monitors-by file follows it). */
+  onSettings: (s: Settings) => void = () => {};
+
   setSettings(raw: unknown): Settings {
     this.settings = normalizeSettings(raw);
     writeJsonAtomic(this.settingsPath, this.settings);
+    this.onSettings(this.settings);
     this.emit();
     return this.settings;
   }
@@ -1715,7 +1725,20 @@ export class Sources {
    * next instruction.
    */
   private withActivity(sessions: Session[], now: number): Session[] {
-    return sessions.map((s) => {
+    const watches = this.watchInfo();
+    return sessions.map((raw) => {
+      const s = this.activityOf(raw, now);
+      // Monitors MasterDeck runs for it count like its own, once its turn is over.
+      const mine = watches.filter((w) => w.sessionId === s.sessionId);
+      return mine.length &&
+        (s.state === "idle" || s.waitingOn || s.busyWith)
+        ? withMdWatches(s, mine)
+        : s;
+    });
+  }
+
+  private activityOf(s: Session, now: number): Session {
+    {
       if (s.state !== "idle" && s.state !== "working") return s;
       const t = this.tasksOf(s.sessionId);
       // "busy" with its turn over: only its background work keeps it so (a live Monitor).
@@ -1733,7 +1756,7 @@ export class Sources {
             asking,
           }
         : s;
-    });
+    }
   }
 
   /**
@@ -1910,6 +1933,7 @@ export class Sources {
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
+      watches: this.watchInfo(),
       hookInfo,
       sessionWorktrees: Object.fromEntries(
         sessions
@@ -1976,4 +2000,10 @@ export class Sources {
   isHealthy(name: string): boolean {
     return this.health[name] === "ok";
   }
+}
+
+/** A session that MasterDeck runs monitors for waits on them (shown like a monitor of its own). */
+function withMdWatches(s: Session, mine: WatchInfo[]): Session {
+  const what = mine.map((w) => `MasterDeck monitor: ${w.description}`).join(" · ");
+  return { ...s, waitingOn: s.waitingOn ? `${s.waitingOn} · ${what}` : what };
 }

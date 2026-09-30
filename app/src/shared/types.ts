@@ -1,3 +1,4 @@
+import type { WatchInfo } from "./watches";
 import type { ScreenMenu, SessionAsk } from "./ask";
 import type { InboxView } from "./inbox";
 import type { PrStage, StatusKey } from "./review";
@@ -181,6 +182,8 @@ export interface AppState {
   sessionWorktrees: Record<string, import("./worktrees").SessionWorktree[]>;
   /** PR URLs linked to each session (sessionId): babysit-ticket's list, then PRs it created. Oldest first. */
   sessionPrs: Record<string, string[]>;
+  /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
+  watches: WatchInfo[];
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;

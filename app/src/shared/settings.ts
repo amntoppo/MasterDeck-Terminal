@@ -10,6 +10,8 @@ export interface Settings {
   afterRestart: 'ask' | 'resume' | 'off'
   /** A session's open PR is Ready for Review once its automated review is done, or after this many minutes without new comments. */
   reviewQuietMinutes: number
+  /** Who runs the monitors sessions arm: Claude Code (30 minutes each, re-armed) or MasterDeck (no limit, while it runs). */
+  monitorsBy: 'claude' | 'masterdeck'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyNeedsYou: true,
   afterRestart: 'ask',
   reviewQuietMinutes: 20,
+  monitorsBy: 'claude',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -38,5 +41,6 @@ export function normalizeSettings(raw: unknown): Settings {
     notifyNeedsYou: typeof r.notifyNeedsYou === 'boolean' ? r.notifyNeedsYou : DEFAULT_SETTINGS.notifyNeedsYou,
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
+    monitorsBy: r.monitorsBy === 'masterdeck' ? 'masterdeck' : 'claude',
   }
 }

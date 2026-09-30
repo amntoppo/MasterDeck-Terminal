@@ -115,6 +115,15 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <Field label="Budget per ticket" hint="USD; 0 turns it off. Over budget shows in Needs you.">
           {num('budgetPerTicketUsd', 0)} <span className="muted">USD</span>
         </Field>
+        <Field
+          label="Monitors run by"
+          hint="Claude Code stops each monitor after 30 minutes, so sessions re-arm them. MasterDeck runs them with no limit and sends each event to the session once its turn is over, but only while MasterDeck is open (closed: the session's monitor goes to Claude Code). Sessions started before a change keep the old way until restarted."
+        >
+          <select className="input" value={s.monitorsBy} onChange={(e) => set('monitorsBy', e.target.value as Settings['monitorsBy'])}>
+            <option value="claude">Claude Code (30 minutes, re-armed)</option>
+            <option value="masterdeck">MasterDeck (no time limit)</option>
+          </select>
+        </Field>
         <Field label="Context warning at" hint="From this much context used, Details offers Compact now.">
           {num('contextWarnPct', 10, 100)} <span className="muted">%</span>
         </Field>

@@ -254,11 +254,16 @@ export function installWorkflowHooks(
 
 /** MasterDeck's own hook (main/deckHooks.ts): marked by its path, one entry per event. */
 const DECK_MARK = "/deck/hook.sh";
+/** Plus PreToolUse on Monitor: hands a monitor to MasterDeck when Settings say so. */
+const DECK_MONITOR_MARK = "/deck/hook.sh\" MonitorCall";
 
 export function deckHooksInstalled(settingsPath: string): boolean {
   try {
     const s = read(settingsPath);
-    return DECK_EVENTS.every((e) => has(s, e, DECK_MARK));
+    return (
+      DECK_EVENTS.every((e) => has(s, e, DECK_MARK)) &&
+      has(s, "PreToolUse", DECK_MONITOR_MARK)
+    );
   } catch {
     return false;
   }
@@ -286,8 +291,19 @@ export function installDeckHooks(
     const stale = DECK_EVENTS.some(
       (e) => has(s, e, DECK_MARK) && !has(s, e, cmd(e)),
     );
-    if (DECK_EVENTS.every((e) => has(s, e, cmd(e))) && !stale)
+    const monitorCmd = cmd("MonitorCall");
+    const monitorStale =
+      has(s, "PreToolUse", DECK_MONITOR_MARK) &&
+      !has(s, "PreToolUse", monitorCmd);
+    if (
+      DECK_EVENTS.every((e) => has(s, e, cmd(e))) &&
+      has(s, "PreToolUse", monitorCmd) &&
+      !stale &&
+      !monitorStale
+    )
       return { ok: true, message: "already installed" };
+    remove(s, "PreToolUse", DECK_MONITOR_MARK);
+    add(s, "PreToolUse", "Monitor", monitorCmd, DECK_MONITOR_MARK, 15);
     for (const e of DECK_EVENTS) {
       remove(s, e, DECK_MARK);
       add(

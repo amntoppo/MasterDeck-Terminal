@@ -13,6 +13,10 @@ const EVENTS_MAX = 4 * 1024 * 1024
  *   The terminal shows the prompt meanwhile and can be answered there too. It gives up when
  *   MasterDeck withdraws the request (deletes the pending file) or after ~9 minutes.
  * - SessionStart: prints `context/<session id>.json` when MasterDeck left one (the ticket's context).
+ * - MonitorCall (PreToolUse on Monitor): only with Settings → Monitors run by MasterDeck (the
+ *   `monitors-by` file) and while MasterDeck runs. Leaves the call in `watch-requests/<id>.json`
+ *   and waits up to 10s for `watch-answers/<id>.json` (MasterDeck took it over: the call is
+ *   denied with why). No answer: Claude Code runs the monitor as usual.
  * - The rest: one line in `events.jsonl`. Stop writes only its session id.
  */
 export function hookScript(dir: string): string {
@@ -26,6 +30,22 @@ sid=$(printf '%s' "$in" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p' | 
 now=$(date +%s)
 mkdir -p "$D/pending" "$D/answers" "$D/context" 2>/dev/null
 case "$ev" in
+  MonitorCall)
+    [ "$(cat "$D/monitors-by" 2>/dev/null)" = masterdeck ] || exit 0
+    m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
+    [ $((now - m)) -lt 30 ] || exit 0
+    mkdir -p "$D/watch-requests" "$D/watch-answers" 2>/dev/null
+    id="$now-$$-$RANDOM"
+    printf '{"id":"%s","at":%s000,"data":%s}\n' "$id" "$now" "$in" > "$D/watch-requests/$id.tmp" && mv "$D/watch-requests/$id.tmp" "$D/watch-requests/$id.json"
+    i=0
+    while [ $i -lt 40 ]; do
+      if [ -f "$D/watch-answers/$id.json" ]; then cat "$D/watch-answers/$id.json"; rm -f "$D/watch-answers/$id.json" "$D/watch-requests/$id.json"; exit 0; fi
+      [ -f "$D/watch-requests/$id.json" ] || exit 0
+      sleep 0.25
+      i=$((i + 1))
+    done
+    rm -f "$D/watch-requests/$id.json"
+    exit 0 ;;
   PermissionRequest)
     m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
     [ $((now - m)) -lt 30 ] || exit 0
@@ -71,7 +91,7 @@ export class DeckHooks {
 
   /** Write the script (every launch: it follows this version) and the folders it uses. */
   setup(): void {
-    for (const d of ['', 'pending', 'answers', 'context']) mkdirSync(join(this.dir, d), { recursive: true })
+    for (const d of ['', 'pending', 'answers', 'context', 'watch-requests', 'watch-answers']) mkdirSync(join(this.dir, d), { recursive: true })
     writeFileSync(this.script, hookScript(this.dir))
     chmodSync(this.script, 0o755)
     try {
@@ -147,6 +167,45 @@ export class DeckHooks {
   /** The request is over (answered elsewhere): the hook stops waiting. */
   withdraw(id: string): void {
     rm(join(this.dir, 'pending', `${id}.json`))
+  }
+
+  /** Settings → Monitors run by: the hook reads this before handing a Monitor call over. */
+  setMonitorsBy(by: 'claude' | 'masterdeck'): void {
+    try {
+      writeFileSync(join(this.dir, 'monitors-by'), by)
+    } catch {
+      // next change
+    }
+  }
+
+  /** Monitor calls the hook is waiting on, oldest first (raw text; see parseWatchRequest). */
+  watchRequests(): { id: string; text: string }[] {
+    const dir = join(this.dir, 'watch-requests')
+    let names: string[] = []
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith('.json'))
+    } catch {
+      return []
+    }
+    const out: { id: string; text: string }[] = []
+    for (const n of names.sort()) {
+      try {
+        out.push({ id: n.slice(0, -5), text: readFileSync(join(dir, n), 'utf8') })
+      } catch {
+        // taken meanwhile
+      }
+    }
+    return out
+  }
+
+  /** Answer a Monitor call (the hook prints it); or, with null, let Claude Code run it. */
+  answerWatch(id: string, answer: object | null): void {
+    const req = join(this.dir, 'watch-requests', `${id}.json`)
+    if (!answer) return rm(req)
+    mkdirSync(join(this.dir, 'watch-answers'), { recursive: true })
+    const tmp = join(this.dir, 'watch-answers', `${id}.tmp`)
+    writeFileSync(tmp, JSON.stringify(answer))
+    renameSync(tmp, join(this.dir, 'watch-answers', `${id}.json`))
   }
 
   /** What SessionStart tells this session (null: nothing). */

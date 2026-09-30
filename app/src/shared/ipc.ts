@@ -86,6 +86,7 @@ export const CH = {
   showNeedsYou: "app:showNeedsYou",
   showInboxItem: "app:showInboxItem",
   getState: "state:get",
+  watchStop: "watch:stop",
   approve: "cli:approve",
   reject: "cli:reject",
   draftAssign: "cli:draftAssign",
@@ -217,6 +218,8 @@ export interface DeckApi {
   platform: string;
   home: string;
   getState(): Promise<AppState | null>;
+  /** Stop a monitor MasterDeck runs (its session is told). */
+  watchStop(id: string): Promise<boolean>;
   onState(cb: (s: AppState) => void): () => void;
   onFocusSession(cb: (sessionKey: string) => void): () => void;
   onShowNeedsYou(cb: () => void): () => void;
