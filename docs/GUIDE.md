@@ -240,7 +240,7 @@ checkout whose branch was once linked to a ticket does not link it.
   it set up is still pending; hover for which); otherwise **Idle**: nothing running, no
   question, waiting for your next instruction. Ready for Review: the automated review check (e.g. `claude-review`) passed or
   failed, or nothing new was said on the PR for 20 minutes (Settings), and the session is not
-  working. In Review: the review check runs, or comments are recent. Draft PRs count. Hover a
+  working. In Review: the review check runs, or comments are recent. Draft PRs don't count: a session whose open PRs are all drafts keeps its usual status (Working, Idle…) until one is marked ready for review. Hover a
   status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
   of every session are checked every two minutes while open.
 - **Notifications:** every new Needs-you item (except held ones) shows a macOS / Windows

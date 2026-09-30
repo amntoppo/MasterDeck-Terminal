@@ -11,7 +11,7 @@ const pr = (n: number, o: Partial<PrLive> = {}): PrLive => ({
   ci: null,
   reviewCheck: null,
   buildCi: null,
-  isDraft: true,
+  isDraft: false,
   createdAt: 0,
   mergedAt: null,
   lastCommentAt: null,
@@ -21,6 +21,12 @@ const MIN = 60_000
 const stage = (live: Record<string, PrLive>, now = 5 * MIN) => prStage(Object.keys(live), live, now, 20)
 
 describe('prStage', () => {
+  it('leaves draft PRs out: no review status until one is ready for review', () => {
+    const live = { a: pr(1, { isDraft: true }), b: pr(2, { isDraft: true, reviewCheck: 'success' }) }
+    expect(prStage(['a', 'b'], live, 5 * MIN, 20)).toBeNull()
+    const mixed = { ...live, c: pr(3, { reviewCheck: 'success' }) }
+    expect(prStage(['a', 'c'], mixed, 5 * MIN, 20)).toMatchObject({ kind: 'ready', prs: [3] })
+  })
   it('Ready for Review when the automated review passed or failed', () => {
     expect(stage({ u1: pr(1, { reviewCheck: 'success' }) })).toMatchObject({ kind: 'ready', why: 'the automated review passed' })
     expect(stage({ u1: pr(1, { reviewCheck: 'failure' }) })).toMatchObject({ kind: 'ready', why: 'the automated review failed' })

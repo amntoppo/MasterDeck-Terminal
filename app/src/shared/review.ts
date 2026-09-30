@@ -26,13 +26,14 @@ export interface PrStage {
  * - ready (Ready for Review): the automated review is done, passed or failed, or nothing new has
  *   been said on the PR for `quietMinutes` (a stale review counts as done);
  * - in-review: the review check runs, or comments came in the last `quietMinutes`.
- * Drafts count: sessions open their PRs as drafts.
+ * Drafts don't count: a session whose open PRs are all drafts is still at work on them, so it
+ * shows its usual status until one is marked ready for review.
  */
 export function prStage(urls: string[], live: Record<string, PrLive>, now: number, quietMinutes: number, instructedAt: number | null = null): PrStage | null {
   const prs = urls.map((u) => live[u]).filter((p): p is PrLive => !!p)
-  const open = prs.filter((p) => p.state === 'OPEN')
+  const openAll = prs.filter((p) => p.state === 'OPEN')
   const nums = (list: PrLive[]) => list.map((p) => p.number)
-  if (!open.length) {
+  if (!openAll.length) {
     const merged = prs.filter((p) => p.state === 'MERGED')
     if (!merged.length) return null
     const lastMerge = Math.max(...merged.map((p) => p.mergedAt ?? 0))
@@ -40,6 +41,9 @@ export function prStage(urls: string[], live: Record<string, PrLive>, now: numbe
       return { kind: 'rework', prs: nums(merged), why: 'new instructions after its PR was merged; no new PR yet' }
     return { kind: 'merged', prs: nums(merged), why: 'merged' }
   }
+  // Drafts: not up for review yet.
+  const open = openAll.filter((p) => !p.isDraft)
+  if (!open.length) return null
   const approved = open.filter((p) => p.reviewDecision === 'APPROVED')
   if (approved.length === open.length) return { kind: 'approved', prs: nums(approved), why: 'approved' }
   const changes = open.filter((p) => p.reviewDecision === 'CHANGES_REQUESTED')
