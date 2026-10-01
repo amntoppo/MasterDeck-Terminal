@@ -1218,3 +1218,6 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .mon-list .mon-row + .mon-row { border-top: 1px solid var(--line); }
 .board-head .seg { flex: none; }
 .board-head .seg button { flex: none; white-space: nowrap; }
+.sched-dot { flex: none; width: 14px; margin-top: 1px; font-size: 12px; line-height: 16px; opacity: .85; }
+.sched-row .mon-main { cursor: pointer; }
+.sched-prompt { margin: 6px 0 0; padding: 6px 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }

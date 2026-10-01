@@ -1,4 +1,5 @@
 import type { WatchInfo } from "./watches";
+import type { ScheduleInfo } from "./schedules";
 import type { ScreenMenu, SessionAsk } from "./ask";
 import type { InboxView } from "./inbox";
 import type { PrStage, StatusKey } from "./review";
@@ -187,6 +188,8 @@ export interface AppState {
   sessionPrs: Record<string, string[]>;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
+  /** Scheduled jobs (CronCreate) by session id. */
+  schedules: Record<string, ScheduleInfo[]>;
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;

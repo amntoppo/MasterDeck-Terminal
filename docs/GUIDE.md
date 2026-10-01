@@ -475,6 +475,12 @@ Stored in `~/.claude/masterdeck/settings.json`.
     Claude Code's monitors until it is restarted.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
     its events and a Stop button. With several, they open as a list.
+- **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
+  Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
+  it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the
+  session). Click one for its whole prompt. A job the session cancelled (CronDelete) disappears, and
+  an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
+  session itself.
 
 ## Links survive a resume
 

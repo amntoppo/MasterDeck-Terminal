@@ -12,6 +12,7 @@ import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { MonitorWidget } from "./MonitorWidget";
+import { ScheduleWidget } from "./ScheduleWidget";
 
 interface Props {
   session: Session;
@@ -167,6 +168,7 @@ export function SessionDetails({
 
       <WorkflowWidget session={s} state={state} />
       <MonitorWidget session={s} state={state} />
+      <ScheduleWidget session={s} state={state} />
 
       <section className="dsec">
         <div className="eyebrow">Ticket</div>
