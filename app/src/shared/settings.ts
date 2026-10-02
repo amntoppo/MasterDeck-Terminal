@@ -14,6 +14,8 @@ export interface Settings {
   monitorsBy: 'claude' | 'masterdeck'
   /** Send Tasks and Needs you to the remote backend, and run the commands it relays (Settings → Remote). */
   remoteEnabled: boolean
+  /** Web terminal: show typed characters at once, corrected when the Mac's output arrives (predictive local echo). */
+  instantTyping: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reviewQuietMinutes: 20,
   monitorsBy: 'claude',
   remoteEnabled: false,
+  instantTyping: true,
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -46,5 +49,6 @@ export function normalizeSettings(raw: unknown): Settings {
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
     monitorsBy: r.monitorsBy === 'masterdeck' ? 'masterdeck' : 'claude',
     remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
+    instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
   }
 }

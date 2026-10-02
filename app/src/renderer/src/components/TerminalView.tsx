@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
+import { createPredictor, type Predictor } from '../predictiveEcho'
 import { isWeb, keyPlatform } from '../web'
 
 const THEME = {
@@ -54,6 +55,8 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
+  // Web only: predictive local echo (Settings → Instant typing); null when off.
+  const pred = useRef<Predictor | null>(null)
   const [error, setError] = useState<string | null>(null)
   const specKey = JSON.stringify(spec)
   const onExitRef = useRef(onExit)
@@ -91,13 +94,21 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // hidden on mount; fitted when shown
     }
     let disposed = false
+    // Created before any output so it tracks the pen and cursor state from the start; switched on by the setting.
+    pred.current = isWeb() ? createPredictor(t, { enabled: false }) : null
+    const setInstant = (on: boolean) => !disposed && pred.current?.setEnabled(on)
+    // A Mac on an older version has no instantTyping: on by default.
+    const offState = isWeb() ? deck().onState((s) => setInstant(s.settings.instantTyping !== false)) : () => {}
+    if (isWeb()) void deck().getSettings().then((s) => setInstant(s.instantTyping !== false))
+    // On the web all output goes through the predictor: it takes its overlay off first, and tracks the screen state.
+    const write = (d: string) => (pred.current ? pred.current.write(d) : t.write(d))
     // Data that arrives before ptyOpen answers is queued, then dropped if the replay covers it.
     let ready = false
     let replaySeq = 0
     const queued: [string, number][] = []
     const offData = deck().onPtyData(paneId, (d, seq) => {
       if (!ready) queued.push([d, seq])
-      else if (seq > replaySeq) t.write(d)
+      else if (seq > replaySeq) write(d)
     })
     const offExit = deck().onPtyExit(paneId, (code) => onExitRef.current?.(code))
     void deck()
@@ -105,23 +116,29 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       .then((r) => {
         if (disposed) return
         if (!r.ok) setError(r.message ?? 'could not start the terminal')
-        else if (r.replay) t.write(r.replay)
+        else if (r.replay) write(r.replay)
         replaySeq = r.seq
         ready = true
-        for (const [d, seq] of queued) if (seq > replaySeq) t.write(d)
+        for (const [d, seq] of queued) if (seq > replaySeq) write(d)
         queued.length = 0
         if (r.ok && r.exited) onExitRef.current?.(0)
       })
       .catch((e) => {
         if (!disposed) setError(String(e))
       })
-    const input = t.onData((d) => deck().ptyWrite(paneId, d))
+    const input = t.onData((d) => {
+      pred.current?.onInput(d)
+      deck().ptyWrite(paneId, d)
+    })
     const resize = t.onResize(({ cols, rows }) => visibleRef.current && deck().ptyResize(paneId, cols, rows))
     // Cmd+C copies a selection instead of sending ^C; Cmd+V pastes.
     t.attachCustomKeyEventHandler((e) => {
       const o = keyOverride(e)
       if (o) {
-        if (o !== 'swallow') deck().ptyWrite(paneId, o.send)
+        if (o !== 'swallow') {
+          pred.current?.onInput(o.send)
+          deck().ptyWrite(paneId, o.send)
+        }
         e.preventDefault()
         return false
       }
@@ -135,11 +152,16 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     })
     const ro = new ResizeObserver(() => {
       if (!host.current || host.current.offsetParent === null) return
-      try {
-        f.fit()
-      } catch {
-        // not laid out yet
+      // A resize reflows the screen: take predictions off first.
+      const refit = () => {
+        try {
+          f.fit()
+        } catch {
+          // not laid out yet
+        }
       }
+      if (pred.current) pred.current.clear(refit)
+      else refit()
     })
     ro.observe(host.current)
     return () => {
@@ -149,6 +171,9 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       resize.dispose()
       offData()
       offExit()
+      offState()
+      pred.current?.dispose()
+      pred.current = null
       const rest = (searchers.get(paneId) ?? []).filter((x) => x !== entry)
       if (rest.length) searchers.set(paneId, rest)
       else searchers.delete(paneId)
@@ -161,7 +186,9 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
 
   useEffect(() => {
     if (!visible) return
-    const id = requestAnimationFrame(() => {
+    let live = true
+    const shown = () => {
+      if (!live) return
       try {
         fit.current?.fit()
       } catch {
@@ -170,8 +197,10 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // Take the PTY's size back: another view may have shown it at its own size meanwhile.
       if (term.current) deck().ptyResize(paneId, term.current.cols, term.current.rows)
       if (focusOnShow) term.current?.focus()
-    })
+    }
+    const id = requestAnimationFrame(() => (pred.current ? pred.current.clear(shown) : shown()))
     return () => {
+      live = false
       cancelAnimationFrame(id)
       // Hidden or gone: this view no longer holds the PTY's size (cols 0 resizes nothing; spec §4 size rule).
       deck().ptyResize(paneId, 0, 0)

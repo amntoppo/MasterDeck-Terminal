@@ -101,6 +101,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             <option value="off">Do nothing</option>
           </select>
         </Field>
+        <Field label="Instant typing (web)" hint="Show typed characters right away in the web terminal and correct them when the Mac's output arrives.">
+          {toggle('instantTyping', 'Instant typing (web)')}
+        </Field>
       </>
     ),
     alerts: (
