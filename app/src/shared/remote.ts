@@ -251,7 +251,7 @@ export type DesktopMsg = z.infer<typeof DesktopMsg>
 export const LiveClient = z.object({
   id: z.string().min(1).max(100),
   kind: z.enum(['live', 'api']),
-  name: z.string().max(100),
+  name: z.string().max(120),
   device: z.string().max(80).nullable(),
   since: z.number().int(),
 })
