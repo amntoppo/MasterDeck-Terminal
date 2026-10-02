@@ -16,6 +16,8 @@ export interface BridgeDeps {
   /** The signed-in account, only when CloudSync's welcome.user and Account agree. */
   account: () => { userId: string; email: string } | null
   send: (m: BrowserOut) => boolean
+  /** DELETE /v1/browsers/:id with the device token; true when the backend revoked it. */
+  revokeRemote: (id: string) => Promise<boolean>
   /** IpcRegistry.call */
   call: (ch: string, args: unknown[]) => Promise<unknown>
   /** Pending requests, the browser list or the warning changed. */
@@ -41,6 +43,13 @@ const PTY_CHUNK = 128 * 1024
 /** Base64url length of a sealed message whose JSON is this many UTF-8 bytes (+16 GCM tag). */
 const sealedLen = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3)
 const later = (ms: number, f: () => void) => setTimeout(f, Math.max(0, ms)).unref?.()
+const isHs1 = (d: string) => {
+  try {
+    return (JSON.parse(d) as { k?: unknown } | null)?.k === 'hs1'
+  } catch {
+    return false
+  }
+}
 
 /** Account state changed: approved browsers go on sign-out or when another email signs in (RF1). */
 export function accountChange(lastEmail: string | null, s: { kind: string; email?: string }): { forget: boolean; email: string | null } {
@@ -52,7 +61,7 @@ export function accountChange(lastEmail: string | null, s: { kind: string; email
 export const userChanged = (prev: { id: string } | null, next: { id: string } | null) => !!prev && !!next && prev.id !== next.id
 const EVENTS = new Map(Object.values(DECK_ACCESS).flatMap((a) => (a.kind === 'event' ? [[a.ch, !!a.perId] as const] : [])))
 
-interface Pending { id: string; name: string; email: string; commit: string; nM: string; expiresAt: number; publicKey?: string; words?: [string, string, string] }
+interface Pending { id: string; name: string; email: string; commit: string; nM: string; expiresAt: number; publicKey?: string; nB?: string; words?: [string, string, string] }
 interface Conn {
   b: string
   name: string
@@ -62,6 +71,8 @@ interface Conn {
   ch?: Channel
   subs: Set<string>
   visible: boolean
+  /** Took over from an earlier channel of this browser: that channel's late frames are ignored, not failures. */
+  replaced: boolean
   calls: number[]
   lastState?: string
   stateAt: number
@@ -132,19 +143,28 @@ export class BrowserBridge {
   async decide(id: string, allow: boolean): Promise<void> {
     const p = this.live().get(id)
     if (!p?.publicKey) return
-    this.pending.delete(id)
     const a = this.d.account()
     const ok = allow && !!a
-    this.d.send({ t: 'browserDecision', id, allow: ok })
+    // Not sent (the Mac is offline): keep the prompt; the user decides again once the line is back.
+    if (!this.d.send({ t: 'browserDecision', id, allow: ok })) {
+      this.d.log?.(`browser request ${id}: decision not sent; your Mac is offline`)
+      return
+    }
+    this.pending.delete(id)
     if (ok) this.d.store.add(a.userId, { id, name: p.name, publicKey: p.publicKey, approvedAt: this.now() })
     this.d.onChange()
   }
 
-  /** Local half of a revoke; index.ts also calls DELETE /v1/browsers/:id. */
-  revoke(id: string): void {
+  /**
+   * Revoke from the Mac: the backend first, so the hub closes the browser with 4003 (revoked) rather than 4008, then
+   * locally. Local always happens (the Mac is authoritative); the result says whether the backend got it.
+   */
+  async revoke(id: string): Promise<boolean> {
+    const ok = await this.d.revokeRemote(id).catch(() => false)
     const c = this.conns.get(id)
     if (c) this.close(c)
     this.forget(id)
+    return ok
   }
 
   requests(): BrowserRequestView[] {
@@ -163,10 +183,16 @@ export class BrowserBridge {
     return null
   }
 
-  /** Sign-out, account change, disconnect. */
+  /** Sign-out, account change: channels and approval requests go. */
   closeAll(): void {
     for (const c of [...this.conns.values()]) this.close(c)
     this.pending.clear()
+    this.d.onChange()
+  }
+
+  /** The line to the backend dropped: channels are gone, approval requests stay (they complete after the reconnect). */
+  dropChannels(): void {
+    for (const c of [...this.conns.values()]) this.drop(c)
     this.d.onChange()
   }
 
@@ -217,6 +243,8 @@ export class BrowserBridge {
       this.d.onChange()
     }
     if (!p || !key) return deny('no such request')
+    // The same reveal again (re-sent after a reconnect): keep the words.
+    if (p.publicKey && p.publicKey === m.publicKey && p.nB === m.nonce) return
     if (p.publicKey) return deny('revealed twice')
     if (!(await checkCommitment(p.commit, m.publicKey, m.nonce))) return deny('commitment mismatch')
     let w: [string, string, string]
@@ -227,6 +255,7 @@ export class BrowserBridge {
     }
     if (this.pending.get(m.id) !== p) return
     p.publicKey = m.publicKey
+    p.nB = m.nonce
     p.words = w
     this.d.onChange()
   }
@@ -258,16 +287,21 @@ export class BrowserBridge {
     const old = this.conns.get(m.b)
     if (old) this.drop(old)
     if (!known || known.publicKey !== m.publicKey || !this.d.key()) {
-      this.d.send({ t: 'browserClose', b: m.b })
+      const close = () => void this.d.send({ t: 'browserClose', b: m.b })
+      // Not ours under this account (e.g. approved before an account switch): revoke its backend row too, so the
+      // hub closes it with 4003 and the browser asks for approval again instead of reconnecting forever.
+      if (a && !known) void this.d.revokeRemote(m.b).catch(() => false).then(close)
+      else close()
       return
     }
-    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, calls: [], stateAt: 0, ptyBuf: new Map() })
+    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], stateAt: 0, ptyBuf: new Map() })
   }
 
   private async onFrame(b: string, d: string): Promise<void> {
     const c = this.conns.get(b)
     if (!c) return
     if (typeof d !== 'string' || d.length > MAX_FRAME) return this.fail(c, 'frame too large')
+    if (c.state === 'hs1' && c.replaced && !isHs1(d)) return // a late frame of the superseded channel: not a failure
     if (c.state === 'hs1' || c.state === 'hs3') return this.handshake(c, d)
     if (c.state !== 'open') return this.fail(c, 'frame during handshake')
     let msg: WebToMac

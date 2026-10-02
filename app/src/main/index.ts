@@ -58,7 +58,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { knownDirsOnly, remoteSettings } from "./remoteGuards";
+import { knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -154,6 +154,8 @@ if (process.env.MASTERDECK_USER_DATA)
 let win: BrowserWindow | null = null;
 // The browser bridge (app.masterdeck.dev); every renderer event also goes to it.
 let bridge: BrowserBridge | null = null;
+/** Panes the Mac's window shows: their size is the Mac's, not a browser's (spec §4). */
+const macPanes = new MacPanes();
 const reg = new IpcRegistry(ipcMain);
 /** Send to the window and to any connected browser. */
 function emit(channel: string, ...args: unknown[]): void {
@@ -508,6 +510,20 @@ function publishBrowsers(): void {
     b.warning(),
   );
 }
+/** DELETE /v1/browsers/:id with this Mac's device token: the hub then closes that browser with 4003. */
+async function revokeBrowserRow(id: string): Promise<boolean> {
+  const token = readToken(remoteTokenFile());
+  if (!token) return false;
+  try {
+    const r = await fetch(`${REMOTE}/v1/browsers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
 function forgetBrowsers(): void {
   browserStore.wipe();
   bridge?.closeAll();
@@ -558,6 +574,7 @@ bridge = new BrowserBridge({
       : null;
   },
   send: (m) => cloud?.sendBrowser(m) ?? false,
+  revokeRemote: (id) => revokeBrowserRow(id),
   call: (ch, a) => reg.call(ch, a),
   onChange: () => publishBrowsers(),
   hello: { appVersion: app.getVersion(), platform: process.platform, home: homedir() },
@@ -645,7 +662,8 @@ function syncRemote(): void {
       cloudUser = u;
       publishBrowsers();
     },
-    onDisconnect: () => bridge!.closeAll(),
+    // Channels only: approval requests survive a blip and complete after the reconnect.
+    onDisconnect: () => bridge!.dropChannels(),
   });
   cloud.start();
   if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
@@ -2206,18 +2224,8 @@ function registerIpc(): void {
   );
   reg.handle(CH.browserRevoke, async (_e, id: unknown) => {
     if (typeof id !== "string" || !id || id.length > 100) return { ok: false };
-    bridge!.revoke(id);
-    const token = readToken(remoteTokenFile());
-    if (!token) return { ok: false };
-    try {
-      const r = await fetch(`${REMOTE}/v1/browsers/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${token}` },
-      });
-      return { ok: r.ok };
-    } catch {
-      return { ok: false };
-    }
+    // Backend first, then the local close (e2e H): the browser gets 4003 and asks for approval again.
+    return { ok: await bridge!.revoke(id) };
   });
   reg.handle(CH.stopSession, async (e, bgId: string, name: string) => {
     if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
@@ -2331,16 +2339,26 @@ function registerIpc(): void {
   reg.handle(CH.masterStart, () => startMaster());
   reg.handle(
     CH.ptyOpen,
-    (_e, id: string, spec: PaneSpec, cols: number, rows: number) =>
-      ptys.open(id, spec, cols, rows),
+    (e, id: string, spec: PaneSpec, cols: number, rows: number) => {
+      // Spec §4: a browser's size never resizes a pane the Mac's window shows.
+      if (!isRemote(e)) macPanes.local(id, cols);
+      else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
+      return ptys.open(id, spec, cols, rows);
+    },
   );
   reg.on(CH.ptyWrite, (_e, id: string, data: string) =>
     ptys.write(id, data),
   );
-  reg.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) =>
-    ptys.resize(id, cols, rows),
-  );
-  reg.on(CH.ptyClose, (_e, id: string) => ptys.close(id));
+  reg.on(CH.ptyResize, (e, id: string, cols: number, rows: number) => {
+    if (!isRemote(e)) macPanes.local(id, cols);
+    else if (!macPanes.remoteSize(id, cols, rows)) return;
+    // cols 0: the window hid the pane; nothing to resize.
+    if (cols > 0 && rows > 0) ptys.resize(id, cols, rows);
+  });
+  reg.on(CH.ptyClose, (_e, id: string) => {
+    macPanes.closed(id);
+    ptys.close(id);
+  });
 }
 
 function createWindow(): void {

@@ -23,6 +23,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     logs: [] as string[],
     changes: 0,
     sendOk: true,
+    revokeOk: true,
     t: 1_000_000,
     acct: { userId: 'u1', email: EMAIL } as { userId: string; email: string } | null,
     state: { n: 0 } as unknown,
@@ -34,6 +35,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     key: () => ({ pair: mac, publicKey: macPub }),
     account: () => w.acct,
     send: (m) => (w.sent.push(m), w.sendOk),
+    revokeRemote: async (id) => (w.sent.push({ t: 'DELETE', id }), w.revokeOk),
     call: (ch, a) => w.call(ch, a),
     onChange: () => void w.changes++,
     hello: { appVersion: '9.9.9', platform: 'darwin', home: '/Users/me' },
@@ -145,9 +147,60 @@ describe('BrowserBridge approval (commit-reveal)', () => {
     const w = await world()
     const r = await request(w)
     await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
-    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: randomNonce() })
     expect(w.bridge.requests()).toEqual([])
     expect(of(w, 'browserDecision')).toEqual([{ t: 'browserDecision', id: 'b1', allow: false }])
+  })
+
+  it('the same reveal again (re-sent after a reconnect) is a no-op: same words, still decidable', async () => {
+    const w = await world()
+    const r = await request(w)
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    const shown = w.bridge.requests()
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    expect(w.bridge.requests()).toEqual(shown)
+    expect(of(w, 'browserDecision')).toEqual([])
+    await w.bridge.decide('b1', true)
+    expect(w.store.get('u1', 'b1')).toMatchObject({ publicKey: r.pub })
+  })
+
+  it('socket drop mid-approval (revealed): the prompt and words survive; the re-sent reveal completes', async () => {
+    const w = await world()
+    const r = await request(w)
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    const shown = w.bridge.requests()
+    w.bridge.dropChannels()
+    expect(w.bridge.requests()).toEqual(shown)
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB }) // hub welcome re-send
+    expect(w.bridge.requests()).toEqual(shown)
+    await w.bridge.decide('b1', true)
+    expect(of(w, 'browserDecision')).toEqual([{ t: 'browserDecision', id: 'b1', allow: true }])
+    expect(w.store.get('u1', 'b1')).toBeTruthy()
+  })
+
+  it('socket drop after the nonce, before the reveal: the reveal after the reconnect shows the words', async () => {
+    const w = await world()
+    const r = await request(w)
+    const nM = of(w, 'browserNonce')[0].nonce
+    w.bridge.dropChannels()
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    expect(w.bridge.requests()[0].words).toEqual(await words(w.macPub, r.pub, nM, r.nB))
+    await w.bridge.decide('b1', true)
+    expect(w.store.get('u1', 'b1')).toBeTruthy()
+  })
+
+  it('decide whose send fails keeps the request (nothing stored); deciding again once online works', async () => {
+    const w = await world()
+    const r = await request(w)
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: r.pub, nonce: r.nB })
+    w.sendOk = false
+    await w.bridge.decide('b1', true)
+    expect(w.store.get('u1', 'b1')).toBeFalsy()
+    expect(w.bridge.requests()).toHaveLength(1)
+    w.sendOk = true
+    await w.bridge.decide('b1', true)
+    expect(w.store.get('u1', 'b1')).toBeTruthy()
+    expect(w.bridge.requests()).toEqual([])
   })
 
   it('at most 3 outstanding unrevealed nonces', async () => {
@@ -220,7 +273,10 @@ describe('BrowserBridge channel', () => {
     const other = await publicRaw((await generateStatic(false)).publicKey)
     await w.bridge.onServer({ t: 'open', b: 'nope', name: 'x', publicKey: other })
     await w.bridge.onServer({ t: 'open', b: 'b1', name: 'x', publicKey: other })
-    expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'nope' }, { t: 'browserClose', b: 'b1' }])
+    await tick()
+    // A known id with another key: closed at once; an unknown one: after its backend row is revoked.
+    expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'b1' }, { t: 'browserClose', b: 'nope' }])
+    expect(of(w, 'DELETE')).toEqual([{ t: 'DELETE', id: 'nope' }])
   })
 
   it('handshake, hello, then call runs an allowlisted method via deps.call with the right channel', async () => {
@@ -393,12 +449,46 @@ describe('BrowserBridge channel', () => {
     expect(w.sent.slice(sentBefore).filter((m) => m.t === 'frame')).toEqual([])
   })
 
-  it('revoke(id) from the Mac closes the channel and forgets the browser', async () => {
+  it('revoke(id) from the Mac: backend DELETE first, then the local close; forgets the browser', async () => {
     const w = await world()
     await connected(w)
-    w.bridge.revoke('b1')
-    expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'b1' }])
+    expect(await w.bridge.revoke('b1')).toBe(true)
+    expect(w.sent.filter((m) => m.t === 'DELETE' || m.t === 'browserClose')).toEqual([{ t: 'DELETE', id: 'b1' }, { t: 'browserClose', b: 'b1' }])
     expect(w.bridge.browsers()).toEqual([])
+  })
+
+  it('revoke with the backend unreachable still closes locally and reports false', async () => {
+    const w = await world()
+    await connected(w)
+    w.revokeOk = false
+    expect(await w.bridge.revoke('b1')).toBe(false)
+    expect(of(w, 'browserClose')).toHaveLength(1)
+    expect(w.bridge.browsers()).toEqual([])
+  })
+
+  it('open for an id not in the store (this account) revokes its backend row, then closes', async () => {
+    const w = await world()
+    await w.bridge.onServer({ t: 'open', b: 'stale', name: 'Chrome', publicKey: w.macPub })
+    await tick()
+    expect(w.sent.filter((m) => m.t === 'DELETE' || m.t === 'browserClose')).toEqual([{ t: 'DELETE', id: 'stale' }, { t: 'browserClose', b: 'stale' }])
+    // Account unknown: close only, never a revoke on a guess.
+    w.acct = null
+    await w.bridge.onServer({ t: 'open', b: 'other', name: 'Chrome', publicKey: w.macPub })
+    await tick()
+    expect(of(w, 'DELETE')).toHaveLength(1)
+  })
+
+  it('a second open (another tab) replaces the channel without a failure; old frames are ignored', async () => {
+    const w = await world()
+    const { browser } = await approve(w)
+    const old = await connectBrowser(w, 'b1', browser)
+    await w.bridge.onServer({ t: 'open', b: 'b1', name: 'Chrome', publicKey: await publicRaw(browser.publicKey) })
+    await w.bridge.onServer({ t: 'frame', b: 'b1', d: await old.channel.seal({ k: 'call', id: 1, m: 'getState', a: [] }) })
+    expect(of(w, 'browserClose')).toEqual([])
+    expect(w.logs.join('\n')).not.toContain('channel closed')
+    const fresh = await connectBrowser(w, 'b1', browser)
+    expect((await fresh.recv())[0]).toMatchObject({ k: 'hello' })
+    expect(w.bridge.warning()).toBeNull()
   })
 
   it('account change wipes the store and closes channels (RF1)', async () => {
@@ -410,6 +500,7 @@ describe('BrowserBridge channel', () => {
     expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'b1' }])
     // The stale browser reconnects: refused, and the lookup under u2 dropped u1's entries.
     await w.bridge.onServer({ t: 'open', b: 'b1', name: 'Chrome', publicKey: await publicRaw(browser.publicKey) })
+    await tick()
     expect(of(w, 'browserClose')).toHaveLength(2)
     expect(w.store.list('u1')).toEqual([])
     // Signed out: nothing opens, no prompts.
@@ -418,6 +509,14 @@ describe('BrowserBridge channel', () => {
     expect(of(w, 'browserClose')).toHaveLength(3)
     await request(w, 'b9')
     expect(of(w, 'browserDecision').at(-1)).toEqual({ t: 'browserDecision', id: 'b9', allow: false })
+  })
+
+  it('dropChannels drops channels without a browserClose and keeps the store', async () => {
+    const w = await world()
+    await connected(w)
+    w.bridge.dropChannels()
+    expect(of(w, 'browserClose')).toEqual([])
+    expect(w.bridge.browsers()).toMatchObject([{ id: 'b1', connected: false }])
   })
 
   it('closeAll clears pending requests', async () => {
