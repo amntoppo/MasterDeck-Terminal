@@ -56,6 +56,12 @@ import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { readToken, writeToken } from "./remoteToken";
 import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import {
+  externalAnswerAllowed,
+  optionMessage,
+  remoteTextAllowed,
+  sendMasterUp,
+} from "@shared/remoteGuard";
 import { toDefaultBranch } from "./defaultBranch";
 import {
   transcriptMessages,
@@ -459,17 +465,14 @@ const remoteTokenFile = () => join(paths.home, "remote-token");
 const remoteCommands = new RemoteCommands(
   {
     state: () => latest,
-    inboxAct,
+    // remote = true: a client token is less trusted than the window (see runInboxAction).
+    inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
     startAssign: (req) => startAssign(cli, req),
     stopBg,
     resume: (id, name, cwd) => resumeBg(id, name, cwd),
-    sendNow: (s, text) => {
-      const masterUp =
-        latest?.master.kind === "attached" ||
-        latest?.master.kind === "elsewhere";
-      return sender.send(s, text, !!masterUp);
-    },
+    // Never relayed through master-agent: remote text goes straight to the session or not at all.
+    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
     queueEdit: (sessionId, edit) => {
       const { ok, message } = editQueue(sessionId, edit);
       return { ok, message };
@@ -549,13 +552,16 @@ async function stopBg(bgId: string): Promise<CliResult> {
     : { ok: false, message: (r.stderr || r.stdout).trim() };
 }
 
-/** The inbox's act, shared by the window's IPC and the remote commands. */
+/** The inbox's act, shared by the window's IPC and the remote commands (`remote` = true). */
 async function inboxAct(
   id: string,
   type: string,
   payload: Record<string, unknown>,
+  remote = false,
 ): Promise<CliResult> {
-  const r = await sources.inbox.act(id, type, payload, runInboxAction);
+  const r = await sources.inbox.act(id, type, payload, (item, t, p) =>
+    runInboxAction(item, t, p, remote),
+  );
   if (r.ok && type === "dismiss" && id.startsWith("ext-"))
     cloud?.dismissItem(id);
   sources.changed();
@@ -571,9 +577,10 @@ async function runInboxAction(
   item: InboxItem,
   type: string,
   payload: Record<string, unknown>,
+  /** From a remote client: never relayed through master-agent, and its text must pass noEscape. */
+  remote = false,
 ): Promise<CliResult> {
-  const masterUp =
-    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const masterUp = sendMasterUp(remote, latest?.master.kind);
   const d = item.detail;
   const owner = (): Session | undefined => {
     if (item.sessionKey)
@@ -598,6 +605,8 @@ async function runInboxAction(
           .trim()
           .slice(0, 10_000);
         if (!answer) return { ok: false, message: "nothing to answer" };
+        if (!externalAnswerAllowed(d.item, answer))
+          return { ok: false, message: "answer with one of the options" };
         const by =
           typeof payload.by === "string" && payload.by
             ? payload.by.slice(0, 40)
@@ -608,12 +617,17 @@ async function runInboxAction(
       }
       const s = owner();
       if (!s) return { ok: false, message: "no live session to reply to" };
-      const msg =
-        type === "option" && typeof payload.key === "string"
-          ? `${payload.key}: ${text}`
-          : text;
+      const msg = type === "option" ? optionMessage(payload.key, text) : text;
+      if (msg === null)
+        return { ok: false, message: "an option key is 1-3 letters or digits" };
       if (!msg.trim()) return { ok: false, message: "nothing to send" };
-      return sender.send(s, msg, !!masterUp);
+      if (remote && !remoteTextAllowed(msg))
+        return {
+          ok: false,
+          message:
+            "remote text may not start with / or ! or contain control characters",
+        };
+      return sender.send(s, msg, masterUp);
     }
     case "menu":
       if (!item.sessionKey) return { ok: false, message: "no session" };
@@ -627,7 +641,7 @@ async function runInboxAction(
       return sender.send(
         s,
         type === "continue" ? "continue" : "/compact",
-        !!masterUp,
+        masterUp,
       );
     }
     case "approve":
@@ -647,7 +661,7 @@ async function runInboxAction(
       const s = owner();
       if (!s)
         return { ok: false, message: "no session owns this PR; start one" };
-      const r = await sender.send(s, d.offer.message, !!masterUp);
+      const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
     default:

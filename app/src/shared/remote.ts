@@ -49,8 +49,8 @@ export const CommandInput = z.discriminatedUnion('type', [
     args: z.strictObject({
       action: z.enum(INBOX_ACTIONS),
       text: noEscape.optional(),
-      /** The option's key for `option` ("B"). */
-      key: clean(20).optional(),
+      /** The option's key for `option` ("B"): 1-3 letters or digits, so it can never start a command. */
+      key: z.string().regex(/^[A-Za-z0-9]{1,3}$/).optional(),
       /** For `menu`: the question being answered and the answer, as MasterDeck's answerMenu takes them. */
       question: z.string().max(2000).nullable().optional(),
       answer: MenuAnswer.optional(),
