@@ -403,13 +403,15 @@ export function collectItems(x: InboxInput): InboxItem[] {
     });
   }
 
+  // API items stay while open, even if their session ended (the key is dropped so no card opens it).
+  const external: InboxItem[] = [];
   for (const e of x.external ?? []) {
     if (e.state !== "open") continue;
-    out.push({
+    external.push({
       id: e.id,
       kind: "external",
       priority: e.priority,
-      sessionKey: e.sessionKey ?? null,
+      sessionKey: e.sessionKey && byKey.has(e.sessionKey) ? e.sessionKey : null,
       ticket: e.ticket ? parseTicket(e.ticket) : null,
       title: e.title,
       body: e.body,
@@ -422,9 +424,7 @@ export function collectItems(x: InboxInput): InboxItem[] {
   }
 
   // Sessions come and go: only items whose session is known (or that have none).
-  return out
-    .filter((i) => i.sessionKey === null || byKey.has(i.sessionKey))
-    .sort((a, b) => b.priority - a.priority);
+  return [...out.filter((i) => i.sessionKey === null || byKey.has(i.sessionKey)), ...external].sort((a, b) => b.priority - a.priority);
 }
 
 /** A new item's notification: its text, the item (clicking opens it), and what it can do from the

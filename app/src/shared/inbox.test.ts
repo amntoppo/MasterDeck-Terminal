@@ -133,4 +133,10 @@ describe('external items', () => {
     expect(i.actions).toEqual([{ type: 'reply', label: 'Answer' }])
     expect(i.ticket).toBeNull()
   })
+
+  it('stay while open even if their session is gone; a known session keeps its key', () => {
+    const items = collectItems(input({ sessions: [sess('a')], external: [ext({ id: 'e-gone', sessionKey: 'gone' }), ext({ id: 'e-known', sessionKey: 'a' })] }))
+    expect(items.find((x) => x.id === 'e-gone')?.sessionKey).toBeNull()
+    expect(items.find((x) => x.id === 'e-known')?.sessionKey).toBe('a')
+  })
 })
