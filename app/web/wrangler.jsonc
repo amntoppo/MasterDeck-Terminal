@@ -1,0 +1,7 @@
+// The web app as a static-assets Worker on app.masterdeck.dev (deploy: npm run deploy:web).
+{
+  "name": "masterdeck-web",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "../out/web", "not_found_handling": "single-page-application" },
+  "routes": [{ "pattern": "app.masterdeck.dev", "custom_domain": true }]
+}

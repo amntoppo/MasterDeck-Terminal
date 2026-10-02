@@ -4,6 +4,7 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import type { WorkflowTemplate } from "@shared/flow";
 import { actionCount, DEFAULT_TEMPLATE } from "@shared/flow";
 import { deck } from "../deck";
+import { can, keyPlatform } from "../web";
 
 export type Repo = { name: string; path: string };
 
@@ -13,7 +14,7 @@ export type NewAction =
   | { kind: "issue" }
   | { kind: "resume" };
 
-const isMac = () => deck().platform === "darwin";
+const isMac = () => keyPlatform() === "darwin";
 const key = (k: string) =>
   isMac() ? k : k.replace("⌘", "Ctrl+").replace("⇧", "Shift+");
 
@@ -136,12 +137,13 @@ export function NewMenu({ onPick }: { onPick: (a: NewAction) => void }) {
               { kind: "issue" },
               "Find a ticket, then start a session on it",
             )}
-            {item(
-              "Resume a past session…",
-              key("⌘⇧F"),
-              { kind: "resume" },
-              "Search earlier sessions and resume one",
-            )}
+            {can("searchHistory") &&
+              item(
+                "Resume a past session…",
+                key("⌘⇧F"),
+                { kind: "resume" },
+                "Search earlier sessions and resume one",
+              )}
           </div>,
           document.body,
         )}
@@ -213,9 +215,10 @@ export function NewSessionDialog({
         if (r[0]) setCwd((c) => c || r[0].path);
       });
     void deck().defaultModel().then(setConfigured);
-    void deck()
-      .workflowGet()
-      .then((w) => setTemplates(w.templates));
+    if (can("workflowGet"))
+      void deck()
+        .workflowGet()
+        .then((w) => setTemplates(w.templates));
   }, []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -272,7 +275,7 @@ export function NewSessionDialog({
               </option>
             ))}
             {other && <option value="__other">{cwd}</option>}
-            <option value="__other">Other folder…</option>
+            {can("pickFolder") && <option value="__other">Other folder…</option>}
           </select>
         </div>
         {cwd && <div className="meta mono">{cwd}</div>}

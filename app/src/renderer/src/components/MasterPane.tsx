@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
+import { can } from '../web'
 import { StartHereDialog } from './StartHereDialog'
 import { TerminalView } from './TerminalView'
 
@@ -61,15 +62,17 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
           </button>
           {menu && (
             <div className="menu">
-              <button
-                onClick={async () => {
-                  setMenu(false)
-                  const r = await deck().refresh()
-                  setMsg(r.ok ? 'Issues refreshed' : r.message)
-                }}
-              >
-                Refresh issues and PRs
-              </button>
+              {can('refresh') && (
+                <button
+                  onClick={async () => {
+                    setMenu(false)
+                    const r = await deck().refresh()
+                    setMsg(r.ok ? 'Issues refreshed' : r.message)
+                  }}
+                >
+                  Refresh issues and PRs
+                </button>
+              )}
               {bgId && (
                 <button
                   onClick={() => {
@@ -81,8 +84,8 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
                   Run /master sweep
                 </button>
               )}
-              <hr />
-              {state.statuslineInstalled ? (
+              {can('statuslineInstall') && <hr />}
+              {!can('statuslineInstall') ? null : state.statuslineInstalled ? (
                 <button
                   onClick={async () => {
                     setMenu(false)
@@ -153,9 +156,11 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
             <button className="btn" onClick={() => deck().copy(`claude --resume ${m.session.sessionId}`)}>
               Copy resume command
             </button>
-            <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
-              {busy ? 'Starting…' : 'Start master here'}
-            </button>
+            {can('startHere') && (
+              <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
+                {busy ? 'Starting…' : 'Start master here'}
+              </button>
+            )}
           </div>
           {askHere && (
             <StartHereDialog

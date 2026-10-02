@@ -35,6 +35,7 @@ import { RestoreBanner } from "./components/RestoreBanner";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
+import { can, isWeb, keyPlatform } from "./web";
 import { TasksView } from "./components/TasksView";
 import { Rail } from "./components/Rail";
 import {
@@ -47,7 +48,7 @@ import { SettingsView, type SettingsSection } from "./components/SettingsView";
 import { WorktreesDialog } from "./components/WorktreesDialog";
 import { HistoryDialog } from "./components/HistoryDialog";
 import { FindBar, type FindTarget } from "./components/FindBar";
-import { cycle, matchShortcut } from "@shared/shortcuts";
+import { cycle, matchShortcut, type ShortcutId } from "@shared/shortcuts";
 import { TerminalView, typeInto } from "./components/TerminalView";
 import { deck, load, save, useAppState } from "./deck";
 
@@ -75,6 +76,8 @@ const MIN_MASTER = 300;
 const MIN_PANEL = 340;
 /** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
 const MAIN_VIEWS: View[] = ["terminals", "board", "prs", "tasks"];
+/** Shortcuts that work in the web app (the others open screens that need the Mac). */
+const WEB_SHORTCUTS = new Set<ShortcutId>(["needs-you", "find", "palette", "tab-prev", "tab-next", "tab-n", "new-shell", "close-tab", "split", "master"]);
 const SIDE_W = 272;
 const MIN_SIDE = 200;
 const MAX_SIDE = 560;
@@ -146,7 +149,7 @@ export function App() {
     load<boolean>("masterOpen", true),
   );
   const [view, setView] = useState<View>(() => {
-    const v = load<string>("view", "terminals");
+    const v = load<string>("view", isWeb() ? "tasks" : "terminals");
     return (
       [
         "terminals",
@@ -227,6 +230,10 @@ export function App() {
   useEffect(() => save("inspPct", inspPct), [inspPct]);
   useEffect(() => save("masterOpen", masterOpen), [masterOpen]);
   useEffect(() => save("inspOpen", inspOpen), [inspOpen]);
+  // The web app has Tasks and Terminals only (plus master).
+  useEffect(() => {
+    if (isWeb() && view !== "tasks" && view !== "terminals") setView("tasks");
+  }, [view]);
   useEffect(() => {
     save("view", view);
     deck().setBoardOpen(view === "board");
@@ -262,7 +269,7 @@ export function App() {
     async (cwd?: string) => {
       const id = `sh:${Date.now()}`;
       const dir = cwd ?? (workspace || deck().home);
-      if (!cwd && workspace) {
+      if (!cwd && workspace && can("shellPrepare")) {
         const r = await deck().shellPrepare(dir);
         if (r.message) flash(r.message, !r.ok);
       }
@@ -611,11 +618,12 @@ export function App() {
       (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     const dialogOpen = !!document.querySelector(".backdrop");
     const hit = matchShortcut(e, {
-      platform: deck().platform,
+      platform: keyPlatform(),
       inTextField,
       dialogOpen,
     });
     if (!hit || !state) return;
+    if (isWeb() && !WEB_SHORTCUTS.has(hit.id)) return;
     const done = () => {
       e.preventDefault();
       e.stopPropagation();
@@ -783,6 +791,8 @@ export function App() {
   };
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
   const openPr = (url: string, issue: Ticket | null, title: string) => {
+    // The PR popup needs GitHub on the Mac; the web opens the PR itself.
+    if (isWeb()) return deck().openExternal(url);
     const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url);
     if (!m) return;
     const known = issue
@@ -1254,7 +1264,7 @@ export function App() {
           onClose={() => setWorktreesFor(null)}
         />
       )}
-      {(dialog === "setup" || (showFirstRun && !state.config.configured)) && (
+      {(dialog === "setup" || (showFirstRun && !state.config.configured && !isWeb())) && (
         <SetupDialog
           state={state}
           firstRun={dialog !== "setup"}
