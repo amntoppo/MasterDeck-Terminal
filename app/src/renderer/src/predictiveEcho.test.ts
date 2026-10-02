@@ -40,7 +40,9 @@ function setup(opts: { latency?: number; timeoutMs?: number; realClock?: boolean
     await settle(term)
     await settle(ref)
   }
-  const type = async (keys: string | string[]) => {
+  /** Keys, `gap` ms after the last thing that happened (a person pausing). */
+  const type = async (keys: string | string[], gap = 2000) => {
+    clock += gap
     for (const k of typeof keys === 'string' ? Array.from(keys) : keys) p.onInput(k)
     await settle(term)
   }
@@ -62,6 +64,53 @@ describe('predictive echo', () => {
     expect(row(term)).toBe('$ abc')
     await out('bc')
     expect(p.pending()).toBe(0)
+    same()
+  })
+
+  it('a key typed while output is being parsed is predicted once it is parsed', async () => {
+    const { term, ref, p, out, same } = setup()
+    ref.write('$ ')
+    p.write('$ ')
+    p.onInput('l') // before '$ ' is parsed
+    await settle(term)
+    await settle(term)
+    expect(p.pending()).toBe(1)
+    expect(row(term)).toBe('$ l')
+    await out('l')
+    expect(p.pending()).toBe(0)
+    same()
+  })
+
+  it('typing faster than the round trip: every key predicted, confirmed in order', async () => {
+    const { term, p, out, type, same } = setup()
+    await out('$ ')
+    await type('l')
+    await type('s', 80)
+    await type(' ', 80)
+    expect(row(term)).toBe('$ ls')
+    await out('l')
+    await type('-', 80)
+    await out('s')
+    await out(' ')
+    await out('-')
+    expect(p.pending()).toBe(0)
+    expect(p.paused()).toBe(false)
+    same()
+  })
+
+  it('after Enter, predicts nothing until the new prompt has had time to come', async () => {
+    const { term, p, out, type, same } = setup()
+    await out('$ ')
+    await type('a')
+    await out('a')
+    await type(['\r'])
+    await type('b', 50) // typed ahead of the next prompt: where it lands is unknown
+    expect(p.pending()).toBe(0)
+    await out('\r\n$ b')
+    await type('c', 2000)
+    expect(p.pending()).toBe(1)
+    expect(row(term, 1)).toBe('$ bc')
+    await out('c')
     same()
   })
 
@@ -321,7 +370,7 @@ describe('predictive echo', () => {
         if (rnd(2)) {
           const k = keys[rnd(keys.length - 2)] // mostly printable / editing keys
           queue.push(rnd(10) ? k : keys[keys.length - 2 + rnd(2)])
-          await type([queue[queue.length - 1]])
+          await type([queue[queue.length - 1]], [0, 80, 2000][rnd(3)])
           predicted = Math.max(predicted, p.pending())
         } else {
           await out(queue.length && rnd(10) < 8 ? echo[queue.shift()!] : outs[rnd(outs.length)])

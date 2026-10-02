@@ -126,6 +126,10 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const lat: number[] = []
   let keyAt: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
+  /** Keys typed while output was being parsed: decided once the buffer is current. */
+  const deferred: string[] = []
+  /** When we last sent a key we did not model; its echo (or a whole new prompt, after Enter) may still be on the way. */
+  let blindAt = -Infinity
 
   const hooks = [
     term.parser.registerOscHandler(OVERLAY, (d) => ((inOverlay = d === '1'), true)),
@@ -147,6 +151,8 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const b = () => term.buffer.active
   const lineAt = (y: number) => b().getLine(baseY + y)
   const penSeq = () => '\x1b[0m' + pen.map((p) => `\x1b[${p}m`).join('')
+  // How long after an unmodelled key the screen may still change because of it: about one round trip.
+  const syncMs = () => Math.min(3000, Math.max(300, 1.5 * (lat.length ? Math.max(...lat) : 700)))
   const lowLatency = () => lat.length >= 3 && lat.reduce((a, c) => a + c, 0) / lat.length < LOW_LATENCY_MS
 
   /** The line as it shows with the predictions applied. */
@@ -214,6 +220,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     busy++
     term.write(undo, () => {
       busy--
+      if (busy === 0) idle()
       cb?.()
     })
   }
@@ -232,6 +239,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
         if (preds.length && now() - preds[0].at >= timeoutMs) {
           clear()
           pause()
+          blindAt = now()
         }
         arm()
       },
@@ -260,6 +268,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       preds = []
       drawn = false
       pause()
+      blindAt = now() // the keys behind the failed predictions are still on their way
       return
     }
     preds = rest
@@ -267,25 +276,41 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     draw(preds.filter((p) => p.shown))
   }
 
+  function handle(d: string): void {
+    const kind = classify(d)
+    if (isPaused && now() - pausedAt > RECOVER_MS) isPaused = false
+    const buf = b()
+    const last = preds[preds.length - 1]
+    const x = last ? to(last) : buf.cursorX
+    const y = last ? last.y : buf.cursorY
+    if (!last) baseY = buf.baseY
+    const can =
+      kind && now() - blindAt >= syncMs() && buf.type === 'normal' && !hidden && !penLost && !term.modes.insertMode && !term.modes.originMode && !lowLatency()
+    if (!can || !allowed(kind, x, y)) {
+      // Not modelled: from here on we do not know where the cursor will be until the screen settles.
+      clear()
+      blindAt = now()
+      return
+    }
+    const p: Pred = { kind, ch: d, x, y, at: now(), shown: !isPaused && preds.every((q) => q.shown), saved: [] }
+    preds.push(p)
+    if (p.shown) draw([p])
+    arm()
+  }
+
+  /** Nothing of ours is waiting to be parsed: check the predictions, then the keys typed meanwhile. */
+  function idle(): void {
+    validate()
+    while (deferred.length && busy === 0) handle(deferred.shift()!)
+  }
+
   return {
     onInput(d) {
-      const kind = classify(d)
-      if (kind && keyAt === null) keyAt = now()
-      if (isPaused && now() - pausedAt > RECOVER_MS) isPaused = false
-      const buf = b()
-      const last = preds[preds.length - 1]
-      const x = last ? to(last) : buf.cursorX
-      const y = last ? last.y : buf.cursorY
-      if (!last) baseY = buf.baseY
-      const can = kind && busy === 0 && buf.type === 'normal' && !hidden && !penLost && !term.modes.insertMode && !term.modes.originMode && !lowLatency()
-      if (!can || !allowed(kind, x, y)) {
-        clear()
-        return
-      }
-      const p: Pred = { kind, ch: d, x, y, at: now(), shown: !isPaused && preds.every((q) => q.shown), saved: [] }
-      preds.push(p)
-      if (p.shown) draw([p])
-      arm()
+      if (classify(d) && keyAt === null) keyAt = now()
+      // Output is being parsed, so the cursor we would read is stale: the key cannot be echoed in it (the Mac
+      // has not seen the key yet), so decide once it is parsed.
+      if (busy > 0 || deferred.length) deferred.push(d)
+      else handle(d)
     },
     write(data, cb) {
       const undo = undoSeq()
@@ -298,7 +323,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
           if (lat.length > 8) lat.shift()
           keyAt = null
         }
-        if (busy === 0) validate()
+        if (busy === 0) idle()
         cb?.()
       })
     },
