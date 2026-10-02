@@ -488,12 +488,14 @@ const account = new Account({
     }
   },
   saveIdentity: (id) => {
-    try {
-      if (id) writeFileSync(identityFile(), JSON.stringify(id));
-      else rmSync(identityFile(), { force: true });
-    } catch (e) {
-      console.error("account.json", e);
-    }
+    // A failed write must throw so Account can undo the token and the device.
+    if (id) writeFileSync(identityFile(), JSON.stringify(id));
+    else
+      try {
+        rmSync(identityFile(), { force: true });
+      } catch (e) {
+        console.error("account.json", e);
+      }
   },
   onChange: (s) => {
     sources.setAccount(s);
@@ -2098,6 +2100,7 @@ function registerIpc(): void {
     if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
   });
   ipcMain.handle(CH.accountCancel, () => account.cancel());
+  ipcMain.handle(CH.accountReopen, () => account.reopen());
   ipcMain.handle(CH.accountEmail, (_e, a: unknown) => {
     const x = (a ?? {}) as Record<string, unknown>;
     if (

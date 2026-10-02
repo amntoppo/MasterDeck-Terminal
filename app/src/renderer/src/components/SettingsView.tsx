@@ -280,7 +280,7 @@ function AccountPanel({ account }: { account: AppState['account'] }) {
           </div>
         </Field>
         <Field label="Not seeing the page?">
-          <button className="btn" onClick={() => deck().openExternal(a.verifyUrl)}>
+          <button className="btn" onClick={() => void deck().accountReopen()}>
             Open the page again
           </button>
           <button className="btn" onClick={() => void deck().accountCancel()}>

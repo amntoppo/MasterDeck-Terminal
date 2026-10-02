@@ -499,11 +499,11 @@ Settings → Account is where this Mac signs in to your MasterDeck account (need
 
 ## Remote (phone)
 
-MasterDeck can connect out to your own backend (`masterdeck-backend`, a Cloudflare Worker) so a
+MasterDeck can connect out to the MasterDeck service (dev.masterdeck.dev) so a
 phone, curl or CI can see your sessions and act on them while you're away from the Mac.
 
 - **What it sends:** Tasks, Needs you and the board, as one snapshot (sent at most once a second,
-  and only when something changed). Never terminals, their output, the cost book or files.
+  and only when something changed; cost- or context-only changes go at most every 5 s). Never terminals, their output, the cost book or files.
 - **What can be done remotely:** answer, snooze or dismiss a Needs-you item (`inbox.act`,
   `inbox.snooze`, `inbox.dismiss`); start a session from a board issue (`session.start`); stop or
   resume a background session (`session.stop`, `session.resume`); message a session
@@ -608,6 +608,9 @@ cards is in them.
 | `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start |
 | `MASTER_HOME` | `~/.claude/master` | ledger location |
 | `MASTERDECK_HOME` | `~/.claude/masterdeck` | stats, hook, backups |
+| `MASTERDECK_ISOLATED` | unset | `1` with `MASTERDECK_HOME`: Claude settings and skills default under that folder instead of `~/.claude` |
+| `MASTERDECK_REMOTE_URL` | `https://dev.masterdeck.dev` | sign-in/remote backend (https, or http on localhost) |
+| `MASTERDECK_CLAUDE_SETTINGS` | `~/.claude/settings.json` | Claude settings file to edit |
 | `MASTERDECK_NO_HOOK` | unset | `1` skips the status line hook install |
 | `MASTERDECK_NO_SKILLS` | unset | `1` skips installing the bundled skills at launch |
 | `MASTERDECK_SKILLS_DIR` | `~/.claude/skills` | where bundled skills are installed |

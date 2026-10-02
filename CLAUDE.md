@@ -62,6 +62,7 @@ there. Isolate with:
 |---|---|
 | `MASTERDECK_CLAUDE_SETTINGS` | `~/.claude/settings.json` (point at a copy) |
 | `MASTERDECK_HOME` | `~/.claude/masterdeck` (costs, tokens, summaries, workflow, restore list) |
+| `MASTERDECK_ISOLATED=1` | with `MASTERDECK_HOME`: settings default to `<home>/claude-settings.json`, skills to `<home>/skills` (use for every isolated test launch) |
 | `MASTERDECK_SKILLS_DIR` | `~/.claude/skills` |
 | `MASTER_HOME` | `~/.claude/master` (config.json, ledger) — empty folder = first-run Setup |
 | `MASTERDECK_USER_DATA` | Electron user data (window state, localStorage) |

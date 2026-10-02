@@ -85,8 +85,13 @@ export class Account {
     }
   }
 
+  /** Reopen the browser page of the sign-in in progress (main-side URL, so localhost dev backends work). */
+  reopen(): void {
+    if (this.st.kind === 'pending') this.d.openBrowser(this.st.verifyUrl)
+  }
+
   async signInWith(provider: 'google' | 'github' | 'apple'): Promise<void> {
-    if (this.running) return
+    if (this.running || this.st.kind === 'signedIn') return
     this.running = true
     this.cancelled = false
     this.ctl = new AbortController()
@@ -94,7 +99,8 @@ export class Account {
       const r = await this.post('/auth/device/code', { client_id: CLIENT_ID })
       if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
       if (!r.ok) return this.set({ kind: 'signedOut', message: `Couldn't start sign-in (${r.status})` })
-      const c = (await r.json()) as { device_code: string; user_code: string; verification_uri: string; interval?: number; expires_in?: number }
+      const c = (await r.json().catch(() => null)) as { device_code?: unknown; user_code?: unknown; verification_uri?: string; interval?: number; expires_in?: number } | null
+      if (!c || typeof c.user_code !== 'string' || !c.user_code || typeof c.device_code !== 'string' || !c.device_code) return this.set({ kind: 'signedOut', message: "Couldn't start sign-in" })
       const verifyUrl = this.verifyUrlFor(c.verification_uri, provider)
       if (!verifyUrl) return this.set({ kind: 'signedOut', message: "Sign-in returned an address that isn't MasterDeck's" })
       if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
@@ -190,6 +196,7 @@ export class Account {
   }
 
   async signInEmail(email: string, password: string, create: boolean, name?: string): Promise<{ ok: boolean; message: string }> {
+    if (this.st.kind === 'signedIn') return { ok: true, message: 'signed in' }
     if (this.running) return { ok: false, message: 'A sign-in is already in progress' }
     this.running = true
     this.cancelled = false
@@ -241,7 +248,7 @@ function deviceName(raw: string): string {
 async function errorText(r: Response): Promise<string> {
   const b = (await r.json().catch(() => ({}))) as { code?: string; message?: string }
   if (b.code === 'EMAIL_NOT_VERIFIED' || (r.status === 403 && /verif/i.test(b.message ?? ''))) return 'Check your inbox to verify your email, then sign in'
-  if (r.status === 403) return 'Sign-in refused (403)'
+  if (r.status === 403) return b.message ? `Sign-in refused (403): ${b.message}`.slice(0, 200) : 'Sign-in refused (403)'
   if (b.code === 'INVALID_EMAIL_OR_PASSWORD' || r.status === 401) return 'Wrong email or password'
   if (r.status === 429) return 'Too many attempts; wait a minute and try again'
   if (b.code === 'PASSWORD_COMPROMISED' || /breach/i.test(b.message ?? '')) return 'That password appears in a known data breach; choose another'

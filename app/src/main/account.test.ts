@@ -117,8 +117,8 @@ describe('Account email', () => {
       'POST /auth/sign-out': () => json({}),
     })
     const a = new Account(deps(f.fn).d)
-    await a.signInEmail('m@x.test', 'pw pw pw pw pw', false)
     await a.signInEmail('n@x.test', 'pw pw pw pw pw', true)
+    await a.signInEmail('m@x.test', 'pw pw pw pw pw', false)
     const origin = (c: { init: RequestInit }) => (c.init.headers as Record<string, string>).origin
     const auth = f.calls.filter((c) => new URL(c.url).pathname.startsWith('/auth/'))
     expect(auth.length).toBeGreaterThanOrEqual(3)
@@ -277,7 +277,7 @@ describe('Account fix round 1', () => {
   })
   it('403 not about verification is not the inbox message', async () => {
     const f = fakeFetch({ 'POST /auth/sign-in/email': () => json({ message: 'Forbidden' }, 403) })
-    expect((await new Account(deps(f.fn).d).signInEmail('a@x.test', 'x', false)).message).toBe('Sign-in refused (403)')
+    expect((await new Account(deps(f.fn).d).signInEmail('a@x.test', 'x', false)).message).toBe('Sign-in refused (403): Forbidden')
   })
 })
 
@@ -301,5 +301,40 @@ describe('D3 carry-overs', () => {
     const a = new Account(t.d)
     a.signedOutRemotely('This account was deleted')
     expect(a.state()).toEqual({ kind: 'signedOut', message: 'This account was deleted' })
+  })
+})
+
+describe('final fixes', () => {
+  it('signIn does nothing when already signed in', async () => {
+    const f = fakeFetch({})
+    const a = new Account(deps(f.fn, { readIdentity: () => ({ email: 'a@x.test', provider: 'email', deviceId: 'd' }) }).d)
+    await a.signInWith('google')
+    expect((await a.signInEmail('a@x.test', 'x', false)).ok).toBe(true)
+    expect(f.calls).toHaveLength(0)
+  })
+  it('rejects a device-code response without user_code/device_code', async () => {
+    const f = fakeFetch({ 'POST /auth/device/code': () => json({ ...code, user_code: '' }) })
+    const t = deps(f.fn)
+    await new Account(t.d).signInWith('google')
+    expect(t.states.at(-1)).toEqual({ kind: 'signedOut', message: "Couldn't start sign-in" })
+    expect(t.d.openBrowser).not.toHaveBeenCalled()
+  })
+  it('includes the server message on other 403s', async () => {
+    const f = fakeFetch({ 'POST /auth/sign-in/email': () => json({ message: 'Account suspended' }, 403) })
+    expect((await new Account(deps(f.fn).d).signInEmail('a@x.test', 'x', false)).message).toBe('Sign-in refused (403): Account suspended')
+  })
+  it('reopen opens the pending verifyUrl only', async () => {
+    const f = fakeFetch({ 'POST /auth/device/code': () => json(code), 'POST /auth/device/token': () => json({ error: 'authorization_pending' }, 400) })
+    const open = vi.fn()
+    const a = new Account(deps(f.fn, { openBrowser: open, sleep: () => new Promise((r) => setTimeout(r, 5)) }).d)
+    a.reopen()
+    expect(open).not.toHaveBeenCalled()
+    const p = a.signInWith('github')
+    await new Promise((r) => setTimeout(r, 20))
+    a.reopen()
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(open.mock.calls[1][0]).toBe('https://md.test/device?provider=github')
+    a.cancel()
+    await p
   })
 })

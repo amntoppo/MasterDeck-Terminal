@@ -18,6 +18,7 @@ const api: DeckApi = {
   watchStop: (id) => ipcRenderer.invoke(CH.watchStop, id),
   accountSignIn: (provider) => ipcRenderer.invoke(CH.accountSignIn, provider),
   accountCancel: () => ipcRenderer.invoke(CH.accountCancel),
+  accountReopen: () => ipcRenderer.invoke(CH.accountReopen),
   accountEmail: (a) => ipcRenderer.invoke(CH.accountEmail, a),
   accountSignOut: () => ipcRenderer.invoke(CH.accountSignOut),
   accountManage: () => ipcRenderer.invoke(CH.accountManage),

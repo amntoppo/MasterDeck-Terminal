@@ -35,15 +35,14 @@ export interface Paths {
  */
 export function resolvePaths(appRoot: string, resourcesPath: string, packaged: boolean): Paths {
   const h = homedir()
-  const skillsDir = process.env.MASTERDECK_SKILLS_DIR || join(h, '.claude', 'skills')
+  const home = process.env.MASTERDECK_HOME || join(h, '.claude', 'masterdeck')
+  // MASTERDECK_ISOLATED=1 (test launches) keeps settings and skills out of the real ~/.claude.
+  const iso = process.env.MASTERDECK_ISOLATED === '1'
+  const skillsDir = process.env.MASTERDECK_SKILLS_DIR || (iso ? join(home, 'skills') : join(h, '.claude', 'skills'))
   const skillLib = join(skillsDir, 'master', 'lib')
   const bundledSkills = packaged ? join(resourcesPath, 'skills') : resolve(appRoot, '..', 'skills')
   const libDir = existsSync(join(skillLib, 'master')) ? skillLib : join(bundledSkills, 'master', 'lib')
-  const home = process.env.MASTERDECK_HOME || join(h, '.claude', 'masterdeck')
-  // An isolated home must never touch the real ~/.claude/settings.json.
-  const claudeSettings =
-    process.env.MASTERDECK_CLAUDE_SETTINGS ||
-    (process.env.MASTERDECK_HOME ? join(home, 'claude-settings.json') : join(h, '.claude', 'settings.json'))
+  const claudeSettings = process.env.MASTERDECK_CLAUDE_SETTINGS || (iso ? join(home, 'claude-settings.json') : join(h, '.claude', 'settings.json'))
   const masterHome = process.env.MASTER_HOME || join(h, '.claude', 'master')
   return {
     libDir,

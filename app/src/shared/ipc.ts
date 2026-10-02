@@ -89,6 +89,7 @@ export const CH = {
   watchStop: "watch:stop",
   accountSignIn: "account:signIn",
   accountCancel: "account:cancel",
+  accountReopen: "account:reopen",
   accountEmail: "account:email",
   accountSignOut: "account:signOut",
   accountManage: "account:manage",
@@ -228,6 +229,8 @@ export interface DeckApi {
   /** Start the browser sign-in with this provider (progress arrives as AppState.account). */
   accountSignIn(provider: "google" | "github" | "apple"): Promise<void>;
   accountCancel(): Promise<void>;
+  /** Reopen the pending sign-in page (the URL stays in main). */
+  accountReopen(): Promise<void>;
   accountEmail(a: { email: string; password: string; create: boolean; name?: string }): Promise<{ ok: boolean; message: string }>;
   accountSignOut(): Promise<void>;
   accountManage(): Promise<void>;
