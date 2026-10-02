@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AssignRequest, QueueEdit } from '@shared/ipc'
+import { MASTER_NAME } from '@shared/derive'
 import type { Command, CommandResult } from '@shared/remote'
 import type { Ticket } from '@shared/ticket'
 import type { AppState, CliResult, DraftAssign, Session } from '@shared/types'
@@ -22,6 +23,8 @@ export interface RemoteDeps {
 export type RemoteOutcome = CommandResult & { status?: 'stale' }
 
 const KEEP = 500
+const LOADING = 'MasterDeck is still loading; try again'
+const MASTER_MSG = 'master-agent cannot be controlled remotely'
 const STALE: RemoteOutcome = { ok: false, status: 'stale', message: 'that is no longer waiting on you' }
 
 /**
@@ -45,6 +48,10 @@ export class RemoteCommands {
     }
   }
 
+  /**
+   * Outcomes are recorded after the handler finishes, so a crash mid-run means at-least-once on
+   * redelivery (the command may run again).
+   */
   run(cmd: Command): Promise<RemoteOutcome> {
     const prev = this.done.get(cmd.id) ?? this.readBack(cmd.id)
     if (prev) return Promise.resolve(prev)
@@ -53,7 +60,7 @@ export class RemoteCommands {
     const p = this.exec(cmd)
       .catch((e): RemoteOutcome => ({ ok: false, message: `failed: ${String(e)}` }))
       .then((r) => {
-        this.remember(cmd.id, r)
+        if (r.message !== LOADING) this.remember(cmd.id, r)
         this.running.delete(cmd.id)
         return r
       })
@@ -78,14 +85,15 @@ export class RemoteCommands {
       mkdirSync(dirname(this.file), { recursive: true })
       writeFileSync(`${this.file}.tmp`, JSON.stringify([...this.done]))
       renameSync(`${this.file}.tmp`, this.file)
-    } catch {
+    } catch (e) {
+      console.error('remote-done write failed', e)
       // kept in memory; the file is written again next time
     }
   }
 
   private async exec(cmd: Command): Promise<RemoteOutcome> {
     const st = this.deps.state()
-    if (!st) return { ok: false, message: 'MasterDeck is still loading; try again' }
+    if (!st) return { ok: false, message: LOADING }
     const by = `remote:${cmd.by}`.slice(0, 40)
     const session = (key: string) => st.sessions.find((s) => s.key === key)
     switch (cmd.type) {
@@ -119,18 +127,23 @@ export class RemoteCommands {
       case 'session.stop': {
         const s = session(cmd.args.key)
         if (!s) return { ok: false, message: 'session not found' }
+        if (s.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
         if (!s.bgId) return { ok: false, message: `${s.name} runs in another terminal; only background sessions can be stopped remotely` }
         return this.deps.stopBg(s.bgId)
       }
       case 'session.resume': {
         const s = session(cmd.args.key)
         if (!s) return { ok: false, message: 'session not found' }
+        if (s.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
         if (s.state !== 'done' && s.state !== 'suspended') return { ok: false, message: `${s.name} is ${s.state}, not stopped` }
         return this.deps.resume(s.sessionId, s.name, s.cwd)
       }
       case 'session.send': {
         const s = session(cmd.args.key)
         if (!s || s.state === 'done') return { ok: false, message: 'session not found' }
+        if (s.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
+        if (s.state === 'needs-input') return { ok: false, message: `${s.name} is waiting on a prompt; answer it from Needs you instead` }
+        if (s.state === 'suspended') return { ok: false, message: `${s.name} is suspended; resume it first` }
         if (cmd.args.via === 'now' || s.state === 'idle') return this.deps.sendNow(s, cmd.args.text)
         if (!st.hooks.queue)
           return { ok: false, message: 'the queue hook is not installed (Settings → Hooks & skills), so a queued message would never be sent; send it now instead' }
@@ -139,10 +152,14 @@ export class RemoteCommands {
       case 'queue.edit': {
         const s = session(cmd.args.key)
         if (!s) return { ok: false, message: 'session not found' }
-        return this.deps.queueEdit(s.sessionId, cmd.args.edit as QueueEdit)
+        if (s.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
+        const { ok, message } = this.deps.queueEdit(s.sessionId, cmd.args.edit as QueueEdit)
+        return { ok, message }
       }
-      case 'session.setStatus':
+      case 'session.setStatus': {
+        if (session(cmd.args.key)?.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
         return this.deps.setManualStatus(cmd.args.key, cmd.args.status)
+      }
       default:
         return { ok: false, message: `unsupported: ${(cmd as { type: string }).type}` }
     }

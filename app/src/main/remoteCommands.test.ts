@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -146,5 +146,57 @@ describe('RemoteCommands', () => {
   it('a handler that throws is a failure, not a crash', async () => {
     const d = deps(st([sess('a', 'idle')]), { sendNow: vi.fn(async () => { throw new Error('pty gone') }) })
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.send', args: { key: 'a', text: 'x', via: 'now' } }))).toEqual({ ok: false, message: 'failed: Error: pty gone' })
+  })
+})
+
+describe('RemoteCommands fix round 1', () => {
+  const MSG = 'master-agent cannot be controlled remotely'
+  it('master-agent is protected from stop, send, resume, queue.edit and setStatus', async () => {
+    const d = deps(st([sess('m', 'working', { name: 'master-agent' })]))
+    const rc = new RemoteCommands(d, file())
+    expect(await rc.run(cmd({ type: 'session.stop', args: { key: 'm' } }))).toEqual({ ok: false, message: MSG })
+    expect(await rc.run(cmd({ type: 'session.send', args: { key: 'm', text: 'x', via: 'now' } }))).toEqual({ ok: false, message: MSG })
+    expect(await rc.run(cmd({ type: 'session.resume', args: { key: 'm' } }))).toEqual({ ok: false, message: MSG })
+    expect(await rc.run(cmd({ type: 'queue.edit', args: { key: 'm', edit: { op: 'clear' } } }))).toEqual({ ok: false, message: MSG })
+    expect(await rc.run(cmd({ type: 'session.setStatus', args: { key: 'm', status: null } }))).toEqual({ ok: false, message: MSG })
+    expect(d.stopBg).not.toHaveBeenCalled()
+    expect(d.sendNow).not.toHaveBeenCalled()
+    expect(d.resume).not.toHaveBeenCalled()
+    expect(d.queueEdit).not.toHaveBeenCalled()
+    expect(d.setManualStatus).not.toHaveBeenCalled()
+  })
+
+  it('send into needs-input refuses for both via values', async () => {
+    const d = deps(st([sess('p', 'needs-input')]))
+    const rc = new RemoteCommands(d, file())
+    const m = { ok: false, message: 'p is waiting on a prompt; answer it from Needs you instead' }
+    expect(await rc.run(cmd({ type: 'session.send', args: { key: 'p', text: 'x', via: 'now' } }))).toEqual(m)
+    expect(await rc.run(cmd({ type: 'session.send', args: { key: 'p', text: 'x', via: 'queue' } }))).toEqual(m)
+    expect(d.sendNow).not.toHaveBeenCalled()
+    expect(d.queueEdit).not.toHaveBeenCalled()
+  })
+
+  it('send to a suspended session says resume first; to a done one says not found', async () => {
+    const d = deps(st([sess('s', 'suspended'), sess('x', 'done')]))
+    const rc = new RemoteCommands(d, file())
+    expect(await rc.run(cmd({ type: 'session.send', args: { key: 's', text: 'x', via: 'now' } }))).toEqual({ ok: false, message: 's is suspended; resume it first' })
+    expect(await rc.run(cmd({ type: 'session.send', args: { key: 'x', text: 'x', via: 'now' } }))).toEqual({ ok: false, message: 'session not found' })
+    expect(d.sendNow).not.toHaveBeenCalled()
+  })
+
+  it('queue.edit returns only ok and message', async () => {
+    const d = deps(st([sess('a', 'idle')]), { queueEdit: vi.fn(() => ({ ok: true, message: 'q', items: [1, 2, 3] }) as never) })
+    expect(await new RemoteCommands(d, file()).run(cmd({ type: 'queue.edit', args: { key: 'a', edit: { op: 'clear' } } }))).toEqual({ ok: true, message: 'q' })
+  })
+
+  it('the loading outcome is not remembered, so a redelivery runs', async () => {
+    let state: AppState | null = null
+    const d = deps(null, { state: () => state })
+    const rc = new RemoteCommands(d, file())
+    const c = cmd({ type: 'session.stop', args: { key: 'a' } })
+    expect(await rc.run(c)).toEqual({ ok: false, message: 'MasterDeck is still loading; try again' })
+    state = st([sess('a', 'working')])
+    expect(await rc.run(c)).toMatchObject({ ok: true })
+    expect(d.stopBg).toHaveBeenCalledTimes(1)
   })
 })
