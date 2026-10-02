@@ -141,9 +141,9 @@ export function App() {
   );
   // Master's column width (% of the window), on every screen; the Terminals panel's width.
   const [masterPct, setMasterPct] = useState<number>(() =>
-    load("masterPct", 34),
+    load("masterPct", isWeb() ? 26 : 34),
   );
-  const [inspPct, setInspPct] = useState<number>(() => load("inspPct", 28));
+  const [inspPct, setInspPct] = useState<number>(() => load("inspPct", isWeb() ? 22 : 28));
   // The Master button (top right, every screen) shows or hides master; hidden, it stays attached.
   const [masterOpen, setMasterOpen] = useState(() =>
     load<boolean>("masterOpen", true),
@@ -862,13 +862,17 @@ export function App() {
             root: () => document.querySelector<HTMLElement>(".board-view"),
           }
         : null;
+  // On the web (any window size, often a wide one) the side columns stop growing so the terminal gets the room.
+  const cap = (css: string, px: number) => (isWeb() ? `min(${css}, ${px}px)` : css);
+  const panelW = cap(`max(${MIN_PANEL}px, ${inspPct}%)`, 440);
+  const masterW = cap(`max(${MIN_MASTER}px, ${masterPct}%)`, 560);
   // rail · sessions · terminal · [panel] · [master]: the other screens cover all but the rail and master.
   const columns = [
     "var(--rail-w)",
     `${sideW}px`,
     "minmax(0, 1fr)",
-    ...(panelShown ? ["6px", `max(${MIN_PANEL}px, ${inspPct}%)`] : []),
-    ...(masterShown ? ["6px", `max(${MIN_MASTER}px, ${masterPct}%)`] : []),
+    ...(panelShown ? ["6px", panelW] : []),
+    ...(masterShown ? ["6px", masterW] : []),
   ].join(" ");
   const masterAttached = useMaster && state.master.kind === "attached";
   const askMaster = (s: Session) => {
@@ -895,7 +899,7 @@ export function App() {
         gridTemplateColumns: columns,
         ["--side-w" as string]: `${sideW}px`,
         ["--right-w" as string]: masterShown
-          ? `calc(max(${MIN_MASTER}px, ${masterPct}%) + 6px)`
+          ? `calc(${masterW} + 6px)`
           : "0px",
       }}
     >
@@ -1228,7 +1232,7 @@ export function App() {
         <div
           className="find-slot"
           style={{
-            right: `calc(var(--right-w, 0px) + ${panelShown ? `max(${MIN_PANEL}px, ${inspPct}%) + 6px` : "0px"} + 14px)`,
+            right: `calc(var(--right-w, 0px) + ${panelShown ? `${panelW} + 6px` : "0px"} + 14px)`,
           }}
         >
           <FindBar
