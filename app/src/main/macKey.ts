@@ -8,6 +8,7 @@ export interface SafeStore { isEncryptionAvailable(): boolean; encryptString(s: 
 export async function loadMacKey(file: string, safe: SafeStore): Promise<{ pair: CryptoKeyPair; publicKey: string } | null> {
   if (!safe.isEncryptionAvailable()) return null
   if (existsSync(file)) {
+    chmodSync(file, 0o600)
     const { priv, pub } = JSON.parse(safe.decryptString(readFileSync(file))) as { priv: string; pub: string }
     return { pair: { privateKey: await importPrivate(priv), publicKey: await importPublic(pub) }, publicKey: pub }
   }

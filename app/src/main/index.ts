@@ -58,7 +58,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { BrowserBridge } from "./browserBridge";
+import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
@@ -535,9 +535,9 @@ const account = new Account({
       }
   },
   onChange: (s) => {
-    if (s.kind === "signedOut") forgetBrowsers();
-    else if (s.kind === "signedIn" && accountEmail && s.email !== accountEmail) forgetBrowsers();
-    if (s.kind !== "pending") accountEmail = s.kind === "signedIn" ? s.email : null;
+    const c = accountChange(accountEmail, s);
+    if (c.forget) forgetBrowsers();
+    accountEmail = c.email;
     sources.setAccount(s);
     syncRemote();
   },
@@ -640,7 +640,7 @@ function syncRemote(): void {
     macPublicKey: () => macKey?.publicKey ?? null,
     onBrowser: (m) => void bridge!.onServer(m).catch((e) => console.error(`browser bridge: ${String(e)}`)),
     onUser: (u) => {
-      if (cloudUser && u && u.id !== cloudUser.id) forgetBrowsers();
+      if (userChanged(cloudUser, u)) forgetBrowsers();
       cloudUser = u;
       publishBrowsers();
     },

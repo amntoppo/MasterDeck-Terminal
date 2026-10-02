@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -58,7 +58,9 @@ describe('loadMacKey', () => {
     expect(a!.publicKey).toHaveLength(87)
     expect(readFileSync(f, 'utf8')).not.toContain(a!.publicKey) // stored through safeStorage
     expect(statSync(f).mode & 0o777).toBe(0o600)
+    chmodSync(f, 0o644)
     const again = await loadMacKey(f, safe())
+    expect(statSync(f).mode & 0o777).toBe(0o600)
     expect(again!.publicKey).toBe(a!.publicKey)
     expect(await publicRaw(again!.pair.publicKey)).toBe(a!.publicKey)
     expect(again!.pair.privateKey.extractable).toBe(false)

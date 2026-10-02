@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { browserHandshake, commitment, generateStatic, publicRaw, randomNonce, words, type Channel } from '@shared/e2e'
 import { CH } from '@shared/ipc'
 import { DECK_ACCESS } from '@shared/remoteDeck'
-import { PROTOCOL_VERSION } from '@shared/remote'
-import { BrowserBridge } from './browserBridge'
+import { MAX_FRAME, PROTOCOL_VERSION } from '@shared/remote'
+import { accountChange, BrowserBridge, userChanged } from './browserBridge'
 import { BrowserStore } from './browserStore'
 
 const EMAIL = 'me@x.com'
@@ -22,6 +22,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     sent: [] as any[],
     logs: [] as string[],
     changes: 0,
+    sendOk: true,
     t: 1_000_000,
     acct: { userId: 'u1', email: EMAIL } as { userId: string; email: string } | null,
     state: { n: 0 } as unknown,
@@ -32,7 +33,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     store,
     key: () => ({ pair: mac, publicKey: macPub }),
     account: () => w.acct,
-    send: (m) => (w.sent.push(m), true),
+    send: (m) => (w.sent.push(m), w.sendOk),
     call: (ch, a) => w.call(ch, a),
     onChange: () => void w.changes++,
     hello: { appVersion: '9.9.9', platform: 'darwin', home: '/Users/me' },
@@ -281,7 +282,8 @@ describe('BrowserBridge channel', () => {
     expect(w.bridge.browsers()[0].connected).toBe(false)
   })
 
-  it('tampered frame → browserClose; three failures in an hour → tamper warning', async () => {
+  it('tampered frame → browserClose; three failures in an hour → tamper warning (onChange when it ages out)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const w = await world()
     const { browser } = await approve(w)
     for (let i = 0; i < 3; i++) {
@@ -293,7 +295,11 @@ describe('BrowserBridge channel', () => {
     }
     expect(w.bridge.warning()).toBe('Possible tampering on the connection to Chrome')
     expect(w.logs.join('\n')).toContain('Possible tampering')
-    w.t += 3_600_001
+    const before = w.changes
+    w.t += 3_600_002
+    vi.advanceTimersByTime(3_600_002)
+    vi.useRealTimers()
+    expect(w.changes).toBeGreaterThan(before)
     expect(w.bridge.warning()).toBeNull()
   })
 
@@ -438,6 +444,110 @@ describe('BrowserBridge channel', () => {
     await w.bridge.onServer({ t: 'frame', b: 'b1', d: stale })
     expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'b1' }])
     expect(w.call).not.toHaveBeenCalledWith(CH.sendText, ['k', 'replayed'])
+  })
+})
+
+describe('BrowserBridge fix round 1', () => {
+  it('~2 MB of pty data in one window: no frame over MAX_FRAME, all data in order, seq per piece', async () => {
+    const w = await world()
+    const c = await connected(w)
+    await c.sub(CH.ptyData, 'p1')
+    const piece = 'y\x1b'.repeat(32 * 1024) // escape-heavy: worst case for JSON size
+    let seq = 0
+    for (let i = 0; i < 32; i++) w.bridge.event('pty:data:p1', [piece, (seq += piece.length)])
+    await tick(60)
+    const frames = w.sent.filter((m) => m.t === 'frame' && m.b === 'b1')
+    expect(Math.max(...frames.map((m) => m.d.length))).toBeLessThanOrEqual(MAX_FRAME)
+    const evs = (await c.recv()).filter((x) => x.k === 'ev')
+    expect(evs.length).toBeGreaterThan(1)
+    expect(evs.map((e) => e.v[0]).join('')).toBe(piece.repeat(32))
+    let n = 0
+    for (const e of evs) expect(e.v[1]).toBe((n += e.v[0].length))
+    expect(of(w, 'browserClose')).toEqual([])
+  })
+
+  it('an oversize state is skipped unsealed; the channel stays usable', async () => {
+    const w = await world()
+    const c = await connected(w)
+    await c.sub(CH.state)
+    w.bridge.event(CH.state, [{ big: 'x'.repeat(1_200_000) }])
+    await tick(100)
+    expect(w.logs.join('\n')).toContain('state too large for the web')
+    w.bridge.event(CH.state, [{ n: 2 }])
+    await tick(100)
+    const evs = (await c.recv()).filter((x) => x.k === 'ev')
+    expect(evs.at(-1)).toEqual({ k: 'ev', ev: CH.state, v: [{ n: 2 }] })
+    expect(await c.call('sendText', ['k', 'hi'])).toMatchObject({ ok: true })
+    expect(of(w, 'browserClose')).toEqual([])
+  })
+
+  it('send() = false closes the channel', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.sendOk = false
+    await c.send({ k: 'call', id: 1, m: 'sendText', a: ['k', 'hi'] })
+    await tick(5)
+    expect(of(w, 'browserClose')).toEqual([{ t: 'browserClose', b: 'b1' }])
+    expect(w.bridge.browsers()[0].connected).toBe(false)
+  })
+
+  it('state A (sent) → B → A within one window sends nothing stale', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = { n: 'A' }
+    await c.sub(CH.state)
+    w.bridge.event(CH.state, [{ n: 'B' }])
+    w.bridge.event(CH.state, [{ n: 'A' }])
+    await tick(100)
+    expect((await c.recv()).filter((x) => x.k === 'ev')).toEqual([{ k: 'ev', ev: CH.state, v: [{ n: 'A' }] }])
+  })
+
+  it('sub/unsub count toward the rate limit', async () => {
+    const w = await world()
+    const c = await connected(w)
+    for (let i = 0; i < 200; i++) await c.sub(CH.focusSession)
+    expect(await c.call('getState', [])).toMatchObject({ ok: false, e: 'too many calls' })
+  })
+
+  it('the request name is cut to 80 code points without control or format characters', async () => {
+    const w = await world()
+    const browser = await generateStatic(false)
+    const pub = await publicRaw(browser.publicKey), nB = randomNonce()
+    const name = '\u202eEvil\u0007\u200b' + '😀'.repeat(100)
+    await w.bridge.onServer({ t: 'browserRequest', id: 'b1', name, email: EMAIL, commit: await commitment(pub, nB), expiresAt: w.t + 300_000 })
+    await w.bridge.onServer({ t: 'browserReveal', id: 'b1', publicKey: pub, nonce: nB })
+    expect(w.bridge.requests()[0].name).toBe('Evil' + '😀'.repeat(76))
+  })
+
+  it('onChange fires when a request expires', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const w = await world()
+      await request(w)
+      const before = w.changes
+      w.t += 300_001
+      vi.advanceTimersByTime(300_001)
+      expect(w.changes).toBeGreaterThan(before)
+      expect(w.logs.join('\n')).toMatch(/expired without a reveal/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('account helpers (index.ts wiring, RF1)', () => {
+  it('accountChange forgets on sign-out and on a different email; pending keeps the last email', () => {
+    expect(accountChange('a@x', { kind: 'signedOut' })).toEqual({ forget: true, email: null })
+    expect(accountChange('a@x', { kind: 'signedIn', email: 'b@x' })).toEqual({ forget: true, email: 'b@x' })
+    expect(accountChange('a@x', { kind: 'signedIn', email: 'a@x' })).toEqual({ forget: false, email: 'a@x' })
+    expect(accountChange(null, { kind: 'signedIn', email: 'a@x' })).toEqual({ forget: false, email: 'a@x' })
+    expect(accountChange('a@x', { kind: 'pending' })).toEqual({ forget: false, email: 'a@x' })
+  })
+  it('userChanged only for two known, different ids', () => {
+    expect(userChanged({ id: 'u1' }, { id: 'u2' })).toBe(true)
+    expect(userChanged({ id: 'u1' }, { id: 'u1' })).toBe(false)
+    expect(userChanged(null, { id: 'u2' })).toBe(false)
+    expect(userChanged({ id: 'u1' }, null)).toBe(false)
   })
 })
 

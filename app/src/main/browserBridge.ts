@@ -36,6 +36,20 @@ const REQUEST_TTL = 5 * 60_000
 /** PaneSpec kinds the first-release web screens open: session/master panes (attach) and shell tabs. */
 const WEB_PANES = new Set(['attach', 'shell'])
 const PER_ID = [CH.ptyData, CH.ptyExit]
+/** PTY data per frame: even all-escaped JSON (6x) stays under MAX_FRAME after GCM + base64. */
+const PTY_CHUNK = 128 * 1024
+/** Base64url length of a sealed message whose JSON is this many UTF-8 bytes (+16 GCM tag). */
+const sealedLen = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3)
+const later = (ms: number, f: () => void) => setTimeout(f, Math.max(0, ms)).unref?.()
+
+/** Account state changed: approved browsers go on sign-out or when another email signs in (RF1). */
+export function accountChange(lastEmail: string | null, s: { kind: string; email?: string }): { forget: boolean; email: string | null } {
+  if (s.kind === 'signedOut') return { forget: true, email: null }
+  if (s.kind === 'signedIn') return { forget: !!lastEmail && s.email !== lastEmail, email: s.email ?? null }
+  return { forget: false, email: lastEmail } // pending: keep the last signed-in email
+}
+/** The backend's welcome.user moved to another account id. */
+export const userChanged = (prev: { id: string } | null, next: { id: string } | null) => !!prev && !!next && prev.id !== next.id
 const EVENTS = new Map(Object.values(DECK_ACCESS).flatMap((a) => (a.kind === 'event' ? [[a.ch, !!a.perId] as const] : [])))
 
 interface Pending { id: string; name: string; email: string; commit: string; nM: string; expiresAt: number; publicKey?: string; words?: [string, string, string] }
@@ -99,12 +113,15 @@ export class BrowserBridge {
       if (ch === CH.state) {
         // ponytail: full state per change; JSON-patch if AppState size becomes a problem.
         stateJson ??= JSON.stringify(args[0])
-        if (stateJson !== c.lastState) this.queueState(c, args[0])
+        // A pending timer always takes the latest (A sent, B, A → nothing stale goes out); it dedupes when it fires.
+        if (c.stateTimer || stateJson !== c.lastState) this.queueState(c, args[0])
       } else if (ev === CH.ptyData) {
         if (!c.visible) continue
         const buf = c.ptyBuf.get(arg!)
-        c.ptyBuf.set(arg!, { d: (buf?.d ?? '') + String(args[0]), seq: args[1] })
-        c.ptyTimer ??= setTimeout(() => this.flushPty(c), this.d.batchMs ?? 50)
+        const d = (buf?.d ?? '') + String(args[0])
+        c.ptyBuf.set(arg!, { d, seq: args[1] })
+        if (d.length >= PTY_CHUNK) this.flushPty(c) // heavy output: don't wait to build one huge frame
+        else c.ptyTimer ??= setTimeout(() => this.flushPty(c), this.d.batchMs ?? 50)
       } else {
         if (ev === CH.ptyExit) this.flushPty(c)
         void this.out(c, { k: 'ev', ev, ...(arg !== undefined ? { arg } : {}), v: args })
@@ -176,7 +193,7 @@ export class BrowserBridge {
     const nM = randomNonce()
     this.pending.set(m.id, {
       id: m.id,
-      name: String(m.name).slice(0, 80),
+      name: [...String(m.name).replace(/[\p{Cc}\p{Cf}]/gu, '')].slice(0, 80).join(''),
       email: m.email,
       commit: String(m.commit),
       nM,
@@ -184,6 +201,11 @@ export class BrowserBridge {
       expiresAt: Math.min(Number(m.expiresAt) || 0, t + REQUEST_TTL),
     })
     this.d.send({ t: 'browserNonce', id: m.id, macPublicKey: key.publicKey, nonce: nM })
+    // Expiry: drop the prompt (and log an unrevealed request) without waiting for another change.
+    later(this.pending.get(m.id)!.expiresAt - t + 1, () => {
+      this.live()
+      this.d.onChange()
+    })
   }
 
   private async onReveal(m: Extract<ServerToDesktop, { t: 'browserReveal' }>): Promise<void> {
@@ -256,6 +278,12 @@ export class BrowserBridge {
       return
     }
     if (c.state !== 'open' || !msg || typeof msg !== 'object') return
+    if (msg.k === 'call' || msg.k === 'sub' || msg.k === 'unsub') {
+      const t = this.now()
+      c.calls = c.calls.filter((x) => x > t - 1000)
+      c.calls.push(t)
+      if (c.calls.length > MAX_CALLS_PER_SEC) return msg.k === 'call' ? this.ret(c, msg.id, false, 'too many calls') : undefined
+    }
     switch (msg.k) {
       case 'call': return this.onCall(c, msg)
       case 'sub':
@@ -296,10 +324,6 @@ export class BrowserBridge {
   }
 
   private async onCall(c: Conn, m: Extract<WebToMac, { k: 'call' }>): Promise<void> {
-    const t = this.now()
-    c.calls = c.calls.filter((x) => x > t - 1000)
-    c.calls.push(t)
-    if (c.calls.length > MAX_CALLS_PER_SEC) return this.ret(c, m.id, false, 'too many calls')
     const access: Access | undefined = typeof m.m === 'string' && Object.hasOwn(DECK_ACCESS, m.m) ? DECK_ACCESS[m.m as keyof typeof DECK_ACCESS] : undefined
     let args = Array.isArray(m.a) ? m.a : []
     if (access?.kind !== 'remote' || (m.m === 'ptyOpen' && !WEB_PANES.has((args[1] as { kind?: unknown } | null)?.kind as string)))
@@ -350,7 +374,14 @@ export class BrowserBridge {
   private flushPty(c: Conn): void {
     clearTimeout(c.ptyTimer)
     c.ptyTimer = undefined
-    for (const [id, { d, seq }] of c.ptyBuf) void this.out(c, { k: 'ev', ev: CH.ptyData, arg: id, v: [d, seq] })
+    for (const [id, { d, seq }] of c.ptyBuf)
+      for (let at = 0; at < d.length; ) {
+        let end = Math.min(d.length, at + PTY_CHUNK)
+        if (end < d.length && /[\ud800-\udbff]/.test(d[end - 1])) end-- // keep surrogate pairs whole
+        // seq counts characters up to the end of this piece (ptys.ts: cumulative length).
+        void this.out(c, { k: 'ev', ev: CH.ptyData, arg: id, v: [d.slice(at, end), typeof seq === 'number' ? seq - (d.length - end) : seq] })
+        at = end
+      }
     c.ptyBuf.clear()
   }
 
@@ -361,9 +392,20 @@ export class BrowserBridge {
   }
 
   private out(c: Conn, m: MacToWeb): Promise<void> {
+    // Too big for the relay: never seal it (the counter must not move for a frame the hub would drop).
+    // ponytail: stringified twice (here and in seal); fine at AppState sizes.
+    if (sealedLen(Buffer.byteLength(JSON.stringify(m) ?? '')) > MAX_FRAME) {
+      this.d.log?.(`browser ${c.b}: ${m.k === 'ev' && m.ev === CH.state ? 'state too large for the web' : `${m.k} too large for the web`}; not sent`)
+      return m.k === 'ret' ? this.out(c, { k: 'ret', id: m.id, ok: false, e: 'result too large for the web' }) : Promise.resolve()
+    }
     return c.ch!.seal(m).then(
       (d) => {
-        if (this.conns.get(c.b) === c && c.state === 'open') this.d.send({ t: 'frame', b: c.b, d })
+        if (this.conns.get(c.b) !== c || c.state !== 'open') return
+        // A sealed frame that cannot go out leaves the channel out of step: close it, never continue.
+        if (d.length > MAX_FRAME || !this.d.send({ t: 'frame', b: c.b, d })) {
+          this.d.log?.(`browser ${c.b}: frame not sent; channel closed`)
+          this.close(c)
+        }
       },
       (e) => this.d.log?.(`browser ${c.b}: not sent: ${String(e)}`),
     )
@@ -378,6 +420,7 @@ export class BrowserBridge {
     this.close(c)
     if (f.at.length >= 3) this.d.log?.(`Possible tampering on the connection to ${c.name}`)
     this.d.onChange()
+    later(HOUR + 1, () => this.d.onChange()) // the warning ages out
   }
 
   /** Tell the server and forget the connection. */
