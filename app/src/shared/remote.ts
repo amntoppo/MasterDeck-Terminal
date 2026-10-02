@@ -12,8 +12,17 @@ const id = z.string().min(1).max(300)
 const key = z.string().min(1).max(200)
 const text = z.string().max(MAX_TEXT)
 
-/** Text that reaches a session: no slash commands, no shell escapes. */
-export const noEscape = text.refine((s) => !/^\s*[/!]/.test(s), { message: 'may not start with / or !' })
+/** C0/C1 control characters except newline and tab: a terminal would act on them. */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
+const noControl = (s: string) => !CONTROL.test(s)
+const NO_CONTROL = { message: 'may not contain control characters' }
+
+/** Free text that is stored or typed, never a command: control characters refused. */
+export const clean = (max: number) => z.string().max(max).refine(noControl, NO_CONTROL)
+
+/** Text that reaches a session: no slash commands, no shell escapes, no control characters. */
+export const noEscape = text.refine((s) => !/^\s*[/!]/.test(s), { message: 'may not start with / or !' }).refine(noControl, NO_CONTROL)
 
 export const INBOX_ACTIONS = ['reply', 'option', 'menu', 'continue', 'compact', 'approve', 'reject', 'send'] as const
 
@@ -41,7 +50,7 @@ export const CommandInput = z.discriminatedUnion('type', [
       action: z.enum(INBOX_ACTIONS),
       text: noEscape.optional(),
       /** The option's key for `option` ("B"). */
-      key: z.string().max(20).optional(),
+      key: clean(20).optional(),
       /** For `menu`: the question being answered and the answer, as MasterDeck's answerMenu takes them. */
       question: z.string().max(2000).nullable().optional(),
       answer: MenuAnswer.optional(),
@@ -87,9 +96,9 @@ export interface CommandRecord {
 
 export const ItemInput = z
   .object({
-    title: z.string().min(1).max(200),
+    title: clean(200).min(1),
     body: z.string().max(MAX_TEXT).default(''),
-    options: z.array(z.string().min(1).max(200)).min(1).max(10).optional(),
+    options: z.array(clean(200).min(1)).min(1).max(10).optional(),
     allowText: z.boolean().default(true),
     sessionKey: key.optional(),
     ticket: z.string().max(200).optional(),
@@ -99,7 +108,7 @@ export const ItemInput = z
   .refine((i) => i.allowText || (i.options?.length ?? 0) > 0, { message: 'give options, or allow a text answer' })
 export type ItemInput = z.infer<typeof ItemInput>
 
-export const ItemAnswer = z.object({ answer: z.string().min(1).max(MAX_TEXT) })
+export const ItemAnswer = z.object({ answer: clean(MAX_TEXT).min(1) })
 
 export type ItemState = 'open' | 'answered' | 'dismissed'
 export type CallbackStatus = 'none' | 'pending' | 'delivered' | 'failed'
@@ -191,7 +200,7 @@ export const DesktopMsg = z.discriminatedUnion('t', [
     message: z.string().max(2000),
     data: z.unknown().optional(),
   }),
-  z.object({ t: z.literal('itemAnswered'), itemId: z.string().min(1).max(100), answer: z.string().min(1).max(MAX_TEXT), by: z.string().max(40) }),
+  z.object({ t: z.literal('itemAnswered'), itemId: z.string().min(1).max(100), answer: clean(MAX_TEXT).min(1), by: z.string().max(40) }),
   z.object({ t: z.literal('itemDismissed'), itemId: z.string().min(1).max(100) }),
   z.object({ t: z.literal('ping') }),
 ])
