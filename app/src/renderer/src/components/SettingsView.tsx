@@ -192,6 +192,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             onChange={(e) => setUrl(e.target.value)}
             onBlur={() => url !== s.remoteUrl && set('remoteUrl', url)}
           />
+          {url.trim() && !/^https:\/\/[^\s/]|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/*$/.test(url.trim()) && (
+            <div className="set-hint">Use https://… or http://localhost:&lt;port&gt;</div>
+          )}
         </Field>
         <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
           <form

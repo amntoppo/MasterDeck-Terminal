@@ -55,7 +55,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { readToken, writeToken } from "./remoteToken";
-import { toRemoteSnapshot } from "@shared/remoteSnapshot";
+import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import { toDefaultBranch } from "./defaultBranch";
 import {
   transcriptMessages,
@@ -486,8 +486,12 @@ function deviceId(): string {
     // first run
   }
   const v = randomUUID();
-  mkdirSync(paths.home, { recursive: true });
-  writeFileSync(f, v);
+  try {
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(f, v);
+  } catch (e) {
+    console.error(`remote device id not saved, using one for this run: ${String(e)}`);
+  }
   return v;
 }
 
@@ -497,22 +501,13 @@ function syncRemote(): void {
   const token = readToken(remoteTokenFile());
   const key =
     s.remoteEnabled && s.remoteUrl && token ? `${s.remoteUrl}\n${token}` : "";
-  if (key === cloudKey) return;
+  if (key && key === cloudKey) return;
   cloud?.stop();
   cloud = null;
   cloudKey = key;
   sources.setExternalItems([]);
   if (!key) {
-    sources.setRemote({
-      conn: "off",
-      message: s.remoteEnabled
-        ? token
-          ? "set the backend address"
-          : "add the desktop token"
-        : null,
-      lastSyncAt: null,
-      hasToken: !!token,
-    });
+    sources.setRemote(remoteStatusWhenOff(s, !!token));
     return;
   }
   cloud = new CloudSync({
@@ -585,7 +580,9 @@ async function runInboxAction(
           type === "option" && typeof payload.text === "string"
             ? payload.text
             : text
-        ).trim();
+        )
+          .trim()
+          .slice(0, 10_000);
         if (!answer) return { ok: false, message: "nothing to answer" };
         const by =
           typeof payload.by === "string" && payload.by

@@ -149,3 +149,9 @@ export function fitSnapshot(
   }
   return { snap: cur, json, trimmed, oversize: bytes(json) > limit }
 }
+
+/** The status shown while the line to the backend is not running. */
+export function remoteStatusWhenOff(s: { remoteEnabled: boolean; remoteUrl: string }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
+  const message = !s.remoteEnabled ? null : !hasToken ? 'add the desktop token' : !s.remoteUrl ? 'set the backend address' : null
+  return { conn: 'off', message, lastSyncAt: null, hasToken }
+}

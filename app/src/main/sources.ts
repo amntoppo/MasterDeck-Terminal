@@ -604,7 +604,6 @@ export class Sources {
     };
   }
 
-  /** Send the state again now (after an inbox action). */
   /** Needs-you items asked through the remote API (the backend's open list). */
   setExternalItems(items: ExternalItem[]): void {
     this.externalItems = items;
@@ -616,6 +615,7 @@ export class Sources {
     this.emit();
   }
 
+  /** Send the state again now (after an inbox action). */
   changed(): void {
     this.emit();
   }
