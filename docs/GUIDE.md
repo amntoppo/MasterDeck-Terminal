@@ -511,7 +511,7 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   with their options and, if allowed, a reply box. Your answer goes back to the backend; when the
   item names a session, the session also gets `[<title>] <answer>`. Such a card stays while it's
   open, even if its session has ended.
-- **Setting it up:** Settings → Remote (phone): the backend address (`https://…`, or
+- **Setting it up:** Settings → Remote (phone): the backend address (`https://dev.masterdeck.dev`, or
   `http://localhost:8787` for a local `wrangler dev`), the backend's `DESKTOP_TOKEN` (stored in
   the Keychain, never in `settings.json`), then switch on **Connect to the backend**. It's off by
   default.

@@ -188,7 +188,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             className="input"
             style={{ width: '100%' }}
             value={url}
-            placeholder="https://masterdeck-backend.<account>.workers.dev"
+            placeholder="https://dev.masterdeck.dev"
             onChange={(e) => setUrl(e.target.value)}
             onBlur={() => url !== s.remoteUrl && set('remoteUrl', url)}
           />
