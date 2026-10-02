@@ -90,7 +90,7 @@ describe('fitSnapshot', () => {
   it('trims history, then cards, then the board, never sessions or the open inbox (Review Focus 5)', () => {
     const cards = Array.from({ length: 5000 }, (_, i) => card(i))
     const s = state({
-      sessions: [sess('a', 'idle', { issue: 3 })],
+      sessions: [sess('a', 'idle', { issue: 3, issueRepo: 'o/r' })],
       inbox: { open: [entry('o1', 'question', 'a')], snoozed: [], history: Array.from({ length: 20 }, (_, i) => entry(`h${i}`, 'idle', null)) },
       board: { takenAt: null, sprint: null, columns: ['Todo'], cards },
     })
@@ -100,7 +100,46 @@ describe('fitSnapshot', () => {
     expect(r.snap.sessions).toHaveLength(1)
     expect(r.snap.inbox.open).toHaveLength(1)
     // Cards linked to a session's issue survive the card trim.
-    if (r.snap.board) expect(r.snap.board.cards.map((c) => c.number)).toEqual([3])
+    expect(r.snap.board).not.toBeNull()
+    expect(r.snap.board!.cards.map((c) => c.number)).toEqual([3])
+    expect(r.oversize).toBe(false)
+  })
+
+  it('measures bytes, not characters', () => {
+    const body = '😀漢'.repeat(100_000) // 300k chars, 700k bytes each; two entries
+    const big = toRemoteSnapshot(state({ inbox: { open: [{ ...entry('o1', 'question', null), item: { ...entry('o1', 'question', null).item, body } }, { ...entry('o2', 'question', null), item: { ...entry('o2', 'question', null).item, body } }], snoozed: [], history: [] } }), 'v')
+    const json = JSON.stringify(big)
+    expect(json.length).toBeLessThan(SNAPSHOT_LIMIT)
+    expect(new TextEncoder().encode(json).length).toBeGreaterThan(SNAPSHOT_LIMIT)
+    const r = fitSnapshot(big)
+    expect(r.trimmed).toContain('bodies')
+    expect(new TextEncoder().encode(r.json).length).toBeLessThanOrEqual(SNAPSHOT_LIMIT)
+    expect(r.oversize).toBe(false)
+  })
+
+  it('truncates huge inbox bodies as the last step, keeping every entry', () => {
+    const e = entry('o1', 'question', null)
+    const s = state({ inbox: { open: [{ ...e, item: { ...e.item, body: 'y'.repeat(500_000) } }], snoozed: [{ ...e, item: { ...e.item, id: 's1', body: 'z'.repeat(500_000) } }], history: [] } })
+    const r = fitSnapshot(toRemoteSnapshot(s, 'v'))
+    expect(r.trimmed.at(-1)).toBe('bodies')
+    expect(r.snap.inbox.open).toHaveLength(1)
+    expect(r.snap.inbox.open[0].body).toBe('y'.repeat(2000) + '…')
+    expect(r.snap.inbox.snoozed[0].body).toHaveLength(2001)
+    expect(r.oversize).toBe(false)
+  })
+
+  it('reports oversize when nothing droppable is left, with sessions intact', () => {
+    const sessions = Array.from({ length: 1000 }, (_, i) => sess(`s${i}`, 'idle', { name: 'n'.repeat(500) }))
+    const r = fitSnapshot(toRemoteSnapshot(state({ sessions }), 'v'), 1000)
+    expect(r.oversize).toBe(true)
+    expect(r.snap.sessions).toHaveLength(1000)
+  })
+
+  it('card trim needs the same issue number and repo', () => {
+    const cards = [card(3), { ...card(3), repo: 'o/other' }, ...Array.from({ length: 3000 }, (_, i) => card(100 + i))]
+    const s = state({ sessions: [sess('a', 'idle', { issue: 3, issueRepo: 'o/r' })], board: { takenAt: null, sprint: null, columns: ['Todo'], cards } })
+    const r = fitSnapshot(toRemoteSnapshot(s, 'v'), 100_000)
+    expect(r.snap.board!.cards.map((c) => [c.number, c.repo])).toEqual([[3, 'o/r']])
   })
 
   it('SNAPSHOT_LIMIT is under the 1 MB socket cap', () => {

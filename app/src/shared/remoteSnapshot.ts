@@ -101,8 +101,23 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
   }
 }
 
-/** Under `limit` characters: drop the history, then cards not linked to a live session, then the board. */
-export function fitSnapshot(snap: RemoteSnapshot, limit = SNAPSHOT_LIMIT): { snap: RemoteSnapshot; json: string; trimmed: string[] } {
+const BODY_KEEP = 2000
+const enc = new TextEncoder()
+const bytes = (json: string): number => enc.encode(json).length
+
+function cutBody(e: RemoteInboxEntry): RemoteInboxEntry {
+  return e.body.length > BODY_KEEP ? { ...e, body: `${e.body.slice(0, BODY_KEEP)}…` } : e
+}
+
+/**
+ * Under `limit` bytes (the socket cap is bytes): drop the history, then cards not linked to a live
+ * session, then the board, then truncate inbox bodies. Sessions and open entries are never dropped;
+ * `oversize` is true when it still does not fit, and the sender should skip it.
+ */
+export function fitSnapshot(
+  snap: RemoteSnapshot,
+  limit = SNAPSHOT_LIMIT,
+): { snap: RemoteSnapshot; json: string; trimmed: string[]; oversize: boolean } {
   const trimmed: string[] = []
   let cur = snap
   let json = JSON.stringify(cur)
@@ -111,17 +126,26 @@ export function fitSnapshot(snap: RemoteSnapshot, limit = SNAPSHOT_LIMIT): { sna
     [
       'cards',
       (x) => {
-        const issues = new Set(x.sessions.map((s) => s.issue).filter((n): n is number => n !== null))
-        return x.board ? { ...x, board: { ...x.board, cards: x.board.cards.filter((c) => issues.has(c.number)) } } : x
+        const live = x.sessions.filter((s) => s.issue !== null)
+        return x.board
+          ? {
+              ...x,
+              board: {
+                ...x.board,
+                cards: x.board.cards.filter((c) => live.some((s) => s.issue === c.number && (s.issueRepo ?? null) === (c.repo ?? null))),
+              },
+            }
+          : x
       },
     ],
     ['board', (x) => ({ ...x, board: null })],
+    ['bodies', (x) => ({ ...x, inbox: { ...x.inbox, open: x.inbox.open.map(cutBody), snoozed: x.inbox.snoozed.map(cutBody) } })],
   ]
   for (const [name, step] of steps) {
-    if (json.length <= limit) break
+    if (bytes(json) <= limit) break
     cur = step(cur)
     json = JSON.stringify(cur)
     trimmed.push(name)
   }
-  return { snap: cur, json, trimmed }
+  return { snap: cur, json, trimmed, oversize: bytes(json) > limit }
 }
