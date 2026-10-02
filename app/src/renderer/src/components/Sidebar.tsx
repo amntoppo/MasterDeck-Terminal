@@ -1127,7 +1127,7 @@ function ExternalCard({
           <div className="ask-opts">
             {(item.options ?? []).map((o, n) => (
               <button
-                key={o}
+                key={n}
                 className="ask-opt"
                 disabled={busy}
                 onClick={() => void answer("option", o, String(n + 1))}
