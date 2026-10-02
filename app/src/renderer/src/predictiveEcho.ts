@@ -11,7 +11,7 @@ import type { IBufferCell, Terminal } from '@xterm/xterm'
  *
  * Correctness over speed: whenever the screen could differ from what the output alone would make, predict nothing.
  */
-export type PredictorTerm = Pick<Terminal, 'cols' | 'rows' | 'buffer' | 'modes' | 'parser' | 'write'>
+export type PredictorTerm = Pick<Terminal, 'cols' | 'rows' | 'buffer' | 'modes' | 'parser' | 'write' | 'onResize'>
 
 export interface Predictor {
   /** A keystroke, before it goes to the pty. */
@@ -44,9 +44,7 @@ interface Pred {
   saved: Saved[]
 }
 
-const OVERLAY = 7731 // a private OSC that brackets our own writes, so the pen/cursor tracking skips them
-const BEGIN = `\x1b]${OVERLAY};1\x07`
-const END = `\x1b]${OVERLAY};0\x07`
+const OVERLAY = 7731 // a private OSC that brackets our own writes (with a per-instance token), so tracking skips them
 const STYLE = '\x1b[0;2m' // dim
 const RECOVER_AFTER = 3
 const RECOVER_MS = 10_000
@@ -71,6 +69,53 @@ function classify(d: string): Kind | null {
 const to = (p: Pred) => (p.kind === 'char' || p.kind === 'right' ? p.x + 1 : p.x - 1)
 const cup = (x: number, y: number) => `\x1b[${y + 1};${x + 1}H`
 const blank = (ch: string) => ch === '' || ch === ' '
+
+/**
+ * Where the output stream stands between chunks: in ground state, or inside an escape sequence or string that the
+ * next chunk finishes. Our overlay may only go into the stream in ground state (else it would cut the program's
+ * sequence in two). Also follows the G0/G1 charsets and SO/SI.
+ */
+interface Scan {
+  st: 'ground' | 'esc' | 'int' | 'csi' | 'osc' | 'dcs'
+  int: string
+  g: [string, string]
+  so: boolean
+}
+function scan(sc: Scan, data: string): void {
+  for (let i = 0; i < data.length; i++) {
+    const ch = data[i]
+    const c = data.charCodeAt(i)
+    if (c === 0x18 || c === 0x1a) sc.st = 'ground'
+    else if (c === 0x1b) (sc.st = 'esc'), (sc.int = '') // also ends a string (ESC \\)
+    else if (sc.st === 'ground') {
+      if (c === 0x0e) sc.so = true
+      else if (c === 0x0f) sc.so = false
+      else if (c === 0x9b) sc.st = 'csi'
+      else if (c === 0x9d) sc.st = 'osc'
+      else if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) sc.st = 'dcs'
+    } else if (sc.st === 'esc') {
+      if (ch === '[') sc.st = 'csi'
+      else if (ch === ']') sc.st = 'osc'
+      else if (ch === 'P' || ch === '_' || ch === '^' || ch === 'X') sc.st = 'dcs'
+      else if (c >= 0x20 && c <= 0x2f) (sc.st = 'int'), (sc.int = ch)
+      else if (c >= 0x30 && c <= 0x7e) {
+        if (ch === 'c') (sc.g = ['B', '']), (sc.so = false)
+        sc.st = 'ground'
+      }
+    } else if (sc.st === 'int') {
+      if (c >= 0x20 && c <= 0x2f) sc.int += ch
+      else if (c >= 0x30 && c <= 0x7e) {
+        if (sc.int === '(') sc.g[0] = ch
+        else if (sc.int === ')') sc.g[1] = ch
+        sc.st = 'ground'
+      }
+    } else if (sc.st === 'csi') {
+      if (c >= 0x40 && c <= 0x7e) sc.st = 'ground'
+    } else if (sc.st === 'osc') {
+      if (c === 0x07 || c === 0x9c) sc.st = 'ground'
+    } else if (c === 0x9c) sc.st = 'ground'
+  }
+}
 
 /** The program's current SGR attributes, by slot, as SGR text: enough to put the pen back after our overlay. */
 type Pen = Record<string, string>
@@ -151,6 +196,14 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const pen: Pen = {}
   let penLost = false
   let inOverlay = false
+  const token = Math.random().toString(36).slice(2)
+  const BEGIN = `\x1b]${OVERLAY};${token}\x07`
+  const END = `\x1b]${OVERLAY};${token}.\x07`
+  /** G1 unknown until designated: SO then counts as not ASCII. */
+  const sc: Scan = { st: 'ground', int: '', g: ['B', ''], so: false }
+  const ground = () => sc.st === 'ground'
+  const ascii = () => (sc.so ? sc.g[1] : sc.g[0]) === 'B'
+  let alive = true
   const lat: number[] = []
   let keyAt: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -160,7 +213,12 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   let blindAt = -Infinity
 
   const hooks = [
-    term.parser.registerOscHandler(OVERLAY, (d) => ((inOverlay = d === '1'), true)),
+    // Only our own token counts: program output can neither fake nor stick the marker.
+    term.parser.registerOscHandler(OVERLAY, (d) => (d === token ? (inOverlay = true) : d === token + '.' ? (inOverlay = false) : 0, true)),
+    term.onResize(() => {
+      // A resize not routed through clear(): the overlay may have been reflowed with the text; drop it all.
+      if (preds.length) drop(true)
+    }),
     term.parser.registerCsiHandler({ final: 'm' }, (ps) => {
       if (inOverlay) return false
       if (!ps.length || ps[0] === 0) penLost = false
@@ -217,7 +275,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const target = (p: Pred) => (p.kind === 'char' ? p.x : p.kind === 'bs' ? p.x - 1 : -1)
 
   function draw(list: Pred[]): void {
-    if (!list.length) return
+    if (!list.length || !ground() || !alive || !enabled) return
     let s = BEGIN
     for (const p of list) {
       const x = target(p)
@@ -239,16 +297,28 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     return s + cup(preds[0].x, preds[0].y) + penSeq() + END
   }
 
+  /** Forget the predictions (their overlay is already undone in the stream, or was never drawn). */
+  function drop(andPause: boolean): void {
+    preds = []
+    drawn = false
+    if (andPause) pause()
+    blindAt = now()
+  }
+
+  /** Undo the overlay, then call back. Keys typed until `cb` has run (e.g. a refit) wait for it. */
   function clear(cb?: () => void): void {
     const undo = undoSeq()
     preds = []
     drawn = false
-    if (!undo) return void (cb && term.write('', cb))
+    if (!undo && !cb) return
     busy++
     term.write(undo, () => {
-      busy--
-      if (busy === 0) idle()
-      cb?.()
+      try {
+        cb?.()
+      } finally {
+        busy--
+        if (busy === 0) idle()
+      }
     })
   }
 
@@ -259,7 +329,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   }
 
   function arm(): void {
-    if (timer || !preds.length) return
+    if (timer || !preds.length || !alive) return
     timer = setTimeout(
       () => {
         timer = null
@@ -280,12 +350,12 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     if (buf.type !== lastType) {
       // Entered or left a full-screen app: its keys mean something else now; watch them again first.
       lastType = buf.type
-      preds = []
-      drawn = false
-      pause()
+      drop(true)
       return
     }
     if (!preds.length) return
+    // The output stopped inside an escape sequence: nothing may be drawn until it ends.
+    if (!ground()) return drop(false)
     const cx = buf.cursorX
     const cy = buf.cursorY
     const reasons = hidden || buf.baseY !== baseY
@@ -299,14 +369,15 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       if (!p.shown) streak++
     }
     const rest = preds.slice(i)
-    if (reasons || (rest.length && (cx !== rest[0].x || cy !== rest[0].y))) {
-      preds = []
-      drawn = false
-      pause()
-      blindAt = now() // the keys behind the failed predictions are still on their way
-      return
+    // The keys behind failed predictions are still on their way: drop, pause, and stay blind for a round trip.
+    if (reasons || (rest.length && (cx !== rest[0].x || cy !== rest[0].y))) return drop(true)
+    // Redraw only what handle() would draw now: the output may have changed modes, pen, charset or the line.
+    if (term.modes.insertMode || term.modes.originMode || penLost || !ascii()) return drop(true)
+    preds = []
+    for (const p of rest) {
+      if (!allowed(p.kind, p.x, p.y)) return drop(true)
+      preds.push(p)
     }
-    preds = rest
     if (isPaused && streak >= RECOVER_AFTER) isPaused = false
     draw(preds.filter((p) => p.shown))
   }
@@ -323,7 +394,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     const y = last ? last.y : buf.cursorY
     if (!last) baseY = buf.baseY
     const can =
-      kind && now() - blindAt >= syncMs() && !hidden && !penLost && !term.modes.insertMode && !term.modes.originMode && !lowLatency()
+      kind && ground() && ascii() && now() - blindAt >= syncMs() && !hidden && !penLost && !term.modes.insertMode && !term.modes.originMode && !lowLatency()
     if (!can || !allowed(kind, x, y)) {
       // Not modelled: from here on we do not know where the cursor will be until the screen settles.
       clear()
@@ -338,6 +409,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
 
   /** Nothing of ours is waiting to be parsed: check the predictions, then the keys typed meanwhile. */
   function idle(): void {
+    if (!alive || !enabled) return
     validate()
     while (deferred.length && busy === 0) handle(deferred.shift()!)
   }
@@ -352,8 +424,9 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       else handle(d)
     },
     write(data, cb) {
-      const undo = undoSeq()
+      const undo = undoSeq() // drawn implies the stream was in ground state when it was drawn, and still is
       drawn = false
+      scan(sc, data)
       busy++
       term.write(undo + data, () => {
         busy--
@@ -372,12 +445,15 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     setEnabled(on) {
       if (on === enabled) return
       enabled = on
+      deferred.length = 0
       if (!on) clear()
       else if (b().type === 'alternate') pause()
     },
     paused: () => isPaused,
     dispose() {
       clear()
+      alive = false
+      deferred.length = 0
       if (timer) clearTimeout(timer)
       timer = null
       for (const h of hooks) h.dispose()

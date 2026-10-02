@@ -511,4 +511,180 @@ describe('predictive echo', () => {
     }
     expect(predicted).toBeGreaterThan(2)
   }, 30_000)
+
+  describe('review round 2', () => {
+    const capture = (): [number, string][] => JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/claude-echo.json'), 'utf8'))
+
+    for (const [name, chunks] of [
+      ['an SGR', ['\x1b[3', '1mX']],
+      ['a cursor move', ['\x1b[2;', '5HZ']],
+      ['an OSC title', ['\x1b]0;ti', 'tle\x07Q']],
+      ['a DCS string', ['\x1bP1$', 'qm\x1b\\Q']],
+      ['an ESC with an intermediate', ['\x1b(', 'BQ']],
+      ['an echo, then an SGR', ['a\x1b[3', '1mX']],
+    ] as [string, string[]][]) {
+      it(`output split inside ${name} with predictions on screen is not corrupted`, async () => {
+        const { p, out, type, same } = setup()
+        await out('$ ')
+        await type('a')
+        await out(chunks[0])
+        await type('b', 50) // typed between the two halves
+        for (const c of chunks.slice(1)) await out(c)
+        await new Promise<void>((r) => p.clear(r))
+        same()
+      })
+    }
+
+    it('the Claude capture split at every boundary, a key typed in between: always the reference screen', async () => {
+      const all = capture()
+        .map(([, d]) => d)
+        .join('')
+      let drawnMidSequence = 0
+      for (let k = 1; k < all.length; k++) {
+        const { p, out, type, same } = setup({ cols: 100, rows: 30 })
+        await out(all.slice(0, k))
+        await type('x') // a person pausing, then typing: drawn if it can be
+        drawnMidSequence += p.shown()
+        await out(all.slice(k))
+        await new Promise<void>((r) => p.clear(r))
+        same()
+      }
+      expect(drawnMidSequence).toBeGreaterThan(0)
+    }, 300_000)
+
+    it('Claude, learned: its redraws split at every boundary with a key typed in between', async () => {
+      const cap = capture()
+      const echoAt = cap.findIndex(([, d]) => d.includes('\x1b[25Bh'))
+      const echo = (x: number, ch: string) => `\x1b[?25l\x1b[H\r\x1b[${x}C\x1b[25B${ch}\x1b[30;1H\x1b[26;${x + 2}H\x1b[?25h`
+      // Claude echoing 't', with its status line redraw (from the capture) in the same stream.
+      const tail = echo(5, 't') + cap[cap.length - 3][1] + echo(6, 'h')
+      let drawn = 0
+      for (let k = 1; k < tail.length; k++) {
+        const { p, out, type, same } = setup({ cols: 100, rows: 30 })
+        for (const [, d] of cap.slice(0, echoAt)) await out(d)
+        await type('h')
+        await out(cap[echoAt][1])
+        await type('i', 500)
+        await out(cap[echoAt + 1][1])
+        await type(' ', 500)
+        await out(echo(4, ' '))
+        await type('t', 500)
+        await type('h', 80)
+        await out(tail.slice(0, k))
+        await type('e', 1000)
+        drawn += p.shown()
+        await out(tail.slice(k))
+        await new Promise<void>((r) => p.clear(r))
+        same()
+      }
+      expect(drawn).toBeGreaterThan(0)
+    }, 300_000)
+
+    it('insert mode switched on while a prediction waits: dropped, not redrawn', async () => {
+      const { p, out, type, same } = setup()
+      await out('$ xyz\x1b[3D')
+      await type('a')
+      await type('b', 50)
+      await out('\x1b[4h')
+      expect(p.shown()).toBe(0)
+      await out('ab')
+      same()
+    })
+
+    it('origin mode and margins switched on while a prediction waits: dropped', async () => {
+      const { p, out, type, same } = setup()
+      await out('\r\n\r\n$ ')
+      await type('a')
+      await out('\x1b[2;5r\x1b[?6h\x1b[2;3H')
+      expect(p.shown()).toBe(0)
+      await out('a')
+      await new Promise<void>((r) => p.clear(r))
+      same()
+    })
+
+    it('an unknown SGR while a prediction waits: dropped', async () => {
+      const { p, out, type, same } = setup()
+      await out('$ ')
+      await type('ab')
+      await out('\x1b[73m')
+      expect(p.shown()).toBe(0)
+      await out('ab')
+      same()
+    })
+
+    it('a password prompt drawn while predictions wait: dropped', async () => {
+      const { p, out, type, same } = setup()
+      await out('$ ')
+      await type('ab')
+      await out('\x1b[s\x1b[1;20HPassword:\x1b[u')
+      expect(p.shown()).toBe(0)
+      await out('ab')
+      same()
+    })
+
+    it('a line-drawing charset: nothing predicted until ASCII is back', async () => {
+      const { p, out, type, same } = setup()
+      await out('$ qqq\x1b[3D\x1b(0')
+      await type('a')
+      expect(p.pending()).toBe(0)
+      await out('\x1b(B')
+      await type('a')
+      expect(p.shown()).toBe(1)
+      await out('a')
+      await out('\x0e') // SO: G1 (line drawing by default in xterm)
+      await type('b')
+      expect(p.pending()).toBe(0)
+      await out('\x0fb')
+      same()
+    })
+
+    it('a key typed while clear(refit) is in flight waits for the resize (no reflowed overlay)', async () => {
+      const { term, ref, p, out, type, same } = setup()
+      await out('hello world, this is a long-ish line\r\n$ ')
+      await type('a')
+      await new Promise<void>((r) => {
+        p.clear(() => {
+          term.resize(20, ROWS)
+          r()
+        })
+        p.onInput('b')
+      })
+      ref.resize(20, ROWS)
+      await settle(term)
+      await out('ab')
+      await new Promise<void>((r) => p.clear(r))
+      same()
+    })
+
+    it('a resize that did not go through clear() drops the predictions', async () => {
+      const { term, p, out, type } = setup()
+      await out('$ ')
+      await type('ab')
+      term.resize(30, ROWS)
+      expect(p.pending()).toBe(0)
+    })
+
+    it('program output cannot fake the overlay marker', async () => {
+      const { p, out, type, same } = setup()
+      await out('$ \x1b]7731;1\x07\x1b[31m')
+      await type('a')
+      await out('a')
+      await out('z') // red, as the program asked
+      same()
+      expect(p.shown()).toBe(0)
+    })
+
+    it('after dispose, late write callbacks draw nothing', async () => {
+      const { term, ref, p, out, type, same } = setup()
+      await out('$ ')
+      await type('a')
+      ref.write('x')
+      p.write('x')
+      p.dispose()
+      await settle(term)
+      await settle(term)
+      await settle(ref)
+      same()
+    })
+  })
 })
