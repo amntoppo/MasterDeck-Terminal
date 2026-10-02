@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { deck } from '../deck'
-import { filterRepos, type Repo } from '../repoPicker'
+import { expandHome, filterRepos, type Repo } from '../repoPicker'
 
 /**
  * The web app's folder picker (the native one cannot open from a browser): the workspace repos, a filter, and a
@@ -27,6 +27,7 @@ export function RepoPicker({ start, onDone }: { start?: string; onDone: (path: s
     return () => window.removeEventListener('keydown', onKey, true)
   }, [onDone])
   const shown = repos ? filterRepos(repos, q) : []
+  const typed = () => path.trim() && onDone(expandHome(path.trim(), deck().home))
   return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone(null)}>
       <div className="dialog status-dialog" role="dialog" aria-modal="true" aria-labelledby="rp-title">
@@ -43,8 +44,8 @@ export function RepoPicker({ start, onDone }: { start?: string; onDone: (path: s
         </div>
         <label>Or type a path</label>
         <div className="row-inputs">
-          <input value={path} placeholder="~/code/my-repo" aria-label="Folder path" onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && path.trim() && onDone(path.trim())} />
-          <button className="btn primary" disabled={!path.trim()} onClick={() => onDone(path.trim())}>
+          <input value={path} placeholder={`${deck().home}/code/my-repo`} aria-label="Folder path" onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && typed()} />
+          <button className="btn primary" disabled={!path.trim()} onClick={typed}>
             Use this path
           </button>
         </div>

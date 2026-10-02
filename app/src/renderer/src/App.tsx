@@ -21,6 +21,7 @@ import { JanitorView } from "./components/HygieneViews";
 import { PrsView } from "./components/PrsView";
 import { BrowserApproval } from "./components/BrowserApproval";
 import { WebConfirm } from "./components/WebConfirm";
+import { confirmPending } from "./webConfirm";
 import { SetupDialog } from "./components/SetupDialog";
 import {
   SprintSummaryDialog,
@@ -622,6 +623,8 @@ export function App() {
       dialogOpen,
     });
     if (!hit || !state) return;
+    // A web confirm is waiting: it gets the keys, not the app behind it.
+    if (confirmPending()) return;
     if (!shortcutOk(hit.id)) return;
     const done = () => {
       e.preventDefault();

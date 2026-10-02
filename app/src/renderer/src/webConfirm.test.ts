@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { onConfirmRequest, setIsWeb, webConfirm } from './webConfirm'
+import { confirmPending, onConfirmRequest, setIsWeb, webConfirm } from './webConfirm'
 
 type Req = Parameters<Parameters<typeof onConfirmRequest>[0]>[0]
 
@@ -18,6 +18,18 @@ describe('webConfirm', () => {
     expect(seen.at(-1)).toBeNull()
     expect(await a).toBe(true)
     expect(await b).toBe(false)
+    off()
+  })
+  it('confirmPending() is true while a confirm waits (App ignores its shortcuts meanwhile)', async () => {
+    setIsWeb(() => true)
+    let cur: Req = null
+    const off = onConfirmRequest((r) => (cur = r))
+    expect(confirmPending()).toBe(false)
+    const a = webConfirm('Stop A?')
+    expect(confirmPending()).toBe(true)
+    cur!.resolve(false)
+    await a
+    expect(confirmPending()).toBe(false)
     off()
   })
   it('on desktop resolves true without showing (native dialog already confirms)', async () => {

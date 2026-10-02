@@ -51,3 +51,6 @@ export function onConfirmRequest(cb: Listener): () => void {
   if (queue[0]) cb(queue[0])
   return () => listeners.delete(cb)
 }
+
+/** A confirm is waiting: App's global shortcuts stay off until it is answered. */
+export const confirmPending = (): boolean => queue.length > 0
