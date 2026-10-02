@@ -1,4 +1,6 @@
-import type { AccountState, Provider } from '@shared/account'
+import { createHash, randomBytes as nodeRandomBytes, timingSafeEqual } from 'node:crypto'
+import { PROVIDERS, type AccountState, type Provider } from '@shared/account'
+import { startLoopback as realStartLoopback, type Loopback } from './loopback'
 
 export interface AccountDeps {
   baseUrl: string
@@ -12,9 +14,12 @@ export interface AccountDeps {
   timeoutMs?: number
   now?: () => number
   sleep?: (ms: number) => Promise<void>
+  startLoopback?: typeof realStartLoopback
+  randomBytes?: (n: number) => Buffer
 }
 
 const CLIENT_ID = 'masterdeck-desktop'
+const CAP_MESSAGE = 'This account already has 5 signed-in Macs; sign one out at dev.masterdeck.dev/account'
 const GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 
 /**
@@ -26,6 +31,9 @@ export class Account {
   private st: AccountState
   private running = false
   private cancelled = false
+  private lb: Loopback | null = null
+  private flow = 0
+  private browserUrl = ''
 
   constructor(private d: AccountDeps) {
     const id = d.readIdentity()
@@ -87,14 +95,111 @@ export class Account {
 
   /** Reopen the browser page of the sign-in in progress (main-side URL, so localhost dev backends work). */
   reopen(): void {
-    if (this.st.kind === 'pending') this.d.openBrowser(this.st.verifyUrl)
+    if (this.st.kind !== 'pending') return
+    this.d.openBrowser(this.st.mode === 'code' ? this.st.verifyUrl : this.browserUrl)
   }
 
+  /** Social providers the backend has configured, in display order; Google and GitHub if it can't say. */
+  async providers(): Promise<string[]> {
+    try {
+      const r = await this.d.fetch(`${this.d.baseUrl}/providers`, { signal: AbortSignal.timeout(this.d.timeoutMs ?? 10_000) })
+      const list = r.ok ? ((await r.json()) as { providers?: unknown }).providers : null
+      if (Array.isArray(list)) return PROVIDERS.map((p) => p.id).filter((id) => list.includes(id))
+    } catch {
+      // fall through
+    }
+    return ['google', 'github']
+  }
+
+  private b64url = (b: Buffer) => b.toString('base64url')
+
+  /** Browser sign-in: loopback listener + PKCE. Falls back to the typed-code flow if the listener can't start. */
   async signInWith(provider: 'google' | 'github' | 'apple'): Promise<void> {
+    if (this.running || this.st.kind === 'signedIn') return
+    const rnd = this.d.randomBytes ?? nodeRandomBytes
+    const verifier = this.b64url(rnd(32))
+    const challenge = pkceChallenge(verifier)
+    const state = this.b64url(rnd(24))
+    this.running = true
+    this.cancelled = false
+    this.ctl = new AbortController()
+    const flow = ++this.flow
+    let lb: Loopback
+    try {
+      lb = await (this.d.startLoopback ?? realStartLoopback)({ state })
+    } catch {
+      if (this.flow !== flow) return
+      this.running = false
+      if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
+      return this.signInWithCode(provider)
+    }
+    if (this.flow !== flow || this.cancelled) {
+      lb.close()
+      if (this.flow === flow) {
+        this.running = false
+        if (this.state().kind !== 'signedIn') this.set({ kind: 'signedOut', message: null })
+      }
+      return
+    }
+    this.lb = lb
+    const stale = () => this.flow !== flow || this.cancelled
+    // Once cancelled by signOut/remote sign-out the state is already set; only clear our own pending screen.
+    const bail = () => {
+      if (this.flow === flow && this.st.kind === 'pending') this.set({ kind: 'signedOut', message: null })
+    }
+    try {
+      this.browserUrl = `${this.d.baseUrl}/desktop-login?${new URLSearchParams({ port: String(lb.port), state, challenge, provider })}`
+      this.set({ kind: 'pending', provider, mode: 'browser', expiresAt: this.now() + 300_000 })
+      this.d.openBrowser(this.browserUrl)
+      const r = await lb.result
+      if (stale()) return bail()
+      if (!r) return this.set({ kind: 'signedOut', message: 'That sign-in expired; try again' })
+      const a = Buffer.from(r.state)
+      const b = Buffer.from(state)
+      if (a.length !== b.length || !timingSafeEqual(a, b)) return this.set({ kind: 'signedOut', message: 'Sign-in failed (state mismatch)' })
+      const res = await this.post('/desktop/redeem', { code: r.code, verifier, name: deviceName(this.d.deviceName) })
+      if (stale()) {
+        const late = res.status === 201 ? ((await res.json().catch(() => null)) as { token?: unknown } | null) : null
+        if (typeof late?.token === 'string') await this.dropDevice(late.token)
+        return bail()
+      }
+      if (res.status === 409) return this.set({ kind: 'signedOut', message: CAP_MESSAGE })
+      const body = res.status === 201 ? ((await res.json().catch(() => null)) as { id?: unknown; token?: unknown; email?: unknown } | null) : null
+      if (typeof body?.id !== 'string' || typeof body.token !== 'string' || typeof body.email !== 'string') return this.set({ kind: 'signedOut', message: 'Sign-in failed; try again' })
+      if (stale()) {
+        await this.dropDevice(body.token)
+        return bail()
+      }
+      await this.saveDevice({ id: body.id, token: body.token, email: body.email, provider })
+    } catch (e) {
+      if (this.flow === flow) this.set(this.cancelled ? { kind: 'signedOut', message: null } : { kind: 'signedOut', message: `Sign-in failed: ${String(e)}`.slice(0, 200) })
+    } finally {
+      lb.close()
+      if (this.flow === flow) {
+        this.running = false
+        this.lb = null
+      }
+    }
+  }
+
+  /** Switch a pending browser sign-in to the typed-code flow. */
+  useCode(): void {
+    if (this.st.kind !== 'pending' || this.st.mode !== 'browser') return
+    const provider = this.st.provider as 'google' | 'github' | 'apple'
+    this.flow++
+    this.ctl.abort()
+    this.lb?.close()
+    this.lb = null
+    this.running = false
+    void this.signInWithCode(provider)
+  }
+
+  async signInWithCode(provider: 'google' | 'github' | 'apple'): Promise<void> {
     if (this.running || this.st.kind === 'signedIn') return
     this.running = true
     this.cancelled = false
     this.ctl = new AbortController()
+    const flow = ++this.flow
     try {
       const r = await this.post('/auth/device/code', { client_id: CLIENT_ID })
       if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
@@ -105,7 +210,7 @@ export class Account {
       if (!verifyUrl) return this.set({ kind: 'signedOut', message: "Sign-in returned an address that isn't MasterDeck's" })
       if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
       const expiresAt = this.now() + (c.expires_in ?? 600) * 1000
-      this.set({ kind: 'pending', provider, userCode: c.user_code, verifyUrl, expiresAt })
+      this.set({ kind: 'pending', provider, mode: 'code', userCode: c.user_code, verifyUrl, expiresAt })
       this.d.openBrowser(verifyUrl)
       let interval = Math.max(1000, (c.interval ?? 5) * 1000)
       while (!this.cancelled) {
@@ -140,13 +245,14 @@ export class Account {
     } catch (e) {
       this.set(this.cancelled ? { kind: 'signedOut', message: null } : { kind: 'signedOut', message: `Sign-in failed: ${String(e)}`.slice(0, 200) })
     } finally {
-      this.running = false
+      if (this.flow === flow) this.running = false
     }
   }
 
   cancel(): void {
     this.cancelled = true
     this.ctl.abort()
+    this.lb?.close()
   }
 
   private dropSession(session: string): Promise<unknown> {
@@ -164,7 +270,7 @@ export class Account {
     try {
       const r = await this.post('/v1/devices', { name: deviceName(this.d.deviceName) }, session)
       if (r.status === 409) {
-        this.set({ kind: 'signedOut', message: 'This account already has 5 signed-in Macs; sign one out at dev.masterdeck.dev/account' })
+        this.set({ kind: 'signedOut', message: CAP_MESSAGE })
         return { ok: false, message: 'too many Macs' }
       }
       const body = r.ok ? ((await r.json().catch(() => null)) as { id?: unknown; token?: unknown } | null) : null
@@ -172,27 +278,31 @@ export class Account {
         this.set({ kind: 'signedOut', message: `Couldn't register this Mac (${r.status})` })
         return { ok: false, message: `register failed (${r.status})` }
       }
-      const { id, token } = body as { id: string; token: string }
-      const saved = this.d.saveToken(token)
-      if (!saved.ok) {
-        await this.dropDevice(token)
-        this.set({ kind: 'signedOut', message: saved.message })
-        return { ok: false, message: saved.message }
-      }
-      const identity = { email, provider, deviceId: id }
-      try {
-        this.d.saveIdentity(identity)
-      } catch (e) {
-        this.d.saveToken(null)
-        await this.dropDevice(token)
-        this.set({ kind: 'signedOut', message: `Couldn't save sign-in: ${String(e)}`.slice(0, 200) })
-        return { ok: false, message: 'identity save failed' }
-      }
-      this.set({ kind: 'signedIn', ...identity })
-      return { ok: true, message: 'signed in' }
+      return await this.saveDevice({ id: body.id, token: body.token, email, provider })
     } finally {
       await this.dropSession(session)
     }
+  }
+
+  /** Keep a new device token and identity; on any failure undo the device so it isn't orphaned. */
+  private async saveDevice(v: { id: string; token: string; email: string; provider: Provider }): Promise<{ ok: boolean; message: string }> {
+    const saved = this.d.saveToken(v.token)
+    if (!saved.ok) {
+      await this.dropDevice(v.token)
+      this.set({ kind: 'signedOut', message: saved.message })
+      return { ok: false, message: saved.message }
+    }
+    const identity = { email: v.email, provider: v.provider, deviceId: v.id }
+    try {
+      this.d.saveIdentity(identity)
+    } catch (e) {
+      this.d.saveToken(null)
+      await this.dropDevice(v.token)
+      this.set({ kind: 'signedOut', message: `Couldn't save sign-in: ${String(e)}`.slice(0, 200) })
+      return { ok: false, message: 'identity save failed' }
+    }
+    this.set({ kind: 'signedIn', ...identity })
+    return { ok: true, message: 'signed in' }
   }
 
   async signInEmail(email: string, password: string, create: boolean, name?: string): Promise<{ ok: boolean; message: string }> {
@@ -237,6 +347,11 @@ export class Account {
     this.d.saveIdentity(null)
     this.set({ kind: 'signedOut', message })
   }
+}
+
+/** PKCE S256 challenge (RFC 7636): base64url(SHA-256(verifier)), no padding. */
+export function pkceChallenge(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url')
 }
 
 /** The backend rejects odd names with 400, so send a clean one. */

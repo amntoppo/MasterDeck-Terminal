@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { PROVIDERS } from '@shared/account'
 import type { AppState } from '@shared/types'
 import { deck, useNow } from '../deck'
@@ -11,11 +11,36 @@ export function AccountPanel({ account }: { account: AppState['account'] }) {
   const [create, setCreate] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [ids, setIds] = useState<string[]>(['google', 'github'])
   const now = useNow(1_000)
+  useEffect(() => {
+    void deck().accountProviders().then(setIds, () => {})
+  }, [])
   const a = account ?? { kind: 'signedOut' as const, message: null }
 
   if (a.kind === 'pending') {
     const left = Math.max(0, Math.round((a.expiresAt - now) / 1000))
+    if (a.mode === 'browser')
+      return (
+        <>
+          <Field label="Finish signing in in your browser" hint="Approve this Mac in the browser page that just opened; it comes back here by itself.">
+            <span className="muted">
+              Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}
+            </span>
+          </Field>
+          <Field label="Not seeing the page?">
+            <button className="btn" onClick={() => void deck().accountReopen()}>
+              Open the page again
+            </button>
+            <button className="btn" onClick={() => void deck().accountUseCode()}>
+              Use a code instead
+            </button>
+            <button className="btn" onClick={() => void deck().accountCancel()}>
+              Cancel
+            </button>
+          </Field>
+        </>
+      )
     return (
       <>
         <Field label="Finish signing in in your browser" hint="Type this code in the browser page that just opened. Only approve it if you started this sign-in.">
@@ -84,9 +109,9 @@ export function AccountPanel({ account }: { account: AppState['account'] }) {
           {a.message}
         </p>
       )}
-      <Field label="Continue with" hint="Opens your browser; you type a code shown here to approve this Mac.">
+      <Field label="Continue with" hint="Opens your browser to approve this Mac.">
         <div className="add-row">
-          {PROVIDERS.map((p) => (
+          {PROVIDERS.filter((p) => ids.includes(p.id)).map((p) => (
             <button key={p.id} className="btn" onClick={() => void deck().accountSignIn(p.id)}>
               Continue with {p.label}
             </button>

@@ -2101,6 +2101,8 @@ function registerIpc(): void {
   });
   ipcMain.handle(CH.accountCancel, () => account.cancel());
   ipcMain.handle(CH.accountReopen, () => account.reopen());
+  ipcMain.handle(CH.accountUseCode, () => account.useCode());
+  ipcMain.handle(CH.accountProviders, () => account.providers());
   ipcMain.handle(CH.accountEmail, (_e, a: unknown) => {
     const x = (a ?? {}) as Record<string, unknown>;
     if (

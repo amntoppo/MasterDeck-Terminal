@@ -90,6 +90,8 @@ export const CH = {
   accountSignIn: "account:signIn",
   accountCancel: "account:cancel",
   accountReopen: "account:reopen",
+  accountUseCode: "account:useCode",
+  accountProviders: "account:providers",
   accountEmail: "account:email",
   accountSignOut: "account:signOut",
   accountManage: "account:manage",
@@ -231,6 +233,8 @@ export interface DeckApi {
   accountCancel(): Promise<void>;
   /** Reopen the pending sign-in page (the URL stays in main). */
   accountReopen(): Promise<void>;
+  accountUseCode(): Promise<void>;
+  accountProviders(): Promise<string[]>;
   accountEmail(a: { email: string; password: string; create: boolean; name?: string }): Promise<{ ok: boolean; message: string }>;
   accountSignOut(): Promise<void>;
   accountManage(): Promise<void>;
