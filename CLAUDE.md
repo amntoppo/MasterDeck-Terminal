@@ -112,6 +112,12 @@ dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` prints `SMOKE OK sessio
 - Process for features: brainstorm → spec → plan → subagent-driven development with per-task
   reviews and a final review (superpowers skills); specs/plans go to the backend repo's
   `docs/superpowers/`.
+- **Keep the docs current — part of every change, not a follow-up.** In the same commit as the code:
+  update the doc that describes what you changed (`docs/ARCHITECTURE.md`, `docs/REMOTE.md`,
+  `docs/OPERATIONS.md`, `docs/GUIDE.md` for anything user-facing), move finished items from
+  `docs/TODO.md` to its "Recently done" list (with the commit) and add new open items you found,
+  and refresh this file's "Current state and next steps". Protocol changes also update the
+  backend's `docs/PROTOCOL.md`. Docs describe the code as it is: when they disagree, fix the doc.
 
 ## Protocol copy rule
 
