@@ -6,3 +6,9 @@ it('shows the oldest unexpired request', () => {
   expect(nextRequest([], now)).toBeNull()
   expect(nextRequest(undefined, now)).toBeNull()
 })
+import { allowArmed } from './nextBrowserRequest'
+it('arms Allow only after the delay', () => {
+  expect(allowArmed(1000, 1000)).toBe(false)
+  expect(allowArmed(1000, 1599)).toBe(false)
+  expect(allowArmed(1000, 1600)).toBe(true)
+})

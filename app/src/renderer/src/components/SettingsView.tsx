@@ -215,7 +215,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
                     {b.name}
                     {b.connected ? ' · connected' : ''}
                   </span>
-                  <button className="btn" onClick={() => void deck().browserRevoke(b.id)}>
+                  <button className="btn" aria-label={`Revoke ${b.name}`} onClick={() => void deck().browserRevoke(b.id)}>
                     Revoke
                   </button>
                 </li>
