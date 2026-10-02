@@ -56,6 +56,7 @@ import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
+import { IpcRegistry } from "./ipcRegistry";
 import { readToken, writeToken } from "./remoteToken";
 import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
@@ -146,6 +147,14 @@ if (process.env.MASTERDECK_USER_DATA)
   app.setPath("userData", process.env.MASTERDECK_USER_DATA);
 
 let win: BrowserWindow | null = null;
+// Set by the browser bridge (F5); every renderer event also goes to it.
+let bridge: { event(ch: string, args: unknown[]): void } | null = null;
+const reg = new IpcRegistry(ipcMain);
+/** Send to the window and to any connected browser. */
+function emit(channel: string, ...args: unknown[]): void {
+  win?.webContents.send(channel, ...args);
+  bridge?.event(channel, args);
+}
 let latest: AppState | null = null;
 let focused: string | null = null;
 let pathEnv = process.env.PATH ?? "";
@@ -161,7 +170,7 @@ const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
 const ptys = new PtyManager(
   env,
-  (channel, ...args) => win?.webContents.send(channel, ...args),
+  (channel, ...args) => emit(channel, ...args),
   () => claudeBin,
   () => join(paths.home, "installer"),
   () => builderDir(),
@@ -257,7 +266,7 @@ const sources = new Sources(
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
     }
-    win?.webContents.send(CH.state, state);
+    emit(CH.state, state);
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
       cloud?.push(toRemoteSnapshot(state, app.getVersion()));
@@ -283,7 +292,7 @@ const sources = new Sources(
     // Auto-open: a session that just blocked on a prompt gets its tab (not focused) and a dock bounce.
     const blocked = newlyNeedsInput(prev, state);
     if (blocked.length && state.settings.autoOpenNeedsInput) {
-      for (const key of blocked) win?.webContents.send(CH.autoOpen, key);
+      for (const key of blocked) emit(CH.autoOpen, key);
       if (process.platform === "darwin" && !win?.isFocused())
         app.dock?.bounce("informational");
     }
@@ -306,10 +315,10 @@ function reveal(target: NotifyEvent["target"]): void {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
-  if (target.itemId) win.webContents.send(CH.showInboxItem, target.itemId);
+  if (target.itemId) emit(CH.showInboxItem, target.itemId);
   else if (target.sessionKey)
-    win.webContents.send(CH.focusSession, target.sessionKey);
-  else win.webContents.send(CH.showNeedsYou);
+    emit(CH.focusSession, target.sessionKey);
+  else emit(CH.showNeedsYou);
 }
 
 /** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
@@ -868,7 +877,7 @@ function readCreatedTickets(): void {
   });
   if (!made.length) return;
   void sources.refreshGithub(true);
-  win?.webContents.send(CH.ticketsCreated, made);
+  emit(CH.ticketsCreated, made);
 }
 
 const repoMetaCache = new Map<
@@ -963,7 +972,7 @@ function readDraft(force = false): void {
   if (!sig) {
     if (builderDraft) {
       builderDraft = null;
-      win?.webContents.send(CH.workflowDraft, null);
+      emit(CH.workflowDraft, null);
     }
     draftSig = "";
     return;
@@ -1019,7 +1028,7 @@ function readDraft(force = false): void {
     check,
     at: Date.now(),
   };
-  win?.webContents.send(CH.workflowDraft, builderDraft);
+  emit(CH.workflowDraft, builderDraft);
 }
 
 /** Throw the builder's draft away: the workflow, its triggers and its skills (nothing was installed). */
@@ -1234,10 +1243,10 @@ function liveDirs(): string[] {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(CH.getState, () => latest);
-  ipcMain.handle(CH.approve, (_e, id: number) => cli.approve([id]));
-  ipcMain.handle(CH.reject, (_e, id: number) => cli.reject([id]));
-  ipcMain.handle(
+  reg.handle(CH.getState, () => latest);
+  reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
+  reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
+  reg.handle(
     CH.draftAssign,
     (_e, issue: unknown, title?: string, url?: string) => {
       const t = asTicket(issue);
@@ -1246,20 +1255,20 @@ function registerIpc(): void {
         : { ok: false, message: "bad issue" };
     },
   );
-  ipcMain.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
-  ipcMain.handle(CH.sendText, async (_e, key: string, text: string) => {
+  reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
+  reg.handle(CH.sendText, async (_e, key: string, text: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
     const masterUp =
       latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
     return sender.send(s, text, !!masterUp);
   });
-  ipcMain.handle(
+  reg.handle(
     CH.answerMenu,
     (_e, key: string, question: string | null, answer: unknown) =>
       answerMenuFor(String(key), question, answer),
   );
-  ipcMain.handle(
+  reg.handle(
     CH.inboxAct,
     async (_e, id: unknown, type: unknown, payload: unknown) => {
       if (typeof id !== "string" || typeof type !== "string")
@@ -1271,15 +1280,15 @@ function registerIpc(): void {
       return inboxAct(id, type, p);
     },
   );
-  ipcMain.handle(CH.queueList, (_e, sessionId: string) =>
+  reg.handle(CH.queueList, (_e, sessionId: string) =>
     readQueue(String(sessionId)),
   );
-  ipcMain.handle(CH.queueEdit, (_e, sessionId: string, edit: QueueEdit) =>
+  reg.handle(CH.queueEdit, (_e, sessionId: string, edit: QueueEdit) =>
     isQueueEdit(edit)
       ? editQueue(String(sessionId), edit)
       : { ok: false, message: "bad queue edit", items: [] },
   );
-  ipcMain.handle(CH.queueSendNext, async (_e, key: string) => {
+  reg.handle(CH.queueSendNext, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
     const next = shiftQueue(s.sessionId);
@@ -1291,32 +1300,32 @@ function registerIpc(): void {
     if (!r.ok) unshiftQueue(s.sessionId, next);
     return r;
   });
-  ipcMain.handle(CH.getSettings, () => sources.getSettings());
-  ipcMain.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
+  reg.handle(CH.getSettings, () => sources.getSettings());
+  reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
     const r = await ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
-  ipcMain.handle(
+  reg.handle(
     CH.standupCommits,
     (_e, since: number, dirs: string[], until?: number) =>
       ops.standupCommits(since, [...dirs, ...ops.repos()], until),
   );
-  ipcMain.handle(CH.janitor, (_e, dirs: string[], force?: boolean) =>
+  reg.handle(CH.janitor, (_e, dirs: string[], force?: boolean) =>
     ops.janitor(dirs, force === true),
   );
-  ipcMain.handle(
+  reg.handle(
     CH.removeWorktree,
     (_e, repo: string, path: string, force: boolean) =>
       ops.removeWorktree(repo, path, force, liveDirs()),
   );
-  ipcMain.handle(CH.removeSession, (_e, bgId: string) =>
+  reg.handle(CH.removeSession, (_e, bgId: string) =>
     ops.removeSession(bgId),
   );
-  ipcMain.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q));
-  ipcMain.handle(
+  reg.handle(CH.searchHistory, (_e, q: string) => ops.searchHistory(q));
+  reg.handle(
     CH.historyTranscript,
     async (_e, p: unknown, query: unknown, focus: unknown) => {
       // A session transcript under ~/.claude/projects only; the renderer names it from a search hit.
@@ -1335,16 +1344,16 @@ function registerIpc(): void {
       }
     },
   );
-  ipcMain.handle(CH.templates, () => ops.templates());
-  ipcMain.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) =>
+  reg.handle(CH.templates, () => ops.templates());
+  reg.handle(CH.saveTemplate, (_e, t: { name: string; text: string }) =>
     ops.saveTemplate(t),
   );
-  ipcMain.handle(CH.deleteTemplate, (_e, name: string) =>
+  reg.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // babysit-ticket's `tt.sh create` (the Board's Claude session uses the same command).
-  ipcMain.handle(CH.ticketCreate, async (_e, raw: unknown) => {
+  reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;
     const str = (v: unknown, n: number) =>
       typeof v === "string" ? v.slice(0, n) : "";
@@ -1435,7 +1444,7 @@ function registerIpc(): void {
   });
   // Create with Claude (Board): the ticket session's folder gets the boards, the people, where
   // the + was clicked, and a create command it may run without asking.
-  ipcMain.handle(CH.ticketBuilderPrepare, (_e, ctx: unknown) => {
+  reg.handle(CH.ticketBuilderPrepare, (_e, ctx: unknown) => {
     const cfg = latest?.config;
     if (!cfg)
       return {
@@ -1504,7 +1513,7 @@ function registerIpc(): void {
     return { ok: true, message: "ready", canContinue };
   });
   // Labels, milestones and people who can be assigned in a repo (the New ticket dialog), cached a while.
-  ipcMain.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {
+  reg.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {
     if (
       typeof repo !== "string" ||
       !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)
@@ -1551,7 +1560,7 @@ function registerIpc(): void {
     return meta;
   });
   // The + menu: the workspace and its repos, to open a terminal or a session in.
-  ipcMain.handle(CH.workspaceRepos, () => {
+  reg.handle(CH.workspaceRepos, () => {
     const seen = new Set<string>();
     return [paths.masterWorkspace, ...ops.repos()]
       .filter((p) => typeof p === "string" && p && existsSync(p))
@@ -1560,7 +1569,7 @@ function registerIpc(): void {
       .map((p) => ({ name: basename(p), path: p }));
   });
   // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
-  ipcMain.handle(CH.startClaude, async (_e, raw: unknown) => {
+  reg.handle(CH.startClaude, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as {
       name?: unknown;
       cwd?: unknown;
@@ -1625,39 +1634,39 @@ function registerIpc(): void {
     void sources.refreshAgents();
     return { ok: true, message: name };
   });
-  ipcMain.handle(
+  reg.handle(
     CH.resumeSession,
     (_e, id: string, name: string, cwd: string | null) =>
       resumeBg(id, name, cwd),
   );
-  ipcMain.handle(CH.resumeStopped, () => sources.resumeStopped());
-  ipcMain.handle(CH.tokensByDay, (_e, ids: unknown) =>
+  reg.handle(CH.resumeStopped, () => sources.resumeStopped());
+  reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
-  ipcMain.handle(CH.dismissStopped, () => sources.dismissStopped());
-  ipcMain.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s));
-  ipcMain.handle(CH.watchStop, (_e, id: unknown) =>
+  reg.handle(CH.dismissStopped, () => sources.dismissStopped());
+  reg.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s));
+  reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string" ? watches.stop(id) : false,
   );
-  ipcMain.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
+  reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
-  ipcMain.handle(CH.prSummary, (_e, url: string) => github.prSummary(url));
+  reg.handle(CH.prSummary, (_e, url: string) => github.prSummary(url));
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
-  ipcMain.handle(CH.shellPrepare, (_e, dir: unknown) =>
+  reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
     typeof dir === "string" && dir && dir === getConfig().workspace
       ? toDefaultBranch(run, dir)
       : { ok: true, message: null },
   );
-  ipcMain.handle(CH.ticketMemory, (_e, ticket: unknown) => {
+  reg.handle(CH.ticketMemory, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
     return t ? sources.ticketMemory(t) : [];
   });
-  ipcMain.handle(CH.issueBody, (_e, ticket: unknown) => {
+  reg.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
     return t ? github.issueBody(t) : { ok: false, message: "bad ticket" };
   });
-  ipcMain.handle(
+  reg.handle(
     CH.assignIssue,
     async (_e, issue: unknown, login: string, current: string[]) => {
       const t = asTicket(issue);
@@ -1667,7 +1676,7 @@ function registerIpc(): void {
       return r;
     },
   );
-  ipcMain.handle(CH.assign, (_e, req: AssignRequest) => {
+  reg.handle(CH.assign, (_e, req: AssignRequest) => {
     // The template picked in the Start dialog: the new session copies it instead of the default.
     if (
       typeof req?.workflow === "string" &&
@@ -1677,14 +1686,14 @@ function registerIpc(): void {
       workflows().setPending(req.name, req.workflow);
     return startAssign(cli, req);
   });
-  ipcMain.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
+  reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
-  ipcMain.handle(CH.refresh, () => sources.refreshGithub(true));
-  ipcMain.handle(CH.boardRefresh, () => sources.refreshGithub(true));
-  ipcMain.handle(CH.setupCheck, () => setupCheck());
-  ipcMain.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
-  ipcMain.handle(CH.ghAccounts, () => ghAccounts());
-  ipcMain.handle(CH.ghSwitch, async (_e, login: string) => {
+  reg.handle(CH.refresh, () => sources.refreshGithub(true));
+  reg.handle(CH.boardRefresh, () => sources.refreshGithub(true));
+  reg.handle(CH.setupCheck, () => setupCheck());
+  reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
+  reg.handle(CH.ghAccounts, () => ghAccounts());
+  reg.handle(CH.ghSwitch, async (_e, login: string) => {
     const { accounts } = await ghAccounts();
     if (!accounts.some((a) => a.login === login))
       return { ok: false, message: `gh is not logged in to ${login}` };
@@ -1697,7 +1706,7 @@ function registerIpc(): void {
       ? { ok: true, message: `gh now uses ${login}` }
       : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
   });
-  ipcMain.handle(CH.ghOwners, async () => {
+  reg.handle(CH.ghOwners, async () => {
     // Straight to gh, not the shared cache: it is not per account.
     const [user, orgs] = await Promise.all([
       run("gh", ["api", "user", "--jq", ".login"], { timeoutMs: 20_000 }),
@@ -1727,8 +1736,8 @@ function registerIpc(): void {
         : {}),
     };
   });
-  ipcMain.handle(CH.configDetectAll, () => cli.configDetectAll());
-  ipcMain.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
+  reg.handle(CH.configDetectAll, () => cli.configDetectAll());
+  reg.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === "string"
       ? cli.configDetect(
           owner.trim(),
@@ -1736,19 +1745,19 @@ function registerIpc(): void {
         )
       : { ok: false, message: "owner required" },
   );
-  ipcMain.handle(CH.configSave, async (_e, patch: unknown) => {
+  reg.handle(CH.configSave, async (_e, patch: unknown) => {
     const r = await cli.configSave(patch);
     if (r.ok) sources.loadConfig();
     return r;
   });
-  ipcMain.handle(CH.pickFolder, async (_e, start: unknown) => {
+  reg.handle(CH.pickFolder, async (_e, start: unknown) => {
     const r = await dialog.showOpenDialog(win!, {
       properties: ["openDirectory", "createDirectory"],
       defaultPath: typeof start === "string" && start ? start : homedir(),
     });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
-  ipcMain.handle(CH.hooksInstall, (_e, which: HookStatus) => {
+  reg.handle(CH.hooksInstall, (_e, which: HookStatus) => {
     const r = installHooks(paths.claudeSettings, paths.home, {
       ticket: !!which?.ticket,
       pr: !!which?.pr,
@@ -1757,7 +1766,7 @@ function registerIpc(): void {
     sources.setHooks(hookStatus(paths.claudeSettings));
     return r;
   });
-  ipcMain.handle(CH.skillReinstall, (_e, name: unknown) => {
+  reg.handle(CH.skillReinstall, (_e, name: unknown) => {
     if (typeof name !== "string")
       return { ok: false, message: "bad skill name" };
     const r = reinstallSkill(
@@ -1775,7 +1784,7 @@ function registerIpc(): void {
     refreshSkills();
     return r;
   });
-  ipcMain.handle(CH.summaryGet, (_e, key: string) => {
+  reg.handle(CH.summaryGet, (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { summary: null, stale: false };
     const summary = summaries.get(s.sessionId);
@@ -1783,7 +1792,7 @@ function registerIpc(): void {
     const size = t && existsSync(t) ? statSync(t).size : 0;
     return { summary, stale: !!summary && size > summary.size };
   });
-  ipcMain.handle(CH.summaryMake, async (_e, key: string) => {
+  reg.handle(CH.summaryMake, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
     const f = sources.sessionFacts(s.sessionId, s.key);
@@ -1798,7 +1807,7 @@ function registerIpc(): void {
       prs: f.prs,
     });
   });
-  ipcMain.handle(CH.summaryPost, async (_e, key: string) => {
+  reg.handle(CH.summaryPost, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
     if (s.issue === null)
@@ -1823,7 +1832,7 @@ function registerIpc(): void {
       ? { ok: true, message: r.stdout.trim() || "posted" }
       : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
   });
-  ipcMain.handle(CH.workflowGet, () => ({
+  reg.handle(CH.workflowGet, () => ({
     hooks: collectHooks(dirname(paths.claudeSettings), [
       paths.masterWorkspace,
       ...ops.repos(),
@@ -1837,11 +1846,11 @@ function registerIpc(): void {
     triggers: workflows().triggers(),
     monitors: workflows().monitors(),
   }));
-  ipcMain.handle(CH.workflowSave, (_e, raw: unknown) => {
+  reg.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
     return syncWorkflowHooks();
   });
-  ipcMain.handle(
+  reg.handle(
     CH.workflowTemplateSave,
     (_e, id: unknown, name: unknown, raw: unknown) => {
       const tid = workflows().saveTemplate(
@@ -1854,14 +1863,14 @@ function registerIpc(): void {
       return r.ok ? { ok: true, message: "template saved", id: tid } : r;
     },
   );
-  ipcMain.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
+  reg.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
     if (typeof id !== "string" || !workflows().deleteTemplate(id))
       return { ok: false, message: "no such template" };
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
   });
   // The builder: its folder gets the format, the skills and the open workflow before it starts.
-  ipcMain.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
+  reg.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
     const t =
       (typeof templateId === "string" && workflows().template(templateId)) ||
       workflows().template(DEFAULT_TEMPLATE);
@@ -1895,9 +1904,9 @@ function registerIpc(): void {
     }
     return { ok: true, message: "ready", canContinue };
   });
-  ipcMain.handle(CH.workflowDraftGet, () => builderDraft);
+  reg.handle(CH.workflowDraftGet, () => builderDraft);
   // Discard asks first: it throws away the draft and every trigger and skill Claude made for it.
-  ipcMain.handle(CH.workflowDraftDiscard, async () => {
+  reg.handle(CH.workflowDraftDiscard, async () => {
     const d = builderDraft;
     if (!d) {
       clearDraft();
@@ -1935,7 +1944,7 @@ function registerIpc(): void {
   });
   // Apply (to the open workflow) or save as a new template: install the draft's triggers and
   // skills first, then save the workflow, then clear the draft.
-  ipcMain.handle(CH.workflowDraftApply, (_e, target: unknown) => {
+  reg.handle(CH.workflowDraftApply, (_e, target: unknown) => {
     readDraft(true);
     const d = builderDraft;
     if (!d) return { ok: false, message: "no draft" };
@@ -2002,13 +2011,13 @@ function registerIpc(): void {
       message: `saved${extra.length ? `, with ${extra.join(", ")} installed` : ""}${hooks.ok ? "" : ` (hooks: ${hooks.message})`}`,
     };
   });
-  ipcMain.handle(CH.workflowTriggerDelete, (_e, id: unknown) => {
+  reg.handle(CH.workflowTriggerDelete, (_e, id: unknown) => {
     if (typeof id !== "string" || !workflows().deleteTrigger(id))
       return { ok: false, message: "no such trigger" };
     syncWorkflowHooks();
     return { ok: true, message: "trigger deleted" };
   });
-  ipcMain.handle(CH.workflowStatus, (_e, sid: unknown) => {
+  reg.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
     const s = latest?.sessions.find((x) => x.sessionId === sid);
     const doc = workflows().sessionDoc(sid);
@@ -2039,10 +2048,10 @@ function registerIpc(): void {
       ...flowProgress(flow, events, stoppedAt, working, watching),
     };
   });
-  ipcMain.handle(CH.sessionWorkflowGet, (_e, sid: unknown) =>
+  reg.handle(CH.sessionWorkflowGet, (_e, sid: unknown) =>
     validSessionId(sid) ? workflows().sessionDoc(sid) : null,
   );
-  ipcMain.handle(
+  reg.handle(
     CH.sessionWorkflowSave,
     (_e, sid: unknown, raw: unknown, from: unknown) => {
       if (!validSessionId(sid)) return { ok: false, message: "bad session" };
@@ -2055,7 +2064,7 @@ function registerIpc(): void {
       return r.ok ? { ok: true, message: "saved for this session" } : r;
     },
   );
-  ipcMain.handle(CH.skillRemove, (_e, name: unknown) => {
+  reg.handle(CH.skillRemove, (_e, name: unknown) => {
     if (typeof name !== "string")
       return { ok: false, message: "bad skill name" };
     const r = removeSkill(paths.bundledSkills, paths.skillsDir, name);
@@ -2075,35 +2084,35 @@ function registerIpc(): void {
     refreshSkills();
     return r;
   });
-  ipcMain.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) =>
+  reg.handle(CH.teamPrsRefresh, (_e, maxAgeMs: unknown) =>
     typeof maxAgeMs === "number" && maxAgeMs > 0
       ? sources.refreshTeamPrs(maxAgeMs)
       : sources.refreshTeamPrs(0, true),
   );
-  ipcMain.handle(
+  reg.handle(
     CH.linkSession,
     (_e, issue: unknown, sessionId: string, cwd: string | null) =>
       linkSession(issue, sessionId, cwd),
   );
-  ipcMain.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
-  ipcMain.on(CH.setFocus, (_e, id: string | null) => {
+  reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
+  reg.on(CH.setFocus, (_e, id: string | null) => {
     focused = id;
     sources.setFocus(id);
   });
-  ipcMain.on(CH.setVisible, (_e, ids: string[]) => sources.setVisible(ids));
-  ipcMain.on(CH.openExternal, (_e, url: string) => {
+  reg.on(CH.setVisible, (_e, ids: string[]) => sources.setVisible(ids));
+  reg.on(CH.openExternal, (_e, url: string) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
-  ipcMain.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
-  ipcMain.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
-  ipcMain.handle(CH.accountSignIn, (_e, p: unknown) => {
+  reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
+  reg.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
+  reg.handle(CH.accountSignIn, (_e, p: unknown) => {
     if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
   });
-  ipcMain.handle(CH.accountCancel, () => account.cancel());
-  ipcMain.handle(CH.accountReopen, () => account.reopen());
-  ipcMain.handle(CH.accountUseCode, () => account.useCode());
-  ipcMain.handle(CH.accountProviders, () => account.providers());
-  ipcMain.handle(CH.accountEmail, (_e, a: unknown) => {
+  reg.handle(CH.accountCancel, () => account.cancel());
+  reg.handle(CH.accountReopen, () => account.reopen());
+  reg.handle(CH.accountUseCode, () => account.useCode());
+  reg.handle(CH.accountProviders, () => account.providers());
+  reg.handle(CH.accountEmail, (_e, a: unknown) => {
     const x = (a ?? {}) as Record<string, unknown>;
     if (
       typeof x.email !== "string" || x.email.length > 254 ||
@@ -2114,9 +2123,9 @@ function registerIpc(): void {
       return { ok: false, message: "invalid input" };
     return account.signInEmail(x.email, x.password, x.create, x.name as string | undefined);
   });
-  ipcMain.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
-  ipcMain.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
-  ipcMain.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
+  reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
+  reg.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
+  reg.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
     if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
     const choice = await dialog.showMessageBox(win!, {
       type: "warning",
@@ -2130,7 +2139,7 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return stopBg(bgId);
   });
-  ipcMain.handle(
+  reg.handle(
     CH.stopOtherSession,
     async (_e, pid: unknown, name: string) => {
       if (typeof pid !== "number" || !(await isClaudePid(pid)))
@@ -2155,7 +2164,7 @@ function registerIpc(): void {
         : { ok: true, message: "stopped" };
     },
   );
-  ipcMain.handle(CH.stopSessions, async (_e, keys: unknown) => {
+  reg.handle(CH.stopSessions, async (_e, keys: unknown) => {
     const want = new Set(
       Array.isArray(keys)
         ? keys.filter((k): k is string => typeof k === "string")
@@ -2210,13 +2219,13 @@ function registerIpc(): void {
           message: `stopped ${stopped.length} session${stopped.length === 1 ? "" : "s"}`,
         };
   });
-  ipcMain.handle(CH.setManualStatus, (_e, key: unknown, status: unknown) =>
+  reg.handle(CH.setManualStatus, (_e, key: unknown, status: unknown) =>
     typeof key === "string" && key.length < 200
       ? sources.setManualStatus(key, status)
       : { ok: false, message: "bad session" },
   );
-  ipcMain.handle(CH.statuslineInstall, () => installHook());
-  ipcMain.handle(CH.statuslineUninstall, () => {
+  reg.handle(CH.statuslineInstall, () => installHook());
+  reg.handle(CH.statuslineUninstall, () => {
     const r = uninstallStatusline(statuslineOpts());
     sources.statuslineInstalled = isInstalled(
       paths.claudeSettings,
@@ -2224,19 +2233,19 @@ function registerIpc(): void {
     );
     return r;
   });
-  ipcMain.handle(CH.masterStart, () => startMaster());
-  ipcMain.handle(
+  reg.handle(CH.masterStart, () => startMaster());
+  reg.handle(
     CH.ptyOpen,
     (_e, id: string, spec: PaneSpec, cols: number, rows: number) =>
       ptys.open(id, spec, cols, rows),
   );
-  ipcMain.on(CH.ptyWrite, (_e, id: string, data: string) =>
+  reg.on(CH.ptyWrite, (_e, id: string, data: string) =>
     ptys.write(id, data),
   );
-  ipcMain.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) =>
+  reg.on(CH.ptyResize, (_e, id: string, cols: number, rows: number) =>
     ptys.resize(id, cols, rows),
   );
-  ipcMain.on(CH.ptyClose, (_e, id: string) => ptys.close(id));
+  reg.on(CH.ptyClose, (_e, id: string) => ptys.close(id));
 }
 
 function createWindow(): void {
@@ -2463,7 +2472,7 @@ app.whenReady().then(async () => {
   const capture = process.env.MASTERDECK_CAPTURE;
   if (capture) {
     // Test runs only: the capture script can ask for named screenshots along the way.
-    ipcMain.handle("test:shot", async (_e, name: string) => {
+    reg.handle("test:shot", async (_e, name: string) => {
       const img = await win?.webContents.capturePage();
       const file = join(
         dirname(capture),

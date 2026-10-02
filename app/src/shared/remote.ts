@@ -2,15 +2,21 @@
  * The wire contract between MasterDeck, this backend and its clients. MasterDeck keeps a copy of
  * this file (app/src/shared/remote.ts); change both together and bump PROTOCOL_VERSION when an old
  * desktop could no longer talk to a new server.
+ * PROTOCOL_VERSION 3 adds browsers; the hub still accepts MIN_PROTOCOL desktops.
  */
 import { z } from 'zod'
 
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
+export const MIN_PROTOCOL = 2
 export const MAX_TEXT = 10_000
+export const MAX_FRAME = 1_400_000
 
 const id = z.string().min(1).max(300)
 const key = z.string().min(1).max(200)
 const text = z.string().max(MAX_TEXT)
+/** An end-to-end encrypted frame between a browser and the Mac: opaque to the server. */
+const frameData = z.string().max(MAX_FRAME)
+const browserId = z.string().min(1).max(100)
 
 /** C0/C1 control characters except newline and tab: a terminal would act on them. */
 // eslint-disable-next-line no-control-regex
@@ -190,7 +196,13 @@ export interface RemoteSnapshot {
 // ---- Messages ----
 
 export const DesktopMsg = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('hello'), deviceId: z.string().min(1).max(100), appVersion: z.string().max(40), protocol: z.number().int() }),
+  z.object({
+    t: z.literal('hello'),
+    deviceId: z.string().min(1).max(100),
+    appVersion: z.string().max(40),
+    protocol: z.number().int(),
+    macPublicKey: z.string().regex(/^B[A-Za-z0-9_-]{86}$/).optional(),
+  }),
   z.object({ t: z.literal('snapshot'), data: z.record(z.string(), z.unknown()) }),
   z.object({
     t: z.literal('result'),
@@ -203,15 +215,23 @@ export const DesktopMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('itemAnswered'), itemId: z.string().min(1).max(100), answer: clean(MAX_TEXT).min(1), by: z.string().max(40) }),
   z.object({ t: z.literal('itemDismissed'), itemId: z.string().min(1).max(100) }),
   z.object({ t: z.literal('ping') }),
+  z.object({ t: z.literal('frame'), b: browserId, d: frameData }),
+  z.object({ t: z.literal('browserDecision'), id: browserId, allow: z.boolean() }),
+  z.object({ t: z.literal('browserClose'), b: browserId }),
 ])
 export type DesktopMsg = z.infer<typeof DesktopMsg>
 
 export type ServerToDesktop =
-  | { t: 'welcome'; pending: Command[] }
+  | { t: 'welcome'; pending: Command[]; user?: { id: string; email: string } }
   | { t: 'command'; cmd: Command }
   | { t: 'items'; items: ExternalItem[] }
   | { t: 'pong' }
   | { t: 'error'; code: string; message: string }
+  | { t: 'frame'; b: string; d: string }
+  | { t: 'open'; b: string; name: string; publicKey: string }
+  | { t: 'close'; b: string }
+  | { t: 'browserRequest'; id: string; name: string; publicKey: string; email: string; expiresAt: number }
+  | { t: 'browserRevoked'; id: string }
 
 export const ClientMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('resync') })])
 export type ClientMsg = z.infer<typeof ClientMsg>
@@ -235,4 +255,13 @@ export type ServerToClient =
   | { t: 'desktop'; desktop: DesktopStatus }
   | { t: 'command'; record: CommandRecord }
   | { t: 'item'; item: ExternalItem }
+  | { t: 'error'; code: string; message: string }
+
+export const BrowserMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('frame'), d: frameData }), z.object({ t: z.literal('ping') })])
+export type BrowserMsg = z.infer<typeof BrowserMsg>
+
+export type ServerToBrowser =
+  | { t: 'frame'; d: string }
+  | { t: 'desktop'; desktop: DesktopStatus }
+  | { t: 'pong' }
   | { t: 'error'; code: string; message: string }
