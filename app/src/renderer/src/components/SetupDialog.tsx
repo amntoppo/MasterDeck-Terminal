@@ -7,9 +7,11 @@ import type { SetupTool } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 import { TerminalView } from './TerminalView'
+import { AccountPanel } from './AccountPanel'
+import { canAdvance } from './stepRules'
 
 
-const STEPS = ['Tools', 'GitHub account', 'Repos & boards', 'Preferences'] as const
+const STEPS = ['Account', 'Tools', 'GitHub account', 'Repos & boards', 'Preferences'] as const
 
 const INSTALLER_PANE = 'setup:installer'
 
@@ -33,7 +35,7 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 ]
 
 /**
- * First-run setup (a four-step wizard; from Settings → Set up MasterDeck, the same sections as one page): tools, the gh account, the
+ * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the gh account, the
  * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master, babysit-ticket and MasterDeck share.
@@ -41,10 +43,12 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onClose: () => void; firstRun: boolean }) {
   const cfg = state.config
   const [step, setStep] = useState(0)
+  const signedIn = state.account?.kind === 'signedIn'
+  const [remoteOn, setRemoteOn] = useState(true)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Step 1: tools, each checked on its own.
+  // Step 2: tools, each checked on its own.
   const [tools, setTools] = useState<Partial<Record<SetupTool, { ok: boolean; detail: string }>>>({})
   const checkTools = () => {
     setTools({})
@@ -73,7 +77,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   // The session goes when the dialog does, or when the user leaves the tools step.
   useEffect(() => () => deck().ptyClose(INSTALLER_PANE), [])
 
-  // Step 2: the gh account.
+  // Step 3: the gh account.
   const [accounts, setAccounts] = useState<GhAccount[] | null>(null)
   const [accountsErr, setAccountsErr] = useState<string | null>(null)
   const [login, setLogin] = useState('')
@@ -87,7 +91,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   }
   const account = accounts?.find((a) => a.login === login) ?? null
 
-  // Step 3: the repos and boards to follow (every org gh can reach), which repo is primary, and
+  // Step 4: the repos and boards to follow (every org gh can reach), which repo is primary, and
   // what each board's statuses mean.
   const [found, setFound] = useState<DetectAll | null>(null)
   const [finding, setFinding] = useState(false)
@@ -131,7 +135,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     }
   }
 
-  // Step 4.
+  // Step 5.
   // A fresh install starts from the folder master would use anyway.
   const [workspace, setWorkspace] = useState(cfg.workspace || state.masterWorkspace || '')
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
@@ -149,8 +153,10 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
   const go = async (to: number) => {
     setMsg(null)
-    if (to === 1 && accounts === null) void loadAccounts()
-    if (to === 2) {
+    if (to === 2 && accounts === null) void loadAccounts()
+    // Leaving Account for the next step (not Skip): apply the Remote switch.
+    if (firstRun && step === 0 && to === 1 && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
+    if (to === 3) {
       // The chosen account becomes gh's active one: MasterDeck, master and the sessions all use it.
       if (account && !account.active) {
         setBusy(true)
@@ -233,12 +239,13 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   // Settings view: one line under each section's name.
   const bad = TOOLS.filter((t) => tools[t.id]?.ok === false).length
   const sectionSummary = [
+    signedIn && state.account?.kind === 'signedIn' ? state.account.email : 'not signed in',
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
     login || (accounts === null ? '—' : 'not logged in'),
     primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(boards).length} board${Object.keys(boards).length === 1 ? '' : 's'}`}` : 'none chosen',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
-  const canNext = step === 0 ? toolsDone : step === 1 ? !!account && account.ok : step === 2 ? !!primaryRepo && !finding : true
+  const canNext = canAdvance(step, { signedIn, toolsDone, ghOk: !!account && account.ok, hasPrimaryRepo: !!primaryRepo, finding })
   const Spin = ({ text }: { text: string }) => (
     <div className="tool-row wait">
       <span className="tool-mark">
@@ -277,6 +284,18 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         <div className={firstRun ? '' : 'setup-section'}>
 
         {step === 0 && (
+          <>
+            <div className="meta">Sign in to use MasterDeck from your phone — see and answer your sessions anywhere. Optional; everything else works without it.</div>
+            <AccountPanel account={state.account} />
+            {firstRun && signedIn && (
+              <label className="mpick-row">
+                <input type="checkbox" checked={remoteOn} onChange={(e) => setRemoteOn(e.target.checked)} /> Turn on Remote
+              </label>
+            )}
+          </>
+        )}
+
+        {step === 1 && (
           <>
             <div className="meta">{toolsDone ? 'MasterDeck uses these tools.' : 'Checking the tools MasterDeck uses…'}</div>
             <div className="tool-list">
@@ -348,7 +367,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
           </>
         )}
 
-        {step === 1 && (
+        {step === 2 && (
           <>
             <div className="meta">
               The GitHub account MasterDeck, master and your sessions use: gh's active account. Choosing another one here switches it.
@@ -399,7 +418,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
           </>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <>
             <div className="meta">
               The repositories whose issues you work on, and the project boards that track them. Tickets from all of them show on
@@ -514,7 +533,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
             <label>Workspace (master and new shells start here; your repos live in or next to it)</label>
             <div className="row-inputs">
@@ -570,6 +589,11 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
           {firstRun && step > 0 && (
             <button className="btn" disabled={busy} onClick={() => void go(step - 1)}>
               Back
+            </button>
+          )}
+          {firstRun && step === 0 && !signedIn && (
+            <button className="btn" disabled={busy} onClick={() => void go(1)}>
+              Skip for now
             </button>
           )}
           {!firstRun ? null : step < STEPS.length - 1 ? (
