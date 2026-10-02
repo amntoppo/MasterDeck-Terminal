@@ -1,3 +1,4 @@
+import { compare } from 'fast-json-patch'
 import { checkCommitment, E2EError, macHandshake, randomNonce, words, type Channel, type Hs1, type Hs3 } from '@shared/e2e'
 import { CH } from '@shared/ipc'
 import { ARG_FIX, DECK_ACCESS, type Access } from '@shared/remoteDeck'
@@ -75,6 +76,10 @@ interface Conn {
   replaced: boolean
   calls: number[]
   lastState?: string
+  /** Patch-capable state subscriber: `sent` is our own parsed copy of lastState (the evp base), `n` its number. */
+  patches: boolean
+  sent?: unknown
+  n: number
   stateAt: number
   stateNext?: unknown
   stateTimer?: NodeJS.Timeout
@@ -122,7 +127,6 @@ export class BrowserBridge {
     for (const c of this.conns.values()) {
       if (c.state !== 'open' || !c.subs.has(ch)) continue
       if (ch === CH.state) {
-        // ponytail: full state per change; JSON-patch if AppState size becomes a problem.
         stateJson ??= JSON.stringify(args[0])
         // A pending timer always takes the latest (A sent, B, A → nothing stale goes out); it dedupes when it fires.
         if (c.stateTimer || stateJson !== c.lastState) this.queueState(c, args[0])
@@ -294,7 +298,7 @@ export class BrowserBridge {
       else close()
       return
     }
-    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], stateAt: 0, ptyBuf: new Map() })
+    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], patches: false, n: 0, stateAt: 0, ptyBuf: new Map() })
   }
 
   private async onFrame(b: string, d: string): Promise<void> {
@@ -312,7 +316,7 @@ export class BrowserBridge {
       return
     }
     if (c.state !== 'open' || !msg || typeof msg !== 'object') return
-    if (msg.k === 'call' || msg.k === 'sub' || msg.k === 'unsub') {
+    if (msg.k === 'call' || msg.k === 'sub' || msg.k === 'unsub' || msg.k === 'resync') {
       const t = this.now()
       c.calls = c.calls.filter((x) => x > t - 1000)
       c.calls.push(t)
@@ -325,6 +329,9 @@ export class BrowserBridge {
       case 'visible':
         c.visible = msg.on === true
         if (!c.visible) c.ptyBuf.clear()
+        return
+      case 'resync':
+        if (msg.ev === CH.state && c.patches && c.lastState !== undefined) void this.sendState(c, c.lastState, true)
         return
     }
   }
@@ -376,6 +383,11 @@ export class BrowserBridge {
     const perId = EVENTS.get(m.ev)
     if (perId === undefined || perId !== (typeof m.arg === 'string' && m.arg.length > 0 && m.arg.length <= 200)) return
     const key = perId ? `${m.ev}:${m.arg}` : m.ev
+    if (m.ev === CH.state) {
+      c.patches = m.k === 'sub' && m.patches === 1
+      c.sent = undefined
+      c.n = 0
+    }
     if (m.k === 'unsub') {
       c.subs.delete(key)
       if (perId) c.ptyBuf.delete(m.arg!)
@@ -384,25 +396,40 @@ export class BrowserBridge {
     c.subs.add(key)
     if (m.ev === CH.state) {
       const s = await this.d.call(CH.getState, [])
-      if (this.conns.get(c.b) !== c || c.state !== 'open') return
-      c.lastState = JSON.stringify(s)
-      c.stateAt = this.now()
-      await this.out(c, { k: 'ev', ev: CH.state, v: [s] })
+      if (this.conns.get(c.b) !== c || c.state !== 'open' || !c.subs.has(key)) return
+      await this.sendState(c, JSON.stringify(s), true, s)
     }
   }
 
   private queueState(c: Conn, s: unknown): void {
     c.stateNext = s
     if (c.stateTimer) return
-    const wait = Math.max(0, c.stateAt + (this.d.stateMs ?? 500) - this.now())
+    const wait = Math.max(0, c.stateAt + (this.d.stateMs ?? 1500) - this.now())
     c.stateTimer = setTimeout(() => {
       c.stateTimer = undefined
       const json = JSON.stringify(c.stateNext)
-      if (c.state !== 'open' || json === c.lastState) return
-      c.lastState = json
-      c.stateAt = this.now()
-      void this.out(c, { k: 'ev', ev: CH.state, v: [c.stateNext] })
+      if (c.state !== 'open' || !c.subs.has(CH.state) || json === c.lastState) return
+      void this.sendState(c, json, false, c.stateNext)
     }, wait)
+  }
+
+  /**
+   * One state message. An old web: the full state, as always. A patch subscriber: numbered; `evp` with the diff from
+   * what it last got, or a full (`full`, no base yet, or the diff isn't much smaller than the state).
+   */
+  private sendState(c: Conn, json: string, full: boolean, s?: unknown): Promise<void> {
+    c.lastState = json
+    c.stateAt = this.now()
+    if (!c.patches) return this.out(c, { k: 'ev', ev: CH.state, v: [s ?? JSON.parse(json)] })
+    // Our own copy: the caller's object may change later, and the web sees the JSON round-trip anyway.
+    const next: unknown = JSON.parse(json), prev = c.sent
+    c.sent = next
+    if (!full && prev !== undefined) {
+      const ops = compare(prev as object, next as object)
+      if (!ops.length) return Promise.resolve() // same content, other key order
+      if (JSON.stringify(ops).length <= json.length * 0.6) return this.out(c, { k: 'evp', ev: CH.state, n: ++c.n, ops })
+    }
+    return this.out(c, { k: 'ev', ev: CH.state, v: [next], n: ++c.n })
   }
 
   private flushPty(c: Conn): void {

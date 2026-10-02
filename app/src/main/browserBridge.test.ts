@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { applyPatch, deepClone } from 'fast-json-patch'
 import { browserHandshake, commitment, generateStatic, publicRaw, randomNonce, words, type Channel } from '@shared/e2e'
 import { CH } from '@shared/ipc'
 import { DECK_ACCESS } from '@shared/remoteDeck'
@@ -630,6 +631,115 @@ describe('BrowserBridge fix round 1', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('BrowserBridge state patches', () => {
+  const stateMsgs = async (c: Awaited<ReturnType<typeof connectBrowser>>) => (await c.recv()).filter((x) => x.ev === CH.state)
+  const big = (i: number) => ({ rows: Array.from({ length: 50 }, (_, j) => ({ id: j, text: 'row ' + j })), tick: i })
+
+  it('a web without the patches flag gets full state messages as before (no n, no evp)', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.sub(CH.state)
+    w.bridge.event(CH.state, [big(1)])
+    await tick(100)
+    expect(await stateMsgs(c)).toEqual([{ k: 'ev', ev: CH.state, v: [big(0)] }, { k: 'ev', ev: CH.state, v: [big(1)] }])
+  })
+
+  it('a patch-capable web gets full (n=1), then evp (n=2) whose ops turn the first into the second', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [big(1)])
+    await tick(100)
+    const [first, second] = await stateMsgs(c)
+    expect(first).toEqual({ k: 'ev', ev: CH.state, v: [big(0)], n: 1 })
+    expect(second).toMatchObject({ k: 'evp', ev: CH.state, n: 2 })
+    expect(applyPatch(deepClone(first.v[0]), second.ops, true).newDocument).toEqual(big(1))
+  })
+
+  it('an empty diff sends nothing', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [big(0)])
+    w.bridge.event(CH.state, [{ tick: 0, rows: big(0).rows }]) // same content, other key order
+    await tick(100)
+    expect(await stateMsgs(c)).toHaveLength(1)
+  })
+
+  it('a diff larger than ~60% of the full state goes out as a full with the next n', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = { a: 1, b: 2 }
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [{ c: 3, d: 4 }])
+    await tick(100)
+    expect((await stateMsgs(c))[1]).toEqual({ k: 'ev', ev: CH.state, v: [{ c: 3, d: 4 }], n: 2 })
+  })
+
+  it('resync answers with a full of the last state and the next n; patches continue from it', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [big(1)])
+    await tick(100)
+    await c.send({ k: 'resync', ev: CH.state })
+    await tick(5)
+    expect((await stateMsgs(c))[2]).toEqual({ k: 'ev', ev: CH.state, v: [big(1)], n: 3 })
+    w.bridge.event(CH.state, [big(2)])
+    await tick(100)
+    const p = (await stateMsgs(c))[3]
+    expect(p).toMatchObject({ k: 'evp', n: 4 })
+    expect(applyPatch(big(1), p.ops, true).newDocument).toEqual(big(2))
+  })
+
+  it('resync without a state subscription is ignored', async () => {
+    const w = await world()
+    const c = await connected(w)
+    await c.send({ k: 'resync', ev: CH.state })
+    await tick(5)
+    expect(await stateMsgs(c)).toEqual([])
+  })
+
+  it('unsub then sub starts again at a full n=1', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    await c.send({ k: 'unsub', ev: CH.state })
+    w.state = big(5)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    expect((await stateMsgs(c))[1]).toEqual({ k: 'ev', ev: CH.state, v: [big(5)], n: 1 })
+  })
+
+  it('per connection: a patch browser and a full browser each get their own stream', async () => {
+    const w = await world()
+    const a = await connected(w)
+    const { browser } = await approve(w, 'b2')
+    const b = await connectBrowser(w, 'b2', browser)
+    w.state = big(0)
+    await a.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [big(1)])
+    await tick(100)
+    w.state = big(1)
+    await b.sub(CH.state) // joins later, no patches
+    w.bridge.event(CH.state, [big(2)])
+    await tick(100)
+    expect((await stateMsgs(a)).map((m) => [m.k, m.n])).toEqual([['ev', 1], ['evp', 2], ['evp', 3]])
+    expect((await stateMsgs(b)).map((m) => [m.k, m.n, m.v[0].tick])).toEqual([['ev', undefined, 1], ['ev', undefined, 2]])
+  })
+
+  it('resync counts toward the rate limit', async () => {
+    const w = await world()
+    const c = await connected(w)
+    for (let i = 0; i < 200; i++) await c.send({ k: 'resync', ev: CH.state })
+    expect(await c.call('getState', [])).toMatchObject({ ok: false, e: 'too many calls' })
   })
 })
 
