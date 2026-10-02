@@ -208,6 +208,21 @@ export const DesktopMsg = z.discriminatedUnion('t', [
     macPublicKey: z.string().regex(PUBKEY_RE).optional(),
   }),
   z.object({ t: z.literal('snapshot'), data: z.record(z.string(), z.unknown()) }),
+  /** JSON Patch against the server's stored snapshot at version `base`; answered by snapshotAck or snapshotNeeded. */
+  z.object({
+    t: z.literal('snapshotPatch'),
+    base: z.number().int().min(1),
+    ops: z
+      .array(
+        z.object({
+          op: z.enum(['add', 'remove', 'replace', 'move', 'copy', 'test']),
+          path: z.string().max(1000).regex(/^(\/.*)?$/s),
+          value: z.unknown().optional(),
+          from: z.string().optional(),
+        }),
+      )
+      .max(2000),
+  }),
   z.object({
     t: z.literal('result'),
     cmdId: z.string().min(1).max(100),
@@ -232,6 +247,8 @@ export type ServerToDesktop =
   | { t: 'command'; cmd: Command }
   | { t: 'items'; items: ExternalItem[] }
   | { t: 'pong' }
+  | { t: 'snapshotAck'; v: number }
+  | { t: 'snapshotNeeded'; reason: string }
   | { t: 'error'; code: string; message: string }
   | { t: 'frame'; b: string; d: string }
   | { t: 'open'; b: string; name: string; publicKey: string }
