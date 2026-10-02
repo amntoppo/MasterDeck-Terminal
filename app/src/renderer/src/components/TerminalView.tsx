@@ -171,7 +171,11 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       if (term.current) deck().ptyResize(paneId, term.current.cols, term.current.rows)
       if (focusOnShow) term.current?.focus()
     })
-    return () => cancelAnimationFrame(id)
+    return () => {
+      cancelAnimationFrame(id)
+      // Hidden or gone: this view no longer holds the PTY's size (cols 0 resizes nothing; spec §4 size rule).
+      deck().ptyResize(paneId, 0, 0)
+    }
   }, [visible, focusOnShow, paneId])
 
   return (

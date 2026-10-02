@@ -1,5 +1,5 @@
-import { it, expect } from 'vitest'
-import { remoteSettings, knownDirsOnly } from './remoteGuards'
+import { describe, it, expect } from 'vitest'
+import { remoteSettings, knownDirsOnly, MacPanes } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
   expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
@@ -10,4 +10,22 @@ it('non-object payload keeps every current setting', () => {
 })
 it('keeps only known dirs, normalising trailing slashes', () => {
   expect(knownDirsOnly(['/etc', '/w/repo/', '/w/other'], ['/w/repo', '/w/other'])).toEqual(['/w/repo', '/w/other'])
+})
+
+describe('MacPanes (spec §4 size rule)', () => {
+  it("a browser's size applies only while the Mac's window does not show the pane", () => {
+    const m = new MacPanes()
+    expect(m.remoteSize('p', 80, 24)).toEqual([80, 24])
+    m.local('p', 120) // the window shows it
+    expect(m.remoteSize('p', 80, 24)).toBeNull()
+    expect(m.remoteSize('other', 80, 24)).toEqual([80, 24])
+    m.local('p', 0) // hidden on the Mac
+    expect(m.remoteSize('p', 80, 24)).toEqual([80, 24])
+    m.local('p', 100)
+    m.closed('p')
+    expect(m.remoteSize('p', 80, 24)).toEqual([80, 24])
+  })
+  it('a size of 0 never resizes', () => {
+    expect(new MacPanes().remoteSize('p', 0, 0)).toBeNull()
+  })
 })
