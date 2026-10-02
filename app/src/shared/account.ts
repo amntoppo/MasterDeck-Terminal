@@ -27,5 +27,6 @@ export function parseIdentity(text: string): Identity | null {
 
 export type AccountState =
   | { kind: 'signedOut'; message: string | null }
-  | { kind: 'pending'; provider: Provider; userCode: string; verifyUrl: string; expiresAt: number }
+  | { kind: 'pending'; provider: Provider; mode: 'browser'; expiresAt: number }
+  | { kind: 'pending'; provider: Provider; mode: 'code'; userCode: string; verifyUrl: string; expiresAt: number }
   | { kind: 'signedIn'; email: string; provider: Provider; deviceId: string }
