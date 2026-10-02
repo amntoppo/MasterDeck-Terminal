@@ -246,14 +246,13 @@ describe('BrowserBridge channel', () => {
     expect(w.call).not.toHaveBeenCalled()
   })
 
-  it('ptyOpen only for the kinds the first-release screens use', async () => {
+  it('ptyOpen for the screen kinds; unknown kinds refused', async () => {
     const w = await world()
     const c = await connected(w)
-    expect(await c.call('ptyOpen', ['p1', { kind: 'attach', bgId: 'x' }, 80, 24])).toMatchObject({ ok: true })
-    expect(await c.call('ptyOpen', ['p2', { kind: 'shell', cwd: '/' }, 80, 24])).toMatchObject({ ok: true })
-    for (const kind of ['installer', 'builder', 'ticket-builder'])
-      expect(await c.call('ptyOpen', ['p3', { kind }, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
-    expect(w.call).toHaveBeenCalledTimes(2)
+    const specs = [{ kind: 'attach', bgId: 'x' }, { kind: 'shell', cwd: '/' }, { kind: 'ticket-builder', resume: false }, { kind: 'builder', resume: false }, { kind: 'installer', tools: [] }]
+    for (const spec of specs) expect(await c.call('ptyOpen', ['p', spec, 80, 24])).toMatchObject({ ok: true })
+    expect(await c.call('ptyOpen', ['p9', { kind: 'bogus' }, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
+    expect(w.call).toHaveBeenCalledTimes(specs.length)
   })
 
   it('send-mode methods run without a ret', async () => {

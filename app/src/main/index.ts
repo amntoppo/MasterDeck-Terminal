@@ -58,6 +58,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
+import { knownDirsOnly, stripRemoteSettings } from "./remoteGuards";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -1368,8 +1369,20 @@ function registerIpc(): void {
   });
   reg.handle(
     CH.standupCommits,
-    (_e, since: number, dirs: string[], until?: number) =>
-      ops.standupCommits(since, [...dirs, ...ops.repos()], until),
+    (e, since: number, dirs: string[], until?: number) =>
+      ops.standupCommits(
+        since,
+        [
+          ...(isRemote(e)
+            ? knownDirsOnly(dirs, [
+                ...ops.repos(),
+                ...(latest?.sessions ?? []).flatMap((x) => (x.cwd ? [x.cwd] : [])),
+              ])
+            : dirs),
+          ...ops.repos(),
+        ],
+        until,
+      ),
   );
   reg.handle(CH.janitor, (_e, dirs: string[], force?: boolean) =>
     ops.janitor(dirs, force === true),
@@ -1702,7 +1715,13 @@ function registerIpc(): void {
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
-  reg.handle(CH.setSettings, (_e, s: unknown) => sources.setSettings(s));
+  reg.handle(CH.setSettings, (e, s: unknown) =>
+    sources.setSettings(
+      isRemote(e) && s && typeof s === "object"
+        ? stripRemoteSettings(s as Record<string, unknown>)
+        : s,
+    ),
+  );
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string" ? watches.stop(id) : false,
   );
@@ -1964,7 +1983,7 @@ function registerIpc(): void {
   });
   reg.handle(CH.workflowDraftGet, () => builderDraft);
   // Discard asks first: it throws away the draft and every trigger and skill Claude made for it.
-  reg.handle(CH.workflowDraftDiscard, async () => {
+  reg.handle(CH.workflowDraftDiscard, async (e) => {
     const d = builderDraft;
     if (!d) {
       clearDraft();
@@ -1988,7 +2007,7 @@ function registerIpc(): void {
           ]
         : []),
     ];
-    const choice = await dialog.showMessageBox(win!, {
+    const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
       type: "warning",
       buttons: ["Cancel", "Discard"],
       defaultId: 0,

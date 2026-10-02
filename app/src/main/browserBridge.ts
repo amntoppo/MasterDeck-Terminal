@@ -33,8 +33,8 @@ const MAX_UNREVEALED = 3
 const MAX_NONCES_PER_HOUR = 10
 const MAX_CALLS_PER_SEC = 200
 const REQUEST_TTL = 5 * 60_000
-/** PaneSpec kinds the first-release web screens open: session/master panes (attach) and shell tabs. */
-const WEB_PANES = new Set(['attach', 'shell'])
+/** PaneSpec kinds the web screens open: session/master panes, shell tabs, and the ticket/workflow builders and tool installer. */
+const WEB_PANES = new Set(['attach', 'shell', 'ticket-builder', 'builder', 'installer'])
 const PER_ID = [CH.ptyData, CH.ptyExit]
 /** PTY data per frame: even all-escaped JSON (6x) stays under MAX_FRAME after GCM + base64. */
 const PTY_CHUNK = 128 * 1024

@@ -19,8 +19,11 @@ describe('DECK_ACCESS', () => {
     const chans = new Set(Object.values(CH))
     for (const [m, a] of Object.entries(DECK_ACCESS)) if (a.kind === 'remote' || a.kind === 'event') expect(chans, m).toContain(a.ch)
   })
-  it('first-release allowlist is exactly the spec list', () => {
+  it('allowlist is stage 1 plus stage 2; identity and native-window methods stay blocked', () => {
     const remote = Object.entries(DECK_ACCESS).filter(([, a]) => a.kind === 'remote' || a.kind === 'event').map(([m]) => m).sort()
-    expect(remote).toEqual(['answerMenu','approve','defaultModel','dismissStopped','getState','inboxAct','linkSession','masterStart','onFocusSession','onPtyData','onPtyExit','onShowInboxItem','onShowNeedsYou','onState','ptyClose','ptyOpen','ptyResize','ptyWrite','queueEdit','queueList','queueSendNext','reject','resumeSession','resumeStopped','sendText','setManualStatus','setStatus','startClaude','stopOtherSession','stopSession','stopSessions','templates','workspaceRepos'].sort())
+    const stage1 = ['answerMenu','approve','defaultModel','dismissStopped','getState','inboxAct','linkSession','masterStart','onFocusSession','onPtyData','onPtyExit','onShowInboxItem','onShowNeedsYou','onState','ptyClose','ptyOpen','ptyResize','ptyWrite','queueEdit','queueList','queueSendNext','reject','resumeSession','resumeStopped','sendText','setManualStatus','setStatus','startClaude','stopOtherSession','stopSession','stopSessions','templates','workspaceRepos']
+    const stage2 = ['setSprint','refresh','refreshBoard','refreshTeamPrs','ticketBuilderPrepare','saveTemplate','deleteTemplate','workflowGet','issueBody','draftAssign','ticketMemory','assign','assignIssue','ticketCreate','ticketRepoMeta','prSummary','tokensByDay','janitor','removeWorktree','removeSession','searchHistory','historyTranscript','workflowSave','workflowTemplateSave','workflowTemplateDelete','workflowBuilderPrepare','workflowDraftGet','workflowDraftDiscard','workflowDraftApply','workflowStatus','workflowTriggerDelete','sessionWorkflowGet','sessionWorkflowSave','watchStop','summaryGet','summaryMake','summaryPost','standupCommits','getSettings','setSettings','hooksInstall','statuslineInstall','statuslineUninstall','skillReinstall','skillRemove','configDetect','configDetectAll','configSave','setupTool','setupCheck','startHere','onWorkflowDraft','onTicketsCreated']
+    expect(remote).toEqual([...stage1, ...stage2].sort())
+    for (const m of ['pickFolder','openEditor','accountSignIn','ghSwitch','ghAccounts','ghOwners','onAutoOpen','browserDecide','browserRevoke'] as const) expect(DECK_ACCESS[m].kind, m).toBe('blocked')
   })
 })
