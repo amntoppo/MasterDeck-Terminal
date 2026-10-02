@@ -73,7 +73,7 @@ const blank = (ch: string) => ch === '' || ch === ' '
 /**
  * Where the output stream stands between chunks: in ground state, or inside an escape sequence or string that the
  * next chunk finishes. Our overlay may only go into the stream in ground state (else it would cut the program's
- * sequence in two). Also follows the G0/G1 charsets and SO/SI.
+ * sequence in two). Also follows the G0-G3 charsets and the shifts that lock one into GL.
  */
 interface Scan {
   st: 'ground' | 'esc' | 'int' | 'csi' | 'osc' | 'dcs'
@@ -94,10 +94,9 @@ function scan(sc: Scan, data: string): void {
     else if (c === 0x9d) sc.st = 'osc'
     else if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) sc.st = 'dcs'
     else if (c === 0x1b) (sc.st = 'esc'), (sc.int = '') // also ends a string (ESC \\)
-    else if (sc.st === 'ground') {
-      if (c === 0x0e) sc.gl = 1
-      else if (c === 0x0f) sc.gl = 0
-    } else if (sc.st === 'esc') {
+    // SO/SI are C0 controls: xterm executes them inside ESC and CSI sequences too (not inside strings).
+    else if ((c === 0x0e || c === 0x0f) && sc.st !== 'osc' && sc.st !== 'dcs') sc.gl = c === 0x0e ? 1 : 0
+    else if (sc.st === 'esc') {
       if (ch === '[') sc.st = 'csi'
       else if (ch === ']') sc.st = 'osc'
       else if (ch === 'P' || ch === '_' || ch === '^' || ch === 'X') sc.st = 'dcs'
@@ -186,7 +185,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   let preds: Pred[] = []
   /** The overlay of `preds` is in the write stream (drawn or about to be). */
   let drawn = false
-  /** Our writes whose effect on the buffer is not parsed yet: real output and undos. */
+  /** Our writes whose effect on the buffer is not parsed yet: real output (held or queued) and clears. */
   let busy = 0
   /** The viewport's scroll position the predictions' rows refer to. */
   let baseY = 0
@@ -208,9 +207,21 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const ground = () => sc.st === 'ground'
   const ascii = () => sc.g[sc.gl] === 'B'
   let alive = true
-  /** Our overlay writes (draws, undos, undo-prefixed output) not parsed yet: a resize must wait for them. */
+  /**
+   * Overlay writes (draws and undos) not parsed yet. A resize must wait for them, since xterm resizes at once but
+   * parses writes later. While any is in flight, real output is held in `held` rather than queued behind it, so a
+   * deferred resize still lands before that output, as it would in a plain terminal.
+   */
   let overlayInflight = 0
   const rawResize = term.resize
+  /** Real output held back while an overlay write is unparsed, so a resize can still slot in before it. */
+  let held: (() => void)[] = []
+  const release = () => {
+    if (overlayInflight > 0) return
+    const h = held
+    held = []
+    h.forEach((f) => f())
+  }
   const lat: number[] = []
   let keyAt: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -261,7 +272,8 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   }
 
   function allowed(kind: Kind, x: number, y: number): boolean {
-    if (y < 0 || y >= term.rows) return false
+    // x === cols is xterm's pending-wrap state, which an undo's cursor move cannot put back.
+    if (y < 0 || y >= term.rows || x >= term.cols) return false
     // Full-screen apps: only characters, and only once their echo is learned (Backspace and arrows mean too many things there).
     if (kind !== 'char' && b().type === 'alternate') return false
     const cells = model(y)
@@ -293,7 +305,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     }
     const last = list[list.length - 1]
     overlayInflight++
-    term.write(s + cup(to(last), last.y) + penSeq() + END, () => overlayInflight--)
+    term.write(s + cup(to(last), last.y) + penSeq() + END, () => (overlayInflight--, release()))
     drawn = true
   }
 
@@ -319,6 +331,8 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     preds = []
     drawn = false
     if (!undo && !cb) return
+    // Nothing of ours unparsed: the buffer holds no overlay, so the callback can run now, ahead of queued output.
+    if (!undo && overlayInflight === 0) return cb?.()
     busy++
     if (undo) overlayInflight++
     term.write(undo, () => {
@@ -326,6 +340,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       try {
         cb?.()
       } finally {
+        release()
         busy--
         if (busy === 0) idle()
       }
@@ -444,10 +459,12 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       drawn = false
       scan(sc, data)
       busy++
-      if (undo) overlayInflight++
-      term.write(undo + data, () => {
+      if (undo) {
+        overlayInflight++
+        term.write(undo, () => (overlayInflight--, release()))
+      }
+      const send = () => term.write(data, () => {
         busy--
-        if (undo) overlayInflight--
         if (keyAt !== null) {
           lat.push(now() - keyAt)
           if (lat.length > 8) lat.shift()
@@ -456,6 +473,8 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
         if (busy === 0) idle()
         cb?.()
       })
+      if (overlayInflight > 0) held.push(send)
+      else send()
     },
     clear,
     pending: () => preds.length,

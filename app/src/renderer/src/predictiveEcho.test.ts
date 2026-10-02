@@ -756,4 +756,107 @@ describe('predictive echo', () => {
       expect(term.cols).toBe(25)
     })
   })
+
+  describe('review round 4', () => {
+    const snapAll = (t: Terminal) => [`${t.cols}x${t.rows}`, ...snap(t)]
+
+    // The reviewer's /tmp/sdrev/rz3.ts: output queued behind an overlay draw, then a resize. xterm resizes at once
+    // and parses queued writes later, so the plain terminal parses that output at the new size.
+    for (const [name, data] of [
+      ['a cursor move', 'a\x1b[1;35HZ'],
+      ['a long line', 'a' + 'x'.repeat(30) + '\r\n$ '],
+    ] as const)
+      for (const via of ['direct', 'clear'] as const)
+        for (const enabled of [true, false])
+          it(`resize (${via}${enabled ? '' : ', switched off'}) with ${name} queued behind an overlay draw`, async () => {
+            const { term, ref, p, out, type } = setup({ enabled })
+            await out('$ ')
+            await type('a') // overlay draw queued, not parsed
+            p.write(data)
+            ref.write(data)
+            if (via === 'clear') p.clear(() => term.resize(20, ROWS))
+            else term.resize(20, ROWS)
+            ref.resize(20, ROWS)
+            await settle(term)
+            await settle(term)
+            await settle(ref)
+            await new Promise<void>((r) => p.clear(r))
+            expect(snapAll(term)).toEqual(snapAll(ref))
+          })
+
+    // The reviewer's /tmp/sdrev/so.ts: xterm executes SO inside ESC and CSI sequences too.
+    for (const [name, pre] of [
+      ['a CSI', '\x1b)0$ xyz\x1b[3D\x1b[\x0em'],
+      ['an ESC with an intermediate', '\x1b)0$ xyz\x1b[3D\x1b(\x0eB'],
+      ['ground', '\x1b)0$ xyz\x1b[3D\x0e'],
+    ] as const)
+      it(`SO inside ${name} locks in G1: nothing predicted`, async () => {
+        const { p, out, type, same } = setup()
+        await out(pre)
+        await type('q')
+        expect(p.shown()).toBe(0)
+        await out('\r\n')
+        await new Promise<void>((r) => p.clear(r))
+        same()
+      })
+
+    // The reviewer's /tmp/sdrev/wrap.ts: at the pending-wrap position (cursor x === cols) an undo cannot put it back.
+    for (const [name, key] of [
+      ['Backspace', '\x7f'],
+      ['Left', '\x1b[D'],
+    ] as const)
+      it(`${name} at the pending-wrap position is not predicted`, async () => {
+        const { p, out, type, same } = setup()
+        await out('$ ' + 'x'.repeat(COLS - 2))
+        await type(key)
+        expect(p.shown()).toBe(0)
+        await new Promise<void>((r) => p.clear(r))
+        await out('Q')
+        same()
+      })
+
+    // A seeded slice of the reviewer's /tmp/sdrev/fuzz.ts (3000 runs there): keys, output, resizes both ways, settles.
+    it('fuzz: 300 seeded runs end exactly as a plain terminal', async () => {
+      const outs = ['a', 'b', 'ab', '\r\n$ ', '\x1b[1;30HZ', '\x1b[K', '\b \b', 'x'.repeat(25), '\x1b[2D', '\x1b[31m', '\x1b[0m']
+      const keys = ['a', 'b', 'c', '\x7f', '\x1b[D', '\x1b[C']
+      const bad: number[] = []
+      for (let run = 0; run < 300; run++) {
+        let seed = run + 1
+        const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
+        const term = newTerm()
+        const ref = newTerm()
+        let clock = 5000
+        const p = createPredictor(term as unknown as PredictorTerm, { now: () => clock })
+        p.write('$ ')
+        ref.write('$ ')
+        for (let i = 0; i < 25; i++) {
+          const r = rnd()
+          clock += 50
+          if (r < 0.4) p.onInput(keys[Math.floor(rnd() * keys.length)])
+          else if (r < 0.75) {
+            const o = outs[Math.floor(rnd() * outs.length)]
+            p.write(o)
+            ref.write(o)
+          } else if (r < 0.85) {
+            const c = 15 + Math.floor(rnd() * 30)
+            const rw = 4 + Math.floor(rnd() * 4)
+            if (rnd() < 0.5) term.resize(c, rw)
+            else p.clear(() => term.resize(c, rw))
+            ref.resize(c, rw)
+          } else {
+            await settle(term)
+            await settle(ref)
+            clock += 3000
+          }
+        }
+        await settle(term)
+        await settle(ref)
+        await new Promise<void>((r) => p.clear(r))
+        await settle(term)
+        if (JSON.stringify(snapAll(term)) !== JSON.stringify(snapAll(ref))) bad.push(run)
+        p.dispose()
+      }
+      expect(bad).toEqual([])
+    }, 20_000)
+  })
 })
