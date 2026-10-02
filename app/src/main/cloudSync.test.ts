@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 /** A fake backend: records messages per connection; `reject` answers the upgrade with 401. */
-async function server(o: { reject?: boolean; welcome?: unknown[] } = {}) {
+async function server(o: { reject?: boolean; welcome?: unknown[]; nopong?: boolean } = {}) {
   const wss = new WebSocketServer({
     port: 0,
     verifyClient: (info, cb) => (o.reject || info.req.headers.authorization !== `Bearer ${TOKEN}` ? cb(false, 401, 'unauthorized') : cb(true)),
@@ -31,7 +31,7 @@ async function server(o: { reject?: boolean; welcome?: unknown[] } = {}) {
       const m = JSON.parse(String(raw))
       got.push(m)
       if (m.t === 'hello') ws.send(JSON.stringify({ t: 'welcome', pending: o.welcome ?? [] }))
-      if (m.t === 'ping') ws.send(JSON.stringify({ t: 'pong' }))
+      if (m.t === 'ping' && !o.nopong) ws.send(JSON.stringify({ t: 'pong' }))
     })
   })
   const port = (wss.address() as { port: number }).port
@@ -139,6 +139,9 @@ describe('CloudSync', () => {
     const { s, statuses } = sync('http://127.0.0.1:1')
     s.start()
     await until(() => statuses.some((x) => x.conn === 'connecting' && !!x.message))
+    await until(() => s.status().message !== null && s.status().message!.startsWith('cannot reach the backend'))
+    await new Promise((r) => setTimeout(r, 100))
+    expect(s.status().message).toMatch(/^cannot reach the backend/)
     s.stop()
     expect(s.status().conn).toBe('off')
   })
@@ -157,5 +160,53 @@ describe('CloudSync', () => {
     expect(srv.got.filter((m) => m.t === 'snapshot')).toHaveLength(0)
     expect(log.mock.calls.filter((c) => String(c[0]).includes('still over the limit'))).toHaveLength(1)
     expect(s.status().conn).toBe('connected')
+  })
+
+  it('a throwing run does not wedge the command chain', async () => {
+    const srv = await server({ welcome: [{ id: 'a', type: 'session.stop', args: { key: 'k' } }, { id: 'b', type: 'session.stop', args: { key: 'k' } }] })
+    const { s } = sync(srv.url, { run: async (c) => { if (c.id === 'a') throw new Error('boom'); return { ok: true, message: 'fine' } } })
+    s.start()
+    await until(() => srv.got.filter((m) => m.t === 'result').length === 2)
+    expect(srv.got.find((m) => m.t === 'result' && m.cmdId === 'a')).toMatchObject({ ok: false, message: 'failed: Error: boom' })
+    expect(srv.got.find((m) => m.t === 'result' && m.cmdId === 'b')).toMatchObject({ ok: true })
+  })
+
+  it('oversize drops the stale snapshot and the message clears once a snapshot is sent', async () => {
+    const srv = await server()
+    const { s, statuses } = sync(srv.url, { limit: 5000 })
+    s.start()
+    await until(() => statuses.some((x) => x.conn === 'connected'))
+    const mk = (n: number) => ({ takenAt: 1, board: null, inbox: { open: [], snoozed: [], history: [] }, sessions: Array.from({ length: n }, (_, i) => ({ key: `k${i}`, issue: null, name: 'x'.repeat(1024) })) }) as unknown as RemoteSnapshot
+    s.push(mk(1))
+    await until(() => srv.got.some((m) => m.t === 'snapshot'))
+    s.push(mk(2000))
+    await until(() => s.status().message === 'snapshot too large to send')
+    srv.conns[0].close(1011, 'boom')
+    await until(() => srv.conns.length === 2)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(srv.got.filter((m) => m.t === 'snapshot')).toHaveLength(1)
+    s.push(mk(1))
+    await until(() => srv.got.filter((m) => m.t === 'snapshot').length === 2)
+    expect(s.status().message).toBeNull()
+  })
+
+  it('does not resend when only takenAt changed', async () => {
+    const srv = await server()
+    const { s, statuses } = sync(srv.url)
+    s.start()
+    await until(() => statuses.some((x) => x.conn === 'connected'))
+    s.push(snap(1))
+    await until(() => srv.got.some((m) => m.t === 'snapshot'))
+    s.push(snap(2))
+    await new Promise((r) => setTimeout(r, 80))
+    expect(srv.got.filter((m) => m.t === 'snapshot')).toHaveLength(1)
+  })
+
+  it('terminates a half-open socket when pings go unanswered', async () => {
+    const srv = await server({ nopong: true })
+    const { s } = sync(srv.url, { pingMs: 40 })
+    s.start()
+    await until(() => srv.conns.length === 2, 3000)
+    expect(srv.got.filter((m) => m.t === 'hello').length).toBeGreaterThanOrEqual(2)
   })
 })

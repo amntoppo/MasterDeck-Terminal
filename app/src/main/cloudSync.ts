@@ -34,7 +34,10 @@ export class CloudSync {
   private debounce: NodeJS.Timeout | null = null
   private pending: RemoteSnapshot | null = null
   private lastJson: string | null = null
-  private sentJson: string | null = null
+  private lastKey: string | null = null
+  private sentKey: string | null = null
+  private lastRx = 0
+  private welcomed = new WeakSet<WebSocket>()
   private chain: Promise<void> = Promise.resolve()
   private trimLogged = false
   private oversizeLogged = false
@@ -95,7 +98,7 @@ export class CloudSync {
 
   private flush(): void {
     if (this.pending) {
-      const { json, trimmed, oversize } = fitSnapshot(this.pending, this.o.limit ?? SNAPSHOT_LIMIT)
+      const { snap, json, trimmed, oversize } = fitSnapshot(this.pending, this.o.limit ?? SNAPSHOT_LIMIT)
       this.pending = null
       if (trimmed.length && !this.trimLogged) {
         this.trimLogged = true
@@ -106,15 +109,18 @@ export class CloudSync {
           this.oversizeLogged = true
           this.o.log?.('remote: snapshot still over the limit after trimming; not sent')
         }
+        this.lastJson = null
+        this.lastKey = null
         this.set({ message: 'snapshot too large to send' })
         return
       }
       this.lastJson = json
+      this.lastKey = JSON.stringify({ ...snap, takenAt: 0 })
     }
-    if (!this.lastJson || this.lastJson === this.sentJson || !this.ready || !this.ws) return
+    if (!this.lastJson || this.lastKey === this.sentKey || !this.ready || !this.ws) return
     this.ws.send(`{"t":"snapshot","data":${this.lastJson}}`)
-    this.sentJson = this.lastJson
-    this.set({ lastSyncAt: Date.now() })
+    this.sentKey = this.lastKey
+    this.set({ lastSyncAt: Date.now(), ...(this.st.message === 'snapshot too large to send' ? { message: null } : {}) })
   }
 
   private connect(): void {
@@ -127,23 +133,31 @@ export class CloudSync {
       ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION }))
     })
     ws.on('unexpected-response', (_req, res) => {
+      if (this.ws !== ws) return
       const code = res.statusCode ?? 0
       this.set({ conn: 'error', message: code === 401 || code === 403 ? `the backend rejected the token (${code})` : `the backend answered ${code}` })
       ws.removeAllListeners('close')
       ws.on('error', () => {})
       ws.terminate()
-      this.later(true)
+      this.later(code === 401 || code === 403)
     })
-    ws.on('message', (raw) => this.onMessage(ws, String(raw)))
+    ws.on('message', (raw) => {
+      if (this.ws !== ws) return
+      this.lastRx = Date.now()
+      this.onMessage(ws, String(raw))
+    })
     ws.on('error', (e) => {
+      if (this.ws !== ws) return
       if (this.st.conn !== 'error') this.set({ conn: 'connecting', message: `cannot reach the backend: ${e.message}` })
     })
     ws.on('close', (code, reason) => {
       if (this.ws !== ws) return
+      const wasWelcomed = this.welcomed.has(ws)
       this.ready = false
       if (this.ping) clearInterval(this.ping)
       this.ping = null
       if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
+      else if (this.st.conn !== 'error' && !wasWelcomed && this.st.message?.startsWith('cannot reach')) this.set({ conn: 'connecting' })
       else if (this.st.conn !== 'error') this.set({ conn: 'connecting', message: `disconnected (${code}); reconnecting` })
       this.later(code === 4001)
     })
@@ -175,8 +189,17 @@ export class CloudSync {
         this.attempt = 0
         this.set({ conn: 'connected', message: null })
         if (this.ping) clearInterval(this.ping)
-        this.ping = setInterval(() => this.send({ t: 'ping' }), this.o.pingMs ?? 30_000)
-        this.sentJson = null
+        const pingMs = this.o.pingMs ?? 30_000
+        this.ping = setInterval(() => {
+          if (Date.now() - this.lastRx > 2 * pingMs) {
+            ws.terminate()
+            return
+          }
+          this.send({ t: 'ping' })
+        }, pingMs)
+        this.sentKey = null
+        this.welcomed.add(ws)
+        this.lastRx = Date.now()
         this.flush()
         for (const cmd of m.pending) this.enqueue(cmd)
         return
@@ -198,11 +221,17 @@ export class CloudSync {
   /** One at a time, in order; a result for a dropped socket goes out on the next one (the server re-sends). */
   private enqueue(cmd: Command): void {
     this.chain = this.chain.then(async () => {
-      const r = await this.o.run(cmd)
-      const msg: Record<string, unknown> = { t: 'result', cmdId: cmd.id, ok: r.ok, message: String(r.message ?? '').slice(0, 2000) }
-      if (r.status) msg.status = r.status
-      if (r.data !== undefined) msg.data = r.data
+      let msg: Record<string, unknown>
+      try {
+        const r = await this.o.run(cmd)
+        msg = { t: 'result', cmdId: cmd.id, ok: r.ok, message: String(r.message ?? '').slice(0, 2000) }
+        if (r.status) msg.status = r.status
+        if (r.data !== undefined) msg.data = r.data
+        JSON.stringify(msg)
+      } catch (e) {
+        msg = { t: 'result', cmdId: cmd.id, ok: false, message: `failed: ${String(e)}`.slice(0, 2000) }
+      }
       this.send(msg)
-    })
+    }).catch(() => {})
   }
 }
