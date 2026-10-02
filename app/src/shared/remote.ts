@@ -247,6 +247,16 @@ export const DesktopMsg = z.discriminatedUnion('t', [
 ])
 export type DesktopMsg = z.infer<typeof DesktopMsg>
 
+/** A remote client (phone app, API) connected to /v1/live. `name` is a label, never a credential. */
+export const LiveClient = z.object({
+  id: z.string().min(1).max(100),
+  kind: z.enum(['live', 'api']),
+  name: z.string().max(100),
+  device: z.string().max(80).nullable(),
+  since: z.number().int(),
+})
+export type LiveClient = z.infer<typeof LiveClient>
+
 export type ServerToDesktop =
   | { t: 'welcome'; pending: Command[]; user?: { id: string; email: string } }
   | { t: 'command'; cmd: Command }
@@ -261,6 +271,8 @@ export type ServerToDesktop =
   | { t: 'browserRequest'; id: string; name: string; email: string; commit: string; expiresAt: number }
   | { t: 'browserReveal'; id: string; publicKey: string; nonce: string }
   | { t: 'browserRevoked'; id: string }
+  /** Protocol 3: the remote clients now connected (newest first, at most 50); sent after welcome and on every change. */
+  | { t: 'clients'; clients: LiveClient[] }
 
 export const ClientMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('resync') })])
 export type ClientMsg = z.infer<typeof ClientMsg>
