@@ -36,6 +36,22 @@ describe('toRemoteSnapshot', () => {
     expect(volatileKey(mk(1, 10, 'idle', 1))).toBe(volatileKey(mk(2, 20, 'idle', 2)))
     expect(volatileKey(mk(1, 10, 'idle', 1))).not.toBe(volatileKey(mk(1, 10, 'working', 1)))
   })
+  it('volatileKey also ignores monitor counters and schedule nextAt, but not their identity', () => {
+    const mk = (events: number, last: number, nextAt: number, desc = 'ci') =>
+      toRemoteSnapshot(state({
+        sessions: [sess('a', 'idle')],
+        schedules: { 'a-sid': [{ id: 'j1', cron: '* * * * *', when: 'Every minute', prompt: 'p', recurring: true, sessionOnly: true, createdAt: 1, nextAt, expiresAt: 2 }] },
+        watches: [{ id: 'w1', sessionId: 'a-sid', description: desc, command: 'x', startedAt: 1, events, lastEventAt: last, queued: 0 }],
+      }), 'v', 1)
+    expect(volatileKey(mk(1, 10, 100))).toBe(volatileKey(mk(5, 50, 200)))
+    expect(volatileKey(mk(1, 10, 100))).not.toBe(volatileKey(mk(1, 10, 100, 'other')))
+  })
+  it('describePending text carries no ticking numbers (labels only)', () => {
+    const s = state({ sessions: [sess('a', 'working', { busyWith: 'monitor: ci', waitingOn: 'scheduled: Every 5 minutes' })] })
+    const r = toRemoteSnapshot(s, 'v', 1).sessions[0]
+    expect(r.busyWith).toBe('monitor: ci')
+    expect(r.waitingOn).toBe('scheduled: Every 5 minutes')
+  })
   it('keeps live sessions with cost, context, PRs, schedules and monitors', () => {
     const s = state({
       sessions: [sess('a', 'idle', { waitingOn: 'Monitor: ci' }), sess('gone', 'done')],

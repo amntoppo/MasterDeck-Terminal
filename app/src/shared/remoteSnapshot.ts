@@ -101,9 +101,19 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
   }
 }
 
-/** The snapshot with what changes every tick (time, cost, context) zeroed: equal keys = nothing worth sending now. */
+/** The snapshot with what ticks without meaning zeroed (time, cost, context, monitor counters, next-run times): equal keys = nothing worth sending now. */
 export function volatileKey(snap: RemoteSnapshot): string {
-  return JSON.stringify({ ...snap, takenAt: 0, sessions: snap.sessions.map((s) => ({ ...s, costUsd: 0, contextPct: 0 })) })
+  return JSON.stringify({
+    ...snap,
+    takenAt: 0,
+    sessions: snap.sessions.map((s) => ({
+      ...s,
+      costUsd: 0,
+      contextPct: 0,
+      schedules: s.schedules?.map((j) => ({ ...j, nextAt: 0 })),
+      monitors: s.monitors?.map((m) => ({ ...m, events: 0, lastEventAt: 0 })),
+    })),
+  })
 }
 
 const BODY_KEEP = 2000

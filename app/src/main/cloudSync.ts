@@ -16,7 +16,7 @@ export interface CloudSyncOpts {
   /** This Mac was signed out by the server (close 4003, HTTP 401/410); the line has stopped. */
   onSignedOut?: (message?: string) => void
   debounceMs?: number
-  /** Snapshots differing only in time, cost or context go out at most this often (default 5 s). */
+  /** Snapshots differing only in time, cost or context go out at most this often (default 15 s). */
   minVolatileMs?: number
   pingMs?: number
   backoff?: { min: number; max: number }
@@ -149,7 +149,7 @@ export class CloudSync {
     }
     if (!this.lastJson || this.lastKey === this.sentKey || !this.ready || !this.ws) return
     // Only cost/context moved: hold it to one send per minVolatileMs (deferred, never dropped).
-    const wait = this.sentAt + (this.o.minVolatileMs ?? 5000) - Date.now()
+    const wait = this.sentAt + (this.o.minVolatileMs ?? 15_000) - Date.now()
     if (this.sentKey !== null && this.lastVKey === this.sentVKey && wait > 0) {
       if (!this.defer)
         this.defer = setTimeout(() => {
