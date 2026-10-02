@@ -475,6 +475,52 @@ Stored in `~/.claude/masterdeck/settings.json`.
     Claude Code's monitors until it is restarted.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
     its events and a Stop button. With several, they open as a list.
+- **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
+  Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
+  it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the
+  session). Click one for its whole prompt. A job the session cancelled (CronDelete) disappears, and
+  an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
+  session itself.
+
+## Remote (phone)
+
+MasterDeck can connect out to your own backend (`masterdeck-backend`, a Cloudflare Worker) so a
+phone, curl or CI can see your sessions and act on them while you're away from the Mac.
+
+- **What it sends:** Tasks, Needs you and the board, as one snapshot (sent at most once a second,
+  and only when something changed). Never terminals, their output, the cost book or files.
+- **What can be done remotely:** answer, snooze or dismiss a Needs-you item (`inbox.act`,
+  `inbox.snooze`, `inbox.dismiss`); start a session from a board issue (`session.start`); stop or
+  resume a background session (`session.stop`, `session.resume`); message a session
+  (`session.send`); edit its queue (`queue.edit`); set its status (`session.setStatus`). Anything
+  else is refused as unsupported.
+  - `session.send` with `via: "queue"` (the default) waits until the session's turn is over (it goes
+    straight in if the turn is already over; needs the queue hook); `via: "now"` types it at once.
+  - **master-agent** can't be controlled remotely.
+  - Text isn't sent to a session that waits on a prompt (answer it from Needs you instead), and a
+    suspended session must be resumed first. Only background sessions can be stopped remotely, with
+    no confirmation on the Mac (the phone already asked).
+  - Text with control characters, or starting with `/` or `!`, is refused by the backend.
+- **While the Mac sleeps or MasterDeck is closed,** commands wait on the backend and run in order
+  when MasterDeck reconnects, each exactly once (MasterDeck remembers the last 500 in
+  `~/.claude/masterdeck/remote-done.json`). Until then you can cancel one from the API
+  (`DELETE /v1/commands/<id>`).
+- **Stale answers:** an answer or dismiss for an item that is no longer waiting (answered here
+  already, or its question changed) is dropped and the command shows as `stale`.
+- **Questions from the API:** items created with `POST /v1/items` show in Needs you as **ASKED**,
+  with their options and, if allowed, a reply box. Your answer goes back to the backend; when the
+  item names a session, the session also gets `[<title>] <answer>`. Such a card stays while it's
+  open, even if its session has ended.
+- **Setting it up:** Settings → Remote (phone): the backend address (`https://…`, or
+  `http://localhost:8787` for a local `wrangler dev`), the backend's `DESKTOP_TOKEN` (stored in
+  the Keychain, never in `settings.json`), then switch on **Connect to the backend**. It's off by
+  default.
+- **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
+  the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
+  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (the token was
+  rejected, or MasterDeck is too old for the backend), grey off.
+- **Security:** anyone with the backend's client token can drive your Claude sessions. Keep it
+  secret, and rotate it (`npx wrangler secret put CLIENT_TOKEN`) if it leaks.
 
 ## Links survive a resume
 

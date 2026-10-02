@@ -1,5 +1,12 @@
 import type { WatchInfo } from "@shared/watches";
 import {
+  liveSchedules,
+  newScheduleScan,
+  scanScheduleLines,
+  type ScheduleInfo,
+  type ScheduleScan,
+} from "@shared/schedules";
+import {
   existsSync,
   mkdirSync,
   readdirSync,
@@ -30,6 +37,7 @@ import {
   PR_VIEW_ARGS,
 } from "@shared/git";
 import { collectItems } from "@shared/inbox";
+import type { ExternalItem } from "@shared/remote";
 import { Inbox } from "./inbox";
 import {
   isStatusKey,
@@ -252,6 +260,7 @@ export class Sources {
       scan: PrScanState;
       wt: WorktreeScan;
       flow: FlowTrackState;
+      sched: ScheduleScan;
     }
   > = {};
   /** Worktree candidates per Session.key, from all its transcripts (a resume adds one). */
@@ -279,6 +288,8 @@ export class Sources {
   private skills: SkillStatus[] = [];
   private hooks: HookStatus = { ticket: false, pr: false, queue: false };
   private settings: Settings = DEFAULT_SETTINGS;
+  private externalItems: ExternalItem[] = [];
+  private remote: AppState["remote"] = undefined;
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
   private costDirty = false;
@@ -591,6 +602,17 @@ export class Sources {
       ok: true,
       message: status === null ? "automatic" : STATUS_TEXT[status as StatusKey],
     };
+  }
+
+  /** Needs-you items asked through the remote API (the backend's open list). */
+  setExternalItems(items: ExternalItem[]): void {
+    this.externalItems = items;
+    this.emit();
+  }
+
+  setRemote(r: AppState["remote"]): void {
+    this.remote = r;
+    this.emit();
   }
 
   /** Send the state again now (after an inbox action). */
@@ -1367,6 +1389,7 @@ export class Sources {
       scan: newPrScanState(),
       wt: newWorktreeScan(),
       flow: newFlowTrack(),
+      sched: newScheduleScan(),
     });
     // From the start of the transcript: a PR opened early in a long session counts too.
     const lines = readNewLines(f.st, Infinity);
@@ -1374,6 +1397,8 @@ export class Sources {
     scanWorktreeLines(lines, f.wt, homedir());
     // Where it is in its workflow: a resumed session's transcripts add up under one key.
     scanFlowLines(lines, f.flow);
+    // Scheduled jobs (CronCreate): from this transcript only, since session-only ones end with it.
+    scanScheduleLines(lines, f.sched);
     const track = (this.flowTracks[key] ??= newFlowTrack());
     for (const [t, at] of Object.entries(f.flow.reached))
       if (at && (track.reached[t as FlowTrigger] ?? 0) < at)
@@ -1389,6 +1414,13 @@ export class Sources {
     // Most recent last; a resumed session adds a second transcript to the same key.
     this.notePrs(key, f.scan.urls);
     return found;
+  }
+
+  /** Scheduled jobs the session's current transcript shows (see shared/schedules). */
+  private schedulesOf(sessionId: string, now: number): ScheduleInfo[] {
+    const tp = this.transcripts.find(sessionId, now);
+    const f = tp ? this.follows[tp] : undefined;
+    return f ? liveSchedules(f.sched, now) : [];
   }
 
   private flowTracks: Record<string, FlowTrackState> = {};
@@ -1730,10 +1762,13 @@ export class Sources {
       const s = this.activityOf(raw, now);
       // Monitors MasterDeck runs for it count like its own, once its turn is over.
       const mine = watches.filter((w) => w.sessionId === s.sessionId);
-      return mine.length &&
-        (s.state === "idle" || s.waitingOn || s.busyWith)
-        ? withMdWatches(s, mine)
-        : s;
+      const withW =
+        mine.length && (s.state === "idle" || s.waitingOn || s.busyWith)
+          ? withMdWatches(s, mine)
+          : s;
+      // Scheduled jobs (CronCreate) will wake it: waiting on those, not on you.
+      const jobs = s.state === "idle" ? this.schedulesOf(s.sessionId, now) : [];
+      return jobs.length ? withSchedules(withW, jobs) : withW;
     });
   }
 
@@ -1910,6 +1945,7 @@ export class Sources {
       prs: this.snapshot.prs.filter((p) => p.authorIsMe),
       sessionPrs,
       failures,
+      external: this.externalItems,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -1928,12 +1964,19 @@ export class Sources {
       proposals: this.proposals,
       master: deriveMaster(sessions),
       inbox: this.inbox.view(),
+      remote: this.remote,
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
       watches: this.watchInfo(),
+      schedules: Object.fromEntries(
+        sessions
+          .filter((s) => s.state !== "done")
+          .map((s) => [s.sessionId, this.schedulesOf(s.sessionId, now)] as const)
+          .filter((e) => e[1].length > 0),
+      ),
       hookInfo,
       sessionWorktrees: Object.fromEntries(
         sessions
@@ -2005,5 +2048,11 @@ export class Sources {
 /** A session that MasterDeck runs monitors for waits on them (shown like a monitor of its own). */
 function withMdWatches(s: Session, mine: WatchInfo[]): Session {
   const what = mine.map((w) => `MasterDeck monitor: ${w.description}`).join(" · ");
+  return { ...s, waitingOn: s.waitingOn ? `${s.waitingOn} · ${what}` : what };
+}
+
+/** An idle session with scheduled jobs waits on them (the next one first). */
+function withSchedules(s: Session, jobs: ScheduleInfo[]): Session {
+  const what = `scheduled: ${jobs.map((j) => j.when).join(" · ")}`;
   return { ...s, waitingOn: s.waitingOn ? `${s.waitingOn} · ${what}` : what };
 }

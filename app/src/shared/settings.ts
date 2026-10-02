@@ -12,6 +12,10 @@ export interface Settings {
   reviewQuietMinutes: number
   /** Who runs the monitors sessions arm: Claude Code (30 minutes each, re-armed) or MasterDeck (no limit, while it runs). */
   monitorsBy: 'claude' | 'masterdeck'
+  /** Send Tasks and Needs you to the remote backend, and run the commands it relays (Settings → Remote). */
+  remoteEnabled: boolean
+  /** The backend's address: https://…, or http://localhost for a local `wrangler dev`. */
+  remoteUrl: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,10 +28,18 @@ export const DEFAULT_SETTINGS: Settings = {
   afterRestart: 'ask',
   reviewQuietMinutes: 20,
   monitorsBy: 'claude',
+  remoteEnabled: false,
+  remoteUrl: '',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt
+
+function remoteUrl(v: unknown): string {
+  if (typeof v !== 'string') return ''
+  const u = v.trim().replace(/\/+$/, '').slice(0, 300)
+  return /^https:\/\/[^\s/]+(\/[^\s]*)?$/.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(u) ? u : ''
+}
 
 /** Fill gaps with defaults and keep numbers in sane ranges. */
 export function normalizeSettings(raw: unknown): Settings {
@@ -42,5 +54,7 @@ export function normalizeSettings(raw: unknown): Settings {
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
     monitorsBy: r.monitorsBy === 'masterdeck' ? 'masterdeck' : 'claude',
+    remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
+    remoteUrl: remoteUrl(r.remoteUrl),
   }
 }

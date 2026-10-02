@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { allowed, collectItems, inboxNotice, type InboxInput } from './inbox'
 import { DEFAULT_SETTINGS } from './settings'
+import { parseTicket } from './ticket'
+import type { ExternalItem } from './remote'
 import type { Pr, Proposal, Session } from './types'
 
 const NOW = 10_000_000
@@ -109,5 +111,32 @@ describe('collectItems', () => {
     expect(inboxNotice(e)).toMatchObject({ reply: true, target: { itemId: q.id } })
     const [h] = collectItems(input({ proposals: [prop({ status: 'held' })] }))
     expect(inboxNotice({ ...e, item: h })).toBeNull()
+  })
+})
+
+describe('external items', () => {
+  const ext = (over: Partial<ExternalItem> = {}): ExternalItem => ({
+    id: 'ext-1', title: 'Deploy?', body: 'prod', options: ['yes', 'no'], allowText: false, priority: 85, createdAt: 1, by: 'client:test',
+    state: 'open', answer: null, answeredBy: null, answeredAt: null, callbackStatus: 'none', callbackAttempts: 0, ticket: 'o/r#7', ...over,
+  })
+
+  it('become Needs-you items with their options', () => {
+    const [i] = collectItems(input({ external: [ext()] }))
+    expect(i).toMatchObject({ id: 'ext-1', kind: 'external', priority: 85, title: 'Deploy?', body: 'prod', ticket: parseTicket('o/r#7'), detail: { type: 'external' } })
+    expect(i.actions).toEqual([{ type: 'option', label: 'yes' }, { type: 'option', label: 'no' }])
+    expect(allowed(i, 'option')).toBe(true)
+    expect(allowed(i, 'reply')).toBe(true)
+  })
+
+  it('free text adds an Answer action', () => {
+    const [i] = collectItems(input({ external: [ext({ options: undefined, allowText: true, ticket: undefined })] }))
+    expect(i.actions).toEqual([{ type: 'reply', label: 'Answer' }])
+    expect(i.ticket).toBeNull()
+  })
+
+  it('stay while open even if their session is gone; a known session keeps its key', () => {
+    const items = collectItems(input({ sessions: [sess('a')], external: [ext({ id: 'e-gone', sessionKey: 'gone' }), ext({ id: 'e-known', sessionKey: 'a' })] }))
+    expect(items.find((x) => x.id === 'e-gone')?.sessionKey).toBeNull()
+    expect(items.find((x) => x.id === 'e-known')?.sessionKey).toBe('a')
   })
 })

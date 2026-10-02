@@ -51,6 +51,17 @@ import type {
 import { getConfig } from "@shared/appConfig";
 import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
 import { startAssign } from "./assign";
+import { randomUUID } from "node:crypto";
+import { RemoteCommands } from "./remoteCommands";
+import { CloudSync } from "./cloudSync";
+import { readToken, writeToken } from "./remoteToken";
+import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import {
+  externalAnswerAllowed,
+  optionMessage,
+  remoteTextAllowed,
+  sendMasterUp,
+} from "@shared/remoteGuard";
 import { toDefaultBranch } from "./defaultBranch";
 import {
   transcriptMessages,
@@ -245,6 +256,25 @@ const sources = new Sources(
       console.error(`workflow watch: ${String(e)}`);
     }
     win?.webContents.send(CH.state, state);
+    // The remote line must never break the state callback (notifications, badge, auto-open below).
+    try {
+      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+    } catch (e) {
+      console.error(`remote snapshot: ${String(e)}`);
+    }
+    try {
+      if (!remoteReady && sources.isHealthy("agents")) {
+        // The session list is in: commands that waited while MasterDeck was closed can run now.
+        remoteReady = true;
+        syncRemote();
+      } else if (
+        state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
+        state.settings.remoteUrl !== prev?.settings.remoteUrl
+      )
+        syncRemote();
+    } catch (e) {
+      console.error(`remote sync: ${String(e)}`);
+    }
     notify(diffEvents(prev, state, focused));
     // Dock badge: the Needs-you count.
     if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length);
@@ -440,6 +470,113 @@ async function answerMenuFor(
   return r;
 }
 
+const remoteTokenFile = () => join(paths.home, "remote-token");
+const remoteCommands = new RemoteCommands(
+  {
+    state: () => latest,
+    // remote = true: a client token is less trusted than the window (see runInboxAction).
+    inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
+    draftAssign: (t) => cli.draftAssign(t),
+    startAssign: (req) => startAssign(cli, req),
+    stopBg,
+    resume: (id, name, cwd) => resumeBg(id, name, cwd),
+    // Never relayed through master-agent: remote text goes straight to the session or not at all.
+    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+    queueEdit: (sessionId, edit) => {
+      const { ok, message } = editQueue(sessionId, edit);
+      return { ok, message };
+    },
+    setManualStatus: (key, status) => sources.setManualStatus(key, status),
+  },
+  join(paths.home, "remote-done.json"),
+);
+let cloud: CloudSync | null = null;
+let cloudKey = "";
+/** True once the first state with the session list exists; until then the backend is not dialled. */
+let remoteReady = false;
+
+function deviceId(): string {
+  const f = join(paths.home, "remote-device-id");
+  try {
+    const v = readFileSync(f, "utf8").trim();
+    if (v) return v;
+  } catch {
+    // first run
+  }
+  const v = randomUUID();
+  try {
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(f, v);
+  } catch (e) {
+    console.error(`remote device id not saved, using one for this run: ${String(e)}`);
+  }
+  return v;
+}
+
+/** Start, restart or stop the line to the backend to match Settings → Remote and the token. */
+function syncRemote(): void {
+  const s = latest?.settings ?? sources.getSettings();
+  const token = readToken(remoteTokenFile());
+  const key =
+    s.remoteEnabled && s.remoteUrl && token ? `${s.remoteUrl}\n${token}` : "";
+  if (key && key === cloudKey) return;
+  if (key && !remoteReady) {
+    // Pending commands arrive on connect; running them before the sessions load would fail them.
+    cloud?.stop();
+    cloud = null;
+    cloudKey = "";
+    sources.setRemote({ conn: "connecting", message: "waiting for sessions to load", lastSyncAt: null, hasToken: true });
+    return;
+  }
+  cloud?.stop();
+  cloud = null;
+  cloudKey = key;
+  sources.setExternalItems([]);
+  if (!key) {
+    sources.setRemote(remoteStatusWhenOff(s, !!token));
+    return;
+  }
+  cloud = new CloudSync({
+    url: s.remoteUrl,
+    token: token!,
+    deviceId: deviceId(),
+    appVersion: app.getVersion(),
+    run: (cmd) => remoteCommands.run(cmd),
+    onItems: (items) => sources.setExternalItems(items),
+    onStatus: (st) => sources.setRemote({ ...st, hasToken: true }),
+    log: (line) => console.log(line),
+  });
+  cloud.start();
+  if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
+}
+
+/** Stop a background session (no confirmation: callers ask first). */
+async function stopBg(bgId: string): Promise<CliResult> {
+  if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
+  const r = await run(claudeBin, ["stop", bgId], { timeoutMs: 30_000 });
+  // Read the session list now: a stopped session leaves the sidebar at once.
+  await sources.refreshAgents();
+  return r.code === 0
+    ? { ok: true, message: "stopped" }
+    : { ok: false, message: (r.stderr || r.stdout).trim() };
+}
+
+/** The inbox's act, shared by the window's IPC and the remote commands (`remote` = true). */
+async function inboxAct(
+  id: string,
+  type: string,
+  payload: Record<string, unknown>,
+  remote = false,
+): Promise<CliResult> {
+  const r = await sources.inbox.act(id, type, payload, (item, t, p) =>
+    runInboxAction(item, t, p, remote),
+  );
+  if (r.ok && type === "dismiss" && id.startsWith("ext-"))
+    cloud?.dismissItem(id);
+  sources.changed();
+  return r;
+}
+
 /**
  * Carry out an inbox item's action: the one path the Needs-you cards, notifications and (later) a
  * phone all use. The inbox has checked the item is still open; this checks the session is still in
@@ -449,9 +586,10 @@ async function runInboxAction(
   item: InboxItem,
   type: string,
   payload: Record<string, unknown>,
+  /** From a remote client: never relayed through master-agent, and its text must pass noEscape. */
+  remote = false,
 ): Promise<CliResult> {
-  const masterUp =
-    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const masterUp = sendMasterUp(remote, latest?.master.kind);
   const d = item.detail;
   const owner = (): Session | undefined => {
     if (item.sessionKey)
@@ -467,14 +605,38 @@ async function runInboxAction(
   switch (type) {
     case "reply":
     case "option": {
+      if (d.type === "external") {
+        const answer = (
+          type === "option" && typeof payload.text === "string"
+            ? payload.text
+            : text
+        )
+          .trim()
+          .slice(0, 10_000);
+        if (!answer) return { ok: false, message: "nothing to answer" };
+        if (!externalAnswerAllowed(d.item, answer))
+          return { ok: false, message: "answer with one of the options" };
+        const by =
+          typeof payload.by === "string" && payload.by
+            ? payload.by.slice(0, 40)
+            : "desktop";
+        return cloud?.answerItem(item.id, answer, by)
+          ? { ok: true, message: "answered" }
+          : { ok: false, message: "not connected to the remote backend" };
+      }
       const s = owner();
       if (!s) return { ok: false, message: "no live session to reply to" };
-      const msg =
-        type === "option" && typeof payload.key === "string"
-          ? `${payload.key}: ${text}`
-          : text;
+      const msg = type === "option" ? optionMessage(payload.key, text) : text;
+      if (msg === null)
+        return { ok: false, message: "an option key is 1-3 letters or digits" };
       if (!msg.trim()) return { ok: false, message: "nothing to send" };
-      return sender.send(s, msg, !!masterUp);
+      if (remote && !remoteTextAllowed(msg))
+        return {
+          ok: false,
+          message:
+            "remote text may not start with / or ! or contain control characters",
+        };
+      return sender.send(s, msg, masterUp);
     }
     case "menu":
       if (!item.sessionKey) return { ok: false, message: "no session" };
@@ -488,7 +650,7 @@ async function runInboxAction(
       return sender.send(
         s,
         type === "continue" ? "continue" : "/compact",
-        !!masterUp,
+        masterUp,
       );
     }
     case "approve":
@@ -508,7 +670,7 @@ async function runInboxAction(
       const s = owner();
       if (!s)
         return { ok: false, message: "no session owns this PR; start one" };
-      const r = await sender.send(s, d.offer.message, !!masterUp);
+      const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
     default:
@@ -1073,9 +1235,7 @@ function registerIpc(): void {
         payload && typeof payload === "object"
           ? (payload as Record<string, unknown>)
           : {};
-      const r = await sources.inbox.act(id, type, p, runInboxAction);
-      sources.changed();
-      return r;
+      return inboxAct(id, type, p);
     },
   );
   ipcMain.handle(CH.queueList, (_e, sessionId: string) =>
@@ -1903,6 +2063,18 @@ function registerIpc(): void {
   });
   ipcMain.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
   ipcMain.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
+  ipcMain.handle(CH.remoteSetToken, (_e, token: unknown) => {
+    const r = writeToken(
+      remoteTokenFile(),
+      typeof token === "string" ? token : null,
+    );
+    if (r.ok) syncRemote();
+    return r;
+  });
+  ipcMain.handle(
+    CH.remoteHasToken,
+    () => readToken(remoteTokenFile()) !== null,
+  );
   ipcMain.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
     if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
     const choice = await dialog.showMessageBox(win!, {
@@ -1915,12 +2087,7 @@ function registerIpc(): void {
         "The background session ends. Its conversation is kept and can be resumed later.",
     });
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
-    const r = await run(claudeBin, ["stop", bgId], { timeoutMs: 30_000 });
-    // Read the session list now: a stopped session leaves the sidebar at once.
-    await sources.refreshAgents();
-    return r.code === 0
-      ? { ok: true, message: "stopped" }
-      : { ok: false, message: (r.stderr || r.stdout).trim() };
+    return stopBg(bgId);
   });
   ipcMain.handle(
     CH.stopOtherSession,
@@ -2227,6 +2394,7 @@ app.whenReady().then(async () => {
   createWindow();
   sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
   sources.start();
+  syncRemote();
   if (SMOKE) {
     setTimeout(() => {
       console.log(
@@ -2279,6 +2447,7 @@ app.on("window-all-closed", () => app.quit());
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
+  cloud?.stop();
   sender.killAll();
   watches.killAll();
   ptys.closeAll();

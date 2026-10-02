@@ -87,6 +87,8 @@ export const CH = {
   showInboxItem: "app:showInboxItem",
   getState: "state:get",
   watchStop: "watch:stop",
+  remoteSetToken: "remote:setToken",
+  remoteHasToken: "remote:hasToken",
   approve: "cli:approve",
   reject: "cli:reject",
   draftAssign: "cli:draftAssign",
@@ -220,6 +222,9 @@ export interface DeckApi {
   getState(): Promise<AppState | null>;
   /** Stop a monitor MasterDeck runs (its session is told). */
   watchStop(id: string): Promise<boolean>;
+  /** Save (or with null remove) the remote backend's desktop token. */
+  remoteSetToken(token: string | null): Promise<CliResult>;
+  remoteHasToken(): Promise<boolean>;
   onState(cb: (s: AppState) => void): () => void;
   onFocusSession(cb: (sessionKey: string) => void): () => void;
   onShowNeedsYou(cb: () => void): () => void;

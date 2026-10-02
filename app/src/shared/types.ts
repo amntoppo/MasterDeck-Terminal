@@ -1,4 +1,5 @@
 import type { WatchInfo } from "./watches";
+import type { ScheduleInfo } from "./schedules";
 import type { ScreenMenu, SessionAsk } from "./ask";
 import type { InboxView } from "./inbox";
 import type { PrStage, StatusKey } from "./review";
@@ -166,6 +167,8 @@ export interface AppState {
   master: MasterState;
   /** Needs you: open items by priority, snoozed ones, and the last day's resolved ones (shared/inbox.ts). */
   inbox: InboxView;
+  /** The line to the remote backend (Settings → Remote); absent before the first status. */
+  remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean };
   stats: Record<string, SessionStats>;
   tails: Record<string, TranscriptTail>;
   git: Record<string, GitInfo>;
@@ -187,6 +190,8 @@ export interface AppState {
   sessionPrs: Record<string, string[]>;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
+  /** Scheduled jobs (CronCreate) by session id. */
+  schedules: Record<string, ScheduleInfo[]>;
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;
