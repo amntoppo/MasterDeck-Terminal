@@ -109,6 +109,23 @@ describe('Account device flow', () => {
 })
 
 describe('Account email', () => {
+  it('sends Origin on /auth requests only (Better Auth CSRF), not on /v1', async () => {
+    const f = fakeFetch({
+      'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S2' }),
+      'POST /auth/sign-up/email': () => json({ user: { email: 'm@x.test' } }),
+      'POST /v1/devices': () => json({ id: 'd2', token: 'T2' }, 201),
+      'POST /auth/sign-out': () => json({}),
+    })
+    const a = new Account(deps(f.fn).d)
+    await a.signInEmail('m@x.test', 'pw pw pw pw pw', false)
+    await a.signInEmail('n@x.test', 'pw pw pw pw pw', true)
+    const origin = (c: { init: RequestInit }) => (c.init.headers as Record<string, string>).origin
+    const auth = f.calls.filter((c) => new URL(c.url).pathname.startsWith('/auth/'))
+    expect(auth.length).toBeGreaterThanOrEqual(3)
+    for (const c of auth) expect(origin(c)).toBe('https://md.test')
+    for (const c of f.calls.filter((c) => c.url.includes('/v1/'))) expect(origin(c)).toBeUndefined()
+  })
+
   it('sign-in exchanges the session for a device token', async () => {
     const f = fakeFetch({
       'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S2' }),

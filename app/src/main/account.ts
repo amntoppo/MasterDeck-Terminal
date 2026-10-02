@@ -50,10 +50,15 @@ export class Account {
     return AbortSignal.any([this.ctl.signal, AbortSignal.timeout(this.d.timeoutMs ?? 10_000)])
   }
 
+  /** Better Auth's CSRF check rejects Sec-Fetch-* requests with no Origin; Node's fetch sends the former only. */
+  private originFor(path: string): Record<string, string> {
+    return path.startsWith('/auth/') ? { origin: this.d.baseUrl } : {}
+  }
+
   private post(path: string, body: unknown, bearer?: string, signal: AbortSignal = this.sig()): Promise<Response> {
     return this.d.fetch(`${this.d.baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+      headers: { 'content-type': 'application/json', ...this.originFor(path), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
       body: JSON.stringify(body),
       signal,
     })
@@ -110,7 +115,7 @@ export class Account {
         if (res.ok) {
           const { access_token } = (await res.json()) as { access_token: string }
           if (this.cancelled) break
-          const who = await this.d.fetch(`${this.d.baseUrl}/auth/get-session`, { headers: { authorization: `Bearer ${access_token}` }, signal: this.sig() }).catch(() => null)
+          const who = await this.d.fetch(`${this.d.baseUrl}/auth/get-session`, { headers: { ...this.originFor('/auth/'), authorization: `Bearer ${access_token}` }, signal: this.sig() }).catch(() => null)
           const email = ((await who?.json().catch(() => null)) as { user?: { email?: string } } | null)?.user?.email ?? ''
           if (this.cancelled) {
             void this.dropSession(access_token)

@@ -336,11 +336,13 @@ function AccountPanel({ account }: { account: AppState['account'] }) {
         </p>
       )}
       <Field label="Continue with" hint="Opens your browser; you type a code shown here to approve this Mac.">
-        {PROVIDERS.map((p) => (
-          <button key={p.id} className="btn" onClick={() => void deck().accountSignIn(p.id)}>
-            Continue with {p.label}
-          </button>
-        ))}
+        <div className="add-row">
+          {PROVIDERS.map((p) => (
+            <button key={p.id} className="btn" onClick={() => void deck().accountSignIn(p.id)}>
+              Continue with {p.label}
+            </button>
+          ))}
+        </div>
       </Field>
       <Field label={create ? 'Create account' : 'Sign in with email'}>
         <form
