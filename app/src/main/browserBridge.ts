@@ -78,6 +78,7 @@ interface Conn {
   /** When the channel opened, and what the web said it runs on (sanitized, null until it does). */
   connectedAt?: number
   device: string | null
+  deviceSet?: boolean
   /** Took over from an earlier channel of this browser: that channel's late frames are ignored, not failures. */
   replaced: boolean
   calls: number[]
@@ -344,8 +345,12 @@ export class BrowserBridge {
         if (!c.visible) c.ptyBuf.clear()
         return
       case 'device':
-        if (typeof msg.device === 'string') c.device = [...msg.device.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, 80).join('') || null
-        this.d.onChange()
+        // Once per connection: a browser cannot make the Mac re-emit state by repeating it.
+        if (typeof msg.device === 'string' && !c.deviceSet) {
+          c.deviceSet = true
+          c.device = [...msg.device.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, 80).join('') || null
+          this.d.onChange()
+        }
         return
       case 'resync':
         if (msg.ev === CH.state && c.patches && c.lastState !== undefined) this.resync(c)

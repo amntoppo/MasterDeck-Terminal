@@ -1,4 +1,6 @@
-const clean = (s: string) => [...s.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, 80).join('')
+/** Strips control and format (bidi) characters, trims, caps at n code points. */
+export const cleanLabel = (s: string, n = 80) => [...s.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, n).join('')
+const clean = (s: string) => cleanLabel(s, 80)
 
 /** "Chrome on macOS" from a user agent (and the userAgentData platform when the browser has one); null when unknown. */
 export function deviceFrom(userAgent: string, platform?: string): string | null {

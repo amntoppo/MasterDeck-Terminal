@@ -17,6 +17,10 @@ describe('mergePresence', () => {
     expect(r.map((x) => [x.id, x.kind])).toEqual([['c1', 'phone'], ['b1', 'browser'], ['c2', 'api'], ['b3', 'browser']])
     expect(r[3]).toMatchObject({ device: null, since: 0 })
   })
+  it('sanitizes names and falls back to Unnamed', () => {
+    const r = mergePresence([{ id: 'b', name: '\u202eevil\u0000', approvedAt: 1, connected: true, connectedAt: 1 }], [{ id: 'c', kind: 'live', name: '  ', device: null, since: 2 }])
+    expect(r.map((x) => x.name)).toEqual(['Unnamed', 'evil'])
+  })
   it('tolerates missing lists', () => expect(mergePresence(undefined, undefined)).toEqual([]))
 })
 

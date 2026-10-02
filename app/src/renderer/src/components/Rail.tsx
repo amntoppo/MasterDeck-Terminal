@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { formatRefreshed } from '@shared/format'
 import { describeDevice, showRemoteDot, type Presence } from '@shared/remotePresence'
 import type { View } from './Sidebar'
@@ -48,6 +48,8 @@ interface Props {
 /** The blinking amber dot (only while something remote is connected) and its hover/focus card. */
 function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: () => void }) {
   const [now, setNow] = useState(Date.now)
+  const [esc, setEsc] = useState(false)
+  const cardId = useId()
   useEffect(() => {
     if (!remote.length) return
     setNow(Date.now())
@@ -57,14 +59,28 @@ function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: (
   if (!showRemoteDot(remote.length, isWeb())) return null
   const n = remote.length
   return (
-    <div className="ri" onMouseEnter={() => setNow(Date.now())}>
-      <button className="rb" aria-label={`${n} remote connection${n === 1 ? '' : 's'} active`} onClick={onRemote}>
+    <div
+      className={`ri ${esc ? 'esc' : ''}`}
+      onMouseEnter={() => (setNow(Date.now()), setEsc(false))}
+      onFocus={() => setEsc(false)}
+      onKeyDown={(e) => e.key === 'Escape' && setEsc(true)}
+    >
+      <button
+        className="rb"
+        aria-label={`${n} remote connection${n === 1 ? '' : 's'} active`}
+        aria-describedby={cardId}
+        onClick={(e) => {
+          e.currentTarget.blur()
+          onRemote()
+        }}
+      >
         <span className="ri-dot" />
       </button>
-      <div className="ri-card" role="group" aria-label="Remote connections">
+      <div id={cardId} className="ri-card" role="group" aria-label="Remote connections">
+        <div className="ri-box">
         <div className="ri-head">Remote connections ({n})</div>
-        {remote.map((r) => (
-          <div key={`${r.kind}:${r.id}`} className="ri-row">
+        {remote.map((r, i) => (
+          <div key={`${i}:${r.kind}:${r.id}`} className="ri-row">
             <div className="ri-name">{r.name}</div>
             <div className="ri-sub">{describeDevice(r.device)}</div>
             {r.since > 0 && (
@@ -74,6 +90,7 @@ function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: (
             )}
           </div>
         ))}
+        </div>
       </div>
     </div>
   )

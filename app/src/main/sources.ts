@@ -634,6 +634,7 @@ export class Sources {
   }
 
   setRemoteClients(c: AppState["remoteClients"]): void {
+    if (!c?.length && !this.remoteClients?.length) return;
     this.remoteClients = c;
     this.emit();
   }

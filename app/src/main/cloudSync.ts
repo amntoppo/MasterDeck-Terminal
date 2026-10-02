@@ -1,6 +1,7 @@
 import WebSocket from 'ws'
 import { compare } from 'fast-json-patch'
 import { PROTOCOL_VERSION, type Command, type LiveClient, type DesktopMsg, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
+import { cleanLabel } from '@shared/deviceInfo'
 import { fitSnapshot, SNAPSHOT_LIMIT, volatileKey, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
 
@@ -43,7 +44,7 @@ export interface CloudSyncOpts {
 }
 
 const CLIENTS_MAX = 50
-const tidy = (s: string, n: number) => [...s.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, n).join('')
+const tidy = cleanLabel
 /** Drops malformed entries, strips control characters, caps the list. */
 function cleanClients(v: unknown[]): LiveClient[] {
   const out: LiveClient[] = []

@@ -113,9 +113,13 @@ describe('BrowserBridge presence', () => {
     expect(w.bridge.browsers()[0]).toMatchObject({ connected: true, connectedAt: 2_000_000, device: null })
     await c.send({ k: 'device', device: 'Chrome\u0000 on macOS' })
     expect(w.bridge.browsers()[0].device).toBe('Chrome on macOS')
+    const changes = w.changes
+    await c.send({ k: 'device', device: 'Other' })
     await c.send({ k: 'device', device: 42 })
-    expect(w.bridge.browsers()[0].device).toBe('Chrome on macOS')
-    await c.send({ k: 'device', device: 'x'.repeat(500) })
+    expect(w.bridge.browsers()[0].device).toBe('Chrome on macOS') // accepted once per connection
+    expect(w.changes).toBe(changes)
+    const c2 = await connectBrowser(w, 'b1', browser)
+    await c2.send({ k: 'device', device: 'x'.repeat(500) })
     expect(w.bridge.browsers()[0].device!.length).toBe(80)
     w.bridge.dropChannels()
     expect(w.bridge.browsers()[0]).toMatchObject({ connected: false })

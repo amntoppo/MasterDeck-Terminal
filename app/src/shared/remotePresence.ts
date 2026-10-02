@@ -1,4 +1,5 @@
 import type { LiveClient } from './remote'
+import { cleanLabel } from './deviceInfo'
 import type { AppState } from './types'
 
 export interface Presence {
@@ -14,8 +15,8 @@ type BrowserLike = NonNullable<AppState['browsers']>[number]
 
 /** Connected approved browsers plus the backend's live clients, newest first. */
 export function mergePresence(browsers: BrowserLike[] | undefined, clients: Pick<LiveClient, 'id' | 'kind' | 'name' | 'device' | 'since'>[] | undefined): Presence[] {
-  const b: Presence[] = (browsers ?? []).filter((x) => x.connected).map((x) => ({ id: x.id, kind: 'browser', name: x.name, device: x.device ?? null, since: x.connectedAt ?? 0 }))
-  const c: Presence[] = (clients ?? []).map((x) => ({ id: x.id, kind: x.kind === 'api' ? 'api' : 'phone', name: x.name, device: x.device, since: x.since }))
+  const b: Presence[] = (browsers ?? []).filter((x) => x.connected).map((x) => ({ id: x.id, kind: 'browser', name: cleanLabel(x.name, 120) || 'Unnamed', device: x.device ?? null, since: x.connectedAt ?? 0 }))
+  const c: Presence[] = (clients ?? []).map((x) => ({ id: x.id, kind: x.kind === 'api' ? 'api' : 'phone', name: cleanLabel(x.name, 120) || 'Unnamed', device: x.device, since: x.since }))
   return [...b, ...c].sort((x, y) => y.since - x.since)
 }
 
