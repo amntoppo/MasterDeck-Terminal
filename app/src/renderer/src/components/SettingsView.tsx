@@ -52,7 +52,6 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
 
-  const [token, setToken] = useState('')
   const now = useNow(5_000)
   const r = state.remote
   const dot = !r || r.conn === 'off' ? 'off' : r.conn === 'connected' ? 'ok' : r.conn === 'error' ? 'bad' : 'wait'
@@ -176,33 +175,12 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
       <>
         <p className="set-hint" style={{ padding: '12px 0 0' }}>
           Sends Tasks and Needs you to your MasterDeck backend, and runs what you do from the phone: answers, starting a session from a board issue, stopping,
-          resuming and messaging sessions. Anyone with the client token can drive your sessions, so keep it secret.
+          resuming and messaging sessions. Anyone signed in to your account can drive your sessions.
         </p>
-        <Field label="Connect to the backend" hint="Off by default. Needs the desktop token.">
+        <Field label="Connect to the backend" hint="Off by default. Needs a signed-in account.">
           {toggle('remoteEnabled', 'Connect to the backend')}
         </Field>
-        <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
-          <form
-            className="f-row"
-            style={{ width: '100%', flexWrap: 'wrap' }}
-            onSubmit={async (e) => {
-              e.preventDefault()
-              const res = await deck().remoteSetToken(token)
-              flash(res.message)
-              if (res.ok) setToken('')
-            }}
-          >
-            <input className="input" style={{ flex: '1 1 180px', minWidth: 0 }} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={r?.hasToken ? 'paste a new token' : 'paste the token'} />
-            <button className="btn" type="submit" disabled={!token}>
-              Save
-            </button>
-            {r?.hasToken && (
-              <button className="btn" type="button" onClick={async () => flash((await deck().remoteSetToken(null)).message)}>
-                Remove
-              </button>
-            )}
-          </form>
-        </Field>
+        {!r?.hasToken && <p className="set-hint" style={{ padding: '0 0 8px' }}>Sign in first (Settings → Account)</p>}
         <Field label="Status">
           <span className={`remote-dot ${dot}`} aria-hidden="true" />
           <span>

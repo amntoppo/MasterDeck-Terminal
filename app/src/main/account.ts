@@ -9,11 +9,11 @@ export interface AccountDeps {
   readIdentity(): { email: string; provider: Provider; deviceId: string } | null
   saveIdentity(id: { email: string; provider: Provider; deviceId: string } | null): void
   onChange(s: AccountState): void
+  timeoutMs?: number
   now?: () => number
   sleep?: (ms: number) => Promise<void>
 }
 
-const TIMEOUT_MS = 10_000
 const CLIENT_ID = 'masterdeck-desktop'
 const GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 
@@ -47,7 +47,7 @@ export class Account {
   private ctl = new AbortController()
 
   private sig(): AbortSignal {
-    return AbortSignal.any([this.ctl.signal, AbortSignal.timeout(TIMEOUT_MS)])
+    return AbortSignal.any([this.ctl.signal, AbortSignal.timeout(this.d.timeoutMs ?? 10_000)])
   }
 
   private post(path: string, body: unknown, bearer?: string, signal: AbortSignal = this.sig()): Promise<Response> {
@@ -121,7 +121,7 @@ export class Account {
         const err = ((await res.json().catch(() => ({}))) as { error?: string }).error
         if (err === 'access_denied') return this.set({ kind: 'signedOut', message: 'Sign-in was denied' })
         if (err === 'expired_token') return this.set({ kind: 'signedOut', message: 'That sign-in expired; try again' })
-        if (err === 'slow_down') interval += 5000
+        if (err === 'slow_down' || res.status === 429) interval += 5000
         else if (err !== 'authorization_pending' && res.status >= 400 && res.status < 500) return this.set({ kind: 'signedOut', message: `Sign-in failed (${err ?? res.status})`.slice(0, 200) })
         await this.nap(interval)
       }
@@ -139,12 +139,12 @@ export class Account {
   }
 
   private dropSession(session: string): Promise<unknown> {
-    return this.post('/auth/sign-out', {}, session, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
+    return this.post('/auth/sign-out', {}, session, AbortSignal.timeout(this.d.timeoutMs ?? 10_000)).catch(() => undefined)
   }
 
   private async dropDevice(token: string): Promise<void> {
     await this.d
-      .fetch(`${this.d.baseUrl}/v1/devices/self`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) })
+      .fetch(`${this.d.baseUrl}/v1/devices/self`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.d.timeoutMs ?? 10_000) })
       .catch(() => undefined)
   }
 
@@ -215,9 +215,9 @@ export class Account {
   }
 
   /** The server signed this Mac out (4003 / 401). */
-  signedOutRemotely(): void {
+  signedOutRemotely(message?: string): void {
     this.cancel()
-    this.clear('This Mac was signed out')
+    this.clear(message ?? 'This Mac was signed out')
   }
 
   private clear(message: string | null): void {

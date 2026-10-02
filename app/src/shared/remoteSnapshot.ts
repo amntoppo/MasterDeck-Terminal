@@ -152,6 +152,6 @@ export function fitSnapshot(
 
 /** The status shown while the line to the backend is not running. */
 export function remoteStatusWhenOff(s: { remoteEnabled: boolean }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
-  const message = !s.remoteEnabled ? null : !hasToken ? 'add the desktop token' : null
+  const message = !s.remoteEnabled ? null : !hasToken ? 'Sign in first (Settings → Account)' : null
   return { conn: 'off', message, lastSyncAt: null, hasToken }
 }

@@ -206,13 +206,13 @@ describe('Account fix round 1', () => {
   it('signOut DELETE carries a timeout signal that aborts a hang; local state clears', async () => {
     const f = fakeFetch({ 'DELETE /v1/devices/self': (i) => new Promise<Response>((_, rej) => i.signal!.addEventListener('abort', () => rej(new Error('t')))) })
     const t = deps(f.fn)
-    const p = new Account(t.d).signOut('TOK')
+    const p = new Account({ ...t.d, timeoutMs: 20 }).signOut('TOK')
     const sig = f.calls[0].init.signal as AbortSignal
     expect(sig.aborted).toBe(false)
-    await p // resolves only when the 10 s timeout fires
+    await p // resolves only when the timeout fires
     expect(sig.aborted).toBe(true)
     expect(t.identity()).toBeNull()
-  }, 15_000)
+  })
   it('saveToken failing after registering deletes the orphan device', async () => {
     const f = fakeFetch({ ...okRoutes, 'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S' }), 'POST /v1/devices': () => json({ id: 'd', token: 'T' }, 201), 'DELETE /v1/devices/self': () => json({}) })
     const t = deps(f.fn, { saveToken: () => ({ ok: false, message: 'keychain locked' }) })
@@ -261,5 +261,28 @@ describe('Account fix round 1', () => {
   it('403 not about verification is not the inbox message', async () => {
     const f = fakeFetch({ 'POST /auth/sign-in/email': () => json({ message: 'Forbidden' }, 403) })
     expect((await new Account(deps(f.fn).d).signInEmail('a@x.test', 'x', false)).message).toBe('Sign-in refused (403)')
+  })
+})
+
+describe('D3 carry-overs', () => {
+  it('429 from the token endpoint is treated like slow_down', async () => {
+    const f = fakeFetch({
+      'POST /auth/device/code': () => json(code),
+      'GET /auth/get-session': () => json({ user: { email: 'e@x.test' } }),
+      'POST /v1/devices': () => json({ id: 'd', token: 'T' }, 201),
+      'POST /auth/sign-out': () => json({}),
+      'POST /auth/device/token': [() => json({}, 429), () => json({ access_token: 'S', token_type: 'Bearer', expires_in: 1 })],
+    })
+    const t = deps(f.fn)
+    const sleeps: number[] = []
+    await new Account({ ...t.d, sleep: async (ms: number) => void sleeps.push(ms) }).signInWith('google')
+    expect(sleeps[0]).toBeGreaterThanOrEqual(10_000)
+    expect(f.calls.filter((c) => c.url.endsWith('/auth/device/token'))).toHaveLength(2)
+  })
+  it('signedOutRemotely(message) shows that message', () => {
+    const t = deps(fakeFetch({}).fn)
+    const a = new Account(t.d)
+    a.signedOutRemotely('This account was deleted')
+    expect(a.state()).toEqual({ kind: 'signedOut', message: 'This account was deleted' })
   })
 })

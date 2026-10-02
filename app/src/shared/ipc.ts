@@ -87,8 +87,11 @@ export const CH = {
   showInboxItem: "app:showInboxItem",
   getState: "state:get",
   watchStop: "watch:stop",
-  remoteSetToken: "remote:setToken",
-  remoteHasToken: "remote:hasToken",
+  accountSignIn: "account:signIn",
+  accountCancel: "account:cancel",
+  accountEmail: "account:email",
+  accountSignOut: "account:signOut",
+  accountManage: "account:manage",
   approve: "cli:approve",
   reject: "cli:reject",
   draftAssign: "cli:draftAssign",
@@ -223,8 +226,11 @@ export interface DeckApi {
   /** Stop a monitor MasterDeck runs (its session is told). */
   watchStop(id: string): Promise<boolean>;
   /** Save (or with null remove) the remote backend's desktop token. */
-  remoteSetToken(token: string | null): Promise<CliResult>;
-  remoteHasToken(): Promise<boolean>;
+  accountSignIn(provider: "google" | "github" | "apple"): Promise<void>;
+  accountCancel(): Promise<void>;
+  accountEmail(a: { email: string; password: string; create: boolean; name?: string }): Promise<{ ok: boolean; message: string }>;
+  accountSignOut(): Promise<void>;
+  accountManage(): Promise<void>;
   onState(cb: (s: AppState) => void): () => void;
   onFocusSession(cb: (sessionKey: string) => void): () => void;
   onShowNeedsYou(cb: () => void): () => void;

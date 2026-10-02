@@ -15,10 +15,10 @@ afterEach(() => {
 })
 
 /** A fake backend: records messages per connection; `reject` answers the upgrade with 401. */
-async function server(o: { reject?: boolean; welcome?: unknown[]; nopong?: boolean; onHello?: (ws: WsSocket) => void } = {}) {
+async function server(o: { reject?: boolean | number; welcome?: unknown[]; nopong?: boolean; onHello?: (ws: WsSocket) => void } = {}) {
   const wss = new WebSocketServer({
     port: 0,
-    verifyClient: (info, cb) => (o.reject || info.req.headers.authorization !== `Bearer ${TOKEN}` ? cb(false, 401, 'unauthorized') : cb(true)),
+    verifyClient: (info, cb) => (o.reject || info.req.headers.authorization !== `Bearer ${TOKEN}` ? cb(false, typeof o.reject === 'number' ? o.reject : 401, 'unauthorized') : cb(true)),
   })
   servers.push(wss)
   await new Promise((r) => wss.once('listening', r))
@@ -151,13 +151,70 @@ describe('CloudSync', () => {
     expect(srv.got.filter((m) => m.t === 'hello')).toHaveLength(2)
   })
 
-  it('a rejected token shows an error and keeps retrying (Review Focus 4)', async () => {
-    const srv = await server({ reject: true })
+  it('a 403 on connect shows an error and keeps retrying (Review Focus 4)', async () => {
+    const srv = await server({ reject: 403 })
     const { s, statuses } = sync(srv.url)
     s.start()
     await until(() => statuses.filter((x) => x.conn === 'error').length >= 2)
-    expect(statuses.find((x) => x.conn === 'error')!.message).toBe('the backend rejected the token (401)')
+    expect(statuses.find((x) => x.conn === 'error')!.message).toBe('the backend rejected the token (403)')
     expect(s.answerItem('x', 'y', 'desktop')).toBe(false)
+  })
+  it('4003 signs out and stops reconnecting (Review Focus 2)', async () => {
+    const srv = await server()
+    const onSignedOut = vi.fn()
+    const { s, statuses } = sync(srv.url, { onSignedOut })
+    s.start()
+    await until(() => srv.conns.length === 1)
+    srv.conns[0].close(4003, 'signed out')
+    await until(() => onSignedOut.mock.calls.length === 1)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(srv.conns).toHaveLength(1)
+    expect(statuses.at(-1)).toMatchObject({ conn: 'off', message: 'Signed out' })
+    expect(onSignedOut).toHaveBeenCalledWith(undefined)
+  })
+  it('401 on connect signs out too', async () => {
+    const srv = await server({ reject: true })
+    const onSignedOut = vi.fn()
+    const { s } = sync(srv.url, { onSignedOut })
+    s.start()
+    await until(() => onSignedOut.mock.calls.length === 1)
+  })
+  it('410 on connect signs out with "This account was deleted"', async () => {
+    const srv = await server({ reject: 410 })
+    const onSignedOut = vi.fn()
+    const { s } = sync(srv.url, { onSignedOut })
+    s.start()
+    await until(() => onSignedOut.mock.calls.length === 1)
+    expect(onSignedOut).toHaveBeenCalledWith('This account was deleted')
+  })
+  it('close reason "account deleted" signs out with that message', async () => {
+    const srv = await server()
+    const onSignedOut = vi.fn()
+    const { s } = sync(srv.url, { onSignedOut })
+    s.start()
+    await until(() => srv.conns.length === 1)
+    srv.conns[0].close(4003, 'account deleted')
+    await until(() => onSignedOut.mock.calls.length === 1)
+    expect(onSignedOut).toHaveBeenCalledWith('This account was deleted')
+  })
+  it('4005 shows "Another Mac is connected" and retries at the cap, not in a tight loop', async () => {
+    const srv = await server({ onHello: (ws) => ws.close(4005, 'another Mac is connected for this account') })
+    const onSignedOut = vi.fn()
+    const { s, statuses } = sync(srv.url, { onSignedOut, backoff: { min: 30, max: 400 } })
+    s.start()
+    await until(() => srv.conns.length === 1)
+    await until(() => statuses.some((x) => x.conn === 'error'))
+    expect(s.status()).toMatchObject({ conn: 'error', message: 'Another Mac is connected to this account' })
+    await new Promise((r) => setTimeout(r, 150))
+    expect(srv.conns).toHaveLength(1)
+    expect(onSignedOut).not.toHaveBeenCalled()
+  })
+  it('4006 reconnects normally', async () => {
+    let n = 0
+    const srv = await server({ onHello: (ws) => (++n === 1 ? ws.close(4006, 'session expired, reconnect') : ws.send(JSON.stringify({ t: 'welcome', pending: [] }))) })
+    const { s } = sync(srv.url)
+    s.start()
+    await until(() => srv.conns.length === 2 && s.status().conn === 'connected')
   })
 
   it('a server that is down is amber, not a crash', async () => {

@@ -290,6 +290,7 @@ export class Sources {
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
+  private account: AppState["account"] = undefined;
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
   private costDirty = false;
@@ -607,6 +608,11 @@ export class Sources {
   /** Needs-you items asked through the remote API (the backend's open list). */
   setExternalItems(items: ExternalItem[]): void {
     this.externalItems = items;
+    this.emit();
+  }
+
+  setAccount(a: AppState["account"]): void {
+    this.account = a;
     this.emit();
   }
 
@@ -1965,6 +1971,7 @@ export class Sources {
       master: deriveMaster(sessions),
       inbox: this.inbox.view(),
       remote: this.remote,
+      account: this.account,
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },

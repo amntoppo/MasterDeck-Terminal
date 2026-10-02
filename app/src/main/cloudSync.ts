@@ -3,6 +3,8 @@ import { PROTOCOL_VERSION, type Command, type ExternalItem, type RemoteSnapshot,
 import { fitSnapshot, SNAPSHOT_LIMIT, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
 
+const DELETED = 'This account was deleted'
+
 export interface CloudSyncOpts {
   url: string
   token: string
@@ -11,6 +13,8 @@ export interface CloudSyncOpts {
   run(cmd: Command): Promise<RemoteOutcome>
   onItems(items: ExternalItem[]): void
   onStatus(s: RemoteStatus): void
+  /** This Mac was signed out by the server (close 4003, HTTP 401/410); the line has stopped. */
+  onSignedOut?: (message?: string) => void
   debounceMs?: number
   pingMs?: number
   backoff?: { min: number; max: number }
@@ -158,6 +162,8 @@ export class CloudSync {
     ws.on('unexpected-response', (_req, res) => {
       if (this.ws !== ws) return
       const code = res.statusCode ?? 0
+      if (code === 401) return this.signedOut()
+      if (code === 410) return this.signedOut(DELETED)
       this.set({ conn: 'error', message: code === 401 || code === 403 ? `the backend rejected the token (${code})` : `the backend answered ${code}` })
       ws.removeAllListeners('close')
       ws.on('error', () => {})
@@ -181,11 +187,19 @@ export class CloudSync {
       this.welcomeWait = null
       if (this.ping) clearInterval(this.ping)
       this.ping = null
-      if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
+      if (code === 4003) return this.signedOut(String(reason) === 'account deleted' ? DELETED : undefined)
+      if (code === 4005) this.set({ conn: 'error', message: 'Another Mac is connected to this account' })
+      else if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
       else if (this.st.conn !== 'error' && !wasWelcomed && this.st.message?.startsWith('cannot reach')) this.set({ conn: 'connecting' })
       else if (this.st.conn !== 'error') this.set({ conn: 'connecting', message: `disconnected (${code}); reconnecting` })
-      this.later(code === 4001)
+      this.later(code === 4001 || code === 4005)
     })
+  }
+
+  private signedOut(message?: string): void {
+    this.stop()
+    this.set({ conn: 'off', message: 'Signed out' })
+    this.o.onSignedOut?.(message)
   }
 
   /** Reconnect after a backoff (at the cap for errors the user has to fix). */
