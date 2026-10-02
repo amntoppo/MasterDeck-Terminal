@@ -58,7 +58,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { knownDirsOnly, stripRemoteSettings } from "./remoteGuards";
+import { knownDirsOnly, remoteSettings } from "./remoteGuards";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -1375,8 +1375,9 @@ function registerIpc(): void {
         [
           ...(isRemote(e)
             ? knownDirsOnly(dirs, [
-                ...ops.repos(),
+                ...liveDirs(),
                 ...(latest?.sessions ?? []).flatMap((x) => (x.cwd ? [x.cwd] : [])),
+                ...ops.repos(),
               ])
             : dirs),
           ...ops.repos(),
@@ -1717,9 +1718,7 @@ function registerIpc(): void {
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
   reg.handle(CH.setSettings, (e, s: unknown) =>
     sources.setSettings(
-      isRemote(e) && s && typeof s === "object"
-        ? stripRemoteSettings(s as Record<string, unknown>)
-        : s,
+      isRemote(e) ? remoteSettings(s, sources.getSettings()) : s,
     ),
   );
   reg.handle(CH.watchStop, (_e, id: unknown) =>
@@ -2388,8 +2387,8 @@ async function setupTool(
     git: ["git", ["--version"]],
     jq: ["jq", ["--version"]],
   };
+  if (!Object.hasOwn(cmd, tool)) return { ok: false, detail: "unknown tool" };
   const c = cmd[tool];
-  if (!c) return { ok: false, detail: "unknown tool" };
   // Tests of the install flow: these tools read as missing.
   if ((process.env.MASTERDECK_SETUP_MISSING ?? "").split(",").includes(tool))
     return { ok: false, detail: "not found (MASTERDECK_SETUP_MISSING)" };
