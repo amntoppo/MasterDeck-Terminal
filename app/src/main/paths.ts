@@ -40,6 +40,10 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
   const bundledSkills = packaged ? join(resourcesPath, 'skills') : resolve(appRoot, '..', 'skills')
   const libDir = existsSync(join(skillLib, 'master')) ? skillLib : join(bundledSkills, 'master', 'lib')
   const home = process.env.MASTERDECK_HOME || join(h, '.claude', 'masterdeck')
+  // An isolated home must never touch the real ~/.claude/settings.json.
+  const claudeSettings =
+    process.env.MASTERDECK_CLAUDE_SETTINGS ||
+    (process.env.MASTERDECK_HOME ? join(home, 'claude-settings.json') : join(h, '.claude', 'settings.json'))
   const masterHome = process.env.MASTER_HOME || join(h, '.claude', 'master')
   return {
     libDir,
@@ -47,7 +51,7 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
     installedTee: join(home, 'statusline_tee.py'),
     home,
     statsDir: join(home, 'stats'),
-    claudeSettings: process.env.MASTERDECK_CLAUDE_SETTINGS || join(h, '.claude', 'settings.json'),
+    claudeSettings,
     projectsDir: join(h, '.claude', 'projects'),
     ledger: join(masterHome, 'ledger.json'),
     // Replaced by the config's workspace once it loads (see Sources.applyConfig).

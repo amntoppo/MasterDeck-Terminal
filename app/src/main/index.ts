@@ -2412,7 +2412,11 @@ app.whenReady().then(async () => {
     }
   }
   // Workflows: older installs had one hook per step; now one per trigger, reading each session's copy.
-  if (process.platform !== "win32" && !SMOKE)
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  )
     try {
       workflows().migrate();
       const r = syncWorkflowHooks();
