@@ -118,36 +118,54 @@ export class Account {
     if (this.running || this.st.kind === 'signedIn') return
     const rnd = this.d.randomBytes ?? nodeRandomBytes
     const verifier = this.b64url(rnd(32))
-    const challenge = this.b64url(createHash('sha256').update(verifier).digest())
+    const challenge = pkceChallenge(verifier)
     const state = this.b64url(rnd(24))
-    let lb: Loopback
-    try {
-      lb = await (this.d.startLoopback ?? realStartLoopback)()
-    } catch {
-      return this.signInWithCode(provider)
-    }
-    if (this.running || this.state().kind === 'signedIn') return lb.close()
     this.running = true
     this.cancelled = false
     this.ctl = new AbortController()
     const flow = ++this.flow
+    let lb: Loopback
+    try {
+      lb = await (this.d.startLoopback ?? realStartLoopback)({ state })
+    } catch {
+      if (this.flow !== flow) return
+      this.running = false
+      if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
+      return this.signInWithCode(provider)
+    }
+    if (this.flow !== flow || this.cancelled) {
+      lb.close()
+      if (this.flow === flow) {
+        this.running = false
+        if (this.st.kind !== 'signedIn') this.set({ kind: 'signedOut', message: null })
+      }
+      return
+    }
     this.lb = lb
+    const stale = () => this.flow !== flow || this.cancelled
+    // Once cancelled by signOut/remote sign-out the state is already set; only clear our own pending screen.
+    const bail = () => {
+      if (this.flow === flow && this.st.kind === 'pending') this.set({ kind: 'signedOut', message: null })
+    }
     try {
       this.browserUrl = `${this.d.baseUrl}/desktop-login?${new URLSearchParams({ port: String(lb.port), state, challenge, provider })}`
       this.set({ kind: 'pending', provider, mode: 'browser', expiresAt: this.now() + 300_000 })
       this.d.openBrowser(this.browserUrl)
       const r = await lb.result
-      if (this.flow !== flow) return
-      if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
+      if (stale()) return bail()
       if (!r) return this.set({ kind: 'signedOut', message: 'That sign-in expired; try again' })
       const a = Buffer.from(r.state)
       const b = Buffer.from(state)
       if (a.length !== b.length || !timingSafeEqual(a, b)) return this.set({ kind: 'signedOut', message: 'Sign-in failed (state mismatch)' })
       const res = await this.post('/desktop/redeem', { code: r.code, verifier, name: deviceName(this.d.deviceName) })
-      if (this.cancelled) return this.set({ kind: 'signedOut', message: null })
+      if (stale()) return bail()
       if (res.status === 409) return this.set({ kind: 'signedOut', message: CAP_MESSAGE })
       const body = res.status === 201 ? ((await res.json().catch(() => null)) as { id?: unknown; token?: unknown; email?: unknown } | null) : null
       if (typeof body?.id !== 'string' || typeof body.token !== 'string' || typeof body.email !== 'string') return this.set({ kind: 'signedOut', message: 'Sign-in failed; try again' })
+      if (stale()) {
+        await this.dropDevice(body.token)
+        return bail()
+      }
       await this.saveDevice({ id: body.id, token: body.token, email: body.email, provider })
     } catch (e) {
       if (this.flow === flow) this.set(this.cancelled ? { kind: 'signedOut', message: null } : { kind: 'signedOut', message: `Sign-in failed: ${String(e)}`.slice(0, 200) })
@@ -165,6 +183,7 @@ export class Account {
     if (this.st.kind !== 'pending' || this.st.mode !== 'browser') return
     const provider = this.st.provider as 'google' | 'github' | 'apple'
     this.flow++
+    this.ctl.abort()
     this.lb?.close()
     this.lb = null
     this.running = false
@@ -324,6 +343,11 @@ export class Account {
     this.d.saveIdentity(null)
     this.set({ kind: 'signedOut', message })
   }
+}
+
+/** PKCE S256 challenge (RFC 7636): base64url(SHA-256(verifier)), no padding. */
+export function pkceChallenge(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url')
 }
 
 /** The backend rejects odd names with 400, so send a clean one. */

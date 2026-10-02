@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { connect } from 'node:net'
 import { startLoopback } from './loopback'
 
 const url = (port: number, p: string) => `http://127.0.0.1:${port}${p}`
@@ -32,5 +33,23 @@ describe('startLoopback', () => {
     lb.close()
     expect(await lb.result).toBeNull()
     await expect(fetch(url(lb.port, '/callback?code=c&state=s'))).rejects.toThrow()
+  })
+  it('ignores callbacks whose state is not the expected one', async () => {
+    const lb = await startLoopback({ state: 'good', timeoutMs: 300 })
+    expect((await fetch(url(lb.port, '/callback?code=c&state=bad'))).status).toBe(400)
+    expect((await fetch(url(lb.port, '/callback?code=c&state=good'))).status).toBe(200)
+    expect(await lb.result).toEqual({ code: 'c', state: 'good' })
+  })
+  it('answers 400 to a malformed request target instead of throwing', async () => {
+    const lb = await startLoopback({ timeoutMs: 300 })
+    const text = await new Promise<string>((res) => {
+      const c = connect(lb.port, '127.0.0.1', () => c.write('GET http://[::1 HTTP/1.1\r\nHost: x\r\n\r\n'))
+      let b = ''
+      c.on('data', (d) => (b += d))
+      c.on('close', () => res(b))
+      c.on('error', () => res(b))
+    })
+    expect(text).toMatch(/^HTTP\/1.1 400/)
+    expect(await lb.result).toBeNull()
   })
 })

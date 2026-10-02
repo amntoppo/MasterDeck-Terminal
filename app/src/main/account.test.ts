@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { Account, type AccountDeps } from './account'
+import { Account, pkceChallenge, type AccountDeps } from './account'
 
 type Route = (init: RequestInit & { url: string }) => Response | Promise<Response>
 function fakeFetch(routes: Record<string, Route | Route[]>) {
@@ -443,5 +443,65 @@ describe('Account.providers', () => {
     expect(await new Account(deps(bad.fn).d).providers()).toEqual(['google', 'github'])
     const boom = deps((async () => { throw new Error('down') }) as any)
     expect(await new Account(boom.d).providers()).toEqual(['google', 'github'])
+  })
+})
+
+describe('PKCE', () => {
+  it('matches the RFC 7636 Appendix B vector', () => {
+    expect(pkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')).toBe('E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM')
+  })
+})
+
+describe('Account browser flow races', () => {
+  const fixed = (n: number) => Buffer.alloc(n, 7)
+  const state = fixed(24).toString('base64url')
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void
+    const p = new Promise<T>((r) => (resolve = r))
+    return { p, resolve }
+  }
+  const mk = (lbp: Promise<any>, routes: Record<string, Route | Route[]> = {}) => {
+    const f = fakeFetch({ 'POST /auth/device/code': () => json(code), 'POST /auth/device/token': () => json({ error: 'authorization_pending' }, 400), 'DELETE /v1/devices/self': () => json({}), ...routes })
+    const lb = { port: 1, result: lbp, close: vi.fn() }
+    const t = deps(f.fn, { startLoopback: async () => lb, randomBytes: fixed, sleep: () => new Promise((r) => setTimeout(r, 5)) })
+    return { f, lb, t, a: new Account(t.d) }
+  }
+  it('a callback arriving after useCode() saves nothing and does not redeem', async () => {
+    const d = deferred<any>()
+    const { f, t, a } = mk(d.p)
+    const p = a.signInWith('google')
+    await vi.waitFor(() => expect(a.state()).toMatchObject({ mode: 'browser' }))
+    a.useCode()
+    d.resolve({ code: 'C', state })
+    await p
+    expect(f.calls.some((c) => c.url.endsWith('/desktop/redeem'))).toBe(false)
+    expect(t.token()).toBeNull()
+    await vi.waitFor(() => expect(a.state()).toMatchObject({ kind: 'pending', mode: 'code' }))
+    a.cancel()
+  })
+  it('signOut during redeem keeps the token unsaved and deletes the issued device', async () => {
+    const redeem = deferred<Response>()
+    const { f, t, a } = mk(Promise.resolve({ code: 'C', state }), { 'POST /desktop/redeem': () => redeem.p })
+    const p = a.signInWith('google')
+    await vi.waitFor(() => expect(f.calls.some((c) => c.url.endsWith('/desktop/redeem'))).toBe(true))
+    await a.signOut(null)
+    redeem.resolve(json({ id: 'd', token: 'TOK', email: 'e@x.test' }, 201))
+    await p
+    expect(t.token()).toBeNull()
+    expect(a.state()).toEqual({ kind: 'signedOut', message: null })
+  })
+  it('cancel while the listener is starting is not lost', async () => {
+    const start = deferred<any>()
+    const f = fakeFetch({})
+    const lb = { port: 1, result: new Promise(() => {}), close: vi.fn() }
+    const t = deps(f.fn, { startLoopback: () => start.p, randomBytes: fixed })
+    const a = new Account(t.d)
+    const p = a.signInWith('google')
+    a.cancel()
+    start.resolve(lb)
+    await p
+    expect(lb.close).toHaveBeenCalled()
+    expect(t.d.openBrowser).not.toHaveBeenCalled()
+    expect(a.state()).toEqual({ kind: 'signedOut', message: null })
   })
 })
