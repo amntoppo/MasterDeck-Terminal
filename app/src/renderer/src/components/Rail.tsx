@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
+import { formatRefreshed } from '@shared/format'
+import { describeDevice, showRemoteDot, type Presence } from '@shared/remotePresence'
 import type { View } from './Sidebar'
-import { screenOk } from '../web'
+import { isWeb, screenOk } from '../web'
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
@@ -36,6 +39,44 @@ interface Props {
   needs: number
   /** PRs waiting on the user (badge on PRs). */
   prAttention: number
+  /** Browsers and phones/API clients connected to this Mac right now. */
+  remote: Presence[]
+  /** Open Settings → Remote. */
+  onRemote: () => void
+}
+
+/** The blinking amber dot (only while something remote is connected) and its hover/focus card. */
+function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: () => void }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!remote.length) return
+    setNow(Date.now())
+    const t = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(t)
+  }, [remote.length])
+  if (!showRemoteDot(remote.length, isWeb())) return null
+  const n = remote.length
+  return (
+    <div className="ri" onMouseEnter={() => setNow(Date.now())}>
+      <button className="rb" aria-label={`${n} remote connection${n === 1 ? '' : 's'} active`} onClick={onRemote}>
+        <span className="ri-dot" />
+      </button>
+      <div className="ri-card" role="group" aria-label="Remote connections">
+        <div className="ri-head">Remote connections ({n})</div>
+        {remote.map((r) => (
+          <div key={`${r.kind}:${r.id}`} className="ri-row">
+            <div className="ri-name">{r.name}</div>
+            <div className="ri-sub">{describeDevice(r.device)}</div>
+            {r.since > 0 && (
+              <div className="ri-sub" title={new Date(r.since).toLocaleString()}>
+                connected {formatRefreshed(now - r.since)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 const VIEWS: [View, string, string][] = [
@@ -57,7 +98,7 @@ const ACTIONS: [RailAction, string, string][] = [
 ]
 
 /** The Command Center rail: views on top, tools, then actions and Settings at the bottom. */
-export function Rail({ view, onView, onAction, needs, prAttention }: Props) {
+export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote }: Props) {
   const viewBtn = (v: View, label: string, hint = '', badge = 0) => (
     <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${label}  ${hint}` : label} aria-label={label} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
       <RailIcon name={v} />
@@ -71,6 +112,7 @@ export function Rail({ view, onView, onAction, needs, prAttention }: Props) {
       {TOOLS.some(([v]) => screenOk(v)) && <div className="rail-sep" />}
       {TOOLS.filter(([v]) => screenOk(v)).map(([v, label]) => viewBtn(v, label))}
       <div style={{ flex: 1 }} />
+      <RemoteIndicator remote={remote} onRemote={onRemote} />
       {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label, hint]) => (
         <button key={a} className="rb" data-tip={`${label} · ${hint}`} aria-label={label} onClick={() => onAction(a)}>
           <RailIcon name={a} />

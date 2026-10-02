@@ -103,6 +103,27 @@ async function connected(w: W) {
   return connectBrowser(w, 'b1', browser)
 }
 
+describe('BrowserBridge presence', () => {
+  it('connectedAt is set when the channel opens, device comes from the web (sanitized), both cleared on close', async () => {
+    const w = await world()
+    const { browser } = await approve(w)
+    expect(w.bridge.browsers()[0].connectedAt).toBeUndefined()
+    w.t = 2_000_000
+    const c = await connectBrowser(w, 'b1', browser)
+    expect(w.bridge.browsers()[0]).toMatchObject({ connected: true, connectedAt: 2_000_000, device: null })
+    await c.send({ k: 'device', device: 'Chrome\u0000 on macOS' })
+    expect(w.bridge.browsers()[0].device).toBe('Chrome on macOS')
+    await c.send({ k: 'device', device: 42 })
+    expect(w.bridge.browsers()[0].device).toBe('Chrome on macOS')
+    await c.send({ k: 'device', device: 'x'.repeat(500) })
+    expect(w.bridge.browsers()[0].device!.length).toBe(80)
+    w.bridge.dropChannels()
+    expect(w.bridge.browsers()[0]).toMatchObject({ connected: false })
+    expect(w.bridge.browsers()[0]).not.toHaveProperty('connectedAt')
+    expect(w.bridge.browsers()[0]).not.toHaveProperty('device')
+  })
+})
+
 describe('BrowserBridge approval (commit-reveal)', () => {
   it('refuses a different email without a prompt or a nonce', async () => {
     const w = await world()

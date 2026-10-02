@@ -401,6 +401,34 @@ describe('CloudSync', () => {
     expect(onDisconnect).toHaveBeenCalledTimes(2)
   })
 
+  it('clients: forwards a valid list (capped, sanitized, repeated), ignores malformed, clears on disconnect and stop', async () => {
+    const lc = (i: number, name = `n${i}`) => ({ id: `c${i}`, kind: 'live', name, device: i % 2 ? null : 'Pixel', since: i })
+    const many = Array.from({ length: 80 }, (_, i) => lc(i))
+    let first = true
+    const srv = await server({
+      onHello: (ws) => {
+        ws.send(JSON.stringify({ t: 'welcome', pending: [] }))
+        if (!first) return
+        first = false
+        ws.send(JSON.stringify({ t: 'clients', clients: [lc(1, 'Pi\u0000xel\n'), { id: 5 }, null] }))
+        ws.send(JSON.stringify({ t: 'clients', clients: 'nope' }))
+        ws.send(JSON.stringify({ t: 'clients', clients: many }))
+        ws.send(JSON.stringify({ t: 'clients', clients: many }))
+      },
+    })
+    const lists: any[][] = []
+    const { s } = sync(srv.url, { onClients: (c) => lists.push(c) })
+    s.start()
+    await until(() => lists.length >= 3)
+    expect(lists[0]).toEqual([{ id: 'c1', kind: 'live', name: 'Pixel', device: null, since: 1 }])
+    expect(lists[1]).toHaveLength(50)
+    expect(lists.some((l) => l.length === 0)).toBe(false)
+    srv.conns[0].close(4006)
+    await until(() => lists[lists.length - 1].length === 0)
+    s.stop()
+    expect(lists[lists.length - 1]).toEqual([])
+  })
+
   describe('patches', () => {
     const doc = (state: string, cost = 1, extra: unknown[] = []) =>
       ({ takenAt: cost, sessions: [{ key: 'a', state, costUsd: cost, contextPct: cost, notes: extra }], pad: 'x'.repeat(2000) }) as unknown as RemoteSnapshot

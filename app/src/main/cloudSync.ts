@@ -1,6 +1,6 @@
 import WebSocket from 'ws'
 import { compare } from 'fast-json-patch'
-import { PROTOCOL_VERSION, type Command, type DesktopMsg, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
+import { PROTOCOL_VERSION, type Command, type LiveClient, type DesktopMsg, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
 import { fitSnapshot, SNAPSHOT_LIMIT, volatileKey, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
 
@@ -38,6 +38,22 @@ export interface CloudSyncOpts {
   onUser?: (u: { id: string; email: string } | null) => void
   /** The socket closed or the line stopped: every browser channel is gone. */
   onDisconnect?: () => void
+  /** The remote clients now connected (newest first, at most 50); [] when the line drops or stops. */
+  onClients?: (c: LiveClient[]) => void
+}
+
+const CLIENTS_MAX = 50
+const tidy = (s: string, n: number) => [...s.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, n).join('')
+/** Drops malformed entries, strips control characters, caps the list. */
+function cleanClients(v: unknown[]): LiveClient[] {
+  const out: LiveClient[] = []
+  for (const x of v) {
+    const c = x as Partial<LiveClient> | null
+    if (!c || typeof c.id !== 'string' || !c.id || (c.kind !== 'live' && c.kind !== 'api') || typeof c.name !== 'string' || !Number.isFinite(c.since)) continue
+    out.push({ id: tidy(c.id, 100), kind: c.kind, name: tidy(c.name, 120), device: typeof c.device === 'string' ? tidy(c.device, 80) || null : null, since: c.since as number })
+    if (out.length >= CLIENTS_MAX) break
+  }
+  return out
 }
 
 /**
@@ -103,6 +119,7 @@ export class CloudSync {
     ws?.close(1000, 'turned off')
     this.set({ conn: 'off', message: null })
     this.o.onDisconnect?.()
+    this.o.onClients?.([])
   }
 
   sendBrowser(m: Extract<DesktopMsg, { t: 'frame' | 'browserDecision' | 'browserNonce' | 'browserClose' }>): boolean {
@@ -287,6 +304,7 @@ export class CloudSync {
       if (this.ping) clearInterval(this.ping)
       this.ping = null
       this.o.onDisconnect?.()
+      this.o.onClients?.([])
       if (code === 4003) return this.signedOut(String(reason) === 'account deleted' ? DELETED : undefined)
       if (code === 4005) this.set({ conn: 'error', message: 'Another Mac is connected to this account' })
       else if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
@@ -370,6 +388,10 @@ export class CloudSync {
         this.resetAcks()
         this.sentKey = null
         this.flush()
+        return
+      case 'clients':
+        if (!Array.isArray(m.clients)) this.o.log?.('remote: malformed clients ignored')
+        else this.o.onClients?.(cleanClients(m.clients))
         return
       case 'command':
         this.enqueue(m.cmd)

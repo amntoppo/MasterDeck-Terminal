@@ -75,6 +75,9 @@ interface Conn {
   ch?: Channel
   subs: Set<string>
   visible: boolean
+  /** When the channel opened, and what the web said it runs on (sanitized, null until it does). */
+  connectedAt?: number
+  device: string | null
   /** Took over from an earlier channel of this browser: that channel's late frames are ignored, not failures. */
   replaced: boolean
   calls: number[]
@@ -180,9 +183,14 @@ export class BrowserBridge {
     return [...this.live().values()].flatMap((p) => (p.words ? [{ id: p.id, name: p.name, email: p.email, words: p.words, expiresAt: p.expiresAt }] : []))
   }
 
-  browsers(): (ApprovedBrowser & { connected: boolean })[] {
+  browsers(): (ApprovedBrowser & { connected: boolean; connectedAt?: number; device?: string | null })[] {
     const a = this.d.account()
-    return a ? this.d.store.list(a.userId).map((b) => ({ ...b, connected: this.conns.get(b.id)?.state === 'open' })) : []
+    return a
+      ? this.d.store.list(a.userId).map((b) => {
+          const c = this.conns.get(b.id)
+          return c?.state === 'open' ? { ...b, connected: true, connectedAt: c.connectedAt, device: c.device } : { ...b, connected: false }
+        })
+      : []
   }
 
   /** "Possible tampering…" after 3 channel failures for one browser within an hour. */
@@ -303,7 +311,7 @@ export class BrowserBridge {
       else close()
       return
     }
-    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], patches: false, n: 0, resyncAt: -Infinity, stateAt: 0, ptyBuf: new Map() })
+    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, device: null, replaced: !!old, calls: [], patches: false, n: 0, resyncAt: -Infinity, stateAt: 0, ptyBuf: new Map() })
   }
 
   private async onFrame(b: string, d: string): Promise<void> {
@@ -335,6 +343,10 @@ export class BrowserBridge {
         c.visible = msg.on === true
         if (!c.visible) c.ptyBuf.clear()
         return
+      case 'device':
+        if (typeof msg.device === 'string') c.device = [...msg.device.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()].slice(0, 80).join('') || null
+        this.d.onChange()
+        return
       case 'resync':
         if (msg.ev === CH.state && c.patches && c.lastState !== undefined) this.resync(c)
         return
@@ -361,6 +373,7 @@ export class BrowserBridge {
         if (c.state !== 'busy') return
         c.ch = ch
         c.state = 'open'
+        c.connectedAt = this.now()
         await this.out(c, { k: 'hello', protocol: PROTOCOL_VERSION, ...this.d.hello })
         this.d.onChange()
       }

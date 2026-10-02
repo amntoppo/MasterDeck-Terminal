@@ -7,6 +7,8 @@ export type WebToMac =
   | { k: 'sub'; ev: string; arg?: string; patches?: 1 }
   | { k: 'unsub'; ev: string; arg?: string }
   | { k: 'visible'; on: boolean }
+  /** Optional, sent once after hello: "Chrome on macOS". Older webs never send it. */
+  | { k: 'device'; device: string }
   /** Patch stream broken (gap, failed apply): send a full state again. */
   | { k: 'resync'; ev: string }
 export type MacToWeb =

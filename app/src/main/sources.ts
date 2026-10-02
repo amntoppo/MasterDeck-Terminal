@@ -290,6 +290,7 @@ export class Sources {
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
+  private remoteClients: AppState["remoteClients"] = [];
   private browsers: Pick<AppState, "browsers" | "browserRequests"> & { warning?: string } = {};
   private account: AppState["account"] = undefined;
   private allStats: AppState["allStats"] = {};
@@ -629,6 +630,11 @@ export class Sources {
     warning: string | null,
   ): void {
     this.browsers = { browsers, browserRequests, warning: warning ?? undefined };
+    this.emit();
+  }
+
+  setRemoteClients(c: AppState["remoteClients"]): void {
+    this.remoteClients = c;
     this.emit();
   }
 
@@ -1986,6 +1992,7 @@ export class Sources {
           ? { ...this.remote, warning: this.browsers.warning }
           : this.remote,
       browsers: this.browsers.browsers,
+      remoteClients: this.remoteClients,
       browserRequests: this.browsers.browserRequests,
       account: this.account,
       stats: { ...this.stats },

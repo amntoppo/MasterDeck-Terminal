@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { browserHandshake, generateStatic, type Channel } from '@shared/e2e'
+import { deviceFrom } from '@shared/deviceInfo'
 import { formatAgo } from '@shared/format'
 import { PROTOCOL_VERSION, type DesktopStatus, type ServerToBrowser } from '@shared/remote'
 import type { MacToWeb } from '@shared/bridgeWire'
@@ -325,6 +326,9 @@ function connect(rec: KeyRec, h: Hooks): () => void {
           quick = true
           h.conn((c) => ({ ...c, gen: Date.now() }))
           if (document.hidden) void visible()
+          // Tell the Mac what this is ("Chrome on macOS") for its remote indicator; an older Mac ignores the message.
+          const device = deviceFrom(navigator.userAgent, (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform)
+          if (device) void ch.seal({ k: 'device', device }).then(sendFrame, () => {})
         } else onFrame?.(m.d)
       }
     }

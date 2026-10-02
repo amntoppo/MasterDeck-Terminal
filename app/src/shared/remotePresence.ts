@@ -1,4 +1,5 @@
 import type { LiveClient } from './remote'
+import type { AppState } from './types'
 
 export interface Presence {
   id: string
@@ -9,7 +10,7 @@ export interface Presence {
   since: number
 }
 
-interface BrowserLike { id: string; name: string; connected: boolean; connectedAt?: number; device?: string | null }
+type BrowserLike = NonNullable<AppState['browsers']>[number]
 
 /** Connected approved browsers plus the backend's live clients, newest first. */
 export function mergePresence(browsers: BrowserLike[] | undefined, clients: Pick<LiveClient, 'id' | 'kind' | 'name' | 'device' | 'since'>[] | undefined): Presence[] {

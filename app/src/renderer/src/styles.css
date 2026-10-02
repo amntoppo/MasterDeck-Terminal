@@ -1234,3 +1234,15 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .browser-list li { display: flex; align-items: center; gap: 10px; }
 .browser-list li span { flex: 1; }
 .set-hint.error { color: var(--red); }
+
+/* Remote connection indicator (rail): amber blinking dot, card on hover/focus */
+.ri { position: relative; flex: none; }
+.ri-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); animation: mon-blink 1.4s ease-in-out infinite, ri-pulse 1.4s ease-out infinite; }
+@keyframes ri-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 55%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+.ri-card { display: none; position: absolute; left: 44px; bottom: 0; min-width: 220px; max-width: 300px; background: var(--bg-4); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; z-index: 60; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.ri:hover .ri-card, .ri:focus-within .ri-card { display: block; }
+.ri-head { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.ri-row + .ri-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-2); }
+.ri-name { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.ri-sub { font-size: 11px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .ri-dot { animation: none; opacity: 1; } }

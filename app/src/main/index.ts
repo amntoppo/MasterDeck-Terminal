@@ -505,7 +505,7 @@ let accountEmail: string | null = null;
 function publishBrowsers(): void {
   const b = bridge!;
   sources.setBrowsers(
-    b.browsers().map(({ id, name, approvedAt, connected }) => ({ id, name, approvedAt, connected })),
+    b.browsers().map(({ id, name, approvedAt, connected, connectedAt, device }) => ({ id, name, approvedAt, connected, connectedAt, device })),
     b.requests(),
     b.warning(),
   );
@@ -664,6 +664,7 @@ function syncRemote(): void {
     },
     // Channels only: approval requests survive a blip and complete after the reconnect.
     onDisconnect: () => bridge!.dropChannels(),
+    onClients: (c) => sources.setRemoteClients(c),
   });
   cloud.start();
   if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));

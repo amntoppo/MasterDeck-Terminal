@@ -170,7 +170,9 @@ export interface AppState {
   /** The line to the remote backend (Settings → Remote); absent before the first status. */
   remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean; warning?: string };
   /** Browsers approved on this Mac (app.masterdeck.dev), and approval prompts waiting for an answer. */
-  browsers?: { id: string; name: string; approvedAt: number; connected: boolean }[];
+  browsers?: { id: string; name: string; approvedAt: number; connected: boolean; connectedAt?: number; device?: string | null }[];
+  /** Remote clients the backend says are connected (phone app, API), newest first. */
+  remoteClients?: { id: string; kind: 'live' | 'api'; name: string; device: string | null; since: number }[];
   browserRequests?: BrowserRequestView[];
   /** The MasterDeck account this Mac is signed in with. */
   account?: import("./account").AccountState;

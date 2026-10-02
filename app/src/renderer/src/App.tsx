@@ -7,6 +7,7 @@ import {
 } from "@shared/ticket";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionForIssue, sessionTicket } from "@shared/derive";
+import { mergePresence } from "@shared/remotePresence";
 import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
@@ -97,6 +98,10 @@ function paneIdFor(tab: Tab): string {
 
 export function App() {
   const state = useAppState();
+  const remote = useMemo(
+    () => mergePresence(state?.browsers, state?.remoteClients),
+    [state?.browsers, state?.remoteClients],
+  );
   const [tabs, setTabs] = useState<Tab[]>(() =>
     load<Tab[]>("tabs", []).filter((t) =>
       t.kind === "session" ? typeof t.key === "string" : t.kind === "shell",
@@ -906,6 +911,11 @@ export function App() {
       <Rail
         view={view}
         onView={setView}
+        remote={remote}
+        onRemote={() => {
+          setSettingsAt({ section: "remote", at: Date.now() });
+          setView("settings");
+        }}
         onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
         needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
         prAttention={
