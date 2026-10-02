@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AssignRequest, QueueEdit } from '@shared/ipc'
 import { MASTER_NAME } from '@shared/derive'
-import type { Command, CommandResult } from '@shared/remote'
+import { CommandInput, type Command, type CommandResult } from '@shared/remote'
 import type { Ticket } from '@shared/ticket'
 import type { AppState, CliResult, DraftAssign, Session } from '@shared/types'
 
@@ -58,7 +58,7 @@ export class RemoteCommands {
     if (prev) return Promise.resolve(prev)
     const inflight = this.running.get(cmd.id)
     if (inflight) return inflight
-    const p = this.exec(cmd)
+    const p = this.checked(cmd)
       .catch((e): RemoteOutcome => ({ ok: false, message: `failed: ${String(e)}` }))
       .then((r) => {
         if (!r.transient) this.remember(cmd.id, r)
@@ -67,6 +67,17 @@ export class RemoteCommands {
       })
     this.running.set(cmd.id, p)
     return p
+  }
+
+  /**
+   * The backend validates too, but a client token is less trusted than the desktop: check the
+   * command against the same wire contract here and run the parsed (defaulted) form.
+   */
+  private async checked(cmd: Command): Promise<RemoteOutcome> {
+    const { id, createdAt, by, ...input } = cmd
+    const parsed = CommandInput.safeParse(input)
+    if (!parsed.success) return { ok: false, message: 'bad command' }
+    return this.exec({ ...parsed.data, id, createdAt, by })
   }
 
   /** Another instance (an earlier launch) may have run it since this one loaded. */
@@ -158,7 +169,9 @@ export class RemoteCommands {
         return { ok, message }
       }
       case 'session.setStatus': {
-        if (session(cmd.args.key)?.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
+        const s = session(cmd.args.key)
+        if (!s || s.state === 'done') return { ok: false, message: 'session not found' }
+        if (s.name === MASTER_NAME) return { ok: false, message: MASTER_MSG }
         return this.deps.setManualStatus(cmd.args.key, cmd.args.status)
       }
       default:

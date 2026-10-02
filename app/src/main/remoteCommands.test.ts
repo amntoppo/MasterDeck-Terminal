@@ -118,8 +118,8 @@ describe('RemoteCommands', () => {
     expect(d.setManualStatus).toHaveBeenCalledWith('a', null)
   })
 
-  it('unsupported types and a loading app', async () => {
-    expect(await new RemoteCommands(deps(st([])), file()).run(cmd({ type: 'shell.run', args: {} }))).toEqual({ ok: false, message: 'unsupported: shell.run' })
+  it('unknown types and a loading app', async () => {
+    expect(await new RemoteCommands(deps(st([])), file()).run(cmd({ type: 'shell.run', args: {} }))).toEqual({ ok: false, message: 'bad command' })
     expect(await new RemoteCommands(deps(null), file()).run(cmd({ type: 'session.stop', args: { key: 'a' } }))).toEqual({ ok: false, transient: true, message: 'MasterDeck is still loading; try again' })
   })
 
@@ -198,5 +198,28 @@ describe('RemoteCommands fix round 1', () => {
     state = st([sess('a', 'working')])
     expect(await rc.run(c)).toMatchObject({ ok: true })
     expect(d.stopBg).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates every command against the wire contract before running it, and remembers the refusal', async () => {
+    const f = file()
+    const d = deps(st([sess('a', 'idle')], ['q1']))
+    const rc = new RemoteCommands(d, f)
+    const slash = cmd({ type: 'session.send', args: { key: 'a', text: '/clear', via: 'now' } })
+    expect(await rc.run(slash)).toEqual({ ok: false, message: 'bad command' })
+    expect(await rc.run(cmd({ type: 'nope.run', args: {} }))).toEqual({ ok: false, message: 'bad command' })
+    expect(await rc.run(cmd({ type: 'inbox.act', itemId: 'q1', args: { action: 'option', key: '!touch /tmp/x;#', text: 'x' } }))).toEqual({ ok: false, message: 'bad command' })
+    expect(d.sendNow).not.toHaveBeenCalled()
+    expect(d.inboxAct).not.toHaveBeenCalled()
+    // persisted like other final outcomes: a fresh instance returns it without running
+    expect(await new RemoteCommands(deps(st([sess('a', 'idle')])), f).run(slash)).toEqual({ ok: false, message: 'bad command' })
+  })
+
+  it('setStatus needs a live session with that key', async () => {
+    const d = deps(st([sess('a', 'idle'), sess('old', 'done')]))
+    const rc = new RemoteCommands(d, file())
+    expect(await rc.run(cmd({ type: 'session.setStatus', args: { key: 'gone', status: 'x' } }))).toEqual({ ok: false, message: 'session not found' })
+    expect(await rc.run(cmd({ type: 'session.setStatus', args: { key: 'old', status: 'x' } }))).toEqual({ ok: false, message: 'session not found' })
+    expect(d.setManualStatus).not.toHaveBeenCalled()
+    expect(await rc.run(cmd({ type: 'session.setStatus', args: { key: 'a', status: 'x' } }))).toMatchObject({ ok: true })
   })
 })
