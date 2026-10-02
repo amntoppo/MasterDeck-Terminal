@@ -487,6 +487,8 @@ describe('Account browser flow races', () => {
     await a.signOut(null)
     redeem.resolve(json({ id: 'd', token: 'TOK', email: 'e@x.test' }, 201))
     await p
+    const del = f.calls.find((c) => c.init.method === 'DELETE' && c.url.endsWith('/v1/devices/self'))
+    expect((del?.init.headers as any)?.authorization).toBe('Bearer TOK')
     expect(t.token()).toBeNull()
     expect(a.state()).toEqual({ kind: 'signedOut', message: null })
   })

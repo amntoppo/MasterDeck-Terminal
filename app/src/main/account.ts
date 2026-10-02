@@ -158,7 +158,11 @@ export class Account {
       const b = Buffer.from(state)
       if (a.length !== b.length || !timingSafeEqual(a, b)) return this.set({ kind: 'signedOut', message: 'Sign-in failed (state mismatch)' })
       const res = await this.post('/desktop/redeem', { code: r.code, verifier, name: deviceName(this.d.deviceName) })
-      if (stale()) return bail()
+      if (stale()) {
+        const late = res.status === 201 ? ((await res.json().catch(() => null)) as { token?: unknown } | null) : null
+        if (typeof late?.token === 'string') await this.dropDevice(late.token)
+        return bail()
+      }
       if (res.status === 409) return this.set({ kind: 'signedOut', message: CAP_MESSAGE })
       const body = res.status === 201 ? ((await res.json().catch(() => null)) as { id?: unknown; token?: unknown; email?: unknown } | null) : null
       if (typeof body?.id !== 'string' || typeof body.token !== 'string' || typeof body.email !== 'string') return this.set({ kind: 'signedOut', message: 'Sign-in failed; try again' })
