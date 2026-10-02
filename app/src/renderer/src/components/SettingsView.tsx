@@ -2,16 +2,18 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/settings'
 import { SHORTCUTS, showKeys } from '@shared/shortcuts'
 import type { AppState, HookStatus } from '@shared/types'
-import { deck } from '../deck'
+import { formatAgo } from '@shared/format'
+import { deck, useNow } from '../deck'
 
 export type SettingsSection = Section
-type Section = 'general' | 'alerts' | 'sessions' | 'hooks' | 'keys' | 'about'
+type Section = 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
 
 const SECTIONS: [Section, string][] = [
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
   ['hooks', 'Hooks & skills'],
+  ['remote', 'Remote (phone)'],
   ['keys', 'Keyboard shortcuts'],
   ['about', 'About'],
 ]
@@ -49,6 +51,13 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
   const toggle = (k: keyof Settings, label: string) => (
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
+
+  const [url, setUrl] = useState(settings.remoteUrl)
+  useEffect(() => setUrl(settings.remoteUrl), [settings.remoteUrl])
+  const [token, setToken] = useState('')
+  const now = useNow(5_000)
+  const r = state.remote
+  const dot = !r || r.conn === 'off' ? 'off' : r.conn === 'connected' ? 'ok' : r.conn === 'error' ? 'bad' : 'wait'
 
   const c = state.config
   const hooks = state.hooks
@@ -162,6 +171,57 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
           <button className="btn" onClick={onSkills}>
             Manage skills…
           </button>
+        </Field>
+      </>
+    ),
+    remote: (
+      <>
+        <p className="set-hint" style={{ padding: '12px 0 0' }}>
+          Sends Tasks and Needs you to your MasterDeck backend, and runs what you do from the phone: answers, starting a session from a board issue, stopping,
+          resuming and messaging sessions. Anyone with the client token can drive your sessions, so keep it secret.
+        </p>
+        <Field label="Connect to the backend" hint="Off by default. Needs the backend address and the desktop token.">
+          {toggle('remoteEnabled', 'Connect to the backend')}
+        </Field>
+        <Field label="Backend address" hint="https://…, or http://localhost:8787 for a local wrangler dev.">
+          <input
+            className="input"
+            style={{ width: '100%' }}
+            value={url}
+            placeholder="https://masterdeck-backend.<account>.workers.dev"
+            onChange={(e) => setUrl(e.target.value)}
+            onBlur={() => url !== s.remoteUrl && set('remoteUrl', url)}
+          />
+        </Field>
+        <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
+          <form
+            className="f-row"
+            style={{ width: '100%' }}
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const res = await deck().remoteSetToken(token)
+              flash(res.message)
+              if (res.ok) setToken('')
+            }}
+          >
+            <input className="input" style={{ flex: 1 }} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={r?.hasToken ? 'paste a new token' : 'paste the token'} />
+            <button className="btn" type="submit" disabled={!token}>
+              Save
+            </button>
+            {r?.hasToken && (
+              <button className="btn" type="button" onClick={async () => flash((await deck().remoteSetToken(null)).message)}>
+                Remove
+              </button>
+            )}
+          </form>
+        </Field>
+        <Field label="Status">
+          <span className={`remote-dot ${dot}`} aria-hidden="true" />
+          <span>
+            {r?.conn === 'connected'
+              ? `Connected${r.lastSyncAt ? ` · last sync ${formatAgo(now - r.lastSyncAt)} ago` : ''}`
+              : (r?.message ?? (s.remoteEnabled ? 'Connecting…' : 'Off'))}
+          </span>
         </Field>
       </>
     ),

@@ -167,6 +167,8 @@ export interface AppState {
   master: MasterState;
   /** Needs you: open items by priority, snoozed ones, and the last day's resolved ones (shared/inbox.ts). */
   inbox: InboxView;
+  /** The line to the remote backend (Settings → Remote); absent before the first status. */
+  remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean };
   stats: Record<string, SessionStats>;
   tails: Record<string, TranscriptTail>;
   git: Record<string, GitInfo>;

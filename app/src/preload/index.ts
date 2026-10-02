@@ -16,6 +16,8 @@ const api: DeckApi = {
   home: homedir(),
   getState: () => ipcRenderer.invoke(CH.getState),
   watchStop: (id) => ipcRenderer.invoke(CH.watchStop, id),
+  remoteSetToken: (token) => ipcRenderer.invoke(CH.remoteSetToken, token),
+  remoteHasToken: () => ipcRenderer.invoke(CH.remoteHasToken),
   onState: (cb) => listen(CH.state, cb),
   onFocusSession: (cb) => listen(CH.focusSession, cb),
   onShowNeedsYou: (cb) => listen(CH.showNeedsYou, cb),

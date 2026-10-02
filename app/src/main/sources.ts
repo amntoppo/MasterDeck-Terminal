@@ -37,6 +37,7 @@ import {
   PR_VIEW_ARGS,
 } from "@shared/git";
 import { collectItems } from "@shared/inbox";
+import type { ExternalItem } from "@shared/remote";
 import { Inbox } from "./inbox";
 import {
   isStatusKey,
@@ -287,6 +288,8 @@ export class Sources {
   private skills: SkillStatus[] = [];
   private hooks: HookStatus = { ticket: false, pr: false, queue: false };
   private settings: Settings = DEFAULT_SETTINGS;
+  private externalItems: ExternalItem[] = [];
+  private remote: AppState["remote"] = undefined;
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
   private costDirty = false;
@@ -602,6 +605,17 @@ export class Sources {
   }
 
   /** Send the state again now (after an inbox action). */
+  /** Needs-you items asked through the remote API (the backend's open list). */
+  setExternalItems(items: ExternalItem[]): void {
+    this.externalItems = items;
+    this.emit();
+  }
+
+  setRemote(r: AppState["remote"]): void {
+    this.remote = r;
+    this.emit();
+  }
+
   changed(): void {
     this.emit();
   }
@@ -1931,6 +1945,7 @@ export class Sources {
       prs: this.snapshot.prs.filter((p) => p.authorIsMe),
       sessionPrs,
       failures,
+      external: this.externalItems,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -1949,6 +1964,7 @@ export class Sources {
       proposals: this.proposals,
       master: deriveMaster(sessions),
       inbox: this.inbox.view(),
+      remote: this.remote,
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },
