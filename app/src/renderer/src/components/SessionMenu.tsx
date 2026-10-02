@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ticketLabel, ticketUrl } from '@shared/ticket'
 import type { AppState, Session } from '@shared/types'
 import { deck } from '../deck'
+import { can } from '../web'
 import type { SessionAction } from './Sidebar'
 
 /**
@@ -68,9 +69,11 @@ export function SessionMenu({
       </div>
       <button onClick={run(onOpen)}>Open</button>
       <button onClick={run(onStatus)}>Set status…</button>
-      <button onClick={run(() => onAction('summary'))} title="What it did: goal, changes, decisions, open questions">
-        Summary
-      </button>
+      {can('summaryGet') && (
+        <button onClick={run(() => onAction('summary'))} title="What it did: goal, changes, decisions, open questions">
+          Summary
+        </button>
+      )}
       <hr />
       {s.issue !== null && <button onClick={run(() => deck().openExternal(ticketUrl(s.issueRepo, s.issue!)))}>Open ticket {ticketLabel(s.issueRepo, s.issue)}</button>}
       {pr && (
@@ -78,7 +81,7 @@ export function SessionMenu({
           Open PR {pr.replace(/^https:\/\/github\.com\/[^/]+\//, '').replace('/pull/', '#')}
         </button>
       )}
-      {dir && (
+      {dir && can('openEditor') && (
         <button
           onClick={run(async () => {
             const r = await deck().openEditor(dir)

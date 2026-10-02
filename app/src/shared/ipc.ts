@@ -95,6 +95,8 @@ export const CH = {
   accountEmail: "account:email",
   accountSignOut: "account:signOut",
   accountManage: "account:manage",
+  browserDecide: "browser:decide",
+  browserRevoke: "browser:revoke",
   approve: "cli:approve",
   reject: "cli:reject",
   draftAssign: "cli:draftAssign",
@@ -238,6 +240,10 @@ export interface DeckApi {
   accountEmail(a: { email: string; password: string; create: boolean; name?: string }): Promise<{ ok: boolean; message: string }>;
   accountSignOut(): Promise<void>;
   accountManage(): Promise<void>;
+  /** Answer a browser's approval prompt (AppState.browserRequests). */
+  browserDecide(id: string, allow: boolean): Promise<void>;
+  /** Revoke an approved browser here and on the backend. */
+  browserRevoke(id: string): Promise<{ ok: boolean }>;
   onState(cb: (s: AppState) => void): () => void;
   onFocusSession(cb: (sessionKey: string) => void): () => void;
   onShowNeedsYou(cb: () => void): () => void;

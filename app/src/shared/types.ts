@@ -168,7 +168,10 @@ export interface AppState {
   /** Needs you: open items by priority, snoozed ones, and the last day's resolved ones (shared/inbox.ts). */
   inbox: InboxView;
   /** The line to the remote backend (Settings → Remote); absent before the first status. */
-  remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean };
+  remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean; warning?: string };
+  /** Browsers approved on this Mac (app.masterdeck.dev), and approval prompts waiting for an answer. */
+  browsers?: { id: string; name: string; approvedAt: number; connected: boolean }[];
+  browserRequests?: BrowserRequestView[];
   /** The MasterDeck account this Mac is signed in with. */
   account?: import("./account").AccountState;
   stats: Record<string, SessionStats>;
@@ -384,6 +387,15 @@ export interface DraftAssign {
 export interface CliResult {
   ok: boolean;
   message: string;
+}
+
+/** A browser asking to control this Mac, shown once it revealed its key (three words to compare). */
+export interface BrowserRequestView {
+  id: string;
+  name: string;
+  email: string;
+  words: [string, string, string];
+  expiresAt: number;
 }
 
 export interface NotifyEvent {

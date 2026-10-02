@@ -11,6 +11,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:web": "vite build -c vite.web.config.ts",
+    "dev:web": "vite -c vite.web.config.ts",
+    "deploy:web": "npm run build:web && npx --yes wrangler@4 deploy -c web/wrangler.jsonc",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "postinstall": "electron-builder install-app-deps",

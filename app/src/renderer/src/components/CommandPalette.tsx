@@ -3,6 +3,7 @@ import { ticketKey, ticketLabel, ticketOf, type Ticket } from '@shared/ticket'
 import { MASTER_NAME, sessionForIssue } from '@shared/derive'
 import { rank } from '@shared/fuzzy'
 import type { AppState, Issue, Session } from '@shared/types'
+import { actionOk } from '../web'
 
 export type PaletteAction =
   | 'refresh'
@@ -75,7 +76,7 @@ export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssu
       onClose()
       fn()
     }
-    const items: Item[] = ACTIONS.filter(([id]) => id !== 'start-master' || state.config.masterEnabled).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
+    const items: Item[] = ACTIONS.filter(([id]) => (id !== 'start-master' || state.config.masterEnabled) && actionOk(id)).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
       items.push({

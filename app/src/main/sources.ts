@@ -290,6 +290,7 @@ export class Sources {
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
+  private browsers: Pick<AppState, "browsers" | "browserRequests"> & { warning?: string } = {};
   private account: AppState["account"] = undefined;
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
@@ -618,6 +619,16 @@ export class Sources {
 
   setRemote(r: AppState["remote"]): void {
     this.remote = r;
+    this.emit();
+  }
+
+  /** Approved browsers, approval prompts and the tampering warning (from the browser bridge). */
+  setBrowsers(
+    browsers: AppState["browsers"],
+    browserRequests: AppState["browserRequests"],
+    warning: string | null,
+  ): void {
+    this.browsers = { browsers, browserRequests, warning: warning ?? undefined };
     this.emit();
   }
 
@@ -1970,7 +1981,12 @@ export class Sources {
       proposals: this.proposals,
       master: deriveMaster(sessions),
       inbox: this.inbox.view(),
-      remote: this.remote,
+      remote:
+        this.remote && this.browsers.warning
+          ? { ...this.remote, warning: this.browsers.warning }
+          : this.remote,
+      browsers: this.browsers.browsers,
+      browserRequests: this.browsers.browserRequests,
       account: this.account,
       stats: { ...this.stats },
       tails: { ...this.tails },

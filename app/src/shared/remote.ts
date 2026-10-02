@@ -2,15 +2,25 @@
  * The wire contract between MasterDeck, this backend and its clients. MasterDeck keeps a copy of
  * this file (app/src/shared/remote.ts); change both together and bump PROTOCOL_VERSION when an old
  * desktop could no longer talk to a new server.
+ * PROTOCOL_VERSION 3 adds browsers; the hub still accepts MIN_PROTOCOL desktops.
  */
 import { z } from 'zod'
 
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
+export const MIN_PROTOCOL = 2
 export const MAX_TEXT = 10_000
+export const MAX_FRAME = 1_400_000
 
 const id = z.string().min(1).max(300)
 const key = z.string().min(1).max(200)
 const text = z.string().max(MAX_TEXT)
+/** An end-to-end encrypted frame between a browser and the Mac: opaque to the server. */
+const frameData = z.string().max(MAX_FRAME)
+const browserId = z.string().min(1).max(100)
+/** A P-256 public key: base64url of the 65-byte uncompressed point. */
+export const PUBKEY_RE = /^B[A-Za-z0-9_-]{86}$/
+/** A 16-byte approval nonce, base64url. */
+export const NONCE_RE = /^[A-Za-z0-9_-]{22}$/
 
 /** C0/C1 control characters except newline and tab: a terminal would act on them. */
 // eslint-disable-next-line no-control-regex
@@ -190,7 +200,13 @@ export interface RemoteSnapshot {
 // ---- Messages ----
 
 export const DesktopMsg = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('hello'), deviceId: z.string().min(1).max(100), appVersion: z.string().max(40), protocol: z.number().int() }),
+  z.object({
+    t: z.literal('hello'),
+    deviceId: z.string().min(1).max(100),
+    appVersion: z.string().max(40),
+    protocol: z.number().int(),
+    macPublicKey: z.string().regex(PUBKEY_RE).optional(),
+  }),
   z.object({ t: z.literal('snapshot'), data: z.record(z.string(), z.unknown()) }),
   z.object({
     t: z.literal('result'),
@@ -203,15 +219,26 @@ export const DesktopMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('itemAnswered'), itemId: z.string().min(1).max(100), answer: clean(MAX_TEXT).min(1), by: z.string().max(40) }),
   z.object({ t: z.literal('itemDismissed'), itemId: z.string().min(1).max(100) }),
   z.object({ t: z.literal('ping') }),
+  z.object({ t: z.literal('frame'), b: browserId, d: frameData }),
+  z.object({ t: z.literal('browserDecision'), id: browserId, allow: z.boolean() }),
+  /** The Mac's nonce for a browser request (spec §1 step 4); the browser has already committed to its key. */
+  z.object({ t: z.literal('browserNonce'), id: browserId, macPublicKey: z.string().regex(PUBKEY_RE), nonce: z.string().regex(NONCE_RE) }),
+  z.object({ t: z.literal('browserClose'), b: browserId }),
 ])
 export type DesktopMsg = z.infer<typeof DesktopMsg>
 
 export type ServerToDesktop =
-  | { t: 'welcome'; pending: Command[] }
+  | { t: 'welcome'; pending: Command[]; user?: { id: string; email: string } }
   | { t: 'command'; cmd: Command }
   | { t: 'items'; items: ExternalItem[] }
   | { t: 'pong' }
   | { t: 'error'; code: string; message: string }
+  | { t: 'frame'; b: string; d: string }
+  | { t: 'open'; b: string; name: string; publicKey: string }
+  | { t: 'close'; b: string }
+  | { t: 'browserRequest'; id: string; name: string; email: string; commit: string; expiresAt: number }
+  | { t: 'browserReveal'; id: string; publicKey: string; nonce: string }
+  | { t: 'browserRevoked'; id: string }
 
 export const ClientMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('resync') })])
 export type ClientMsg = z.infer<typeof ClientMsg>
@@ -235,4 +262,19 @@ export type ServerToClient =
   | { t: 'desktop'; desktop: DesktopStatus }
   | { t: 'command'; record: CommandRecord }
   | { t: 'item'; item: ExternalItem }
+  | { t: 'error'; code: string; message: string }
+
+export const BrowserMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('frame'), d: frameData }), z.object({ t: z.literal('ping') })])
+export type BrowserMsg = z.infer<typeof BrowserMsg>
+
+/**
+ * Browser socket close codes (the web app acts on them):
+ * 4003 revoked or signed out (keys deleted, approval again) · 4006 session re-check, reconnect at once ·
+ * 4008 closed by the Mac (re-check the session and the browser's status, then back off) ·
+ * 4009 open in another tab of this browser (terminal; "Use here" reconnects and bumps the other tab).
+ */
+export type ServerToBrowser =
+  | { t: 'frame'; d: string }
+  | { t: 'desktop'; desktop: DesktopStatus }
+  | { t: 'pong' }
   | { t: 'error'; code: string; message: string }

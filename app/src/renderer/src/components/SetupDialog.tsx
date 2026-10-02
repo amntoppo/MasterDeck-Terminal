@@ -6,6 +6,9 @@ import { hasProjectScope, type GhAccount } from '@shared/ghAuth'
 import type { SetupTool } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
+import { can } from '../web'
+import { webConfirm } from '../webConfirm'
+import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
@@ -47,6 +50,9 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const [remoteOn, setRemoteOn] = useState(true)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The web: gh accounts and the folder window are the Mac's (blocked); a repo picker stands in for the latter.
+  const ghHere = can('ghAccounts')
+  const [picking, setPicking] = useState(false)
 
   // Step 2: tools, each checked on its own.
   const [tools, setTools] = useState<Partial<Record<SetupTool, { ok: boolean; detail: string }>>>({})
@@ -144,7 +150,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   useEffect(() => {
     checkTools()
     // From Settings every section is one click away: know the account up front.
-    if (!firstRun) void loadAccounts()
+    if (!firstRun && ghHere) void loadAccounts()
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !firstRun && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -153,7 +159,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
   const go = async (to: number) => {
     setMsg(null)
-    if (to === 2 && accounts === null) void loadAccounts()
+    if (to === 2 && accounts === null && ghHere) void loadAccounts()
     // Leaving Account for the next step (not Skip): apply the Remote switch.
     if (firstRun && step === 0 && to === 1 && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
     if (to === 3) {
@@ -188,6 +194,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
   const save = async () => {
     if (!primaryRepo) return setMsg('Go back and pick at least one repository.')
+    if (!(await webConfirm('Save this setup to your Mac?', { confirmLabel: 'Save' }))) return
     setBusy(true)
     setMsg(null)
     // The chosen account becomes gh's active one (from Settings, Save may come straight from its section).
@@ -241,7 +248,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const sectionSummary = [
     signedIn && state.account?.kind === 'signedIn' ? state.account.email : 'not signed in',
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
-    login || (accounts === null ? '—' : 'not logged in'),
+    !ghHere ? 'on your Mac' : login || (accounts === null ? '—' : 'not logged in'),
     primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(boards).length} board${Object.keys(boards).length === 1 ? '' : 's'}`}` : 'none chosen',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
@@ -372,7 +379,9 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             <div className="meta">
               The GitHub account MasterDeck, master and your sessions use: gh's active account. Choosing another one here switches it.
             </div>
-            {accounts === null ? (
+            {!ghHere ? (
+              <div className="meta">Choose the GitHub account on your Mac (Settings → Set up MasterDeck).</div>
+            ) : accounts === null ? (
               <Spin text="Looking for the accounts gh is logged in to…" />
             ) : accounts.length === 0 ? (
               <div className="meta">
@@ -538,10 +547,11 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             <label>Workspace (master and new shells start here; your repos live in or next to it)</label>
             <div className="row-inputs">
               <input value={workspace} placeholder="~/code" onChange={(e) => setWorkspace(e.target.value)} />
-              <button className="btn" onClick={async () => { const p = await deck().pickFolder(workspace); if (p) setWorkspace(p) }}>
+              <button className="btn" onClick={async () => { if (!can('pickFolder')) return setPicking(true); const p = await deck().pickFolder(workspace); if (p) setWorkspace(p) }}>
                 Choose…
               </button>
             </div>
+            {picking && <RepoPicker start={workspace} onDone={(p) => { setPicking(false); if (p) setWorkspace(p) }} />}
 
             <label>Master agent</label>
             <label className="mpick-row">

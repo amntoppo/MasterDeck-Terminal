@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
+import { isWeb, keyPlatform } from '../web'
 
 const THEME = {
   background: '#0b0c0f',
@@ -65,7 +66,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
   useEffect(() => {
     if (!host.current) return
     const t = new Terminal({
-      fontFamily: deck().platform === 'win32' ? 'Cascadia Mono, Consolas, monospace' : 'SF Mono, Menlo, monospace',
+      fontFamily: deck().platform === 'win32' ? 'Cascadia Mono, Consolas, monospace' : isWeb() ? 'SF Mono, Menlo, Cascadia Mono, Consolas, monospace' : 'SF Mono, Menlo, monospace',
       fontSize: 13,
       lineHeight: 1.15,
       theme: THEME,
@@ -125,7 +126,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
         return false
       }
       if (e.type !== 'keydown') return true
-      const mod = deck().platform === 'darwin' ? e.metaKey : e.ctrlKey && e.shiftKey
+      const mod = keyPlatform() === 'darwin' ? e.metaKey : e.ctrlKey && e.shiftKey
       if (mod && e.key.toLowerCase() === 'c' && t.hasSelection()) {
         deck().copy(t.getSelection())
         return false
@@ -170,7 +171,11 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       if (term.current) deck().ptyResize(paneId, term.current.cols, term.current.rows)
       if (focusOnShow) term.current?.focus()
     })
-    return () => cancelAnimationFrame(id)
+    return () => {
+      cancelAnimationFrame(id)
+      // Hidden or gone: this view no longer holds the PTY's size (cols 0 resizes nothing; spec §4 size rule).
+      deck().ptyResize(paneId, 0, 0)
+    }
   }, [visible, focusOnShow, paneId])
 
   return (

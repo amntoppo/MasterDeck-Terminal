@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
+import { can } from '../web'
+import { webConfirm } from '../webConfirm'
 import { StartHereDialog } from './StartHereDialog'
 import { TerminalView } from './TerminalView'
 
@@ -61,15 +63,17 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
           </button>
           {menu && (
             <div className="menu">
-              <button
-                onClick={async () => {
-                  setMenu(false)
-                  const r = await deck().refresh()
-                  setMsg(r.ok ? 'Issues refreshed' : r.message)
-                }}
-              >
-                Refresh issues and PRs
-              </button>
+              {can('refresh') && (
+                <button
+                  onClick={async () => {
+                    setMenu(false)
+                    const r = await deck().refresh()
+                    setMsg(r.ok ? 'Issues refreshed' : r.message)
+                  }}
+                >
+                  Refresh issues and PRs
+                </button>
+              )}
               {bgId && (
                 <button
                   onClick={() => {
@@ -81,11 +85,12 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
                   Run /master sweep
                 </button>
               )}
-              <hr />
-              {state.statuslineInstalled ? (
+              {can('statuslineInstall') && <hr />}
+              {!can('statuslineInstall') ? null : state.statuslineInstalled ? (
                 <button
                   onClick={async () => {
                     setMenu(false)
+                    if (!(await webConfirm('Remove the status line on your Mac?', { confirmLabel: 'Remove', danger: true }))) return
                     const r = await deck().statuslineUninstall()
                     setMsg(r.message)
                   }}
@@ -96,6 +101,7 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
                 <button
                   onClick={async () => {
                     setMenu(false)
+                    if (!(await webConfirm('Install the status line on your Mac?', { confirmLabel: 'Install' }))) return
                     const r = await deck().statuslineInstall()
                     setMsg(r.message)
                   }}
@@ -153,9 +159,11 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
             <button className="btn" onClick={() => deck().copy(`claude --resume ${m.session.sessionId}`)}>
               Copy resume command
             </button>
-            <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
-              {busy ? 'Starting…' : 'Start master here'}
-            </button>
+            {can('startHere') && (
+              <button className="btn primary" disabled={busy} onClick={() => setAskHere(true)}>
+                {busy ? 'Starting…' : 'Start master here'}
+              </button>
+            )}
           </div>
           {askHere && (
             <StartHereDialog

@@ -10,6 +10,8 @@ import { attentionFor, sessionStatus } from "@shared/review";
 import { STEPS, taskStep } from "@shared/tasks";
 import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
+import { can } from "../web";
+import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
@@ -235,9 +237,11 @@ export function SessionDetails({
                 {w.branch ? `⎇ ${w.branch}` : w.path}
               </button>
             </div>
-            <button className="btn" onClick={() => void openEditor(w.path)}>
-              Open in editor
-            </button>
+            {can("openEditor") && (
+              <button className="btn" onClick={() => void openEditor(w.path)}>
+                Open in editor
+              </button>
+            )}
           </div>
         ))}
         {worktrees.length === 0 && (
@@ -264,9 +268,11 @@ export function SessionDetails({
                 </button>
               )}
             </div>
-            <button className="btn" onClick={() => void openEditor(dir)}>
-              Open in editor
-            </button>
+            {can("openEditor") && (
+              <button className="btn" onClick={() => void openEditor(dir)}>
+                Open in editor
+              </button>
+            )}
           </div>
         )}
       </section>
@@ -366,6 +372,8 @@ export function SessionDetails({
             <button
               className="btn danger"
               onClick={async () => {
+                if (!(await webConfirm(`Stop ${s.name}?`, { confirmLabel: "Stop", danger: true })))
+                  return;
                 const r = await deck().stopSession(s.bgId!, s.name);
                 if (r.message !== "cancelled")
                   flash(r.ok ? "Stopped" : r.message);

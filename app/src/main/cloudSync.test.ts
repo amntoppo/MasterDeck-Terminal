@@ -351,4 +351,51 @@ describe('CloudSync', () => {
     expect(onItems).not.toHaveBeenCalled()
     expect(srv.conns).toHaveLength(1)
   })
+
+  it('hello carries macPublicKey when there is one', async () => {
+    const srv = await server()
+    const pk = 'B' + 'x'.repeat(86)
+    const { s } = sync(srv.url, { macPublicKey: () => pk })
+    s.start()
+    await until(() => srv.got.some((m) => m.t === 'hello'))
+    expect(srv.got[0]).toEqual({ t: 'hello', deviceId: 'mac-1', appVersion: '0.7.0', protocol: PROTOCOL_VERSION, macPublicKey: pk })
+  })
+
+  it('forwards welcome.user (or null) and browser messages; sendBrowser only when ready; onDisconnect on close', async () => {
+    const user = { id: 'u1', email: 'me@x.com' }
+    const browserMsgs = [
+      { t: 'open', b: 'b1', name: 'C', publicKey: 'k' },
+      { t: 'frame', b: 'b1', d: 'abc' },
+      { t: 'close', b: 'b1' },
+      { t: 'browserRequest', id: 'b2', name: 'C', email: 'me@x.com', commit: 'c', expiresAt: 1 },
+      { t: 'browserReveal', id: 'b2', publicKey: 'k', nonce: 'n' },
+      { t: 'browserRevoked', id: 'b1' },
+    ]
+    let first = true
+    const srv = await server({
+      onHello: (ws) => {
+        ws.send(JSON.stringify({ t: 'welcome', pending: [], ...(first ? { user } : {}) }))
+        if (first) for (const m of browserMsgs) ws.send(JSON.stringify(m))
+        first = false
+      },
+    })
+    const users: unknown[] = [], got: unknown[] = []
+    const onDisconnect = vi.fn()
+    const { s } = sync(srv.url, { onUser: (u) => users.push(u), onBrowser: (m) => got.push(m), onDisconnect })
+    expect(s.sendBrowser({ t: 'browserClose', b: 'b1' })).toBe(false)
+    s.start()
+    await until(() => got.length === browserMsgs.length)
+    expect(got).toEqual(browserMsgs)
+    expect(users).toEqual([user])
+    expect(s.sendBrowser({ t: 'browserDecision', id: 'b2', allow: true })).toBe(true)
+    await until(() => srv.got.some((m) => m.t === 'browserDecision'))
+    expect(srv.got.find((m) => m.t === 'browserDecision')).toEqual({ t: 'browserDecision', id: 'b2', allow: true })
+    expect(onDisconnect).not.toHaveBeenCalled()
+    srv.conns[0].close(4006)
+    await until(() => onDisconnect.mock.calls.length === 1)
+    await until(() => users.length === 2)
+    expect(users[1]).toBeNull()
+    s.stop()
+    expect(onDisconnect).toHaveBeenCalledTimes(2)
+  })
 })

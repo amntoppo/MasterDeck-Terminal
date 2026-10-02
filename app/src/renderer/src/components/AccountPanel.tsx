@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { PROVIDERS } from '@shared/account'
 import type { AppState } from '@shared/types'
 import { deck, useNow } from '../deck'
+import { can } from '../web'
 
 /** Settings → Account: sign in (browser or email), the pending code, and the signed-in summary. */
 export function AccountPanel({ account }: { account: AppState['account'] }) {
@@ -14,9 +15,16 @@ export function AccountPanel({ account }: { account: AppState['account'] }) {
   const [ids, setIds] = useState<string[]>(['google', 'github'])
   const now = useNow(1_000)
   useEffect(() => {
-    void deck().accountProviders().then(setIds, () => {})
+    if (can('accountProviders')) void deck().accountProviders().then(setIds, () => {})
   }, [])
   const a = account ?? { kind: 'signedOut' as const, message: null }
+  // Who the Mac is signed in as changes only at the Mac (account calls are blocked on the web).
+  if (!can('accountSignIn'))
+    return (
+      <Field label="Account" hint="Sign in, sign out and account settings are on your Mac.">
+        <span className="muted">{a.kind === 'signedIn' ? `${a.email} · ` : ''}Manage your account on your Mac</span>
+      </Field>
+    )
 
   if (a.kind === 'pending') {
     const left = Math.max(0, Math.round((a.expiresAt - now) / 1000))

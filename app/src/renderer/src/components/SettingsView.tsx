@@ -4,6 +4,8 @@ import { SHORTCUTS, showKeys } from '@shared/shortcuts'
 import type { AppState, HookStatus } from '@shared/types'
 import { formatAgo } from '@shared/format'
 import { deck, useNow } from '../deck'
+import { webConfirm } from '../webConfirm'
+import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
 
 export type SettingsSection = Section
@@ -15,7 +17,7 @@ const SECTIONS: [Section, string][] = [
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
   ['hooks', 'Hooks & skills'],
-  ['remote', 'Remote (phone)'],
+  ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
   ['about', 'About'],
 ]
@@ -61,6 +63,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
   const c = state.config
   const hooks = state.hooks
   const setHook = async (key: keyof HookStatus, on: boolean) => {
+    if (!(await webConfirm(`${on ? 'Install' : 'Remove'} the ${key} hook on your Mac?`, { confirmLabel: on ? 'Install' : 'Remove', danger: !on }))) return
     const r = await deck().hooksInstall({ ...hooks, [key]: on })
     flash(r.ok ? (on ? 'Hook installed' : 'Hook removed') : r.message)
   }
@@ -147,7 +150,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             <button
               className="btn"
               onClick={async () => {
-                const r = state.statuslineInstalled ? await deck().statuslineUninstall() : await deck().statuslineInstall()
+                const off = state.statuslineInstalled
+                if (!(await webConfirm(`${off ? 'Remove' : 'Install'} the status line on your Mac?`, { confirmLabel: off ? 'Remove' : 'Install', danger: off }))) return
+                const r = off ? await deck().statuslineUninstall() : await deck().statuslineInstall()
                 flash(r.ok ? 'Done' : r.message)
               }}
             >
@@ -180,9 +185,12 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
           Sends Tasks and Needs you to your MasterDeck backend, and runs what you do from the phone: answers, starting a session from a board issue, stopping,
           resuming and messaging sessions. Anyone signed in to your account can drive your sessions.
         </p>
-        <Field label="Connect to the backend" hint="Off by default. Needs a signed-in account.">
-          {toggle('remoteEnabled', 'Connect to the backend')}
-        </Field>
+        {/* The web must not be able to cut itself off (the Mac also ignores remoteEnabled from the web). */}
+        {!isWeb() && (
+          <Field label="Connect to the backend" hint="Off by default. Needs a signed-in account.">
+            {toggle('remoteEnabled', 'Connect to the backend')}
+          </Field>
+        )}
         {!r?.hasToken && (
           <Field label="Account" hint="Remote needs a signed-in account.">
             <span>Sign in first</span>
@@ -199,6 +207,32 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
               : (r?.message ?? (s.remoteEnabled ? 'Connecting…' : 'Off'))}
           </span>
         </Field>
+        {r?.warning && (
+          <p className="set-hint error" role="alert">
+            {r.warning}
+          </p>
+        )}
+        <Field label="Browsers" hint="Each browser is approved once here by comparing three words.">
+          {(state.browsers ?? []).length === 0 ? (
+            <span className="muted">No browsers. Open app.masterdeck.dev to add one.</span>
+          ) : (
+            <ul className="browser-list">
+              {state.browsers!.map((b) => (
+                <li key={b.id}>
+                  <span>
+                    {b.name}
+                    {b.connected ? ' · connected' : ''}
+                  </span>
+                  {can('browserRevoke') && (
+                    <button className="btn" aria-label={`Revoke ${b.name}`} onClick={() => void deck().browserRevoke(b.id)}>
+                      Revoke
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Field>
       </>
     ),
     keys: (
@@ -208,7 +242,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             <div className="eyebrow">{g}</div>
             {SHORTCUTS.filter((k) => k.group === g).map((k) => (
               <div key={k.id} className="keys-row">
-                <kbd>{showKeys(k.keys, deck().platform)}</kbd>
+                <kbd>{showKeys(k.keys, keyPlatform())}</kbd>
                 <span>{k.what}</span>
               </div>
             ))}

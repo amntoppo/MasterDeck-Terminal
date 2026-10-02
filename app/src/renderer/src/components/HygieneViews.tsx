@@ -6,6 +6,7 @@ import type { JanitorRow } from '@shared/ipc'
 import { isCleanupTarget, needsTypedConfirm } from '@shared/janitor'
 import type { AppState, Session } from '@shared/types'
 import { deck, useNow } from '../deck'
+import { webConfirm } from '../webConfirm'
 
 const CLS_ORDER = ['SAFE', 'PUSHED', 'DIRTY', 'UNPUSHED', 'IN USE']
 
@@ -46,7 +47,9 @@ export function JanitorView({ state }: { state: AppState }) {
     if (r.ok) setRows((cur) => cur?.filter((x) => x.path !== row.path) ?? null)
     return r.ok
   }
+  const wts = (n: number) => `${n} worktree${n === 1 ? '' : 's'}`
   const cleanUp = async (targets: JanitorRow[]) => {
+    if (!(await webConfirm(`Remove ${wts(targets.length)} whose PR is merged? Branches are kept.`, { confirmLabel: 'Remove', danger: true }))) return
     let removed = 0
     for (const r of targets) if (await remove(r, false)) removed++
     const failed = targets.length - removed
@@ -79,6 +82,7 @@ export function JanitorView({ state }: { state: AppState }) {
           className="btn"
           disabled={!safeRows.length || !!busy}
           onClick={async () => {
+            if (!(await webConfirm(`Remove ${wts(safeRows.length)} marked SAFE?`, { confirmLabel: 'Remove', danger: true }))) return
             for (const r of safeRows) await remove(r, false)
           }}
         >
@@ -153,7 +157,7 @@ export function JanitorView({ state }: { state: AppState }) {
                       <button
                         className={`btn ${needsTypedConfirm(r.cls) ? 'danger' : ''}`}
                         disabled={busy === r.path}
-                        onClick={() => (needsTypedConfirm(r.cls) ? setConfirm({ row: r, typed: '' }) : void remove(r, false))}
+                        onClick={() => (needsTypedConfirm(r.cls) ? setConfirm({ row: r, typed: '' }) : void webConfirm(`Remove the worktree ${r.path}?`, { confirmLabel: 'Remove', danger: true }).then((y) => y && remove(r, false)))}
                       >
                         {busy === r.path ? 'Removing…' : 'Remove'}
                       </button>

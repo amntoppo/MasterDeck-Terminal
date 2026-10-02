@@ -4,6 +4,8 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import type { WorkflowTemplate } from "@shared/flow";
 import { actionCount, DEFAULT_TEMPLATE } from "@shared/flow";
 import { deck } from "../deck";
+import { can, keyPlatform } from "../web";
+import { RepoPicker } from "./RepoPicker";
 
 export type Repo = { name: string; path: string };
 
@@ -13,7 +15,7 @@ export type NewAction =
   | { kind: "issue" }
   | { kind: "resume" };
 
-const isMac = () => deck().platform === "darwin";
+const isMac = () => keyPlatform() === "darwin";
 const key = (k: string) =>
   isMac() ? k : k.replace("⌘", "Ctrl+").replace("⇧", "Shift+");
 
@@ -136,12 +138,13 @@ export function NewMenu({ onPick }: { onPick: (a: NewAction) => void }) {
               { kind: "issue" },
               "Find a ticket, then start a session on it",
             )}
-            {item(
-              "Resume a past session…",
-              key("⌘⇧F"),
-              { kind: "resume" },
-              "Search earlier sessions and resume one",
-            )}
+            {can("searchHistory") &&
+              item(
+                "Resume a past session…",
+                key("⌘⇧F"),
+                { kind: "resume" },
+                "Search earlier sessions and resume one",
+              )}
           </div>,
           document.body,
         )}
@@ -205,6 +208,7 @@ export function NewSessionDialog({
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflow, setWorkflow] = useState(DEFAULT_TEMPLATE);
   const [mode, setMode] = useState("");
+  const [picking, setPicking] = useState(false);
   useEffect(() => {
     void deck()
       .workspaceRepos()
@@ -213,9 +217,10 @@ export function NewSessionDialog({
         if (r[0]) setCwd((c) => c || r[0].path);
       });
     void deck().defaultModel().then(setConfigured);
-    void deck()
-      .workflowGet()
-      .then((w) => setTemplates(w.templates));
+    if (can("workflowGet"))
+      void deck()
+        .workflowGet()
+        .then((w) => setTemplates(w.templates));
   }, []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -368,11 +373,22 @@ export function NewSessionDialog({
           </button>
         </div>
       </div>
+      {picking && (
+        <RepoPicker
+          start={cwd}
+          onDone={(p) => {
+            setPicking(false);
+            if (p) setCwd(p);
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
 
   async function pickOther() {
+    // The web cannot open the Mac's folder window: pick from the repos or type a path.
+    if (!can("pickFolder")) return setPicking(true);
     const p = await deck().pickFolder(cwd || undefined);
     if (p) setCwd(p);
   }

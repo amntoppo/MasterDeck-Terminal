@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { PROTOCOL_VERSION, type Command, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
+import { PROTOCOL_VERSION, type Command, type DesktopMsg, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
 import { fitSnapshot, SNAPSHOT_LIMIT, volatileKey, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
 
@@ -27,6 +27,14 @@ export interface CloudSyncOpts {
   welcomeTimeoutMs?: number
   /** How often and how long a transient outcome is re-run before it is sent (default 1 s, 60 s). */
   transientRetry?: { everyMs: number; forMs: number }
+  /** The Mac's browser key, sent in hello (protocol 3). */
+  macPublicKey?: () => string | null
+  /** open / close / frame / browserRequest / browserReveal / browserRevoked, for the browser bridge. */
+  onBrowser?: (m: ServerToDesktop) => void
+  /** The account the backend says this device belongs to (from welcome), null when it does not say. */
+  onUser?: (u: { id: string; email: string } | null) => void
+  /** The socket closed or the line stopped: every browser channel is gone. */
+  onDisconnect?: () => void
 }
 
 /**
@@ -81,6 +89,11 @@ export class CloudSync {
     ws?.on('error', () => {})
     ws?.close(1000, 'turned off')
     this.set({ conn: 'off', message: null })
+    this.o.onDisconnect?.()
+  }
+
+  sendBrowser(m: Extract<DesktopMsg, { t: 'frame' | 'browserDecision' | 'browserNonce' | 'browserClose' }>): boolean {
+    return this.send(m)
   }
 
   push(snap: RemoteSnapshot): void {
@@ -170,7 +183,8 @@ export class CloudSync {
     }
     this.ws = ws
     ws.on('open', () => {
-      ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION }))
+      const macPublicKey = this.o.macPublicKey?.()
+      ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION, ...(macPublicKey ? { macPublicKey } : {}) }))
       // Open but never welcomed (a proxy, a wedged server): drop it so the close path redials.
       if (this.welcomeWait) clearTimeout(this.welcomeWait)
       this.welcomeWait = setTimeout(() => {
@@ -209,6 +223,7 @@ export class CloudSync {
       this.welcomeWait = null
       if (this.ping) clearInterval(this.ping)
       this.ping = null
+      this.o.onDisconnect?.()
       if (code === 4003) return this.signedOut(String(reason) === 'account deleted' ? DELETED : undefined)
       if (code === 4005) this.set({ conn: 'error', message: 'Another Mac is connected to this account' })
       else if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
@@ -268,6 +283,7 @@ export class CloudSync {
         this.sentKey = null
         this.welcomed.add(ws)
         this.lastRx = Date.now()
+        this.o.onUser?.(m.user && typeof m.user.id === 'string' && typeof m.user.email === 'string' ? { id: m.user.id, email: m.user.email } : null)
         this.flush()
         for (const cmd of m.pending) this.enqueue(cmd)
         return
@@ -280,6 +296,14 @@ export class CloudSync {
           return
         }
         this.o.onItems(m.items)
+        return
+      case 'open':
+      case 'close':
+      case 'frame':
+      case 'browserRequest':
+      case 'browserReveal':
+      case 'browserRevoked':
+        this.o.onBrowser?.(m)
         return
       case 'error':
         this.o.log?.(`remote: ${m.code}: ${m.message}`)

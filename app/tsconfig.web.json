@@ -9,8 +9,8 @@
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
-    "paths": { "@shared/*": ["src/shared/*"] }
+    "paths": { "@shared/*": ["src/shared/*"], "@renderer/*": ["src/renderer/src/*"] }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/*.d.ts"],
+  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/*.d.ts", "src/web/**/*"],
   "exclude": ["src/shared/**/*.test.ts"]
 }

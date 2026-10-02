@@ -19,6 +19,9 @@ import {
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
 import { PrsView } from "./components/PrsView";
+import { BrowserApproval } from "./components/BrowserApproval";
+import { WebConfirm } from "./components/WebConfirm";
+import { confirmPending } from "./webConfirm";
 import { SetupDialog } from "./components/SetupDialog";
 import {
   SprintSummaryDialog,
@@ -34,6 +37,7 @@ import { RestoreBanner } from "./components/RestoreBanner";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
+import { can, isWeb, keyPlatform, screenOk, shortcutOk } from "./web";
 import { TasksView } from "./components/TasksView";
 import { Rail } from "./components/Rail";
 import {
@@ -137,15 +141,15 @@ export function App() {
   );
   // Master's column width (% of the window), on every screen; the Terminals panel's width.
   const [masterPct, setMasterPct] = useState<number>(() =>
-    load("masterPct", 34),
+    load("masterPct", isWeb() ? 26 : 34),
   );
-  const [inspPct, setInspPct] = useState<number>(() => load("inspPct", 28));
+  const [inspPct, setInspPct] = useState<number>(() => load("inspPct", isWeb() ? 22 : 28));
   // The Master button (top right, every screen) shows or hides master; hidden, it stays attached.
   const [masterOpen, setMasterOpen] = useState(() =>
     load<boolean>("masterOpen", true),
   );
   const [view, setView] = useState<View>(() => {
-    const v = load<string>("view", "terminals");
+    const v = load<string>("view", isWeb() ? "tasks" : "terminals");
     return (
       [
         "terminals",
@@ -226,6 +230,10 @@ export function App() {
   useEffect(() => save("inspPct", inspPct), [inspPct]);
   useEffect(() => save("masterOpen", masterOpen), [masterOpen]);
   useEffect(() => save("inspOpen", inspOpen), [inspOpen]);
+  // The web app shows only the views in WEB_VIEWS (web.ts).
+  useEffect(() => {
+    if (!screenOk(view)) setView("tasks");
+  }, [view]);
   useEffect(() => {
     save("view", view);
     deck().setBoardOpen(view === "board");
@@ -261,7 +269,7 @@ export function App() {
     async (cwd?: string) => {
       const id = `sh:${Date.now()}`;
       const dir = cwd ?? (workspace || deck().home);
-      if (!cwd && workspace) {
+      if (!cwd && workspace && can("shellPrepare")) {
         const r = await deck().shellPrepare(dir);
         if (r.message) flash(r.message, !r.ok);
       }
@@ -610,11 +618,14 @@ export function App() {
       (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     const dialogOpen = !!document.querySelector(".backdrop");
     const hit = matchShortcut(e, {
-      platform: deck().platform,
+      platform: keyPlatform(),
       inTextField,
       dialogOpen,
     });
     if (!hit || !state) return;
+    // A web confirm is waiting: it gets the keys, not the app behind it.
+    if (confirmPending()) return;
+    if (!shortcutOk(hit.id)) return;
     const done = () => {
       e.preventDefault();
       e.stopPropagation();
@@ -782,6 +793,8 @@ export function App() {
   };
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
   const openPr = (url: string, issue: Ticket | null, title: string) => {
+    // The PR popup needs GitHub on the Mac; the web opens the PR itself.
+    if (isWeb()) return deck().openExternal(url);
     const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url);
     if (!m) return;
     const known = issue
@@ -849,13 +862,17 @@ export function App() {
             root: () => document.querySelector<HTMLElement>(".board-view"),
           }
         : null;
+  // On the web (any window size, often a wide one) the side columns stop growing so the terminal gets the room.
+  const cap = (css: string, px: number) => (isWeb() ? `min(${css}, ${px}px)` : css);
+  const panelW = cap(`max(${MIN_PANEL}px, ${inspPct}%)`, 440);
+  const masterW = cap(`max(${MIN_MASTER}px, ${masterPct}%)`, 560);
   // rail · sessions · terminal · [panel] · [master]: the other screens cover all but the rail and master.
   const columns = [
     "var(--rail-w)",
     `${sideW}px`,
     "minmax(0, 1fr)",
-    ...(panelShown ? ["6px", `max(${MIN_PANEL}px, ${inspPct}%)`] : []),
-    ...(masterShown ? ["6px", `max(${MIN_MASTER}px, ${masterPct}%)`] : []),
+    ...(panelShown ? ["6px", panelW] : []),
+    ...(masterShown ? ["6px", masterW] : []),
   ].join(" ");
   const masterAttached = useMaster && state.master.kind === "attached";
   const askMaster = (s: Session) => {
@@ -882,7 +899,7 @@ export function App() {
         gridTemplateColumns: columns,
         ["--side-w" as string]: `${sideW}px`,
         ["--right-w" as string]: masterShown
-          ? `calc(max(${MIN_MASTER}px, ${masterPct}%) + 6px)`
+          ? `calc(${masterW} + 6px)`
           : "0px",
       }}
     >
@@ -1215,7 +1232,7 @@ export function App() {
         <div
           className="find-slot"
           style={{
-            right: `calc(var(--right-w, 0px) + ${panelShown ? `max(${MIN_PANEL}px, ${inspPct}%) + 6px` : "0px"} + 14px)`,
+            right: `calc(var(--right-w, 0px) + ${panelShown ? `${panelW} + 6px` : "0px"} + 14px)`,
           }}
         >
           <FindBar
@@ -1253,7 +1270,7 @@ export function App() {
           onClose={() => setWorktreesFor(null)}
         />
       )}
-      {(dialog === "setup" || (showFirstRun && !state.config.configured)) && (
+      {(dialog === "setup" || (showFirstRun && !state.config.configured && !isWeb())) && (
         <SetupDialog
           state={state}
           firstRun={dialog !== "setup"}
@@ -1320,6 +1337,8 @@ export function App() {
           }}
         />
       )}
+      {can("browserDecide") && <BrowserApproval state={state} />}
+      <WebConfirm />
       {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
           before the headers under it (drag regions for moving the window) could not be clicked. */}
       {useMaster && (

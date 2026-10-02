@@ -19,6 +19,8 @@ import type { InboxEntry, InboxKind } from "@shared/inbox";
 import type { ExternalItem } from "@shared/remote";
 import type { AppState, Issue, Proposal, Session } from "@shared/types";
 import { deck, KIND_COLOR, load, save, useNow } from "../deck";
+import { can } from "../web";
+import { webConfirm } from "../webConfirm";
 import type { PaletteAction } from "./CommandPalette";
 import { OfferRow } from "./PrsView";
 import { AskPanel } from "./AskPanel";
@@ -193,6 +195,9 @@ export function Sidebar({
     ? sessions.filter((s) => picked.has(s.key) && canStop(s))
     : [];
   const stopPicked = async () => {
+    const n = toStop.length;
+    if (!(await webConfirm(`Stop ${n} session${n === 1 ? "" : "s"}?`, { confirmLabel: "Stop", danger: true })))
+      return;
     setStopping(true);
     const r = await deck().stopSessions(toStop.map((s) => s.key));
     setStopping(false);
@@ -571,13 +576,15 @@ export function Sidebar({
               Cleanup
             </button>
           )}
-          <button
-            className="link-btn"
-            onClick={refresh}
-            disabled={refreshing || state.githubRefreshing}
-          >
-            {refreshing || state.githubRefreshing ? "Refreshing…" : "Refresh"}
-          </button>
+          {can("refresh") && (
+            <button
+              className="link-btn"
+              onClick={refresh}
+              disabled={refreshing || state.githubRefreshing}
+            >
+              {refreshing || state.githubRefreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
         </div>
       </div>
       {detailCard && (
