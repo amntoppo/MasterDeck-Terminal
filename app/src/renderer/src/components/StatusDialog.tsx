@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { attentionFor, MANUAL_STATUSES, sessionStatus, STATUS_TEXT, type StatusKey } from '@shared/review'
 import type { AppState, Session } from '@shared/types'
 import { deck } from '../deck'
+import { webConfirm } from '../webConfirm'
 
 /**
  * A session's status, set by hand: pick one (it stays until set back to Automatic), or stop the
@@ -27,6 +28,7 @@ export function StatusDialog({ session: s, state, onClose, onStopped }: { sessio
     else setMsg(r.message)
   }
   const stop = async () => {
+    if (!(await webConfirm(`Stop ${s.name}?`, { confirmLabel: 'Stop', danger: true }))) return
     setBusy(true)
     setMsg(null)
     const r = s.kind === 'background' && s.bgId ? await deck().stopSession(s.bgId, s.name) : s.pid !== null ? await deck().stopOtherSession(s.pid, s.name) : { ok: false, message: 'no process to stop' }

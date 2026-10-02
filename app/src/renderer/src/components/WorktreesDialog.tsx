@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { SessionWorktree } from '@shared/worktrees'
 import type { Session } from '@shared/types'
 import { deck } from '../deck'
+import { can } from '../web'
 
 /**
  * The git worktrees a session created or worked in (any repo), each with Open in editor (the
@@ -54,9 +55,11 @@ export function WorktreesDialog({ session: s, worktrees, dir, onClose }: { sessi
                   {w.path}
                 </div>
               </div>
-              <button className="btn primary" onClick={() => void open(w.path)} title="Open this folder in your default IDE">
-                Open in editor
-              </button>
+              {can('openEditor') && (
+                <button className="btn primary" onClick={() => void open(w.path)} title="Open this folder in your default IDE">
+                  Open in editor
+                </button>
+              )}
             </div>
           ))}
         </div>

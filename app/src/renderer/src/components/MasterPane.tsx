@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 import { can } from '../web'
+import { webConfirm } from '../webConfirm'
 import { StartHereDialog } from './StartHereDialog'
 import { TerminalView } from './TerminalView'
 
@@ -89,6 +90,7 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
                 <button
                   onClick={async () => {
                     setMenu(false)
+                    if (!(await webConfirm('Remove the status line on your Mac?', { confirmLabel: 'Remove', danger: true }))) return
                     const r = await deck().statuslineUninstall()
                     setMsg(r.message)
                   }}
@@ -99,6 +101,7 @@ export function MasterPane({ state, shown = true }: { state: AppState; shown?: b
                 <button
                   onClick={async () => {
                     setMenu(false)
+                    if (!(await webConfirm('Install the status line on your Mac?', { confirmLabel: 'Install' }))) return
                     const r = await deck().statuslineInstall()
                     setMsg(r.message)
                   }}

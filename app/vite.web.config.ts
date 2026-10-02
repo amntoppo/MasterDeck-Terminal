@@ -14,6 +14,7 @@ const localCsp = (): Plugin => ({
 /** The web app (app.masterdeck.dev): the renderer again, with window.deck talking to the Mac through the relay. */
 export default defineConfig(({ command, mode }) => {
   // A production build (deploy:web) must never ship pointing at a local or plain-http backend.
+  // Against a local backend use `MD_API=http://localhost:8787 npm run dev:web` (the dev server), not build:web.
   if (command === 'build' && mode === 'production' && !API.startsWith('https://')) throw new Error(`MD_API must be https:// for a production build (got ${API})`)
   return {
     root: resolve(__dirname, 'src/web'),

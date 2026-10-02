@@ -11,6 +11,7 @@ import {
 } from "@shared/flow";
 import type { AppState } from "@shared/types";
 import { deck, load as loadPref, save as savePref } from "../deck";
+import { webConfirm } from "../webConfirm";
 import { FlowEditor, type Skill } from "./FlowEditor";
 import { TerminalView } from "./TerminalView";
 import type { WorkflowDraft } from "@shared/ipc";
@@ -197,6 +198,8 @@ export function WorkflowView(_: { state: AppState }) {
   };
   const del = async () => {
     if (!current) return;
+    if (!(await webConfirm(`Delete the workflow “${current.name}”?`, { confirmLabel: "Delete", danger: true })))
+      return;
     const r = await deck().workflowTemplateDelete(current.id);
     setMsg(r.message);
     if (r.ok) {
@@ -228,6 +231,10 @@ export function WorkflowView(_: { state: AppState }) {
   // Apply or save: MasterDeck installs the draft's new triggers and skills, then saves it.
   const applyDraft = async (asNew: boolean) => {
     if (!draft || !current) return;
+    const ask = asNew
+      ? "Save the draft as a new template? Its triggers and skills are installed on your Mac."
+      : `Apply the draft to “${current.name}”? Its triggers and skills are installed on your Mac.`;
+    if (!(await webConfirm(ask, { confirmLabel: asNew ? "Save" : "Apply" }))) return;
     const r = await deck().workflowDraftApply(
       asNew
         ? { newName: draft.name ?? "From the builder" }
@@ -456,7 +463,10 @@ export function WorkflowView(_: { state: AppState }) {
               </button>
               <button
                 className="btn"
-                onClick={() => void deck().workflowDraftDiscard()}
+                onClick={async () => {
+                  if (await webConfirm("Discard the builder's draft?", { confirmLabel: "Discard", danger: true }))
+                    void deck().workflowDraftDiscard();
+                }}
               >
                 Discard
               </button>

@@ -18,10 +18,24 @@ export const keyPlatform = () => (isWeb() ? (navigator.platform.includes('Mac') 
 export type Screen = View | 'history' | 'broadcast' | 'standup' | 'sprint-summary' | 'skills'
 
 /**
- * THE web allowlist: the screens the web app shows (stage 1). Everything below derives from it, and each screen
- * also needs its methods to be reachable (`can`).
+ * THE web allowlist: the screens the web app shows (stage 2: all of them, matching the desktop). Everything below
+ * derives from it, and each screen also needs its methods to be reachable (`can`).
  */
-export const WEB_VIEWS: ReadonlySet<Screen> = new Set<Screen>(['tasks', 'terminals'])
+export const WEB_VIEWS: ReadonlySet<Screen> = new Set<Screen>([
+  'terminals',
+  'board',
+  'prs',
+  'tasks',
+  'settings',
+  'costs',
+  'janitor',
+  'history',
+  'workflow',
+  'broadcast',
+  'standup',
+  'sprint-summary',
+  'skills',
+])
 
 /** The method a screen cannot work without, if any. */
 const SCREEN_NEEDS: Partial<Record<Screen, Method>> = {

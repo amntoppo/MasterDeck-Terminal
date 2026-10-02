@@ -5,6 +5,7 @@ import type { WorkflowTemplate } from "@shared/flow";
 import { actionCount, DEFAULT_TEMPLATE } from "@shared/flow";
 import { deck } from "../deck";
 import { can, keyPlatform } from "../web";
+import { RepoPicker } from "./RepoPicker";
 
 export type Repo = { name: string; path: string };
 
@@ -207,6 +208,7 @@ export function NewSessionDialog({
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflow, setWorkflow] = useState(DEFAULT_TEMPLATE);
   const [mode, setMode] = useState("");
+  const [picking, setPicking] = useState(false);
   useEffect(() => {
     void deck()
       .workspaceRepos()
@@ -275,7 +277,7 @@ export function NewSessionDialog({
               </option>
             ))}
             {other && <option value="__other">{cwd}</option>}
-            {can("pickFolder") && <option value="__other">Other folder…</option>}
+            <option value="__other">Other folder…</option>
           </select>
         </div>
         {cwd && <div className="meta mono">{cwd}</div>}
@@ -371,11 +373,22 @@ export function NewSessionDialog({
           </button>
         </div>
       </div>
+      {picking && (
+        <RepoPicker
+          start={cwd}
+          onDone={(p) => {
+            setPicking(false);
+            if (p) setCwd(p);
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
 
   async function pickOther() {
+    // The web cannot open the Mac's folder window: pick from the repos or type a path.
+    if (!can("pickFolder")) return setPicking(true);
     const p = await deck().pickFolder(cwd || undefined);
     if (p) setCwd(p);
   }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { SKILL_INFO } from '@shared/skillInfo'
 import type { AppState, HookStatus, SkillStatus } from '@shared/types'
 import { deck } from '../deck'
+import { webConfirm } from '../webConfirm'
 
 const STATE_TEXT: Record<SkillStatus['state'], string> = {
   installed: 'installed',
@@ -33,6 +34,8 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
   }, [onClose])
 
   const act = async (name: string, what: 'add' | 'remove') => {
+    const ask = what === 'add' ? `Install the ${name} skill on your Mac?` : `Remove the ${name} skill from your Mac?`
+    if (!(await webConfirm(ask, { confirmLabel: what === 'add' ? 'Install' : 'Remove', danger: what === 'remove' }))) return
     setBusy(name)
     const r = what === 'add' ? await deck().skillReinstall(name) : await deck().skillRemove(name)
     setBusy(null)
@@ -44,6 +47,7 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
   const changed = (Object.keys(hooks) as (keyof HookStatus)[]).some((k) => hooks[k] !== state.hooks[k])
   const save = async () => {
     if (changed) {
+      if (!(await webConfirm('Install the changed hooks on your Mac?', { confirmLabel: 'Install' }))) return
       setBusy('hooks')
       const r = await deck().hooksInstall(hooks)
       setBusy(null)
