@@ -52,8 +52,6 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
 
-  const [url, setUrl] = useState(settings.remoteUrl)
-  useEffect(() => setUrl(settings.remoteUrl), [settings.remoteUrl])
   const [token, setToken] = useState('')
   const now = useNow(5_000)
   const r = state.remote
@@ -180,21 +178,8 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
           Sends Tasks and Needs you to your MasterDeck backend, and runs what you do from the phone: answers, starting a session from a board issue, stopping,
           resuming and messaging sessions. Anyone with the client token can drive your sessions, so keep it secret.
         </p>
-        <Field label="Connect to the backend" hint="Off by default. Needs the backend address and the desktop token.">
+        <Field label="Connect to the backend" hint="Off by default. Needs the desktop token.">
           {toggle('remoteEnabled', 'Connect to the backend')}
-        </Field>
-        <Field label="Backend address" hint="https://…, or http://localhost:8787 for a local wrangler dev.">
-          <input
-            className="input"
-            style={{ width: '100%' }}
-            value={url}
-            placeholder="https://masterdeck-backend.<account>.workers.dev"
-            onChange={(e) => setUrl(e.target.value)}
-            onBlur={() => url !== s.remoteUrl && set('remoteUrl', url)}
-          />
-          {url.trim() && !/^https:\/\/[^\s/]|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/*$/.test(url.trim()) && (
-            <div className="set-hint">Use https://… or http://localhost:&lt;port&gt;</div>
-          )}
         </Field>
         <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
           <form

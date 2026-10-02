@@ -14,14 +14,11 @@ describe('normalizeSettings', () => {
 })
 
 describe('remote settings', () => {
-  it('defaults off with no URL', () => {
-    expect(normalizeSettings({})).toMatchObject({ remoteEnabled: false, remoteUrl: '' })
+  it('defaults off', () => {
+    expect(normalizeSettings({})).toMatchObject({ remoteEnabled: false })
   })
-  it('keeps https and localhost URLs, drops others', () => {
-    expect(normalizeSettings({ remoteUrl: 'https://md.example.workers.dev/' }).remoteUrl).toBe('https://md.example.workers.dev')
-    expect(normalizeSettings({ remoteUrl: 'http://localhost:8787' }).remoteUrl).toBe('http://localhost:8787')
-    expect(normalizeSettings({ remoteUrl: 'http://evil.example' }).remoteUrl).toBe('')
-    expect(normalizeSettings({ remoteUrl: 'javascript:alert(1)' }).remoteUrl).toBe('')
+  it('drops the retired remoteUrl and keeps remoteEnabled', () => {
+    expect('remoteUrl' in normalizeSettings({ remoteUrl: 'https://x' })).toBe(false)
     expect(normalizeSettings({ remoteEnabled: true }).remoteEnabled).toBe(true)
   })
 })

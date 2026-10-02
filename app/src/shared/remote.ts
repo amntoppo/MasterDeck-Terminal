@@ -5,7 +5,7 @@
  */
 import { z } from 'zod'
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 export const MAX_TEXT = 10_000
 
 const id = z.string().min(1).max(300)

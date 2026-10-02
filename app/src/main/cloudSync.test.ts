@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
-import type { RemoteSnapshot } from '@shared/remote'
+import { PROTOCOL_VERSION, type RemoteSnapshot } from '@shared/remote'
 import type { RemoteStatus } from '@shared/remoteSnapshot'
 import { CloudSync } from './cloudSync'
 
@@ -70,7 +70,7 @@ describe('CloudSync', () => {
     const { s, statuses } = sync(srv.url)
     s.start()
     await until(() => srv.got.some((m) => m.t === 'hello'))
-    expect(srv.got[0]).toEqual({ t: 'hello', deviceId: 'mac-1', appVersion: '0.7.0', protocol: 1 })
+    expect(srv.got[0]).toEqual({ t: 'hello', deviceId: 'mac-1', appVersion: '0.7.0', protocol: PROTOCOL_VERSION })
     await until(() => statuses.some((x) => x.conn === 'connected'))
     s.push(snap(1))
     s.push(snap(2))

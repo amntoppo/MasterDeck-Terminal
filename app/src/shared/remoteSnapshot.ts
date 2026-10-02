@@ -151,7 +151,7 @@ export function fitSnapshot(
 }
 
 /** The status shown while the line to the backend is not running. */
-export function remoteStatusWhenOff(s: { remoteEnabled: boolean; remoteUrl: string }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
-  const message = !s.remoteEnabled ? null : !hasToken ? 'add the desktop token' : !s.remoteUrl ? 'set the backend address' : null
+export function remoteStatusWhenOff(s: { remoteEnabled: boolean }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
+  const message = !s.remoteEnabled ? null : !hasToken ? 'add the desktop token' : null
   return { conn: 'off', message, lastSyncAt: null, hasToken }
 }

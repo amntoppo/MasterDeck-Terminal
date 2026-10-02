@@ -1,3 +1,4 @@
+import { remoteUrl } from "@shared/account";
 import { Watches } from "./watches";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
@@ -268,8 +269,7 @@ const sources = new Sources(
         remoteReady = true;
         syncRemote();
       } else if (
-        state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
-        state.settings.remoteUrl !== prev?.settings.remoteUrl
+        state.settings.remoteEnabled !== prev?.settings.remoteEnabled
       )
         syncRemote();
     } catch (e) {
@@ -517,8 +517,8 @@ function deviceId(): string {
 function syncRemote(): void {
   const s = latest?.settings ?? sources.getSettings();
   const token = readToken(remoteTokenFile());
-  const key =
-    s.remoteEnabled && s.remoteUrl && token ? `${s.remoteUrl}\n${token}` : "";
+  const url = remoteUrl(process.env);
+  const key = s.remoteEnabled && token ? `${url}\n${token}` : "";
   if (key && key === cloudKey) return;
   if (key && !remoteReady) {
     // Pending commands arrive on connect; running them before the sessions load would fail them.
@@ -537,7 +537,7 @@ function syncRemote(): void {
     return;
   }
   cloud = new CloudSync({
-    url: s.remoteUrl,
+    url,
     token: token!,
     deviceId: deviceId(),
     appVersion: app.getVersion(),
