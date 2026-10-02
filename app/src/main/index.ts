@@ -251,7 +251,11 @@ const sources = new Sources(
     }
     win?.webContents.send(CH.state, state);
     cloud?.push(toRemoteSnapshot(state, app.getVersion()));
-    if (
+    if (!remoteReady && sources.isHealthy("agents")) {
+      // The session list is in: commands that waited while MasterDeck was closed can run now.
+      remoteReady = true;
+      syncRemote();
+    } else if (
       state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
       state.settings.remoteUrl !== prev?.settings.remoteUrl
     )
@@ -476,6 +480,8 @@ const remoteCommands = new RemoteCommands(
 );
 let cloud: CloudSync | null = null;
 let cloudKey = "";
+/** True once the first state with the session list exists; until then the backend is not dialled. */
+let remoteReady = false;
 
 function deviceId(): string {
   const f = join(paths.home, "remote-device-id");
@@ -502,6 +508,14 @@ function syncRemote(): void {
   const key =
     s.remoteEnabled && s.remoteUrl && token ? `${s.remoteUrl}\n${token}` : "";
   if (key && key === cloudKey) return;
+  if (key && !remoteReady) {
+    // Pending commands arrive on connect; running them before the sessions load would fail them.
+    cloud?.stop();
+    cloud = null;
+    cloudKey = "";
+    sources.setRemote({ conn: "connecting", message: "waiting for sessions to load", lastSyncAt: null, hasToken: true });
+    return;
+  }
   cloud?.stop();
   cloud = null;
   cloudKey = key;

@@ -17,6 +17,8 @@ export interface CloudSyncOpts {
   log?: (line: string) => void
   /** Snapshot size limit in UTF-8 bytes (default SNAPSHOT_LIMIT). */
   limit?: number
+  /** How often and how long a transient outcome is re-run before it is sent (default 1 s, 60 s). */
+  transientRetry?: { everyMs: number; forMs: number }
 }
 
 /**
@@ -218,12 +220,32 @@ export class CloudSync {
     }
   }
 
+  /**
+   * Runs a command until its outcome is final: a transient one (MasterDeck still loading) is run
+   * again every second for up to a minute, so it is never reported to the backend as a failure.
+   * Stops early (with the last outcome) when the line is stopped.
+   */
+  private async runSettled(cmd: Command): Promise<RemoteOutcome> {
+    const { everyMs, forMs } = this.o.transientRetry ?? { everyMs: 1_000, forMs: 60_000 }
+    const until = Date.now() + forMs
+    let r = await this.o.run(cmd)
+    while (r.transient && !this.stopped && Date.now() + everyMs <= until) {
+      await new Promise((res) => setTimeout(res, everyMs))
+      r = await this.o.run(cmd)
+    }
+    if (r.transient) {
+      const { transient: _t, ...rest } = r
+      return rest
+    }
+    return r
+  }
+
   /** One at a time, in order; a result for a dropped socket goes out on the next one (the server re-sends). */
   private enqueue(cmd: Command): void {
     this.chain = this.chain.then(async () => {
       let msg: Record<string, unknown>
       try {
-        const r = await this.o.run(cmd)
+        const r = await this.runSettled(cmd)
         msg = { t: 'result', cmdId: cmd.id, ok: r.ok, message: String(r.message ?? '').slice(0, 2000) }
         if (r.status) msg.status = r.status
         if (r.data !== undefined) msg.data = r.data

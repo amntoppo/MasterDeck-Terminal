@@ -91,6 +91,28 @@ describe('CloudSync', () => {
     expect(srv.got.find((m) => m.t === 'result' && m.cmdId === 'c')).toEqual({ t: 'result', cmdId: 'c', ok: true, message: 'fine' })
   })
 
+  it('a transient outcome is re-run, and only the final result is sent', async () => {
+    const srv = await server({ welcome: [{ id: 't', type: 'session.stop', args: { key: 'k' } }] })
+    let n = 0
+    const run = vi.fn(async () => (++n <= 2 ? { ok: false, transient: true as const, message: 'loading' } : { ok: true, message: 'stopped' }))
+    const { s } = sync(srv.url, { run, transientRetry: { everyMs: 20, forMs: 1000 } })
+    s.start()
+    await until(() => srv.got.some((m) => m.t === 'result'))
+    await new Promise((r) => setTimeout(r, 60))
+    expect(run).toHaveBeenCalledTimes(3)
+    expect(srv.got.filter((m) => m.t === 'result')).toEqual([{ t: 'result', cmdId: 't', ok: true, message: 'stopped' }])
+  })
+
+  it('a transient outcome that never clears is sent as a plain failure after the limit', async () => {
+    const srv = await server({ welcome: [{ id: 'u', type: 'session.stop', args: { key: 'k' } }] })
+    const run = vi.fn(async () => ({ ok: false, transient: true as const, message: 'loading' }))
+    const { s } = sync(srv.url, { run, transientRetry: { everyMs: 20, forMs: 100 } })
+    s.start()
+    await until(() => srv.got.some((m) => m.t === 'result'))
+    expect(run.mock.calls.length).toBeGreaterThan(1)
+    expect(srv.got.filter((m) => m.t === 'result')).toEqual([{ t: 'result', cmdId: 'u', ok: false, message: 'loading' }])
+  })
+
   it('passes stale through', async () => {
     const srv = await server({ welcome: [{ id: 's', type: 'inbox.dismiss', itemId: 'x', args: {} }] })
     const { s } = sync(srv.url, { run: async () => ({ ok: false, status: 'stale', message: 'gone' }) })

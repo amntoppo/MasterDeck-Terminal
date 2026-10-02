@@ -516,7 +516,8 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   the Keychain, never in `settings.json`), then switch on **Connect to the backend**. It's off by
   default.
 - **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
-  the reason, e.g. it can't reach the backend), red an error that needs you (the token was
+  the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
+  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (the token was
   rejected, or MasterDeck is too old for the backend), grey off.
 - **Security:** anyone with the backend's client token can drive your Claude sessions. Keep it
   secret, and rotate it (`npx wrangler secret put CLIENT_TOKEN`) if it leaks.

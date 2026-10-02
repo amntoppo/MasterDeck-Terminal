@@ -199,7 +199,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
           <form
             className="f-row"
-            style={{ width: '100%' }}
+            style={{ width: '100%', flexWrap: 'wrap' }}
             onSubmit={async (e) => {
               e.preventDefault()
               const res = await deck().remoteSetToken(token)
@@ -207,7 +207,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
               if (res.ok) setToken('')
             }}
           >
-            <input className="input" style={{ flex: 1 }} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={r?.hasToken ? 'paste a new token' : 'paste the token'} />
+            <input className="input" style={{ flex: '1 1 180px', minWidth: 0 }} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={r?.hasToken ? 'paste a new token' : 'paste the token'} />
             <button className="btn" type="submit" disabled={!token}>
               Save
             </button>

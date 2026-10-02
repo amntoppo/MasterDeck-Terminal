@@ -20,7 +20,8 @@ export interface RemoteDeps {
   setManualStatus(key: string, status: unknown): CliResult
 }
 
-export type RemoteOutcome = CommandResult & { status?: 'stale' }
+/** `transient`: not a final answer (MasterDeck is still loading); the caller runs it again later. */
+export type RemoteOutcome = CommandResult & { status?: 'stale'; transient?: true }
 
 const KEEP = 500
 const LOADING = 'MasterDeck is still loading; try again'
@@ -60,7 +61,7 @@ export class RemoteCommands {
     const p = this.exec(cmd)
       .catch((e): RemoteOutcome => ({ ok: false, message: `failed: ${String(e)}` }))
       .then((r) => {
-        if (r.message !== LOADING) this.remember(cmd.id, r)
+        if (!r.transient) this.remember(cmd.id, r)
         this.running.delete(cmd.id)
         return r
       })
@@ -93,7 +94,7 @@ export class RemoteCommands {
 
   private async exec(cmd: Command): Promise<RemoteOutcome> {
     const st = this.deps.state()
-    if (!st) return { ok: false, message: LOADING }
+    if (!st) return { ok: false, transient: true, message: LOADING }
     const by = `remote:${cmd.by}`.slice(0, 40)
     const session = (key: string) => st.sessions.find((s) => s.key === key)
     switch (cmd.type) {

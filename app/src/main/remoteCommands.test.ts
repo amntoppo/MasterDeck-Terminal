@@ -120,7 +120,7 @@ describe('RemoteCommands', () => {
 
   it('unsupported types and a loading app', async () => {
     expect(await new RemoteCommands(deps(st([])), file()).run(cmd({ type: 'shell.run', args: {} }))).toEqual({ ok: false, message: 'unsupported: shell.run' })
-    expect(await new RemoteCommands(deps(null), file()).run(cmd({ type: 'session.stop', args: { key: 'a' } }))).toEqual({ ok: false, message: 'MasterDeck is still loading; try again' })
+    expect(await new RemoteCommands(deps(null), file()).run(cmd({ type: 'session.stop', args: { key: 'a' } }))).toEqual({ ok: false, transient: true, message: 'MasterDeck is still loading; try again' })
   })
 
   it('runs a command id once, across restarts (Review Focus 1)', async () => {
@@ -194,7 +194,7 @@ describe('RemoteCommands fix round 1', () => {
     const d = deps(null, { state: () => state })
     const rc = new RemoteCommands(d, file())
     const c = cmd({ type: 'session.stop', args: { key: 'a' } })
-    expect(await rc.run(c)).toEqual({ ok: false, message: 'MasterDeck is still loading; try again' })
+    expect(await rc.run(c)).toEqual({ ok: false, transient: true, message: 'MasterDeck is still loading; try again' })
     state = st([sess('a', 'working')])
     expect(await rc.run(c)).toMatchObject({ ok: true })
     expect(d.stopBg).toHaveBeenCalledTimes(1)
