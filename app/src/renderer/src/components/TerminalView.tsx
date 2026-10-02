@@ -94,18 +94,13 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // hidden on mount; fitted when shown
     }
     let disposed = false
-    const setInstant = (on: boolean) => {
-      if (disposed || on === !!pred.current) return
-      if (on) pred.current = createPredictor(t)
-      else {
-        pred.current?.dispose()
-        pred.current = null
-      }
-    }
+    // Created before any output so it tracks the pen and cursor state from the start; switched on by the setting.
+    pred.current = isWeb() ? createPredictor(t, { enabled: false }) : null
+    const setInstant = (on: boolean) => !disposed && pred.current?.setEnabled(on)
     // A Mac on an older version has no instantTyping: on by default.
     const offState = isWeb() ? deck().onState((s) => setInstant(s.settings.instantTyping !== false)) : () => {}
     if (isWeb()) void deck().getSettings().then((s) => setInstant(s.instantTyping !== false))
-    // Output goes through the predictor when it is on: it takes its overlay off first.
+    // On the web all output goes through the predictor: it takes its overlay off first, and tracks the screen state.
     const write = (d: string) => (pred.current ? pred.current.write(d) : t.write(d))
     // Data that arrives before ptyOpen answers is queued, then dropped if the replay covers it.
     let ready = false

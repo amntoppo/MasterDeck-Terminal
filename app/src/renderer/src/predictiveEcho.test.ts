@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { Terminal } from '@xterm/headless'
 import { describe, expect, it } from 'vitest'
 import { createPredictor, type PredictorTerm } from './predictiveEcho'
 
 const COLS = 40
 const ROWS = 6
-const newTerm = () => new Terminal({ cols: COLS, rows: ROWS, allowProposedApi: true })
+const newTerm = (cols = COLS, rows = ROWS) => new Terminal({ cols, rows, allowProposedApi: true })
 const settle = (t: Terminal) => new Promise<void>((r) => t.write('', r))
 
 /** Every cell (chars, width, colors, bold/dim) and the cursor: what "the same screen" means here. */
@@ -24,13 +26,14 @@ function snap(t: Terminal): string[] {
 }
 const row = (t: Terminal, y = 0) => t.buffer.active.getLine(t.buffer.active.baseY + y)!.translateToString(true).trimEnd()
 
-function setup(opts: { latency?: number; timeoutMs?: number; realClock?: boolean } = {}) {
-  const term = newTerm()
-  const ref = newTerm()
+function setup(opts: { latency?: number; timeoutMs?: number; realClock?: boolean; cols?: number; rows?: number; enabled?: boolean } = {}) {
+  const term = newTerm(opts.cols, opts.rows)
+  const ref = newTerm(opts.cols, opts.rows)
   let clock = 0
   const p = createPredictor(term as unknown as PredictorTerm, {
     now: opts.realClock ? Date.now : () => clock,
     timeoutMs: opts.timeoutMs,
+    enabled: opts.enabled,
   })
   /** Output from the Mac, `latency` ms after the last keystroke. The reference sees only this. */
   const out = async (d: string) => {
@@ -252,19 +255,145 @@ describe('predictive echo', () => {
     same()
   })
 
-  it('does not predict on the alternate screen', async () => {
-    const { term, p, out, type, same } = setup()
+  it('on the alternate screen it only watches at first: nothing is drawn', async () => {
+    const { p, out, type, same } = setup()
     await out('$ ')
     await type('a')
     await out('\x1b[?1049h')
     expect(p.pending()).toBe(0)
     same()
     await type('q')
-    expect(p.pending()).toBe(0)
-    expect(row(term)).toBe('')
+    expect(p.shown()).toBe(0)
+    same()
     await out('\x1b[?1049l')
     await type('b')
-    expect(p.pending()).toBe(1)
+    expect(p.shown()).toBe(0) // back on the normal screen: watching again
+    await out('b')
+    same()
+  })
+
+  it('a full-screen app whose keys do not echo (vim normal mode) never gets predictions', async () => {
+    const { p, out, type, same } = setup()
+    await out('\x1b[?1049h\x1b[H~\r\n~\r\n~\x1b[H')
+    const moves: [string, string][] = [['j', '\x1b[2;1H'], ['j', '\x1b[3;1H'], ['k', '\x1b[2;1H'], ['l', '\x1b[2;2H'], ['x', '\x1b[2;1H\x1b[K'], ['w', ''], ['j', '\x1b[3;1H']]
+    for (const [k, echo] of moves) {
+      await type(k, 2000)
+      expect(p.shown()).toBe(0)
+      same()
+      await out(echo)
+      same()
+    }
+  })
+
+  it('a key echoed at the cursor three times in a row on the alternate screen: then predicted', async () => {
+    const { term, p, out, type, same } = setup()
+    await out('\x1b[?1049h\x1b[H> ')
+    for (const ch of 'abc') {
+      await type(ch)
+      expect(p.shown()).toBe(0)
+      await out(ch)
+    }
+    await type('d')
+    expect(p.shown()).toBe(1)
+    expect(row(term)).toBe('> abcd')
+    await out('d')
+    same()
+    await type('e')
+    await out('E') // mismatch: back to watching
+    same()
+    await type('f')
+    expect(p.shown()).toBe(0)
+  })
+
+  it('Esc on the alternate screen goes back to watching (vim leaving insert mode)', async () => {
+    const { p, out, type } = setup()
+    await out('\x1b[?1049h\x1b[H')
+    for (const ch of 'abc') {
+      await type(ch)
+      await out(ch)
+    }
+    await type(['\x1b'])
+    await out('\b')
+    await type('j')
+    expect(p.shown()).toBe(0)
+  })
+
+  it('mouse motion reports do not disturb predictions', async () => {
+    const { p, out, type, same } = setup()
+    await out('\x1b[?1003h\x1b[?1006h$ ')
+    await type('a')
+    await type(['\x1b[<35;10;3M'], 50)
+    await type(['\x1b[I'], 50)
+    await type('b', 50)
+    expect(p.shown()).toBe(2)
+    await type(['\x1b[<64;10;3M'], 50) // the wheel is not neutral: it may scroll the app
+    expect(p.shown()).toBe(0)
+    await out('ab')
+    same()
+  })
+
+  it('tracks the pen and the cursor from the start even while switched off', async () => {
+    const { p, out, type, same } = setup({ enabled: false })
+    await out('\x1b[1;38;5;33m$ \x1b[?25l')
+    await type('a')
+    expect(p.pending()).toBe(0)
+    p.setEnabled(true)
+    await type('b')
+    expect(p.pending()).toBe(0) // the cursor is still hidden
+    await out('b\x1b[?25h')
+    await type('c')
+    expect(p.shown()).toBe(1)
+    await out('c')
+    await out('z')
+    same()
+  })
+
+  it('a long run of SGRs without a full reset (Claude Code never sends 0) keeps predicting', async () => {
+    const { p, out, type, same } = setup()
+    let s = ''
+    for (let i = 0; i < 100; i++) s += `\x1b[38;2;${i};1;2m-\x1b[39m\x1b[2m.\x1b[22m`
+    await out(s + '\r\n\x1b[48;5;4m$ ')
+    await type('a')
+    expect(p.shown()).toBe(1)
+    await out('a')
+    await out('z')
+    same()
+  })
+
+  it('Claude Code (real capture): learns its echo, then predicts, and the screen ends exactly as the output makes it', async () => {
+    const capture: [number, string][] = JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/claude-echo.json'), 'utf8'))
+    const { term, p, out, type, same } = setup({ cols: 100, rows: 30 })
+    // The capture up to the first keystroke ('h' was typed just before the 'h' echo).
+    const echoAt = capture.findIndex(([, d]) => d.includes('\x1b[25Bh'))
+    for (const [, d] of capture.slice(0, echoAt)) await out(d)
+    expect(term.buffer.active.type).toBe('alternate')
+    expect([term.buffer.active.cursorX, term.buffer.active.cursorY]).toEqual([2, 25])
+    // h and i, with Claude's own echoes from the capture: watched, not drawn.
+    await type('h')
+    expect(p.shown()).toBe(0)
+    await out(capture[echoAt][1])
+    await type('i', 500)
+    await out(capture[echoAt + 1][1])
+    same()
+    // Claude-style echoes from here on: hide the cursor, redraw at the input, park, show the cursor.
+    const echo = (x: number, ch: string) => `\x1b[?25l\x1b[H\r\x1b[${x}C\x1b[25B${ch}\x1b[30;1H\x1b[26;${x + 2}H\x1b[?25h`
+    await type(' ', 400)
+    expect(p.shown()).toBe(0)
+    await out(echo(4, ' ')) // third exact echo: learned
+    await type('t', 400)
+    expect(p.shown()).toBe(1)
+    expect(row(term, 25).startsWith('❯\u00a0hi t')).toBe(true)
+    await type('h', 80)
+    await type('e', 80)
+    expect(p.shown()).toBe(3)
+    expect(row(term, 25).startsWith('❯\u00a0hi the')).toBe(true)
+    await out(echo(5, 't'))
+    expect(p.pending()).toBe(2)
+    await out(echo(6, 'h'))
+    await out(echo(7, 'e'))
+    expect(p.pending()).toBe(0)
+    expect(p.paused()).toBe(false)
+    same()
   })
 
   it('does not predict while the cursor is hidden', async () => {
