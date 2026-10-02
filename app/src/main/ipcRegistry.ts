@@ -24,3 +24,6 @@ export class IpcRegistry {
     return fn(REMOTE_EVENT, ...args);
   }
 }
+
+/** True for a call from the browser bridge (the web UI has already asked the user), false for the window's IPC. */
+export const isRemote = (e: unknown): boolean => (e as { remote?: unknown } | null)?.remote === true;

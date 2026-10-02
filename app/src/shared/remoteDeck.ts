@@ -25,6 +25,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   accountEmail: blocked,
   accountSignOut: blocked,
   accountManage: blocked,
+  browserDecide: blocked,
+  browserRevoke: blocked,
   onState: { kind: "event", ch: CH.state },
   onFocusSession: { kind: "event", ch: CH.focusSession },
   onShowNeedsYou: { kind: "event", ch: CH.showNeedsYou },

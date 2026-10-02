@@ -28,6 +28,7 @@ import {
   dialog,
   ipcMain,
   Notification,
+  safeStorage,
   shell,
 } from "electron";
 import {
@@ -56,7 +57,10 @@ import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
-import { IpcRegistry } from "./ipcRegistry";
+import { IpcRegistry, isRemote } from "./ipcRegistry";
+import { BrowserBridge } from "./browserBridge";
+import { BrowserStore } from "./browserStore";
+import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
 import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
@@ -147,13 +151,18 @@ if (process.env.MASTERDECK_USER_DATA)
   app.setPath("userData", process.env.MASTERDECK_USER_DATA);
 
 let win: BrowserWindow | null = null;
-// Set by the browser bridge (F5); every renderer event also goes to it.
-let bridge: { event(ch: string, args: unknown[]): void } | null = null;
+// The browser bridge (app.masterdeck.dev); every renderer event also goes to it.
+let bridge: BrowserBridge | null = null;
 const reg = new IpcRegistry(ipcMain);
 /** Send to the window and to any connected browser. */
 function emit(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args);
-  bridge?.event(channel, args);
+  try {
+    bridge?.event(channel, args);
+  } catch (e) {
+    // Never let a browser problem break delivery to the Mac's own window.
+    console.error(`browser bridge: ${String(e)}`);
+  }
 }
 let latest: AppState | null = null;
 let focused: string | null = null;
@@ -483,6 +492,25 @@ async function answerMenuFor(
 const remoteTokenFile = () => join(paths.home, "remote-token");
 const REMOTE = remoteUrl(process.env);
 const identityFile = () => join(paths.home, "account.json");
+const browserStore = new BrowserStore(join(paths.home, "browsers.json"));
+/** The Mac's browser key (Keychain); loaded once the app is ready. */
+let macKey: Awaited<ReturnType<typeof loadMacKey>> = null;
+/** The account the backend says this Mac belongs to (CloudSync welcome). */
+let cloudUser: { id: string; email: string } | null = null;
+let accountEmail: string | null = null;
+/** Sign-out or another account: approved browsers belong to the old one (spec "Same account", RF1). */
+function publishBrowsers(): void {
+  const b = bridge!;
+  sources.setBrowsers(
+    b.browsers().map(({ id, name, approvedAt, connected }) => ({ id, name, approvedAt, connected })),
+    b.requests(),
+    b.warning(),
+  );
+}
+function forgetBrowsers(): void {
+  browserStore.wipe();
+  bridge?.closeAll();
+}
 const account = new Account({
   baseUrl: REMOTE,
   fetch: (input, init) => fetch(input, init),
@@ -507,11 +535,33 @@ const account = new Account({
       }
   },
   onChange: (s) => {
+    if (s.kind === "signedOut") forgetBrowsers();
+    else if (s.kind === "signedIn" && accountEmail && s.email !== accountEmail) forgetBrowsers();
+    if (s.kind !== "pending") accountEmail = s.kind === "signedIn" ? s.email : null;
     sources.setAccount(s);
     syncRemote();
   },
 });
+{
+  const s = account.state();
+  accountEmail = s.kind === "signedIn" ? s.email : null;
+}
 sources.setAccount(account.state());
+bridge = new BrowserBridge({
+  store: browserStore,
+  key: () => macKey,
+  account: () => {
+    const s = account.state();
+    return cloudUser && s.kind === "signedIn" && s.email === cloudUser.email
+      ? { userId: cloudUser.id, email: cloudUser.email }
+      : null;
+  },
+  send: (m) => cloud?.sendBrowser(m) ?? false,
+  call: (ch, a) => reg.call(ch, a),
+  onChange: () => publishBrowsers(),
+  hello: { appVersion: app.getVersion(), platform: process.platform, home: homedir() },
+  log: (l) => console.log(l),
+});
 const remoteCommands = new RemoteCommands(
   {
     state: () => latest,
@@ -587,6 +637,14 @@ function syncRemote(): void {
     onStatus: (st) => sources.setRemote({ ...st, hasToken: true }),
     onSignedOut: (m) => account.signedOutRemotely(m),
     log: (line) => console.log(line),
+    macPublicKey: () => macKey?.publicKey ?? null,
+    onBrowser: (m) => void bridge!.onServer(m).catch((e) => console.error(`browser bridge: ${String(e)}`)),
+    onUser: (u) => {
+      if (cloudUser && u && u.id !== cloudUser.id) forgetBrowsers();
+      cloudUser = u;
+      publishBrowsers();
+    },
+    onDisconnect: () => bridge!.closeAll(),
   });
   cloud.start();
   if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
@@ -2125,9 +2183,28 @@ function registerIpc(): void {
   });
   reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
   reg.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
-  reg.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
+  reg.handle(CH.browserDecide, (_e, id: unknown, allow: unknown) =>
+    typeof id === "string" ? bridge!.decide(id, allow === true) : undefined,
+  );
+  reg.handle(CH.browserRevoke, async (_e, id: unknown) => {
+    if (typeof id !== "string" || !id || id.length > 100) return { ok: false };
+    bridge!.revoke(id);
+    const token = readToken(remoteTokenFile());
+    if (!token) return { ok: false };
+    try {
+      const r = await fetch(`${REMOTE}/v1/browsers/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      return { ok: r.ok };
+    } catch {
+      return { ok: false };
+    }
+  });
+  reg.handle(CH.stopSession, async (e, bgId: string, name: string) => {
     if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
-    const choice = await dialog.showMessageBox(win!, {
+    // From a browser: the web UI asked first; no native dialog on the Mac.
+    const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
       type: "warning",
       buttons: ["Cancel", "Stop session"],
       defaultId: 0,
@@ -2141,13 +2218,13 @@ function registerIpc(): void {
   });
   reg.handle(
     CH.stopOtherSession,
-    async (_e, pid: unknown, name: string) => {
+    async (e, pid: unknown, name: string) => {
       if (typeof pid !== "number" || !(await isClaudePid(pid)))
         return {
           ok: false,
           message: "that session is not a running claude process here",
         };
-      const choice = await dialog.showMessageBox(win!, {
+      const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
         type: "warning",
         buttons: ["Cancel", "Stop session"],
         defaultId: 0,
@@ -2164,7 +2241,7 @@ function registerIpc(): void {
         : { ok: true, message: "stopped" };
     },
   );
-  reg.handle(CH.stopSessions, async (_e, keys: unknown) => {
+  reg.handle(CH.stopSessions, async (e, keys: unknown) => {
     const want = new Set(
       Array.isArray(keys)
         ? keys.filter((k): k is string => typeof k === "string")
@@ -2175,7 +2252,7 @@ function registerIpc(): void {
     );
     if (!list.length) return { ok: false, message: "nothing to stop" };
     const names = list.map((s) => s.name);
-    const choice = await dialog.showMessageBox(win!, {
+    const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
       type: "warning",
       buttons: [
         "Cancel",
@@ -2370,6 +2447,11 @@ app.whenReady().then(async () => {
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
+  try {
+    macKey = await loadMacKey(join(paths.home, "browser-key"), safeStorage);
+  } catch (e) {
+    console.error(`browser key unreadable; browsers cannot connect: ${String(e)}`);
+  }
   sources.setLinker(linkSession);
   sources.statuslineInstalled = isInstalled(
     paths.claudeSettings,

@@ -18,7 +18,7 @@ const text = z.string().max(MAX_TEXT)
 const frameData = z.string().max(MAX_FRAME)
 const browserId = z.string().min(1).max(100)
 /** A P-256 public key: base64url of the 65-byte uncompressed point. */
-const PUBKEY_RE = /^B[A-Za-z0-9_-]{86}$/
+export const PUBKEY_RE = /^B[A-Za-z0-9_-]{86}$/
 /** A 16-byte approval nonce, base64url. */
 export const NONCE_RE = /^[A-Za-z0-9_-]{22}$/
 
