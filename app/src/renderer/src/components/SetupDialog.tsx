@@ -572,7 +572,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         </div>
         <div className="foot">
           <span className="grow meta">{msg && <span className="bad">{msg}</span>}</span>
-          {firstRun ? (
+          {firstRun && step === 0 ? null : firstRun ? (
             <button className="btn" onClick={onClose} title="Sessions work without GitHub; connect it later from the Board, PRs or Settings">
               Skip for now
             </button>
@@ -591,7 +591,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               Back
             </button>
           )}
-          {firstRun && step === 0 && !signedIn && (
+          {firstRun && step === 0 && (
             <button className="btn" disabled={busy} onClick={() => void go(1)}>
               Skip for now
             </button>
