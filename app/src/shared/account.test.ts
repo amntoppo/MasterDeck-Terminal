@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_REMOTE_URL, PROVIDERS, remoteUrl } from './account'
+import { DEFAULT_REMOTE_URL, PROVIDERS, parseIdentity, remoteUrl } from './account'
 
 describe('account shared', () => {
   it('lists the three providers in order', () => {
@@ -14,5 +14,13 @@ describe('account shared', () => {
     expect(remoteUrl({ MASTERDECK_REMOTE_URL: 'https://x.dev?a=1' })).toBe(DEFAULT_REMOTE_URL)
     expect(remoteUrl({ MASTERDECK_REMOTE_URL: 'https://x.dev#f' })).toBe(DEFAULT_REMOTE_URL)
     expect(remoteUrl({ MASTERDECK_REMOTE_URL: 'https://x.dev/' })).toBe('https://x.dev')
+  })
+})
+
+describe('parseIdentity', () => {
+  it('accepts a well-formed identity and rejects anything else', () => {
+    const ok = { email: 'a@b.c', provider: 'github', deviceId: 'd1' }
+    expect(parseIdentity(JSON.stringify({ ...ok, extra: 1 }))).toEqual(ok)
+    for (const bad of ['', 'null', '[]', '{}', JSON.stringify({ ...ok, provider: 'x' }), JSON.stringify({ ...ok, email: 1 }), JSON.stringify({ ...ok, deviceId: null })]) expect(parseIdentity(bad)).toBeNull()
   })
 })

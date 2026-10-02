@@ -1,4 +1,4 @@
-import { remoteUrl } from "@shared/account";
+import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { handedOver, parseWatchRequest } from "@shared/watches";
@@ -474,6 +474,23 @@ async function answerMenuFor(
 const remoteTokenFile = () => join(paths.home, "remote-token");
 const REMOTE = remoteUrl(process.env);
 const identityFile = () => join(paths.home, "account.json");
+// Token and identity must agree: a legacy pasted token (no identity) or an identity whose
+// Keychain token is gone is cleared before the first sync.
+{
+  let hasId = false;
+  try {
+    hasId = parseIdentity(readFileSync(identityFile(), "utf8")) !== null;
+  } catch {}
+  const hasTok = readToken(remoteTokenFile()) !== null;
+  if (hasTok && !hasId) writeToken(remoteTokenFile(), null);
+  if (hasId && !hasTok) {
+    try {
+      rmSync(identityFile(), { force: true });
+    } catch (e) {
+      console.error("account.json", e);
+    }
+  }
+}
 const account = new Account({
   baseUrl: REMOTE,
   fetch: (input, init) => fetch(input, init),
@@ -482,7 +499,7 @@ const account = new Account({
   saveToken: (t) => writeToken(remoteTokenFile(), t),
   readIdentity: () => {
     try {
-      return JSON.parse(readFileSync(identityFile(), "utf8"));
+      return parseIdentity(readFileSync(identityFile(), "utf8"));
     } catch {
       return null;
     }
@@ -500,6 +517,7 @@ const account = new Account({
     syncRemote();
   },
 });
+sources.setAccount(account.state());
 const remoteCommands = new RemoteCommands(
   {
     state: () => latest,

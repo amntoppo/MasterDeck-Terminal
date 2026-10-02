@@ -225,7 +225,7 @@ export interface DeckApi {
   getState(): Promise<AppState | null>;
   /** Stop a monitor MasterDeck runs (its session is told). */
   watchStop(id: string): Promise<boolean>;
-  /** Save (or with null remove) the remote backend's desktop token. */
+  /** Start the browser sign-in with this provider (progress arrives as AppState.account). */
   accountSignIn(provider: "google" | "github" | "apple"): Promise<void>;
   accountCancel(): Promise<void>;
   accountEmail(a: { email: string; password: string; create: boolean; name?: string }): Promise<{ ok: boolean; message: string }>;
