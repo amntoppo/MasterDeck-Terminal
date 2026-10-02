@@ -64,7 +64,29 @@ const until = async (f: () => boolean, ms = 3000) => {
 }
 const snap = (tick: number) => ({ takenAt: tick, sessions: [] }) as unknown as RemoteSnapshot
 
+const withCost = (cost: number, state = 'idle') =>
+  ({ takenAt: cost, sessions: [{ key: 'a', state, costUsd: cost, contextPct: cost }] }) as unknown as RemoteSnapshot
+
 describe('CloudSync', () => {
+  it('sends cost-only changes at most every minVolatileMs (deferred, not dropped); real changes go at once', async () => {
+    const srv = await server()
+    const { s, statuses } = sync(srv.url, { minVolatileMs: 400 })
+    s.start()
+    await until(() => statuses.some((x) => x.conn === 'connected'))
+    const sent = () => srv.got.filter((m) => m.t === 'snapshot')
+    s.push(withCost(1))
+    await until(() => sent().length === 1)
+    s.push(withCost(2))
+    await new Promise((r) => setTimeout(r, 150))
+    expect(sent()).toHaveLength(1)
+    await until(() => sent().length === 2)
+    expect(sent()[1].data.sessions[0].costUsd).toBe(2)
+    s.push(withCost(3))
+    s.push(withCost(3, 'busy'))
+    await until(() => sent().length === 3, 300)
+    expect(sent()[2].data.sessions[0].state).toBe('busy')
+  })
+
   it('says hello, then sends snapshots debounced and only when changed', async () => {
     const srv = await server()
     const { s, statuses } = sync(srv.url)

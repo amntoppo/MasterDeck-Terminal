@@ -474,23 +474,6 @@ async function answerMenuFor(
 const remoteTokenFile = () => join(paths.home, "remote-token");
 const REMOTE = remoteUrl(process.env);
 const identityFile = () => join(paths.home, "account.json");
-// Token and identity must agree: a legacy pasted token (no identity) or an identity whose
-// Keychain token is gone is cleared before the first sync.
-{
-  let hasId = false;
-  try {
-    hasId = parseIdentity(readFileSync(identityFile(), "utf8")) !== null;
-  } catch {}
-  const hasTok = readToken(remoteTokenFile()) !== null;
-  if (hasTok && !hasId) writeToken(remoteTokenFile(), null);
-  if (hasId && !hasTok) {
-    try {
-      rmSync(identityFile(), { force: true });
-    } catch (e) {
-      console.error("account.json", e);
-    }
-  }
-}
 const account = new Account({
   baseUrl: REMOTE,
   fetch: (input, init) => fetch(input, init),
@@ -2361,6 +2344,15 @@ if (process.platform === "win32")
 
 app.whenReady().then(async () => {
   app.setName("MasterDeck");
+  // Token and identity must agree. Judged by the token FILE (not by decrypting it), so a transient
+  // Keychain error never signs the user out: a legacy pasted token (no identity) is removed, and an
+  // identity whose token file is gone is cleared.
+  {
+    const hasTok = existsSync(remoteTokenFile());
+    const st = account.state();
+    if (hasTok && st.kind !== "signedIn") writeToken(remoteTokenFile(), null);
+    else if (!hasTok && st.kind === "signedIn") account.signedOutRemotely("Signed out; sign in again");
+  }
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { PROVIDERS } from '@shared/account'
 import type { Settings } from '@shared/settings'
 import { SHORTCUTS, showKeys } from '@shared/shortcuts'
 import type { AppState, HookStatus } from '@shared/types'
@@ -6,9 +7,10 @@ import { formatAgo } from '@shared/format'
 import { deck, useNow } from '../deck'
 
 export type SettingsSection = Section
-type Section = 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
+type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
 
 const SECTIONS: [Section, string][] = [
+  ['account', 'Account'],
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
@@ -64,6 +66,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
   }
 
   const body: Record<Section, ReactNode> = {
+    account: <AccountPanel account={state.account} />,
     general: (
       <>
         <Field label="GitHub and boards" hint="Your account, repositories and boards (Setup).">
@@ -180,7 +183,14 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <Field label="Connect to the backend" hint="Off by default. Needs a signed-in account.">
           {toggle('remoteEnabled', 'Connect to the backend')}
         </Field>
-        {!r?.hasToken && <p className="set-hint" style={{ padding: '0 0 8px' }}>Sign in first (Settings → Account)</p>}
+        {!r?.hasToken && (
+          <Field label="Account" hint="Remote needs a signed-in account.">
+            <span>Sign in first</span>
+            <button className="btn" onClick={() => setSection('account')}>
+              Go to Account
+            </button>
+          </Field>
+        )}
         <Field label="Status">
           <span className={`remote-dot ${dot}`} aria-hidden="true" />
           <span>
@@ -241,6 +251,129 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <div className="set-body">{body[section]}</div>
       </div>
     </section>
+  )
+}
+
+/** Settings → Account: sign in (browser or email), the pending code, and the signed-in summary. */
+function AccountPanel({ account }: { account: AppState['account'] }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [create, setCreate] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const now = useNow(1_000)
+  const a = account ?? { kind: 'signedOut' as const, message: null }
+
+  if (a.kind === 'pending') {
+    const left = Math.max(0, Math.round((a.expiresAt - now) / 1000))
+    return (
+      <>
+        <Field label="Finish signing in in your browser" hint="Type this code in the browser page that just opened. Only approve it if you started this sign-in.">
+          <div className="f-col">
+            <code className="user-code" aria-label="Sign-in code">
+              {a.userCode}
+            </code>
+            <span className="muted">
+              Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}
+            </span>
+          </div>
+        </Field>
+        <Field label="Not seeing the page?">
+          <button className="btn" onClick={() => deck().openExternal(a.verifyUrl)}>
+            Open the page again
+          </button>
+          <button className="btn" onClick={() => void deck().accountCancel()}>
+            Cancel
+          </button>
+        </Field>
+      </>
+    )
+  }
+
+  if (a.kind === 'signedIn') {
+    const via = a.provider === 'email' ? 'email' : (PROVIDERS.find((p) => p.id === a.provider)?.label ?? a.provider)
+    return (
+      <>
+        <Field label="Signed in" hint={`Signed in as ${a.email} (${via}).`}>
+          <span>{a.email}</span>
+        </Field>
+        <Field label="Manage account" hint="Devices, password and deleting the account (opens the browser).">
+          <button className="btn" onClick={() => void deck().accountManage()}>
+            Manage account
+          </button>
+        </Field>
+        <Field label="Sign out" hint="Remote stops until you sign in again.">
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (window.confirm('Sign this Mac out? Remote will stop.')) void deck().accountSignOut()
+            }}
+          >
+            Sign out
+          </button>
+        </Field>
+      </>
+    )
+  }
+
+  const submit = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const r = await deck().accountEmail({ email: email.trim(), password, create, ...(create && name.trim() ? { name: name.trim() } : {}) })
+      setMsg(r.message)
+      if (r.ok) setPassword('')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      {a.message && (
+        <p className="set-hint" style={{ padding: '12px 0 0', color: 'var(--red)' }} role="alert">
+          {a.message}
+        </p>
+      )}
+      <Field label="Continue with" hint="Opens your browser; you type a code shown here to approve this Mac.">
+        {PROVIDERS.map((p) => (
+          <button key={p.id} className="btn" onClick={() => void deck().accountSignIn(p.id)}>
+            Continue with {p.label}
+          </button>
+        ))}
+      </Field>
+      <Field label={create ? 'Create account' : 'Sign in with email'}>
+        <form
+          className="f-col"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!busy) void submit()
+          }}
+        >
+          {create && <input className="input" placeholder="Name (optional)" aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />}
+          <input className="input" type="email" placeholder="Email" aria-label="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} />
+          <input
+            className="input"
+            type="password"
+            placeholder="Password"
+            aria-label="Password"
+            autoComplete={create ? 'new-password' : 'current-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={busy}
+          />
+          <div className="f-row">
+            <button className="btn primary" type="submit" disabled={busy || !email.trim() || !password}>
+              {busy ? 'Working…' : create ? 'Create account' : 'Sign in'}
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={() => (setCreate(!create), setMsg(null))}>
+              {create ? 'I have an account' : 'Create account'}
+            </button>
+          </div>
+          {msg && <span className="muted">{msg}</span>}
+        </form>
+      </Field>
+    </>
   )
 }
 
