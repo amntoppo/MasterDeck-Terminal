@@ -128,7 +128,7 @@ describe('RemoteDeck', () => {
     await tick(20)
     expect(w.got).toEqual([
       { k: 'sub', ev: CH.ptyData, arg: 'p1' },
-      { k: 'sub', ev: CH.state },
+      { k: 'sub', ev: CH.state, patches: 1 },
     ])
     await w.toWeb({ k: 'ev', ev: CH.ptyData, arg: 'p1', v: ['out', 1] })
     await w.toWeb({ k: 'ev', ev: CH.state, v: [{ n: 1 }] })
@@ -169,5 +169,69 @@ describe('RemoteDeck', () => {
     const w = await world()
     expect(w.deck.platform).toBe('web')
     expect(w.deck.home).toBe('/Users/me')
+  })
+})
+
+describe('RemoteDeck state patches', () => {
+  const add = (path: string, value: unknown) => ({ op: 'add', path, value }) as const
+  async function subbed() {
+    const w = await world()
+    const fn = vi.fn()
+    w.deck.onState(fn)
+    await w.toWeb({ k: 'ev', ev: CH.state, v: [{ a: 1, list: [1] }], n: 1 })
+    return { w, fn, resyncs: () => w.got.filter((m) => m.k === 'resync') }
+  }
+
+  it('applies evp in order and calls onState with the patched state (base left untouched)', async () => {
+    const { w, fn } = await subbed()
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 2, ops: [add('/b', 2)] })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 3, ops: [add('/list/-', 2), { op: 'remove', path: '/a' }] })
+    await tick(20)
+    expect(fn.mock.calls.map((c) => c[0])).toEqual([{ a: 1, list: [1] }, { a: 1, b: 2, list: [1] }, { b: 2, list: [1, 2] }])
+    expect(fn.mock.calls[0][0]).toEqual({ a: 1, list: [1] })
+  })
+
+  it('a gap sends one resync and ignores patches until the next full; the full resets n', async () => {
+    const { w, fn, resyncs } = await subbed()
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 3, ops: [add('/b', 2)] })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 4, ops: [add('/c', 3)] })
+    await tick(20)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(resyncs()).toEqual([{ k: 'resync', ev: CH.state }])
+    await w.toWeb({ k: 'ev', ev: CH.state, v: [{ z: 1 }], n: 5 })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 6, ops: [add('/y', 2)] })
+    await tick(20)
+    expect(fn.mock.calls.slice(1).map((c) => c[0])).toEqual([{ z: 1 }, { z: 1, y: 2 }])
+    expect(resyncs()).toHaveLength(1)
+  })
+
+  it('an op that fails to apply → resync, no onState', async () => {
+    const { w, fn, resyncs } = await subbed()
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 2, ops: [{ op: 'remove', path: '/nope/x' }] })
+    await tick(20)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(resyncs()).toHaveLength(1)
+  })
+
+  it('a prototype path → resync, Object.prototype untouched', async () => {
+    for (const path of ['/__proto__/polluted', '/constructor/prototype/polluted']) {
+      const { w, fn, resyncs } = await subbed()
+      await w.toWeb({ k: 'evp', ev: CH.state, n: 2, ops: [add(path, 1)] })
+      await tick(20)
+      expect(fn).toHaveBeenCalledTimes(1)
+      expect(resyncs()).toHaveLength(1)
+      expect(({} as any).polluted).toBeUndefined()
+    }
+  })
+
+  it('evp without a full base (old Mac sent a full without n) → resync', async () => {
+    const w = await world()
+    const fn = vi.fn()
+    w.deck.onState(fn)
+    await w.toWeb({ k: 'ev', ev: CH.state, v: [{ a: 1 }] })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 1, ops: [add('/b', 2)] })
+    await tick(20)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(w.got.filter((m) => m.k === 'resync')).toHaveLength(1)
   })
 })

@@ -1,5 +1,6 @@
+import { applyPatch, type Operation } from 'fast-json-patch'
 import type { Channel } from '@shared/e2e'
-import type { DeckApi } from '@shared/ipc'
+import { CH, type DeckApi } from '@shared/ipc'
 import type { MacToWeb, WebToMac } from '@shared/bridgeWire'
 import { ARG_FIX, DECK_ACCESS } from '@shared/remoteDeck'
 
@@ -12,6 +13,9 @@ export type Hello = Extract<MacToWeb, { k: 'hello' }>
 
 const BLOCKED = 'Not available on the web yet'
 const OFFLINE = 'Your Mac went offline — not sent'
+/** A JSON pointer through `__proto__` or `constructor/prototype` (fast-json-patch bans these too; belt and braces). */
+const PROTO = /(^|\/)(__proto__|constructor\/prototype)(\/|$)/
+const unsafe = (ops: Operation[]) => ops.some((o) => PROTO.test(o.path) || ('from' in o && PROTO.test(o.from)))
 
 /** `window.deck` for the web app (spec §3): calls and events travel sealed to the Mac; local members run here. */
 export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
@@ -19,6 +23,24 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
   let closed = false
   const waiting = new Map<number, { ok(v: unknown): void; no(e: Error): void }>()
   const listeners = new Map<string, Set<(...a: unknown[]) => void>>()
+  const fire = (key: string, v: unknown[]) => {
+    for (const fn of listeners.get(key) ?? []) {
+      try {
+        fn(...v)
+      } catch (e) {
+        console.error(e) // one broken listener must not starve the others
+      }
+    }
+  }
+  /** The last state and its number, the base for the next `evp`; null until a numbered full (or while resyncing). */
+  let base: { n: number; v: unknown } | null = null
+  let resyncing = false
+  const resync = () => {
+    base = null
+    if (resyncing) return
+    resyncing = true
+    out({ k: 'resync', ev: CH.state }).catch(() => {})
+  }
   io.onFrame(async (d) => {
     let m: MacToWeb
     try {
@@ -31,13 +53,23 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
       waiting.delete(m.id)
       if (w) m.ok ? w.ok(m.v) : w.no(new Error(m.e))
     } else if (m.k === 'ev' && Array.isArray(m.v)) {
-      for (const fn of listeners.get(m.arg ? `${m.ev}:${m.arg}` : m.ev) ?? []) {
-        try {
-          fn(...m.v)
-        } catch (e) {
-          console.error(e) // one broken listener must not starve the others
-        }
+      if (m.ev === CH.state) {
+        base = typeof m.n === 'number' ? { n: m.n, v: m.v[0] } : null
+        resyncing = false
       }
+      fire(m.arg ? `${m.ev}:${m.arg}` : m.ev, m.v)
+    } else if (m.k === 'evp' && m.ev === CH.state) {
+      // Ordered channel, no acks: apply n === last+1 onto a copy; anything else waits for a full.
+      if (resyncing) return
+      if (!base || m.n !== base.n + 1 || !Array.isArray(m.ops) || unsafe(m.ops)) return resync()
+      let v: unknown
+      try {
+        v = applyPatch(structuredClone(base.v), m.ops, true).newDocument
+      } catch {
+        return resync()
+      }
+      base = { n: m.n, v }
+      fire(CH.state, [v])
     }
   })
   io.onClose(() => {
@@ -71,7 +103,8 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
           if (!set) {
             set = new Set()
             listeners.set(key, set)
-            out({ k: 'sub', ev: a.ch, ...(arg ? { arg } : {}) }).catch(() => {})
+            if (a.ch === CH.state) base = null
+            out({ k: 'sub', ev: a.ch, ...(arg ? { arg } : {}), ...(a.ch === CH.state ? { patches: 1 as const } : {}) }).catch(() => {})
           }
           set.add(cb)
           return () => {
