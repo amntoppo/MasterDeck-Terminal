@@ -22,3 +22,11 @@ describe('remote settings', () => {
     expect(normalizeSettings({ remoteEnabled: true }).remoteEnabled).toBe(true)
   })
 })
+
+describe('instant typing', () => {
+  it('defaults on and keeps a boolean', () => {
+    expect(normalizeSettings({}).instantTyping).toBe(true)
+    expect(normalizeSettings({ instantTyping: false }).instantTyping).toBe(false)
+    expect(normalizeSettings({ instantTyping: 'no' }).instantTyping).toBe(true)
+  })
+})
