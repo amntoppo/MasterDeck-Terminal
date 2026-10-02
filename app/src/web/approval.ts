@@ -57,7 +57,7 @@ export async function approve({ api, name, save, onWords, wait, rec: start }: De
     }
     if (status === 'pending' && !rec.macNonce && g.body.macNonce && g.body.macPublicKey) {
       const r = await api.post(`/v1/browsers/${encodeURIComponent(rec.browserId!)}/reveal`, { publicKey: myPub, nonce: rec.nB })
-      if (r.status === 429) return 'denied'
+      if (r.status === 429) return 'tooMany'
       if (r.status !== 200) return 'expired'
       rec = { ...rec, macPublicKey: String(g.body.macPublicKey), macNonce: String(g.body.macNonce) }
       await save(rec)

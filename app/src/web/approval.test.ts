@@ -75,9 +75,9 @@ describe('approve (commit-reveal)', () => {
     expect((await run((await world({ create: 429 })).api, await rec())).out).toBe('tooMany')
   })
 
-  it('reveal 409 → expired, 429 → denied', async () => {
+  it('reveal 409 → expired, 429 → tooMany', async () => {
     expect((await run((await world({ reveal: 409 })).api, await rec())).out).toBe('expired')
-    expect((await run((await world({ reveal: 429 })).api, await rec())).out).toBe('denied')
+    expect((await run((await world({ reveal: 429 })).api, await rec())).out).toBe('tooMany')
   })
 
   it('denied / expired after the words', async () => {

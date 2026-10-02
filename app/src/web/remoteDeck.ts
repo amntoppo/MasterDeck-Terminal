@@ -30,7 +30,15 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
       const w = waiting.get(m.id)
       waiting.delete(m.id)
       if (w) m.ok ? w.ok(m.v) : w.no(new Error(m.e))
-    } else if (m.k === 'ev') listeners.get(m.arg ? `${m.ev}:${m.arg}` : m.ev)?.forEach((fn) => fn(...m.v))
+    } else if (m.k === 'ev' && Array.isArray(m.v)) {
+      for (const fn of listeners.get(m.arg ? `${m.ev}:${m.arg}` : m.ev) ?? []) {
+        try {
+          fn(...m.v)
+        } catch (e) {
+          console.error(e) // one broken listener must not starve the others
+        }
+      }
+    }
   })
   io.onClose(() => {
     closed = true
@@ -41,7 +49,8 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
   const local: Record<string, unknown> = {
     platform: 'web',
     home: hello.home,
-    openExternal: (url: string) => void window.open(url, '_blank', 'noopener'),
+    // Only https: a javascript:/data: URL from the Mac (or a page) must never run in this origin.
+    openExternal: (url: string) => void (/^https:\/\//i.test(url) && window.open(url, '_blank', 'noopener,noreferrer')),
     copy: (t: string) => void navigator.clipboard.writeText(t),
     setFocus: () => {},
     setVisible: () => {},

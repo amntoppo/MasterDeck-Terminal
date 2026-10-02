@@ -56,7 +56,12 @@ export async function deleteOtherAccounts(userId: string): Promise<void> {
   for (const id of ids) if (id !== userId) await deleteKeys(id)
 }
 
-/** Load, or create and store a fresh pair; a failed write/read-back means a private window or blocked storage. */
+/**
+ * Load, or create and store a fresh pair; a failed write/read-back means a private window or blocked storage.
+ * ponytail: private Safari/Firefox keep an in-memory IndexedDB that passes this check, so such a window gets approved
+ * and loses its key on close; each re-approval then holds one of the 20 browser slots until revoked at /account or on
+ * the Mac. Upgrade: navigator.storage.persist() heuristics, or expire unused browsers on the backend.
+ */
 export async function ensureKeys(userId: string, generate: () => Promise<CryptoKeyPair>): Promise<KeyRec> {
   const have = await loadKeys(userId)
   if (have) return have

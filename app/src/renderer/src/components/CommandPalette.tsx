@@ -3,7 +3,7 @@ import { ticketKey, ticketLabel, ticketOf, type Ticket } from '@shared/ticket'
 import { MASTER_NAME, sessionForIssue } from '@shared/derive'
 import { rank } from '@shared/fuzzy'
 import type { AppState, Issue, Session } from '@shared/types'
-import { isWeb } from '../web'
+import { actionOk } from '../web'
 
 export type PaletteAction =
   | 'refresh'
@@ -59,9 +59,6 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['start-master', 'Start master-agent', 'when it is not running'],
 ]
 
-/** Palette actions the web app can run (the rest need the Mac). */
-const WEB_ACTIONS = new Set<PaletteAction>(['view:terminals', 'view:tasks', 'new-shell', 'start-master'])
-
 export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssue, onPr }: Props) {
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
@@ -79,7 +76,7 @@ export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssu
       onClose()
       fn()
     }
-    const items: Item[] = ACTIONS.filter(([id]) => (id !== 'start-master' || state.config.masterEnabled) && (!isWeb() || WEB_ACTIONS.has(id))).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
+    const items: Item[] = ACTIONS.filter(([id]) => (id !== 'start-master' || state.config.masterEnabled) && actionOk(id)).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
       items.push({

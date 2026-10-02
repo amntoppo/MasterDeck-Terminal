@@ -85,9 +85,30 @@ describe('RemoteDeck', () => {
     w.deck.setVisible(true as any)
     w.deck.setBoardOpen(true as any)
     await tick(20)
-    expect(open).toHaveBeenCalledWith('https://x.test', '_blank', 'noopener')
+    expect(open).toHaveBeenCalledWith('https://x.test', '_blank', 'noopener,noreferrer')
     expect(writeText).toHaveBeenCalledWith('hi')
     expect(w.got).toEqual([])
+  })
+
+  it('openExternal opens https only (javascript:, data:, http: are ignored)', async () => {
+    const open = vi.fn()
+    vi.stubGlobal('window', { open })
+    const w = await world()
+    for (const u of ['javascript:alert(1)', 'data:text/html,<b>x</b>', 'http://x.test', ' JAVASCRIPT:alert(1)', 'file:///etc/passwd']) w.deck.openExternal(u)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('a throwing listener does not stop the others; malformed events are ignored', async () => {
+    const w = await world()
+    const bad = vi.fn(() => { throw new Error('x') }), good = vi.fn()
+    w.deck.onState(bad)
+    w.deck.onState(good)
+    await w.toWeb({ k: 'ev', ev: CH.state, v: 'nope' as any })
+    await w.toWeb({ k: 'ev', ev: CH.state, v: [{ n: 2 }] })
+    await tick(20)
+    expect(bad).toHaveBeenCalledTimes(1)
+    expect(good).toHaveBeenCalledTimes(1)
+    expect(good).toHaveBeenCalledWith({ n: 2 })
   })
 
   it('send methods (ptyWrite) do not wait for a ret', async () => {

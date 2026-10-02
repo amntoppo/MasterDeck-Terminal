@@ -1,5 +1,5 @@
 import type { View } from './Sidebar'
-import { isWeb } from '../web'
+import { screenOk } from '../web'
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
@@ -64,21 +64,19 @@ export function Rail({ view, onView, onAction, needs, prAttention }: Props) {
       {badge > 0 && <span className="rb-badge">{badge}</span>}
     </button>
   )
-  // The web app: Tasks and Terminals, and the palette.
-  const web = isWeb()
   return (
     <nav className="rail" aria-label="Views">
       <div className="rail-drag" />
-      {VIEWS.filter(([v]) => !web || v === 'tasks' || v === 'terminals').map(([v, label, hint]) => viewBtn(v, label, hint, v === 'terminals' ? needs : v === 'prs' ? prAttention : 0))}
-      {!web && <div className="rail-sep" />}
-      {!web && TOOLS.map(([v, label]) => viewBtn(v, label))}
+      {VIEWS.filter(([v]) => screenOk(v)).map(([v, label, hint]) => viewBtn(v, label, hint, v === 'terminals' ? needs : v === 'prs' ? prAttention : 0))}
+      {TOOLS.some(([v]) => screenOk(v)) && <div className="rail-sep" />}
+      {TOOLS.filter(([v]) => screenOk(v)).map(([v, label]) => viewBtn(v, label))}
       <div style={{ flex: 1 }} />
-      {ACTIONS.filter(([a]) => !web || a === 'palette').map(([a, label, hint]) => (
+      {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label, hint]) => (
         <button key={a} className="rb" data-tip={`${label} · ${hint}`} aria-label={label} onClick={() => onAction(a)}>
           <RailIcon name={a} />
         </button>
       ))}
-      {!web && viewBtn('settings', 'Settings', '⌘,')}
+      {screenOk('settings') && viewBtn('settings', 'Settings', '⌘,')}
     </nav>
   )
 }

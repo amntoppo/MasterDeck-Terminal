@@ -83,7 +83,7 @@ export function Gate() {
       if (dead) return
       if (out !== 'approved') {
         // Try again starts a new request (same key, new commitment).
-        if (out === 'denied' || out === 'expired') await save({ browserId: null, pair: rec.pair })
+        if (rec.browserId) await save({ browserId: null, pair: rec.pair })
         return show({ s: 'approve', words: null, outcome: out })
       }
       show({ s: 'app' })
@@ -176,7 +176,7 @@ export function Gate() {
       ) : o === 'expired' ? (
         <p>The request expired.</p>
       ) : o === 'tooMany' ? (
-        <p>Too many approval requests; wait a few minutes.</p>
+        <p>Too many approval attempts — try again in a few minutes.</p>
       ) : screen.words ? (
         <>
           <p>Check MasterDeck on your Mac. Allow only if it shows these words:</p>
@@ -219,6 +219,8 @@ interface Hooks {
 function connect(rec: KeyRec, h: Hooks): () => void {
   let stopped = false
   let backoff = 1000
+  /** Re-auth (4006) retries once at once; again before a hello → the usual backoff. Reset on hello. */
+  let quick = true
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let ws: WebSocket | null = null
 
@@ -265,6 +267,7 @@ function connect(rec: KeyRec, h: Hooks): () => void {
         return
       }
       if (m.t === 'desktop') {
+        heard = true
         h.conn((c) => ({ ...c, desktop: m.desktop }))
         if (m.desktop.online && !online) {
           online = true
@@ -293,24 +296,31 @@ function connect(rec: KeyRec, h: Hooks): () => void {
           const io = { send: sendFrame, onFrame: (cb: (d: string) => void) => void (onFrame = cb), onClose: (cb: () => void) => void (onClose = cb) }
           window.deck = createRemoteDeck(io, ch, first)
           backoff = 1000
+          quick = true
           h.conn((c) => ({ ...c, gen: Date.now() }))
           if (document.hidden) void visible()
         } else onFrame?.(m.d)
       }
     }
+    // The hub says where the Mac is right after accepting; silence means it is not reachable: say offline.
+    let heard = false
+    const quiet = setTimeout(() => !heard && h.conn((c) => ({ ...c, desktop: { online: false, lastSeen: null, appVersion: null } })), 10_000)
     sock.onopen = () => h.conn((c) => ({ ...c, up: true }))
     sock.onmessage = (e) => {
       q = q.then(() => handle(String(e.data))).catch(() => sock.close())
     }
     sock.onclose = (e) => {
       clearInterval(ping)
+      clearTimeout(quiet)
       document.removeEventListener('visibilitychange', onVis)
       endChannel()
       if (ws !== sock || stopped) return
       h.conn((c) => ({ ...c, up: false }))
       if (e.code === 4003) return h.revoked()
-      const delay = e.code === 4006 ? 0 : backoff
-      backoff = Math.min(backoff * 2, 30_000)
+      const now = e.code === 4006 && quick
+      if (e.code === 4006) quick = false
+      const delay = now ? 0 : backoff
+      if (!now) backoff = Math.min(backoff * 2, 30_000)
       retryTimer = setTimeout(open, delay)
     }
     const onVis = () => void visible()

@@ -35,7 +35,7 @@ import { RestoreBanner } from "./components/RestoreBanner";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
-import { can, isWeb, keyPlatform } from "./web";
+import { can, isWeb, keyPlatform, screenOk, shortcutOk } from "./web";
 import { TasksView } from "./components/TasksView";
 import { Rail } from "./components/Rail";
 import {
@@ -48,7 +48,7 @@ import { SettingsView, type SettingsSection } from "./components/SettingsView";
 import { WorktreesDialog } from "./components/WorktreesDialog";
 import { HistoryDialog } from "./components/HistoryDialog";
 import { FindBar, type FindTarget } from "./components/FindBar";
-import { cycle, matchShortcut, type ShortcutId } from "@shared/shortcuts";
+import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, typeInto } from "./components/TerminalView";
 import { deck, load, save, useAppState } from "./deck";
 
@@ -76,8 +76,6 @@ const MIN_MASTER = 300;
 const MIN_PANEL = 340;
 /** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
 const MAIN_VIEWS: View[] = ["terminals", "board", "prs", "tasks"];
-/** Shortcuts that work in the web app (the others open screens that need the Mac). */
-const WEB_SHORTCUTS = new Set<ShortcutId>(["needs-you", "find", "palette", "tab-prev", "tab-next", "tab-n", "new-shell", "close-tab", "split", "master"]);
 const SIDE_W = 272;
 const MIN_SIDE = 200;
 const MAX_SIDE = 560;
@@ -230,9 +228,9 @@ export function App() {
   useEffect(() => save("inspPct", inspPct), [inspPct]);
   useEffect(() => save("masterOpen", masterOpen), [masterOpen]);
   useEffect(() => save("inspOpen", inspOpen), [inspOpen]);
-  // The web app has Tasks and Terminals only (plus master).
+  // The web app shows only the views in WEB_VIEWS (web.ts).
   useEffect(() => {
-    if (isWeb() && view !== "tasks" && view !== "terminals") setView("tasks");
+    if (!screenOk(view)) setView("tasks");
   }, [view]);
   useEffect(() => {
     save("view", view);
@@ -623,7 +621,7 @@ export function App() {
       dialogOpen,
     });
     if (!hit || !state) return;
-    if (isWeb() && !WEB_SHORTCUTS.has(hit.id)) return;
+    if (!shortcutOk(hit.id)) return;
     const done = () => {
       e.preventDefault();
       e.stopPropagation();
