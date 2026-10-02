@@ -1227,3 +1227,10 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .remote-dot.ok { background: var(--green); }
 .remote-dot.wait { background: var(--amber); }
 .remote-dot.bad { background: var(--red); }
+
+/* Browser approval + Browsers list */
+.ba-words { font: 600 20px/1.3 var(--mono); text-align: center; margin: 14px 0; letter-spacing: .02em; }
+.browser-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.browser-list li { display: flex; align-items: center; gap: 10px; }
+.browser-list li span { flex: 1; }
+.set-hint.error { color: var(--red); }

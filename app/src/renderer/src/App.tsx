@@ -19,6 +19,7 @@ import {
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
 import { PrsView } from "./components/PrsView";
+import { BrowserApproval } from "./components/BrowserApproval";
 import { SetupDialog } from "./components/SetupDialog";
 import {
   SprintSummaryDialog,
@@ -1320,6 +1321,7 @@ export function App() {
           }}
         />
       )}
+      <BrowserApproval state={state} />
       {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
           before the headers under it (drag regions for moving the window) could not be clicked. */}
       {useMaster && (

@@ -15,7 +15,7 @@ const SECTIONS: [Section, string][] = [
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
   ['hooks', 'Hooks & skills'],
-  ['remote', 'Remote (phone)'],
+  ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
   ['about', 'About'],
 ]
@@ -198,6 +198,30 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
               ? `Connected${r.lastSyncAt ? ` · last sync ${formatAgo(now - r.lastSyncAt)} ago` : ''}`
               : (r?.message ?? (s.remoteEnabled ? 'Connecting…' : 'Off'))}
           </span>
+        </Field>
+        {r?.warning && (
+          <p className="set-hint error" role="alert">
+            {r.warning}
+          </p>
+        )}
+        <Field label="Browsers" hint="Each browser is approved once here by comparing three words.">
+          {(state.browsers ?? []).length === 0 ? (
+            <span className="muted">No browsers. Open app.masterdeck.dev to add one.</span>
+          ) : (
+            <ul className="browser-list">
+              {state.browsers!.map((b) => (
+                <li key={b.id}>
+                  <span>
+                    {b.name}
+                    {b.connected ? ' · connected' : ''}
+                  </span>
+                  <button className="btn" onClick={() => void deck().browserRevoke(b.id)}>
+                    Revoke
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </Field>
       </>
     ),
