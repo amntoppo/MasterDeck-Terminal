@@ -17,6 +17,8 @@ export interface CloudSyncOpts {
   log?: (line: string) => void
   /** Snapshot size limit in UTF-8 bytes (default SNAPSHOT_LIMIT). */
   limit?: number
+  /** How long an open socket may wait for `welcome` before it is dropped and redialled (default 15 s). */
+  welcomeTimeoutMs?: number
   /** How often and how long a transient outcome is re-run before it is sent (default 1 s, 60 s). */
   transientRetry?: { everyMs: number; forMs: number }
 }
@@ -34,6 +36,7 @@ export class CloudSync {
   private retry: NodeJS.Timeout | null = null
   private ping: NodeJS.Timeout | null = null
   private debounce: NodeJS.Timeout | null = null
+  private welcomeWait: NodeJS.Timeout | null = null
   private pending: RemoteSnapshot | null = null
   private lastJson: string | null = null
   private lastKey: string | null = null
@@ -59,8 +62,8 @@ export class CloudSync {
 
   stop(): void {
     this.stopped = true
-    for (const t of [this.retry, this.ping, this.debounce]) if (t) clearTimeout(t)
-    this.retry = this.ping = this.debounce = null
+    for (const t of [this.retry, this.ping, this.debounce, this.welcomeWait]) if (t) clearTimeout(t)
+    this.retry = this.ping = this.debounce = this.welcomeWait = null
     this.ready = false
     const ws = this.ws
     this.ws = null
@@ -129,10 +132,28 @@ export class CloudSync {
     if (this.stopped) return
     this.set({ conn: 'connecting' })
     const url = `${this.o.url.replace(/\/+$/, '').replace(/^http/, 'ws')}/v1/desktop`
-    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${this.o.token}` }, handshakeTimeout: 15_000 })
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(url, { headers: { authorization: `Bearer ${this.o.token}` }, handshakeTimeout: 15_000 })
+    } catch (e) {
+      // A malformed address (or a token no HTTP header can carry) throws here, not as an 'error' event.
+      this.ws = null
+      this.set({ conn: 'error', message: `bad backend address or token: ${e instanceof Error ? e.message : String(e)}` })
+      this.later(true)
+      return
+    }
     this.ws = ws
     ws.on('open', () => {
       ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION }))
+      // Open but never welcomed (a proxy, a wedged server): drop it so the close path redials.
+      if (this.welcomeWait) clearTimeout(this.welcomeWait)
+      this.welcomeWait = setTimeout(() => {
+        this.welcomeWait = null
+        if (this.ws === ws && !this.welcomed.has(ws)) {
+          this.o.log?.('remote: no welcome from the backend; reconnecting')
+          ws.terminate()
+        }
+      }, this.o.welcomeTimeoutMs ?? 15_000)
     })
     ws.on('unexpected-response', (_req, res) => {
       if (this.ws !== ws) return
@@ -156,6 +177,8 @@ export class CloudSync {
       if (this.ws !== ws) return
       const wasWelcomed = this.welcomed.has(ws)
       this.ready = false
+      if (this.welcomeWait) clearTimeout(this.welcomeWait)
+      this.welcomeWait = null
       if (this.ping) clearInterval(this.ping)
       this.ping = null
       if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
@@ -185,8 +208,15 @@ export class CloudSync {
     } catch {
       return
     }
+    if (!m || typeof m !== 'object') return
     switch (m.t) {
       case 'welcome':
+        if (!Array.isArray(m.pending)) {
+          this.o.log?.('remote: malformed welcome ignored')
+          return
+        }
+        if (this.welcomeWait) clearTimeout(this.welcomeWait)
+        this.welcomeWait = null
         this.ready = true
         this.attempt = 0
         this.set({ conn: 'connected', message: null })
@@ -209,6 +239,10 @@ export class CloudSync {
         this.enqueue(m.cmd)
         return
       case 'items':
+        if (!Array.isArray(m.items)) {
+          this.o.log?.('remote: malformed items ignored')
+          return
+        }
         this.o.onItems(m.items)
         return
       case 'error':

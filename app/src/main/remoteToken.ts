@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { safeStorage } from 'electron'
+import { tokenProblem } from '@shared/remoteGuard'
 import type { CliResult } from '@shared/types'
 
 /** The remote backend's desktop token, encrypted with the macOS Keychain (never in settings.json). */
@@ -20,7 +21,8 @@ export function writeToken(file: string, token: string | null): CliResult {
       return { ok: true, message: 'token removed' }
     }
     const t = token.trim()
-    if (!/^\S{32,512}$/.test(t)) return { ok: false, message: 'a token is at least 32 characters, no spaces' }
+    const problem = tokenProblem(t)
+    if (problem) return { ok: false, message: problem }
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, message: 'the Keychain is not available' }
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, safeStorage.encryptString(t))

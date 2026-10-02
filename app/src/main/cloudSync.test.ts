@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 /** A fake backend: records messages per connection; `reject` answers the upgrade with 401. */
-async function server(o: { reject?: boolean; welcome?: unknown[]; nopong?: boolean } = {}) {
+async function server(o: { reject?: boolean; welcome?: unknown[]; nopong?: boolean; onHello?: (ws: WsSocket) => void } = {}) {
   const wss = new WebSocketServer({
     port: 0,
     verifyClient: (info, cb) => (o.reject || info.req.headers.authorization !== `Bearer ${TOKEN}` ? cb(false, 401, 'unauthorized') : cb(true)),
@@ -30,7 +30,10 @@ async function server(o: { reject?: boolean; welcome?: unknown[]; nopong?: boole
     ws.on('message', (raw) => {
       const m = JSON.parse(String(raw))
       got.push(m)
-      if (m.t === 'hello') ws.send(JSON.stringify({ t: 'welcome', pending: o.welcome ?? [] }))
+      if (m.t === 'hello') {
+        if (o.onHello) o.onHello(ws)
+        else ws.send(JSON.stringify({ t: 'welcome', pending: o.welcome ?? [] }))
+      }
       if (m.t === 'ping' && !o.nopong) ws.send(JSON.stringify({ t: 'pong' }))
     })
   })
@@ -230,5 +233,43 @@ describe('CloudSync', () => {
     s.start()
     await until(() => srv.conns.length === 2, 3000)
     expect(srv.got.filter((m) => m.t === 'hello').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a backend address the socket library rejects is an error, not a crash, and is retried', async () => {
+    const { s, statuses } = sync('https://host:87o7')
+    expect(() => s.start()).not.toThrow()
+    expect(s.status().conn).toBe('error')
+    expect(s.status().message).toMatch(/^bad backend address or token: /)
+    // retried at the backoff cap (120 ms here), failing the same way
+    await until(() => statuses.filter((x) => x.conn === 'error').length >= 2)
+  })
+
+  it('a socket that opens but is never welcomed is dropped and redialled', async () => {
+    const srv = await server({ onHello: () => {} })
+    const { s } = sync(srv.url, { welcomeTimeoutMs: 50 })
+    s.start()
+    await until(() => srv.conns.length >= 2, 3000)
+    expect(s.status().conn).not.toBe('connected')
+  })
+
+  it('ignores a welcome or items message whose list is not a list', async () => {
+    const run = vi.fn(async () => ({ ok: true, message: 'ran' }))
+    const onItems = vi.fn()
+    const srv = await server({
+      onHello: (ws) => {
+        ws.send(JSON.stringify({ t: 'welcome', pending: 5 }))
+        ws.send(JSON.stringify({ t: 'welcome', pending: 'abc' }))
+        ws.send(JSON.stringify({ t: 'items', items: 'nope' }))
+        ws.send(JSON.stringify({ t: 'items', items: { length: 1 } }))
+        ws.send(JSON.stringify({ t: 'welcome', pending: [] }))
+      },
+    })
+    const { s, statuses } = sync(srv.url, { run, onItems })
+    s.start()
+    await until(() => statuses.some((x) => x.conn === 'connected'))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(run).not.toHaveBeenCalled()
+    expect(onItems).not.toHaveBeenCalled()
+    expect(srv.conns).toHaveLength(1)
   })
 })

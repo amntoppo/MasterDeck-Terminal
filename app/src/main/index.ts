@@ -256,16 +256,25 @@ const sources = new Sources(
       console.error(`workflow watch: ${String(e)}`);
     }
     win?.webContents.send(CH.state, state);
-    cloud?.push(toRemoteSnapshot(state, app.getVersion()));
-    if (!remoteReady && sources.isHealthy("agents")) {
-      // The session list is in: commands that waited while MasterDeck was closed can run now.
-      remoteReady = true;
-      syncRemote();
-    } else if (
-      state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
-      state.settings.remoteUrl !== prev?.settings.remoteUrl
-    )
-      syncRemote();
+    // The remote line must never break the state callback (notifications, badge, auto-open below).
+    try {
+      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+    } catch (e) {
+      console.error(`remote snapshot: ${String(e)}`);
+    }
+    try {
+      if (!remoteReady && sources.isHealthy("agents")) {
+        // The session list is in: commands that waited while MasterDeck was closed can run now.
+        remoteReady = true;
+        syncRemote();
+      } else if (
+        state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
+        state.settings.remoteUrl !== prev?.settings.remoteUrl
+      )
+        syncRemote();
+    } catch (e) {
+      console.error(`remote sync: ${String(e)}`);
+    }
     notify(diffEvents(prev, state, focused));
     // Dock badge: the Needs-you count.
     if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length);
