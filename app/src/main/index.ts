@@ -1,3 +1,5 @@
+import { parseIdentity, remoteUrl } from "@shared/account";
+import { Account } from "./account";
 import { Watches } from "./watches";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
@@ -17,7 +19,7 @@ import {
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -268,8 +270,7 @@ const sources = new Sources(
         remoteReady = true;
         syncRemote();
       } else if (
-        state.settings.remoteEnabled !== prev?.settings.remoteEnabled ||
-        state.settings.remoteUrl !== prev?.settings.remoteUrl
+        state.settings.remoteEnabled !== prev?.settings.remoteEnabled
       )
         syncRemote();
     } catch (e) {
@@ -471,6 +472,37 @@ async function answerMenuFor(
 }
 
 const remoteTokenFile = () => join(paths.home, "remote-token");
+const REMOTE = remoteUrl(process.env);
+const identityFile = () => join(paths.home, "account.json");
+const account = new Account({
+  baseUrl: REMOTE,
+  fetch: (input, init) => fetch(input, init),
+  openBrowser: (url) => void shell.openExternal(url),
+  deviceName: hostname().replace(/\.local$/, "").slice(0, 80) || "Mac",
+  saveToken: (t) => writeToken(remoteTokenFile(), t),
+  readIdentity: () => {
+    try {
+      return parseIdentity(readFileSync(identityFile(), "utf8"));
+    } catch {
+      return null;
+    }
+  },
+  saveIdentity: (id) => {
+    // A failed write must throw so Account can undo the token and the device.
+    if (id) writeFileSync(identityFile(), JSON.stringify(id));
+    else
+      try {
+        rmSync(identityFile(), { force: true });
+      } catch (e) {
+        console.error("account.json", e);
+      }
+  },
+  onChange: (s) => {
+    sources.setAccount(s);
+    syncRemote();
+  },
+});
+sources.setAccount(account.state());
 const remoteCommands = new RemoteCommands(
   {
     state: () => latest,
@@ -517,8 +549,8 @@ function deviceId(): string {
 function syncRemote(): void {
   const s = latest?.settings ?? sources.getSettings();
   const token = readToken(remoteTokenFile());
-  const key =
-    s.remoteEnabled && s.remoteUrl && token ? `${s.remoteUrl}\n${token}` : "";
+  const url = REMOTE;
+  const key = s.remoteEnabled && token ? `${url}\n${token}` : "";
   if (key && key === cloudKey) return;
   if (key && !remoteReady) {
     // Pending commands arrive on connect; running them before the sessions load would fail them.
@@ -537,13 +569,14 @@ function syncRemote(): void {
     return;
   }
   cloud = new CloudSync({
-    url: s.remoteUrl,
+    url,
     token: token!,
     deviceId: deviceId(),
     appVersion: app.getVersion(),
     run: (cmd) => remoteCommands.run(cmd),
     onItems: (items) => sources.setExternalItems(items),
     onStatus: (st) => sources.setRemote({ ...st, hasToken: true }),
+    onSignedOut: (m) => account.signedOutRemotely(m),
     log: (line) => console.log(line),
   });
   cloud.start();
@@ -2063,18 +2096,24 @@ function registerIpc(): void {
   });
   ipcMain.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
   ipcMain.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
-  ipcMain.handle(CH.remoteSetToken, (_e, token: unknown) => {
-    const r = writeToken(
-      remoteTokenFile(),
-      typeof token === "string" ? token : null,
-    );
-    if (r.ok) syncRemote();
-    return r;
+  ipcMain.handle(CH.accountSignIn, (_e, p: unknown) => {
+    if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
   });
-  ipcMain.handle(
-    CH.remoteHasToken,
-    () => readToken(remoteTokenFile()) !== null,
-  );
+  ipcMain.handle(CH.accountCancel, () => account.cancel());
+  ipcMain.handle(CH.accountReopen, () => account.reopen());
+  ipcMain.handle(CH.accountEmail, (_e, a: unknown) => {
+    const x = (a ?? {}) as Record<string, unknown>;
+    if (
+      typeof x.email !== "string" || x.email.length > 254 ||
+      typeof x.password !== "string" || x.password.length > 200 ||
+      typeof x.create !== "boolean" ||
+      (x.name !== undefined && (typeof x.name !== "string" || x.name.length > 200))
+    )
+      return { ok: false, message: "invalid input" };
+    return account.signInEmail(x.email, x.password, x.create, x.name as string | undefined);
+  });
+  ipcMain.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
+  ipcMain.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
   ipcMain.handle(CH.stopSession, async (_e, bgId: string, name: string) => {
     if (!isSafeBgId(bgId)) return { ok: false, message: "bad background id" };
     const choice = await dialog.showMessageBox(win!, {
@@ -2308,6 +2347,15 @@ if (process.platform === "win32")
 
 app.whenReady().then(async () => {
   app.setName("MasterDeck");
+  // Token and identity must agree. Judged by the token FILE (not by decrypting it), so a transient
+  // Keychain error never signs the user out: a legacy pasted token (no identity) is removed, and an
+  // identity whose token file is gone is cleared.
+  {
+    const hasTok = existsSync(remoteTokenFile());
+    const st = account.state();
+    if (hasTok && st.kind !== "signedIn") writeToken(remoteTokenFile(), null);
+    else if (!hasTok && st.kind === "signedIn") account.signedOutRemotely("Signed out; sign in again");
+  }
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
@@ -2367,7 +2415,11 @@ app.whenReady().then(async () => {
     }
   }
   // Workflows: older installs had one hook per step; now one per trigger, reading each session's copy.
-  if (process.platform !== "win32" && !SMOKE)
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  )
     try {
       workflows().migrate();
       const r = syncWorkflowHooks();

@@ -1,7 +1,9 @@
 import WebSocket from 'ws'
 import { PROTOCOL_VERSION, type Command, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
-import { fitSnapshot, SNAPSHOT_LIMIT, type RemoteStatus } from '@shared/remoteSnapshot'
+import { fitSnapshot, SNAPSHOT_LIMIT, volatileKey, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
+
+const DELETED = 'This account was deleted'
 
 export interface CloudSyncOpts {
   url: string
@@ -11,7 +13,11 @@ export interface CloudSyncOpts {
   run(cmd: Command): Promise<RemoteOutcome>
   onItems(items: ExternalItem[]): void
   onStatus(s: RemoteStatus): void
+  /** This Mac was signed out by the server (close 4003, HTTP 401/410); the line has stopped. */
+  onSignedOut?: (message?: string) => void
   debounceMs?: number
+  /** Snapshots differing only in time, cost or context go out at most this often (default 5 s). */
+  minVolatileMs?: number
   pingMs?: number
   backoff?: { min: number; max: number }
   log?: (line: string) => void
@@ -41,6 +47,10 @@ export class CloudSync {
   private lastJson: string | null = null
   private lastKey: string | null = null
   private sentKey: string | null = null
+  private lastVKey: string | null = null
+  private sentVKey: string | null = null
+  private sentAt = 0
+  private defer: NodeJS.Timeout | null = null
   private lastRx = 0
   private welcomed = new WeakSet<WebSocket>()
   private chain: Promise<void> = Promise.resolve()
@@ -62,8 +72,8 @@ export class CloudSync {
 
   stop(): void {
     this.stopped = true
-    for (const t of [this.retry, this.ping, this.debounce, this.welcomeWait]) if (t) clearTimeout(t)
-    this.retry = this.ping = this.debounce = this.welcomeWait = null
+    for (const t of [this.retry, this.ping, this.debounce, this.welcomeWait, this.defer]) if (t) clearTimeout(t)
+    this.retry = this.ping = this.debounce = this.welcomeWait = this.defer = null
     this.ready = false
     const ws = this.ws
     this.ws = null
@@ -116,15 +126,31 @@ export class CloudSync {
         }
         this.lastJson = null
         this.lastKey = null
+        this.lastVKey = null
         this.set({ message: 'snapshot too large to send' })
         return
       }
       this.lastJson = json
       this.lastKey = JSON.stringify({ ...snap, takenAt: 0 })
+      this.lastVKey = volatileKey(snap)
     }
     if (!this.lastJson || this.lastKey === this.sentKey || !this.ready || !this.ws) return
+    // Only cost/context moved: hold it to one send per minVolatileMs (deferred, never dropped).
+    const wait = this.sentAt + (this.o.minVolatileMs ?? 5000) - Date.now()
+    if (this.sentKey !== null && this.lastVKey === this.sentVKey && wait > 0) {
+      if (!this.defer)
+        this.defer = setTimeout(() => {
+          this.defer = null
+          this.flush()
+        }, wait)
+      return
+    }
+    if (this.defer) clearTimeout(this.defer)
+    this.defer = null
     this.ws.send(`{"t":"snapshot","data":${this.lastJson}}`)
     this.sentKey = this.lastKey
+    this.sentVKey = this.lastVKey
+    this.sentAt = Date.now()
     this.set({ lastSyncAt: Date.now(), ...(this.st.message === 'snapshot too large to send' ? { message: null } : {}) })
   }
 
@@ -158,6 +184,8 @@ export class CloudSync {
     ws.on('unexpected-response', (_req, res) => {
       if (this.ws !== ws) return
       const code = res.statusCode ?? 0
+      if (code === 401) return this.signedOut()
+      if (code === 410) return this.signedOut(DELETED)
       this.set({ conn: 'error', message: code === 401 || code === 403 ? `the backend rejected the token (${code})` : `the backend answered ${code}` })
       ws.removeAllListeners('close')
       ws.on('error', () => {})
@@ -181,11 +209,19 @@ export class CloudSync {
       this.welcomeWait = null
       if (this.ping) clearInterval(this.ping)
       this.ping = null
-      if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
+      if (code === 4003) return this.signedOut(String(reason) === 'account deleted' ? DELETED : undefined)
+      if (code === 4005) this.set({ conn: 'error', message: 'Another Mac is connected to this account' })
+      else if (code === 4001) this.set({ conn: 'error', message: String(reason) || 'protocol mismatch; update MasterDeck' })
       else if (this.st.conn !== 'error' && !wasWelcomed && this.st.message?.startsWith('cannot reach')) this.set({ conn: 'connecting' })
       else if (this.st.conn !== 'error') this.set({ conn: 'connecting', message: `disconnected (${code}); reconnecting` })
-      this.later(code === 4001)
+      this.later(code === 4001 || code === 4005)
     })
+  }
+
+  private signedOut(message?: string): void {
+    this.stop()
+    this.set({ conn: 'off', message: 'Signed out' })
+    this.o.onSignedOut?.(message)
   }
 
   /** Reconnect after a backoff (at the cap for errors the user has to fix). */

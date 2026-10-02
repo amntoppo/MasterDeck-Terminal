@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG } from './appConfig'
 import { DEFAULT_SETTINGS } from './settings'
-import { fitSnapshot, SNAPSHOT_LIMIT, toRemoteSnapshot } from './remoteSnapshot'
+import { fitSnapshot, SNAPSHOT_LIMIT, toRemoteSnapshot, volatileKey } from './remoteSnapshot'
 import type { InboxEntry } from './inbox'
 import type { AppState, BoardCard, Session } from './types'
 
@@ -26,6 +26,16 @@ function state(over: Partial<AppState> = {}): AppState {
 }
 
 describe('toRemoteSnapshot', () => {
+  it('rounds cost to cents and context to whole percent', () => {
+    const s = state({ sessions: [sess('a', 'idle')], allStats: { 'a-sid': { costUsd: 1.23456, contextPct: 40.6, updatedAt: 1 } } })
+    expect(toRemoteSnapshot(s, 'v').sessions[0]).toMatchObject({ costUsd: 1.23, contextPct: 41 })
+  })
+  it('volatileKey ignores takenAt, cost and context but not state', () => {
+    const mk = (cost: number, ctx: number, st: Session['state'], at: number) =>
+      toRemoteSnapshot(state({ sessions: [sess('a', st)], allStats: { 'a-sid': { costUsd: cost, contextPct: ctx, updatedAt: 1 } } }), 'v', at)
+    expect(volatileKey(mk(1, 10, 'idle', 1))).toBe(volatileKey(mk(2, 20, 'idle', 2)))
+    expect(volatileKey(mk(1, 10, 'idle', 1))).not.toBe(volatileKey(mk(1, 10, 'working', 1)))
+  })
   it('keeps live sessions with cost, context, PRs, schedules and monitors', () => {
     const s = state({
       sessions: [sess('a', 'idle', { waitingOn: 'Monitor: ci' }), sess('gone', 'done')],

@@ -482,13 +482,28 @@ Stored in `~/.claude/masterdeck/settings.json`.
   an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
   session itself.
 
+## Account
+
+Settings → Account is where this Mac signs in to your MasterDeck account (needed for Remote).
+
+- **Methods:** Continue with Google, GitHub or Apple, or an email and password (Create account
+  takes an optional name; a new email account must be verified from the message sent to your inbox
+  before you can sign in).
+- **Browser sign-in:** MasterDeck opens a browser page and shows a **code**. Type that code in the
+  page and approve it. Only approve if you started this sign-in; the page never needs the code
+  pre-filled. "Open the page again" reopens it, "Cancel" stops. The code expires (a countdown shows).
+- **Signed in:** shows your email and how you signed in. **Manage account** opens
+  `dev.masterdeck.dev/account` (devices, password, delete). **Sign out** (after a confirm) removes
+  this Mac's session and stops Remote.
+- **Limit:** up to 5 Macs can be signed in to one account.
+
 ## Remote (phone)
 
-MasterDeck can connect out to your own backend (`masterdeck-backend`, a Cloudflare Worker) so a
+MasterDeck can connect out to the MasterDeck service (dev.masterdeck.dev) so a
 phone, curl or CI can see your sessions and act on them while you're away from the Mac.
 
 - **What it sends:** Tasks, Needs you and the board, as one snapshot (sent at most once a second,
-  and only when something changed). Never terminals, their output, the cost book or files.
+  and only when something changed; cost- or context-only changes go at most every 5 s). Never terminals, their output, the cost book or files.
 - **What can be done remotely:** answer, snooze or dismiss a Needs-you item (`inbox.act`,
   `inbox.snooze`, `inbox.dismiss`); start a session from a board issue (`session.start`); stop or
   resume a background session (`session.stop`, `session.resume`); message a session
@@ -511,16 +526,18 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   with their options and, if allowed, a reply box. Your answer goes back to the backend; when the
   item names a session, the session also gets `[<title>] <answer>`. Such a card stays while it's
   open, even if its session has ended.
-- **Setting it up:** Settings → Remote (phone): the backend address (`https://…`, or
-  `http://localhost:8787` for a local `wrangler dev`), the backend's `DESKTOP_TOKEN` (stored in
-  the Keychain, never in `settings.json`), then switch on **Connect to the backend**. It's off by
-  default.
+- **Setting it up:** sign in under Settings → Account, then switch on **Connect to the backend** in
+  Settings → Remote (phone). It's off by default; signed out, Remote shows "Sign in first" with a
+  button to the Account page. There is no address or token to paste.
+- **One Mac at a time:** only one Mac per account can be connected. A second one shows "Another Mac
+  is connected to this account" and keeps retrying slowly.
 - **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
   the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
-  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (the token was
-  rejected, or MasterDeck is too old for the backend), grey off.
-- **Security:** anyone with the backend's client token can drive your Claude sessions. Keep it
-  secret, and rotate it (`npx wrangler secret put CLIENT_TOKEN`) if it leaks.
+  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (another Mac is
+  connected, or MasterDeck is too old for the backend), grey off. If the server signs this Mac out
+  (or the account was deleted) the line stops and says so.
+- **Security:** anyone signed in to your account can drive your Claude sessions. Keep your password
+  secret and sign out of devices you don't use (Manage account).
 
 ## Links survive a resume
 
@@ -591,6 +608,9 @@ cards is in them.
 | `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start |
 | `MASTER_HOME` | `~/.claude/master` | ledger location |
 | `MASTERDECK_HOME` | `~/.claude/masterdeck` | stats, hook, backups |
+| `MASTERDECK_ISOLATED` | unset | `1` with `MASTERDECK_HOME`: Claude settings and skills default under that folder instead of `~/.claude` |
+| `MASTERDECK_REMOTE_URL` | `https://dev.masterdeck.dev` | sign-in/remote backend (https, or http on localhost) |
+| `MASTERDECK_CLAUDE_SETTINGS` | `~/.claude/settings.json` | Claude settings file to edit |
 | `MASTERDECK_NO_HOOK` | unset | `1` skips the status line hook install |
 | `MASTERDECK_NO_SKILLS` | unset | `1` skips installing the bundled skills at launch |
 | `MASTERDECK_SKILLS_DIR` | `~/.claude/skills` | where bundled skills are installed |

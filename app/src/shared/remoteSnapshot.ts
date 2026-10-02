@@ -55,8 +55,8 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
       issue: x.issue,
       issueRepo: x.issueRepo ?? null,
       startedAt: x.startedAt,
-      costUsd: st?.costUsd ?? null,
-      contextPct: st?.contextPct ?? null,
+      costUsd: st?.costUsd == null ? null : Math.round(st.costUsd * 100) / 100,
+      contextPct: st?.contextPct == null ? null : Math.round(st.contextPct),
       prUrls: s.sessionPrs[x.sessionId] ?? [],
       schedules: (s.schedules[x.sessionId] ?? []).map((j) => ({ id: j.id, name: jobName(j.prompt), when: j.when, nextAt: j.nextAt })),
       monitors: s.watches
@@ -99,6 +99,11 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
         .map(([url, p]) => [url, { number: p.number, title: p.title, state: p.state, ci: p.ci, reviewDecision: p.reviewDecision, isDraft: p.isDraft }]),
     ),
   }
+}
+
+/** The snapshot with what changes every tick (time, cost, context) zeroed: equal keys = nothing worth sending now. */
+export function volatileKey(snap: RemoteSnapshot): string {
+  return JSON.stringify({ ...snap, takenAt: 0, sessions: snap.sessions.map((s) => ({ ...s, costUsd: 0, contextPct: 0 })) })
 }
 
 const BODY_KEEP = 2000
@@ -151,7 +156,7 @@ export function fitSnapshot(
 }
 
 /** The status shown while the line to the backend is not running. */
-export function remoteStatusWhenOff(s: { remoteEnabled: boolean; remoteUrl: string }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
-  const message = !s.remoteEnabled ? null : !hasToken ? 'add the desktop token' : !s.remoteUrl ? 'set the backend address' : null
+export function remoteStatusWhenOff(s: { remoteEnabled: boolean }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
+  const message = !s.remoteEnabled ? null : !hasToken ? 'Sign in first (Settings → Account)' : null
   return { conn: 'off', message, lastSyncAt: null, hasToken }
 }

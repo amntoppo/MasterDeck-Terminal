@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { PROVIDERS } from '@shared/account'
 import type { Settings } from '@shared/settings'
 import { SHORTCUTS, showKeys } from '@shared/shortcuts'
 import type { AppState, HookStatus } from '@shared/types'
@@ -6,9 +7,10 @@ import { formatAgo } from '@shared/format'
 import { deck, useNow } from '../deck'
 
 export type SettingsSection = Section
-type Section = 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
+type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
 
 const SECTIONS: [Section, string][] = [
+  ['account', 'Account'],
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
@@ -52,9 +54,6 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
 
-  const [url, setUrl] = useState(settings.remoteUrl)
-  useEffect(() => setUrl(settings.remoteUrl), [settings.remoteUrl])
-  const [token, setToken] = useState('')
   const now = useNow(5_000)
   const r = state.remote
   const dot = !r || r.conn === 'off' ? 'off' : r.conn === 'connected' ? 'ok' : r.conn === 'error' ? 'bad' : 'wait'
@@ -67,6 +66,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
   }
 
   const body: Record<Section, ReactNode> = {
+    account: <AccountPanel account={state.account} />,
     general: (
       <>
         <Field label="GitHub and boards" hint="Your account, repositories and boards (Setup).">
@@ -178,46 +178,19 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
       <>
         <p className="set-hint" style={{ padding: '12px 0 0' }}>
           Sends Tasks and Needs you to your MasterDeck backend, and runs what you do from the phone: answers, starting a session from a board issue, stopping,
-          resuming and messaging sessions. Anyone with the client token can drive your sessions, so keep it secret.
+          resuming and messaging sessions. Anyone signed in to your account can drive your sessions.
         </p>
-        <Field label="Connect to the backend" hint="Off by default. Needs the backend address and the desktop token.">
+        <Field label="Connect to the backend" hint="Off by default. Needs a signed-in account.">
           {toggle('remoteEnabled', 'Connect to the backend')}
         </Field>
-        <Field label="Backend address" hint="https://…, or http://localhost:8787 for a local wrangler dev.">
-          <input
-            className="input"
-            style={{ width: '100%' }}
-            value={url}
-            placeholder="https://masterdeck-backend.<account>.workers.dev"
-            onChange={(e) => setUrl(e.target.value)}
-            onBlur={() => url !== s.remoteUrl && set('remoteUrl', url)}
-          />
-          {url.trim() && !/^https:\/\/[^\s/]|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/*$/.test(url.trim()) && (
-            <div className="set-hint">Use https://… or http://localhost:&lt;port&gt;</div>
-          )}
-        </Field>
-        <Field label="Desktop token" hint={r?.hasToken ? 'Saved in the Keychain. Paste a new one to replace it.' : 'The backend\'s DESKTOP_TOKEN. Stored in the Keychain, never in settings.json.'}>
-          <form
-            className="f-row"
-            style={{ width: '100%', flexWrap: 'wrap' }}
-            onSubmit={async (e) => {
-              e.preventDefault()
-              const res = await deck().remoteSetToken(token)
-              flash(res.message)
-              if (res.ok) setToken('')
-            }}
-          >
-            <input className="input" style={{ flex: '1 1 180px', minWidth: 0 }} type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder={r?.hasToken ? 'paste a new token' : 'paste the token'} />
-            <button className="btn" type="submit" disabled={!token}>
-              Save
+        {!r?.hasToken && (
+          <Field label="Account" hint="Remote needs a signed-in account.">
+            <span>Sign in first</span>
+            <button className="btn" onClick={() => setSection('account')}>
+              Go to Account
             </button>
-            {r?.hasToken && (
-              <button className="btn" type="button" onClick={async () => flash((await deck().remoteSetToken(null)).message)}>
-                Remove
-              </button>
-            )}
-          </form>
-        </Field>
+          </Field>
+        )}
         <Field label="Status">
           <span className={`remote-dot ${dot}`} aria-hidden="true" />
           <span>
@@ -278,6 +251,131 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <div className="set-body">{body[section]}</div>
       </div>
     </section>
+  )
+}
+
+/** Settings → Account: sign in (browser or email), the pending code, and the signed-in summary. */
+function AccountPanel({ account }: { account: AppState['account'] }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [create, setCreate] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const now = useNow(1_000)
+  const a = account ?? { kind: 'signedOut' as const, message: null }
+
+  if (a.kind === 'pending') {
+    const left = Math.max(0, Math.round((a.expiresAt - now) / 1000))
+    return (
+      <>
+        <Field label="Finish signing in in your browser" hint="Type this code in the browser page that just opened. Only approve it if you started this sign-in.">
+          <div className="f-col">
+            <code className="user-code" aria-label="Sign-in code">
+              {a.userCode}
+            </code>
+            <span className="muted">
+              Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}
+            </span>
+          </div>
+        </Field>
+        <Field label="Not seeing the page?">
+          <button className="btn" onClick={() => void deck().accountReopen()}>
+            Open the page again
+          </button>
+          <button className="btn" onClick={() => void deck().accountCancel()}>
+            Cancel
+          </button>
+        </Field>
+      </>
+    )
+  }
+
+  if (a.kind === 'signedIn') {
+    const via = a.provider === 'email' ? 'email' : (PROVIDERS.find((p) => p.id === a.provider)?.label ?? a.provider)
+    return (
+      <>
+        <Field label="Signed in" hint={`Signed in as ${a.email} (${via}).`}>
+          <span>{a.email}</span>
+        </Field>
+        <Field label="Manage account" hint="Devices, password and deleting the account (opens the browser).">
+          <button className="btn" onClick={() => void deck().accountManage()}>
+            Manage account
+          </button>
+        </Field>
+        <Field label="Sign out" hint="Remote stops until you sign in again.">
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (window.confirm('Sign this Mac out? Remote will stop.')) void deck().accountSignOut()
+            }}
+          >
+            Sign out
+          </button>
+        </Field>
+      </>
+    )
+  }
+
+  const submit = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const r = await deck().accountEmail({ email: email.trim(), password, create, ...(create && name.trim() ? { name: name.trim() } : {}) })
+      setMsg(r.message)
+      if (r.ok) setPassword('')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      {a.message && (
+        <p className="set-hint" style={{ padding: '12px 0 0', color: 'var(--red)' }} role="alert">
+          {a.message}
+        </p>
+      )}
+      <Field label="Continue with" hint="Opens your browser; you type a code shown here to approve this Mac.">
+        <div className="add-row">
+          {PROVIDERS.map((p) => (
+            <button key={p.id} className="btn" onClick={() => void deck().accountSignIn(p.id)}>
+              Continue with {p.label}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <Field label={create ? 'Create account' : 'Sign in with email'}>
+        <form
+          className="f-col"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!busy) void submit()
+          }}
+        >
+          {create && <input className="input" placeholder="Name (optional)" aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />}
+          <input className="input" type="email" placeholder="Email" aria-label="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} />
+          <input
+            className="input"
+            type="password"
+            placeholder="Password"
+            aria-label="Password"
+            autoComplete={create ? 'new-password' : 'current-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={busy}
+          />
+          <div className="f-row">
+            <button className="btn primary" type="submit" disabled={busy || !email.trim() || !password}>
+              {busy ? 'Working…' : create ? 'Create account' : 'Sign in'}
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={() => (setCreate(!create), setMsg(null))}>
+              {create ? 'I have an account' : 'Create account'}
+            </button>
+          </div>
+          {msg && <span className="muted">{msg}</span>}
+        </form>
+      </Field>
+    </>
   )
 }
 

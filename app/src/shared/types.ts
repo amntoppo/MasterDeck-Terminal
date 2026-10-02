@@ -169,6 +169,8 @@ export interface AppState {
   inbox: InboxView;
   /** The line to the remote backend (Settings → Remote); absent before the first status. */
   remote?: import("./remoteSnapshot").RemoteStatus & { hasToken: boolean };
+  /** The MasterDeck account this Mac is signed in with. */
+  account?: import("./account").AccountState;
   stats: Record<string, SessionStats>;
   tails: Record<string, TranscriptTail>;
   git: Record<string, GitInfo>;
