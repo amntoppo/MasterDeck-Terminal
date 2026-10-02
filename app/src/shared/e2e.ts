@@ -28,12 +28,14 @@ export const importPublic = async (raw: string) => {
   try { return await subtle.importKey('raw', b, CURVE, true, []) } catch { throw new E2EError('malformed public key') }
 }
 export const exportPrivate = async (k: CryptoKey) => toB64u(new Uint8Array(await subtle.exportKey('pkcs8', k)))
-export const importPrivate = (p: string) => subtle.importKey('pkcs8', bytes(p), CURVE, false, ['deriveBits'])
+export const importPrivate = async (p: string) => {
+  try { return await subtle.importKey('pkcs8', bytes(p), CURVE, false, ['deriveBits']) } catch { throw new E2EError('malformed private key') }
+}
 const dh = async (priv: CryptoKey, pubRaw: string) => new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: await importPublic(pubRaw) }, priv, 256))
 
 export const randomNonce = () => toB64u(crypto.getRandomValues(new Uint8Array(16)))
 export const commitment = async (browserPub: string, nonce: string) =>
-  toB64u(await sha256(cat(enc.encode('masterdeck-commit-v1'), bytes(browserPub), bytes(nonce))))
+  toB64u(await sha256(cat(enc.encode('masterdeck-commit-v1'), bytes(browserPub, 65), bytes(nonce, 16))))
 export async function checkCommitment(commit: string, browserPub: string, nonce: string): Promise<boolean> {
   try {
     const want = bytes(await commitment(browserPub, nonce)), got = bytes(commit, 32)
@@ -44,7 +46,7 @@ export async function checkCommitment(commit: string, browserPub: string, nonce:
 }
 
 export async function words(macPub: string, browserPub: string, macNonce: string, browserNonce: string): Promise<[string, string, string]> {
-  const h = await sha256(cat(enc.encode('masterdeck-sas-v2'), bytes(macPub), bytes(browserPub), bytes(macNonce), bytes(browserNonce)))
+  const h = await sha256(cat(enc.encode('masterdeck-sas-v2'), bytes(macPub, 65), bytes(browserPub, 65), bytes(macNonce, 16), bytes(browserNonce, 16)))
   // First 33 bits of the hash (BigInt: 33 bits don't fit in a JS bitwise int).
   const n = (BigInt(h[0]) << 25n) | (BigInt(h[1]) << 17n) | (BigInt(h[2]) << 9n) | (BigInt(h[3]) << 1n) | (BigInt(h[4]) >> 7n)
   const at = (i: number) => WORDS[Number((n >> BigInt(22 - 11 * i)) & 2047n)]

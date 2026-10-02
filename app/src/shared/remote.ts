@@ -17,6 +17,10 @@ const text = z.string().max(MAX_TEXT)
 /** An end-to-end encrypted frame between a browser and the Mac: opaque to the server. */
 const frameData = z.string().max(MAX_FRAME)
 const browserId = z.string().min(1).max(100)
+/** A P-256 public key: base64url of the 65-byte uncompressed point. */
+const PUBKEY_RE = /^B[A-Za-z0-9_-]{86}$/
+/** A 16-byte approval nonce, base64url. */
+export const NONCE_RE = /^[A-Za-z0-9_-]{22}$/
 
 /** C0/C1 control characters except newline and tab: a terminal would act on them. */
 // eslint-disable-next-line no-control-regex
@@ -201,7 +205,7 @@ export const DesktopMsg = z.discriminatedUnion('t', [
     deviceId: z.string().min(1).max(100),
     appVersion: z.string().max(40),
     protocol: z.number().int(),
-    macPublicKey: z.string().regex(/^B[A-Za-z0-9_-]{86}$/).optional(),
+    macPublicKey: z.string().regex(PUBKEY_RE).optional(),
   }),
   z.object({ t: z.literal('snapshot'), data: z.record(z.string(), z.unknown()) }),
   z.object({
@@ -217,6 +221,8 @@ export const DesktopMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('ping') }),
   z.object({ t: z.literal('frame'), b: browserId, d: frameData }),
   z.object({ t: z.literal('browserDecision'), id: browserId, allow: z.boolean() }),
+  /** The Mac's nonce for a browser request (spec §1 step 4); the browser has already committed to its key. */
+  z.object({ t: z.literal('browserNonce'), id: browserId, macPublicKey: z.string().regex(PUBKEY_RE), nonce: z.string().regex(NONCE_RE) }),
   z.object({ t: z.literal('browserClose'), b: browserId }),
 ])
 export type DesktopMsg = z.infer<typeof DesktopMsg>
@@ -230,7 +236,8 @@ export type ServerToDesktop =
   | { t: 'frame'; b: string; d: string }
   | { t: 'open'; b: string; name: string; publicKey: string }
   | { t: 'close'; b: string }
-  | { t: 'browserRequest'; id: string; name: string; publicKey: string; email: string; expiresAt: number }
+  | { t: 'browserRequest'; id: string; name: string; email: string; commit: string; expiresAt: number }
+  | { t: 'browserReveal'; id: string; publicKey: string; nonce: string }
   | { t: 'browserRevoked'; id: string }
 
 export const ClientMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('resync') })])

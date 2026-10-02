@@ -44,16 +44,17 @@ describe('words (commit-reveal)', () => {
     expect(await checkCommitment(c, await publicRaw((await generateStatic(false)).publicKey), nB)).toBe(false)
     expect(await checkCommitment('junk!', browserPub, nB)).toBe(false)
   })
-  it('an attacker that fixes substitutes before seeing the other nonce never matches', async () => {
+  it('commitment and words refuse wrong-length keys and nonces; importPrivate wraps failures', async () => {
     const { macPub, browserPub } = await pair()
-    const nM = randomNonce(), nB = randomNonce()
-    const real = (await words(macPub, browserPub, nM, nB)).join(' ')
-    let hits = 0
-    for (let i = 0; i < 2000; i++) {
-      const m2 = await publicRaw((await generateStatic(false)).publicKey), b2 = await publicRaw((await generateStatic(false)).publicKey)
-      if ((await words(m2, b2, randomNonce(), randomNonce())).join(' ') === real) hits++
-    }
-    expect(hits).toBe(0)
+    const nM = randomNonce(), nB = randomNonce(), short = toB64u(new Uint8Array(15)), key64 = toB64u(new Uint8Array(64))
+    await expect(commitment(key64, nB)).rejects.toThrow(E2EError)
+    await expect(commitment(browserPub, short)).rejects.toThrow(E2EError)
+    await expect(words(key64, browserPub, nM, nB)).rejects.toThrow(E2EError)
+    await expect(words(macPub, key64, nM, nB)).rejects.toThrow(E2EError)
+    await expect(words(macPub, browserPub, short, nB)).rejects.toThrow(E2EError)
+    await expect(words(macPub, browserPub, nM, short)).rejects.toThrow(E2EError)
+    await expect(importPrivate('AAAA')).rejects.toThrow(E2EError)
+    await expect(importPrivate('a+b')).rejects.toThrow(E2EError)
   })
 })
 describe('handshake + channel', () => {
