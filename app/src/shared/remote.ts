@@ -10,6 +10,8 @@ export const PROTOCOL_VERSION = 3
 export const MIN_PROTOCOL = 2
 export const MAX_TEXT = 10_000
 export const MAX_FRAME = 1_400_000
+/** Largest snapshot (JSON bytes) the server stores, and largest patch it takes. */
+export const MAX_SNAPSHOT = 1_000_000
 
 const id = z.string().min(1).max(300)
 const key = z.string().min(1).max(200)
@@ -212,16 +214,19 @@ export const DesktopMsg = z.discriminatedUnion('t', [
   z.object({
     t: z.literal('snapshotPatch'),
     base: z.number().int().min(1),
+    // Only what a diff of two snapshots emits: no copy/move (they could clone the snapshot into itself).
     ops: z
       .array(
-        z.object({
-          op: z.enum(['add', 'remove', 'replace', 'move', 'copy', 'test']),
-          path: z.string().max(1000).regex(/^(\/.*)?$/s),
-          value: z.unknown().optional(),
-          from: z.string().optional(),
-        }),
+        z
+          .object({
+            op: z.enum(['add', 'remove', 'replace']),
+            path: z.string().max(1000).regex(/^(\/.*)?$/s),
+            value: z.unknown().optional(),
+          })
+          .strict(),
       )
-      .max(2000),
+      .max(2000)
+      .refine((ops) => new TextEncoder().encode(JSON.stringify(ops)).length <= MAX_SNAPSHOT, { message: 'patch too large' }),
   }),
   z.object({
     t: z.literal('result'),
