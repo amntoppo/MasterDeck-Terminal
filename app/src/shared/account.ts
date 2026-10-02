@@ -9,7 +9,7 @@ export const DEFAULT_REMOTE_URL = 'https://dev.masterdeck.dev'
 /** The backend address: the default, or a development override (https, or http on localhost). */
 export function remoteUrl(env: Record<string, string | undefined>): string {
   const v = (env.MASTERDECK_REMOTE_URL ?? '').trim().replace(/\/+$/, '')
-  return /^https:\/\/[^\s/]+$/.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v) ? v : DEFAULT_REMOTE_URL
+  return /^https:\/\/[^\s/@?#]+$/.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v) ? v : DEFAULT_REMOTE_URL
 }
 
 export type AccountState =
