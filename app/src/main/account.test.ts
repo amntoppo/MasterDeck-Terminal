@@ -174,3 +174,92 @@ describe('Account sign-out', () => {
     expect(t.identity()).toBeNull()
   })
 })
+
+describe('Account fix round 1', () => {
+  const okRoutes = {
+    'POST /auth/device/code': () => json(code),
+    'GET /auth/get-session': () => json({ user: { email: 'e@x.test' } }),
+    'POST /auth/sign-out': () => json({}),
+  }
+  it('cancel while a token request is in flight that then succeeds: stays signed out, no /v1/devices', async () => {
+    let a!: Account
+    const f = fakeFetch({ ...okRoutes, 'POST /auth/device/token': () => { a.cancel(); return json({ access_token: 'S' }) }, 'POST /v1/devices': () => json({ id: 'd', token: 'T' }, 201) })
+    const t = deps(f.fn)
+    a = new Account(t.d)
+    await a.signInWith('google')
+    expect(a.state()).toEqual({ kind: 'signedOut', message: null })
+    expect(f.calls.some((c) => c.url.endsWith('/v1/devices'))).toBe(false)
+    expect(t.token()).toBeNull()
+  })
+  it('every request carries an abort signal; cancel aborts a hanging request promptly', async () => {
+    let a!: Account
+    const f = fakeFetch({ 'POST /auth/device/code': () => json(code), 'POST /auth/device/token': (i) => new Promise<Response>((_, rej) => i.signal!.addEventListener('abort', () => rej(new Error('aborted')))) })
+    const t = deps(f.fn)
+    a = new Account(t.d)
+    const p = a.signInWith('google')
+    await new Promise((r) => setTimeout(r, 10))
+    a.cancel()
+    await p
+    expect(a.state()).toEqual({ kind: 'signedOut', message: null })
+    expect(f.calls.every((c) => c.init.signal)).toBe(true)
+  })
+  it('signOut DELETE carries a timeout signal that aborts a hang; local state clears', async () => {
+    const f = fakeFetch({ 'DELETE /v1/devices/self': (i) => new Promise<Response>((_, rej) => i.signal!.addEventListener('abort', () => rej(new Error('t')))) })
+    const t = deps(f.fn)
+    const p = new Account(t.d).signOut('TOK')
+    const sig = f.calls[0].init.signal as AbortSignal
+    expect(sig.aborted).toBe(false)
+    await p // resolves only when the 10 s timeout fires
+    expect(sig.aborted).toBe(true)
+    expect(t.identity()).toBeNull()
+  }, 15_000)
+  it('saveToken failing after registering deletes the orphan device', async () => {
+    const f = fakeFetch({ ...okRoutes, 'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S' }), 'POST /v1/devices': () => json({ id: 'd', token: 'T' }, 201), 'DELETE /v1/devices/self': () => json({}) })
+    const t = deps(f.fn, { saveToken: () => ({ ok: false, message: 'keychain locked' }) })
+    expect((await new Account(t.d).signInEmail('m@x.test', 'pw pw pw pw pw', false)).ok).toBe(false)
+    const del = f.calls.find((c) => c.init.method === 'DELETE')!
+    expect((del.init.headers as any).authorization).toBe('Bearer T')
+  })
+  it('saveIdentity throwing removes the token again', async () => {
+    const f = fakeFetch({ ...okRoutes, 'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S' }), 'POST /v1/devices': () => json({ id: 'd', token: 'T' }, 201), 'DELETE /v1/devices/self': () => json({}) })
+    const t = deps(f.fn, { saveIdentity: () => { throw new Error('disk') } })
+    const a = new Account(t.d)
+    expect((await a.signInEmail('m@x.test', 'pw pw pw pw pw', false)).ok).toBe(false)
+    expect(t.token()).toBeNull()
+    expect(a.state().kind).toBe('signedOut')
+  })
+  it('signs the temp session out on failure paths too', async () => {
+    const f = fakeFetch({ ...okRoutes, 'POST /auth/sign-in/email': () => json({ user: { email: 'm@x.test' } }, 200, { 'set-auth-token': 'S' }), 'POST /v1/devices': () => json({}, 409) })
+    await new Account(deps(f.fn).d).signInEmail('m@x.test', 'pw pw pw pw pw', false)
+    expect(f.calls.some((c) => c.url.endsWith('/auth/sign-out'))).toBe(true)
+  })
+  it('refuses a verification_uri on another origin; builds provider param safely', async () => {
+    const f = fakeFetch({ 'POST /auth/device/code': () => json({ ...code, verification_uri: 'https://evil.test/device' }) })
+    const t = deps(f.fn)
+    const a = new Account(t.d)
+    await a.signInWith('google')
+    expect(t.d.openBrowser).not.toHaveBeenCalled()
+    expect(a.state().kind).toBe('signedOut')
+  })
+  it('unknown 4xx code ends the flow; bad /v1/devices body is rejected', async () => {
+    const f = fakeFetch({ 'POST /auth/device/code': () => json(code), 'POST /auth/device/token': () => json({ error: 'invalid_grant' }, 400) })
+    const a = new Account(deps(f.fn).d)
+    await a.signInWith('google')
+    expect(a.state()).toEqual({ kind: 'signedOut', message: 'Sign-in failed (invalid_grant)' })
+    const g = fakeFetch({ 'POST /auth/sign-in/email': () => json({ user: {} }, 200, { 'set-auth-token': 'S' }), 'POST /v1/devices': () => json({ id: 1 }, 201), 'POST /auth/sign-out': () => json({}) })
+    const t = deps(g.fn)
+    expect((await new Account(t.d).signInEmail('a@x.test', 'pw pw pw pw pw', false)).ok).toBe(false)
+    expect(t.token()).toBeNull()
+  })
+  it('interval is clamped to 1 s', async () => {
+    const waits: number[] = []
+    let n = 0
+    const f = fakeFetch({ 'POST /auth/device/code': () => json({ ...code, interval: 0 }), 'POST /auth/device/token': () => (++n < 2 ? json({ error: 'authorization_pending' }, 400) : json({ error: 'access_denied' }, 400)) })
+    await new Account(deps(f.fn, { sleep: async (ms) => { waits.push(ms) } }).d).signInWith('google')
+    expect(waits).toEqual([1000])
+  })
+  it('403 not about verification is not the inbox message', async () => {
+    const f = fakeFetch({ 'POST /auth/sign-in/email': () => json({ message: 'Forbidden' }, 403) })
+    expect((await new Account(deps(f.fn).d).signInEmail('a@x.test', 'x', false)).message).toBe('Sign-in refused (403)')
+  })
+})
