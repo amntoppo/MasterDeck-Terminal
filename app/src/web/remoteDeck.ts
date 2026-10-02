@@ -15,7 +15,11 @@ const BLOCKED = 'Not available on the web yet'
 const OFFLINE = 'Your Mac went offline — not sent'
 /** A JSON pointer through `__proto__` or `constructor/prototype` (fast-json-patch bans these too; belt and braces). */
 const PROTO = /(^|\/)(__proto__|constructor\/prototype)(\/|$)/
-const unsafe = (ops: Operation[]) => ops.some((o) => PROTO.test(o.path) || ('from' in o && PROTO.test(o.from)))
+const bad = (p: unknown) => typeof p !== 'string' || PROTO.test(p)
+const unsafe = (ops: unknown[]) =>
+  ops.some((o) => !o || typeof o !== 'object' || bad((o as Operation).path) || ('from' in o && bad((o as { from: unknown }).from)))
+/** Still no full this long after a resync (dropped by the Mac's rate limit, say): the next patch asks again. */
+const RESYNC_RETRY_MS = 3000
 
 /** `window.deck` for the web app (spec §3): calls and events travel sealed to the Mac; local members run here. */
 export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
@@ -32,13 +36,16 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
       }
     }
   }
-  /** The last state and its number, the base for the next `evp`; null until a numbered full (or while resyncing). */
+  /**
+   * The last state and its number, the base for the next `evp`; null until a numbered full (or while resyncing).
+   * A private copy: listeners get their own, so one that mutates its state cannot corrupt the base.
+   */
   let base: { n: number; v: unknown } | null = null
-  let resyncing = false
+  let resyncAt: number | null = null
   const resync = () => {
     base = null
-    if (resyncing) return
-    resyncing = true
+    if (resyncAt !== null && Date.now() - resyncAt < RESYNC_RETRY_MS) return
+    resyncAt = Date.now()
     out({ k: 'resync', ev: CH.state }).catch(() => {})
   }
   io.onFrame(async (d) => {
@@ -54,13 +61,13 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
       if (w) m.ok ? w.ok(m.v) : w.no(new Error(m.e))
     } else if (m.k === 'ev' && Array.isArray(m.v)) {
       if (m.ev === CH.state) {
-        base = typeof m.n === 'number' ? { n: m.n, v: m.v[0] } : null
-        resyncing = false
+        base = typeof m.n === 'number' ? { n: m.n, v: structuredClone(m.v[0]) } : null
+        resyncAt = null
       }
       fire(m.arg ? `${m.ev}:${m.arg}` : m.ev, m.v)
     } else if (m.k === 'evp' && m.ev === CH.state) {
       // Ordered channel, no acks: apply n === last+1 onto a copy; anything else waits for a full.
-      if (resyncing) return
+      if (resyncAt !== null) return resync() // waiting for the full; re-asks once the retry time passed
       if (!base || m.n !== base.n + 1 || !Array.isArray(m.ops) || unsafe(m.ops)) return resync()
       let v: unknown
       try {
@@ -69,7 +76,7 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
         return resync()
       }
       base = { n: m.n, v }
-      fire(CH.state, [v])
+      fire(CH.state, [structuredClone(v)])
     }
   })
   io.onClose(() => {

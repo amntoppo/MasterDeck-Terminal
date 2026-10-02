@@ -224,6 +224,51 @@ describe('RemoteDeck state patches', () => {
     }
   })
 
+  it('fix 1: still resyncing 3 s after the resync was sent → the next evp sends it again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(1_000_000)
+      const { w, resyncs } = await subbed()
+      await w.toWeb({ k: 'evp', ev: CH.state, n: 3, ops: [add('/b', 2)] })
+      vi.setSystemTime(1_002_999)
+      await w.toWeb({ k: 'evp', ev: CH.state, n: 4, ops: [add('/b', 2)] })
+      await tick(20)
+      expect(resyncs()).toHaveLength(1)
+      vi.setSystemTime(1_003_000)
+      await w.toWeb({ k: 'evp', ev: CH.state, n: 5, ops: [add('/b', 2)] })
+      await tick(20)
+      expect(resyncs()).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fix 2: a listener that mutates its state cannot corrupt the patch base', async () => {
+    const w = await world()
+    const seen: unknown[] = []
+    w.deck.onState((s: any) => {
+      seen.push(structuredClone(s))
+      s.a = 99
+      delete s.list
+    })
+    await w.toWeb({ k: 'ev', ev: CH.state, v: [{ a: 1, list: [1] }], n: 1 })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 2, ops: [add('/list/-', 2)] })
+    await w.toWeb({ k: 'evp', ev: CH.state, n: 3, ops: [add('/list/-', 3)] })
+    await tick(20)
+    expect(seen).toEqual([{ a: 1, list: [1] }, { a: 1, list: [1, 2] }, { a: 1, list: [1, 2, 3] }])
+    expect(w.got.filter((m) => m.k === 'resync')).toEqual([])
+  })
+
+  it('fix 3: a null or non-object op → resync, no throw', async () => {
+    for (const op of [null, 42, 'x', { op: 'add', path: 7, value: 1 }]) {
+      const { w, fn, resyncs } = await subbed()
+      await w.toWeb({ k: 'evp', ev: CH.state, n: 2, ops: [op as any] })
+      await tick(20)
+      expect(fn).toHaveBeenCalledTimes(1)
+      expect(resyncs()).toHaveLength(1)
+    }
+  })
+
   it('evp without a full base (old Mac sent a full without n) → resync', async () => {
     const w = await world()
     const fn = vi.fn()

@@ -27,6 +27,8 @@ export interface BridgeDeps {
   now?: () => number
   batchMs?: number
   stateMs?: number
+  /** At most one resync-triggered full per connection this often. */
+  resyncMs?: number
   log?: (line: string) => void
 }
 
@@ -43,6 +45,7 @@ const PER_ID = [CH.ptyData, CH.ptyExit]
 const PTY_CHUNK = 128 * 1024
 /** Base64url length of a sealed message whose JSON is this many UTF-8 bytes (+16 GCM tag). */
 const sealedLen = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3)
+const tooBig = (m: unknown) => sealedLen(Buffer.byteLength(JSON.stringify(m) ?? '')) > MAX_FRAME
 const later = (ms: number, f: () => void) => setTimeout(f, Math.max(0, ms)).unref?.()
 const isHs1 = (d: string) => {
   try {
@@ -80,6 +83,8 @@ interface Conn {
   patches: boolean
   sent?: unknown
   n: number
+  resyncAt: number
+  resyncTimer?: NodeJS.Timeout
   stateAt: number
   stateNext?: unknown
   stateTimer?: NodeJS.Timeout
@@ -298,7 +303,7 @@ export class BrowserBridge {
       else close()
       return
     }
-    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], patches: false, n: 0, stateAt: 0, ptyBuf: new Map() })
+    this.conns.set(m.b, { b: m.b, name: known.name, pub: known.publicKey, state: 'hs1', subs: new Set(), visible: true, replaced: !!old, calls: [], patches: false, n: 0, resyncAt: -Infinity, stateAt: 0, ptyBuf: new Map() })
   }
 
   private async onFrame(b: string, d: string): Promise<void> {
@@ -331,7 +336,7 @@ export class BrowserBridge {
         if (!c.visible) c.ptyBuf.clear()
         return
       case 'resync':
-        if (msg.ev === CH.state && c.patches && c.lastState !== undefined) void this.sendState(c, c.lastState, true)
+        if (msg.ev === CH.state && c.patches && c.lastState !== undefined) this.resync(c)
         return
     }
   }
@@ -387,6 +392,8 @@ export class BrowserBridge {
       c.patches = m.k === 'sub' && m.patches === 1
       c.sent = undefined
       c.n = 0
+      clearTimeout(c.resyncTimer)
+      c.resyncTimer = undefined
     }
     if (m.k === 'unsub') {
       c.subs.delete(key)
@@ -413,6 +420,20 @@ export class BrowserBridge {
     }, wait)
   }
 
+  /** A full for a resync, at most one per resyncMs; resyncs inside the window get one full at its end. */
+  private resync(c: Conn): void {
+    if (c.resyncTimer) return
+    const wait = c.resyncAt + (this.d.resyncMs ?? 1000) - this.now()
+    const go = () => {
+      c.resyncTimer = undefined
+      if (c.state !== 'open' || !c.patches || c.lastState === undefined) return
+      c.resyncAt = this.now()
+      void this.sendState(c, c.lastState, true)
+    }
+    if (wait <= 0) go()
+    else c.resyncTimer = setTimeout(go, wait)
+  }
+
   /**
    * One state message. An old web: the full state, as always. A patch subscriber: numbered; `evp` with the diff from
    * what it last got, or a full (`full`, no base yet, or the diff isn't much smaller than the state).
@@ -422,14 +443,21 @@ export class BrowserBridge {
     c.stateAt = this.now()
     if (!c.patches) return this.out(c, { k: 'ev', ev: CH.state, v: [s ?? JSON.parse(json)] })
     // Our own copy: the caller's object may change later, and the web sees the JSON round-trip anyway.
+    // ponytail: one parse + compare per patch connection; share one parse per event() across connections if many tabs.
     const next: unknown = JSON.parse(json), prev = c.sent
-    c.sent = next
+    let m: MacToWeb = { k: 'ev', ev: CH.state, v: [next], n: c.n + 1 }
     if (!full && prev !== undefined) {
       const ops = compare(prev as object, next as object)
       if (!ops.length) return Promise.resolve() // same content, other key order
-      if (JSON.stringify(ops).length <= json.length * 0.6) return this.out(c, { k: 'evp', ev: CH.state, n: ++c.n, ops })
+      if (JSON.stringify(ops).length <= json.length * 0.6) m = { k: 'evp', ev: CH.state, n: c.n + 1, ops }
     }
-    return this.out(c, { k: 'ev', ev: CH.state, v: [next], n: ++c.n })
+    // Too big for the relay (out() drops it): no base, n unchanged, so the next state goes as a full again.
+    if (tooBig(m)) c.sent = undefined
+    else {
+      c.sent = next
+      c.n++
+    }
+    return this.out(c, m)
   }
 
   private flushPty(c: Conn): void {
@@ -455,7 +483,7 @@ export class BrowserBridge {
   private out(c: Conn, m: MacToWeb): Promise<void> {
     // Too big for the relay: never seal it (the counter must not move for a frame the hub would drop).
     // ponytail: stringified twice (here and in seal); fine at AppState sizes.
-    if (sealedLen(Buffer.byteLength(JSON.stringify(m) ?? '')) > MAX_FRAME) {
+    if (tooBig(m)) {
       this.d.log?.(`browser ${c.b}: ${m.k === 'ev' && m.ev === CH.state ? 'state too large for the web' : `${m.k} too large for the web`}; not sent`)
       return m.k === 'ret' ? this.out(c, { k: 'ret', id: m.id, ok: false, e: 'result too large for the web' }) : Promise.resolve()
     }
@@ -494,6 +522,7 @@ export class BrowserBridge {
     const wasOpen = c.state === 'open'
     c.state = 'closed'
     clearTimeout(c.stateTimer)
+    clearTimeout(c.resyncTimer)
     clearTimeout(c.ptyTimer)
     if (this.conns.get(c.b) === c) this.conns.delete(c.b)
     if (wasOpen) this.d.onChange()

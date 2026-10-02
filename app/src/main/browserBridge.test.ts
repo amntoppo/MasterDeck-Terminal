@@ -43,6 +43,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     now: () => w.t,
     batchMs: 20,
     stateMs: 60,
+    resyncMs: 60,
     log: (l) => void w.logs.push(l),
   })
   return w
@@ -733,6 +734,34 @@ describe('BrowserBridge state patches', () => {
     await tick(100)
     expect((await stateMsgs(a)).map((m) => [m.k, m.n])).toEqual([['ev', 1], ['evp', 2], ['evp', 3]])
     expect((await stateMsgs(b)).map((m) => [m.k, m.n, m.v[0].tick])).toEqual([['ev', undefined, 1], ['ev', undefined, 2]])
+  })
+
+  it('fix 1: an oversize full is not counted: once the state shrinks the web gets a full again', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = { n: 1 }
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    w.bridge.event(CH.state, [{ big: 'x'.repeat(1_200_000) }])
+    await tick(100)
+    expect(w.logs.join('\n')).toContain('state too large for the web')
+    w.bridge.event(CH.state, [{ n: 2 }])
+    await tick(100)
+    expect((await stateMsgs(c)).slice(1)).toEqual([{ k: 'ev', ev: CH.state, v: [{ n: 2 }], n: 2 }])
+  })
+
+  it('fix 4: at most one resync full per resyncMs; extra resyncs in the window send one full at its end', async () => {
+    const w = await world()
+    const c = await connected(w)
+    w.state = big(0)
+    await c.send({ k: 'sub', ev: CH.state, patches: 1 })
+    await c.send({ k: 'resync', ev: CH.state })
+    await c.send({ k: 'resync', ev: CH.state })
+    await c.send({ k: 'resync', ev: CH.state })
+    await tick(10)
+    expect((await stateMsgs(c)).map((m) => m.n)).toEqual([1, 2])
+    w.t += 60
+    await tick(100)
+    expect((await stateMsgs(c)).map((m) => [m.k, m.n])).toEqual([['ev', 1], ['ev', 2], ['ev', 3]])
   })
 
   it('resync counts toward the rate limit', async () => {
