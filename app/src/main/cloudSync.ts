@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { compare } from 'fast-json-patch'
 import { PROTOCOL_VERSION, type Command, type DesktopMsg, type ExternalItem, type RemoteSnapshot, type ServerToDesktop } from '@shared/remote'
 import { fitSnapshot, SNAPSHOT_LIMIT, volatileKey, type RemoteStatus } from '@shared/remoteSnapshot'
 import type { RemoteOutcome } from './remoteCommands'
@@ -18,6 +19,8 @@ export interface CloudSyncOpts {
   debounceMs?: number
   /** Snapshots differing only in time, cost or context go out at most this often (default 15 s). */
   minVolatileMs?: number
+  /** How long a send may wait for snapshotAck before the next one is full again (default 10 s). */
+  ackTimeoutMs?: number
   pingMs?: number
   backoff?: { min: number; max: number }
   log?: (line: string) => void
@@ -58,6 +61,14 @@ export class CloudSync {
   private lastVKey: string | null = null
   private sentVKey: string | null = null
   private sentAt = 0
+  /** The version and parsed doc the server acknowledged; patches are computed against ackedDoc. */
+  private ackedV: number | null = null
+  private ackedDoc: unknown = null
+  /** Sends not yet acked, oldest first (acks arrive in order). Patches only go out when this is empty. */
+  private inflight: { json: string }[] = []
+  /** Oldest unacked fulls dropped from `inflight` (old server that never acks): their acks are ignored. */
+  private dropped = 0
+  private ackWait: NodeJS.Timeout | null = null
   private defer: NodeJS.Timeout | null = null
   private lastRx = 0
   private welcomed = new WeakSet<WebSocket>()
@@ -80,8 +91,8 @@ export class CloudSync {
 
   stop(): void {
     this.stopped = true
-    for (const t of [this.retry, this.ping, this.debounce, this.welcomeWait, this.defer]) if (t) clearTimeout(t)
-    this.retry = this.ping = this.debounce = this.welcomeWait = this.defer = null
+    for (const t of [this.retry, this.ping, this.debounce, this.welcomeWait, this.defer, this.ackWait]) if (t) clearTimeout(t)
+    this.retry = this.ping = this.debounce = this.welcomeWait = this.defer = this.ackWait = null
     this.ready = false
     const ws = this.ws
     this.ws = null
@@ -160,11 +171,59 @@ export class CloudSync {
     }
     if (this.defer) clearTimeout(this.defer)
     this.defer = null
-    this.ws.send(`{"t":"snapshot","data":${this.lastJson}}`)
+    if (this.ackedV !== null && this.inflight.length) return // one patch/full at a time once the server acks; flushed again on the ack
+    let out = `{"t":"snapshot","data":${this.lastJson}}`
+    let patched = false
+    if (this.ackedV !== null) {
+      const ops = compare(this.ackedDoc as object, JSON.parse(this.lastJson))
+      if (!ops.length) {
+        this.sentKey = this.lastKey
+        this.sentVKey = this.lastVKey
+        return
+      }
+      const p = JSON.stringify({ t: 'snapshotPatch', base: this.ackedV, ops })
+      if (ops.length <= 2000 && p.length <= this.lastJson.length * 0.6) {
+        out = p
+        patched = true
+      }
+    }
+    this.ws.send(out)
+    this.track(this.lastJson, patched)
     this.sentKey = this.lastKey
     this.sentVKey = this.lastVKey
     this.sentAt = Date.now()
     this.set({ lastSyncAt: Date.now(), ...(this.st.message === 'snapshot too large to send' ? { message: null } : {}) })
+  }
+
+  private track(json: string, patched: boolean): void {
+    this.inflight.push({ json })
+    // ponytail: an old server never acks; keep the queue short and ignore the acks of what fell off.
+    if (!patched && this.inflight.length > 16) {
+      this.inflight.shift()
+      this.dropped++
+    }
+    this.arm()
+  }
+
+  /** (Re)start the ack timeout while anything is unacked; on expiry the next send is full. */
+  private arm(): void {
+    if (this.ackWait) clearTimeout(this.ackWait)
+    this.ackWait = null
+    if (!this.inflight.length) return
+    this.ackWait = setTimeout(() => {
+      this.ackWait = null
+      this.resetAcks()
+      this.flush()
+    }, this.o.ackTimeoutMs ?? 10_000)
+  }
+
+  private resetAcks(): void {
+    this.ackedV = null
+    this.ackedDoc = null
+    this.inflight = []
+    this.dropped = 0
+    if (this.ackWait) clearTimeout(this.ackWait)
+    this.ackWait = null
   }
 
   private connect(): void {
@@ -281,11 +340,30 @@ export class CloudSync {
           this.send({ t: 'ping' })
         }, pingMs)
         this.sentKey = null
+        this.resetAcks()
         this.welcomed.add(ws)
         this.lastRx = Date.now()
         this.o.onUser?.(m.user && typeof m.user.id === 'string' && typeof m.user.email === 'string' ? { id: m.user.id, email: m.user.email } : null)
         this.flush()
         for (const cmd of m.pending) this.enqueue(cmd)
+        return
+      case 'snapshotAck': {
+        if (this.dropped > 0) {
+          this.dropped--
+          return
+        }
+        const sent = this.inflight.shift()
+        if (!sent || typeof m.v !== 'number') return
+        this.ackedV = m.v
+        this.ackedDoc = JSON.parse(sent.json)
+        this.arm()
+        this.flush()
+        return
+      }
+      case 'snapshotNeeded':
+        this.resetAcks()
+        this.sentKey = null
+        this.flush()
         return
       case 'command':
         this.enqueue(m.cmd)

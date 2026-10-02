@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
 import { PROTOCOL_VERSION, type RemoteSnapshot } from '@shared/remote'
 import type { RemoteStatus } from '@shared/remoteSnapshot'
+import { applyPatch } from 'fast-json-patch'
 import { CloudSync } from './cloudSync'
 
 const TOKEN = 't'.repeat(40)
@@ -15,7 +16,7 @@ afterEach(() => {
 })
 
 /** A fake backend: records messages per connection; `reject` answers the upgrade with 401. */
-async function server(o: { reject?: boolean | number; welcome?: unknown[]; nopong?: boolean; onHello?: (ws: WsSocket) => void } = {}) {
+async function server(o: { reject?: boolean | number; welcome?: unknown[]; nopong?: boolean; onHello?: (ws: WsSocket) => void; onMsg?: (ws: WsSocket, m: any) => void } = {}) {
   const wss = new WebSocketServer({
     port: 0,
     verifyClient: (info, cb) => (o.reject || info.req.headers.authorization !== `Bearer ${TOKEN}` ? cb(false, typeof o.reject === 'number' ? o.reject : 401, 'unauthorized') : cb(true)),
@@ -30,6 +31,7 @@ async function server(o: { reject?: boolean | number; welcome?: unknown[]; nopon
     ws.on('message', (raw) => {
       const m = JSON.parse(String(raw))
       got.push(m)
+      o.onMsg?.(ws, m)
       if (m.t === 'hello') {
         if (o.onHello) o.onHello(ws)
         else ws.send(JSON.stringify({ t: 'welcome', pending: o.welcome ?? [] }))
@@ -397,5 +399,115 @@ describe('CloudSync', () => {
     expect(users[1]).toBeNull()
     s.stop()
     expect(onDisconnect).toHaveBeenCalledTimes(2)
+  })
+
+  describe('patches', () => {
+    const doc = (state: string, cost = 1, extra: unknown[] = []) =>
+      ({ takenAt: cost, sessions: [{ key: 'a', state, costUsd: cost, contextPct: cost, notes: extra }], pad: 'x'.repeat(2000) }) as unknown as RemoteSnapshot
+    let v = 0
+    const acker = (ws: WsSocket, m: any) => {
+      if (m.t === 'snapshot' || m.t === 'snapshotPatch') ws.send(JSON.stringify({ t: 'snapshotAck', v: ++v }))
+    }
+    const kinds = (srv: { got: any[] }) => srv.got.filter((m) => m.t === 'snapshot' || m.t === 'snapshotPatch')
+    const up = async (srv: Awaited<ReturnType<typeof server>>, over = {}) => {
+      v = 0
+      const { s, statuses } = sync(srv.url, over)
+      s.start()
+      await until(() => statuses.some((x) => x.conn === 'connected'))
+      return s
+    }
+
+    it('first send is full; after the ack the next change is a patch that rebuilds the doc', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      expect(kinds(srv)[0].t).toBe('snapshot')
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('working'))
+      await until(() => kinds(srv).length === 2)
+      const p = kinds(srv)[1]
+      expect(p).toMatchObject({ t: 'snapshotPatch', base: 1 })
+      expect(p.ops.every((o: any) => ['add', 'remove', 'replace'].includes(o.op))).toBe(true)
+      expect(applyPatch(JSON.parse(JSON.stringify(kinds(srv)[0].data)), p.ops).newDocument).toEqual(JSON.parse(JSON.stringify(doc('working'))))
+    })
+
+    it('waits for the ack before the next patch (one in flight), then flushes the pending change', async () => {
+      const held: WsSocket[] = []
+      const srv = await server({ onMsg: (ws, m) => (m.t === 'snapshot' ? ws.send(JSON.stringify({ t: 'snapshotAck', v: 1 })) : m.t === 'snapshotPatch' ? held.push(ws) : 0) })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('working'))
+      await until(() => kinds(srv).length === 2)
+      s.push(doc('busy'))
+      await new Promise((r) => setTimeout(r, 120))
+      expect(kinds(srv)).toHaveLength(2)
+      held[0].send(JSON.stringify({ t: 'snapshotAck', v: 2 }))
+      await until(() => kinds(srv).length === 3)
+      expect(kinds(srv)[2]).toMatchObject({ t: 'snapshotPatch', base: 2 })
+    })
+
+    it('snapshotNeeded makes the next send full, right away', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('working'))
+      await until(() => kinds(srv).length === 2)
+      srv.conns[0].send(JSON.stringify({ t: 'snapshotNeeded', reason: 'base mismatch' }))
+      await until(() => kinds(srv).length === 3)
+      expect(kinds(srv)[2].t).toBe('snapshot')
+      expect(kinds(srv)[2].data.sessions[0].state).toBe('working')
+    })
+
+    it('no ack within the timeout falls back to a full snapshot', async () => {
+      const srv = await server({ onMsg: (ws, m) => (m.t === 'snapshot' && kinds(srv).length === 1 ? ws.send(JSON.stringify({ t: 'snapshotAck', v: 1 })) : 0) })
+      const s = await up(srv, { ackTimeoutMs: 150 })
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('working'))
+      await until(() => kinds(srv).length === 2)
+      expect(kinds(srv)[1].t).toBe('snapshotPatch')
+      s.push(doc('busy'))
+      await until(() => kinds(srv).length === 3, 1500)
+      expect(kinds(srv)[2].t).toBe('snapshot')
+    })
+
+    it('a server that never acks gets full snapshots every time and never stalls', async () => {
+      const srv = await server()
+      const s = await up(srv, { ackTimeoutMs: 100 })
+      for (const st of ['a', 'b', 'c', 'd']) {
+        s.push(doc(st))
+        await new Promise((r) => setTimeout(r, 60))
+      }
+      await until(() => kinds(srv).length === 4)
+      expect(kinds(srv).every((m) => m.t === 'snapshot')).toBe(true)
+    })
+
+    it('after a reconnect the first send is full', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      srv.conns[0].close()
+      await until(() => kinds(srv).length === 2, 3000)
+      expect(kinds(srv)[1].t).toBe('snapshot')
+    })
+
+    it('a change only in volatile fields is held for minVolatileMs, not patched at once', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv, { minVolatileMs: 400 })
+      s.push(doc('idle', 1))
+      await until(() => kinds(srv).length === 1)
+      s.push(doc('idle', 2))
+      await new Promise((r) => setTimeout(r, 150))
+      expect(kinds(srv)).toHaveLength(1)
+      await until(() => kinds(srv).length === 2)
+      expect(kinds(srv)[1].t).toBe('snapshotPatch')
+    })
   })
 })
