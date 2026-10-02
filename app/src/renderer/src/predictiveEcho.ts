@@ -11,7 +11,7 @@ import type { IBufferCell, Terminal } from '@xterm/xterm'
  *
  * Correctness over speed: whenever the screen could differ from what the output alone would make, predict nothing.
  */
-export type PredictorTerm = Pick<Terminal, 'cols' | 'rows' | 'buffer' | 'modes' | 'parser' | 'write' | 'onResize'>
+export type PredictorTerm = Pick<Terminal, 'cols' | 'rows' | 'buffer' | 'modes' | 'parser' | 'write' | 'onResize' | 'resize'>
 
 export interface Predictor {
   /** A keystroke, before it goes to the pty. */
@@ -78,42 +78,46 @@ const blank = (ch: string) => ch === '' || ch === ' '
 interface Scan {
   st: 'ground' | 'esc' | 'int' | 'csi' | 'osc' | 'dcs'
   int: string
-  g: [string, string]
-  so: boolean
+  /** G0..G3 designations (final bytes; 'B' is ASCII, xterm's default for all four) and the one locked into GL. */
+  g: string[]
+  gl: number
 }
+const G: Record<string, number> = { '(': 0, ')': 1, '-': 1, '*': 2, '.': 2, '+': 3 }
+const SHIFT: Record<string, number> = { n: 2, '}': 2, o: 3, '|': 3, '~': 1 }
 function scan(sc: Scan, data: string): void {
   for (let i = 0; i < data.length; i++) {
     const ch = data[i]
     const c = data.charCodeAt(i)
-    if (c === 0x18 || c === 0x1a) sc.st = 'ground'
+    // As in xterm's parser, these act from any state.
+    if (c === 0x18 || c === 0x1a || (c >= 0x80 && c <= 0x8f) || (c >= 0x91 && c <= 0x97) || c === 0x99 || c === 0x9a || c === 0x9c) sc.st = 'ground'
+    else if (c === 0x9b) sc.st = 'csi'
+    else if (c === 0x9d) sc.st = 'osc'
+    else if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) sc.st = 'dcs'
     else if (c === 0x1b) (sc.st = 'esc'), (sc.int = '') // also ends a string (ESC \\)
     else if (sc.st === 'ground') {
-      if (c === 0x0e) sc.so = true
-      else if (c === 0x0f) sc.so = false
-      else if (c === 0x9b) sc.st = 'csi'
-      else if (c === 0x9d) sc.st = 'osc'
-      else if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) sc.st = 'dcs'
+      if (c === 0x0e) sc.gl = 1
+      else if (c === 0x0f) sc.gl = 0
     } else if (sc.st === 'esc') {
       if (ch === '[') sc.st = 'csi'
       else if (ch === ']') sc.st = 'osc'
       else if (ch === 'P' || ch === '_' || ch === '^' || ch === 'X') sc.st = 'dcs'
       else if (c >= 0x20 && c <= 0x2f) (sc.st = 'int'), (sc.int = ch)
       else if (c >= 0x30 && c <= 0x7e) {
-        if (ch === 'c') (sc.g = ['B', '']), (sc.so = false)
+        if (ch === 'c') (sc.g = ['B', 'B', 'B', 'B']), (sc.gl = 0)
+        else if (ch in SHIFT) sc.gl = SHIFT[ch]
         sc.st = 'ground'
       }
     } else if (sc.st === 'int') {
       if (c >= 0x20 && c <= 0x2f) sc.int += ch
       else if (c >= 0x30 && c <= 0x7e) {
-        if (sc.int === '(') sc.g[0] = ch
-        else if (sc.int === ')') sc.g[1] = ch
+        if (sc.int in G) sc.g[G[sc.int]] = ch
         sc.st = 'ground'
       }
     } else if (sc.st === 'csi') {
       if (c >= 0x40 && c <= 0x7e) sc.st = 'ground'
     } else if (sc.st === 'osc') {
-      if (c === 0x07 || c === 0x9c) sc.st = 'ground'
-    } else if (c === 0x9c) sc.st = 'ground'
+      if (c === 0x07) sc.st = 'ground'
+    }
   }
 }
 
@@ -199,11 +203,14 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
   const token = Math.random().toString(36).slice(2)
   const BEGIN = `\x1b]${OVERLAY};${token}\x07`
   const END = `\x1b]${OVERLAY};${token}.\x07`
-  /** G1 unknown until designated: SO then counts as not ASCII. */
-  const sc: Scan = { st: 'ground', int: '', g: ['B', ''], so: false }
+  // ponytail: DECSTR and DECANM also reset charsets in xterm; not followed, so prediction just stays off until RIS or 'B'.
+  const sc: Scan = { st: 'ground', int: '', g: ['B', 'B', 'B', 'B'], gl: 0 }
   const ground = () => sc.st === 'ground'
-  const ascii = () => (sc.so ? sc.g[1] : sc.g[0]) === 'B'
+  const ascii = () => sc.g[sc.gl] === 'B'
   let alive = true
+  /** Our overlay writes (draws, undos, undo-prefixed output) not parsed yet: a resize must wait for them. */
+  let overlayInflight = 0
+  const rawResize = term.resize
   const lat: number[] = []
   let keyAt: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -285,7 +292,8 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       s += cup(x, p.y) + (p.kind === 'char' ? STYLE + p.ch : '\x1b[0m\x1b[X')
     }
     const last = list[list.length - 1]
-    term.write(s + cup(to(last), last.y) + penSeq() + END)
+    overlayInflight++
+    term.write(s + cup(to(last), last.y) + penSeq() + END, () => overlayInflight--)
     drawn = true
   }
 
@@ -312,7 +320,9 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     drawn = false
     if (!undo && !cb) return
     busy++
+    if (undo) overlayInflight++
     term.write(undo, () => {
+      if (undo) overlayInflight--
       try {
         cb?.()
       } finally {
@@ -414,6 +424,12 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
     while (deferred.length && busy === 0) handle(deferred.shift()!)
   }
 
+  // Own the terminal's resizes: one with the overlay on screen (or on its way off) would reflow it into the text.
+  term.resize = (cols: number, rows: number) => {
+    if (alive && (drawn || overlayInflight > 0)) clear(() => rawResize.call(term, cols, rows))
+    else rawResize.call(term, cols, rows)
+  }
+
   return {
     onInput(d) {
       if (!enabled || neutral(d)) return
@@ -428,8 +444,10 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       drawn = false
       scan(sc, data)
       busy++
+      if (undo) overlayInflight++
       term.write(undo + data, () => {
         busy--
+        if (undo) overlayInflight--
         if (keyAt !== null) {
           lat.push(now() - keyAt)
           if (lat.length > 8) lat.shift()
@@ -454,6 +472,7 @@ export function createPredictor(term: PredictorTerm, opts: { now?: () => number;
       clear()
       alive = false
       deferred.length = 0
+      term.resize = rawResize
       if (timer) clearTimeout(timer)
       timer = null
       for (const h of hooks) h.dispose()

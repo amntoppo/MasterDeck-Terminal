@@ -631,7 +631,7 @@ describe('predictive echo', () => {
       await type('a')
       expect(p.shown()).toBe(1)
       await out('a')
-      await out('\x0e') // SO: G1 (line drawing by default in xterm)
+      await out('\x1b)0\x0e') // G1 = line drawing, then SO shifts it in
       await type('b')
       expect(p.pending()).toBe(0)
       await out('\x0fb')
@@ -685,6 +685,75 @@ describe('predictive echo', () => {
       await settle(term)
       await settle(ref)
       same()
+    })
+  })
+
+  describe('review round 3', () => {
+    // The reviewer's /tmp/sdrev/c1.ts: a prediction on screen, the first chunk, a key, the rest.
+    async function c1(pre: string, chunks: string[]) {
+      const { p, out, type, same } = setup()
+      await out(pre)
+      await type('a')
+      await out(chunks[0])
+      await type('b')
+      for (const c of chunks.slice(1)) await out(c)
+      await new Promise<void>((r) => p.clear(r))
+      same()
+    }
+    it('an 8-bit CSI right after ESC, split', () => c1('$ ', ['\x1b\x9b3', '1mX']))
+    it('an 8-bit OSC inside a CSI, split', () => c1('$ ', ['\x1b[\x9d0;t', 'itle\x07Q']))
+    it('8-bit controls cancel a sequence from any state', () => c1('$ ', ['\x1b]0;x\x9a', 'Q\x1b[\x85', 'R']))
+    it('G2 line drawing locked in with ESC n: nothing predicted over text', () => c1('$ xyz\x1b[3D', ['\x1b*0\x1bn', '\r\n']))
+    it('G1 line drawing locked in with ESC ~: nothing predicted over text', () => c1('$ xyz\x1b[3D', ['\x1b)0\x1b~', '\r\n']))
+    it('G3 via ESC + and ESC o, then back with SI', async () => {
+      const { p, out, type } = setup()
+      await out('$ \x1b+0\x1bo')
+      await type('a')
+      expect(p.pending()).toBe(0)
+      await out('\x0f')
+      await type('a')
+      expect(p.shown()).toBe(1)
+    })
+    it('RIS resets the charsets', async () => {
+      const { p, out, type } = setup()
+      await out('\x1b(0\x1bc$ ')
+      await type('a')
+      expect(p.shown()).toBe(1)
+    })
+
+    // The reviewer's /tmp/sdrev/rz2.ts: a direct t.resize while 'ab' is predicted.
+    it('a direct term.resize goes through clear first', async () => {
+      const { term, ref, p, out, type, same } = setup()
+      await out('$ ')
+      await type('ab')
+      term.resize(30, ROWS)
+      ref.resize(30, ROWS)
+      await settle(term)
+      await settle(term)
+      expect(term.cols).toBe(30)
+      await out('\r\n')
+      same()
+      p.dispose()
+    })
+    it('a resize while an undo is still queued waits for it', async () => {
+      const { term, ref, p, out, type, same } = setup()
+      await out('hello world, this is a long-ish line\r\n$ ')
+      await type('ab')
+      p.clear() // undo queued, not parsed yet
+      term.resize(20, ROWS)
+      ref.resize(20, ROWS)
+      await settle(term)
+      await settle(term)
+      await out('ab')
+      same()
+    })
+    it('dispose puts term.resize back', async () => {
+      const { term, p } = setup()
+      const own = term.resize
+      p.dispose()
+      expect(term.resize).not.toBe(own)
+      term.resize(25, ROWS)
+      expect(term.cols).toBe(25)
     })
   })
 })
