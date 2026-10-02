@@ -4,7 +4,9 @@ One window for all your Claude Code sessions, laid out as a command center:
 
 - **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, Janitor and
   Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
-  on Terminals counts what needs you; one on PRs counts PRs waiting on you.
+  on Terminals counts what needs you; one on PRs counts PRs waiting on you. A blinking amber dot
+  above the bottom buttons means a browser, phone or API client is connected right now (see
+  *Remote connections* below).
 - **Terminals:**
   - **Sessions column:** what needs you, then every session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
@@ -489,21 +491,27 @@ Settings → Account is where this Mac signs in to your MasterDeck account (need
 - **Methods:** Continue with Google, GitHub or Apple, or an email and password (Create account
   takes an optional name; a new email account must be verified from the message sent to your inbox
   before you can sign in).
-- **Browser sign-in:** MasterDeck opens a browser page and shows a **code**. Type that code in the
-  page and approve it. Only approve if you started this sign-in; the page never needs the code
-  pre-filled. "Open the page again" reopens it, "Cancel" stops. The code expires (a countdown shows).
+- **Browser sign-in:** MasterDeck opens a browser page; sign in there and approve this Mac. The
+  page hands the sign-in back to MasterDeck by itself (a one-time local address on this Mac), so
+  there is nothing to type. "Open the page again" reopens it, "Cancel" stops, and a countdown shows
+  when it expires (5 minutes).
+- **Use a code instead:** if the page can't reach MasterDeck (or you choose **Use a code instead**),
+  MasterDeck shows a **code**: type it in the page and approve. Only approve if you started this
+  sign-in; the page never needs the code pre-filled.
 - **Signed in:** shows your email and how you signed in. **Manage account** opens
   `dev.masterdeck.dev/account` (devices, password, delete). **Sign out** (after a confirm) removes
   this Mac's session and stops Remote.
 - **Limit:** up to 5 Macs can be signed in to one account.
 
-## Remote (phone)
+## Remote
 
 MasterDeck can connect out to the MasterDeck service (dev.masterdeck.dev) so a
 phone, curl or CI can see your sessions and act on them while you're away from the Mac.
 
-- **What it sends:** Tasks, Needs you and the board, as one snapshot (sent at most once a second,
-  and only when something changed; cost- or context-only changes go at most every 5 s). Never terminals, their output, the cost book or files.
+- **What it sends:** Tasks, Needs you and the board, as one snapshot (at most once a second, and
+  only when something changed; changes to cost, context, monitor counters or next-run times alone
+  go at most every 15 s). After the first full snapshot only the differences are sent. Never
+  terminals, their output, the cost book or files. (The web app is different: see below.)
 - **What can be done remotely:** answer, snooze or dismiss a Needs-you item (`inbox.act`,
   `inbox.snooze`, `inbox.dismiss`); start a session from a board issue (`session.start`); stop or
   resume a background session (`session.stop`, `session.resume`); message a session
@@ -515,7 +523,8 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   - Text isn't sent to a session that waits on a prompt (answer it from Needs you instead), and a
     suspended session must be resumed first. Only background sessions can be stopped remotely, with
     no confirmation on the Mac (the phone already asked).
-  - Text with control characters, or starting with `/` or `!`, is refused by the backend.
+  - Text with control characters, or starting with `/` or `!`, is refused (by the backend, and
+    again by MasterDeck).
 - **While the Mac sleeps or MasterDeck is closed,** commands wait on the backend and run in order
   when MasterDeck reconnects, each exactly once (MasterDeck remembers the last 500 in
   `~/.claude/masterdeck/remote-done.json`). Until then you can cancel one from the API
@@ -527,7 +536,7 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   item names a session, the session also gets `[<title>] <answer>`. Such a card stays while it's
   open, even if its session has ended.
 - **Setting it up:** sign in under Settings → Account, then switch on **Connect to the backend** in
-  Settings → Remote (phone). It's off by default; signed out, Remote shows "Sign in first" with a
+  Settings → Remote. It's off by default; signed out, Remote shows "Sign in first" with a
   button to the Account page. There is no address or token to paste.
 - **One Mac at a time:** only one Mac per account can be connected. A second one shows "Another Mac
   is connected to this account" and keeps retrying slowly.
@@ -538,6 +547,46 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   (or the account was deleted) the line stops and says so.
 - **Security:** anyone signed in to your account can drive your Claude sessions. Keep your password
   secret and sign out of devices you don't use (Manage account).
+
+## Web app (app.masterdeck.dev)
+
+The whole MasterDeck window in a browser, on any computer, talking to your Mac end-to-end
+encrypted (the MasterDeck service only relays sealed messages it can't read). Needs Remote on (above).
+
+- **First time in a browser:** sign in with your MasterDeck account, then approve the browser on
+  the Mac. The Mac shows "Allow <browser> to control this Mac?" with **three words**; allow only if
+  the browser shows the same three words. **Deny** is the default; Esc does nothing. A request
+  expires after 5 minutes. A private window can't be approved (it can't keep its key).
+- **What works:** every view (Terminals with live terminals you can type in, Board, PRs, Tasks,
+  Costs, Janitor, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
+  page instead of on the Mac. Not on the web: signing in or out of the Mac's account, approving
+  browsers, switching the gh account, the folder picker (a repo picker instead), opening editors,
+  and turning Remote off.
+- **Terminal sizes:** while the Mac shows a terminal, its size wins; the browser's size applies
+  only to terminals the Mac isn't showing.
+- **Mac offline:** the page says "Your Mac is offline — last seen …" and pauses until it is back.
+  One tab per browser: opening another shows "MasterDeck is open in another tab · Use here".
+- **Settings → Remote → Browsers** lists approved browsers (and which are connected); **Revoke**
+  cuts one off at once (it has to be approved again). Signing the Mac out, or into another account,
+  forgets every approved browser. Three failed connections from one browser within an hour show
+  "Possible tampering on the connection to …".
+
+### Instant typing (web)
+
+The web terminal shows what you type at once, dim, and corrects it when the Mac's real output
+arrives, so typing feels local even with a slow connection. It never changes what the terminal
+ends up showing: anything it isn't sure about (password prompts, full-screen apps it hasn't learned,
+hidden cursor, special character sets) it simply doesn't predict. In Claude Code (a full-screen
+app) it starts after three typed characters have come back exactly as predicted. Switch it off in
+Settings → General → **Instant typing (web)** (on by default; the setting is the Mac's, so it applies
+to every browser).
+
+### Remote connections
+
+While any browser or phone/API client is connected, a blinking amber dot shows on the rail (on the
+Mac only; solid if your system reduces motion). Hover or focus it for the list: who (the account
+email or browser name), the device ("Chrome on macOS", or "Unknown device" for older browser tabs)
+and how long ago it connected. Click it to open Settings → Remote.
 
 ## Links survive a resume
 
@@ -639,7 +688,7 @@ cards is in them.
 | `⌘E` | The open session's worktrees (Open in editor) |
 | `⌘⇧M` | Show or hide master |
 | `⌘⇧G` | Refresh from GitHub |
-| `⌘,` | Settings (a page: General, Needs you & alerts, Sessions, Hooks & skills, Keyboard shortcuts, About) |
+| `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks & skills, Remote, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
 Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where
