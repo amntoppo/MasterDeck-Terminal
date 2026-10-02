@@ -11,6 +11,7 @@ import { prOffers, type PrOffer } from "./offers";
 import type { Settings } from "./settings";
 import { parseTicket, ticketKey, ticketLabel, type Ticket } from "./ticket";
 import type { Pr, Proposal, Session } from "./types";
+import type { ExternalItem } from "./remote";
 import type { ScreenMenu } from "./ask";
 
 /**
@@ -32,6 +33,7 @@ export type InboxKind =
   | "context"
   | "idle" // working a ticket but quiet
   | "waiting" // blocked on a prompt for a while (another terminal)
+  | "external" // asked through the remote API
   | "error"; // its turn ended on an API error (rate limit, overload…)
 
 export type InboxActionType =
@@ -58,7 +60,8 @@ export type InboxDetail =
   | { type: "nudge"; minutes: number }
   | { type: "context"; pct: number }
   | { type: "budget"; spend: number; cap: number }
-  | { type: "offer"; offer: PrOffer };
+  | { type: "offer"; offer: PrOffer }
+  | { type: "external"; item: ExternalItem };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -108,6 +111,7 @@ export const PRIORITY: Record<InboxKind, number> = {
   input: 100,
   menu: 100,
   error: 95,
+  external: 85,
   question: 90,
   blocked: 80,
   ci: 70,
@@ -135,6 +139,7 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   idle: "active again",
   waiting: "active again",
   error: "working again",
+  external: "answered elsewhere",
 };
 
 /** Actions an item of this kind takes (besides dismiss and snooze, which every item takes). */
@@ -144,7 +149,8 @@ export function allowed(item: InboxItem, type: string): boolean {
       item.kind === "question" ||
       item.kind === "blocked" ||
       item.kind === "menu" ||
-      item.kind === "input"
+      item.kind === "input" ||
+      item.kind === "external"
     );
   return item.actions.some((a) => a.type === type);
 }
@@ -171,6 +177,8 @@ export interface InboxInput {
   sessionPrs: Record<string, string[]>;
   /** Sessions whose last turn ended on an API error (MasterDeck's StopFailure hook), by Session.key. */
   failures?: Record<string, { type: string; message: string; at: number }>;
+  /** Needs-you items created through the remote API (open ones). */
+  external?: ExternalItem[];
   now: number;
 }
 
@@ -392,6 +400,24 @@ export function collectItems(x: InboxInput): InboxItem[] {
         },
       ],
       detail: { type: "offer", offer: o },
+    });
+  }
+
+  for (const e of x.external ?? []) {
+    if (e.state !== "open") continue;
+    out.push({
+      id: e.id,
+      kind: "external",
+      priority: e.priority,
+      sessionKey: e.sessionKey ?? null,
+      ticket: e.ticket ? parseTicket(e.ticket) : null,
+      title: e.title,
+      body: e.body,
+      actions: [
+        ...(e.options ?? []).map((label) => ({ type: "option" as const, label })),
+        ...(e.allowText ? [{ type: "reply" as const, label: "Answer" }] : []),
+      ],
+      detail: { type: "external", item: e },
     });
   }
 

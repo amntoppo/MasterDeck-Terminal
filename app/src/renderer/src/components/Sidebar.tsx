@@ -16,6 +16,7 @@ import { LANES, laneOf } from "@shared/tasks";
 import { canStop, cleanupDefaults } from "@shared/cleanup";
 import { formatAgo, formatGhCache, formatRefreshed } from "@shared/format";
 import type { InboxEntry, InboxKind } from "@shared/inbox";
+import type { ExternalItem } from "@shared/remote";
 import type { AppState, Issue, Proposal, Session } from "@shared/types";
 import { deck, KIND_COLOR, load, save, useNow } from "../deck";
 import type { PaletteAction } from "./CommandPalette";
@@ -656,6 +657,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   idle: "IDLE",
   waiting: "WAITING",
   error: "API ERROR",
+  external: "ASKED",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -761,6 +763,10 @@ function InboxCard({
           onOpenSession={onOpenSession}
         />
       </div>
+    );
+  if (d.type === "external")
+    return (
+      <ExternalCard itemId={i.id} item={d.item} full={full} onDetails={onDetails} />
     );
   const s = i.sessionKey
     ? state.sessions.find((x) => x.key === i.sessionKey)
@@ -1074,6 +1080,100 @@ function ProposalCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A Needs-you item someone asked through the remote API: its options as buttons, or a text answer. */
+function ExternalCard({
+  itemId,
+  item,
+  full,
+  onDetails,
+}: {
+  itemId: string;
+  item: ExternalItem;
+  full: boolean;
+  onDetails?: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const answer = async (type: "option" | "reply", value: string, key?: string) => {
+    if (!value.trim() || busy) return;
+    setBusy(true);
+    const r = await deck().inboxAct(
+      itemId,
+      type,
+      type === "option" ? { key, text: value } : { text: value },
+    );
+    setBusy(false);
+    setMsg({ ok: r.ok, text: r.ok ? "Answered" : r.message });
+  };
+  return (
+    <div
+      className={`card ${onDetails ? "clickable" : ""}`}
+      style={{ ["--kind" as string]: "var(--accent)" }}
+      onClick={detailsClick(onDetails)}
+    >
+      {!full && <ItemControls itemId={itemId} />}
+      <div className="top">
+        <span className="kind">ASKED</span>
+        <span className="title">{item.title}</span>
+      </div>
+      {item.body && <div className="body">{item.body}</div>}
+      {(item.options ?? []).length > 0 && (
+        <div className="ask" onClick={(e) => e.stopPropagation()}>
+          <div className="ask-opts">
+            {(item.options ?? []).map((o, n) => (
+              <button
+                key={o}
+                className="ask-opt"
+                disabled={busy}
+                onClick={() => void answer("option", o, String(n + 1))}
+              >
+                <span className="ask-key">{n + 1}</span>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {item.allowText && (
+        <div className="quick-reply" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            value={text}
+            placeholder="Answer…"
+            disabled={busy}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) =>
+              e.key === "Enter" &&
+              (e.metaKey || e.ctrlKey) &&
+              void answer("reply", text)
+            }
+          />
+          <div className="actions">
+            <button
+              className="btn primary"
+              disabled={busy || !text.trim()}
+              onClick={() => void answer("reply", text)}
+            >
+              Answer
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="actions">
+        {msg && (
+          <span
+            className="error"
+            style={{ color: msg.ok ? "var(--green)" : undefined }}
+          >
+            {msg.text}
+          </span>
+        )}
+        <span className="muted small">asked by {item.by}</span>
+      </div>
     </div>
   );
 }
