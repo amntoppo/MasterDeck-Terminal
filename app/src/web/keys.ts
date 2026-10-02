@@ -9,6 +9,8 @@ export interface KeyRec {
   nB?: string
   macPublicKey?: string
   macNonce?: string
+  /** The Mac nonce we POSTed our reveal for (saved before the POST, for a reload that lost the answer). */
+  revealFor?: string
 }
 
 export class StorageUnavailable extends Error {}

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest'
 import { checkCommitment, generateStatic, publicRaw, randomNonce, words } from '@shared/e2e'
-import { approve, browserName, type Api } from './approval'
+import { afterClose, approve, browserName, type Api } from './approval'
 import type { KeyRec } from './keys'
 
 /** A fake backend + Mac: answers like the worker routes, scripted per test. */
@@ -47,7 +47,7 @@ async function rec(over: Partial<KeyRec> = {}): Promise<KeyRec> {
 const run = async (api: Api, r: KeyRec) => {
   const saved: KeyRec[] = []
   const shown: string[][] = []
-  const out = await approve({ api, rec: r, name: 'Chrome on macOS', save: async (x) => void saved.push(x), onWords: (x) => void shown.push(x), wait: async () => {} })
+  const out = await approve({ api, rec: r, name: 'Chrome on macOS', save: async (x) => void saved.push(x), onWords: (x) => void shown.push(x), wait: async () => {}, generate: () => generateStatic(false) })
   return { out, saved, shown }
 }
 
@@ -63,7 +63,9 @@ describe('approve (commit-reveal)', () => {
     // The reveal comes after a GET that carried the Mac nonce, never before.
     const revealAt = w.calls.findIndex((c) => c.p.endsWith('/reveal'))
     expect(w.calls.slice(0, revealAt).filter((c) => c.m === 'GET')).toHaveLength(2)
-    const myPub = await publicRaw(r.pair.publicKey)
+    // A fresh pair for the new request, never the one we came in with.
+    expect(saved[0].pair).not.toBe(r.pair)
+    const myPub = await publicRaw(saved[0].pair.publicKey)
     expect(w.revealed!.publicKey).toBe(myPub)
     expect(shown).toEqual([await words(w.macPub, myPub, w.nM, w.revealed!.nonce)])
     const last = saved.at(-1)!
@@ -92,6 +94,34 @@ describe('approve (commit-reveal)', () => {
       expect(out).toBe('approved')
       expect(w.calls.filter((c) => c.p === '/v1/browsers')).toHaveLength(1)
     }
+  })
+
+  it('every new request after a failed one uses a fresh key pair (a denied key is blocked for an hour)', async () => {
+    const { w, api } = await world({ status: 'denied' })
+    const old = await rec({ browserId: 'old' })
+    const { out, saved } = await run(api, old)
+    expect(out).toBe('approved')
+    const used = saved.find((x) => x.browserId === 'b1')!
+    expect(used.pair).not.toBe(old.pair)
+    expect(w.revealed!.publicKey).toBe(await publicRaw(used.pair.publicKey))
+    expect(w.revealed!.publicKey).not.toBe(await publicRaw(old.pair.publicKey))
+  })
+
+  it('reveal 409 when our record says we already sent this reveal (reload race): keeps polling', async () => {
+    const { w, api } = await world()
+    const r = await rec()
+    const first = await run({ ...api, post: async (p, b) => (p.endsWith('/reveal') ? (await api.post(p, b), { status: 409, body: {} }) : api.post(p, b)) }, r)
+    // Without a record of the sent reveal a 409 is an expiry.
+    expect(first.out).toBe('expired')
+    const sent = first.saved.find((x) => x.revealFor)!
+    expect(sent.revealFor).toBe(w.nM)
+    let n = 0
+    const again = await run({
+      get: async (p) => (n++ === 0 ? { status: 200, body: { status: 'pending', macPublicKey: w.macPub, macNonce: w.nM } } : api.get(p)),
+      post: async (p, b) => (p.endsWith('/reveal') ? { status: 409, body: {} } : api.post(p, b)),
+    }, sent)
+    expect(again.out).toBe('approved')
+    expect(again.shown).toEqual([await words(w.macPub, await publicRaw(sent.pair.publicKey), w.nM, sent.nB!)])
   })
 
   it('approved by the server without our reveal on record is not trusted', async () => {
@@ -128,5 +158,58 @@ describe('browserName', () => {
     expect(browserName('Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0')).toBe('Firefox on Linux')
     expect(browserName('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15')).toBe('Safari on macOS')
     expect(browserName('')).toBe('Browser')
+  })
+})
+
+describe('afterClose', () => {
+  const fake = (session: number | 'none' | 'throw', browser: { status: number; body?: any }) => {
+    const calls: string[] = []
+    const api: Api = {
+      async get(p) {
+        calls.push('GET ' + p)
+        if (p === '/auth/get-session') {
+          if (session === 'throw') throw new Error('offline')
+          return session === 'none' ? { status: 200, body: null } : { status: session, body: { user: { id: 'u1' } } }
+        }
+        return { status: browser.status, body: browser.body ?? null }
+      },
+      async post() {
+        throw new Error('no post')
+      },
+      async del(p) {
+        calls.push('DELETE ' + p)
+        return { status: 401, body: null }
+      },
+    }
+    return { api, calls }
+  }
+  const approved = { status: 200, body: { status: 'approved' } }
+  it('4009 → another tab, without asking the backend', async () => {
+    const f = fake(200, approved)
+    expect(await afterClose(f.api, 'b1', 4009, 'open in another tab', true)).toBe('otherTab')
+    expect(f.calls).toEqual([])
+  })
+  it('a close after the hello (not 4003/4008) → retry without asking', async () => {
+    const f = fake(200, approved)
+    expect(await afterClose(f.api, 'b1', 1006, '', true)).toBe('retry')
+    expect(f.calls).toEqual([])
+  })
+  it('4008 or a close before the hello: signed out → signin; revoked / 404 / pending → revoked; approved → retry', async () => {
+    expect(await afterClose(fake('none', approved).api, 'b1', 4008, '', true)).toBe('signin')
+    expect(await afterClose(fake(401, approved).api, 'b1', 1006, '', false)).toBe('signin')
+    for (const b of [{ status: 404 }, { status: 200, body: { status: 'revoked' } }, { status: 200, body: { status: 'pending' } }])
+      expect(await afterClose(fake(200, b).api, 'b1', 1006, '', false)).toBe('revoked')
+    expect(await afterClose(fake(200, approved).api, 'b1', 4008, '', true)).toBe('retry')
+    // The backend unreachable: keep backing off.
+    expect(await afterClose(fake('throw', approved).api, 'b1', 1006, '', false)).toBe('retry')
+  })
+  it("4003: revoked (or signin without a session); 'signed out' first tries DELETE of this browser", async () => {
+    const f = fake(200, approved)
+    expect(await afterClose(f.api, 'b1', 4003, 'revoked', true)).toBe('revoked')
+    expect(f.calls.filter((c) => c.startsWith('DELETE'))).toEqual([])
+    const g = fake('none', approved)
+    expect(await afterClose(g.api, 'b1', 4003, 'signed out', true)).toBe('signin')
+    expect(g.calls[0]).toBe('DELETE /v1/browsers/b1')
+    expect(await afterClose(fake('throw', approved).api, 'b1', 4003, 'revoked', true)).toBe('revoked')
   })
 })

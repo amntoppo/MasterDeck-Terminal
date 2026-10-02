@@ -4,7 +4,7 @@ import { formatAgo } from '@shared/format'
 import { PROTOCOL_VERSION, type DesktopStatus, type ServerToBrowser } from '@shared/remote'
 import type { MacToWeb } from '@shared/bridgeWire'
 import { App } from '@renderer/App'
-import { approve, browserName, type Api, type Outcome, type Res } from './approval'
+import { afterClose, approve, browserName, type Api, type Outcome, type Res } from './approval'
 import { deleteKeys, deleteOtherAccounts, ensureKeys, saveKeys, StorageUnavailable, type KeyRec } from './keys'
 import { createRemoteDeck } from './remoteDeck'
 
@@ -21,7 +21,7 @@ async function call(method: string, path: string, body?: unknown): Promise<Res> 
   })
   return { status: r.status, body: await r.json().catch(() => null) }
 }
-const api: Api = { get: (p) => call('GET', p), post: (p, b) => call('POST', p, b) }
+const api: Api = { get: (p) => call('GET', p), post: (p, b) => call('POST', p, b), del: (p) => call('DELETE', p) }
 
 class Cancelled extends Error {}
 
@@ -30,7 +30,8 @@ type Screen =
   | { s: 'signin' }
   | { s: 'storage' }
   | { s: 'error'; message: string }
-  | { s: 'approve'; words: string[] | null; outcome: Outcome | null }
+  | { s: 'approve'; words: string[] | null; outcome: Outcome | 'revoked' | null }
+  | { s: 'otherTab' }
   | { s: 'update' }
   | { s: 'app' }
 
@@ -79,10 +80,13 @@ export function Gate() {
         ctx.current = { userId: user.id, rec }
         await saveKeys(user.id, r)
       }
-      const out = await approve({ api, rec, name: browserName(navigator.userAgent), save, wait, onWords: (words) => show({ s: 'approve', words, outcome: null }) })
+      const out = await approve({
+        api, rec, name: browserName(navigator.userAgent), save, wait, generate: () => generateStatic(false),
+        onWords: (words) => show({ s: 'approve', words, outcome: null }),
+      })
       if (dead) return
       if (out !== 'approved') {
-        // Try again starts a new request (same key, new commitment).
+        // Try again starts a new request (with a new key).
         if (rec.browserId) await save({ browserId: null, pair: rec.pair })
         return show({ s: 'approve', words: null, outcome: out })
       }
@@ -90,10 +94,17 @@ export function Gate() {
       stop = connect(rec, {
         conn: (f) => !dead && setConn(f),
         update: () => show({ s: 'update' }),
-        revoked: async () => {
-          // Revoked or signed out elsewhere: this key is done; start over (Sign in, or a new approval).
-          await deleteKeys(user.id).catch(() => {})
-          if (!dead) setRun((n) => n + 1)
+        closed: async (code, reason, helloed) => {
+          const next = await afterClose(api, rec.browserId!, code, reason, helloed)
+          if (dead) return false
+          if (next === 'retry') return true
+          stop()
+          // Revoked, signed out, or no longer approved: this key is done. Nothing is requested until the user asks.
+          if (code === 4003 || next === 'revoked') await deleteKeys(user.id).catch(() => {})
+          if (next === 'signin') show({ s: 'signin' })
+          else if (next === 'otherTab') show({ s: 'otherTab' })
+          else show({ s: 'approve', words: null, outcome: 'revoked' })
+          return false
         },
       })
     })().catch((e) => {
@@ -151,6 +162,15 @@ export function Gate() {
         </button>
       </Card>
     )
+  if (screen.s === 'otherTab')
+    return (
+      <Card title="MasterDeck">
+        <p>MasterDeck is open in another tab.</p>
+        <button className="btn primary" onClick={retry}>
+          Use here
+        </button>
+      </Card>
+    )
   if (screen.s === 'storage') return <Card title="MasterDeck">This window can't be approved; use a normal window.</Card>
   if (screen.s === 'update')
     return (
@@ -170,11 +190,13 @@ export function Gate() {
   return (
     <Card title="Approve this browser">
       {o === 'notPaired' ? (
-        <p>Sign in to MasterDeck on your Mac first.</p>
+        <p>Sign in to MasterDeck on your Mac and turn on Remote (update MasterDeck if it's older).</p>
       ) : o === 'denied' ? (
         <p>Denied on your Mac.</p>
       ) : o === 'expired' ? (
         <p>The request expired.</p>
+      ) : o === 'revoked' ? (
+        <p>This browser no longer has access to your Mac.</p>
       ) : o === 'tooMany' ? (
         <p>Too many approval attempts — try again in a few minutes.</p>
       ) : screen.words ? (
@@ -187,7 +209,7 @@ export function Gate() {
       )}
       {o && (
         <button className="btn primary" onClick={retry}>
-          Try again
+          {o === 'revoked' ? 'Request access again' : 'Try again'}
         </button>
       )}
       <button className="link-btn" onClick={() => void signOut()}>
@@ -209,7 +231,8 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 interface Hooks {
   conn(f: (c: Conn) => Conn): void
   update(): void
-  revoked(): void
+  /** The socket closed; resolves true to reconnect with backoff, false when the Gate took over. */
+  closed(code: number, reason: string, helloed: boolean): Promise<boolean>
 }
 
 /**
@@ -233,6 +256,8 @@ function connect(rec: KeyRec, h: Hooks): () => void {
     let hsTimer: ReturnType<typeof setTimeout> | undefined
     let ch: Channel | null = null
     let hello = false
+    /** This socket reached the Mac's hello (hello itself resets when the channel ends). */
+    let reached = false
     let onFrame: ((d: string) => void) | undefined
     let onClose: (() => void) | undefined
     const ping = setInterval(() => sendRaw({ t: 'ping' }), 30_000)
@@ -293,6 +318,7 @@ function connect(rec: KeyRec, h: Hooks): () => void {
             return h.update()
           }
           hello = true
+          reached = true
           const io = { send: sendFrame, onFrame: (cb: (d: string) => void) => void (onFrame = cb), onClose: (cb: () => void) => void (onClose = cb) }
           window.deck = createRemoteDeck(io, ch, first)
           backoff = 1000
@@ -316,12 +342,20 @@ function connect(rec: KeyRec, h: Hooks): () => void {
       endChannel()
       if (ws !== sock || stopped) return
       h.conn((c) => ({ ...c, up: false }))
-      if (e.code === 4003) return h.revoked()
-      const now = e.code === 4006 && quick
+      if (e.code === 4006 && quick) {
+        quick = false
+        retryTimer = setTimeout(open, 0)
+        return
+      }
       if (e.code === 4006) quick = false
-      const delay = now ? 0 : backoff
-      if (!now) backoff = Math.min(backoff * 2, 30_000)
-      retryTimer = setTimeout(open, delay)
+      void h.closed(e.code, e.reason, reached).then(
+        (again) => {
+          if (!again || ws !== sock || stopped) return
+          retryTimer = setTimeout(open, backoff)
+          backoff = Math.min(backoff * 2, 30_000)
+        },
+        () => {},
+      )
     }
     const onVis = () => void visible()
     document.addEventListener('visibilitychange', onVis)
