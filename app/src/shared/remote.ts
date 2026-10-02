@@ -267,6 +267,12 @@ export type ServerToClient =
 export const BrowserMsg = z.discriminatedUnion('t', [z.object({ t: z.literal('frame'), d: frameData }), z.object({ t: z.literal('ping') })])
 export type BrowserMsg = z.infer<typeof BrowserMsg>
 
+/**
+ * Browser socket close codes (the web app acts on them):
+ * 4003 revoked or signed out (keys deleted, approval again) · 4006 session re-check, reconnect at once ·
+ * 4008 closed by the Mac (re-check the session and the browser's status, then back off) ·
+ * 4009 open in another tab of this browser (terminal; "Use here" reconnects and bumps the other tab).
+ */
 export type ServerToBrowser =
   | { t: 'frame'; d: string }
   | { t: 'desktop'; desktop: DesktopStatus }
