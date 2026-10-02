@@ -137,7 +137,7 @@ export class Account {
       lb.close()
       if (this.flow === flow) {
         this.running = false
-        if (this.st.kind !== 'signedIn') this.set({ kind: 'signedOut', message: null })
+        if (this.state().kind !== 'signedIn') this.set({ kind: 'signedOut', message: null })
       }
       return
     }
