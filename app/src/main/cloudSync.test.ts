@@ -509,5 +509,76 @@ describe('CloudSync', () => {
       await until(() => kinds(srv).length === 2)
       expect(kinds(srv)[1].t).toBe('snapshotPatch')
     })
+
+    it('a rejected full (error) is forgotten: the next ack is credited to the next full, and the patch is against it', async () => {
+      let n = 0
+      const srv = await server({
+        onMsg: (ws, m) => {
+          if (m.t !== 'snapshot' && m.t !== 'snapshotPatch') return
+          n++
+          ws.send(JSON.stringify(n === 1 ? { t: 'error', code: 'too_large', message: 'x' } : { t: 'snapshotAck', v: n }))
+        },
+      })
+      const s = await up(srv)
+      s.push(doc('one'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('two'))
+      await until(() => kinds(srv).length === 2)
+      expect(kinds(srv)[1].t).toBe('snapshot')
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('three'))
+      await until(() => kinds(srv).length === 3)
+      const p = kinds(srv)[2]
+      expect(p).toMatchObject({ t: 'snapshotPatch', base: 2 })
+      expect(applyPatch(JSON.parse(JSON.stringify(kinds(srv)[1].data)), p.ops).newDocument).toEqual(JSON.parse(JSON.stringify(doc('three'))))
+    })
+
+    it('ignores a stale ack (v not above the acked one) and a non-numeric one', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      srv.conns[0].send(JSON.stringify({ t: 'snapshotAck', v: 1 }))
+      srv.conns[0].send(JSON.stringify({ t: 'snapshotAck', v: 'x' }))
+      s.push(doc('working'))
+      await until(() => kinds(srv).length === 2)
+      expect(kinds(srv)[1]).toMatchObject({ t: 'snapshotPatch', base: 1 })
+    })
+
+    it('a diff that is most of the document falls back to a full snapshot', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv)
+      s.push(doc('idle'))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push({ ...doc('idle'), pad: 'y'.repeat(2000) } as unknown as RemoteSnapshot)
+      await until(() => kinds(srv).length === 2)
+      expect(kinds(srv)[1].t).toBe('snapshot')
+      await new Promise((r) => setTimeout(r, 50))
+      const many = Array.from({ length: 2100 }, (_, i) => i)
+      const big = { ...doc('idle'), pad: 'y'.repeat(2000), n: many } as unknown as RemoteSnapshot
+      s.push(big)
+      await until(() => kinds(srv).length === 3)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push({ ...big, n: many.map((x) => x + 1) } as unknown as RemoteSnapshot)
+      await until(() => kinds(srv).length === 4)
+      expect(kinds(srv)[3].t).toBe('snapshot') // 2100 replace ops > 2000
+    })
+
+    it('a meaningful change goes out promptly while a volatile-only change is held', async () => {
+      const srv = await server({ onMsg: acker })
+      const s = await up(srv, { minVolatileMs: 600 })
+      s.push(doc('idle', 1))
+      await until(() => kinds(srv).length === 1)
+      await new Promise((r) => setTimeout(r, 50))
+      s.push(doc('idle', 2))
+      await new Promise((r) => setTimeout(r, 100))
+      expect(kinds(srv)).toHaveLength(1)
+      s.push(doc('working', 3))
+      await until(() => kinds(srv).length === 2, 400)
+      expect(kinds(srv)[1].t).toBe('snapshotPatch')
+    })
   })
 })

@@ -56,6 +56,8 @@ export class CloudSync {
   private welcomeWait: NodeJS.Timeout | null = null
   private pending: RemoteSnapshot | null = null
   private lastJson: string | null = null
+  /** lastJson parsed, once per fitted snapshot (patch base and ack bookkeeping reuse it). */
+  private lastDoc: object | null = null
   private lastKey: string | null = null
   private sentKey: string | null = null
   private lastVKey: string | null = null
@@ -65,7 +67,7 @@ export class CloudSync {
   private ackedV: number | null = null
   private ackedDoc: unknown = null
   /** Sends not yet acked, oldest first (acks arrive in order). Patches only go out when this is empty. */
-  private inflight: { json: string }[] = []
+  private inflight: { doc: object }[] = []
   /** Oldest unacked fulls dropped from `inflight` (old server that never acks): their acks are ignored. */
   private dropped = 0
   private ackWait: NodeJS.Timeout | null = null
@@ -149,12 +151,14 @@ export class CloudSync {
           this.o.log?.('remote: snapshot still over the limit after trimming; not sent')
         }
         this.lastJson = null
+        this.lastDoc = null
         this.lastKey = null
         this.lastVKey = null
         this.set({ message: 'snapshot too large to send' })
         return
       }
       this.lastJson = json
+      this.lastDoc = null
       this.lastKey = JSON.stringify({ ...snap, takenAt: 0 })
       this.lastVKey = volatileKey(snap)
     }
@@ -175,7 +179,7 @@ export class CloudSync {
     let out = `{"t":"snapshot","data":${this.lastJson}}`
     let patched = false
     if (this.ackedV !== null) {
-      const ops = compare(this.ackedDoc as object, JSON.parse(this.lastJson))
+      const ops = compare(this.ackedDoc as object, (this.lastDoc ??= JSON.parse(this.lastJson)) as object)
       if (!ops.length) {
         this.sentKey = this.lastKey
         this.sentVKey = this.lastVKey
@@ -188,15 +192,15 @@ export class CloudSync {
       }
     }
     this.ws.send(out)
-    this.track(this.lastJson, patched)
+    this.track((this.lastDoc ??= JSON.parse(this.lastJson)) as object, patched)
     this.sentKey = this.lastKey
     this.sentVKey = this.lastVKey
     this.sentAt = Date.now()
     this.set({ lastSyncAt: Date.now(), ...(this.st.message === 'snapshot too large to send' ? { message: null } : {}) })
   }
 
-  private track(json: string, patched: boolean): void {
-    this.inflight.push({ json })
+  private track(doc: object, patched: boolean): void {
+    this.inflight.push({ doc })
     // ponytail: an old server never acks; keep the queue short and ignore the acks of what fell off.
     if (!patched && this.inflight.length > 16) {
       this.inflight.shift()
@@ -352,10 +356,12 @@ export class CloudSync {
           this.dropped--
           return
         }
+        // A late ack after a timeout is stale; the server's base check is the backstop for any other mismatch.
+        if (typeof m.v !== 'number' || (this.ackedV !== null && m.v <= this.ackedV)) return
         const sent = this.inflight.shift()
-        if (!sent || typeof m.v !== 'number') return
+        if (!sent) return
         this.ackedV = m.v
-        this.ackedDoc = JSON.parse(sent.json)
+        this.ackedDoc = sent.doc
         this.arm()
         this.flush()
         return
@@ -385,6 +391,8 @@ export class CloudSync {
         return
       case 'error':
         this.o.log?.(`remote: ${m.code}: ${m.message}`)
+        // A rejected snapshot is never acked; forget what is in flight so the next ack is not credited to it.
+        if (m.code === 'bad_message' || m.code === 'too_large') this.resetAcks()
         if (m.code === 'protocol') this.set({ conn: 'error', message: m.message })
         return
       default:
