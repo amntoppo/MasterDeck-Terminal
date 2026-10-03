@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, boardForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
 import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -165,5 +165,18 @@ describe('tabs per account', () => {
     expect(boardForAccount(b, 'alice', cfg).cards.map((c) => c.number)).toEqual([1])
     expect(boardForAccount(b, null, cfg)).toBe(b)
     expect(boardForAccount(b, 'alice', parseConfig({ accounts: [{ login: 'alice', owner: 'acme', issueRepo: 'tracker' }] }))).toBe(b)
+  })
+  it("offers a tab only its account's sprints", () => {
+    const sp = (title: string, projects?: string[]) => ({ id: title, title, startDate: '2026-10-01', duration: 14, completed: false, projects })
+    const all = [sp('S1', ['acme/1']), sp('S2', ['globex/7']), sp('S3', ['acme/1', 'globex/7']), sp('S4')]
+    expect(sprintsForAccount(all, 'bob-work', cfg).map((s) => s.title)).toEqual(['S2', 'S3', 'S4'])
+    expect(sprintsForAccount(all, null, cfg)).toBe(all)
+    expect(sprintsForAccount(all, 'alice', parseConfig({ accounts: [{ login: 'alice', owner: 'acme', issueRepo: 'tracker' }] }))).toBe(all)
+  })
+  it('saved tabs: an account is kept, an old tab has none (the primary)', () => {
+    const t = parseSavedTabs([{ id: 'a', name: 'Mine', filters: {}, account: 'bob-work' }, { id: 'b', filters: {} }, null], 'alice')
+    expect(t?.map((x) => [x.id, x.name, x.account])).toEqual([['a', 'Mine', 'bob-work'], ['b', 'Board', undefined]])
+    expect(parseSavedTabs([], 'alice')).toBeNull()
+    expect(parseSavedTabs('x', 'alice')).toBeNull()
   })
 })

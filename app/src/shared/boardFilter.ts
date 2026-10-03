@@ -2,7 +2,7 @@ import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
 import { accountForProject, accountForRepo, isMulti } from './accounts'
 import { projectKey, type AppConfig } from './appConfig'
-import type { Board, BoardCard, BoardPr, Session } from './types'
+import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
 
 export const UNASSIGNED = '(unassigned)'
 
@@ -81,6 +81,26 @@ export function boardForAccount(b: Board, login: string | null, c: AppConfig): B
   const cards = b.cards.filter((card) => (card.project ? accountForProject(card.project, c) : accountForRepo(card.repo, c)) === login)
   const boards = (b.projects ?? []).filter((p) => keys.has(p.key))
   return { ...b, cards, projects: boards, columns: boards.length ? [...new Set(boards.flatMap((p) => p.columns))] : b.columns }
+}
+
+/** The sprints with a board of this account (a sprint with no board list is kept). */
+export function sprintsForAccount(sprints: Sprint[], login: string | null, c: AppConfig): Sprint[] {
+  if (!login || !isMulti(c)) return sprints
+  const keys = new Set(c.accounts.find((a) => a.login === login)?.projects.map(projectKey) ?? [])
+  return sprints.filter((s) => !s.projects || s.projects.some((k) => keys.has(k)))
+}
+
+/** Saved Board tabs read back (old ones have no account: the primary); null when nothing usable is saved. */
+export function parseSavedTabs(saved: unknown, me: string | null): BoardTab[] | null {
+  if (!Array.isArray(saved) || !saved.length) return null
+  return saved
+    .filter((t) => t && typeof t.id === 'string')
+    .map((t) => ({
+      id: t.id,
+      name: typeof t.name === 'string' && t.name ? t.name : 'Board',
+      filters: normalizeFilters(t.filters, me),
+      ...(typeof t.account === 'string' ? { account: t.account } : {}),
+    }))
 }
 
 export interface FilterOptions {

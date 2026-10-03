@@ -28,6 +28,8 @@ import {
   defaultFilters,
   filterOptions,
   boardForAccount,
+  parseSavedTabs,
+  sprintsForAccount,
   tabAccount,
   withAccountTabs,
   normalizeFilters,
@@ -111,16 +113,8 @@ const MINE_TAB = "board-mine";
 
 /** The saved tabs; before any are saved, Mine (my issues, selected) and Everyone. */
 function loadTabs(me: string | null): BoardTab[] {
-  const saved = load<BoardTab[] | null>(TABS_KEY, null);
-  if (Array.isArray(saved) && saved.length)
-    return saved
-      .filter((t) => t && typeof t.id === "string")
-      .map((t) => ({
-        id: t.id,
-        name: typeof t.name === "string" && t.name ? t.name : "Board",
-        filters: normalizeFilters(t.filters, me),
-        ...(typeof t.account === "string" ? { account: t.account } : {}),
-      }));
+  const saved = parseSavedTabs(load<unknown>(TABS_KEY, null), me);
+  if (saved) return saved;
   return [
     { id: MINE_TAB, name: "Mine", filters: defaultFilters(me) },
     {
@@ -282,16 +276,18 @@ export function BoardView({
   // Connecting another account adds a "Mine" tab for it, once.
   useEffect(() => {
     const added = load<string[]>("boardTabAccounts", []);
-    const r = withAccountTabs(tabs, logins, primary, added, (l) => ({
+    const make = (l: string) => ({
       id: `board-mine-${l}`,
       name: "Mine",
       account: l,
       filters: defaultFilters(l),
-    }));
-    if (r.tabs !== tabs) setTabs(r.tabs);
-    if (r.added !== added) save("boardTabAccounts", r.added);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logins.join(), primary]);
+    });
+    const r = withAccountTabs(tabs, logins, primary, added, make);
+    if (r.added === added) return;
+    save("boardTabAccounts", r.added);
+    // Functional, so it cannot undo another update (the first-run Mine fill).
+    setTabs((ts) => withAccountTabs(ts, logins, primary, added, make).tabs);
+  }, [logins.join(), primary]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => save(TABS_KEY, tabs), [tabs]);
   useEffect(() => save(TAB_KEY, tab.id), [tab.id]);
   const f = tab.filters;
@@ -308,7 +304,7 @@ export function BoardView({
         id,
         name: nextTabName(tabs, "Board"),
         filters: { ...defaultFilters(me), assignees: [] },
-        ...(tab.account ? { account: tab.account } : {}),
+        ...(tabAccount(tab, logins) ? { account: tabAccount(tab, logins) } : {}),
       },
     ]);
     setTabId(id);
@@ -350,7 +346,7 @@ export function BoardView({
       b
         ? filterOptions(b, me, acct && acct !== primary ? [] : state.users)
         : { assignees: [], labels: [], milestones: [] },
-    [b, me, state.users],
+    [b, me, state.users, acct, primary],
   );
 
   const refresh = async () => {
@@ -370,7 +366,8 @@ export function BoardView({
   };
 
   const loading = state.boardLoading || state.githubRefreshing || refreshing;
-  const current = state.sprints.find(
+  const sprints = sprintsForAccount(state.sprints, acct, cfg);
+  const current = sprints.find(
     (s) => !s.completed && inSprint(s.startDate, s.duration, now),
   );
   const columns = shown
@@ -612,7 +609,7 @@ export function BoardView({
                     ...t,
                     account: l === primary ? undefined : l,
                     // Its own repos and boards; "Mine" follows the account.
-                    filters: { ...t.filters, repos: [], projects: [], assignees: t.filters.assignees.length === 1 && t.filters.assignees[0] === me ? [l] : t.filters.assignees },
+                    filters: { ...t.filters, repos: [], projects: [], labels: [], milestone: null, assignees: t.filters.assignees.length === 1 && t.filters.assignees[0] === me ? [l] : [] },
                   }
                 : t,
             ),
@@ -759,7 +756,7 @@ export function BoardView({
             <option value="@current">
               Current sprint{current ? ` (${current.title})` : ""}
             </option>
-            {state.sprints
+            {sprints
               .filter((s) => s.title !== current?.title)
               .map((s) => (
                 <option key={s.id} value={s.title}>
