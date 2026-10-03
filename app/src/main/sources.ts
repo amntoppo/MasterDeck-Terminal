@@ -1,5 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
-import { isMulti, type GhAccountStatus } from "@shared/accounts";
+import { isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
   newScheduleScan,
@@ -117,7 +117,7 @@ import {
   setConfig,
   type AppConfig,
 } from "@shared/appConfig";
-import { parseTeamPrs, type TeamPr } from "@shared/teamPrs";
+import { mergeTeamPages, parseTeamPrs, type TeamPr } from "@shared/teamPrs";
 import {
   nextRestore,
   parseRestoreFile,
@@ -1026,10 +1026,15 @@ export class Sources {
   private async refreshPeople(
     force = false,
   ): Promise<{ ok: boolean; message: string }> {
+    // The primary issue repo's assignees and my login: the primary's (two or more accounts), as before with one.
+    const gh =
+      isMulti(this.config) && this.githubFor
+        ? this.githubFor(primaryLogin(this.config)!)
+        : this.github;
     const [sp, users, me] = await Promise.all([
       this.cli.sprints(force),
-      this.github.assignableUsers(force),
-      this.me ? Promise.resolve(this.me) : this.github.me(),
+      gh.assignableUsers(force),
+      this.me ? Promise.resolve(this.me) : gh.me(),
     ]);
     if (sp.ok) this.sprints = sp.sprints;
     if (users) this.users = users;
@@ -1088,19 +1093,53 @@ export class Sources {
     this.teamPrsLoading = true;
     this.emit();
     try {
-      const r = await this.github.teamPrPages(undefined, undefined, force);
-      if (r.ok) {
-        this.teamPrPages = r.pages;
-        this.teamPrs = parseTeamPrs(r.pages);
+      // One search per account (each owner's PRs with that account's token); one account: as before.
+      const accts =
+        isMulti(this.config) && this.githubFor ? this.config.accounts : null;
+      const got = accts
+        ? await Promise.all(
+            accts.map(async (a) => ({
+              login: a.login as string | null,
+              r: await this.githubFor!(a.login).teamPrPages(
+                a.owner,
+                undefined,
+                force,
+                a.ownerType,
+              ),
+            })),
+          )
+        : [
+            {
+              login: null as string | null,
+              r: await this.github.teamPrPages(undefined, undefined, force),
+            },
+          ];
+      const msgs = got.flatMap((g) =>
+        g.r.ok
+          ? g.r.partial
+            ? [g.r.partial]
+            : []
+          : [`${g.login ? `${g.login}: ` : ""}${g.r.message}`],
+      );
+      if (got.some((g) => g.r.ok)) {
+        this.teamPrPages = mergeTeamPages(
+          got.map((g) => ({
+            login: g.login,
+            pages: g.r.ok ? g.r.pages : null,
+          })),
+          this.teamPrPages,
+        );
+        this.teamPrs = parseTeamPrs(this.teamPrPages);
         this.teamPrsAt = Date.now();
-        this.teamPrsError = r.partial ?? null;
+        this.teamPrsError = msgs.join("; ") || null;
         this.saveGithubCache();
         return { ok: true, message: "refreshed" };
       }
-      // Keep the last good list on screen; say why it didn't update.
-      this.githubPaused(r.message);
-      this.teamPrsError = r.message;
-      return { ok: false, message: r.message };
+      // Keep the last good list on screen; say why it didn't update. Per account, ghc pauses only the limited one.
+      const msg = msgs.join("; ");
+      if (!accts) this.githubPaused(msg);
+      this.teamPrsError = msg;
+      return { ok: false, message: msg };
     } catch (e) {
       this.teamPrsError = String(e);
       return { ok: false, message: this.teamPrsError };
@@ -1135,7 +1174,10 @@ export class Sources {
       if (b) {
         this.boards[sprint] = b;
         if (r.ok) this.rawBoards[sprint] = r.data;
-        this.boardError = null;
+        // Two or more accounts: the board still shows when some (not all) accounts' reads failed.
+        const partial = r.ok ? (r.data as { errors?: unknown })?.errors : null;
+        this.boardError =
+          Array.isArray(partial) && partial.length ? partial.join("; ") : null;
         if (b.sprint)
           this.boardHistory[b.sprint] = addBurnPoint(
             this.boardHistory[b.sprint] ?? [],
@@ -1313,22 +1355,33 @@ export class Sources {
     try {
       const r = await this.cli.snapshot(force);
       if (r.ok) {
-        // A source that failed (board, prs) comes back empty: keep the last good list instead.
-        const raw = { ...(r.data as Record<string, unknown>) };
-        const ok = (raw.sources ?? {}) as Record<string, boolean>;
-        if (!ok.board && this.rawSnapshot?.issues)
-          raw.issues = this.rawSnapshot.issues;
-        if (!ok.prs && this.rawSnapshot?.prs) raw.prs = this.rawSnapshot.prs;
+        // A source that failed (board, prs) comes back empty: keep the last good list (per account).
+        const raw = keepLastGood(
+          { ...(r.data as Record<string, unknown>) },
+          this.rawSnapshot,
+          this.config,
+        );
         this.rawSnapshot = raw;
         this.snapshot = parseSnapshot(raw);
         this.setHealth("snapshot", true);
         // A snapshot can succeed with some sources failed; a rate-limit failure still pauses GitHub calls.
+        // One account's (two or more: tagged) pauses only that account, in the shared cache (ghc).
         const errs =
-          (r.data as { errors?: { message?: string }[] })?.errors ?? [];
-        for (const e of errs) this.githubPaused(e?.message);
+          (r.data as { errors?: { message?: string; account?: string }[] })
+            ?.errors ?? [];
+        for (const e of errs) if (!e?.account) this.githubPaused(e?.message);
+        const parts = (raw.accounts ?? []) as {
+          login?: string;
+          sources?: Record<string, boolean>;
+        }[];
         for (const [k, v] of Object.entries(this.snapshot.sources)) {
+          // Two or more accounts: name whose read failed.
+          const whose = parts
+            .filter((a) => a.sources?.[k] === false)
+            .map((a) => a.login);
           if (!v)
-            this.errors[`snapshot:${k}`] = `snapshot source missing: ${k}`;
+            this.errors[`snapshot:${k}`] =
+              `snapshot source missing: ${k}${whose.length ? ` (${whose.join(", ")})` : ""}`;
           else delete this.errors[`snapshot:${k}`];
         }
         this.emit();

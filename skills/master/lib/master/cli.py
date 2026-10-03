@@ -28,9 +28,21 @@ def _source(args):
     return collect.Fixtures(Path(args.fixtures)) if args.fixtures else collect.Live()
 
 
+def _sources(args) -> list:
+    """One source per connected account (two or more, each with its own token); else today's one."""
+    if args.fixtures or not config.is_multi():
+        return [_source(args)]
+    return [collect.Live.for_account(a) for a in config.accounts()]
+
+
 def _snap(args) -> dict:
     now = _now(args)
-    return snapshot.build(_source(args), now_iso=now, today=_today(args))
+    srcs = _sources(args)
+    if len(srcs) == 1:
+        return snapshot.build(srcs[0], now_iso=now, today=_today(args))
+    # Each account's issues and PRs with its own token; the sessions once, with the primary.
+    return snapshot.merge([(a["login"], snapshot.build(s, now_iso=now, today=_today(args), with_sessions=i == 0))
+                           for i, (a, s) in enumerate(zip(config.accounts(), srcs))])
 
 
 def cmd_snapshot(args) -> int:
@@ -48,7 +60,7 @@ def cmd_sweep(args) -> int:
     now = _now(args)
     # The snapshot makes network calls for seconds; build it before taking the lock
     # so an approval from the app is never stuck behind gh.
-    cur = snapshot.build(_source(args), now_iso=now, today=_today(args))
+    cur = _snap(args)
     if args.dry_run:
         new = _apply(ledger.load(), cur, now)
     else:
@@ -279,14 +291,23 @@ def cmd_draft_assign(args) -> int:
 
 
 def cmd_board(args) -> int:
-    src = _source(args)
-    try:
-        items = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
-        details = src.pr_details(board.linked_prs(items))
-    except Exception as e:  # gh missing, network, rate limit: say what gh said
-        print(str(e).strip() or type(e).__name__)
+    srcs = _sources(args)
+    logins = [a["login"] for a in config.accounts()] if len(srcs) > 1 else [None]
+    items, details, errors = [], {}, []
+    for login, src in zip(logins, srcs):
+        try:
+            got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
+            details.update(src.pr_details(board.linked_prs(got)))
+            items += [dict(it, account=login) for it in got] if login else got
+        except Exception as e:  # gh missing, network, rate limit, an account to log in again: say what gh said
+            errors.append(str(e).strip() or type(e).__name__)
+    if len(errors) == len(srcs):
+        print(errors[0])
         return 1
-    print(json.dumps(board.build(items, details, _now(args))))
+    out = board.build(items, details, _now(args))
+    if errors:
+        out["errors"] = errors
+    print(json.dumps(out))
     return 0
 
 
@@ -294,11 +315,17 @@ def cmd_sprints(args) -> int:
     if not args.fixtures and not any(p.get("sprintField") for p in config.projects()):
         print("[]")  # no board, or a board without a sprint (iteration) field
         return 0
-    try:
-        print(json.dumps(_source(args).sprints()))
-    except Exception as e:
-        print(str(e).strip() or type(e).__name__)
+    srcs = _sources(args)
+    out, errors = [], []
+    for src in srcs:
+        try:
+            out += src.sprints()
+        except Exception as e:
+            errors.append(str(e).strip() or type(e).__name__)
+    if len(errors) == len(srcs):
+        print(errors[0])
         return 1
+    print(json.dumps(out))
     return 0
 
 

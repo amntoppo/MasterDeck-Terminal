@@ -207,3 +207,30 @@ export function parseGhUser(json: string): { login: string; name: string | null;
     return null
   }
 }
+
+type Raw = Record<string, unknown>
+const rows = (v: unknown): Raw[] => (Array.isArray(v) ? v.filter((x): x is Raw => !!x && typeof x === 'object') : [])
+
+/**
+ * A snapshot whose board or PR read failed keeps the last good list. With several accounts only
+ * the failed account's part comes from before (`accounts[].sources`; a row's own `account`, else
+ * its repo's): one account that needs to log in again never freezes the others.
+ */
+export function keepLastGood(raw: Raw, prev: Raw | null, c: AppConfig): Raw {
+  const ok = (raw.sources ?? {}) as Record<string, boolean>
+  const accts = rows(raw.accounts)
+  const out: Raw = { ...raw }
+  for (const [list, src] of [['issues', 'board'], ['prs', 'prs']] as const) {
+    const before = prev && Array.isArray(prev[list]) ? rows(prev[list]) : null
+    if (ok[src] || !before) continue
+    if (!accts.length) {
+      out[list] = prev![list]
+      continue
+    }
+    const failed = new Set(accts.filter((a) => (a.sources as Record<string, boolean> | undefined)?.[src] === false).map((a) => String(a.login)))
+    const of = (x: Raw) =>
+      typeof x.account === 'string' ? x.account : (accountForRepo(list === 'issues' ? ((x.repo as string | null) ?? null) : prRepo(String(x.url ?? '')), c) ?? '')
+    out[list] = [...rows(raw[list]).filter((x) => !failed.has(of(x))), ...before.filter((x) => failed.has(of(x)))]
+  }
+  return out
+}

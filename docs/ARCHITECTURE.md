@@ -68,6 +68,8 @@ GitHub rate limits pause every caller for `RATE_LIMIT_PAUSE_MS` (10 min). On sta
 cache (`cache.json`: snapshot, boards, sprints, users, team PRs) so the UI fills before GitHub
 answers.
 
+With two or more accounts `master snapshot`/`board`/`sprints` read each account with its own token (`collect.Live.for_account`: `gh auth token --user`) and merge (snapshot: `accounts[].sources`, each issue and PR tagged `account`, sessions read once with the primary; board: cards tagged `account`, `errors` when some failed); `keepLastGood` keeps only a failed account's last issues/PRs; team PRs are one search per account (`teamPrPages(owner, …, ownerType)`), tagged `account`, a failed account keeping its last pages (`mergeTeamPages`). An account's own failure (tagged) pauses only that account (ghc's per-account pause), not every caller; `snapshot source missing: <k>` names the accounts. Assignable users and `me` are the primary's. One account: the same single read as before.
+
 `build()` order: raw sessions (minus the workflow/ticket builder sessions) → `attachIssues` →
 `applyFreshness` → activity → hook state; asks and menus; deck hook permission requests become
 menus; `collectItems` (`shared/inbox.ts`) → `inbox.update()`; then the `AppState` object.
@@ -269,6 +271,8 @@ asks the session to run babysit-ticket or babysit-pr: MasterDeck links it and wa
 ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/master"` in the
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).
+
+master's sweep collects the same way (one read per account), so its proposals see every account's issues and PRs; `author_is_me` and the "last comment is mine" thread rule use each account's own login.
 
 With two or more accounts, master's ASSIGN proposals carry `target.spawn.account` (the issue repo's account, `config.account_for_repo`); `master spawn` adds `--settings` for it and holds the proposal (with the reason) when the account's settings file is missing, never starting it as gh's active account; a proposal without an account (older, or `master add` without `--account`) spawns as its repo's account, else the primary's, and that account is written to the proposal (so the app attributes the session to it). ORPHAN resumes name the account the session was recorded as in `session-accounts.json` (`config.session_account`, a connected login only; otherwise the repo default). With one account `master spawn` passes no `--settings`, even for a target naming an account. The app's starts (`CH.assign`, remote `startAssign`) go through `assignNow` (`main/assign.ts`, wrapped in `index.ts`): the chosen account, else the issue's (`defaultAccount`), refused when it needs to log in again; master's proposal is reused only when it already names that account, otherwise (none: it would start as gh's active account; another; or the Start dialog's Account field changed) a new proposal carries it (`master add --account`). The account is recorded with `SessionAccounts.expect`. With one account any `account` in the request is dropped.
 

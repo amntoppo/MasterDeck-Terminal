@@ -33,6 +33,8 @@ export interface TeamPr {
   issues: number[]
   /** The issues it closes, with their repos (issues keeps the numbers alone). */
   issueRefs?: Ticket[]
+  /** The GitHub account whose search found it (two or more connected). */
+  account?: string
 }
 
 /** The GraphQL query MasterDeck runs (one search page of 100). */
@@ -161,12 +163,23 @@ export function parseTeamPr(raw: unknown): TeamPr | null {
 /** Search result pages to PRs, newest first and without duplicates. */
 export function parseTeamPrs(pages: unknown[]): TeamPr[] {
   const seen = new Map<string, TeamPr>()
-  for (const page of pages)
+  for (const page of pages) {
+    const account = typeof obj(page).account === 'string' ? (obj(page).account as string) : undefined
     for (const raw of nodes(obj(obj(obj(page).data).search))) {
       const pr = parseTeamPr(raw)
-      if (pr && !seen.has(pr.url)) seen.set(pr.url, pr)
+      if (pr && !seen.has(pr.url)) seen.set(pr.url, account ? { ...pr, account } : pr)
     }
+  }
   return [...seen.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/** Each account's search pages tagged with its login; an account whose read failed (pages null) keeps its last pages. */
+export function mergeTeamPages(got: { login: string | null; pages: unknown[] | null }[], prev: unknown[]): unknown[] {
+  const failed = new Set(got.filter((g) => g.pages === null).map((g) => g.login))
+  return [
+    ...got.flatMap((g) => (g.pages ?? []).map((p) => (g.login ? { ...obj(p), account: g.login } : p))),
+    ...prev.filter((p) => failed.has(typeof obj(p).account === 'string' ? (obj(p).account as string) : null)),
+  ]
 }
 
 // --- filters ---------------------------------------------------------------------------------

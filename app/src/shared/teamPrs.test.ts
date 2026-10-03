@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, normalizePrFilters, parseTeamPrs, prFilterOptions, reviewLabel, teamPrSearches, type PrFilters } from './teamPrs'
+import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, mergeTeamPages, normalizePrFilters, parseTeamPrs, prFilterOptions, reviewLabel, teamPrSearches, type PrFilters } from './teamPrs'
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
 const node = (o: Record<string, unknown>) => ({
@@ -90,5 +90,14 @@ describe('team PRs', () => {
   })
   it('searches open PRs and the last 30 days of closed ones', () => {
     expect(teamPrSearches('O', NOW).closed).toBe('org:O is:pr is:closed closed:>=2026-08-26 sort:updated-desc')
+  })
+})
+
+describe('team PRs per account', () => {
+  it("tags each account's PRs, and keeps a failed account's last pages", () => {
+    const merged = mergeTeamPages([{ login: 'alice', pages: [page({ number: 1 })] }, { login: 'bob-work', pages: null }], [{ ...page({ number: 2, repo: 'gx' }), account: 'bob-work' }, { ...page({ number: 3 }), account: 'alice' }])
+    expect(parseTeamPrs(merged).map((p) => [p.number, p.account])).toEqual([[1, 'alice'], [2, 'bob-work']])
+    expect(mergeTeamPages([{ login: null, pages: [page({ number: 1 })] }], [])).toEqual([page({ number: 1 })])
+    expect(parseTeamPrs([page({ number: 1 })])[0].account).toBeUndefined()
   })
 })

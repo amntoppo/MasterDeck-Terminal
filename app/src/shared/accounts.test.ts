@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
+  accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
   matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount,
 } from './accounts'
 
@@ -182,5 +182,29 @@ describe('repoOfArgs', () => {
     expect(repoOfArgs(['issue', 'view', 'https://github.com/globex/app/issues/7'])).toBe('globex/app')
     expect(repoOfArgs(['api', 'repos/globex'])).toBeNull()
     expect(repoOfArgs(['api', 'search/issues?q=repos/globex/app/'])).toBeNull()
+  })
+})
+
+describe('keepLastGood', () => {
+  const issue = (repo: string | null, n: number) => ({ repo, number: n })
+  it('one account: a failed board keeps every old issue, as before', () => {
+    const out = keepLastGood({ sources: { board: false, prs: true }, issues: [], prs: [{ url: 'u2' }] }, { issues: [issue(null, 1)], prs: [{ url: 'u1' }] }, one)
+    expect(out.issues).toEqual([issue(null, 1)])
+    expect(out.prs).toEqual([{ url: 'u2' }])
+  })
+  it('two accounts: only the failed account keeps its old part', () => {
+    const raw = { sources: { board: false, prs: true }, accounts: [{ login: 'alice', sources: { board: true } }, { login: 'bob-work', sources: { board: false } }], issues: [issue(null, 5)], prs: [] }
+    expect(keepLastGood(raw, { issues: [issue(null, 1), issue('globex/app', 2)], prs: [] }, two).issues).toEqual([issue(null, 5), issue('globex/app', 2)])
+  })
+  it("two accounts: a row's own account wins over its repo's, and a failed PR read keeps only that account's PRs", () => {
+    const pr = (url: string, account?: string) => ({ url, ...(account ? { account } : {}) })
+    const raw = { sources: { board: true, prs: false }, accounts: [{ login: 'alice', sources: { prs: false } }, { login: 'bob-work', sources: { prs: true } }], issues: [], prs: [pr('https://github.com/globex/app/pull/9', 'bob-work')] }
+    const prev = { issues: [], prs: [pr('https://github.com/acme/api/pull/1', 'alice'), pr('https://github.com/globex/app/pull/8', 'bob-work'), pr('https://github.com/globex/app/pull/7', 'alice')] }
+    expect(keepLastGood(raw, prev, two).prs).toEqual([pr('https://github.com/globex/app/pull/9', 'bob-work'), pr('https://github.com/acme/api/pull/1', 'alice'), pr('https://github.com/globex/app/pull/7', 'alice')])
+  })
+  it('nothing failed, or nothing before: the new lists as they came', () => {
+    const raw = { sources: { board: true, prs: true }, issues: [issue(null, 5)], prs: [] }
+    expect(keepLastGood(raw, { issues: [issue(null, 1)], prs: [{ url: 'u' }] }, two)).toEqual(raw)
+    expect(keepLastGood({ ...raw, sources: { board: false, prs: false } }, null, one).issues).toEqual([issue(null, 5)])
   })
 })

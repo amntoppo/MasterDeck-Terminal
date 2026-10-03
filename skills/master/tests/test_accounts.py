@@ -1,15 +1,20 @@
 """Several GitHub accounts in the config: the primary's fields stay at the top level for older
 readers; repos and boards of every account count; a repo belongs to the first account listing it."""
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from master import config, ledger, rules, setup, spawn
+from master import board, cli, collect, config, ledger, rules, setup, snapshot, spawn
+from tests.helpers import board_item, pr_node
+from tests.test_snapshot import FakeSource, NOW as SNAP_NOW, TODAY
 from tests.test_spawn import FakeRunner
 
 A = {"login": "alice", "primary": True, "name": "Alice", "email": "a@acme.test", "owner": "acme", "ownerType": "organization",
@@ -247,6 +252,148 @@ class OrphanAccountTest(unittest.TestCase):
                 if text is not None:
                     self.record(text)
                 self.assertNotIn("account", rules._orphan(self.s, self.ISSUE)["target"]["spawn"], text)
+
+
+
+class Bob(FakeSource):
+    def me(self): return "bob-work"
+    def board_mine(self): return [board_item(940, "In Dev", "2026-09-21")]
+    def prs_mine(self): return []
+    def agents(self): raise AssertionError("sessions are read once, with the primary")
+
+
+class CollectAccountTest(unittest.TestCase):
+    def test_token_per_login(self):
+        calls = []
+
+        def runner(cmd, **kw):
+            calls.append(cmd)
+            ok = cmd[-1] == "alice"
+            return subprocess.CompletedProcess(cmd, 0 if ok else 1, "gho_tok\n" if ok else "", "")
+        self.assertEqual(collect.account_token("alice", runner), "gho_tok")
+        self.assertIsNone(collect.account_token("bob-work", runner))
+        self.assertEqual(calls[0], ["gh", "auth", "token", "--hostname", "github.com", "--user", "alice"])
+
+    def test_live_reads_only_its_account(self):
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
+            bob = config.accounts()[1]
+            self.assertEqual(collect.Live(bob)._owners_qualifier(), "org:globex")
+            with self.assertRaises(RuntimeError):
+                collect.Live(bob, None, "gh is not logged in to bob-work").me()
+            live = collect.Live.for_account(bob, runner=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "gho_b\n", ""))
+            self.assertEqual(live.env, {"GH_TOKEN": "gho_b", "GHC_ACCOUNT": "bob-work"})
+            none = collect.Live.for_account(bob, runner=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "no token"))
+            self.assertEqual(none.error, "gh is not logged in to bob-work")
+
+    def test_snapshot_per_account_sessions_once(self):
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=lambda v, runner=None: FakeSource() if v["login"] == "alice" else Bob()):
+            snap = cli._snap(types.SimpleNamespace(fixtures=None, now=SNAP_NOW))
+        self.assertEqual(sorted(i["number"] for i in snap["issues"]), [939, 940])
+        self.assertEqual([a["login"] for a in snap["accounts"]], ["alice", "bob-work"])
+        self.assertEqual(snap["errors"], [])
+        self.assertTrue(all(snap["sources"].values()))
+        self.assertEqual([s["name"] for s in snap["sessions"]], [s["name"] for s in snapshot.build(FakeSource(), now_iso=SNAP_NOW, today=TODAY)["sessions"]])
+        # Each issue and PR says whose read found it.
+        self.assertEqual(sorted((i["number"], i["account"]) for i in snap["issues"]), [(939, "alice"), (940, "bob-work")])
+        self.assertEqual([p["account"] for p in snap["prs"]], ["alice"])
+
+    def test_one_account_failing_keeps_the_others(self):
+        m = snapshot.merge([("alice", snapshot.build(FakeSource(), now_iso=SNAP_NOW, today=TODAY)),
+                            ("bob-work", snapshot.build(FakeSource(fail={"board_mine", "me"}), now_iso=SNAP_NOW, today=TODAY, with_sessions=False))])
+        self.assertFalse(m["sources"]["board"])
+        self.assertEqual([a["sources"]["board"] for a in m["accounts"]], [True, False])
+        self.assertTrue(m["errors"] and all(e["account"] == "bob-work" for e in m["errors"]))
+        self.assertEqual([i["number"] for i in m["issues"]], [939])
+
+    def test_each_accounts_login_is_me(self):
+        """F24: a PR by bob-work is mine under bob-work's read, not under alice's; so is a thread he answered last."""
+        node = pr_node(77, repo="app", author="bob-work", threads=[(False, "2026-09-24T08:00:00Z", "bob-work")])
+
+        class BobPr(Bob):
+            def prs_mine(self): return [node]
+
+        class AlicePr(FakeSource):
+            def prs_mine(self): return [node]
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
+            mine = snapshot.build(BobPr(), now_iso=SNAP_NOW, today=TODAY, with_sessions=False)["prs"][0]
+            alices = snapshot.build(AlicePr(), now_iso=SNAP_NOW, today=TODAY)["prs"][0]
+        self.assertEqual((mine["author_is_me"], mine["unresolved_threads"]), (True, 0))
+        self.assertEqual((alices["author_is_me"], alices["unresolved_threads"]), (False, 1))
+
+    def test_one_account_reads_as_before(self):
+        """One connected account: no token lookup, no env on gh, today's cache keys (env=None)."""
+        calls = []
+
+        def fake_ghcache(args, ttl=0, env="unset", **kw):
+            calls.append((args, env))
+            return 0, b"alice\n", b""
+        with mock.patch.dict(config.CONFIG, {"accounts": [A]}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=AssertionError("no per-account read")), \
+                mock.patch("master.ghcache.run", side_effect=fake_ghcache), mock.patch.dict(os.environ, {"MASTER_NO_GH_CACHE": ""}):
+            (src,) = cli._sources(types.SimpleNamespace(fixtures=None))
+            self.assertEqual((src.cfg, src.env, src.error), (None, None, None))
+            self.assertEqual(src.me(), "alice")
+        self.assertEqual(calls, [(["api", "user", "--jq", ".login"], None)])
+        with mock.patch.dict(os.environ, {"MASTER_NO_GH_CACHE": "1"}), mock.patch("subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "alice\n", "")
+            collect.Live().me()
+        self.assertIsNone(run.call_args.kwargs["env"])
+
+    def test_account_env_reaches_gh_without_the_cache(self):
+        with mock.patch.dict(os.environ, {"MASTER_NO_GH_CACHE": "1"}), mock.patch("subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "bob-work\n", "")
+            collect.Live(None, {"GH_TOKEN": "gho_b", "GHC_ACCOUNT": "bob-work"}).me()
+        env = run.call_args.kwargs["env"]
+        self.assertEqual((env["GH_TOKEN"], env["GHC_ACCOUNT"], env["MASTER_NO_GH_CACHE"]), ("gho_b", "bob-work", "1"))
+
+
+class BoardAccountTest(unittest.TestCase):
+    class Src:
+        def __init__(self, items, fail=False):
+            self.items, self.fail = items, fail
+
+        def board_sprint(self, q):
+            if self.fail:
+                raise RuntimeError("HTTP 401: Bad credentials")
+            return self.items
+
+        def pr_details(self, urls):
+            return {}
+
+        def sprints(self):
+            if self.fail:
+                raise RuntimeError("HTTP 401: Bad credentials")
+            return [{"title": "Sprint 6"}]
+
+    def board(self, pick):
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), mock.patch.object(collect.Live, "for_account", side_effect=pick), redirect_stdout(buf):
+            code = cli.main(["board"])
+        return code, buf.getvalue()
+
+    def test_board_per_account_survives_one_failing(self):
+        alice = self.Src([dict(board_item(939, "In Dev", "2026-09-21"), project="acme/1")])
+        code, out = self.board(lambda v, runner=None: alice if v["login"] == "alice" else self.Src([], True))
+        self.assertEqual(code, 0)
+        b = json.loads(out)
+        self.assertEqual([c["number"] for c in b["cards"]], [939])
+        self.assertEqual(b["errors"], ["HTTP 401: Bad credentials"])
+        self.assertEqual([c["account"] for c in b["cards"]], ["alice"])
+        code, out = self.board(lambda v, runner=None: self.Src([], True))
+        self.assertEqual((code, out.strip()), (1, "HTTP 401: Bad credentials"))
+
+    def test_one_account_cards_have_no_account(self):
+        b = board.build([board_item(939, "In Dev")], {}, SNAP_NOW)
+        self.assertNotIn("account", b["cards"][0])
+        self.assertNotIn("errors", b)
+
+    def test_sprints_per_account(self):
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=lambda v, runner=None: self.Src([], v["login"] == "bob-work")), redirect_stdout(buf):
+            self.assertEqual(cli.main(["sprints"]), 0)
+        self.assertEqual(json.loads(buf.getvalue()), [{"title": "Sprint 6"}])
 
 
 if __name__ == "__main__":

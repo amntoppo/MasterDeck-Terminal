@@ -217,7 +217,9 @@ def build(items: list, pr_details: dict, now_iso: str) -> dict:
                       "assignees": [a for a in it.get("assignees") or [] if isinstance(a, str)],
                       "labels": [n for n in _names(it.get("labels")) if isinstance(n, str)],
                       "milestone": ms if isinstance(ms, str) else (ms or {}).get("title") if isinstance(ms, dict) else None,
-                      "type": it.get("issue type") if isinstance(it.get("issue type"), str) else None})
+                      "type": it.get("issue type") if isinstance(it.get("issue type"), str) else None,
+                      # The account whose read found it (two or more connected); absent with one.
+                      **({"account": it["account"]} if isinstance(it.get("account"), str) else {})})
     base = [c for p in config.projects() for c in p["columns"]] or list(config.BOARD_COLUMNS)
     base = list(dict.fromkeys(base))
     columns = base + [s for s in statuses if s not in base]
