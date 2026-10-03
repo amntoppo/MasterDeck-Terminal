@@ -2056,6 +2056,10 @@ export class Sources {
       failures,
       external: this.externalItems,
       watchedPrs: this.watchedPrs(),
+      // Only accounts MasterDeck uses, and only with two or more (one account is as before).
+      ghAccounts: isMulti(this.config)
+        ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
+        : undefined,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);

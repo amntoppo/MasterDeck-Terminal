@@ -1018,6 +1018,18 @@ async function runInboxAction(
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
+    case "login": {
+      if (d.type !== "account")
+        return { ok: false, message: "not a GitHub account item" };
+      // gh's browser login opens a browser on the Mac: not from a phone or browser.
+      if (remote)
+        return {
+          ok: false,
+          message: `log in to GitHub on the Mac: run gh auth login for ${d.login}`,
+        };
+      emit(CH.ghLogin, d.login);
+      return { ok: true, message: `opened gh auth login for ${d.login}` };
+    }
     default:
       return { ok: false, message: `${type} is done in the window` };
   }
@@ -2057,7 +2069,10 @@ function registerIpc(): void {
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
-  reg.handle(CH.refresh, () => sources.refreshGithub(true));
+  reg.handle(CH.refresh, async () => {
+    await refreshAccounts();
+    return sources.refreshGithub(true);
+  });
   reg.handle(CH.boardRefresh, () => sources.refreshGithub(true));
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));

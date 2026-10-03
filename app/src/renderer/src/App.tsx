@@ -58,7 +58,14 @@ import { deck, load, save, useAppState } from "./deck";
 
 type Tab =
   | { id: string; kind: "session"; key: string }
-  | { id: string; kind: "shell"; cwd: string; title: string }
+  | {
+      id: string;
+      kind: "shell";
+      cwd: string;
+      title: string;
+      /** A gh auth login tab (Needs you → Log in): never restored. */
+      login?: string;
+    }
   /** A session being started from the Start dialog; becomes a session tab when it appears. */
   | {
       id: string;
@@ -107,7 +114,9 @@ export function App() {
   );
   const [tabs, setTabs] = useState<Tab[]>(() =>
     load<Tab[]>("tabs", []).filter((t) =>
-      t.kind === "session" ? typeof t.key === "string" : t.kind === "shell",
+      t.kind === "session"
+        ? typeof t.key === "string"
+        : t.kind === "shell" && !t.login,
     ),
   );
   const [active, setActive] = useState<string | null>(() =>
@@ -597,6 +606,16 @@ export function App() {
       );
       arm(id);
     });
+    const offLogin = deck().onGhLogin((login) => {
+      const id = `gh-login:${Date.now()}`;
+      setView("terminals");
+      setTabs((cur) => [
+        ...cur,
+        { id, kind: "shell", cwd: deck().home, title: `gh login ${login}`, login },
+      ]);
+      activate(id);
+      arm(id);
+    });
     const offFocus = deck().onFocusSession((key) => {
       const s = state?.sessions.find((x) => x.key === key);
       if (s) openSession(s);
@@ -609,6 +628,7 @@ export function App() {
     );
     return () => {
       offAuto();
+      offLogin();
       offFocus();
       offNeeds();
       offItem();
@@ -1484,7 +1504,7 @@ function ShellPane(p: {
   if (!p.armed)
     return (
       <NotStarted
-        label={`Shell in ${tab.cwd}`}
+        label={tab.login ? `gh auth login for ${tab.login}` : `Shell in ${tab.cwd}`}
         action="Open shell"
         onStart={p.onArm}
       />
@@ -1493,11 +1513,14 @@ function ShellPane(p: {
     <>
       <TerminalView
         paneId={tab.id}
-        spec={{ kind: "shell", cwd: tab.cwd }}
+        spec={tab.login ? { kind: "gh-login" } : { kind: "shell", cwd: tab.cwd }}
         visible={visible}
         focusOnShow={focus}
         generation={gen}
-        onExit={() => setExited(true)}
+        onExit={() => {
+          setExited(true);
+          if (tab.login) void deck().refresh();
+        }}
       />
       {exited && (
         <div

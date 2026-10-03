@@ -49,6 +49,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   getSettings: invoke(CH.getSettings),
   setSettings: invoke(CH.setSettings),
   onAutoOpen: blocked,
+  onGhLogin: blocked,
   setStatus: invoke(CH.setStatus),
   standupCommits: invoke(CH.standupCommits),
   janitor: invoke(CH.janitor),

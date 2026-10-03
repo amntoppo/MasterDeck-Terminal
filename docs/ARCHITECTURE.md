@@ -127,7 +127,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 
 - `shared/inbox.ts` `collectItems` builds every item (kinds include questions, menus, permission,
   input, blocked, proposals, offers for CI/review on my PRs, budget, context, idle/waiting nudges,
-  API errors, and `external` for API-created items), each with a stable id, priority, actions and a
+  API errors, `external` for API-created items, and `account`: a connected GitHub account whose token fails, only in multi mode; action `login` → `CH.ghLogin` → a gh-login tab, refused from a remote client), each with a stable id, priority, actions and a
   resolution reason.
 - `main/inbox.ts` `Inbox` (an `EventEmitter`) keeps state in `inbox.json` and appends every
   addition, action and resolution to `inbox-events.jsonl` (last 2000 lines kept). Its `added`

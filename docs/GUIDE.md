@@ -693,6 +693,7 @@ is a `gh` login (`gh auth status` lists them).
   primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog. master's proposals use the issue's account (shown on the proposal).
+- **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 

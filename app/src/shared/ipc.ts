@@ -166,6 +166,7 @@ export const CH = {
   queueSendNext: "queue:sendNext",
   getSettings: "settings:get",
   setSettings: "settings:set",
+  ghLogin: "accounts:login",
   autoOpen: "app:autoOpen",
   setStatus: "board:setStatus",
   standupCommits: "standup:commits",
@@ -304,6 +305,8 @@ export interface DeckApi {
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
+  /** Needs you → Log in: open a terminal tab running gh auth login for this account. */
+  onGhLogin(cb: (login: string) => void): () => void;
   /** Move a ticket to a board column (BoardOps). */
   setStatus(issue: Ticket, status: string): Promise<CliResult>;
   standupCommits(

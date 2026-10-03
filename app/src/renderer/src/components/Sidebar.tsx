@@ -664,6 +664,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   budget: "BUDGET",
   context: "CONTEXT",
   idle: "IDLE",
+  account: "GITHUB",
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
@@ -1214,7 +1215,9 @@ function ExtraCard({
     setMsg(r.ok ? "Sent" : r.message);
   };
   const kind =
-    i.kind === "error"
+    i.kind === "account"
+      ? "GITHUB"
+      : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
         ? `${i.kind === "idle" ? "IDLE" : "WAITING"} ${i.detail.minutes}M`
@@ -1224,7 +1227,8 @@ function ExtraCard({
   const owner =
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
-    (a) => a.type === "continue" || a.type === "compact",
+    (a) =>
+      a.type === "continue" || a.type === "compact" || a.type === "login",
   );
   return (
     <div

@@ -12,6 +12,7 @@ import type { Settings } from "./settings";
 import { parseTicket, ticketKey, ticketLabel, type Ticket } from "./ticket";
 import type { Pr, Proposal, Session } from "./types";
 import type { ExternalItem } from "./remote";
+import type { GhAccountStatus } from "./accounts";
 import type { ScreenMenu } from "./ask";
 
 /**
@@ -34,6 +35,7 @@ export type InboxKind =
   | "idle" // working a ticket but quiet
   | "waiting" // blocked on a prompt for a while (another terminal)
   | "external" // asked through the remote API
+  | "account" // a GitHub account whose token fails
   | "error"; // its turn ended on an API error (rate limit, overload…)
 
 export type InboxActionType =
@@ -46,6 +48,7 @@ export type InboxActionType =
   | "reject"
   | "send" // a PR offer: master's proposal, or the message to the session
   | "start" // open the Start dialog (the renderer does it)
+  | "login" // run gh auth login for an account (the renderer opens it)
   | "open"; // open the session (the renderer does it)
 
 export interface InboxAction {
@@ -61,7 +64,8 @@ export type InboxDetail =
   | { type: "context"; pct: number }
   | { type: "budget"; spend: number; cap: number }
   | { type: "offer"; offer: PrOffer }
-  | { type: "external"; item: ExternalItem };
+  | { type: "external"; item: ExternalItem }
+  | { type: "account"; login: string };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -122,6 +126,7 @@ export const PRIORITY: Record<InboxKind, number> = {
   waiting: 25,
   idle: 20,
   held: 10,
+  account: 75,
 };
 
 /** What happened when an item goes away without anyone acting on it. */
@@ -140,6 +145,7 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   waiting: "active again",
   error: "working again",
   external: "answered elsewhere",
+  account: "logged in again",
 };
 
 /** Actions an item of this kind takes (besides dismiss and snooze, which every item takes). */
@@ -181,6 +187,8 @@ export interface InboxInput {
   external?: ExternalItem[];
   /** PRs MasterDeck's PR watch follows: their review feedback reaches the session already. */
   watchedPrs?: Set<string>;
+  /** Connected GitHub accounts (two or more): one whose token fails is an item. */
+  ghAccounts?: GhAccountStatus[];
   now: number;
 }
 
@@ -403,6 +411,22 @@ export function collectItems(x: InboxInput): InboxItem[] {
         },
       ],
       detail: { type: "offer", offer: o },
+    });
+  }
+
+  // A GitHub account whose token fails: only its calls stop; Log in runs gh's own login.
+  for (const a of x.ghAccounts ?? []) {
+    if (a.healthy) continue;
+    out.push({
+      id: `account:${a.login}`,
+      kind: "account",
+      priority: PRIORITY.account,
+      sessionKey: null,
+      ticket: null,
+      title: `GitHub account ${a.login}`,
+      body: `GitHub account ${a.login} needs to log in again${a.error ? ` (${a.error})` : ""}. Its sessions keep running; MasterDeck's GitHub calls for it wait until then.`,
+      actions: [{ type: "login", label: "Log in", primary: true }],
+      detail: { type: "account", login: a.login },
     });
   }
 
