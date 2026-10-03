@@ -6,6 +6,13 @@ the repo-root [TODO.md](../TODO.md).
 
 ## Shipping / ops
 
+- **P2 · First launch after a local reinstall hangs.** Seen twice on 2026-10-03: after
+  `install-mac.sh`, the first `open` leaves the main process idle (0% CPU), writing nothing, ignoring
+  quit and SIGTERM; `kill -9` and a second launch work. Suspect a synchronous `safeStorage` Keychain
+  prompt (a new ad-hoc signature each build) with no visible window, or the old instance not fully
+  gone. Approach: `sample <pid>` while hung, log a line before each startup await in `main/index.ts`,
+  and check Console for a Keychain prompt. Workaround in the reinstall recipe: if no file in
+  `~/.claude/masterdeck` changes within 30 s, `pkill -9 -f MacOS/MasterDeck$` and open again.
 - **P1 · Backend CI deploy broken.** The CI Cloudflare token gets error 7403. Where:
   `masterdeck-backend/.github/workflows`. Approach: give the token Workers Scripts:Edit + the
   account/zone permissions the custom domains need, or drop the deploy job and keep local
