@@ -523,7 +523,7 @@ export function BoardView({
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
     status: col,
-    project: boardFor(state, col, f),
+    project: boardFor(state, col, f, acct ?? undefined),
     filters: f,
     sprint: state.selectedSprint,
     tab: tab.name,

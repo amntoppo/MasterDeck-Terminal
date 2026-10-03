@@ -324,7 +324,9 @@ const sender = new Sender(
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
 );
-const ops = new Ops(run, paths, () => claudeBin, ghRouted);
+const ops = new Ops(run, paths, () => claudeBin, ghRouted, () =>
+  isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+);
 // Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
 const boardFlow = new BoardFlow({
   ops: boardOpsByRepo,

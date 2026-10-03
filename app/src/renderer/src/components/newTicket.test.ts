@@ -4,6 +4,7 @@ import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
 import type { AppState } from "@shared/types";
+import { parseConfig } from "@shared/appConfig";
 
 const cfg = {
   owner: "Org",
@@ -118,5 +119,24 @@ describe("new ticket", () => {
       "acceptEdits",
       "Create this ticket",
     ]);
+  });
+});
+
+describe("new ticket per account", () => {
+  const two = {
+    ...state,
+    me: "alice",
+    config: parseConfig({
+      accounts: [
+        { login: "alice", primary: true, owner: "acme", issueRepo: "tracker", repos: ["acme/tracker"], projects: [{ owner: "acme", number: 1, columns: ["Todo", "In Dev"] }] },
+        { login: "bob-work", owner: "globex", issueRepo: "app", repos: ["globex/app"], projects: [{ owner: "globex", number: 7, columns: ["Backlog", "In Dev"] }] },
+      ],
+    }),
+  } as unknown as AppState;
+  it("a tab of another account: its board, its repo, its login", () => {
+    expect(boardFor(two, "In Dev", defaultFilters(null), "bob-work")).toBe("globex/7");
+    expect(boardFor(two, "In Dev", defaultFilters(null))).toBe("acme/1");
+    const t = ticketDefaults(two, { status: "Backlog", project: "globex/7", filters: defaultFilters(null), sprint: "@current", tab: "Mine", account: "bob-work" });
+    expect([t.repo, t.assignees]).toEqual(["globex/app", ["bob-work"]]);
   });
 });

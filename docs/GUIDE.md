@@ -414,7 +414,7 @@ creation.
 - **Dragging a card** to another column scrolls the board the same way near its left or right
   edge, and scrolls a long column near its top or bottom.
 - **New ticket (+ on a column):** each column's header has a **+**. It opens a dialog for an issue
-  that lands in that column: title, description (Markdown), repository, status, board (with
+  that lands in that column: title, description (Markdown), repository, account (two or more GitHub accounts), status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
   column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
   the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
@@ -699,6 +699,7 @@ is a `gh` login (`gh auth status` lists them).
   Start dialog. master's proposals use the issue's account (shown on the proposal).
 - **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
 - **Board and PRs**: each tab belongs to one account (see Board View, PRs).
+- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`. **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow. **Standup** counts commits made with any connected account's email.
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 
