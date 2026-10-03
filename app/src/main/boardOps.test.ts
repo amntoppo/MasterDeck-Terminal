@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseConfig, setConfig, type AppConfig } from '@shared/appConfig'
-import { BoardOps, linkTicket, parseCreateArgs, ticketBuilderScript, type LinkDeps } from './boardOps'
+import { BoardOps, linkTicket, parseCreateArgs, bodyFileAllowed, sweepTicketDirs, ticketBuilderScript, type LinkDeps } from './boardOps'
 import type { GhRunner } from './ghc'
 
 const cfg: AppConfig = parseConfig({
@@ -143,4 +143,58 @@ describe.skipIf(process.platform === 'win32')('create-ticket.sh', () => {
     writeFileSync(join(dir, 'answers', `${id}.json`), '{"ok":true,"dryRun":true}')
     expect(JSON.parse(await done)).toEqual({ ok: true, dryRun: true })
   }, 20_000)
+})
+
+describe.skipIf(process.platform === 'win32')('create-ticket.sh edge cases', () => {
+  it('prints usage and exits 1 with no arguments', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb0-'))
+    const script = join(dir, 'c.sh')
+    writeFileSync(script, ticketBuilderScript(dir), { mode: 0o755 })
+    const r = await new Promise<{ code: number | null; out: string }>((res) => execFile(script, [], (e, out) => res({ code: e ? (e as { code?: number }).code ?? 1 : 0, out })))
+    expect(r.code).toBe(1)
+    expect(JSON.parse(r.out).error).toMatch(/usage/)
+  })
+  it('exits 1 on an ok:false answer', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb1-'))
+    mkdirSync(join(dir, 'requests'))
+    const script = join(dir, 'c.sh')
+    writeFileSync(script, ticketBuilderScript(dir), { mode: 0o755 })
+    const done = new Promise<number>((res) => execFile(script, ['--title', 'x'], (e) => res(e ? (e as { code?: number }).code ?? 1 : 0)))
+    let req: string | undefined
+    for (let i = 0; i < 40 && !req; i++) { await new Promise((r) => setTimeout(r, 100)); req = readdirSync(join(dir, 'requests')).find((n) => n.endsWith('.req')) }
+    writeFileSync(join(dir, 'answers', `${req!.slice(0, -4)}.json`), '{"ok":false,"error":"no"}')
+    expect(await done).toBe(1)
+  }, 20_000)
+})
+
+describe('bodyFileAllowed', () => {
+  it('accepts only regular files really inside the folder', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-'))
+    const out = mkdtempSync(join(tmpdir(), 'bf-out-'))
+    writeFileSync(join(dir, 'ok.md'), 'x')
+    writeFileSync(join(out, 'secret'), 's')
+    symlinkSync(join(out, 'secret'), join(dir, 'link.md'))
+    mkdirSync(join(dir, 'sub'))
+    expect(bodyFileAllowed(dir, 'ok.md')).toBe(join(realpathSync(dir), 'ok.md'))
+    expect(bodyFileAllowed(dir, 'link.md')).toBeNull()
+    expect(bodyFileAllowed(dir, '../' + out.split('/').pop() + '/secret')).toBeNull()
+    expect(bodyFileAllowed(dir, join(out, 'secret'))).toBeNull()
+    expect(bodyFileAllowed(dir, 'sub')).toBeNull()
+    expect(bodyFileAllowed(dir, 'missing.md')).toBeNull()
+  })
+})
+
+describe('sweepTicketDirs', () => {
+  it('drops stale requests, old claims/answers and temp files, keeps fresh ones', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sw-'))
+    mkdirSync(join(dir, 'requests')); mkdirSync(join(dir, 'answers'))
+    const age = (f: string, ms: number) => { const t = new Date(Date.now() - ms); utimesSync(f, t, t) }
+    const mk = (sub: string, n: string, ms = 0) => { const f = join(dir, sub, n); writeFileSync(f, ''); age(f, ms) }
+    mk('requests', '1-1-1.req', 3 * 60_000); mk('requests', '2-2-2.req', 10_000)
+    mk('requests', '3-3-3.taken', 11 * 60_000); mk('requests', '4-4-4.taken', 60_000); mk('requests', '5-5-5.tmp')
+    mk('answers', '6-6-6.json', 11 * 60_000); mk('answers', '7-7-7.json', 1000)
+    sweepTicketDirs(dir)
+    expect(readdirSync(join(dir, 'requests')).sort()).toEqual(['2-2-2.req', '4-4-4.taken'])
+    expect(readdirSync(join(dir, 'answers'))).toEqual(['7-7-7.json'])
+  })
 })

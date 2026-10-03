@@ -16,7 +16,6 @@ export interface Paths {
   ledger: string
   masterWorkspace: string
   python: string
-  /** babysit-ticket's CLI. */
   /** tt.sh's links: read once, for the one-time import. */
   babysitState: string
   /** MasterDeck's session ↔ ticket links. */

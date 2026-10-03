@@ -96,7 +96,7 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
-import { BoardOps, linkTicket, parseCreateArgs, ticketBuilderScript } from "./boardOps";
+import { BoardOps, linkTicket, bodyFileAllowed, parseCreateArgs, sweepTicketDirs, ticketBuilderScript } from "./boardOps";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -925,6 +925,7 @@ async function pumpTicketRequests(): Promise<void> {
   if (ticketPumping) return;
   ticketPumping = true;
   try {
+    sweepTicketDirs(ticketDir()); // stale requests are dropped, not created for nobody
     const dir = join(ticketDir(), "requests");
     let names: string[] = [];
     try {
@@ -946,8 +947,8 @@ async function pumpTicketRequests(): Promise<void> {
         const p = parseCreateArgs(args);
         if ("error" in p) answer = { ok: false, error: p.error };
         else {
-          const file = p.bodyFile ? resolve(ticketDir(), p.bodyFile) : "";
-          if (p.bodyFile && !file.startsWith(ticketDir() + sep)) answer = { ok: false, error: "create: body file outside the ticket folder" };
+          const file = p.bodyFile ? bodyFileAllowed(ticketDir(), p.bodyFile) : "";
+          if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
           else {
             const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
             answer = await boardOps.create({ ...p, body });
@@ -1487,7 +1488,7 @@ function registerIpc(): void {
     ops.deleteTemplate(name),
   );
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
-  // BoardOps.create (the Board's Claude session uses tt.sh create through the ticket builder script).
+  // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;
     const str = (v: unknown, n: number) =>

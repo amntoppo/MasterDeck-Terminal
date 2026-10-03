@@ -84,6 +84,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Create with Claude hands tickets to MasterDeck (requests/answers folders; 90 s wait, stale-request sweep, body-file realpath containment) | feat/native-babysit | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |

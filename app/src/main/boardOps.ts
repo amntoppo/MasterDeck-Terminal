@@ -1,3 +1,5 @@
+import { readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
 import { getConfig, projectKey, statusesFor, statusRank, type AppConfig, type ProjectConfig } from '@shared/appConfig'
 import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import type { CliResult } from '@shared/types'
@@ -230,26 +232,69 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
 
 /**
  * The ticket builder session's create command: it hands its tt.sh-style flags to MasterDeck (which
- * runs BoardOps.create) and prints the answer, waiting up to two minutes. MasterDeck runs while this
- * session does (the session lives in its window), so no fallback is needed.
+ * runs BoardOps.create) and prints the answer, waiting up to 90 s (under Claude Code's 120 s Bash
+ * timeout). MasterDeck runs while this session does (the session lives in its window).
  */
 export function ticketBuilderScript(dir: string): string {
   const d = dir.replace(/'/g, `'\\''`)
   return `#!/usr/bin/env bash
 # Written by MasterDeck: create one ticket on the board (MasterDeck does it) and print the result.
 d='${d}'
-mkdir -p "$d/requests" "$d/answers"
+if [ $# -eq 0 ]; then
+  echo '{"ok":false,"error":"usage: ./create-ticket.sh --title T [--repo R] [--body-file F] [--status S] [--project P] [--assignee A] [--label L] [--milestone M] [--dry-run]"}'
+  exit 1
+fi
+fail() { echo '{"ok":false,"error":"could not hand the request to MasterDeck"}'; exit 1; }
+mkdir -p "$d/requests" "$d/answers" || fail
 id="$(date +%s)-$$-$RANDOM"
 # One NUL-terminated argument each: any text survives, no jq needed.
-printf '%s\\0' "$@" > "$d/requests/$id.tmp" && mv "$d/requests/$id.tmp" "$d/requests/$id.req"
+{ printf '%s\\0' "$@" > "$d/requests/$id.tmp" && mv "$d/requests/$id.tmp" "$d/requests/$id.req"; } || fail
 i=0
-while [ $i -lt 480 ]; do
-  if [ -f "$d/answers/$id.json" ]; then cat "$d/answers/$id.json"; echo; rm -f "$d/answers/$id.json" "$d/requests/$id.taken"; exit 0; fi
+while [ $i -lt 360 ]; do
+  if [ -f "$d/answers/$id.json" ]; then
+    out="$(cat "$d/answers/$id.json")"; echo "$out"; rm -f "$d/answers/$id.json" "$d/requests/$id.taken"
+    case "$out" in *'"ok":false'*) exit 1 ;; esac
+    exit 0
+  fi
   sleep 0.25
   i=$((i + 1))
 done
+if [ -f "$d/requests/$id.taken" ]; then
+  echo '{"ok":false,"pending":true,"message":"MasterDeck is still creating it — check the board before retrying"}'
+  exit 1
+fi
 rm -f "$d/requests/$id.req"
 echo '{"ok":false,"error":"MasterDeck did not answer (is it running?)"}'
 exit 1
 `
+}
+
+/**
+ * The --body-file a ticket session named: the real path if it is a regular file really inside `dir`
+ * (symlinks resolved on both sides), else null.
+ */
+export function bodyFileAllowed(dir: string, file: string): string | null {
+  try {
+    const root = realpathSync(dir)
+    const real = realpathSync(resolve(dir, file))
+    return real.startsWith(root + sep) && statSync(real).isFile() ? real : null
+  } catch {
+    return null
+  }
+}
+
+/** Housekeeping for the ticket-builder folder: stale requests, old claims and answers, leftover temp files. */
+export function sweepTicketDirs(dir: string, now = Date.now()): void {
+  const sweep = (sub: string, test: (n: string, age: number) => boolean) => {
+    let names: string[] = []
+    try { names = readdirSync(join(dir, sub)) } catch { return }
+    for (const n of names) {
+      try {
+        const f = join(dir, sub, n)
+        if (test(n, now - statSync(f).mtimeMs)) unlinkSync(f)
+      } catch { /* gone already */ }
+    }
+  }
+  sweep('requests', (n, age) => n.endsWith('.tmp') || (n.endsWith('.req') && age > 2 * 60_000) || (n.endsWith('.taken') && age > 10 * 60_000))
+  sweep('answers', (n, age) => n.endsWith('.tmp') || age > 10 * 60_000)
 }
