@@ -244,9 +244,9 @@ def session_account(session_id: str) -> "str | None":
     return login if isinstance(login, str) and any(a["login"] == login for a in accounts()) else None
 
 
-def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
-    """The login a spawned session for an issue in `repo` works as (None = the primary repo). Only
-    with two or more accounts: with one, sessions start exactly as before."""
+def match_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
+    """The account listing `repo` (None = the primary repo), or whose "Select all" org owns it; None
+    when no account does, or with one account (the app's matchRepo)."""
     if not is_multi(cfg):
         return None
     views = accounts(cfg)
@@ -258,7 +258,32 @@ def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | No
     for v in views:
         if v["allRepos"] and v["owner"].lower() == owner:
             return v["login"]
-    return views[0]["login"]
+    return None
+
+
+def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
+    """The login a spawned session for an issue in `repo` works as (None = the primary repo): its
+    account, else the primary. Only with two or more accounts: with one, sessions start as before."""
+    if not is_multi(cfg):
+        return None
+    return match_repo(repo, cfg) or accounts(cfg)[0]["login"]
+
+
+# https://github.com/o/r, git@<host or ssh alias>:o/r, ssh://git@<host or alias>/o/r (the app's repoFromRemote).
+_REMOTE_RE = re.compile(r"^(?:https?://(?:[^@/\s]+@)?github\.com/|ssh://[^@/\s]+@[^/\s]+/|[^@/\s]+@[^:/\s]+:)"
+                        r"([A-Za-z0-9-]{1,39})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?/?$")
+
+
+def origin_repo(cwd: str, runner=None) -> "str | None":
+    """owner/name of the folder's `origin` remote; None when it has none or it is not GitHub."""
+    import subprocess
+    try:
+        r = (runner or subprocess.run)(["git", "-C", cwd, "remote", "get-url", "origin"],
+                                       capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = _REMOTE_RE.match(r.stdout.strip()) if r.returncode == 0 else None
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 def statuses_for(key: "str | None") -> dict:

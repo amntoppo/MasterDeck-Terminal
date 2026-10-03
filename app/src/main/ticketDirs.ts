@@ -90,7 +90,9 @@ export function ticketPane(
   if (!ticketDirOk(home, cwd)) return { error: 'refusing a ticket builder folder that is a link' }
   if (!spec.account) return { error: 'refusing a ticket builder without its tab account' }
   const s = settingsArgs(spec.account)
-  return s.ok ? { cwd, tab: spec.tab, settings: s.args } : { error: s.message }
+  if (!s.ok) return { error: s.message }
+  // No --settings while multi: the accounts' files are not written yet (as sessionSettings refuses).
+  return s.args.length ? { cwd, tab: spec.tab, settings: s.args } : { error: 'GitHub accounts are still loading; try again in a few seconds' }
 }
 
 type CreateFn = (p: Exclude<ReturnType<typeof parseCreateArgs>, { error: string }>, picked: string | null) => Promise<object>

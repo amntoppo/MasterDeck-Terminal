@@ -189,6 +189,8 @@ export interface InboxInput {
   watchedPrs?: Set<string>;
   /** Connected GitHub accounts (two or more): one whose token fails is an item. */
   ghAccounts?: GhAccountStatus[];
+  /** accountNotices: gh's active account is not the primary, master-agent not started as it. */
+  accountNotices?: { id: string; text: string }[];
   now: number;
 }
 
@@ -429,6 +431,20 @@ export function collectItems(x: InboxInput): InboxItem[] {
       detail: { type: "account", login: a.login },
     });
   }
+
+  // Who gh and master-agent run as (dismiss or snooze only; gone once it is fixed).
+  for (const n of x.accountNotices ?? [])
+    out.push({
+      id: `notice:${n.id}`,
+      kind: "account",
+      priority: PRIORITY.account,
+      sessionKey: null,
+      ticket: null,
+      title: "GitHub accounts",
+      body: n.text,
+      actions: [],
+      detail: { type: "account", login: "" },
+    });
 
   // API items stay while open, even if their session ended (the key is dropped so no card opens it).
   const external: InboxItem[] = [];

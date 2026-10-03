@@ -32,3 +32,14 @@ export function parseGhAccounts(text: string): GhAccount[] {
 export function hasProjectScope(a: GhAccount): boolean {
   return a.scopes.includes('project') || a.scopes.includes('read:project')
 }
+
+/**
+ * The scopes Setup reports. `connected` null (one account): gh's active account's, as before.
+ * Several: only those every connected account's own token has (gh auth status lists each), so one
+ * account without `project` shows the scope missing; a login gh has no token for has none.
+ */
+export function setupScopes(accounts: GhAccount[], connected: string[] | null): string[] {
+  if (!connected) return (accounts.find((a) => a.active) ?? accounts[0])?.scopes ?? []
+  const of = (l: string) => accounts.find((a) => a.login.toLowerCase() === l.toLowerCase())?.scopes ?? []
+  return connected.reduce<string[] | null>((acc, l) => (acc ? acc.filter((s) => of(l).includes(s)) : of(l)), null) ?? []
+}

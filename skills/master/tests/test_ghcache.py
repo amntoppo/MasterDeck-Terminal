@@ -100,6 +100,32 @@ class GhCacheTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ghcache.pause(1.0, account="../x")
 
+    def test_a_token_without_an_account_keys_on_its_hash(self):
+        # A hand-run tool with GH_TOKEN but no GHC_ACCOUNT: never another identity's cached answers.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("GH_TOKEN", None)
+            os.environ.pop("GHC_ACCOUNT", None)
+            k0 = ghcache.cache_key(["api", "user"], "/w")
+            self.assertEqual(ghcache._account(), "")  # one account, no GH_TOKEN: today's keys and pause
+            self.assertEqual(ghcache.cache_key(["api", "user"], "/w", account=""), k0)
+            os.environ["GH_TOKEN"] = "gho_SECRET_one"
+            a1 = ghcache._account()
+            k1 = ghcache.cache_key(["api", "user"], "/w")
+            os.environ["GH_TOKEN"] = "gho_SECRET_two"
+            k2 = ghcache.cache_key(["api", "user"], "/w")
+            self.assertEqual(len({k0, k1, k2}), 3)
+            self.assertNotIn("SECRET", a1)
+            self.assertRegex(a1, r"^-t[0-9a-f]{16}$")  # not a GitHub login (none starts with "-")
+            # GHC_ACCOUNT wins over the token; an env passed in is used before os.environ.
+            os.environ["GHC_ACCOUNT"] = "bob-work"
+            self.assertEqual(ghcache._account(), "bob-work")
+            self.assertEqual(ghcache._account({"GH_TOKEN": "gho_SECRET_one"}), a1)
+            # Its pause has its own hashed file, and the token is never written anywhere.
+            ghcache.pause(1000.0, reason="x", account=a1)
+            files = {f.name: f.read_text() for f in Path(os.environ["GH_CACHE_DIR"]).iterdir()}
+            self.assertIn(f"paused-{a1}.json", files)
+            self.assertFalse(any("SECRET" in n or "SECRET" in t for n, t in files.items()))
+
     # classification ---------------------------------------------------------------------------
 
     def test_reads_and_writes(self):

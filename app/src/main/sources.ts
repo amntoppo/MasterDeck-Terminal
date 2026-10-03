@@ -1,5 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
-import { isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
+import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
   newScheduleScan,
@@ -292,6 +292,10 @@ export class Sources {
   private skills: SkillStatus[] = [];
   private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
   private ghAccounts: GhAccountStatus[] = [];
+  /** gh's active login (gh config get user), for the "not the primary" notice; null: not known. */
+  private ghActive: string | null = null;
+  /** The account master-agent was started as (session-accounts.json); null: not recorded. */
+  private masterAccountOf: (s: Session) => string | null = () => null;
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
@@ -882,6 +886,16 @@ export class Sources {
   setGhAccounts(a: GhAccountStatus[]): void {
     this.ghAccounts = a;
     this.emit();
+  }
+
+  setGhActive(login: string | null): void {
+    if (login === this.ghActive) return;
+    this.ghActive = login;
+    this.emit();
+  }
+
+  setMasterAccount(f: (s: Session) => string | null): void {
+    this.masterAccountOf = f;
   }
 
   private githubFor: ((login: string) => GitHub) | null = null;
@@ -2041,6 +2055,8 @@ export class Sources {
         .map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)])
         .filter(([, v]) => v.length),
     );
+    const m = deriveMaster(sessions);
+    const masterAs = "session" in m ? this.masterAccountOf(m.session) : undefined;
     const items = collectItems({
       sessions,
       proposals: this.proposals.filter((p) => !answered.has(p.id)),
@@ -2058,6 +2074,7 @@ export class Sources {
       ghAccounts: isMulti(this.config)
         ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
         : undefined,
+      accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);

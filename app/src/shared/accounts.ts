@@ -30,6 +30,24 @@ export function primaryLogin(c: WithAccounts): string | null {
   return (c.accounts.find((a) => a.primary) ?? c.accounts[0])?.login ?? null
 }
 
+/**
+ * Needs-you notices about who gh and master-agent run as. `ghActive`: gh's active login (null: not
+ * known). `master`: the account master-agent was started as (null: started without one, by hand or
+ * before several accounts; undefined: not running). gh's active account differing from the primary
+ * is a notice with one account too (MasterDeck then runs as gh's active account); master-agent not
+ * started as the primary only with two or more (it runs as gh's active account otherwise).
+ */
+export function accountNotices(o: { ghActive: string | null; master: string | null | undefined }, c: WithAccounts): { id: string; text: string }[] {
+  const p = primaryLogin(c)
+  if (!p) return []
+  const out: { id: string; text: string }[] = []
+  if (o.ghActive && low(o.ghActive) !== low(p))
+    out.push({ id: `gh-active:${o.ghActive}:${p}`, text: `gh's active account is ${o.ghActive} but MasterDeck's primary is ${p}: run \`gh auth switch -u ${p}\`` })
+  if (isMulti(c) && o.master !== undefined && low(o.master ?? '') !== low(p))
+    out.push({ id: `master-account:${p}`, text: `master-agent was not started with the primary account (${p}): restart master-agent so it runs as ${p}` })
+  return out
+}
+
 /** The account that lists this repo (or, after its "Select all", owns its org); null if none. `repo` null: the primary issue repo. */
 export function matchRepo(repo: string | null | undefined, c: AppConfig): string | null {
   const r = low(repo || primaryRepo(c))
@@ -151,12 +169,13 @@ export function githubSshAliases(text: string): string[] {
 }
 
 /**
- * The `env` of an account's Claude Code settings file: its token for gh, its identity for git, and
+ * The `env` of an account's Claude Code settings file: its token for gh (and GHC_ACCOUNT, so ghc in
+ * the session keys its cache on this account), its identity for git, and
  * git rules (GIT_CONFIG_*, this session only) that send every github.com remote — HTTPS, SSH, or an
  * ssh alias — over HTTPS with gh's credential helper. The empty helper first drops helpers from the
  * user's own git config for github.com (a keychain entry for another account would answer first).
  */
-export function accountEnvBlock(a: Pick<AccountConfig, 'name' | 'email'>, token: string, aliases: string[]): Record<string, string> {
+export function accountEnvBlock(a: Pick<AccountConfig, 'login' | 'name' | 'email'>, token: string, aliases: string[]): Record<string, string> {
   const rules: [string, string][] = [
     ['user.name', a.name],
     ['user.email', a.email],
@@ -169,6 +188,7 @@ export function accountEnvBlock(a: Pick<AccountConfig, 'name' | 'email'>, token:
   ]
   const env: Record<string, string> = {
     GH_TOKEN: token,
+    GHC_ACCOUNT: a.login,
     GIT_AUTHOR_NAME: a.name,
     GIT_AUTHOR_EMAIL: a.email,
     GIT_COMMITTER_NAME: a.name,

@@ -113,9 +113,17 @@ def categories(args: list) -> set:
 
 
 def _account(env: "dict | None" = None) -> str:
-    """GHC_ACCOUNT: the gh login a call runs as (MasterDeck sets it with GH_TOKEN); "" for gh's active one."""
-    a = (env if env is not None and "GHC_ACCOUNT" in env else os.environ).get("GHC_ACCOUNT") or ""
-    return a if ACCOUNT_RE.fullmatch(a) else ""
+    """GHC_ACCOUNT: the gh login a call runs as (MasterDeck sets it with GH_TOKEN); "" for gh's active one.
+
+    GH_TOKEN without GHC_ACCOUNT (a hand-run tool with its own token): "-t" + a short sha256 of the
+    token, so its answers and pause are its own; no GitHub login starts with "-", and the token
+    itself is never stored."""
+    src = env if env is not None and ("GHC_ACCOUNT" in env or "GH_TOKEN" in env) else os.environ
+    a = src.get("GHC_ACCOUNT") or ""
+    if a:
+        return a if ACCOUNT_RE.fullmatch(a) else ""
+    tok = src.get("GH_TOKEN") or ""
+    return "-t" + hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else ""
 
 
 def cache_key(args: list, cwd: str, account: "str | None" = None) -> str:

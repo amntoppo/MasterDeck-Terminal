@@ -157,6 +157,24 @@ class SpawnAccountTest(unittest.TestCase):
     def test_missing_account_file_holds_the_proposal(self):
         led = ledger.empty()
         p = ledger.add(led, kind="ASSIGN", issue=3, source="issue:3",
+                       target={"spawn": {"name": "3-x", "cwd": self.tmp.name, "prompt": "go", "account": "bob-work"}},
+                       message="m", summary="s", now=NOW)
+        ledger.transition(led, p["id"], "approved", now=NOW)
+        run = FakeRunner()
+        with self.multi, self.assertRaises(spawn.SpawnError):
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+        self.assertEqual(p["status"], "held")
+        self.assertIn("GitHub account bob-work has no settings file", p["note"])
+        self.assertEqual(run.calls, [])
+
+    def test_an_account_no_longer_connected_holds_even_with_a_lingering_file(self):
+        # Disconnected while a session still ran: its file stays, but nothing new starts as it.
+        d = Path(self.tmp.name) / "accounts"
+        d.mkdir()
+        for login in ("carol", "bob-work"):
+            (d / f"{login}.settings.json").write_text("{}")
+        led = ledger.empty()
+        p = ledger.add(led, kind="ASSIGN", issue=3, source="issue:3",
                        target={"spawn": {"name": "3-x", "cwd": self.tmp.name, "prompt": "go", "account": "carol"}},
                        message="m", summary="s", now=NOW)
         ledger.transition(led, p["id"], "approved", now=NOW)
@@ -164,8 +182,58 @@ class SpawnAccountTest(unittest.TestCase):
         with self.multi, self.assertRaises(spawn.SpawnError):
             spawn.spawn(led, p["id"], now=NOW, runner=run)
         self.assertEqual(p["status"], "held")
-        self.assertIn("GitHub account carol has no settings file", p["note"])
+        self.assertIn("carol is not a connected account", p["note"])
         self.assertEqual(run.calls, [])
+        # Case does not matter, and the connected login's own file is used.
+        with self.multi:
+            self.assertEqual(spawn.command({"spawn": {"name": "3-x", "cwd": "/w", "prompt": "go", "account": "BOB-WORK"}})[:4],
+                             ["claude", "--bg", "--settings", str(d / "bob-work.settings.json")])
+
+    def _resume(self, led, repo, cwd, name="3-x"):
+        p = ledger.add(led, kind="ORPHAN", issue=3, repo=repo, source="orphan:x",
+                       target={"spawn": {"name": name, "cwd": cwd, "resume": "4f2a9c1e-1234-4abc-9def-0123456789ab"}},
+                       message="m", summary="s", now=NOW)
+        ledger.transition(led, p["id"], "approved", now=NOW)
+        return p
+
+    def test_a_resume_without_an_account_uses_its_spawn_then_origin_then_issue_repo(self):
+        d = Path(self.tmp.name) / "accounts"
+        d.mkdir()
+        for login in ("alice", "bob-work"):
+            (d / f"{login}.settings.json").write_text("{}")
+        git = Path(self.tmp.name) / "repo"
+        git.mkdir()
+        subprocess.run(["git", "init", "-q", str(git)], check=True)
+        subprocess.run(["git", "-C", str(git), "remote", "add", "origin", "git@github.com-work:globex/app.git"], check=True)
+        bare = Path(self.tmp.name) / "plain"
+        bare.mkdir()
+        run = FakeRunner(out="")
+        with self.multi, mock.patch.object(spawn, "running", return_value=False):
+            # 1. The session's own spawn proposal named bob-work (the issue is alice's).
+            led = ledger.empty()
+            ledger.add(led, kind="ASSIGN", issue=3, source="issue:3", message="m", summary="s", now=NOW,
+                       target={"spawn": {"name": "3-x", "cwd": str(bare), "prompt": "go", "account": "bob-work"}})
+            p = self._resume(led, None, str(bare))
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+            self.assertEqual(p["target"]["spawn"]["account"], "bob-work")
+            # 2. No spawn proposal: the folder's origin (an ssh alias for globex/app).
+            led = ledger.empty()
+            p = self._resume(led, None, str(git))
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+            self.assertEqual(p["target"]["spawn"]["account"], "bob-work")
+            # 3. No origin: the issue repo's account, else the primary.
+            led = ledger.empty()
+            p, q = self._resume(led, "globex/app", str(bare)), self._resume(led, None, str(bare), name="4-y")
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+            spawn.spawn(led, q["id"], now=NOW, runner=run)
+            self.assertEqual((p["target"]["spawn"]["account"], q["target"]["spawn"]["account"]), ("bob-work", "alice"))
+        # One account: nothing is looked up, the command as before.
+        led = ledger.empty()
+        p = self._resume(led, None, str(git))
+        with mock.patch.object(spawn, "running", return_value=False):
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+        self.assertNotIn("account", p["target"]["spawn"])
+        self.assertEqual(run.calls[-1][0], ["claude", "--bg", "--resume", "4f2a9c1e-1234-4abc-9def-0123456789ab"])
 
 
     def _old(self, led, repo, n):

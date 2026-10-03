@@ -63,7 +63,12 @@ export function ghCacheDir(): string {
   return process.env.GH_CACHE_DIR || join(homedir(), '.claude', 'gh-cache')
 }
 
-export function readGhCacheStatus(dir = ghCacheDir(), now = Date.now()): GhCacheStatus {
+/**
+ * The shared pause and today's counters. `multi` (two or more accounts): any account's pause counts.
+ * One account: only paused.json, and the pause of a GH_TOKEN without GHC_ACCOUNT (`paused--t<hash>`),
+ * never a leftover `paused-<login>.json` from when several accounts were connected.
+ */
+export function readGhCacheStatus(dir = ghCacheDir(), now = Date.now(), multi = false): GhCacheStatus {
   const json = (f: string): Record<string, unknown> => {
     try {
       return JSON.parse(readFileSync(join(dir, f), 'utf8'))
@@ -75,7 +80,8 @@ export function readGhCacheStatus(dir = ghCacheDir(), now = Date.now()): GhCache
   let reason: string | null = null
   let names: string[] = []
   try {
-    names = readdirSync(dir).filter((f) => /^paused(-[A-Za-z0-9-]{1,39})?\.json$/.test(f))
+    const pat = multi ? /^paused(-[A-Za-z0-9-]{1,39})?\.json$/ : /^paused(--t[0-9a-f]{16})?\.json$/
+    names = readdirSync(dir).filter((f) => pat.test(f))
   } catch {
     // no cache folder yet
   }

@@ -80,6 +80,18 @@ describe('ghc per account', () => {
     const now = 1_790_000_000_000
     writeFileSync(join(d, 'paused-bob-work.json'), JSON.stringify({ until: now / 1000 + 600, reason: 'bob limit' }))
     writeFileSync(join(d, 'paused.json'), JSON.stringify({ until: now / 1000 + 300, reason: 'rate limit' }))
-    expect(readGhCacheStatus(d, now)).toMatchObject({ pausedUntil: now + 600_000, pauseReason: 'bob limit' })
+    expect(readGhCacheStatus(d, now, true)).toMatchObject({ pausedUntil: now + 600_000, pauseReason: 'bob limit' })
+  })
+  it("one account: another login's leftover pause is ignored; paused.json and a token's own pause count", () => {
+    const d = mkdtempSync(join(tmpdir(), 'ghc-'))
+    const now = 1_790_000_000_000
+    writeFileSync(join(d, 'paused-bob-work.json'), JSON.stringify({ until: now / 1000 + 600, reason: 'bob limit' }))
+    expect(readGhCacheStatus(d, now, false).pausedUntil).toBeNull()
+    expect(readGhCacheStatus(d, now).pausedUntil).toBeNull()
+    writeFileSync(join(d, 'paused.json'), JSON.stringify({ until: now / 1000 + 300, reason: 'rate limit' }))
+    expect(readGhCacheStatus(d, now, false)).toMatchObject({ pausedUntil: now + 300_000, pauseReason: 'rate limit' })
+    // GH_TOKEN in MasterDeck's own env (ghcache keys it on a hash of the token): still shown.
+    writeFileSync(join(d, 'paused--t0123456789abcdef.json'), JSON.stringify({ until: now / 1000 + 900, reason: 'token limit' }))
+    expect(readGhCacheStatus(d, now, false)).toMatchObject({ pausedUntil: now + 900_000, pauseReason: 'token limit' })
   })
 })

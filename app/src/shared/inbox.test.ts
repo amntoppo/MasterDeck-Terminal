@@ -42,6 +42,11 @@ describe('collectItems', () => {
     expect(items[0].body).toContain('bob-work needs to log in again (the token no longer works)')
     expect(allowed(items[0], 'login')).toBe(true)
   })
+  it('an account notice is an item with no action but dismiss and snooze', () => {
+    const items = collectItems(input({ accountNotices: [{ id: 'gh-active:bob-work:alice', text: 'switch' }] }))
+    expect(items.map((i) => [i.id, i.kind, i.actions.length, i.body])).toEqual([['notice:gh-active:bob-work:alice', 'account', 0, 'switch']])
+    expect(allowed(items[0], 'login')).toBe(false)
+  })
   it('leaves review offers to the PR watch, keeps CI offers', () => {
     const pr = { url: 'https://github.com/acme/web/pull/3', repo: 'web', number: 3, title: 't', unresolvedThreads: 2, ci: 'failure', headRef: 'f', refsIssue: null, authorIsMe: true } as InboxInput['prs'][number]
     const kinds = (watched: string[]) => collectItems({ ...input({}), prs: [pr], watchedPrs: new Set(watched) }).map((i) => i.kind).filter((k) => k === 'review' || k === 'ci').sort()

@@ -672,7 +672,7 @@ moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run the
 - **Short-lived cache.** Reads are kept in `~/.claude/gh-cache` for a few seconds to minutes, so
   the same read from several sessions makes one call. TTLs: PR status 45 s, PR summaries 2 min,
   the board 5 min, assignees 10 min, your login 1 h.
-- **Per account.** With two or more connected accounts, MasterDeck's calls carry the account (`GHC_ACCOUNT`): each account has its own cached answers and its own pause (`paused-<login>.json`); calls without one (hand-run tools) use `paused.json` as before.
+- **Per account.** With two or more connected accounts, MasterDeck's calls and every session started as an account carry the account (`GHC_ACCOUNT`): each account has its own cached answers and its own pause (`paused-<login>.json`). A `GH_TOKEN` set without `GHC_ACCOUNT` gets its own entries too (keyed on a hash of the token, never the token). Calls with neither (one account, your own terminals) use today's keys and `paused.json` as before.
 - **One call at a time per read.** Identical reads made at the same moment wait for the first one
   and share its answer.
 - **Writes go straight through.** Assign, comment, status change and the like reach GitHub at once.
@@ -715,7 +715,7 @@ is a `gh` login (`gh auth status` lists them).
   its file once none of its sessions is running. GitHub Enterprise and hosts other than github.com
   are not supported.
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
-  account as before.
+  account as before; Needs you only says so when gh's active account is not the one in Setup.
 
 With two or more GitHub accounts connected, MasterDeck reads each one's token from `gh` (it never
 switches gh's active account) and gives sessions started as that account their own token and git
@@ -728,8 +728,17 @@ One limit: a rule in your global git config that sends GitHub over SSH (for exam
 rewrite, so such a session may push as the SSH key's account. Setup shows a warning on the
 accounts when it finds one; remove the rule (`git config --global --unset …`) to fix it.
 
-Also still single-account: skills you run by hand (`tt.sh`, babysit-pr's poll) use `gh`'s active
-account, as do the workflow-builder sessions; SSH host aliases are only found in
+Skills you run by hand inside a session (`tt.sh`, babysit-pr's poll, `/babysit-ticket`) use that
+session's `GH_TOKEN` and `GHC_ACCOUNT`, with the primary's config and boards: babysit-ticket in a
+second account's session works against the primary's boards. Run outside any session (your own
+terminal) they use `gh`'s active account.
+
+**gh's active account.** With one account MasterDeck runs as gh's active account; when that is not
+the primary set in Setup, Needs you says so and how to switch (`gh auth switch -u <primary>`). With
+several, a master-agent started without the primary's settings (by hand, or before the second
+account was connected) shows "restart master-agent so it runs as <primary>".
+
+Also still single-account: the workflow-builder sessions use `gh`'s active account; SSH host aliases are only found in
 `~/.ssh/config`; and a rate limit on one account pauses MasterDeck's own polling for all accounts
 until it lifts.
 

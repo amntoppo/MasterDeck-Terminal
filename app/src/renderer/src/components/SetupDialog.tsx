@@ -129,7 +129,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     setAdding(null)
     const now = (await loadAccounts()).find((a) => a.active)?.login ?? null
     if (before && now && now !== before)
-      setActiveNote(`gh made ${now} its active account (gh auth login does that). MasterDeck doesn't depend on it; for your own terminals, run gh auth switch -u ${before} to go back.`)
+      setActiveNote(`gh made ${now} its active account (gh auth login does that). With one connected account MasterDeck runs as gh's active account, and so do your own terminals; with several, each session runs as its own account. Run gh auth switch -u ${before} to go back.`)
   }
   // What MasterDeck knows of each connected account (token health; a git rule that may send GitHub over SSH).
   const sshWarning = state.ghAccounts?.find((a) => a.warning)?.warning
@@ -486,7 +486,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                   <div className="installer">
                     <div className="installer-head">
                       <b>Add a GitHub account</b>
-                      <span className="meta grow">gh opens GitHub in your browser: log in there as the other account. gh then makes it its active account; MasterDeck leaves that as it is.</span>
+                      <span className="meta grow">gh opens GitHub in your browser: log in there as the other account. gh then makes it its active account; MasterDeck never switches it back (run gh auth switch yourself). With one account MasterDeck runs as gh's active account.</span>
                       <button className="btn" onClick={() => void closeLogin()}>
                         Close
                       </button>

@@ -60,7 +60,7 @@ import {
   accountsKeyOf,
   migrateLegacyConfig,
 } from "./accountEnv";
-import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
+import { parseGhAccounts, setupScopes, type GhAccount } from "@shared/ghAuth";
 import {
   defaultAccount,
   isMulti,
@@ -537,8 +537,9 @@ const sources = new Sources(
   () => claudeBin,
   github,
   ghRouted,
-  () => readGhCacheStatus(),
+  () => readGhCacheStatus(undefined, undefined, isMulti(getConfig())),
 );
+sources.setMasterAccount((s) => sessionAccounts.get(s));
 sources.setAccountRunners({
   github: (login) => forAccount(login).github,
   // The current branch's PR (gh pr view in the folder): the folder's `origin` account, looked up first.
@@ -1580,6 +1581,13 @@ async function startMaster(): Promise<CliResult> {
     timeoutMs: 60_000,
   });
   if (r.code !== 0) masterStartingUntil = 0;
+  else if (as?.ok && as.account) {
+    // Recorded as the primary, so Needs you can tell a master-agent started without it (by hand,
+    // or before a second account) and ask for a restart.
+    const bg = bgIdFromOutput(r.stdout);
+    if (bg) sessionAccounts.set([bg], as.account);
+    sessionAccounts.expect(MASTER_NAME, as.account);
+  }
   return r.code === 0
     ? { ok: true, message: r.stdout.trim() }
     : { ok: false, message: (r.stderr || r.stdout).trim() };
@@ -2744,10 +2752,23 @@ async function refreshAccounts(): Promise<void> {
   );
   await accountEnv.refresh(cfg.accounts, inUse);
   sources.setGhAccounts(accountEnv.status());
+  void refreshGhActive();
   void accountEnv
     .check()
     .then(() => sources.setGhAccounts(accountEnv.status()))
     .catch((e) => console.error(`accounts check: ${String(e)}`));
+}
+
+/**
+ * gh's active login, for the Needs-you notice when it is not MasterDeck's primary (one account runs
+ * as it). `gh config get user` reads gh's own config file: no network, so it can run every minute.
+ */
+async function refreshGhActive(): Promise<void> {
+  const r = await run("gh", ["config", "get", "user", "-h", "github.com"], {
+    timeoutMs: 5_000,
+  });
+  const login = r.stdout.trim();
+  sources.setGhActive(r.code === 0 && GH_LOGIN.test(login) ? login : null);
 }
 
 /**
@@ -2785,10 +2806,14 @@ async function setupCheck(): Promise<SetupCheck> {
     run("gh", ["auth", "status"], { timeoutMs: 20_000 }),
   ]);
   const login = user.code === 0 ? user.stdout.trim() : "";
-  // Several accounts print a block each: the scopes that count are the active account's.
+  // Several accounts print a block each, with that token's scopes. One account: the active
+  // account's; two or more: only scopes every connected account has (see setupScopes).
   const accounts = parseGhAccounts(status.stdout + "\n" + status.stderr);
-  const scopes =
-    (accounts.find((a) => a.active) ?? accounts[0])?.scopes.join(",") ?? "";
+  const cfg = getConfig();
+  const scopes = setupScopes(
+    accounts,
+    isMulti(cfg) ? cfg.accounts.map((a) => a.login) : null,
+  ).join(",");
   const claudeOk = await ok(claudeBin, ["--version"]);
   return {
     claude: claudeOk ? claudeBin : null,
@@ -2990,6 +3015,7 @@ app.whenReady().then(async () => {
       console.error(`accounts migration: ${String(e)}`),
     );
   setInterval(() => void refreshAccounts(), 3_600_000);
+  setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
   syncRemote();
   if (SMOKE) {

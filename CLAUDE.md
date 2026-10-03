@@ -229,9 +229,14 @@ buttons; it does not go through macOS window drag regions.
   agents --json` first.
 - An AskUserQuestion menu is not in the transcript until it is answered: read it from the screen
   (`claude logs <id>`, rendered with `@xterm/headless`; `shared/ask.ts` `parseMenuScreen`).
-- The shared GitHub cache (`ghcache`) keys MasterDeck's calls by account (`GHC_ACCOUNT`, two or more
-  connected accounts); calls without it (one account, hand-run tools) share today's keys, which follow
-  gh's active account.
+- The shared GitHub cache (`ghcache`) keys calls by account (`GHC_ACCOUNT`, two or more connected
+  accounts): MasterDeck's own calls and every session started as an account (its settings file sets
+  `GH_TOKEN` and `GHC_ACCOUNT`, so `ghc` in it never serves another account's answers). A `GH_TOKEN`
+  without `GHC_ACCOUNT` keys on a short hash of the token (`-t<hash>`, pause `paused--t<hash>.json`);
+  calls with neither (one account, plain shells) keep today's keys, which follow gh's active account.
+- One account runs as gh's active account: when that is not MasterDeck's primary (`gh config get user`,
+  each minute), Needs you says to `gh auth switch -u <primary>` (`accountNotices`). With two or more,
+  a master-agent not recorded as started with the primary's `--settings` gets a "restart master-agent" notice.
 - Tests that spawn bash/jq/git get a 20 s timeout; the full suite runs files in parallel.
 - `claude -p` for app features (summaries): run from an empty temp folder with
   `--no-session-persistence`, tell the model the writing style, and remove the empty

@@ -50,6 +50,10 @@ describe('ticketPane', () => {
     expect(ticketPane('/h', true, { tab: 't1', account: 'alice' }, () => ({ ok: false, message: 'GitHub account alice needs to log in again' }))).toEqual({
       error: 'GitHub account alice needs to log in again',
     })
+    // Accounts still loading (no file args yet): refused, never run as gh's active account.
+    expect(ticketPane('/h', true, { tab: 't1', account: 'alice' }, () => ({ ok: true, args: [] }))).toEqual({
+      error: 'GitHub accounts are still loading; try again in a few seconds',
+    })
   })
 })
 

@@ -63,6 +63,8 @@ describe('AccountEnv', () => {
     const file = e.file('bob-work')
     const env = JSON.parse(readFileSync(file, 'utf8')).env
     expect(env.GH_TOKEN).toBe(TB)
+    // ghc in the session keys its cache on this, so bob's answers never serve alice's sessions.
+    expect(env.GHC_ACCOUNT).toBe('bob-work')
     expect(env.GIT_AUTHOR_EMAIL).toBe('b@globex.test')
     expect(Object.values(env)).toContain('git@gh-work:')
     if (process.platform !== 'win32') {

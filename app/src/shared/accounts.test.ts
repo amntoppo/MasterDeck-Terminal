@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountLabel, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
+  accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
   matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
@@ -95,8 +95,9 @@ describe('githubSshAliases', () => {
 
 describe('accountEnvBlock', () => {
   it('sets the token, the identity and git rules that push every GitHub remote over HTTPS as this account', () => {
-    const env = accountEnvBlock({ name: 'Bob B', email: '7+bob-work@users.noreply.github.com' }, 'gho_TOKEN', ['github.com-work'])
+    const env = accountEnvBlock({ login: 'bob-work', name: 'Bob B', email: '7+bob-work@users.noreply.github.com' }, 'gho_TOKEN', ['github.com-work'])
     expect(env.GH_TOKEN).toBe('gho_TOKEN')
+    expect(env.GHC_ACCOUNT).toBe('bob-work')
     expect([env.GIT_AUTHOR_NAME, env.GIT_COMMITTER_NAME, env.GIT_AUTHOR_EMAIL, env.GIT_COMMITTER_EMAIL]).toEqual(['Bob B', 'Bob B', '7+bob-work@users.noreply.github.com', '7+bob-work@users.noreply.github.com'])
     const n = Number(env.GIT_CONFIG_COUNT)
     const pairs = Array.from({ length: n }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]])
@@ -112,7 +113,7 @@ describe('accountEnvBlock', () => {
     ])
   })
   it('resets the github.com credential helpers first (a keychain entry for another account must not answer)', () => {
-    const env = accountEnvBlock({ name: 'x', email: 'y' }, 't'.repeat(20), [])
+    const env = accountEnvBlock({ login: 'x', name: 'x', email: 'y' }, 't'.repeat(20), [])
     expect(env.GIT_CONFIG_KEY_2).toBe('credential.https://github.com.helper')
     expect(env.GIT_CONFIG_VALUE_2).toBe('')
     expect(env.GIT_CONFIG_VALUE_3).toBe('!gh auth git-credential')
@@ -231,5 +232,24 @@ describe('accountLabel', () => {
     expect(accountLabel({ account: 'bob-work' }, two)).toBe('bob-work')
     expect(accountLabel({}, two)).toBeNull()
     expect(accountLabel({ account: 'alice' }, one)).toBeNull()
+  })
+})
+
+describe('accountNotices', () => {
+  it("gh's active account differing from the primary is a notice, with one account too; matching (any case) is nothing", () => {
+    expect(accountNotices({ ghActive: 'bob-work', master: undefined }, one)).toEqual([
+      { id: 'gh-active:bob-work:alice', text: "gh's active account is bob-work but MasterDeck's primary is alice: run `gh auth switch -u alice`" },
+    ])
+    expect(accountNotices({ ghActive: 'ALICE', master: undefined }, one)).toEqual([])
+    expect(accountNotices({ ghActive: null, master: undefined }, two)).toEqual([]) // not known yet
+    expect(accountNotices({ ghActive: 'bob-work', master: null }, none)).toEqual([]) // no accounts: nothing to compare
+  })
+  it('several accounts: a master-agent not started as the primary asks for a restart; one account never', () => {
+    const restart = { id: 'master-account:alice', text: 'master-agent was not started with the primary account (alice): restart master-agent so it runs as alice' }
+    expect(accountNotices({ ghActive: 'alice', master: null }, two)).toEqual([restart])
+    expect(accountNotices({ ghActive: 'alice', master: 'bob-work' }, two)).toEqual([restart])
+    expect(accountNotices({ ghActive: 'alice', master: 'alice' }, two)).toEqual([])
+    expect(accountNotices({ ghActive: 'alice', master: undefined }, two)).toEqual([]) // not running
+    expect(accountNotices({ ghActive: 'alice', master: null }, one)).toEqual([])
   })
 })
