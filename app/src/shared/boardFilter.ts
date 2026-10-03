@@ -206,7 +206,8 @@ const REPLY = (n: string) =>
   `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '${n}: done', ` +
   `'${n}: blocked — <reason>' or '${n}: question — <question>'. When you have a question, ALSO ask the user directly in ` +
   `this session (so they see it here too), and wait for the answer from either place. If the user answers you here, tell ` +
-  `master-agent '${n}: answered — <answer>'.`
+  `master-agent '${n}: answered — <answer>'.` +
+  ` If SendMessage says master-agent is not reachable, do not send it to any other session (none of them is master-agent, whatever its name); ask the user here instead.`
 
 /** The first message of a PR review session: read-only against the diff, review posted on GitHub. */
 export function composeReviewPrompt(t: ReviewTarget, instructions: string): string {

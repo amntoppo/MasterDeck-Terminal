@@ -17,7 +17,7 @@ export interface PrOffer {
 
 /** `n`: the ticket's label, #12 or name#12. */
 const REPLY = (n: string) =>
-  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '${n}: done', '${n}: blocked — <reason>' or '${n}: question — <question>'.`
+  `When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '${n}: done', '${n}: blocked — <reason>' or '${n}: question — <question>'. If SendMessage says master-agent is not reachable, do not send it to any other session (none of them is master-agent, whatever its name); ask the user here instead.`
 
 const label = (pr: Pr): string => (pr.refsIssue !== null ? ticketLabel(pr.refsRepo, pr.refsIssue) : '#0')
 
