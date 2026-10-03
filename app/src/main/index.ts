@@ -54,9 +54,13 @@ import type {
   Session,
   SetupCheck,
 } from "@shared/types";
-import { getConfig, type AppConfig } from "@shared/appConfig";
-import { migrationAccount, parseGhUser } from "@shared/accounts";
-import { AccountEnv, accountsInUse } from "./accountEnv";
+import { getConfig } from "@shared/appConfig";
+import {
+  AccountEnv,
+  accountsInUse,
+  accountsKeyOf,
+  migrateLegacyConfig,
+} from "./accountEnv";
 import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
 import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -339,7 +343,7 @@ const sources = new Sources(
     const prev = latest;
     latest = state;
     // Accounts changed (Setup saved, config edited): new tokens and settings files.
-    if (keyOfAccounts(state.config) !== accountsKey) void refreshAccounts();
+    if (accountsKeyOf(state.config) !== accountsKey) void refreshAccounts();
     // Each session's own workflow: copied the first time it shows up.
     if (process.platform !== "win32")
       try {
@@ -2502,9 +2506,9 @@ async function ghAccounts(): Promise<{
       };
 }
 
-let accountsKey = "";
-const keyOfAccounts = (c: AppConfig) =>
-  JSON.stringify(c.accounts.map((a) => [a.login, a.name, a.email]));
+// Set from the default config at load, so a state emitted before the first refreshAccounts (at
+// launch, after loadConfig) does not start a second one.
+let accountsKey = accountsKeyOf(getConfig());
 
 /**
  * Tokens and settings files of the connected accounts (launch, config change, hourly). Resolves once
@@ -2512,7 +2516,7 @@ const keyOfAccounts = (c: AppConfig) =>
  */
 async function refreshAccounts(): Promise<void> {
   const cfg = getConfig();
-  accountsKey = keyOfAccounts(cfg);
+  accountsKey = accountsKeyOf(cfg);
   // A disconnected account's file stays while a live session still runs as it (until the agents
   // poll has answered, every session recorded in session-accounts.json counts as live).
   const inUse = accountsInUse(
@@ -2528,50 +2532,26 @@ async function refreshAccounts(): Promise<void> {
 }
 
 /**
- * First launch of the multi-account version: an older config becomes one account — gh's active
- * login, today's repos and boards, and the git identity commits are made with today. A backup of
- * config.json is kept. gh not logged in: tried again at the next launch. Runs in the background
- * (gh auth status and gh api user go to the network); one account behaves as before meanwhile.
+ * First launch of the multi-account version (see migrateLegacyConfig): in the background, since gh
+ * auth status and gh api user go to the network; one account behaves as before meanwhile. The
+ * config is re-read from the file after the waits (getConfig() lags the 2 s file watch).
  */
 async function migrateAccounts(): Promise<void> {
-  const cfg = getConfig();
-  if (!cfg.configured || cfg.accounts.length) return;
-  const { accounts } = await ghAccounts();
-  const login = (accounts.find((a) => a.active) ?? accounts[0])?.login;
-  if (!login) return;
-  const [user, gname, gemail] = await Promise.all([
-    run("gh", ["api", "user"], { timeoutMs: 20_000 }),
-    run("git", ["config", "--global", "user.name"], { timeoutMs: 5_000 }),
-    run("git", ["config", "--global", "user.email"], { timeoutMs: 5_000 }),
-  ]);
-  // gh offline, or its active login is another one: the git identity (or the login) fills in.
-  const u = user.code === 0 ? parseGhUser(user.stdout) : null;
-  const gh =
-    u && u.login.toLowerCase() === login.toLowerCase()
-      ? { name: u.name, id: u.id }
-      : { name: null, id: null };
-  if (getConfig().accounts.length) return; // Setup saved accounts meanwhile
-  try {
-    copyFileSync(
-      paths.config,
-      join(dirname(paths.config), `config.backup.${Date.now()}.json`),
-    );
-  } catch (e) {
-    console.error(`accounts migration: no backup (${String(e)}); not migrating`);
-    return;
-  }
-  const r = await cli.configSave({
-    accounts: [
-      migrationAccount(
-        cfg,
-        login,
-        { name: gname.stdout.trim(), email: gemail.stdout.trim() },
-        gh,
+  const r = await migrateLegacyConfig({
+    read: () => sources.loadConfig(),
+    activeLogin: async () => {
+      const { accounts } = await ghAccounts();
+      return (accounts.find((a) => a.active) ?? accounts[0])?.login ?? null;
+    },
+    run,
+    backup: () =>
+      copyFileSync(
+        paths.config,
+        join(dirname(paths.config), `config.backup.${Date.now()}.json`),
       ),
-    ],
+    save: (patch) => cli.configSave(patch),
   });
-  if (r.ok) sources.loadConfig();
-  else console.error(`accounts migration: ${r.message}`);
+  if (r === "migrated") sources.loadConfig();
 }
 
 async function setupCheck(): Promise<SetupCheck> {

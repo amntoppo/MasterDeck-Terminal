@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import { githubSshAliases } from '@shared/accounts'
-import { AccountEnv, accountsInUse, githubSshRewrite, readSshConfig } from './accountEnv'
+import { AccountEnv, accountsInUse, accountsKeyOf, githubSshRewrite, migrateLegacyConfig, readSshConfig } from './accountEnv'
 import type { Runner } from './run'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'] }
@@ -150,8 +150,111 @@ describe('AccountEnv', () => {
     const e = new AccountEnv(h.dir, f.run, h.ssh)
     await e.refresh(accounts)
     await e.check()
-    expect(f.calls.find((c) => c.cmd === 'git')?.args).toEqual(['config', '--global', '--get-regexp', '^url\\..*\\.(push)?insteadof$'])
+    expect(f.calls.find((c) => c.cmd === 'git')?.args).toEqual(['config', '--global', '--includes', '--get-regexp', '^url\\..*\\.(push)?insteadof$'])
     for (const s of e.status()) expect(s.warning).toMatch(/your git config sends GitHub pushes over SSH; sessions may push as the SSH key's account/)
+  })
+})
+
+describe('AccountEnv fixes', () => {
+  it('gh logged out: the file goes unless a session uses it; a 401 token\'s file always goes', async () => {
+    const h = home()
+    const tokens: Record<string, string> = { alice: TA, 'bob-work': TB }
+    const f = fakeGh(tokens, who({ [TA]: 'alice', [TB]: 'bob-work' }))
+    const e = new AccountEnv(h.dir, f.run, h.ssh)
+    await e.refresh(accounts)
+    delete tokens['bob-work']
+    await e.refresh(accounts, new Set(['bob-work']))
+    expect(existsSync(e.file('bob-work'))).toBe(true)
+    await e.refresh(accounts)
+    expect(existsSync(e.file('bob-work'))).toBe(false)
+    const e2 = new AccountEnv(h.dir, fakeGh({ alice: TA, 'bob-work': TB }, who({ [TA]: 'alice' })).run, h.ssh)
+    await e2.refresh(accounts, new Set(['bob-work']))
+    await e2.check()
+    expect(existsSync(e2.file('bob-work'))).toBe(false)
+  })
+
+  it('a leftover temp file (with a token) is removed by the next refresh', async () => {
+    const h = home()
+    mkdirSync(h.dir)
+    writeFileSync(join(h.dir, 'bob-work.settings.json.123.tmp'), '{"env":{"GH_TOKEN":"x"}}')
+    await new AccountEnv(h.dir, fakeGh({ alice: TA, 'bob-work': TB }, who({})).run, h.ssh).refresh(accounts)
+    expect(readdirSync(h.dir).sort()).toEqual(['alice.settings.json', 'bob-work.settings.json'])
+    await new AccountEnv(h.dir, fakeGh({}, who({})).run, h.ssh).refresh([accounts[0]])
+    expect(readdirSync(h.dir)).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32')('a 0755 folder and a 0644 file come out 700 and 600', async () => {
+    const h = home()
+    mkdirSync(h.dir, { mode: 0o755 })
+    chmodSync(h.dir, 0o755)
+    const e = new AccountEnv(h.dir, fakeGh({ alice: TA, 'bob-work': TB }, who({})).run, h.ssh)
+    writeFileSync(e.file('alice'), '{}', { mode: 0o644 })
+    chmodSync(e.file('alice'), 0o644)
+    await e.refresh(accounts)
+    expect(statSync(h.dir).mode & 0o777).toBe(0o700)
+    expect(statSync(e.file('alice')).mode & 0o777).toBe(0o600)
+  })
+
+  it('a check that ends after a switch to one account leaves no warning', async () => {
+    const h = home()
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const base = fakeGh({ alice: TA, 'bob-work': TB }, who({ [TA]: 'alice', [TB]: 'bob-work' }))
+    const run: Runner = async (cmd, args, opts) => {
+      if (cmd === 'git') {
+        await gate
+        return { code: 0, stdout: 'url.git@github.com:.insteadof https://github.com/\n', stderr: '' }
+      }
+      return base.run(cmd, args, opts)
+    }
+    const e = new AccountEnv(h.dir, run, h.ssh)
+    await e.refresh(accounts)
+    const checking = e.check()
+    await e.refresh([accounts[0]])
+    release()
+    await checking
+    expect(e.status()).toEqual([{ login: 'alice', primary: true, healthy: true }])
+  })
+})
+
+describe('accountsKeyOf', () => {
+  it('changes when the primary changes without a reorder', () => {
+    const c = parseConfig({ accounts: [A, B] })
+    const flipped = { ...c, accounts: c.accounts.map(({ primary, ...a }) => (primary ? a : { ...a, primary: true as const })) }
+    expect(accountsKeyOf(flipped)).not.toBe(accountsKeyOf(c))
+  })
+})
+
+describe('migrateLegacyConfig', () => {
+  const legacy = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/api'] })
+  const git = (cmd: string, args: string[]): Res =>
+    cmd === 'git' ? { code: 0, stdout: args.includes('user.name') ? 'Alice A\n' : 'alice@acme.test\n', stderr: '' } : { code: 0, stdout: JSON.stringify({ login: 'alice', name: 'GH', id: 5 }), stderr: '' }
+
+  it('builds the account from the config as read after the network waits', async () => {
+    let cfg = legacy
+    const saved: unknown[] = []
+    const r = await migrateLegacyConfig({
+      read: () => cfg,
+      activeLogin: async () => {
+        cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/api', 'acme/web'] }) // edited meanwhile
+        return 'alice'
+      },
+      run: async (cmd, args) => git(cmd, args),
+      backup: () => {},
+      save: async (p) => (saved.push(p), { ok: true }),
+    })
+    expect(r).toBe('migrated')
+    expect(saved).toEqual([{ accounts: [expect.objectContaining({ login: 'alice', name: 'Alice A', email: 'alice@acme.test', repos: ['acme/tracker', 'acme/api', 'acme/web'] })] }])
+  })
+
+  it('does nothing when accounts appeared meanwhile, or the backup fails', async () => {
+    let cfg = legacy
+    const save = async () => ({ ok: true })
+    const withAccounts = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [A] })
+    expect(await migrateLegacyConfig({ read: () => cfg, activeLogin: async () => ((cfg = withAccounts), 'alice'), run: async (c, a) => git(c, a), backup: () => {}, save })).toBe('skipped')
+    cfg = legacy
+    expect(await migrateLegacyConfig({ read: () => cfg, activeLogin: async () => 'alice', run: async (c, a) => git(c, a), backup: () => { throw new Error('ro') }, save })).toBe('no backup')
+    expect(await migrateLegacyConfig({ read: () => cfg, activeLogin: async () => null, run: async (c, a) => git(c, a), backup: () => {}, save })).toBe('skipped')
   })
 })
 

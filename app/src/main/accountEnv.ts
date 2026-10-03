@@ -1,8 +1,8 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import type { AccountConfig } from '@shared/appConfig'
-import { accountEnvBlock, githubSshAliases, isMulti, parseGhUser, primaryLogin, type GhAccountStatus } from '@shared/accounts'
+import type { AccountConfig, AppConfig } from '@shared/appConfig'
+import { accountEnvBlock, githubSshAliases, isMulti, migrationAccount, parseGhUser, primaryLogin, type GhAccountStatus } from '@shared/accounts'
 import type { Session } from '@shared/types'
 import type { Runner } from './run'
 
@@ -77,6 +77,50 @@ export function accountsInUse(file: string, sessions: Pick<Session, 'sessionId' 
   return out
 }
 
+/** What decides the accounts' tokens and files: a change refreshes AccountEnv. */
+export function accountsKeyOf(c: Pick<AppConfig, 'accounts'>): string {
+  return JSON.stringify(c.accounts.map((a) => [a.login, !!a.primary, a.name, a.email]))
+}
+
+/**
+ * First launch of the multi-account version: an older config becomes one account (gh's active
+ * login, the global git identity, GitHub filling gaps). The account is built from the config as
+ * `read()` returns it after the network waits, so an edit made meanwhile is kept, and nothing is
+ * written if accounts appeared meanwhile. `backup` throwing: not migrating.
+ */
+export async function migrateLegacyConfig(o: {
+  read: () => AppConfig
+  activeLogin: () => Promise<string | null>
+  run: Runner
+  backup: () => void
+  save: (patch: { accounts: AccountConfig[] }) => Promise<{ ok: boolean; message?: string }>
+}): Promise<'migrated' | 'skipped' | 'no backup' | 'save failed'> {
+  const legacy = (c: AppConfig) => c.configured && !c.accounts.length
+  if (!legacy(o.read())) return 'skipped'
+  const login = await o.activeLogin()
+  if (!login) return 'skipped'
+  const [user, gname, gemail] = await Promise.all([
+    o.run('gh', ['api', 'user'], { timeoutMs: 20_000 }),
+    o.run('git', ['config', '--global', 'user.name'], { timeoutMs: 5_000 }),
+    o.run('git', ['config', '--global', 'user.email'], { timeoutMs: 5_000 }),
+  ])
+  // gh offline, or its active login is another one: the git identity (or the login) fills in.
+  const u = user.code === 0 ? parseGhUser(user.stdout) : null
+  const gh = u && low(u.login) === low(login) ? { name: u.name, id: u.id } : { name: null, id: null }
+  const cfg = o.read()
+  if (!legacy(cfg)) return 'skipped'
+  try {
+    o.backup()
+  } catch (e) {
+    console.error(`accounts migration: no backup (${String(e)}); not migrating`)
+    return 'no backup'
+  }
+  const r = await o.save({ accounts: [migrationAccount(cfg, login, { name: gname.stdout.trim(), email: gemail.stdout.trim() }, gh)] })
+  if (r.ok) return 'migrated'
+  console.error(`accounts migration: ${r.message ?? 'save failed'}`)
+  return 'save failed'
+}
+
 const SSH_WARNING = "your git config sends GitHub pushes over SSH; sessions may push as the SSH key's account"
 
 /**
@@ -95,6 +139,8 @@ export class AccountEnv {
   private bad = new Map<string, { reason: string; token?: string }>()
   private aliases: string[] = []
   private warning: string | null = null
+  /** Logins live sessions run as (last refresh): their files are not removed. */
+  private inUse = new Set<string>()
   private queue: Promise<void> = Promise.resolve()
 
   constructor(
@@ -119,6 +165,7 @@ export class AccountEnv {
 
   private async refreshNow(accounts: AccountConfig[], inUse: Set<string>): Promise<void> {
     this.accounts = accounts
+    this.inUse = inUse
     const logins = new Set(accounts.map((a) => a.login))
     for (const m of [this.tokens, this.bad]) for (const l of [...m.keys()]) if (!logins.has(l)) m.delete(l)
     if (!this.multi()) {
@@ -142,6 +189,7 @@ export class AccountEnv {
     if (t.code !== 0 || !TOKEN.test(token)) {
       this.tokens.delete(a.login)
       this.bad.set(a.login, { reason: `gh is not logged in to ${a.login}` })
+      if (!this.inUse.has(a.login)) rmSync(this.file(a.login), { force: true })
       return
     }
     this.tokens.set(a.login, token)
@@ -154,9 +202,13 @@ export class AccountEnv {
   async check(): Promise<void> {
     if (!this.multi()) return
     const [git] = await Promise.all([
-      this.run('git', ['config', '--global', '--get-regexp', '^url\\..*\\.(push)?insteadof$'], { timeoutMs: 5_000 }),
+      this.run('git', ['config', '--global', '--includes', '--get-regexp', '^url\\..*\\.(push)?insteadof$'], { timeoutMs: 5_000 }),
       ...this.accounts.map((a) => this.checkOne(a)),
     ])
+    if (!this.multi()) {
+      this.warning = null // switched to one account meanwhile
+      return
+    }
     const rule = git.code === 0 ? githubSshRewrite(git.stdout) : null
     this.warning = rule ? `${SSH_WARNING} (${rule})` : null
   }
@@ -174,6 +226,7 @@ export class AccountEnv {
       if (this.bad.delete(a.login)) this.write(a, token)
     } else if (r.code !== 0 && /HTTP 401|Bad credentials/i.test(`${r.stderr}\n${r.stdout}`)) {
       this.bad.set(a.login, { reason: 'the token no longer works', token })
+      rmSync(this.file(a.login), { force: true }) // a dead token: a session re-reading it gains nothing
     }
     // Offline or GitHub down: the last answer stands.
   }
@@ -181,6 +234,7 @@ export class AccountEnv {
   private write(a: AccountConfig, token: string): void {
     const f = this.file(a.login)
     const tmp = `${f}.${process.pid}.tmp`
+    rmSync(tmp, { force: true })
     writeFileSync(tmp, JSON.stringify({ env: accountEnvBlock(a, token, this.aliases) }, null, 1) + '\n', { mode: 0o600 })
     chmodSync(tmp, 0o600)
     renameSync(tmp, f)
@@ -195,6 +249,10 @@ export class AccountEnv {
       return
     }
     for (const n of names) {
+      if (/\.settings\.json\.[^/]*\.tmp$/.test(n)) {
+        rmSync(join(this.dir, n), { force: true }) // a write that never got renamed (it may hold a token)
+        continue
+      }
       const m = /^([A-Za-z0-9-]{1,39})\.settings\.json$/.exec(n)
       if (m && !keep.has(m[1]) && !inUse.has(m[1])) rmSync(join(this.dir, n), { force: true })
     }

@@ -305,15 +305,18 @@ With two or more connected accounts (`isMulti`), `AccountEnv` keeps each account
 (`refresh`: `gh auth token --user`, local only) and writes `accounts/<login>.settings.json` (mode
 600, folder 700, temp + rename) with `accountEnvBlock`'s `env`; ssh aliases come from `~/.ssh/config`
 and its Includes (`readSshConfig`). `check` then asks GitHub in the background (`gh api user`, parsed
-with `parseGhUser`: HTTP 401 or another login → unhealthy, another login's file removed; offline →
-unchanged; a new token clears an old refusal) and runs `git config --global --get-regexp
+with `parseGhUser`: HTTP 401 or another login → unhealthy and its file removed; offline →
+unchanged; a new token clears an old refusal) and runs `git config --global --includes --get-regexp
 '^url\..*\.(push)?insteadof$'`: a rule sending `https://github.com` to an SSH form
 (`githubSshRewrite`) wins over a session's own rewrite, so it shows as a `warning` on every account.
-`refreshAccounts` in `index.ts` runs at launch, when the config's accounts (login, name, email)
-change (state callback) and hourly. A disconnected account's file stays while a live session runs
-as it: `accountsInUse` reads `session-accounts.json` for the live sessions (until the agents poll
-has answered, every recorded login counts). With one account it reads and writes nothing, removes every file not
-in use, `runEnv` gives `{env: {}}` and `settingsArgs` no arguments.
+`refreshAccounts` in `index.ts` runs at launch, when the config's accounts (login, primary, name, email:
+`accountsKeyOf`) change (state callback) and hourly. A disconnected account's file, or one gh is no longer logged
+in to, stays while a live session runs as it (`accountsInUse` reads `session-accounts.json` for the
+live sessions; until the agents poll has answered, every recorded login counts). Leftover
+`*.settings.json.*.tmp` files go on each refresh. With one account it reads and writes nothing,
+removes every file not in use, `runEnv` gives `{env: {}}` and `settingsArgs` no arguments. The
+migration (`migrateLegacyConfig`) builds the account from the config re-read after its network
+waits, and writes nothing if accounts appeared meanwhile.
 
 ## Preload and IPC
 

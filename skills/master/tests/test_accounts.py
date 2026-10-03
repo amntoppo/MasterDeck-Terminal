@@ -94,3 +94,27 @@ class AccountsSaveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MigratedLegacyProjectTest(unittest.TestCase):
+    def test_migrated_single_project_keeps_top_level_board(self):
+        """An older config with one `project` becomes one account (as the app's migrationAccount
+        writes it); saving it leaves the top-level board fields exactly as they were."""
+        legacy = {"owner": "acme", "ownerType": "organization", "issueRepo": "tracker", "repos": ["acme/tracker"],
+                  "project": 5, "projectId": "PVT_5", "statusFieldId": "PVTF_1",
+                  "statusOptions": {"Todo": "o1", "Done": "o2"}, "columns": ["Todo", "Done"],
+                  "statuses": {"ready": "Todo", "inProgress": "Todo", "done": ["Done"]}}
+        migrated = {"login": "alice", "primary": True, "name": "Alice", "email": "a@acme.test", "owner": "acme",
+                    "ownerType": "organization", "issueRepo": "tracker", "repos": ["acme/tracker"], "allRepos": False,
+                    "projects": [{"owner": "acme", "ownerType": "organization", "number": 5, "id": "PVT_5",
+                                  "title": "Project 5", "statusField": "Status", "statusFieldId": "PVTF_1",
+                                  "statusOptions": {"Todo": "o1", "Done": "o2"}, "columns": ["Todo", "Done"],
+                                  "statuses": legacy["statuses"], "sprintField": "Sprint"}],
+                    "allProjects": False}
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps(legacy))
+            before = config.load(path)
+            after = setup.save({"accounts": [migrated]}, path)
+        for k in ("owner", "issueRepo", "repos", "project", "projectId", "statusFieldId", "statusOptions", "columns", "statuses"):
+            self.assertEqual(after[k], before[k], k)
