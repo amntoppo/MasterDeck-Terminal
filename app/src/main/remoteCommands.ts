@@ -18,6 +18,10 @@ export interface RemoteDeps {
   sendNow(s: Session, text: string): Promise<CliResult>
   queueEdit(sessionId: string, edit: QueueEdit): CliResult
   setManualStatus(key: string, status: unknown): CliResult
+  /** isMulti(getConfig()): two or more accounts in the config (ahead of state.ghAccounts at startup). */
+  isMulti(): boolean
+  /** The logins in the config. */
+  configLogins(): string[]
 }
 
 /** `transient`: not a final answer (MasterDeck is still loading); the caller runs it again later. */
@@ -120,12 +124,18 @@ export class RemoteCommands {
         return this.deps.inboxAct(cmd.itemId, action, { ...rest, by })
       }
       case 'session.start': {
-        // Multi mode only (two or more accounts): a named account must be one this Mac has connected and can use now.
-        // One account: the field is dropped and the session starts as today (F7).
-        const accts = st.ghAccounts ?? []
-        const account = accts.length >= 2 ? cmd.args.account : undefined
-        if (account && !accts.some((a) => a.login === account && a.healthy))
-          return { ok: false, message: `${account} is not a GitHub account connected on this Mac` }
+        // One account: the field is dropped and the session starts as today (F7). Two or more: it must be a configured
+        // login that is healthy now; ghAccounts lags the config, so an unlisted one fails closed (never dropped).
+        let account: string | undefined
+        if (cmd.args.account && this.deps.isMulti()) {
+          const want = cmd.args.account.toLowerCase()
+          const login = this.deps.configLogins().find((l) => l.toLowerCase() === want)
+          if (!login) return { ok: false, message: `${cmd.args.account} is not a GitHub account connected on this Mac` }
+          const st2 = (st.ghAccounts ?? []).find((a) => a.login.toLowerCase() === want)
+          if (!st2) return { ok: false, message: 'GitHub accounts are still loading on this Mac; try again in a few seconds' }
+          if (!st2.healthy) return { ok: false, message: `${login} is not a GitHub account connected on this Mac` }
+          account = login
+        }
         const d = await this.deps.draftAssign({ repo: cmd.args.repo ?? null, number: cmd.args.issue })
         if (!d.ok) return { ok: false, message: d.message }
         const prompt = cmd.args.prompt?.trim()

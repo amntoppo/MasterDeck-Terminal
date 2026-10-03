@@ -824,6 +824,8 @@ const remoteCommands = new RemoteCommands(
       return { ok, message };
     },
     setManualStatus: (key, status) => sources.setManualStatus(key, status),
+    isMulti: () => isMulti(getConfig()),
+    configLogins: () => getConfig().accounts.map((a) => a.login),
   },
   join(paths.home, "remote-done.json"),
 );
