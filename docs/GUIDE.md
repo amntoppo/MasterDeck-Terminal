@@ -463,7 +463,8 @@ Stored in `~/.claude/masterdeck/settings.json`.
   hooks). Saved to `~/.claude/master/config.json`.
 - **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
-  (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it is a
+  (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the
+  first `gh pr create` of a session with an instruction to review the diff, then lets the retry go through. It is a
   step of the Default workflow, so a workflow without the self-review step skips it. Older versions
   installed hooks for babysit-ticket, babysit-pr and queue; MasterDeck removes exactly those once,
   at launch (a backup of `~/.claude/settings.json` is kept), and does that work itself.

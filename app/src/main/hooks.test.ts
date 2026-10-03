@@ -1,9 +1,10 @@
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { guardedBuiltin } from '@shared/flow'
-import { hookStatus, installDeckHooks, LEGACY_COMMANDS, migrateLegacyHooks } from './hooks'
+import { hookStatus, installDeckHooks, installReviewGate, LEGACY_COMMANDS, migrateLegacyHooks, reviewGateCommand } from './hooks'
 
 const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook'
 const entry = (command: string, matcher?: string) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] })
@@ -67,5 +68,62 @@ describe.skipIf(process.platform === 'win32')('hookStatus', () => {
     s.hooks.Stop.push(entry('$HOME/.claude/hooks/queue-drain.sh'))
     writeFileSync(p, JSON.stringify(s))
     expect(hookStatus(p)).toEqual({ queue: false, foreignQueue: true, reviewGate: false })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('migrateLegacyHooks, shared matcher', () => {
+  it("removes MasterDeck's command and keeps the user's in one matcher", () => {
+    const d = mkdtempSync(join(tmpdir(), 'mig-'))
+    const p = join(d, 'settings.json')
+    writeFileSync(p, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: TT }, { type: 'command', command: 'mine.sh' }] }] } }))
+    expect(migrateLegacyHooks(p, d).removed).toEqual(['ticket (SessionStart)'])
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    expect(s.hooks.SessionStart).toEqual([{ hooks: [{ type: 'command', command: 'mine.sh' }] }])
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('review gate', () => {
+  const SID = '66666666-6666-4666-8666-666666666666'
+  const gate = (home: string, cwd: string, command: string) =>
+    execFileSync('bash', ['-c', reviewGateCommand(home)], { cwd, input: JSON.stringify({ session_id: SID, tool_name: 'Bash', tool_input: { command } }), env: { ...process.env, TMPDIR: home } }).toString()
+  const repoIn = (home: string) => {
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    execFileSync('git', ['init', '-q', repo])
+    execFileSync('git', ['-C', repo, '-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '--allow-empty', '-m', 'x'])
+    return repo
+  }
+  it('denies the first gh pr create per session, then lets it through', () => {
+    const home = mkdtempSync(join(tmpdir(), 'rg-'))
+    const repo = repoIn(home)
+    expect(gate(home, repo, 'echo "gh pr create later" > notes.txt')).toBe('')
+    const first = JSON.parse(gate(home, repo, 'git push && gh pr create --fill'))
+    expect(first.hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' })
+    expect(first.hookSpecificOutput.permissionDecisionReason).toMatch(/review your diff against the base branch/)
+    expect(gate(home, repo, 'gh pr create --fill')).toBe('')
+  }, 20_000)
+  it('lets it through when a hand-run babysit-pr wrote the marker for HEAD', () => {
+    const home = mkdtempSync(join(tmpdir(), 'rg-'))
+    const repo = repoIn(home)
+    const sha = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString().trim()
+    writeFileSync(join(repo, '.git', `pr-selfreview-${sha}`), '')
+    expect(gate(home, repo, 'gh pr create --fill')).toBe('')
+  }, 20_000)
+  it('skips sessions whose workflow left pr-review out', () => {
+    const home = mkdtempSync(join(tmpdir(), 'rg-'))
+    mkdirSync(join(home, 'workflows', 'sessions'), { recursive: true })
+    writeFileSync(join(home, 'workflows', 'sessions', `${SID}.json`), JSON.stringify({ builtins: ['ticket'] }))
+    expect(gate(home, home, 'gh pr create')).toBe('')
+  })
+  it('installs once, and removes', () => {
+    const d = mkdtempSync(join(tmpdir(), 'rg-'))
+    const p = join(d, 'settings.json')
+    writeFileSync(p, '{}')
+    installReviewGate(p, d, d, true)
+    installReviewGate(p, d, d, true)
+    expect(readFileSync(p, 'utf8').split('masterdeck-review-gate').length - 1).toBe(1)
+    expect(hookStatus(p).reviewGate).toBe(true)
+    installReviewGate(p, d, d, false)
+    expect(hookStatus(p).reviewGate).toBe(false)
   })
 })

@@ -163,7 +163,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         </Field>
         <Field label="Queue" hint="/queue <prompt> in any Claude session stores a prompt; the next one runs when a turn ends.">
           <span className={hooks.queue ? 'ok' : 'muted'}>
-            {hooks.foreignQueue ? 'Handled by queue hooks you installed by hand' : hooks.queue ? "MasterDeck's hook" : 'Not installed (macOS and Linux only)'}
+            {hooks.foreignQueue && hooks.queue ? 'Handled by queue hooks you installed by hand' : hooks.foreignQueue ? "Only one of the queue skill's hooks is in settings.json; MasterDeck's queue is off" : hooks.queue ? "MasterDeck's hook" : 'MasterDeck\'s hook is not installed (macOS and Linux only, or the install failed; see the log)'}
           </span>
         </Field>
         <Field label="Self-review gate" hint="Before gh pr create, a session reviews its branch first. A step of the Default workflow (pr-review): a workflow without it skips the gate.">

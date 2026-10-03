@@ -62,6 +62,7 @@ describe('workflow model', () => {
   })
   it('names MasterDeck hooks and places hooks on the stages', () => {
     expect(hookOwner('"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook')).toBe('babysit-ticket (legacy)')
+    expect(hookOwner('x # masterdeck-review-gate')).toBe('MasterDeck (self-review before a PR)')
     expect(hookOwner(stepCommand(step({})))).toBe('custom step deploy-ab12')
     expect(stageOf({ event: 'SessionStart', command: 'node x.js' })).toBe('session')
     expect(stageOf({ event: 'Stop', command: 'q' })).toBe('instructions')

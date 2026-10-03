@@ -158,7 +158,7 @@ export class RemoteCommands {
         if (s.state === 'suspended') return { ok: false, message: `${s.name} is suspended; resume it first` }
         if (cmd.args.via === 'now' || s.state === 'idle') return this.deps.sendNow(s, cmd.args.text)
         if (!st.hooks.queue)
-          return { ok: false, message: "nothing runs /queue on this machine (MasterDeck's hook is not installed: Windows, or MASTERDECK_NO_HOOK), so a queued message would never be sent; send it now instead" }
+          return { ok: false, message: "nothing runs /queue on this machine (no complete queue hook is installed), so a queued message would never be sent; send it now instead" }
         return this.deps.queueEdit(s.sessionId, { op: 'add', text: cmd.args.text })
       }
       case 'queue.edit': {

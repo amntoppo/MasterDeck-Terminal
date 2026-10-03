@@ -136,6 +136,12 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   off: board moves, self-review and the PR watch are Default-workflow steps. There is no install
   path for skill hooks any more (no `installHooks`, no `hooksInstall` IPC); the skills stay
   installed for use by hand.
+- Review gate: `reviewGateCommand`/`installReviewGate` (marker `REVIEW_MARK`) put a PreToolUse Bash
+  hook in settings.json at every launch (via `refreshHooks()` after). It is `guardedBuiltin('pr-review')`,
+  so a session whose workflow leaves the step out is skipped; it fires only when the command runs
+  `gh pr create` (`runsOrExit`), denies the first try of a session with a short review instruction
+  (marker `$TMPDIR/masterdeck-review-<session>`), and lets the retry through, as it does when
+  `.git/pr-selfreview-<HEAD sha>` exists (a hand-run /babysit-pr).
 - `main/deckHooks.ts` writes `<home>/deck/hook.sh` (one script for every event, `$1` = event) and
   reads what it leaves: `pending/<id>.json` + `answers/<id>.json` (PermissionRequest and
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`

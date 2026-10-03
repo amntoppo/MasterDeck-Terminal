@@ -139,6 +139,7 @@ import {
   deckHooksInstalled,
   hookStatus,
   installDeckHooks,
+  installReviewGate,
   installWorkflowHooks,
   migrateLegacyHooks,
 } from "./hooks";
@@ -2588,6 +2589,15 @@ app.whenReady().then(async () => {
       } catch (e) {
         console.error(`hook migration: ${String(e)}`);
       }
+  }
+  // Always in place; guardedBuiltin skips sessions whose workflow leaves pr-review out.
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  ) {
+    const g = installReviewGate(paths.claudeSettings, paths.home, paths.home, true);
+    if (!g.ok) console.error(g.message);
   }
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,

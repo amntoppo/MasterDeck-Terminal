@@ -72,9 +72,10 @@ the repo-root [TODO.md](../TODO.md).
   filter. Needs repro steps from the user. Where: `app/src/shared/boardFilter.ts`, `BoardView.tsx`.
 - **gamerun-app PR #140 (feat/org-join-code)**: closed unmerged on purpose; the merge-conflict
   question was never answered; 4 local commits unpushed there. Other repo; ask the user.
-- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details; the pr-watch hook
-  firing on any command that contains `gh pr create` (check it uses `runsOrExit`,
-  `app/src/shared/workflow.ts`).
+- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details.
+- **Orphaned babysit-proof hook**: older machines may still have a babysit-proof `PROOF_PRE`
+  PreToolUse hook in `~/.claude/settings.json` (the skill is gone; `migrateLegacyHooks` does not
+  remove it). Remove by hand, or add it to `LEGACY`.
 - **Cleanup** (list exact paths, delete only those): remote-probe transcript folders under
   `~/.claude/projects`; scratch dirs in `~/.claude/jobs/*/tmp`; the leftover untracked
   `skills/babysit-proof/` (only `__pycache__`, skill removed in 9329db4).
@@ -83,6 +84,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Self-review gate of MasterDeck's own (`reviewGateCommand`/`installReviewGate`, always installed, `pr-review` decides per session; first `gh pr create` of a session denied with a review instruction; passes on a babysit-pr marker); built-ins say MasterDeck does them | feat/native-babysit | plan H |
 | Skill hooks out, once (`migrateLegacyHooks`: exact MasterDeck commands and `masterdeck-builtin` wrappers only, `native-hooks.json`); Settings → Hooks shows Queue and Self-review gate as status; Skills popup without switches; `/queue` gates on MasterDeck's queue | feat/native-babysit | plan H |
 | `/queue` through MasterDeck's own hook (UserPromptSubmit stores; Stop handshake: app claims by rename and answers, else the hook drains; queue-off when the skill's hooks are installed; `MASTERDECK_QUEUE_DIR`) | feat/native-babysit | plan H |
 | PR watch by MasterDeck (PrWatch: light query per 50 PRs, heavy only when changed, viewer-gated seen set, Details rows, review offers de-duplicated; Settings → Watch new PRs) | feat/native-babysit | plan H |

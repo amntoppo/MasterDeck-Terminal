@@ -219,6 +219,9 @@ export function hookOwner(command: string): string | null {
   if (trigger) return `workflow (${trigger.replace(/-/g, " ")})`;
   if (step) return `custom step ${step[1]}`;
   // Hooks older versions installed for the skills (taken out once at launch), or put there by hand.
+  // Keep in step with REVIEW_MARK in main/hooks.ts (shared code cannot import it).
+  if (command.includes("masterdeck-review-gate"))
+    return "MasterDeck (self-review before a PR)";
   if (command.includes("babysit-ticket/scripts/tt.sh"))
     return "babysit-ticket (legacy)";
   if (command.includes("pr-selfreview-"))
@@ -360,7 +363,7 @@ export const STAGES: Stage[] = [
     what: "Just before `gh pr create`.",
     trigger: "before-pr",
     builtin: [
-      "Self-review (Default workflow): review the branch diff and fix findings first",
+      "MasterDeck's review gate: review the diff against the base branch first (Default workflow)",
     ],
   },
   {

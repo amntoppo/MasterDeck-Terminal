@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CliResult, HookStatus } from "@shared/types";
-import { STEP_MARK } from "@shared/workflow";
+import { runsOrExit, shellQuote, STEP_MARK, TRIGGERS } from "@shared/workflow";
 import {
   customTriggerCommand,
   flowTriggerCommand,
@@ -100,8 +100,55 @@ export function migrateLegacyHooks(
   return { removed: [...new Set(removed)] };
 }
 
-/** The self-review gate's marker (installed by the review gate, Task 10). */
+/** The self-review gate's marker (in its command line; hookStatus and the installer find it). */
 export const REVIEW_MARK = "masterdeck-review-gate";
+
+const REVIEW_REASON =
+  "MasterDeck: before creating this PR, review your diff against the base branch (git diff <base>...HEAD): look for bugs, leftover debug code and changes outside the task; " +
+  "fix what you find and commit. Then run gh pr create again (it is let through the second time). Skip the review only if the user said to.";
+
+/**
+ * Before `gh pr create` (a command that runs it, not text that mentions it): deny the first try of
+ * a session with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
+ * wrote `.git/pr-selfreview-<HEAD sha>`. Skipped for sessions whose workflow left the pr-review
+ * built-in out (guardedBuiltin). bash 3.2.
+ */
+export function reviewGateCommand(home: string): string {
+  const before = TRIGGERS.find((t) => t.id === "before-pr")!.command!;
+  const inner = [
+    `input=$(cat)`,
+    `cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')`,
+    runsOrExit(before),
+    `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"')`,
+    `case "$sid" in *[!A-Za-z0-9-]*) exit 0;; esac`,
+    `sha=$(git rev-parse HEAD 2>/dev/null) && [ -f "$(git rev-parse --git-path "pr-selfreview-$sha" 2>/dev/null)" ] && exit 0`,
+    `m="\${TMPDIR:-/tmp}/masterdeck-review-$sid"; [ -f "$m" ] && exit 0; touch "$m"`,
+    `jq -n --arg r ${shellQuote(REVIEW_REASON)} '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'`,
+  ].join("; ");
+  return `${guardedBuiltin("pr-review", inner, home)} # ${REVIEW_MARK}`;
+}
+
+/** Install (or with `on` false remove) the review gate; idempotent. A changed home reinstalls. */
+export function installReviewGate(
+  settingsPath: string,
+  backupDir: string,
+  home: string,
+  on: boolean,
+): CliResult {
+  if (process.platform === "win32") return { ok: true, message: "skipped" };
+  try {
+    const s = read(settingsPath);
+    const cmd = reviewGateCommand(home);
+    if (on ? has(s, "PreToolUse", cmd) : !has(s, "PreToolUse", REVIEW_MARK))
+      return { ok: true, message: "already set" };
+    remove(s, "PreToolUse", REVIEW_MARK);
+    if (on) add(s, "PreToolUse", "Bash", cmd, REVIEW_MARK, 10);
+    write(settingsPath, backupDir, s);
+    return { ok: true, message: on ? "review gate installed" : "review gate removed" };
+  } catch (e) {
+    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` };
+  }
+}
 
 /** The queue skill's hook scripts by name: from ~/.claude/skills or ~/.claude/hooks alike. */
 const Q_SUBMIT_MARK = "queue-submit.sh";

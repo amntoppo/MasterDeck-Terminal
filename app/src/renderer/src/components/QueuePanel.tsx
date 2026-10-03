@@ -100,7 +100,7 @@ export function QueuePanel({ state, activeKey, onClose }: Props) {
         </button>
       </div>
       {!state.hooks.queue && (
-        <div className="banner">MasterDeck's hook is not installed on this machine, so queued prompts never run (it needs macOS or Linux).</div>
+        <div className="banner">Nothing runs /queue on this machine right now (MasterDeck's hook is not installed, or only half of the queue skill's hooks are), so queued prompts never run.</div>
       )}
       {msg && (
         <div className="banner" style={{ color: 'var(--muted)', background: 'var(--bg-2)' }} onClick={() => setMsg(null)}>

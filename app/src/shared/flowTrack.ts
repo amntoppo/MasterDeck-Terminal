@@ -1,6 +1,6 @@
 /**
  * Where a session is in its workflow, from what it did: the Bash commands in its transcript (a
- * push, `gh pr create`, `gh pr merge`, babysit-ticket's link), its PRs on GitHub (opened, merged),
+ * push, `gh pr create`, `gh pr merge`, a ticket link), its PRs on GitHub (opened, merged),
  * its last turn end, and the steps MasterDeck's hooks logged. The hooks' log alone is not enough:
  * built-in steps don't write to it, and a session keeps the hooks it started with (Claude Code
  * reads them once, at start), so older sessions never log.

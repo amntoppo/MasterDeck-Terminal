@@ -98,7 +98,7 @@ describe('RemoteCommands', () => {
     const d = deps(st([sess('busy', 'working')], [], false))
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.send', args: { key: 'busy', text: 'x', via: 'queue' } }))).toEqual({
       ok: false,
-      message: "nothing runs /queue on this machine (MasterDeck's hook is not installed: Windows, or MASTERDECK_NO_HOOK), so a queued message would never be sent; send it now instead",
+      message: "nothing runs /queue on this machine (no complete queue hook is installed), so a queued message would never be sent; send it now instead",
     })
     expect(d.queueEdit).not.toHaveBeenCalled()
   })
