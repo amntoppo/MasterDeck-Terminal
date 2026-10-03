@@ -220,7 +220,9 @@ checkout whose branch was once linked to a ticket does not link it.
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
-  <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
+  <prompt>`, `/queue list` and `/queue clear` do the same. `/queue` is handled by MasterDeck's own
+  hook, so it works in any Claude session on macOS and Linux, MasterDeck open or not; if you
+  installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them.
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you

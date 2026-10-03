@@ -83,6 +83,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| `/queue` through MasterDeck's own hook (UserPromptSubmit stores; Stop handshake: app claims by rename and answers, else the hook drains; queue-off when the skill's hooks are installed; `MASTERDECK_QUEUE_DIR`) | feat/native-babysit | plan H |
 | PR watch by MasterDeck (PrWatch: light query per 50 PRs, heavy only when changed, viewer-gated seen set, Details rows, review offers de-duplicated; Settings → Watch new PRs) | feat/native-babysit | plan H |
 | Board moves by MasterDeck (BoardFlow: link spawned sessions, PR links, PR Raised only once the PR is ready, Dev Done when all merged; linked steps for native links) | feat/native-babysit | plan H |
 | Create with Claude hands tickets to MasterDeck (requests/answers folders; 90 s wait, stale-request sweep, body-file realpath containment) | feat/native-babysit | plan H |

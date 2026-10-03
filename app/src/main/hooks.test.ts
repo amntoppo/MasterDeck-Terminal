@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { hookStatus, installHooks } from './hooks'
+import { hookStatus, installHooks, queueSkillHooked } from './hooks'
 
 describe.skipIf(process.platform === 'win32')('hooks', () => {
   it('adds, keeps other settings, is idempotent, and removes', () => {
@@ -31,5 +31,17 @@ describe.skipIf(process.platform === 'win32')('hooks', () => {
     expect(hookStatus(p).queue).toBe(true)
     installHooks(p, d, { ticket: false, pr: false, queue: true })
     expect(readFileSync(p, 'utf8').split('queue-submit.sh').length - 1).toBe(1)
+  })
+})
+
+describe('queueSkillHooked', () => {
+  it('sees any queue skill hook, hand-installed under ~/.claude/hooks too', () => {
+    const d = mkdtempSync(join(tmpdir(), 'hooks-'))
+    const p = join(d, 'settings.json')
+    expect(queueSkillHooked(p)).toBe(false)
+    writeFileSync(p, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"$HOME/.claude/hooks/queue-drain.sh"' }] }] } }))
+    expect(queueSkillHooked(p)).toBe(true)
+    writeFileSync(p, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/h/deck/hook.sh" Stop' }] }] } }))
+    expect(queueSkillHooked(p)).toBe(false)
   })
 })

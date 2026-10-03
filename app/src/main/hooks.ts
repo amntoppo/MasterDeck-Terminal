@@ -115,6 +115,19 @@ export function hookStatus(settingsPath: string): HookStatus {
   }
 }
 
+/** Any of the queue skill's hooks in settings.json (by hand or older MasterDeck): MasterDeck's own
+ * hook then leaves /queue to them, so no prompt is stored or run twice. */
+export function queueSkillHooked(settingsPath: string): boolean {
+  try {
+    const s = read(settingsPath);
+    return (
+      has(s, "UserPromptSubmit", Q_SUBMIT_MARK) || has(s, "Stop", Q_DRAIN_MARK)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function write(settingsPath: string, backupDir: string, s: Settings): void {
   if (existsSync(settingsPath)) {
     mkdirSync(backupDir, { recursive: true });

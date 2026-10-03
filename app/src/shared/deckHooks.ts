@@ -15,6 +15,7 @@ export const DECK_EVENTS = [
   "PostCompact",
   "CwdChanged",
   "SessionStart",
+  "UserPromptSubmit",
   "Stop",
 ] as const;
 export type DeckEvent = (typeof DECK_EVENTS)[number];

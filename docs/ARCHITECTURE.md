@@ -129,6 +129,11 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`
   (printed on SessionStart), `watch-requests/` + `watch-answers/` (Monitor takeover),
   `events.jsonl` (the rest; emptied at launch past 4 MB), `alive`, `monitors-by`.
+  It also handles `/queue`: UserPromptSubmit stores `/queue <prompt>` (any other prompt returns at
+  once, unread and unlogged); Stop hands over the next item through `queue-requests/<id>.json` →
+  claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when
+  `hooks.ts` `queueSkillHooked` sees the queue skill's own hooks in settings.json) leaves `/queue`
+  to those hooks.
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
 
 ### Monitors (watches) and schedules
@@ -178,9 +183,15 @@ One MasterDeck hook per trigger in settings.json reads the session's copy.
 
 ### Queue
 
-`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (the `queue` skill's file; its
-UserPromptSubmit hook appends, its Stop hook sends the first item). Writes are temp + rename; an
-empty queue has no file. Remote `session.send` with `via: queue` adds here (needs `hooks.queue`).
+`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` moves it;
+the `queue` skill uses the same file). MasterDeck's hook stores `/queue …`; at a Stop the app
+(running) or the hook (not running) hands over the next prompt, claimed by rename so it runs once:
+the hook leaves a request and waits 4 s; `pumpQueue` (`index.ts`, every second with `pumpWatches`)
+claims it, answers with `queueAnswer` and only then shifts the item (a crash repeats a prompt rather
+than losing it). Not claimed in time, the hook renames the request back itself and drains one item;
+claimed, it waits up to 3 s more for the answer (worst case ~7 s, under the 10 s hook timeout).
+Writes are temp + rename; an empty queue has no file. Remote `session.send` with `via: queue` adds
+here (needs `hooks.queue`).
 
 ### Sender and PTYs
 
@@ -335,7 +346,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
-| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
+| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
@@ -348,5 +359,5 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `claude-settings.json`, `skills/` | only with `MASTERDECK_ISOLATED=1` |
 
 Elsewhere: `~/.claude/settings.json` (hooks, status line), `~/.claude/skills/` (bundled skills),
-`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/`, `~/.claude/babysit-ticket/`,
+`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
 `~/.claude/gh-cache/`, `~/.claude/projects/` (transcripts, read-only), Electron user data.

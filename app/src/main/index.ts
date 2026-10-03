@@ -85,6 +85,7 @@ import { configuredModel } from "./models";
 import {
   editQueue,
   isQueueEdit,
+  queueAnswer,
   readQueue,
   shiftQueue,
   unshiftQueue,
@@ -138,6 +139,7 @@ import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
+  queueSkillHooked,
   hookStatus,
   installDeckHooks,
   installHooks,
@@ -270,10 +272,30 @@ const watches = new Watches(
     ),
   () => sources.changed(),
 );
+/** A session's turn ended with prompts queued: hand it the next one through the hook (once). */
+function pumpQueue(): void {
+  for (const r of deckHooks.queueRequests()) {
+    if (!deckHooks.claimQueue(r.id)) continue;
+    const items = readQueue(r.sid);
+    // Peek, answer, then take it off: a crash in between repeats a prompt rather than losing it.
+    deckHooks.answerQueue(
+      r.id,
+      items.length ? queueAnswer(items[0], items.length - 1) : {},
+    );
+    if (items.length) shiftQueue(r.sid);
+  }
+}
+/** Hook status in the UI, and whether MasterDeck's hook leaves /queue to the skill's hooks. */
+function refreshHooks(): void {
+  sources.setHooks(hookStatus(paths.claudeSettings));
+  if (process.platform !== "win32")
+    deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
+}
 /** Monitor calls already answered (the hook removes its file once it read the answer). */
 const answeredWatches = new Map<string, number>();
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
+  pumpQueue();
   const by = sources.getSettings().monitorsBy;
   const now = Date.now();
   for (const [id, at] of answeredWatches)
@@ -1914,7 +1936,7 @@ function registerIpc(): void {
       pr: !!which?.pr,
       queue: !!which?.queue,
     });
-    sources.setHooks(hookStatus(paths.claudeSettings));
+    refreshHooks();
     return r;
   });
   reg.handle(CH.skillReinstall, (_e, name: unknown) => {
@@ -2229,7 +2251,7 @@ function registerIpc(): void {
           ...hooks,
           [key]: false,
         });
-        sources.setHooks(hookStatus(paths.claudeSettings));
+        refreshHooks();
       }
     }
     refreshSkills();
@@ -2575,12 +2597,13 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
-  sources.setHooks(hookStatus(paths.claudeSettings));
+  refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
+      deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
       sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
       watches.load();
