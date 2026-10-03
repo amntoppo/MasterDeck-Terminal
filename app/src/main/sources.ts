@@ -287,7 +287,7 @@ export class Sources {
   private teamPrsError: string | null = null;
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
-  private hooks: HookStatus = { ticket: false, pr: false, queue: false };
+  private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;

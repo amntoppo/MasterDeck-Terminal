@@ -81,10 +81,9 @@ Or build it yourself (see [Develop](#develop)).
    Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub account,
    Repos & boards, Preferences): change any of them and Save.
 
-   Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the skills: add or remove each
-   one, and choose which run by themselves through a hook in `~/.claude/settings.json` (a backup is
-   made first): babysit-ticket moves the board, babysit-pr steps in around `gh pr create`, and `/queue`
-   works.
+   Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the bundled skills: add or
+   remove each one. They are optional, for use by hand: MasterDeck moves the board, watches PRs and
+   runs `/queue` itself.
 
    **Skip for now** leaves GitHub unset: sessions work, and the Board and PRs views offer **Connect your
    GitHub**, which opens Setup again.

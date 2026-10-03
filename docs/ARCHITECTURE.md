@@ -32,9 +32,10 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
 3. `registerIpc()` — every handler through `reg = new IpcRegistry(ipcMain)`.
 4. `loadMacKey(<home>/browser-key, safeStorage)` (the web app's Mac key).
 5. Status line hook (`statusline.ts`: install or refresh `statusline_tee.py`), bundled skills
-   (`syncSkills`), hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
-   `setInterval(pumpWatches, 1000)`, `installDeckHooks`), workflow migration + hook sync +
-   `guardBuiltinHooks`.
+   (`syncSkills`), the one-time `migrateLegacyHooks` (non-Windows, not smoke, no
+   `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), hook status, MasterDeck's deck hook
+   (non-Windows: `deckHooks.setup()`, monitors, `setInterval(pumpWatches, 1000)`,
+   `installDeckHooks`, then `refreshHooks()` again), workflow migration + hook sync.
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
 7. `createWindow()`, `sources.start()`, `syncRemote()`.
 
@@ -122,8 +123,19 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 ### Hooks
 
 - `main/hooks.ts` edits `~/.claude/settings.json` (backups, atomic writes, marker per hook):
-  `hookStatus` (`HookStatus`: `ticket`, `pr`, `queue`, …), `installHooks`, `installWorkflowHooks`,
-  `installDeckHooks`, `guardBuiltinHooks`.
+  `hookStatus` (`HookStatus`: `queue` = something runs `/queue`: the deck hook with no skill queue
+  hook beside it, or both skill queue hooks; `foreignQueue` = any queue skill hook, e.g. a
+  hand-installed `$HOME/.claude/hooks/queue-submit.sh`; `reviewGate` = `REVIEW_MARK` in
+  PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
+- `migrateLegacyHooks(settingsPath, backupDir)` runs once at launch (`<home>/native-hooks.json`
+  records it with what it removed). It removes only what older MasterDeck versions wrote for the
+  skills: the exact commands in `LEGACY_COMMANDS` (tt.sh hook, babysit-pr's pre/post `gh pr create`
+  hooks, the queue skill's `~/.claude/skills/queue/scripts/*`) or their `# masterdeck-builtin:<id>`
+  wrappers. Everything else stays, including queue hooks installed by hand (they keep MasterDeck's
+  queue off). It writes (backup first, atomic) only when it removed something. Nothing is switched
+  off: board moves, self-review and the PR watch are Default-workflow steps. There is no install
+  path for skill hooks any more (no `installHooks`, no `hooksInstall` IPC); the skills stay
+  installed for use by hand.
 - `main/deckHooks.ts` writes `<home>/deck/hook.sh` (one script for every event, `$1` = event) and
   reads what it leaves: `pending/<id>.json` + `answers/<id>.json` (PermissionRequest and
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`
@@ -132,7 +144,8 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   It also handles `/queue`: UserPromptSubmit stores `/queue <prompt>` (any other prompt returns at
   once, unread and unlogged); Stop hands over the next item through `queue-requests/<id>.json` →
   claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when
-  `hooks.ts` `queueSkillHooked` sees the queue skill's own hooks in settings.json) leaves `/queue`
+  `hooks.ts` `hookStatus().foreignQueue` sees the queue skill's own hooks in settings.json; worked
+  out again whenever settings.json's mtime changes) leaves `/queue`
   to those hooks.
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
 
@@ -355,6 +368,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
+| `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |
 | `remote-device-id` | random UUID sent in `hello` |

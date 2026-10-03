@@ -49,7 +49,6 @@ import { MASTER_NAME, sessionForProposal } from "@shared/derive";
 import type {
   AppState,
   CliResult,
-  HookStatus,
   NotifyEvent,
   PaneSpec,
   Session,
@@ -138,12 +137,10 @@ import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
-  queueSkillHooked,
   hookStatus,
   installDeckHooks,
-  installHooks,
   installWorkflowHooks,
-  guardBuiltinHooks,
+  migrateLegacyHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import {
@@ -280,9 +277,9 @@ function mtimeMs(p: string): number {
 }
 /** Hook status in the UI, and whether MasterDeck's hook leaves /queue to the skill's hooks. */
 function refreshHooks(): void {
-  sources.setHooks(hookStatus(paths.claudeSettings));
-  if (process.platform !== "win32")
-    deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
+  const h = hookStatus(paths.claudeSettings);
+  sources.setHooks(h);
+  if (process.platform !== "win32") deckHooks.setQueueOff(h.foreignQueue);
 }
 /** Monitor calls already answered (the hook removes its file once it read the answer). */
 const answeredWatches = new Map<string, number>();
@@ -295,7 +292,7 @@ function pumpWatches(): void {
   const m = mtimeMs(paths.claudeSettings);
   if (m !== settingsSeen) {
     settingsSeen = m;
-    deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
+    refreshHooks();
   }
   const by = sources.getSettings().monitorsBy;
   const now = Date.now();
@@ -1321,13 +1318,6 @@ function runFlowWatch(state: AppState): void {
 /** Which skills the user removed in the Skills popup. */
 const skillsFile = () => join(paths.home, "skills.json");
 
-/** The hook that belongs to a skill (off when the skill is removed). */
-const SKILL_HOOK: Record<string, keyof HookStatus> = {
-  "babysit-ticket": "ticket",
-  "babysit-pr": "pr",
-  queue: "queue",
-};
-
 function refreshSkills(): void {
   sources.setSkills(
     syncSkills(
@@ -1931,15 +1921,6 @@ function registerIpc(): void {
     });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
-  reg.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, {
-      ticket: !!which?.ticket,
-      pr: !!which?.pr,
-      queue: !!which?.queue,
-    });
-    refreshHooks();
-    return r;
-  });
   reg.handle(CH.skillReinstall, (_e, name: unknown) => {
     if (typeof name !== "string")
       return { ok: false, message: "bad skill name" };
@@ -2244,16 +2225,6 @@ function registerIpc(): void {
     const r = removeSkill(paths.bundledSkills, paths.skillsDir, name);
     if (r.ok) {
       writeRemoved(skillsFile(), [...readRemoved(skillsFile()), name]);
-      // Its hook would call a script that is gone: turn it off too.
-      const key = SKILL_HOOK[name];
-      const hooks = hookStatus(paths.claudeSettings);
-      if (key && hooks[key]) {
-        installHooks(paths.claudeSettings, paths.home, {
-          ...hooks,
-          [key]: false,
-        });
-        refreshHooks();
-      }
     }
     refreshSkills();
     return r;
@@ -2598,13 +2569,32 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
+  // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
+  // that work itself now; the skills stay for use by hand.
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  ) {
+    const marker = join(paths.home, "native-hooks.json");
+    if (!existsSync(marker))
+      try {
+        // Nothing is switched off: self-review and board moves are Default-workflow steps now.
+        const m = migrateLegacyHooks(paths.claudeSettings, paths.home);
+        writeFileSync(
+          marker,
+          JSON.stringify({ at: Date.now(), ...m }, null, 2) + "\n",
+        );
+      } catch (e) {
+        console.error(`hook migration: ${String(e)}`);
+      }
+  }
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
-      deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
       sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
       watches.load();
@@ -2625,6 +2615,8 @@ app.whenReady().then(async () => {
         );
         if (!r.ok) console.error(r.message);
       }
+      // Status and queue-off with the deck hook in place (refreshHooks ran before it was).
+      refreshHooks();
     } catch (e) {
       console.error(`MasterDeck hooks: ${String(e)}`);
     }
@@ -2639,9 +2631,6 @@ app.whenReady().then(async () => {
       workflows().migrate();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
-      // Built-ins a workflow can leave out: their hooks check the session's workflow first.
-      const g = guardBuiltinHooks(paths.claudeSettings, paths.home);
-      if (!g.ok) console.error(g.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }

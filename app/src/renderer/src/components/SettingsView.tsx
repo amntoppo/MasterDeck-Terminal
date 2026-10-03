@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/settings'
 import { SHORTCUTS, showKeys } from '@shared/shortcuts'
-import type { AppState, HookStatus } from '@shared/types'
+import type { AppState } from '@shared/types'
 import { formatAgo } from '@shared/format'
 import { deck, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
@@ -62,11 +62,6 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
 
   const c = state.config
   const hooks = state.hooks
-  const setHook = async (key: keyof HookStatus, on: boolean) => {
-    if (!(await webConfirm(`${on ? 'Install' : 'Remove'} the ${key} hook on your Mac?`, { confirmLabel: on ? 'Install' : 'Remove', danger: !on }))) return
-    const r = await deck().hooksInstall({ ...hooks, [key]: on })
-    flash(r.ok ? (on ? 'Hook installed' : 'Hook removed') : r.message)
-  }
 
   const body: Record<Section, ReactNode> = {
     account: <AccountPanel account={state.account} />,
@@ -166,19 +161,18 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
             </button>
           </div>
         </Field>
-        <Field label="babysit-ticket" hint="Moves board cards as a session works (after each Bash call, at session start).">
-          <button className={`switch ${hooks.ticket ? 'on' : ''}`} role="switch" aria-checked={hooks.ticket} aria-label="babysit-ticket hook" onClick={() => void setHook('ticket', !hooks.ticket)} />
+        <Field label="Queue" hint="/queue <prompt> in any Claude session stores a prompt; the next one runs when a turn ends.">
+          <span className={hooks.queue ? 'ok' : 'muted'}>
+            {hooks.foreignQueue ? 'Handled by queue hooks you installed by hand' : hooks.queue ? "MasterDeck's hook" : 'Not installed (macOS and Linux only)'}
+          </span>
         </Field>
-        <Field label="babysit-pr" hint="Self-review before gh pr create, then a reminder to babysit the PR.">
-          <button className={`switch ${hooks.pr ? 'on' : ''}`} role="switch" aria-checked={hooks.pr} aria-label="babysit-pr hooks" onClick={() => void setHook('pr', !hooks.pr)} />
-        </Field>
-        <Field label="Queue" hint="/queue stores a prompt; the next one runs when a response ends.">
-          <button className={`switch ${hooks.queue ? 'on' : ''}`} role="switch" aria-checked={hooks.queue} aria-label="queue hooks" onClick={() => void setHook('queue', !hooks.queue)} />
+        <Field label="Self-review gate" hint="Before gh pr create, a session reviews its branch first. A step of the Default workflow (pr-review): a workflow without it skips the gate.">
+          <span className={hooks.reviewGate ? 'ok' : 'muted'}>{hooks.reviewGate ? 'Installed' : 'Not installed'}</span>
         </Field>
         <Field label="MasterDeck hook" hint="Permissions from Needs you, exact status, API errors, compactions and ticket context. Installed at launch (macOS and Linux).">
           <span className="ok">Managed by MasterDeck</span>
         </Field>
-        <Field label="Skills" hint="The bundled skills, and which run automatically.">
+        <Field label="Skills" hint="The bundled skills, for use by hand. MasterDeck needs none of them.">
           <button className="btn" onClick={onSkills}>
             Manage skills…
           </button>

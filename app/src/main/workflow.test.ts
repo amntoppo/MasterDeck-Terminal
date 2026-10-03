@@ -57,7 +57,7 @@ describe("collectHooks", () => {
     expect(
       got.map((h) => [h.source, h.where, h.event, h.owner ?? h.command]),
     ).toEqual([
-      ["user", null, "SessionStart", "babysit-ticket"],
+      ["user", null, "SessionStart", "babysit-ticket (legacy)"],
       ["user", null, "StatusLine", "MasterDeck status line (costs)"],
       ["project", "repo", "PreToolUse", "guard.sh"],
       ["plugin", "on", "Stop", "plug-stop.sh"],

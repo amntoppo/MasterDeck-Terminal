@@ -1,27 +1,20 @@
-import type { HookStatus } from './types'
-
-/** What each bundled skill does, for the Skills popup, and the hook that runs it automatically. */
+/** What each bundled skill does, for the Skills popup. None is needed for MasterDeck itself to work. */
 export interface SkillInfo {
   what: string
-  /** The hook that belongs to the skill, and what switching it on does. */
-  hook?: { key: keyof HookStatus; label: string; recommended: boolean }
 }
 
 export const SKILL_INFO: Record<string, SkillInfo> = {
   master: { what: 'The master-agent: finds work in issues, PRs and meetings, proposes it, and starts sessions after your yes.' },
   'babysit-ticket': {
-    what: 'Links a session to its issue and moves the board card as work goes: in progress, PR raised, done.',
-    hook: { key: 'ticket', label: 'Move the board automatically as sessions link, open PRs and merge', recommended: true },
+    what: 'Optional. Links a session to its issue and moves the board card, run by hand (`/babysit-ticket`). MasterDeck does this automatically.',
   },
   'babysit-pr': {
-    what: 'Reviews the branch before a PR is opened, then handles review comments and CI until it merges.',
-    hook: { key: 'pr', label: 'Self-review before `gh pr create`, then babysit the PR', recommended: true },
+    what: "Optional. Self-review before a PR and review-comment babysitting, run by hand (`/babysit-pr`). MasterDeck's own PR watch does the babysitting automatically.",
   },
   'babysit-worktree': { what: 'Moves a session into its own git worktree, so its changes stay apart from your checkout.' },
   'kill-worktree': { what: 'Folds a worktree back into the main checkout, keeping every change.' },
   'worktree-janitor': { what: 'Finds finished worktrees across your repos and cleans up the safe ones.' },
   queue: {
-    what: '`/queue <prompt>` lines up prompts that run one by one as each response ends.',
-    hook: { key: 'queue', label: 'Make /queue work, and the Queue panel', recommended: true },
+    what: "Optional. `/queue <prompt>` lines up prompts. MasterDeck's hook runs it; the skill only explains when that hook is missing.",
   },
 }

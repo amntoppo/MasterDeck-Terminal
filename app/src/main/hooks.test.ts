@@ -1,47 +1,71 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { hookStatus, installHooks, queueSkillHooked } from './hooks'
+import { guardedBuiltin } from '@shared/flow'
+import { hookStatus, installDeckHooks, LEGACY_COMMANDS, migrateLegacyHooks } from './hooks'
 
-describe.skipIf(process.platform === 'win32')('hooks', () => {
-  it('adds, keeps other settings, is idempotent, and removes', () => {
-    const d = mkdtempSync(join(tmpdir(), 'hooks-'))
+const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook'
+const entry = (command: string, matcher?: string) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] })
+
+describe.skipIf(process.platform === 'win32')('migrateLegacyHooks', () => {
+  it("removes exactly what MasterDeck installed for the skills and keeps the user's own", () => {
+    const d = mkdtempSync(join(tmpdir(), 'mig-'))
     const p = join(d, 'settings.json')
-    writeFileSync(p, JSON.stringify({ model: 'x', hooks: { PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'other' }] }] } }))
-    expect(hookStatus(p)).toEqual({ ticket: false, pr: false, queue: false })
-    expect(installHooks(p, d, { ticket: true, pr: true, queue: true }).ok).toBe(true)
-    installHooks(p, d, { ticket: true, pr: true, queue: true })
+    writeFileSync(p, JSON.stringify({
+      model: 'x',
+      hooks: {
+        PostToolUse: [entry(guardedBuiltin('ticket', TT, d), 'Bash'), entry(guardedBuiltin('pr-watch', LEGACY_COMMANDS.prPost, d), 'Bash'), entry('my-own.sh', 'Bash')],
+        SessionStart: [entry(TT)],
+        UserPromptSubmit: [entry('"$HOME/.claude/skills/queue/scripts/queue-submit.sh"'), entry('$HOME/.claude/hooks/queue-submit.sh')],
+        Stop: [entry('"$HOME/.claude/skills/queue/scripts/queue-drain.sh"')],
+      },
+    }))
+    const r = migrateLegacyHooks(p, d)
+    expect(r.removed.sort()).toEqual(['pr (PostToolUse)', 'queue (Stop)', 'queue (UserPromptSubmit)', 'ticket (PostToolUse)', 'ticket (SessionStart)'])
     const s = JSON.parse(readFileSync(p, 'utf8'))
     expect(s.model).toBe('x')
-    expect(hookStatus(p)).toEqual({ ticket: true, pr: true, queue: true })
-    const cmds = JSON.stringify(s.hooks)
-    expect(cmds.split('babysit-ticket/scripts/tt.sh').length - 1).toBe(2)
-    expect(cmds).toContain('other')
-    installHooks(p, d, { ticket: false, pr: true, queue: false })
-    expect(hookStatus(p)).toEqual({ ticket: false, pr: true, queue: false })
-    expect(readFileSync(p, 'utf8')).toContain('other')
-    expect(readFileSync(p, 'utf8')).not.toContain('queue-')
+    expect(JSON.stringify(s.hooks)).toContain('my-own.sh')
+    expect(JSON.stringify(s.hooks)).toContain('$HOME/.claude/hooks/queue-submit.sh')
+    expect(JSON.stringify(s.hooks)).not.toContain('babysit-ticket')
+    expect(s.hooks.Stop).toBeUndefined()
+    expect(readdirSync(d).some((n) => n.startsWith('settings.backup.'))).toBe(true)
+    // The hand-installed queue hook left behind switches MasterDeck's queue off.
+    expect(hookStatus(p).foreignQueue).toBe(true)
   })
-  it('counts a queue install from ~/.claude/hooks and never doubles it', () => {
-    const d = mkdtempSync(join(tmpdir(), 'hooks-'))
+  it('keeps a hand-edited tt.sh call and an unrelated masterdeck-builtin wrapper', () => {
+    const d = mkdtempSync(join(tmpdir(), 'mig-'))
     const p = join(d, 'settings.json')
-    const old = (f: string) => ({ hooks: [{ type: 'command', command: `$HOME/.claude/hooks/${f}`, timeout: 10 }] })
-    writeFileSync(p, JSON.stringify({ hooks: { UserPromptSubmit: [old('queue-submit.sh')], Stop: [old('queue-drain.sh')] } }))
-    expect(hookStatus(p).queue).toBe(true)
-    installHooks(p, d, { ticket: false, pr: false, queue: true })
-    expect(readFileSync(p, 'utf8').split('queue-submit.sh').length - 1).toBe(1)
+    const mine = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook --verbose'
+    writeFileSync(p, JSON.stringify({ hooks: { SessionStart: [entry(mine), entry(guardedBuiltin('ticket', 'my-board.sh', d))] } }))
+    expect(migrateLegacyHooks(p, d)).toEqual({ removed: [] })
+    expect(JSON.parse(readFileSync(p, 'utf8')).hooks.SessionStart).toHaveLength(2)
+  })
+  it('is a no-op on a clean file (no write, no backup)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'mig-'))
+    const p = join(d, 'settings.json')
+    writeFileSync(p, '{"hooks":{}}')
+    expect(migrateLegacyHooks(p, d)).toEqual({ removed: [] })
+    expect(readdirSync(d)).toEqual(['settings.json'])
   })
 })
 
-describe('queueSkillHooked', () => {
-  it('sees any queue skill hook, hand-installed under ~/.claude/hooks too', () => {
-    const d = mkdtempSync(join(tmpdir(), 'hooks-'))
+describe.skipIf(process.platform === 'win32')('hookStatus', () => {
+  it('sees queue hooks installed by hand', () => {
+    const d = mkdtempSync(join(tmpdir(), 'hs-'))
     const p = join(d, 'settings.json')
-    expect(queueSkillHooked(p)).toBe(false)
-    writeFileSync(p, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"$HOME/.claude/hooks/queue-drain.sh"' }] }] } }))
-    expect(queueSkillHooked(p)).toBe(true)
-    writeFileSync(p, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/h/deck/hook.sh" Stop' }] }] } }))
-    expect(queueSkillHooked(p)).toBe(false)
+    writeFileSync(p, JSON.stringify({ hooks: { UserPromptSubmit: [entry('$HOME/.claude/hooks/queue-submit.sh')], Stop: [entry('$HOME/.claude/hooks/queue-drain.sh')] } }))
+    expect(hookStatus(p)).toEqual({ queue: true, foreignQueue: true, reviewGate: false })
+    expect(hookStatus(join(d, 'missing.json'))).toEqual({ queue: false, foreignQueue: false, reviewGate: false })
+  })
+  it("MasterDeck's hook runs /queue unless a half-installed skill hook switched it off", () => {
+    const d = mkdtempSync(join(tmpdir(), 'hs-'))
+    const p = join(d, 'settings.json')
+    installDeckHooks(p, d, join(d, 'deck/hook.sh'))
+    expect(hookStatus(p)).toEqual({ queue: true, foreignQueue: false, reviewGate: false })
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    s.hooks.Stop.push(entry('$HOME/.claude/hooks/queue-drain.sh'))
+    writeFileSync(p, JSON.stringify(s))
+    expect(hookStatus(p)).toEqual({ queue: false, foreignQueue: true, reviewGate: false })
   })
 })

@@ -75,7 +75,6 @@ import type {
   AppState,
   CliResult,
   DraftAssign,
-  HookStatus,
   PaneSpec,
   SetupCheck,
 } from "./types";
@@ -132,7 +131,6 @@ export const CH = {
   configDetectAll: "config:detectAll",
   configSave: "config:save",
   pickFolder: "app:pickFolder",
-  hooksInstall: "hooks:install",
   skillReinstall: "skills:reinstall",
   skillRemove: "skills:remove",
   workflowGet: "workflow:get",
@@ -292,7 +290,7 @@ export interface DeckApi {
     type: string,
     payload?: Record<string, unknown>,
   ): Promise<CliResult>;
-  /** A session's /queue (the queue skill's ~/.claude/queue/<sessionId>.jsonl), first to run first. */
+  /** A session's /queue (~/.claude/queue/<sessionId>.jsonl, run by MasterDeck's hook), first to run first. */
   queueList(sessionId: string): Promise<string[]>;
   queueEdit(
     sessionId: string,
@@ -303,7 +301,7 @@ export interface DeckApi {
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
-  /** Move a ticket to a board column (babysit-ticket). */
+  /** Move a ticket to a board column (BoardOps). */
   setStatus(issue: Ticket, status: string): Promise<CliResult>;
   standupCommits(
     sinceMs: number,
@@ -401,7 +399,6 @@ export interface DeckApi {
   /** Setup: save settings (merged into the config file), then reload everything. */
   configSave(patch: unknown): Promise<CliResult>;
   pickFolder(start?: string): Promise<string | null>;
-  hooksInstall(which: HookStatus): Promise<CliResult>;
   /** Install a bundled skill (or replace the copy there); a skill removed before is added back. */
   skillReinstall(name: string): Promise<CliResult>;
   /** Take a bundled skill out of ~/.claude/skills (kept in its backup folder) and keep it out. */
@@ -464,7 +461,7 @@ export interface DeckApi {
   >;
   /** Post the saved summary as a comment on the session's issue. */
   summaryPost(sessionKey: string): Promise<CliResult>;
-  /** Link a session to an issue with babysit-ticket (`tt.sh link`). */
+  /** Link a session to an issue (MasterDeck's LinkStore). */
   linkSession(
     issue: Ticket,
     sessionId: string,

@@ -34,14 +34,14 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
   { id: 'gh', name: 'GitHub CLI (gh)', hint: 'brew install gh / winget install GitHub.cli' },
   { id: 'python', name: 'Python 3', hint: 'needed by the master CLI' },
   { id: 'git', name: 'git', hint: 'needed for worktrees and standups' },
-  { id: 'jq', name: 'jq', hint: 'needed by the babysit-ticket and babysit-pr hooks' },
+  { id: 'jq', name: 'jq', hint: "needed by MasterDeck's hooks (/queue, workflow steps, self-review)" },
 ]
 
 /**
  * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the gh account, the
  * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
- * Everything lands in ~/.claude/master/config.json, which master, babysit-ticket and MasterDeck share.
+ * Everything lands in ~/.claude/master/config.json, which master and MasterDeck share.
  */
 export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onClose: () => void; firstRun: boolean }) {
   const cfg = state.config
@@ -573,7 +573,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             </label>
 
             <div className="meta">
-              Saved to <code>{cfg.path || '~/.claude/master/config.json'}</code>, shared with the master and babysit skills.
+              Saved to <code>{cfg.path || '~/.claude/master/config.json'}</code>, shared with the master skill.
             </div>
           </>
         )}

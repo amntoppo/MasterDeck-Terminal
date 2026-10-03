@@ -127,8 +127,8 @@ checkout whose branch was once linked to a ticket does not link it.
   - **Actions:** a skill (in a background subagent or in the session, with extra instructions), an
     instruction (text the session is told as it is), or **Notify me** (a desktop notification, after
     Needs you or Idle; after Idle, instructions are sent to the session as a message).
-  - **Built-ins:** babysit-ticket, the self-review before the PR, and the PR watch. Remove one to turn
-    it off for sessions using that workflow: its hook then skips them.
+  - **Built-ins:** board moves, the self-review before the PR, and the PR watch, all done by
+    MasterDeck. Remove one to turn it off for sessions using that workflow.
   - **Arrows:** *then* (do the next block after this one; several arrows out of a block run side by
     side), *if it worked* and *if it failed* (dashed green and red: the session follows the one that
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
@@ -461,8 +461,16 @@ Stored in `~/.claude/masterdeck/settings.json`.
 
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub account, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
-- **Skills:** each bundled skill's state in `~/.claude/skills`. MasterDeck installs missing skills
-  at launch and updates its own unchanged copies. A skill you edited, your own copy, or a symlink
+- **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
+  hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
+  (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it is a
+  step of the Default workflow, so a workflow without the self-review step skips it. Older versions
+  installed hooks for babysit-ticket, babysit-pr and queue; MasterDeck removes exactly those once,
+  at launch (a backup of `~/.claude/settings.json` is kept), and does that work itself.
+- **Skills:** each bundled skill's state in `~/.claude/skills`, for use by hand: MasterDeck needs
+  none of them, and the Skills popup has no automatic switches (just Add, Remove, Replace with
+  bundled, and Close). MasterDeck installs missing skills at launch and updates its own unchanged
+  copies. A skill you edited, your own copy, or a symlink
   is left alone; **Replace with bundled** swaps it (the old folder goes to
   `~/.claude/skills/.masterdeck-backup/`).
 - **Watch new PRs** (Sessions, on by default): MasterDeck follows each open PR a session makes (only
