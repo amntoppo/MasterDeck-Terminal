@@ -111,9 +111,12 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `resumeBg`, `startHere`, `startMaster`) gets `--settings <accounts/<login>.settings.json>` from
   `AccountEnv.settingsArgs` (via `sessionSettings` in `main/sessionAccounts.ts`); an unhealthy or
   unknown account, or no file yet, is refused, never started as gh's active one. Only master-agent
-  starts without it when the primary needs to log in again. The account is recorded in
-  `session-accounts.json` (`SessionAccounts`, by session id and key; by name until a new session
-  shows up, 10 min) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
+  starts without it, when the primary needs to log in again or the accounts' files are still
+  being written. The account is recorded in `session-accounts.json` (`SessionAccounts`, by
+  session id and key: the bg id `claude --bg` prints is recorded at once, `bgIdFromOutput`; a new
+  session started by name is matched by name for 10 min; a live session known by only one of its
+  ids, e.g. resumed by `claude attach` under a new session id, gets the other one on the next state
+  build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
   proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume always
   passes `--settings` again. `accountFor` (IPC) gives a new session's default for a folder. One
   account: no `--settings`, the same arguments as before.

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SessionAccounts, sessionSettings } from './sessionAccounts'
+import { bgIdFromOutput, SessionAccounts, sessionSettings } from './sessionAccounts'
 
 const file = () => join(mkdtempSync(join(tmpdir(), 'sa-')), 'session-accounts.json')
 
@@ -34,6 +34,36 @@ describe('SessionAccounts', () => {
     a.claim([], 11 * 60_000)
     a.claim([{ sessionId: 's8', key: 'k8', name: 'late', state: 'idle' }], 11 * 60_000 + 1)
     expect(a.get({ sessionId: 's8', key: 'k8' })).toBeNull()
+  })
+})
+
+describe('SessionAccounts backfill', () => {
+  it('a live row with a new session id and a known key (claude attach resumed it) gets the account, also after a restart', () => {
+    const f = file()
+    const a = new SessionAccounts(f)
+    a.set(['s1', 'k1'], 'bob-work')
+    a.claim([{ sessionId: 's2', key: 'k1', name: 'fix-12', state: 'working' }])
+    expect(new SessionAccounts(f).get({ sessionId: 's2', key: 's2' })).toBe('bob-work')
+  })
+  it('a known id with its bg key not yet recorded fills the key; ended rows are left alone', () => {
+    const a = new SessionAccounts(file())
+    a.set(['s1'], 'bob-work')
+    a.claim([{ sessionId: 's1', key: 'k1', name: 'x', state: 'idle' }, { sessionId: 's3', key: 'k1x', name: 'y', state: 'done' }])
+    expect(a.get({ sessionId: 'other', key: 'k1' })).toBe('bob-work')
+  })
+  it('recording a resumed id does not give its account to another session of the same name', () => {
+    const a = new SessionAccounts(file())
+    a.set(['s1'], 'bob-work')
+    a.claim([{ sessionId: 's7', key: 'k7', name: 'resumed', state: 'working' }])
+    expect(a.get({ sessionId: 's7', key: 'k7' })).toBeNull()
+  })
+})
+
+describe('bgIdFromOutput', () => {
+  it('the background id claude --bg prints; not part of a session uuid', () => {
+    expect(bgIdFromOutput('Started background session 1a2b3c4d\nclaude attach 1a2b3c4d')).toBe('1a2b3c4d')
+    expect(bgIdFromOutput('resumed 1a2b3c4d-0000-4000-8000-000000000000')).toBeNull()
+    expect(bgIdFromOutput('')).toBeNull()
   })
 })
 

@@ -71,7 +71,11 @@ import {
   repoFromRemote,
   sessionAccount,
 } from "@shared/accounts";
-import { SessionAccounts, sessionSettings } from "./sessionAccounts";
+import {
+  bgIdFromOutput,
+  SessionAccounts,
+  sessionSettings,
+} from "./sessionAccounts";
 import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -209,11 +213,18 @@ const sessionAccounts = new SessionAccounts(
   join(paths.home, "session-accounts.json"),
 );
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
+const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
 const originLookups = new Map<string, Promise<string | null>>();
 function originNow(cwd: string): Promise<string | null> {
   let p = originLookups.get(cwd);
   if (!p) {
+    // ponytail: the oldest folder goes past ORIGINS_MAX (remote callers pass any cwd); an LRU if it ever matters.
+    if (originLookups.size >= ORIGINS_MAX) {
+      const old = originLookups.keys().next().value!;
+      originLookups.delete(old);
+      origins.delete(old);
+    }
     p = run("git", ["remote", "get-url", "origin"], {
       cwd,
       timeoutMs: 5_000,
@@ -1072,6 +1083,7 @@ async function resumeBg(
   name: string,
   cwd: string | null,
   account: string | null = null,
+  key: string | null = null,
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
@@ -1083,7 +1095,7 @@ async function resumeBg(
   // The account it started as (resume always passes --settings again: unverified whether it keeps it).
   const as = await settingsFor(account, async () =>
     accountOfSession(
-      { sessionId: id, key: id.slice(0, 8), name },
+      { sessionId: id, key: key || id.slice(0, 8), name },
       await originNow(dir),
     ),
   );
@@ -1093,10 +1105,9 @@ async function resumeBg(
     ["--bg", ...as.args, "--resume", id, ...named],
     { cwd: dir, timeoutMs: 60_000 },
   );
-  if (r.code === 0 && as.account) {
-    sessionAccounts.set([id], as.account);
-    sessionAccounts.expect(name, as.account);
-  }
+  // By id only: another session may share the name. A new id (claude attach) is filled in by claim.
+  if (r.code === 0 && as.account)
+    sessionAccounts.set([id, key ?? ""], as.account);
   return r.code === 0
     ? { ok: true, message: name }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
@@ -1473,7 +1484,10 @@ async function startHere(o: {
     { cwd, timeoutMs: 60_000 },
   );
   if (r.code === 0 && as.account)
-    sessionAccounts.set([o.sessionId], as.account);
+    sessionAccounts.set(
+      [o.sessionId, bgIdFromOutput(r.stdout) ?? ""],
+      as.account,
+    );
   return r.code === 0
     ? { ok: true, message: r.stdout.trim().split("\n")[0] ?? "started" }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
@@ -1881,12 +1895,6 @@ function registerIpc(): void {
       typeof o.model === "string" && /^[\w.[\]-]{1,80}$/.test(o.model)
         ? o.model
         : "";
-    if (
-      typeof o.workflow === "string" &&
-      o.workflow &&
-      o.workflow !== DEFAULT_TEMPLATE
-    )
-      workflows().setPending(name, o.workflow);
     const as = await settingsFor(
       typeof o.account === "string" ? o.account : null,
       () =>
@@ -1895,6 +1903,12 @@ function registerIpc(): void {
         ),
     );
     if (!as.ok) return { ok: false, message: as.message };
+    if (
+      typeof o.workflow === "string" &&
+      o.workflow &&
+      o.workflow !== DEFAULT_TEMPLATE
+    )
+      workflows().setPending(name, o.workflow);
     const r = await run(
       claudeBin,
       [
@@ -1916,7 +1930,12 @@ function registerIpc(): void {
         ok: false,
         message: (r.stderr || r.stdout).trim().slice(0, 300),
       };
-    if (as.account) sessionAccounts.expect(name, as.account);
+    if (as.account) {
+      // On disk at once when claude printed the bg id (a quit before the first claim keeps it).
+      const bg = bgIdFromOutput(r.stdout);
+      if (bg) sessionAccounts.set([bg], as.account);
+      sessionAccounts.expect(name, as.account);
+    }
     void sources.refreshAgents();
     return { ok: true, message: name };
   });
@@ -2902,7 +2921,9 @@ app.whenReady().then(async () => {
     }
   }, 1000);
   createWindow();
-  sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
+  sources.setResumer((e) =>
+    resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
+  );
   // Accounts before the first GitHub reads: with two or more, each read needs its account's token.
   // Only the local token reads are awaited; nothing here waits on the network.
   try {

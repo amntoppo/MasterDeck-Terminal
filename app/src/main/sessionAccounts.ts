@@ -58,7 +58,20 @@ export class SessionAccounts {
         this.set([s.sessionId, s.key], p.login)
       } else if (now - p.at > PENDING_MS) this.pending.delete(name)
     }
+    // A live session known by one id only (claude attach resumed it under a new session id, or
+    // the bg key wasn't known at start): record the other one too.
+    for (const x of sessions) {
+      if (x.state === 'done') continue
+      const a = this.ids.get(x.sessionId)
+      const b = this.ids.get(x.key)
+      if ((a ?? b) && !(a && b)) this.set([x.sessionId, x.key], (a ?? b)!)
+    }
   }
+}
+
+/** The background id `claude --bg` prints (8 hex, not the start of a session uuid); null if none. */
+export function bgIdFromOutput(out: string): string | null {
+  return /(?<![0-9a-f-])([0-9a-f]{8})(?![0-9a-f-])/i.exec(out)?.[1] ?? null
 }
 
 type SettingsArgs = { ok: true; args: string[]; account: string | null } | { ok: false; message: string }
