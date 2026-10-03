@@ -1,4 +1,11 @@
-## What's new in 0.7.0
+## What's new in 0.7.1
+
+- **Windows build.** 0.7.0 shipped without the Windows installer (tests that assumed macOS failed on
+  the Windows runner); 0.7.1 has both.
+- **Phone: Filters button.** On a phone, Board and PRs show **Filters (n)** next to the search box;
+  it opens a sheet with every filter, Reset and Done, so the board and the PR list get the screen.
+
+## In 0.7.0
 
 - **Web app on your phone.** app.masterdeck.dev has a phone layout: a tab bar, one screen at a time,
   and a quick-key bar (Esc, Tab, ^C, arrows, Enter, y/n) under the terminal.

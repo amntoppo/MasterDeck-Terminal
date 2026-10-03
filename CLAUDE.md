@@ -249,7 +249,7 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-03)
 
-- `main` is pushed and released as **v0.7.0** (2026-10-03; CI builds the DMGs/EXE). Installed
+- `main` is pushed and released as **v0.7.1** (2026-10-03; CI builds the DMGs/EXE; v0.7.0 had no Windows build). Installed
   locally. In this release: snapshot patches + volatile hold (0b6d8ed), web state
   patches (75aafa1), the remote indicator (ce27e5d), instant typing (merge bacb8d6), plan H (merge
   f433be5: native PR watch, board moves, `/queue` hook, one-time migration of the skill hooks, own
