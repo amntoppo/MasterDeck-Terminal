@@ -66,7 +66,8 @@ const LEGACY: {
 /** MasterDeck wrote it: the exact old command, or its guarded wrapper (`# masterdeck-builtin:<id>`). */
 const ours = (l: (typeof LEGACY)[number], cmd: string): boolean =>
   cmd === l.exact ||
-  (!!l.builtin &&
+  (!cmd.includes(REVIEW_MARK) &&
+    !!l.builtin &&
     !!l.inner &&
     cmd.includes(`# masterdeck-builtin:${l.builtin}`) &&
     cmd.includes(l.inner));
@@ -105,11 +106,11 @@ export const REVIEW_MARK = "masterdeck-review-gate";
 
 const REVIEW_REASON =
   "MasterDeck: before creating this PR, review your diff against the base branch (git diff <base>...HEAD): look for bugs, leftover debug code and changes outside the task; " +
-  "fix what you find and commit. Then run gh pr create again (it is let through the second time). Skip the review only if the user said to.";
+  "fix what you find and commit. Then run gh pr create again (it is let through the second time on this branch). Skip the review only if the user said to.";
 
 /**
  * Before `gh pr create` (a command that runs it, not text that mentions it): deny the first try of
- * a session with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
+ * a session and branch and branch with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
  * wrote `.git/pr-selfreview-<HEAD sha>`. Skipped for sessions whose workflow left the pr-review
  * built-in out (guardedBuiltin). bash 3.2.
  */
@@ -122,10 +123,14 @@ export function reviewGateCommand(home: string): string {
     `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"')`,
     `case "$sid" in *[!A-Za-z0-9-]*) exit 0;; esac`,
     `sha=$(git rev-parse HEAD 2>/dev/null) && [ -f "$(git rev-parse --git-path "pr-selfreview-$sha" 2>/dev/null)" ] && exit 0`,
-    `m="\${TMPDIR:-/tmp}/masterdeck-review-$sid"; [ -f "$m" ] && exit 0; touch "$m"`,
+    `br=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' _); m="\${TMPDIR:-/tmp}/masterdeck-review-$sid-$br"; [ -f "$m" ] && exit 0; touch "$m"`,
     `jq -n --arg r ${shellQuote(REVIEW_REASON)} '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'`,
   ].join("; ");
-  return `${guardedBuiltin("pr-review", inner, home)} # ${REVIEW_MARK}`;
+  // Prefilter before any jq: most Bash calls never mention gh pr create.
+  return (
+    `input=$(cat); case "$input" in *gh*pr*create*) ;; *) exit 0;; esac; ` +
+    `printf '%s' "$input" | { ${guardedBuiltin("pr-review", inner, home)} # ${REVIEW_MARK}\n}`
+  );
 }
 
 /** Install (or with `on` false remove) the review gate; idempotent. A changed home reinstalls. */

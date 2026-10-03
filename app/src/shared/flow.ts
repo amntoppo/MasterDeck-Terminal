@@ -266,7 +266,7 @@ export const BUILTINS: BuiltinInfo[] = [
     id: "pr-review",
     label: "Self-review before the PR",
     trigger: "before-pr",
-    what: "MasterDeck stops the first `gh pr create` of a session and asks it to review its diff against the base branch.",
+    what: "MasterDeck stops the first `gh pr create` of each branch and asks it to review its diff against the base branch.",
   },
   {
     id: "pr-watch",

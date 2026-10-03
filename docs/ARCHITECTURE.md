@@ -139,8 +139,8 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 - Review gate: `reviewGateCommand`/`installReviewGate` (marker `REVIEW_MARK`) put a PreToolUse Bash
   hook in settings.json at every launch (via `refreshHooks()` after). It is `guardedBuiltin('pr-review')`,
   so a session whose workflow leaves the step out is skipped; it fires only when the command runs
-  `gh pr create` (`runsOrExit`), denies the first try of a session with a short review instruction
-  (marker `$TMPDIR/masterdeck-review-<session>`), and lets the retry through, as it does when
+  `gh pr create` (`runsOrExit`), denies the first try per session and branch with a short review instruction
+  (marker `$TMPDIR/masterdeck-review-<session>-<branch>`; a prefilter exits before jq unless the input mentions `gh pr create`), and lets the retry through, as it does when
   `.git/pr-selfreview-<HEAD sha>` exists (a hand-run /babysit-pr).
 - `main/deckHooks.ts` writes `<home>/deck/hook.sh` (one script for every event, `$1` = event) and
   reads what it leaves: `pending/<id>.json` + `answers/<id>.json` (PermissionRequest and
