@@ -139,7 +139,7 @@ web tabs keep working.
 | Typing into sessions | `main/send.ts` (`Sender`), `shared/send.ts`, `shared/promptGuard.ts` |
 | Terminals | `main/ptys.ts` (`PtyManager`), `shared/paneCommand.ts`, `renderer/.../TerminalView.tsx` |
 | Hooks | `main/hooks.ts` (settings.json installs), `main/deckHooks.ts` (MasterDeck's hook script), `shared/deckHooks.ts` |
-| Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
+| Monitors / schedules / PR watch | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts`, `main/prWatch.ts`, `shared/prWatch.ts` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `skills/queue` |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |

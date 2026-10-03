@@ -2,6 +2,7 @@ import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
+import { PrWatch, prStates } from "./prWatch";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -218,11 +219,9 @@ const ops = new Ops(run, paths, () => claudeBin, gh);
 const boardFlow = new BoardFlow({
   ops: boardOps,
   links: linkStore,
-  // Replaced by prStates(gh, …) in Task 7 (covers PRs of ended sessions too).
+  // One batched light read per tick (≤ 50 PRs a query, ghc-cached); none while GitHub is paused.
   prStates: async (urls) =>
-    Object.fromEntries(
-      urls.flatMap((u) => (latest?.prLive[u] ? [[u, latest.prLive[u]]] : [])),
-    ),
+    sources.isGithubPaused() ? {} : prStates(gh, urls),
   link: linkSession,
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
@@ -243,6 +242,19 @@ const linkedSteps = new LinkedSteps({
     ),
   logRun: (sid, trigger, ids) => workflows().logRun(sid, trigger, ids),
   log: (m) => console.error(m),
+});
+// MasterDeck's PR watch: each open PR a session made (Settings → Sessions → Watch new PRs).
+const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
+  gh,
+  paused: (o) => sources.isGithubPaused(o),
+  send: (s, text) =>
+    sender.send(
+      s,
+      text,
+      latest?.master.kind === "attached" ||
+        latest?.master.kind === "elsewhere",
+    ),
+  onChange: () => sources.changed(),
 });
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
@@ -316,6 +328,16 @@ const sources = new Sources(
     }
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
+    try {
+      prWatch.sync(
+        state,
+        (s) =>
+          state.settings.watchPrs &&
+          workflows().builtinsFor(s.sessionId).includes("pr-watch"),
+      );
+    } catch (e) {
+      console.error(`PR watch: ${String(e)}`);
+    }
     void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
     // The remote line must never break the state callback (notifications, badge, auto-open below).
@@ -1770,7 +1792,11 @@ function registerIpc(): void {
     ),
   );
   reg.handle(CH.watchStop, (_e, id: unknown) =>
-    typeof id === "string" ? watches.stop(id) : false,
+    typeof id === "string"
+      ? id.startsWith("pr:")
+        ? prWatch.stop(id)
+        : watches.stop(id)
+      : false,
   );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
@@ -2556,7 +2582,6 @@ app.whenReady().then(async () => {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
       sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
-      sources.setWatchInfo(() => watches.info());
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -2595,8 +2620,21 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  // PR watch (all platforms): rows join the monitors in Details; review offers for its PRs step aside.
+  sources.setWatchInfo(() => [
+    ...watches.info(),
+    ...prWatch.info(latest?.sessions ?? []),
+  ]);
+  prWatch.load();
+  sources.setWatchedPrs(() => prWatch.watched());
+  setInterval(() => void prWatch.poll(), 60_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
+    try {
+      prWatch.deliver(latest?.sessions ?? []);
+    } catch (e) {
+      console.error(`PR watch: ${String(e)}`);
+    }
     try {
       readCreatedTickets();
       void pumpTicketRequests();

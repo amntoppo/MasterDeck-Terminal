@@ -463,6 +463,15 @@ Stored in `~/.claude/masterdeck/settings.json`.
   at launch and updates its own unchanged copies. A skill you edited, your own copy, or a symlink
   is left alone; **Replace with bundled** swaps it (the old folder goes to
   `~/.claude/skills/.masterdeck-backup/`).
+- **Watch new PRs** (Sessions, on by default): MasterDeck follows each open PR a session makes (only
+  for sessions whose workflow keeps the PR watch step). Once a minute it checks GitHub; new review
+  threads, comments, changes requested, a merge conflict, a stalled automated Claude review and the
+  merge reach the session as one message starting `[MasterDeck PR watch] repo#12:` once its turn is
+  over. What was already on an older PR when the watch started is not news, and nothing is sent
+  twice, also across restarts. The session is told reviewer text is for it to judge, never to
+  force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
+  has no time limit. Review-thread offers for a watched PR are not added to Needs you (the session
+  gets them already); CI offers still are. A session with a watched PR shows **Waiting** when idle.
 - **Monitors run by** (Sessions): who runs the monitors sessions arm (PR review comments, merge
   readiness, deploys, a workflow's monitor blocks).
   - **Claude Code** (default): each monitor stops after 30 minutes, Claude Code's limit, and the
@@ -477,7 +486,8 @@ Stored in `~/.claude/masterdeck/settings.json`.
   - Sessions read their hooks when they start, so one started before MasterDeck 0.6.1 keeps
     Claude Code's monitors until it is restarted.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
-    its events and a Stop button. With several, they open as a list.
+    its events and a Stop button. With several, they open as a list. A PR watch shows as
+    "PR watch · repo#12"; its Stop ends the watch and tells the session.
 - **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
   Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
   it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the

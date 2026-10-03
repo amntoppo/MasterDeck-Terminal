@@ -130,6 +130,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <Field label="Budget per ticket" hint="USD; 0 turns it off. Over budget shows in Needs you.">
           {num('budgetPerTicketUsd', 0)} <span className="muted">USD</span>
         </Field>
+        <Field label="Watch new PRs" hint="MasterDeck follows each open PR a session makes: new review threads, comments, changes requested, merge conflicts, a stalled automated review, and the merge reach the session as messages once its turn is over.">
+          {toggle('watchPrs', 'Watch new PRs')}
+        </Field>
         <Field
           label="Monitors run by"
           hint="Claude Code stops each monitor after 30 minutes, so sessions re-arm them. MasterDeck runs them with no limit and sends each event to the session once its turn is over, but only while MasterDeck is open (closed: the session's monitor goes to Claude Code). Sessions started before a change keep the old way until restarted."

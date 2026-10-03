@@ -179,6 +179,8 @@ export interface InboxInput {
   failures?: Record<string, { type: string; message: string; at: number }>;
   /** Needs-you items created through the remote API (open ones). */
   external?: ExternalItem[];
+  /** PRs MasterDeck's PR watch follows: their review feedback reaches the session already. */
+  watchedPrs?: Set<string>;
   now: number;
 }
 
@@ -374,6 +376,7 @@ export function collectItems(x: InboxInput): InboxItem[] {
     x.proposals,
     new Set(),
   )) {
+    if (o.kind === "review" && x.watchedPrs?.has(o.pr.url)) continue;
     out.push({
       id: `offer:${o.id}`,
       kind: o.kind,

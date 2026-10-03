@@ -83,6 +83,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| PR watch by MasterDeck (PrWatch: light query per 50 PRs, heavy only when changed, viewer-gated seen set, Details rows, review offers de-duplicated; Settings → Watch new PRs) | feat/native-babysit | plan H |
 | Board moves by MasterDeck (BoardFlow: link spawned sessions, PR links, PR Raised only once the PR is ready, Dev Done when all merged; linked steps for native links) | feat/native-babysit | plan H |
 | Create with Claude hands tickets to MasterDeck (requests/answers folders; 90 s wait, stale-request sweep, body-file realpath containment) | feat/native-babysit | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |

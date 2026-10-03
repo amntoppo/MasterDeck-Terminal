@@ -754,6 +754,10 @@ export class Sources {
 
   /** Monitors MasterDeck runs (main/watches), for the state and the sessions' status. */
   private watchInfo: () => WatchInfo[] = () => [];
+  private watchedPrs: () => Set<string> = () => new Set();
+  setWatchedPrs(f: () => Set<string>): void {
+    this.watchedPrs = f;
+  }
   setWatchInfo(f: () => WatchInfo[]): void {
     this.watchInfo = f;
   }
@@ -1233,6 +1237,11 @@ export class Sources {
       // Mid-write or corrupt: keep the last good proposals.
     }
     this.emit();
+  }
+
+  /** For the PR watch: the same pause every GitHub caller here obeys. */
+  isGithubPaused(output?: string): boolean {
+    return this.githubPaused(output);
   }
 
   /** Pause every GitHub call for a while when gh reports the rate limit. True when paused. */
@@ -1953,6 +1962,7 @@ export class Sources {
       sessionPrs,
       failures,
       external: this.externalItems,
+      watchedPrs: this.watchedPrs(),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
