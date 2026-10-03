@@ -220,7 +220,9 @@ export function NewSessionDialog({
   const [account, setAccount] = useState<string | null>(null);
   const [accountPicked, setAccountPicked] = useState(false);
   useEffect(() => {
-    if (!multi || accountPicked || !cwd) return;
+    if (!multi || accountPicked) return;
+    setAccount(null);
+    if (!cwd) return;
     let alive = true;
     void deck()
       .accountFor(cwd)
@@ -257,7 +259,7 @@ export function NewSessionDialog({
   const nameOk = NAME_RE.test(name) && !taken.includes(name);
   const promptOk = !prompt.trim().startsWith("-");
   const start = () => {
-    if (!cwd || !nameOk || !promptOk) return;
+    if (!cwd || !nameOk || !promptOk || (multi && !account)) return;
     onStart({
       name,
       cwd,
@@ -394,7 +396,7 @@ export function NewSessionDialog({
           </button>
           <button
             className="btn primary"
-            disabled={!cwd || !nameOk || !promptOk}
+            disabled={!cwd || !nameOk || !promptOk || (multi && !account)}
             onClick={start}
             title="⌘↵"
           >

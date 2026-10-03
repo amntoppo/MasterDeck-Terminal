@@ -19,6 +19,11 @@ export function AccountSelect({ state, value, onChange }: { state: AppState; val
     <>
       <label>Account</label>
       <select className="fsel full" value={v} onChange={(e) => onChange(e.target.value)} title="The GitHub account this session works as: its commits, PRs and gh calls">
+        {!v && (
+          <option value="" disabled>
+            Loading…
+          </option>
+        )}
         {v && !choices.includes(v) && (
           <option value={v} disabled>
             {v} (needs to log in again)

@@ -437,6 +437,11 @@ const sources = new Sources(
     // Accounts changed (Setup saved, config edited): new tokens and settings files.
     if (accountsKeyOf(state.config) !== accountsKey) void refreshAccounts();
     sessionAccounts.claim(state.sessions);
+    // A past session resumes as the account it was started as (shown in the Start dialog).
+    if (isMulti(state.config))
+      for (const list of Object.values(state.pastSessions))
+        for (const p of list)
+          p.account = sessionAccounts.get({ sessionId: p.sessionId, key: p.sessionId.slice(0, 8) }) ?? undefined;
     // Each session's own workflow: copied the first time it shows up.
     if (process.platform !== "win32")
       try {

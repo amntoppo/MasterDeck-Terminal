@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountEnvBlock, accountOverride, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
+  accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
   matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, sessionAccount,
 } from './accounts'
 
@@ -155,5 +155,16 @@ describe('the Start dialog default', () => {
     expect(def).toBe('bob-work')
     expect([accountOverride('bob-work', def, two), accountOverride('alice', def, two), accountOverride(null, def, two)]).toEqual([undefined, 'alice', undefined])
     expect(accountOverride('alice', 'bob-work', one)).toBeUndefined()
+  })
+})
+
+describe('resumeAccount', () => {
+  it('an untouched select resumes as the recorded account; a pick wins; one account sends none', () => {
+    expect(resumeAccount('alice', 'bob-work', false, two)).toBe('alice')
+    expect(resumeAccount(undefined, 'bob-work', false, two)).toBe('bob-work')
+    expect(resumeAccount('alice', 'bob-work', true, two)).toBe('bob-work')
+    expect(resumeAccount('alice', null, false, two)).toBe('alice')
+    expect(resumeAccount(undefined, null, false, two)).toBeUndefined()
+    expect(resumeAccount('alice', 'alice', true, one)).toBeUndefined()
   })
 })

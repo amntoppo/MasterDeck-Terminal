@@ -14,6 +14,8 @@ export interface PastSession {
   name: string
   cwd: string | null
   lastActivity: number
+  /** The GitHub account it was started as (two or more accounts, when recorded). */
+  account?: string
 }
 
 export interface TranscriptInfo {

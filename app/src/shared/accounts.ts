@@ -73,6 +73,12 @@ export function accountOverride(picked: string | null, def: string | null, c: Wi
   return isMulti(c) && picked && picked !== def ? picked : undefined
 }
 
+/** The account a resume sends: the user's pick, else the one the session was recorded with, else what the select shows; nothing with one account. */
+export function resumeAccount(recorded: string | null | undefined, selected: string | null, picked: boolean, c: WithAccounts): string | undefined {
+  if (!isMulti(c)) return undefined
+  return (picked ? selected : (recorded ?? selected)) ?? undefined
+}
+
 /** owner/name of a GitHub remote: https://github.com/…, git@<host or alias>:…, ssh://git@<host or alias>/…; null otherwise. */
 export function repoFromRemote(url: string): string | null {
   const m = /^(?:https?:\/\/(?:[^@/\s]+@)?github\.com\/|ssh:\/\/[^@/\s]+@[^/\s]+\/|[^@/\s]+@[^:/\s]+:)([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/.exec(url.trim())
