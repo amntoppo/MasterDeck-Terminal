@@ -11,17 +11,26 @@ It runs on macOS and Windows.
   with filters. You can assign tickets, start sessions for them and review PRs.
 - **Hygiene.** Costs per ticket, standup notes from your commits, a worktree janitor, history
   search, templates and broadcast.
+- **Automatic upkeep.** MasterDeck links a session to its issue and moves the board card (In Dev,
+  PR Raised, Dev Done), stops the first `gh pr create` on each branch for a self-review, sends review
+  comments, conflicts and the merge of a session's PRs back to that session, and runs `/queue`
+  (the gate and `/queue` need its hook, so macOS only). No skill is needed for any of it.
+- **From anywhere (optional).** Sign in, switch on Remote, and reach your Mac from a browser at
+  [app.masterdeck.dev](https://app.masterdeck.dev), on a laptop or a phone: the same Tasks, Board,
+  PRs and live terminals, end-to-end encrypted between the browser and your Mac. A blinking amber dot
+  in the rail shows while something is connected.
 
-MasterDeck ships with a set of Claude Code **skills** and installs them for you:
+MasterDeck ships with a set of Claude Code **skills** and installs them for you. Apart from `master`,
+they are for use by hand; MasterDeck does not depend on them:
 
 | Skill | What it does |
 |---|---|
 | `master` | The master-agent: turns issues, PRs and session messages into proposals and dispatches them after you approve. |
-| `babysit-ticket` | Links a session to an issue and moves the board card as work progresses (in progress, then PR raised, then done). |
-| `babysit-pr` | Runs a self-review before a PR is opened, then handles review comments and CI until it merges. |
+| `babysit-ticket` | Links a session to an issue by hand and moves its board card (MasterDeck does this itself for sessions it starts). |
+| `babysit-pr` | A deeper self-review before a PR, then review comments, CI and deploy until it merges (MasterDeck's own gate and PR watch cover the basics). |
 | `babysit-worktree` / `kill-worktree` | Isolates a session in a git worktree, then folds the work back. |
 | `worktree-janitor` | Cleans up finished worktrees across your repos. |
-| `queue` | `/queue <prompt>` in any session queues a prompt to run after the current response; `/queue list`, `/queue clear`. **Queue Prompts** in a session's header opens a Queue panel under master that shows and edits it. |
+| `queue` | Describes `/queue`. MasterDeck's own hook runs `/queue <prompt>` (run after the current response), `/queue list` and `/queue clear`; **Queue Prompts** in a session's header opens a Queue panel that shows and edits it. |
 
 Nothing is sent to a session or started without your yes. The skills never merge, never
 force-push and never use `--dangerously-skip-permissions`.
@@ -92,7 +101,7 @@ Or build it yourself (see [Develop](#develop)).
    what only master does: sweeps that propose work, the reports sessions send it (done, blocked,
    questions) and relaying text to sessions in other terminals. New sessions then ask you directly.
 
-Setup saves everything to one file, `~/.claude/master/config.json`. The master CLI, babysit-ticket
+Setup saves everything to one file, `~/.claude/master/config.json`. The master CLI, the skills
 and the app all read it. To change it later, open **Settings (⚙) → Set up MasterDeck**, or edit it:
 
 ```bash
@@ -127,8 +136,23 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 See the [guide](docs/GUIDE.md) for every feature: Needs you, the board, PRs, starting and linking
 sessions, costs, standups, the janitor, keyboard shortcuts, environment variables and Windows notes.
 
-MasterDeck also shares one GitHub cache between the app, master and the babysit skills (`ghc`, in
+MasterDeck also shares one GitHub cache between the app, master and the skills (`ghc`, in
 `~/.claude/gh-cache`), so many sessions don't use up your GitHub rate limit.
+
+### From a browser or a phone
+
+1. In the desktop app, sign in under **Settings → Account** (Google, GitHub, or email and
+   password), then switch on **Connect to the backend** under **Settings → Remote** (off by default).
+2. Open [app.masterdeck.dev](https://app.masterdeck.dev) and sign in with the same account.
+3. The Mac asks "Allow <browser> to control this Mac?" with three words. Allow it only if the
+   browser shows the same three words. Settings → Remote → Browsers lists approved browsers and can
+   revoke them.
+
+On a phone (a screen 760 px wide or less) the web app switches to a phone layout: a tab bar
+(Sessions, Tasks, Board, PRs, Master, More), one screen at a time, and a quick-key bar under the
+terminal (Esc, Tab, ⇧Tab, ^C, arrows, Enter, y, n, /). Typing in a web terminal shows up at once
+(Settings → General → Instant typing). The Mac must be on and MasterDeck running. Details:
+[guide § Web app](docs/GUIDE.md#web-app-appmasterdeckdev).
 
 ## Develop
 
@@ -141,6 +165,8 @@ npm test             # Vitest
 npm run typecheck
 npm run dist:mac     # dist/*.dmg (arm64 and x64)
 npm run dist:win     # dist/*.exe
+npm run dev:web      # the web app (vite); /?preview shows it with sample data, no Mac or sign-in
+npm run deploy:web   # publish the web app to app.masterdeck.dev (Cloudflare, needs wrangler login)
 ```
 
 Python tests for the master CLI: `python3 -m pytest skills/master/tests -q` from the repo root.
@@ -148,19 +174,28 @@ Python tests for the master CLI: `python3 -m pytest skills/master/tests -q` from
 Layout:
 
 ```
-app/            Electron + React + xterm.js app (main, preload, renderer, shared)
+app/            Electron + React + xterm.js app (main, preload, renderer, shared; src/web = web app)
 skills/         the Claude Code skills MasterDeck installs (master holds the CLI in lib/)
-docs/GUIDE.md   feature guide
+docs/           GUIDE.md (features), ARCHITECTURE.md, REMOTE.md, OPERATIONS.md, TODO.md
 ```
+
+The backend for remote access (Cloudflare Worker at `dev.masterdeck.dev`) lives in a separate
+repository; see [docs/REMOTE.md](docs/REMOTE.md).
 
 After `dist:mac` has built x64, run `npx electron-builder install-app-deps` to restore the arm64
 node-pty for `npm run dev`.
 
 ## Privacy
 
-MasterDeck runs entirely on your machine. It talks to GitHub through your own `gh` login and to
-Claude through your own `claude`. It has no server and no telemetry. It stores its data in
-`~/.claude/` (`master/`, `masterdeck/`, `gh-cache/`, `babysit-ticket/`).
+MasterDeck runs on your machine. It talks to GitHub through your own `gh` login and to Claude
+through your own `claude`. It has no telemetry. It stores its data in `~/.claude/` (`master/`,
+`masterdeck/`, `gh-cache/`).
+
+Remote access is off until you sign in and switch on Settings → Remote. Then the Mac keeps a
+connection to `dev.masterdeck.dev` and uploads a snapshot of Tasks, Needs you and the board (only the
+changes after the first one), so the web app and the API can show them; never terminals or files.
+Terminal output and anything typed in the web app travel end-to-end encrypted between the approved browser and your Mac; the
+server relays them without being able to read them. Switching Remote off or signing out stops all of it.
 
 ## License
 

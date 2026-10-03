@@ -6,8 +6,8 @@ the repo-root [TODO.md](../TODO.md).
 
 ## Shipping / ops
 
-- **P1 · Push and release decision.** `main` is 21 commits ahead of `origin/main` (9da2877 …
-  bacb8d6); no release since v0.6.2. Approach: the user decides; then
+- **P1 · Push and release decision.** `main` is 53 commits ahead of `origin/main` (9da2877 …
+  b3c4d4b); no release since v0.6.2. Approach: the user decides; then
   [OPERATIONS § Release](OPERATIONS.md#release). Don't push before that.
 - **P1 · Backend CI deploy broken.** The CI Cloudflare token gets error 7403. Where:
   `masterdeck-backend/.github/workflows`. Approach: give the token Workers Scripts:Edit + the
@@ -112,8 +112,8 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
-| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
-| Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a, 96e1606 + docs commit, branch feat/phone-web (not merged) | — |
+| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |
+| Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a … 68bf172, merge b3c4d4b; deployed | — |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |
