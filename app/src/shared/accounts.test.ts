@@ -129,6 +129,14 @@ describe('migration', () => {
     expect(migrationAccount(cfg, 'alice', { name: '', email: '' }, { name: null, id: 5 })).toMatchObject({ name: 'alice', email: '5+alice@users.noreply.github.com' })
     expect(noreplyEmail('bob-work', null)).toBe('bob-work@users.noreply.github.com')
   })
+
+  it('the migrated config lists exactly the repos, boards, owner and issue repo it had', () => {
+    const legacy = { owner: 'acme', issueRepo: 'tracker', repos: ['acme/api', 'acme/web'], allRepos: true, projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] }
+    const before = parseConfig(legacy)
+    const after = parseConfig({ ...legacy, accounts: [migrationAccount(before, 'alice', { name: 'A', email: 'a@acme.test' }, { name: null, id: null })] })
+    for (const k of ['owner', 'issueRepo', 'repos', 'allRepos', 'projects', 'allProjects'] as const) expect(after[k]).toEqual(before[k])
+    expect(isMulti(after)).toBe(false)
+  })
 })
 
 describe('parseGhUser', () => {

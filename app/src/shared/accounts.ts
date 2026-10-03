@@ -13,6 +13,8 @@ export interface GhAccountStatus {
   /** False when gh has no token for it or GitHub refuses the token (Needs you asks to log in again). */
   healthy: boolean
   error?: string
+  /** Something that may make sessions act as another account (a global git rule sending GitHub over SSH). */
+  warning?: string
 }
 
 type WithAccounts = Pick<AppConfig, 'accounts'>

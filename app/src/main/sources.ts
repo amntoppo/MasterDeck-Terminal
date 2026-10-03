@@ -1,4 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
+import type { GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
   newScheduleScan,
@@ -290,6 +291,7 @@ export class Sources {
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
   private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
+  private ghAccounts: GhAccountStatus[] = [];
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
@@ -859,6 +861,11 @@ export class Sources {
 
   setHooks(h: HookStatus): void {
     this.hooks = h;
+    this.emit();
+  }
+
+  setGhAccounts(a: GhAccountStatus[]): void {
+    this.ghAccounts = a;
     this.emit();
   }
 
@@ -1998,6 +2005,7 @@ export class Sources {
       remoteClients: this.remoteClients,
       browserRequests: this.browsers.browserRequests,
       account: this.account,
+      ghAccounts: this.ghAccounts,
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },

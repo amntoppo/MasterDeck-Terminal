@@ -40,7 +40,7 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
    `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
    `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
-7. `createWindow()`, `sources.start()`, `syncRemote()`.
+7. `createWindow()`, then the accounts (`refreshAccounts`, awaiting only the local `gh auth token` reads; the `gh api user` checks, and `migrateAccounts` once, run in the background — an older config becomes one account from gh's active login and the global git identity, `config.backup.<ts>.json` kept), `sources.start()`, `syncRemote()`.
 
 Env aids handled here: `MASTERDECK_USER_DATA`, `MASTERDECK_SMOKE`, `MASTERDECK_CAPTURE`
 (+ `_JS`, `_WAIT`, and a `test:shot` IPC handler while capturing). `will-quit` stops the cloud line,
@@ -299,6 +299,22 @@ the `Sender` path watches use), touches the hook's own once markers
 and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
 entry is dropped.
 
+### GitHub accounts (`main/accountEnv.ts`)
+
+With two or more connected accounts (`isMulti`), `AccountEnv` keeps each account's token in memory
+(`refresh`: `gh auth token --user`, local only) and writes `accounts/<login>.settings.json` (mode
+600, folder 700, temp + rename) with `accountEnvBlock`'s `env`; ssh aliases come from `~/.ssh/config`
+and its Includes (`readSshConfig`). `check` then asks GitHub in the background (`gh api user`, parsed
+with `parseGhUser`: HTTP 401 or another login → unhealthy, another login's file removed; offline →
+unchanged; a new token clears an old refusal) and runs `git config --global --get-regexp
+'^url\..*\.(push)?insteadof$'`: a rule sending `https://github.com` to an SSH form
+(`githubSshRewrite`) wins over a session's own rewrite, so it shows as a `warning` on every account.
+`refreshAccounts` in `index.ts` runs at launch, when the config's accounts (login, name, email)
+change (state callback) and hourly. A disconnected account's file stays while a live session runs
+as it: `accountsInUse` reads `session-accounts.json` for the live sessions (until the agents poll
+has answered, every recorded login counts). With one account it reads and writes nothing, removes every file not
+in use, `runEnv` gives `{env: {}}` and `settingsArgs` no arguments.
+
 ## Preload and IPC
 
 - `shared/ipc.ts` defines `CH` (every channel name, e.g. `state:update`, `pty:open`,
@@ -390,6 +406,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `remote` (+ `warning`), `remoteClients` | `CloudSync` status / `clients` message (`syncRemote`), bridge warning |
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
+| `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
 ## Files on disk
 
@@ -416,6 +433,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
+| `accounts/` | `<login>.settings.json` per connected account (two or more): `{"env": {GH_TOKEN, GIT_* …}}` for `claude --settings`; mode 600, folder 700 |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |
 | `remote-device-id` | random UUID sent in `hello` |
 | `remote-done.json` | last 500 remote command outcomes (run-once) |

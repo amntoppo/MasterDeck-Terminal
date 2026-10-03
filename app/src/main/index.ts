@@ -54,7 +54,9 @@ import type {
   Session,
   SetupCheck,
 } from "@shared/types";
-import { getConfig } from "@shared/appConfig";
+import { getConfig, type AppConfig } from "@shared/appConfig";
+import { migrationAccount, parseGhUser } from "@shared/accounts";
+import { AccountEnv, accountsInUse } from "./accountEnv";
 import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
 import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -186,6 +188,8 @@ const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
+// Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
+const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 const ptys = new PtyManager(
   env,
   (channel, ...args) => emit(channel, ...args),
@@ -334,6 +338,8 @@ const sources = new Sources(
   (state) => {
     const prev = latest;
     latest = state;
+    // Accounts changed (Setup saved, config edited): new tokens and settings files.
+    if (keyOfAccounts(state.config) !== accountsKey) void refreshAccounts();
     // Each session's own workflow: copied the first time it shows up.
     if (process.platform !== "win32")
       try {
@@ -2496,6 +2502,78 @@ async function ghAccounts(): Promise<{
       };
 }
 
+let accountsKey = "";
+const keyOfAccounts = (c: AppConfig) =>
+  JSON.stringify(c.accounts.map((a) => [a.login, a.name, a.email]));
+
+/**
+ * Tokens and settings files of the connected accounts (launch, config change, hourly). Resolves once
+ * the local token reads are done; GitHub's health answers update ghAccounts in the background.
+ */
+async function refreshAccounts(): Promise<void> {
+  const cfg = getConfig();
+  accountsKey = keyOfAccounts(cfg);
+  // A disconnected account's file stays while a live session still runs as it (until the agents
+  // poll has answered, every session recorded in session-accounts.json counts as live).
+  const inUse = accountsInUse(
+    join(paths.home, "session-accounts.json"),
+    latest && sources.isHealthy("agents") ? latest.sessions : null,
+  );
+  await accountEnv.refresh(cfg.accounts, inUse);
+  sources.setGhAccounts(accountEnv.status());
+  void accountEnv
+    .check()
+    .then(() => sources.setGhAccounts(accountEnv.status()))
+    .catch((e) => console.error(`accounts check: ${String(e)}`));
+}
+
+/**
+ * First launch of the multi-account version: an older config becomes one account — gh's active
+ * login, today's repos and boards, and the git identity commits are made with today. A backup of
+ * config.json is kept. gh not logged in: tried again at the next launch. Runs in the background
+ * (gh auth status and gh api user go to the network); one account behaves as before meanwhile.
+ */
+async function migrateAccounts(): Promise<void> {
+  const cfg = getConfig();
+  if (!cfg.configured || cfg.accounts.length) return;
+  const { accounts } = await ghAccounts();
+  const login = (accounts.find((a) => a.active) ?? accounts[0])?.login;
+  if (!login) return;
+  const [user, gname, gemail] = await Promise.all([
+    run("gh", ["api", "user"], { timeoutMs: 20_000 }),
+    run("git", ["config", "--global", "user.name"], { timeoutMs: 5_000 }),
+    run("git", ["config", "--global", "user.email"], { timeoutMs: 5_000 }),
+  ]);
+  // gh offline, or its active login is another one: the git identity (or the login) fills in.
+  const u = user.code === 0 ? parseGhUser(user.stdout) : null;
+  const gh =
+    u && u.login.toLowerCase() === login.toLowerCase()
+      ? { name: u.name, id: u.id }
+      : { name: null, id: null };
+  if (getConfig().accounts.length) return; // Setup saved accounts meanwhile
+  try {
+    copyFileSync(
+      paths.config,
+      join(dirname(paths.config), `config.backup.${Date.now()}.json`),
+    );
+  } catch (e) {
+    console.error(`accounts migration: no backup (${String(e)}); not migrating`);
+    return;
+  }
+  const r = await cli.configSave({
+    accounts: [
+      migrationAccount(
+        cfg,
+        login,
+        { name: gname.stdout.trim(), email: gemail.stdout.trim() },
+        gh,
+      ),
+    ],
+  });
+  if (r.ok) sources.loadConfig();
+  else console.error(`accounts migration: ${r.message}`);
+}
+
 async function setupCheck(): Promise<SetupCheck> {
   const ok = async (cmd: string, args: string[]) =>
     (await run(cmd, args, { timeoutMs: 15_000 })).code === 0;
@@ -2698,6 +2776,19 @@ app.whenReady().then(async () => {
   }, 1000);
   createWindow();
   sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
+  // Accounts before the first GitHub reads: with two or more, each read needs its account's token.
+  // Only the local token reads are awaited; nothing here waits on the network.
+  try {
+    sources.loadConfig();
+    await refreshAccounts();
+  } catch (e) {
+    console.error(`accounts: ${String(e)}`);
+  }
+  if (!SMOKE)
+    void migrateAccounts().catch((e) =>
+      console.error(`accounts migration: ${String(e)}`),
+    );
+  setInterval(() => void refreshAccounts(), 3_600_000);
   sources.start();
   syncRemote();
   if (SMOKE) {

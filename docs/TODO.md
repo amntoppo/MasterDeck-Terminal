@@ -26,6 +26,12 @@ fixes it, and move the item here to "Recently done".
   busy sessions and one tab on Terminals and one on Tasks.
 - **P3 · User to confirm Cloudflare billing**: Free plan, payment method, and whether
   `masterdeck.dev` auto-renews (Registrar). Not code.
+- **P2 · Global git rules sending GitHub over SSH beat a session's account.** A
+  `url.<ssh>.insteadOf`/`pushInsteadOf` for `https://github.com/` in the user's global git config
+  wins over the per-session rewrite (`accountEnvBlock`), so a session may push as the SSH key's
+  account. Today it is only detected (`githubSshRewrite` in `main/accountEnv.ts`, a `warning` on
+  `ghAccounts`). Approach: give sessions `GIT_CONFIG_GLOBAL` pointing at a copy of the global config
+  without those rules, or a per-account `core.sshCommand` with the right key.
 
 ## Remote / web
 

@@ -675,6 +675,19 @@ moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run the
 babysit-pr's poll also got cheaper: one GraphQL and one REST call per poll, down from three
 GraphQL and two REST calls.
 
+## Several GitHub accounts
+
+With two or more GitHub accounts connected, MasterDeck reads each one's token from `gh` (it never
+switches gh's active account) and gives sessions started as that account their own token and git
+identity; GitHub remotes are pushed over HTTPS with that token, including `git@github.com:` and ssh
+aliases from `~/.ssh/config`. An account whose token GitHub refuses shows as needing a new login; an
+offline check changes nothing. With one account nothing changes.
+
+One limit: a rule in your global git config that sends GitHub over SSH (for example
+`url.git@github.com:.insteadOf https://github.com/`, or a `pushInsteadOf`) wins over the session's
+rewrite, so such a session may push as the SSH key's account. Setup shows a warning on the
+accounts when it finds one; remove the rule (`git config --global --unset …`) to fix it.
+
 ## Board View
 
 **Board** on the rail shows a Kanban board of your issues in the current sprint, in the project's column order. The

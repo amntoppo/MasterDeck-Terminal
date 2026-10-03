@@ -39,6 +39,8 @@ export interface Session {
   busyWith?: string | null;
   /** Idle and its last message asks the user something. */
   asking?: string | null;
+  /** The GitHub account the session works as (two or more connected accounts only; see shared/accounts.ts sessionAccount). */
+  account?: string;
 }
 
 export interface Issue {
@@ -178,6 +180,8 @@ export interface AppState {
   browserRequests?: BrowserRequestView[];
   /** The MasterDeck account this Mac is signed in with. */
   account?: import("./account").AccountState;
+  /** Connected GitHub accounts and their health; never a token. */
+  ghAccounts?: import("./accounts").GhAccountStatus[];
   stats: Record<string, SessionStats>;
   tails: Record<string, TranscriptTail>;
   git: Record<string, GitInfo>;
