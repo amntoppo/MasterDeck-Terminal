@@ -258,21 +258,21 @@ export interface BuiltinInfo {
 export const BUILTINS: BuiltinInfo[] = [
   {
     id: "ticket",
-    label: "babysit-ticket",
+    label: "Board moves",
     trigger: "linked",
-    what: "Links the session to its issue, moves the card on the board, and links the PR under Development.",
+    what: "MasterDeck links the session to its issue and moves the card: In Dev, PR Raised (not for drafts), Dev Done; and links the PR under Development.",
   },
   {
     id: "pr-review",
     label: "Self-review before the PR",
     trigger: "before-pr",
-    what: "babysit-pr's gate: review the branch diff and fix findings before `gh pr create`.",
+    what: "MasterDeck stops the first `gh pr create` of each branch and asks it to review its diff against the base branch.",
   },
   {
     id: "pr-watch",
     label: "Watch the PR",
     trigger: "pr-created",
-    what: "babysit-pr watches the PR: fixes review comments and CI until it is merged or closed.",
+    what: "MasterDeck watches the PR and sends the session new review threads, comments, conflicts, a stalled review and the merge, until it is merged or closed.",
   },
 ];
 
@@ -602,7 +602,7 @@ function blockText(n: FlowNode, mons: MonitorDef[] = []): string | null {
     case "instruction":
       return n.text.trim() || null;
     case "builtin":
-      return `Let ${builtinInfo(n.builtin).label} run first (its own hook tells you what to do).`;
+      return `${builtinInfo(n.builtin).label}: MasterDeck does this itself and tells you when there is something to do; wait for that before moving on.`;
     default:
       return null;
   }

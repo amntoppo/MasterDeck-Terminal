@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { makeGhRunner, readGhCacheStatus } from './ghc'
+import { ghErrorText, makeGhRunner, readGhCacheStatus } from './ghc'
 import type { RunOpts } from './run'
 
 describe('ghc bridge', () => {
@@ -42,5 +42,18 @@ describe('ghc on Windows', () => {
     const gh = makeGhRunner(async (cmd, args) => (calls.push([cmd, ...args]), { code: 0, stdout: '', stderr: '' }), '/lib', 'python', 'win32')
     await gh(['api', 'user'], { ttl: 60 })
     expect(calls).toEqual([['gh', 'api', 'user']])
+  })
+})
+
+describe('ghErrorText', () => {
+  it('never reads a successful answer body (comments can say "rate limit")', () => {
+    expect(ghErrorText({ code: 0, stdout: '{"data":{"body":"we hit the rate limit"}}', stderr: '' })).toBe('')
+    expect(ghErrorText({ code: 1, stdout: 'x', stderr: 'HTTP 403: API rate limit exceeded' })).toContain('rate limit')
+    expect(ghErrorText({ code: 0, stdout: JSON.stringify({ data: null, errors: [{ type: 'RATE_LIMITED', message: 'm' }] }), stderr: '' })).toContain('rate limit')
+    expect(ghErrorText({ code: 0, stdout: JSON.stringify({ errors: [{ type: 'NOT_FOUND', message: 'rate limit' }] }), stderr: '' })).toBe('')
+    // gh exits 1 on a partial GraphQL error but still prints the data: its bodies are never read.
+    const partial = { code: 1, stdout: JSON.stringify({ data: { p0: { pullRequest: { body: 'rate limit again' } }, p1: null }, errors: [{ type: 'NOT_FOUND', message: 'no repo' }] }), stderr: 'gh: Could not resolve to a Repository' }
+    expect(ghErrorText(partial)).toBe('gh: Could not resolve to a Repository')
+    expect(ghErrorText({ code: 1, stdout: 'API rate limit exceeded', stderr: '' })).toContain('rate limit')
   })
 })

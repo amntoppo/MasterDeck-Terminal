@@ -178,9 +178,9 @@ So never tell the user a session is "gone" or that sessions "don't survive Claud
 
 - Nothing is sent or spawned without the user's yes on that specific proposal id.
 - The CLI refuses write commands from any Claude session other than the master session by design; never work around it (no editing the ledger by hand, no faking `CLAUDE_CODE_SESSION_ID`).
-- Never create issues, comment on GitHub, move board status, push, or merge from this session. Sessions do that under their own skills (`babysit-ticket`, `babysit-worktree`, `babysit-pr`), after the user gives them instructions.
+- Never create issues, comment on GitHub, move board status, push, or merge from this session. Sessions (and MasterDeck, for board moves and PR watching) do that, after the user gives them instructions.
 - Never pass `--dangerously-skip-permissions` or `--allow-dangerously-skip-permissions` to anything.
 - Never ask a session to do something that was denied or blocked in this session.
 - Send message text inline. `@file` references attach nothing across sessions.
-- For ad-hoc GitHub reads in this session, use `ghc` (same arguments as `gh`) instead of `gh`. It shares one cache and one rate-limit pause with the sweep, MasterDeck and the babysit skills. `ghc --status` shows whether GitHub is paused.
+- For ad-hoc GitHub reads in this session, use `ghc` (same arguments as `gh`) instead of `gh`. It shares one cache and one rate-limit pause with the sweep, MasterDeck and the babysit skills (when installed). `ghc --status` shows whether GitHub is paused.
 - Never store meeting transcripts. The ledger gets only the meeting id and the action item text.

@@ -20,7 +20,7 @@ export interface ParsedSnapshot {
   issues: Issue[]
   prs: Pr[]
   sessionIssue: Map<string, Ticket>
-  /** PR URLs babysit-ticket linked to each session. */
+  /** PR URLs linked to each session. */
   sessionPrs: Map<string, string[]>
   sources: Record<string, boolean>
   takenAt: string | null

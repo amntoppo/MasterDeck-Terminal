@@ -94,7 +94,6 @@ const api: DeckApi = {
   configDetectAll: () => ipcRenderer.invoke(CH.configDetectAll),
   configSave: (patch) => ipcRenderer.invoke(CH.configSave, patch),
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
-  hooksInstall: (which) => ipcRenderer.invoke(CH.hooksInstall, which),
   skillReinstall: (name) => ipcRenderer.invoke(CH.skillReinstall, name),
   skillRemove: (name) => ipcRenderer.invoke(CH.skillRemove, name),
   workflowGet: () => ipcRenderer.invoke(CH.workflowGet),

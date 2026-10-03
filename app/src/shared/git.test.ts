@@ -24,6 +24,9 @@ describe('parsePrView', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { state: 'SUCCESS' }] }))
     expect(p).toEqual({ ...base, title: null, ci: 'success', reviewCheck: null, buildCi: 'success', isDraft: false, createdAt: null, mergedAt: null, lastCommentAt: null })
   })
+  it('keeps the head branch (board moves link a PR on the linked branch)', () => {
+    expect(parsePrView(JSON.stringify({ ...base, headRefName: 'feat/12' }))?.headRef).toBe('feat/12')
+  })
   it('failure beats pending', () => {
     const p = parsePrView(JSON.stringify({ ...base, statusCheckRollup: [{ status: 'IN_PROGRESS', conclusion: '' }, { conclusion: 'FAILURE' }] }))
     expect(p?.ci).toBe('failure')

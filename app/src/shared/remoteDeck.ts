@@ -84,7 +84,6 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   configDetectAll: invoke(CH.configDetectAll),
   configSave: invoke(CH.configSave),
   pickFolder: blocked,
-  hooksInstall: invoke(CH.hooksInstall),
   skillReinstall: invoke(CH.skillReinstall),
   skillRemove: invoke(CH.skillRemove),
   workflowGet: invoke(CH.workflowGet),

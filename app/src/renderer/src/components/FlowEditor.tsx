@@ -195,7 +195,7 @@ function blockSub(n: FlowNode): string | null {
         : null;
   if (n.kind === "skill")
     return `${n.mode === "background" ? "background subagent" : "in the session"}${n.instructions.trim() ? ` · ${n.instructions.trim()}` : ""}`;
-  if (n.kind === "builtin") return "runs from its own hook";
+  if (n.kind === "builtin") return "run by MasterDeck";
   if (n.kind === "monitor")
     return `watches${n.args.trim() ? ` · ${n.args.trim()}` : ""}${n.instructions.trim() ? ` · ${n.instructions.trim()}` : ""}`;
   return null;

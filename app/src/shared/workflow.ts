@@ -207,7 +207,7 @@ export interface HookEntry {
   event: string;
   matcher: string | null;
   command: string;
-  /** What it is, when we know: a MasterDeck skill's hook, a custom step, the status line... */
+  /** What it is, when we know: a workflow trigger, a custom step, the status line, a skill hook... */
   owner: string | null;
 }
 
@@ -218,14 +218,20 @@ export function hookOwner(command: string): string | null {
     step && step[1].startsWith("trigger-") ? step[1].slice(8) : null;
   if (trigger) return `workflow (${trigger.replace(/-/g, " ")})`;
   if (step) return `custom step ${step[1]}`;
-  if (command.includes("babysit-ticket/scripts/tt.sh")) return "babysit-ticket";
+  // Hooks older versions installed for the skills (taken out once at launch), or put there by hand.
+  // Keep in step with REVIEW_MARK in main/hooks.ts (shared code cannot import it).
+  if (command.includes("masterdeck-review-gate"))
+    return "MasterDeck (self-review before a PR)";
+  if (command.includes("babysit-ticket/scripts/tt.sh"))
+    return "babysit-ticket (legacy)";
   if (command.includes("pr-selfreview-"))
-    return "babysit-pr (self-review gate)";
+    return "babysit-pr self-review gate (legacy)";
   if (command.includes("Monitor phase of the babysit-pr"))
-    return "babysit-pr (watch the PR)";
+    return "babysit-pr PR watch (legacy)";
   if (command.includes("queue-submit.sh"))
-    return "queue (store /queue prompts)";
-  if (command.includes("queue-drain.sh")) return "queue (run the next prompt)";
+    return "queue skill (store /queue prompts; MasterDeck's queue is off)";
+  if (command.includes("queue-drain.sh"))
+    return "queue skill (run the next prompt; MasterDeck's queue is off)";
   if (command.includes("statusline_tee"))
     return "MasterDeck status line (costs)";
   return null;
@@ -293,7 +299,7 @@ export interface Stage {
   what: string;
   /** Where custom steps attach. */
   trigger?: TriggerId;
-  /** What MasterDeck and its skills do here, beyond hooks (hooks are listed live). */
+  /** What MasterDeck does here, beyond hooks (hooks are listed live). */
   builtin: string[];
 }
 
@@ -321,13 +327,13 @@ export const STAGES: Stage[] = [
   },
   {
     id: "linked",
-    title: "babysit-ticket",
-    actor: "the session",
-    what: "The session links itself to the issue and moves into its own worktree.",
+    title: "Linked",
+    actor: "MasterDeck / the session",
+    what: "The session is linked to the issue and moves into its own worktree.",
     trigger: "linked",
     builtin: [
-      "babysit-ticket: `tt.sh link <#N>` records the link and moves the card to In progress",
-      "babysit-worktree: a git worktree for the ticket, so your checkout stays clean",
+      "MasterDeck links the session (Start, the branch name, or Link) and moves the card to In progress",
+      "babysit-worktree (optional skill): a git worktree for the ticket, so your checkout stays clean",
     ],
   },
   {
@@ -337,7 +343,7 @@ export const STAGES: Stage[] = [
     what: "The session stops and asks; you plan the work with it, answer questions, or queue prompts.",
     builtin: [
       "Needs you: a card when a session waits on you; its question and options, a reply, Continue",
-      "Queue: prompts you line up run one by one",
+      "Queue: prompts you line up (/queue or the Queue panel) run one by one, through MasterDeck's hook",
     ],
   },
   {
@@ -352,12 +358,12 @@ export const STAGES: Stage[] = [
   },
   {
     id: "before-pr",
-    title: "babysit-PR: before the PR",
+    title: "Before the PR",
     actor: "the session",
     what: "Just before `gh pr create`.",
     trigger: "before-pr",
     builtin: [
-      "babysit-pr: self-review of the branch diff, fixes, then a marker for this commit",
+      "MasterDeck's review gate: review the diff against the base branch first (Default workflow)",
     ],
   },
   {
@@ -367,8 +373,8 @@ export const STAGES: Stage[] = [
     what: "Right after `gh pr create` succeeds.",
     trigger: "pr-created",
     builtin: [
-      "babysit-ticket: links the PR under Development and moves the card to PR raised",
-      "babysit-pr: watches the PR; fixes review comments and CI until it is merged or closed",
+      "MasterDeck links the PR under Development and moves the card to PR raised",
+      "PR watch (Default workflow): MasterDeck tells the session about review comments and CI until the PR is merged or closed",
     ],
   },
   {
@@ -378,7 +384,7 @@ export const STAGES: Stage[] = [
     what: "The PR is merged.",
     trigger: "pr-merged",
     builtin: [
-      "babysit-ticket sync: the card moves to Dev done once every PR of the ticket is merged",
+      "MasterDeck moves the card to Dev done once every PR of the ticket is merged",
       "Janitor: Clean up removes worktrees whose PR is merged",
     ],
   },

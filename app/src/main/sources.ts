@@ -49,7 +49,6 @@ import {
 } from "@shared/review";
 import {
   sameTicket,
-  storedRepo,
   ticketKey,
   ticketLabel,
   type Ticket,
@@ -142,7 +141,7 @@ import {
 import { sessionScreen } from "./screen";
 import { TokenIndex } from "./tokens";
 import { loadCache, saveCache } from "./cache";
-import type { GhRunner } from "./ghc";
+import { ghErrorText, type GhRunner } from "./ghc";
 import { GitHub } from "./github";
 import {
   mtime,
@@ -180,6 +179,8 @@ import {
 } from "@shared/deckHooks";
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
+import { LinkStore } from "./ticketLinks";
+import { linkInfoMap } from "@shared/ticketLinks";
 import type { Runner } from "./run";
 
 const AGENTS_MS = 3_000;
@@ -277,6 +278,8 @@ export class Sources {
   ) => { text: string; at: number } | null = () => null;
   /** PRs each session created, by session key (survives a resume's new sessionId). */
   private createdPrs: Record<string, string[]> = {};
+  /** Of those, the ones its transcripts show it opened (the rest came from its checkout's branch). Rebuilt each launch: transcripts are read from the start. */
+  private openedPrs: Record<string, string[]> = {};
   private ghPausedUntil = 0;
   private ghCache: GhCacheStatus | null = null;
   private teamPrs: TeamPr[] = [];
@@ -286,7 +289,7 @@ export class Sources {
   private teamPrsError: string | null = null;
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
-  private hooks: HookStatus = { ticket: false, pr: false, queue: false };
+  private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
@@ -296,8 +299,9 @@ export class Sources {
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
   private costDirty = false;
-  /** babysit-ticket's links (sessionId → issue and when), read from its state file; fresher than the snapshot. */
+  /** MasterDeck's ticket links (sessionId → issue and when). */
   private links = new Map<string, LinkInfo>();
+  private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
@@ -360,6 +364,7 @@ export class Sources {
     private gh: GhRunner = (args, opts) => run("gh", args, opts),
     private readGhCache: () => GhCacheStatus | null = () => null,
   ) {
+    this.linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
     this.transcripts = new TranscriptIndex(paths.projectsDir);
     this.inbox = new Inbox(
       join(paths.home, "inbox.json"),
@@ -541,7 +546,7 @@ export class Sources {
     this.emit();
   }
 
-  /** Each session's ticket: the snapshot's, then babysit-ticket's fresher links. */
+  /** Each session's ticket: the snapshot's, then MasterDeck's fresher links (ticket-links.json). */
   private issueOf(): Map<string, Ticket> {
     return new Map([
       ...this.snapshot.sessionIssue,
@@ -751,6 +756,10 @@ export class Sources {
 
   /** Monitors MasterDeck runs (main/watches), for the state and the sessions' status. */
   private watchInfo: () => WatchInfo[] = () => [];
+  private watchedPrs: () => Set<string> = () => new Set();
+  setWatchedPrs(f: () => Set<string>): void {
+    this.watchedPrs = f;
+  }
   setWatchInfo(f: () => WatchInfo[]): void {
     this.watchInfo = f;
   }
@@ -1178,37 +1187,17 @@ export class Sources {
     this.emit();
   }
 
-  /** Re-read babysit-ticket's state file. Called every agents poll and right after a link. */
+  /** A trigger point was reached by something other than a transcript (the app's own link). */
+  markReached(sessionId: string, trigger: FlowTrigger): void {
+    const key = this.rawSessions.find((x) => x.sessionId === sessionId)?.key;
+    if (!key) return;
+    const track = (this.flowTracks[key] ??= newFlowTrack());
+    track.reached[trigger] = Date.now();
+  }
+
+  /** Re-read MasterDeck's ticket links. Called every agents poll and right after a link. */
   reloadLinks(): void {
-    try {
-      const raw = JSON.parse(readFileSync(this.paths.babysitState, "utf8")) as {
-        sessions?: Record<
-          string,
-          {
-            issue?: unknown;
-            repo?: unknown;
-            linked_at?: unknown;
-            adopted?: unknown;
-          }
-        >;
-      };
-      const next = new Map<string, LinkInfo>();
-      for (const [sid, v] of Object.entries(raw.sessions ?? {})) {
-        if (typeof v?.issue !== "number") continue;
-        // Adopted from the checkout's branch by older babysit-ticket versions, never asked for.
-        if (v.adopted === true) continue;
-        const at =
-          typeof v.linked_at === "string" ? Date.parse(v.linked_at) : NaN;
-        next.set(sid, {
-          issue: v.issue,
-          repo: storedRepo(typeof v.repo === "string" ? v.repo : null),
-          linkedAt: Number.isFinite(at) ? at : null,
-        });
-      }
-      this.links = next;
-    } catch {
-      // missing or mid-write: keep the last good links
-    }
+    this.links = linkInfoMap(this.linkStore.read());
     this.emit();
   }
 
@@ -1250,6 +1239,11 @@ export class Sources {
       // Mid-write or corrupt: keep the last good proposals.
     }
     this.emit();
+  }
+
+  /** For the PR watch: the same pause every GitHub caller here obeys. */
+  isGithubPaused(output?: string): boolean {
+    return this.githubPaused(output);
   }
 
   /** Pause every GitHub call for a while when gh reports the rate limit. True when paused. */
@@ -1437,6 +1431,7 @@ export class Sources {
     for (const p of f.wt.paths) if (!all.paths.includes(p)) all.paths.push(p);
     // Most recent last; a resumed session adds a second transcript to the same key.
     this.notePrs(key, f.scan.urls);
+    addPrUrls((this.openedPrs[key] ??= []), f.scan.urls);
     return found;
   }
 
@@ -1461,6 +1456,12 @@ export class Sources {
       if (w) out.push(w);
     }
     return out;
+  }
+
+  /** PRs the session opened, from its transcripts (board moves link only these, or its linked branch's). */
+  prsOpenedBy(sessionId: string): string[] {
+    const s = this.lastSessions.find((x) => x.sessionId === sessionId);
+    return s ? (this.openedPrs[s.key] ?? []) : [];
   }
 
   private prUrlsFor(sessionId: string, key: string): string[] {
@@ -1490,7 +1491,7 @@ export class Sources {
         ttl: 45,
       });
       this.noteBinary("gh", r.code);
-      if (this.githubPaused(r.stderr + r.stdout)) return;
+      if (this.githubPaused(ghErrorText(r))) return;
       // Keep the last good value through a network blip.
       const pr = r.code === 0 ? parsePrView(r.stdout) : null;
       if (pr) this.prLive[url] = pr;
@@ -1508,7 +1509,7 @@ export class Sources {
       ttl: 45,
     });
     this.noteBinary("gh", r.code);
-    if (this.githubPaused(r.stderr + r.stdout)) return;
+    if (this.githubPaused(ghErrorText(r))) return;
     const pr = r.code === 0 ? parsePrView(r.stdout) : null;
     if (pr?.url) {
       this.prLive[pr.url] = pr;
@@ -1970,6 +1971,7 @@ export class Sources {
       sessionPrs,
       failures,
       external: this.externalItems,
+      watchedPrs: this.watchedPrs(),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);

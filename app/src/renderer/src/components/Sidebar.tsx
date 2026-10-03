@@ -505,7 +505,7 @@ export function Sidebar({
             className={state.ghCache?.pausedUntil ? "err" : "line"}
             title={
               state.ghCache?.pauseReason ??
-              "One cache (~/.claude/gh-cache) shared by MasterDeck, master and the babysit skills"
+              "One cache (~/.claude/gh-cache) shared by MasterDeck, master and the skills"
             }
           >
             {formatGhCache(state.ghCache, now)}

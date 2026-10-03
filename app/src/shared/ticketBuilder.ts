@@ -2,8 +2,8 @@
  * The Board's ticket session (Create with Claude): a Claude session in its own folder that writes
  * and creates tickets on the board. MasterDeck briefs it (CLAUDE.md: the boards, their columns and
  * sprints, the repos, the people) and says where the + was clicked (context.json: the column, the
- * board, the tab's filters, the sprint shown). It creates tickets with ./create-ticket.sh (tt.sh
- * create), which logs each one so the Board refreshes.
+ * board, the tab's filters, the sprint shown). It creates tickets with ./create-ticket.sh (MasterDeck
+ * creates the ticket; same flags as before) and logs each one so the Board refreshes.
  */
 import type { AppConfig } from "./appConfig";
 import type { Sprint } from "./types";

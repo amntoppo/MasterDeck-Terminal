@@ -36,6 +36,12 @@ const input = (o: Partial<InboxInput>): InboxInput => ({
 })
 
 describe('collectItems', () => {
+  it('leaves review offers to the PR watch, keeps CI offers', () => {
+    const pr = { url: 'https://github.com/acme/web/pull/3', repo: 'web', number: 3, title: 't', unresolvedThreads: 2, ci: 'failure', headRef: 'f', refsIssue: null, authorIsMe: true } as InboxInput['prs'][number]
+    const kinds = (watched: string[]) => collectItems({ ...input({}), prs: [pr], watchedPrs: new Set(watched) }).map((i) => i.kind).filter((k) => k === 'review' || k === 'ci').sort()
+    expect(kinds([])).toEqual(['ci', 'review'])
+    expect(kinds([pr.url])).toEqual(['ci'])
+  })
   it('builds each kind with a stable id, priority order and its actions', () => {
     const a = sess('a', { state: 'needs-input' })
     const b = sess('b', { issue: 7 })

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { SKILL_INFO } from '@shared/skillInfo'
-import type { AppState, HookStatus, SkillStatus } from '@shared/types'
+import type { AppState, SkillStatus } from '@shared/types'
 import { deck } from '../deck'
 import { webConfirm } from '../webConfirm'
 
@@ -14,16 +14,10 @@ const STATE_TEXT: Record<SkillStatus['state'], string> = {
 }
 
 /**
- * The skills MasterDeck ships: add or remove each one (in ~/.claude/skills), and switch on the
- * hooks that run some of them automatically. Opens once after onboarding, then from the sidebar.
+ * The skills MasterDeck ships: add or remove each one (in ~/.claude/skills). MasterDeck needs none
+ * of them; they are there to run by hand. Opens once after onboarding, then from the sidebar.
  */
 export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; onClose: () => void; firstRun: boolean }) {
-  // First run: the recommended hooks start ticked; later, what is installed.
-  const [hooks, setHooks] = useState<HookStatus>(() =>
-    firstRun
-      ? { ticket: true, pr: true, queue: true }
-      : state.hooks,
-  )
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -40,20 +34,6 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
     const r = what === 'add' ? await deck().skillReinstall(name) : await deck().skillRemove(name)
     setBusy(null)
     setMsg(r.message)
-    const key = SKILL_INFO[name]?.hook?.key
-    if (what === 'remove' && key) setHooks((h) => ({ ...h, [key]: false }))
-  }
-
-  const changed = (Object.keys(hooks) as (keyof HookStatus)[]).some((k) => hooks[k] !== state.hooks[k])
-  const save = async () => {
-    if (changed) {
-      if (!(await webConfirm('Install the changed hooks on your Mac?', { confirmLabel: 'Install' }))) return
-      setBusy('hooks')
-      const r = await deck().hooksInstall(hooks)
-      setBusy(null)
-      if (!r.ok) return setMsg(`Hooks: ${r.message}`)
-    }
-    onClose()
   }
 
   const installed = (s: SkillStatus) => s.state !== 'missing'
@@ -64,8 +44,8 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
         <h3>Skills</h3>
         <div className="meta">
           {firstRun ? 'MasterDeck comes with these Claude Code skills. ' : ''}Added skills live in <code>~/.claude/skills</code>, so
-          every Claude Code session can use them; some can also run by themselves through a hook in{' '}
-          <code>~/.claude/settings.json</code> (a backup is kept).
+          every Claude Code session can use them by hand. MasterDeck does not need any of them: it moves the
+          board, watches PRs and runs <code>/queue</code> itself.
         </div>
         <div className="skill-cards">
           {state.skills.map((s) => {
@@ -100,31 +80,14 @@ export function SkillsDialog({ state, onClose, firstRun }: { state: AppState; on
                   )}
                 </div>
                 {info && <div className="skill-what">{info.what}</div>}
-                {info?.hook && (
-                  <label className={`mpick-row ${on ? '' : 'disabled'}`} title={on ? '' : 'Add the skill first'}>
-                    <input
-                      type="checkbox"
-                      disabled={!on}
-                      checked={on && hooks[info.hook.key]}
-                      onChange={(e) => setHooks({ ...hooks, [info.hook!.key]: e.target.checked })}
-                    />
-                    <span>
-                      Automatic: {info.hook.label}
-                      {info.hook.recommended ? '' : ' (uses extra time and tokens)'}
-                    </span>
-                  </label>
-                )}
               </div>
             )
           })}
         </div>
         <div className="foot">
           <span className="grow meta">{msg}</span>
-          <button className="btn" onClick={onClose}>
-            {firstRun ? 'Later' : 'Cancel'}
-          </button>
-          <button className="btn primary" disabled={busy !== null} onClick={save}>
-            {busy === 'hooks' ? 'Saving…' : 'Save'}
+          <button className="btn primary" onClick={onClose}>
+            Close
           </button>
         </div>
       </div>

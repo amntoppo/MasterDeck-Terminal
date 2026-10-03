@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { join } from 'node:path'
 import { applyEventLine, parseRequest, type HookRequest, type HookSessionState } from '@shared/deckHooks'
 import { readNewLines, type FollowState } from './files'
+import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
 
 /** events.jsonl is emptied at launch once it grows past this. */
 const EVENTS_MAX = 4 * 1024 * 1024
@@ -17,17 +18,33 @@ const EVENTS_MAX = 4 * 1024 * 1024
  *   `monitors-by` file) and while MasterDeck runs. Leaves the call in `watch-requests/<id>.json`
  *   and waits up to 10s for `watch-answers/<id>.json` (MasterDeck took it over: the call is
  *   denied with why). No answer: Claude Code runs the monitor as usual.
- * - The rest: one line in `events.jsonl`. Stop writes only its session id.
+ * - UserPromptSubmit: `/queue <prompt>` is stored in `<queueDir>/<session id>.jsonl` and the
+ *   prompt blocked (`/queue` lists, `/queue clear` empties); any other prompt returns at once,
+ *   unread and unlogged.
+ * - Stop: one line in `events.jsonl` (only its session id); then, with prompts queued, hands the
+ *   next one over. While MasterDeck runs it leaves `queue-requests/<id>.json` and waits up to 4s
+ *   for MasterDeck to claim it (rename to `.taken`) and write `queue-answers/<id>.json`. Not
+ *   claimed: the hook takes the request back by renaming it itself and drains one item; claimed:
+ *   it waits until 7s after its start for the answer. One rename wins, so exactly one of them
+ *   takes the item. Deadlines are by the clock: at most ~7s, under the 10s hook timeout.
+ * - `queue-off` (the queue skill's hooks installed by hand): both leave /queue to those hooks.
+ * - `legacy-sids` (one session id a line, or `*`): sessions alive when the migration took the queue
+ *   skill's hooks out still run them (Claude Code reads hooks at session start), so the hook does no
+ *   queue work for them (markLegacy, pruneLegacy).
+ * - The rest: one line in `events.jsonl`.
  */
-export function hookScript(dir: string): string {
-  const q = dir.replace(/'/g, `'\\''`)
+export function hookScript(dir: string, queueDir: string): string {
+  const esc = (p: string) => p.replace(/'/g, `'\\''`)
   return `#!/bin/bash
 # MasterDeck hook: written by MasterDeck at each launch; edits are overwritten.
-D='${q}'
+D='${esc(dir)}'
+Q='${esc(queueDir)}'
 ev="$1"
 in=$(cat)
 sid=$(printf '%s' "$in" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p' | head -n 1)
 now=$(date +%s)
+# Sessions that still run the queue skill's hooks (alive at the migration; "*": not known yet).
+legacy() { [ -f "$D/legacy-sids" ] && grep -qxF -e "$sid" -e '*' "$D/legacy-sids"; }
 mkdir -p "$D/pending" "$D/answers" "$D/context" 2>/dev/null
 case "$ev" in
   MonitorCall)
@@ -60,8 +77,67 @@ case "$ev" in
     done
     rm -f "$D/pending/$id.json"
     exit 0 ;;
+  UserPromptSubmit)
+    # Fast path: only /queue prompts go further (no jq, nothing logged, for the rest).
+    case "$in" in *'"prompt":"/queue'*|*'"prompt": "/queue'*) ;; *) exit 0 ;; esac
+    [ -f "$D/queue-off" ] && exit 0
+    command -v jq >/dev/null 2>&1 || exit 0
+    case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac
+    legacy && exit 0
+    prompt=$(printf '%s' "$in" | jq -r '.prompt // ""')
+    case "$prompt" in /queue|/queue[[:space:]]*) ;; *) exit 0 ;; esac
+    mkdir -p "$Q" 2>/dev/null
+    f="$Q/$sid.jsonl"
+    arg=$(printf '%s' "\${prompt#/queue}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    case "$arg" in
+      ''|list)
+        if [ -s "$f" ]; then r="Queue ($(wc -l < "$f" | tr -d ' ')):
+$(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="Queue empty."; fi ;;
+      clear) rm -f "$f"; r="Queue cleared." ;;
+      *) jq -cn --arg p "$arg" '$p' >> "$f"; r="Queued #$(wc -l < "$f" | tr -d ' '): $arg" ;;
+    esac
+    jq -n --arg r "$r" '{decision: "block", reason: $r}'
+    exit 0 ;;
   Stop)
-    printf '{"at":%s000,"event":"Stop","data":{"session_id":"%s"}}\\n' "$now" "$sid" >> "$D/events.jsonl" ;;
+    printf '{"at":%s000,"event":"Stop","data":{"session_id":"%s"}}\\n' "$now" "$sid" >> "$D/events.jsonl"
+    case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac
+    [ -f "$D/queue-off" ] && exit 0
+    legacy && exit 0
+    f="$Q/$sid.jsonl"
+    [ -s "$f" ] || exit 0
+    m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
+    if [ $((now - m)) -lt 30 ]; then
+      # MasterDeck runs: it picks the next prompt. It claims the request by renaming it, so only
+      # one of us ever takes this turn's item.
+      mkdir -p "$D/queue-requests" "$D/queue-answers" 2>/dev/null
+      id="$now-$$-$RANDOM"
+      r="$D/queue-requests/$id"
+      a="$D/queue-answers/$id.json"
+      printf '{"id":"%s","sid":"%s"}' "$id" "$sid" > "$r.tmp" && mv "$r.tmp" "$r.json"
+      # Deadlines by the clock (from the hook's start), so a slow machine never meets the 10s kill.
+      while [ "$(date +%s)" -lt $((now + 4)) ]; do
+        if [ -f "$a" ]; then cat "$a"; rm -f "$a" "$r.taken"; exit 0; fi
+        sleep 0.25
+      done
+      if mv "$r.json" "$r.gone" 2>/dev/null; then
+        rm -f "$r.gone"   # never claimed: drain it here
+      else
+        while [ "$(date +%s)" -lt $((now + 7)) ]; do
+          if [ -f "$a" ]; then cat "$a"; rm -f "$a" "$r.taken"; exit 0; fi
+          sleep 0.25
+        done
+        rm -f "$r.taken"
+        exit 0
+      fi
+    fi
+    command -v jq >/dev/null 2>&1 || exit 0
+    next=$(head -n 1 "$f" | jq -r '.')
+    tail -n +2 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    [ -s "$f" ] || rm -f "$f"
+    left=0
+    [ -f "$f" ] && left=$(wc -l < "$f" | tr -d ' ')
+    jq -n --arg p "$next" --arg left "$left" '{decision: "block", reason: ("Next queued user prompt (" + $left + " more after this). Treat it as a new user request and handle it fully:\\n\\n" + $p), systemMessage: ("▶ queue: " + $p)}'
+    exit 0 ;;
   SessionStart)
     printf '{"at":%s000,"event":"%s","data":%s}\\n' "$now" "$ev" "$in" >> "$D/events.jsonl"
     case "$sid" in *[!0-9a-fA-F-]*|'') ;; *) [ -f "$D/context/$sid.json" ] && cat "$D/context/$sid.json" ;; esac ;;
@@ -83,7 +159,10 @@ export class DeckHooks {
   /** By session id (the full one). */
   readonly sessions: Record<string, HookSessionState> = {}
 
-  constructor(home: string) {
+  constructor(
+    home: string,
+    private queues = queueDir(),
+  ) {
     this.dir = join(home, 'deck')
     this.script = join(this.dir, 'hook.sh')
     this.follow = { path: join(this.dir, 'events.jsonl'), offset: 0, rest: '' }
@@ -91,8 +170,8 @@ export class DeckHooks {
 
   /** Write the script (every launch: it follows this version) and the folders it uses. */
   setup(): void {
-    for (const d of ['', 'pending', 'answers', 'context', 'watch-requests', 'watch-answers']) mkdirSync(join(this.dir, d), { recursive: true })
-    writeFileSync(this.script, hookScript(this.dir))
+    for (const d of ['', 'pending', 'answers', 'context', 'watch-requests', 'watch-answers', 'queue-requests', 'queue-answers']) mkdirSync(join(this.dir, d), { recursive: true })
+    writeFileSync(this.script, hookScript(this.dir, this.queues))
     chmodSync(this.script, 0o755)
     try {
       if (statSync(this.follow.path).size > EVENTS_MAX) truncateSync(this.follow.path, 0)
@@ -206,6 +285,120 @@ export class DeckHooks {
     const tmp = join(this.dir, 'watch-answers', `${id}.tmp`)
     writeFileSync(tmp, JSON.stringify(answer))
     renameSync(tmp, join(this.dir, 'watch-answers', `${id}.json`))
+  }
+
+  /** Stops waiting for MasterDeck to pick the next queued prompt (request files left by the hook). */
+  queueRequests(now = Date.now()): { id: string; sid: string }[] {
+    const dir = join(this.dir, 'queue-requests')
+    let names: string[] = []
+    try {
+      names = readdirSync(dir)
+    } catch {
+      return []
+    }
+    const out: { id: string; sid: string }[] = []
+    for (const n of names.sort()) {
+      const p = join(dir, n)
+      const id = n.replace(/\.(json|taken)$/, '')
+      // Leftovers of a hook that was killed: the hook gives up after 7 s.
+      if (now - Number(id.split('-')[0]) * 1000 > 60_000) {
+        rm(p)
+        continue
+      }
+      if (!n.endsWith('.json') || !/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue
+      // Past the hook's wait (7 s from its start): nobody would read an answer.
+      if (!(now - Number(id.split('-')[0]) * 1000 < 8_000)) continue
+      try {
+        const r = JSON.parse(readFileSync(p, 'utf8')) as { sid?: unknown }
+        if (typeof r.sid === 'string' && /^[0-9a-f-]{36}$/i.test(r.sid)) out.push({ id, sid: r.sid })
+      } catch {
+        // half-written or taken back
+      }
+    }
+    return out
+  }
+
+  /**
+   * A session's turn ended with prompts queued: hand each waiting hook the next one (once). The
+   * hook must be there (its pid is in the id) when we claim; the item goes once the hook read the
+   * answer or still runs to read it. Peek, answer, then take it off: a crash, or a hook that died
+   * before reading, repeats a prompt rather than losing it.
+   */
+  pumpQueue(now = Date.now(), isAlive = alive): void {
+    for (const r of this.queueRequests(now)) {
+      const pid = Number(r.id.split('-')[1])
+      if (!isAlive(pid) || !this.claimQueue(r.id)) continue
+      const items = readQueue(r.sid, this.queues)
+      this.answerQueue(r.id, items.length ? queueAnswer(items[0], items.length - 1) : {})
+      if (!items.length) continue
+      // Alive: it will read the answer. Gone: the hook removes its answer right after reading it,
+      // so an answer still there was never read. Checked in this order, the file can't change after.
+      const unread = join(this.dir, 'queue-answers', `${r.id}.json`)
+      if (isAlive(pid) || !existsSync(unread)) shiftQueue(r.sid, this.queues)
+      else rm(unread)
+    }
+    // Answers nobody read (the hook was killed after its claim).
+    const dir = join(this.dir, 'queue-answers')
+    try {
+      for (const n of readdirSync(dir)) if (now - Number(n.split('-')[0]) * 1000 > 60_000) rm(join(dir, n))
+    } catch {
+      // none yet
+    }
+  }
+
+  /** Take this Stop: false when the hook took it back first (it drains the queue itself then). */
+  claimQueue(id: string): boolean {
+    try {
+      renameSync(join(this.dir, 'queue-requests', `${id}.json`), join(this.dir, 'queue-requests', `${id}.taken`))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  answerQueue(id: string, answer: object): void {
+    const dir = join(this.dir, 'queue-answers')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${id}.tmp`), JSON.stringify(answer))
+    renameSync(join(dir, `${id}.tmp`), join(dir, `${id}.json`))
+  }
+
+  /** Queue hooks installed by hand handle /queue: MasterDeck's hook leaves it to them. */
+  setQueueOff(off: boolean): void {
+    const p = join(this.dir, 'queue-off')
+    try {
+      if (off) writeFileSync(p, '')
+      else rm(p)
+    } catch {
+      // next launch
+    }
+  }
+
+  /** The migration took the queue skill's hooks out: sessions alive now keep running them. Their
+   * ids are not known yet (the session list comes later), so every session is skipped until then. */
+  markLegacy(): void {
+    mkdirSync(this.dir, { recursive: true })
+    writeFileSync(join(this.dir, 'legacy-sids'), '*\n')
+  }
+
+  /** With the session list in: `*` becomes the live sessions; the file goes once none of them is alive. */
+  pruneLegacy(live: Set<string>): void {
+    const p = join(this.dir, 'legacy-sids')
+    let ids: string[]
+    try {
+      ids = readFileSync(p, 'utf8').split('\n').filter(Boolean)
+    } catch {
+      return // none
+    }
+    const left = ids.includes('*') ? [...live] : ids.filter((id) => live.has(id))
+    try {
+      if (!left.length) return rm(p)
+      if (left.length === ids.length && !ids.includes('*')) return
+      writeFileSync(`${p}.tmp`, left.join('\n') + '\n')
+      renameSync(`${p}.tmp`, p)
+    } catch {
+      // next state
+    }
   }
 
   /** What SessionStart tells this session (null: nothing). */

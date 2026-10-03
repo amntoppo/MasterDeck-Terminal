@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { edgeId, type Flow } from "@shared/flow";
+import { defaultFlow, edgeId, type Flow } from "@shared/flow";
 import { WorkflowStore } from "./workflow";
 
 const SID = "aaaaaaaa-1111-2222-3333-444444444444";
@@ -94,5 +94,21 @@ describe("WorkflowStore", () => {
     w.logRun(SID, "needs-you", ["ny-2"]);
     expect(w.lastRun(SID)).toMatchObject({ trigger: "needs-you", ids: ["ny-2"] });
     expect(w.lastRun(SID2)?.trigger).toBe("needs-you");
+  });
+  // The Default workflow hangs every built-in under its trigger, so every session on it gets
+  // self-review, board moves and the PR watch; this test pins that.
+  it("builtinsFor: the session copy decides; the default has every built-in", () => {
+    const home = mkdtempSync(join(tmpdir(), "wfb-"));
+    const w = new WorkflowStore(home);
+    w.migrate();
+    const sid = "33333333-3333-4333-8333-333333333333";
+    expect(w.builtinsFor(sid).sort()).toEqual(["pr-review", "pr-watch", "ticket"]);
+    const flow = defaultFlow();
+    w.saveSession(sid, {
+      flow: { ...flow, nodes: flow.nodes.filter((n) => !(n.kind === "builtin" && n.builtin === "pr-watch")) },
+      from: null,
+      at: null,
+    });
+    expect(w.builtinsFor(sid)).not.toContain("pr-watch");
   });
 });

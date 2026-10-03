@@ -30,3 +30,11 @@ describe('instant typing', () => {
     expect(normalizeSettings({ instantTyping: 'no' }).instantTyping).toBe(true)
   })
 })
+
+describe('watch new PRs', () => {
+  it('defaults on and keeps a boolean', () => {
+    expect(normalizeSettings({}).watchPrs).toBe(true)
+    expect(normalizeSettings({ watchPrs: false }).watchPrs).toBe(false)
+    expect(normalizeSettings({ watchPrs: 'no' }).watchPrs).toBe(true)
+  })
+})

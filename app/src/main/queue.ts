@@ -5,16 +5,27 @@ import type { QueueEdit } from '@shared/ipc'
 import type { CliResult } from '@shared/types'
 
 /**
- * A session's `/queue` (the queue skill): ~/.claude/queue/<session id>.jsonl, one JSON string per
- * prompt. The skill's UserPromptSubmit hook appends `/queue <prompt>`; its Stop hook sends the first
- * one when a response ends and drops it. The app edits the same file: writes go to a temp file and
- * are renamed in, and an empty queue has no file, as the hooks leave it.
+ * A session's `/queue`: ~/.claude/queue/<session id>.jsonl (MASTERDECK_QUEUE_DIR moves it), one
+ * JSON string per prompt. MasterDeck's hook (main/deckHooks.ts) appends `/queue <prompt>`; at the
+ * end of a turn the next one is handed to the session by the hook (MasterDeck not running) or by
+ * MasterDeck through the hook. The queue skill's own hooks, when installed by hand, use the same
+ * file. The app edits it too: writes go to a temp file and are renamed in, and an empty queue has
+ * no file, as the hooks leave it.
  */
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function queueDir(): string {
-  return join(homedir(), '.claude', 'queue')
+  return process.env.MASTERDECK_QUEUE_DIR || join(homedir(), '.claude', 'queue')
+}
+
+/** What the Stop hook prints to run the next queued prompt (the queue skill's exact answer). */
+export function queueAnswer(prompt: string, left: number): object {
+  return {
+    decision: 'block',
+    reason: `Next queued user prompt (${left} more after this). Treat it as a new user request and handle it fully:\n\n${prompt}`,
+    systemMessage: `▶ queue: ${prompt}`,
+  }
 }
 
 function file(dir: string, sessionId: string): string | null {

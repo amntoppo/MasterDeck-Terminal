@@ -232,7 +232,7 @@ export function BoardView({
     const card = state.board?.cards.find(
       (c) => ticketKey(c.repo, c.number) === k,
     );
-    // Only statuses babysit-ticket can set on the card's own board (a column GitHub added later, or
+    // Only statuses MasterDeck can set on the card's own board (a column GitHub added later, or
     // another board's column, would fail as "unknown status").
     const cols = projectByKey(card?.project)?.columns ?? state.config.columns;
     if (!card || !cols.includes(col) || (moving[k] ?? card.status) === col)

@@ -129,14 +129,14 @@ describe("workflow builder drafts", () => {
     );
     expect(skill.problems).toEqual([]);
     const ok = checkDraft(raw, {
-      installedSkills: ["babysit-pr"],
+      installedSkills: ["master"],
       skills: [skill],
     });
     expect(ok.ok).toBe(true);
     expect(ok.plans[0].trigger).toBe("custom:migration-edited");
     // No skill written: the block points at nothing.
     expect(
-      checkDraft(raw, { installedSkills: ["babysit-pr"] }).problems.join(),
+      checkDraft(raw, { installedSkills: ["master"] }).problems.join(),
     ).toMatch(/no skill named check-migration/);
     // A name that already exists is refused; a thin skill is flagged.
     expect(

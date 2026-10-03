@@ -53,7 +53,9 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   - `scripts/install-mac.sh` (copy the built app to /Applications), `scripts/sync-protocol.sh`.
   - `test/fixtures/` — `agents.json`, `board*.json`, `ledger.json`, `snapshot.json`, `claude-echo.json`.
 - `skills/` — skills shipped with the app (master, babysit-ticket, babysit-pr, babysit-worktree,
-  kill-worktree, worktree-janitor, queue). `skills/master/` is also the `master` CLI (Python,
+  kill-worktree, worktree-janitor, queue). MasterDeck no longer depends on babysit-ticket,
+  babysit-pr or queue — it does their automatic parts itself (PR watch, board moves, /queue hook) —
+  they stay for use by hand. `skills/master/` is also the `master` CLI (Python,
   `lib/master/`) that the app calls for the ledger, snapshot, board, config and spawning.
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
@@ -138,10 +140,12 @@ web tabs keep working.
 | Needs you (inbox) | `shared/inbox.ts` (items), `main/inbox.ts` (store, events), `runInboxAction` in `main/index.ts` |
 | Typing into sessions | `main/send.ts` (`Sender`), `shared/send.ts`, `shared/promptGuard.ts` |
 | Terminals | `main/ptys.ts` (`PtyManager`), `shared/paneCommand.ts`, `renderer/.../TerminalView.tsx` |
-| Hooks | `main/hooks.ts` (settings.json installs), `main/deckHooks.ts` (MasterDeck's hook script), `shared/deckHooks.ts` |
+| Hooks | `main/hooks.ts` (settings.json installs, `hookStatus`, one-time `migrateLegacyHooks` of the old skill hooks), `main/deckHooks.ts` (MasterDeck's hook script), `shared/deckHooks.ts` |
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
+| PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
+| Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
-| Queue | `main/queue.ts`, `skills/queue` |
+| Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
@@ -245,6 +249,11 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-03)
 
+- Branch `feat/native-babysit` (plan H, 2342f28 … HEAD on top of `main`, not merged, not pushed): MasterDeck
+  watches session PRs, moves board cards and runs `/queue` itself; a one-time migration takes out
+  the skill hooks it installed (`native-hooks.json`); its own self-review gate replaces
+  babysit-pr's. Merging into `main` is the user's call. Deploy watch and CI-failure messages are
+  deliberate non-goals (Needs you covers failing CI).
 - On `main`, 21 commits ahead of `origin/main`, not released (last release v0.6.2). This session
   shipped: snapshot patches + volatile hold (0b6d8ed), web state patches (75aafa1), the remote
   indicator (ce27e5d) and instant typing (merge bacb8d6). Backend PRs #4 (ea53f9e) and #5

@@ -11,7 +11,7 @@ interface Props {
 }
 
 /**
- * One session's /queue (the queue skill): the prompts its Stop hook runs, one per finished
+ * One session's /queue (MasterDeck's hook): the prompts its Stop hook runs, one per finished
  * response, first to last. Reads and edits ~/.claude/queue/<session id>.jsonl through the app.
  */
 export function QueuePanel({ state, activeKey, onClose }: Props) {
@@ -100,7 +100,7 @@ export function QueuePanel({ state, activeKey, onClose }: Props) {
         </button>
       </div>
       {!state.hooks.queue && (
-        <div className="banner">Queue hooks are not installed, so queued prompts never run. Turn them on in Settings → GitHub &amp; board → Hooks.</div>
+        <div className="banner">Nothing runs /queue on this machine right now (MasterDeck's hook is not installed, or only half of the queue skill's hooks are), so queued prompts never run.</div>
       )}
       {msg && (
         <div className="banner" style={{ color: 'var(--muted)', background: 'var(--bg-2)' }} onClick={() => setMsg(null)}>

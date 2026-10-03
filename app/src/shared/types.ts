@@ -151,6 +151,8 @@ export interface PrLive {
   reviewCheck: "success" | "failure" | "pending" | null;
   buildCi: "success" | "failure" | "pending" | null;
   isDraft: boolean;
+  /** Its head branch (absent from older reads). */
+  headRef?: string;
   /** When it was opened, and its latest comment or review (ms); for "Ready for Review". */
   createdAt: number | null;
   mergedAt: number | null;
@@ -193,7 +195,7 @@ export interface AppState {
   >;
   /** Git worktrees each session created or worked in that still exist, by Session.key; oldest first. */
   sessionWorktrees: Record<string, import("./worktrees").SessionWorktree[]>;
-  /** PR URLs linked to each session (sessionId): babysit-ticket's list, then PRs it created. Oldest first. */
+  /** PR URLs linked to each session (sessionId): MasterDeck's links, then PRs it created. Oldest first. */
   sessionPrs: Record<string, string[]>;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
@@ -269,12 +271,12 @@ export interface SkillStatus {
 }
 
 export interface HookStatus {
-  /** babysit-ticket's tt.sh hook (board moves). */
-  ticket: boolean;
-  /** babysit-pr's gh pr create hooks (self-review gate, babysit reminder). */
-  pr: boolean;
-  /** The queue skill's hooks: /queue stores a prompt, the next one runs when a response ends. */
+  /** Something stores /queue prompts and runs the next one at the end of a turn: MasterDeck's hook, or queue hooks installed by hand. */
   queue: boolean;
+  /** The queue skill's hooks are in settings.json (put there by hand): MasterDeck's hook leaves /queue to them. */
+  foreignQueue: boolean;
+  /** MasterDeck's self-review gate before `gh pr create`. */
+  reviewGate: boolean;
 }
 
 /** What Setup checks before GitHub can work. */

@@ -29,12 +29,16 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
 1. Reconciles the remote token file and `account.json` (a token without identity is deleted; an
    identity without a token → `account.signedOutRemotely`).
 2. `loginPath()` (the login shell's PATH) and `resolveClaude()`.
-3. `registerIpc()` — every handler through `reg = new IpcRegistry(ipcMain)`.
+3. `registerIpc()` — every handler through `reg = new IpcRegistry(ipcMain)`; then
+   `linkStore.importOnce()` (babysit-ticket's links copied into `ticket-links.json`, first launch only).
 4. `loadMacKey(<home>/browser-key, safeStorage)` (the web app's Mac key).
 5. Status line hook (`statusline.ts`: install or refresh `statusline_tee.py`), bundled skills
-   (`syncSkills`), hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
-   `setInterval(pumpWatches, 1000)`, `installDeckHooks`), workflow migration + hook sync +
-   `guardBuiltinHooks`.
+   (`syncSkills`), the one-time `migrateLegacyHooks` (non-Windows, not smoke, no
+   `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), `installReviewGate` (same conditions),
+   hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
+   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue`, then
+   `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
+   `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
 7. `createWindow()`, `sources.start()`, `syncRemote()`.
 
@@ -80,11 +84,13 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 1. `workflows().snapshot(...)` — each new session gets its own workflow copy (non-Windows).
 2. `runFlowWatch(state)` — the Needs-you / idle workflow triggers (`shared/flowWatch.ts`); may
    notify or send `Workflow step (idle): …` to the session.
-3. `emit(CH.state, state)` — to the window and to every connected browser (`bridge.event`).
-4. `cloud?.push(toRemoteSnapshot(state, version))` — the backend snapshot (see REMOTE.md).
-5. First state with healthy agents → `remoteReady = true; syncRemote()`; a `remoteEnabled` flip →
+3. `boardFlow.tick(state)` (board moves, at most every 30 s) and `linkedSteps.deliver(sessions)`
+   (the `linked` steps of native links); both catch their own errors.
+4. `emit(CH.state, state)` — to the window and to every connected browser (`bridge.event`).
+5. `cloud?.push(toRemoteSnapshot(state, version))` — the backend snapshot (see REMOTE.md).
+6. First state with healthy agents → `remoteReady = true; syncRemote()`; a `remoteEnabled` flip →
    `syncRemote()`.
-6. Notifications (`diffEvents`), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
+7. Notifications (`diffEvents`), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
    `CH.autoOpen`, dock bounce), and the SMOKE exit.
 
 ### Sessions and agents
@@ -96,8 +102,9 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   (`attached | elsewhere | duplicate | absent`).
 - Statuses shown to the user come from `sessionStatus` (`shared/review.ts`) with `prStage` and
   `manualStatus` (`session-status.json`).
-- Session ↔ ticket links come from babysit-ticket's state (`~/.claude/babysit-ticket/state.json`),
-  re-linked after resumes (`session-history.json`, `shared/carry.ts`).
+- Session ↔ ticket links: MasterDeck's `ticket-links.json` (`main/ticketLinks.ts` `LinkStore`,
+  imported once from babysit-ticket's `~/.claude/babysit-ticket/state.json`; never read again after
+  that), re-linked after resumes (`session-history.json`, `shared/carry.ts`).
 - Restart recovery: `running-sessions.json` → `AppState.stoppedByRestart` → `resumeStopped`
   (`shared/restore.ts`).
 
@@ -119,13 +126,41 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 ### Hooks
 
 - `main/hooks.ts` edits `~/.claude/settings.json` (backups, atomic writes, marker per hook):
-  `hookStatus` (`HookStatus`: `ticket`, `pr`, `queue`, …), `installHooks`, `installWorkflowHooks`,
-  `installDeckHooks`, `guardBuiltinHooks`.
+  `hookStatus` (`HookStatus`: `queue` = something runs `/queue`: the deck hook with no skill queue
+  hook beside it, or both skill queue hooks; `foreignQueue` = any queue skill hook, e.g. a
+  hand-installed `$HOME/.claude/hooks/queue-submit.sh`; `reviewGate` = `REVIEW_MARK` in
+  PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
+- `migrateLegacyHooks(settingsPath, backupDir)` runs once at launch (`<home>/native-hooks.json`
+  records it with what it removed). It removes only what older MasterDeck versions wrote for the
+  skills: the exact commands in `LEGACY_COMMANDS` (tt.sh hook, babysit-pr's pre/post `gh pr create`
+  hooks, the queue skill's `~/.claude/skills/queue/scripts/*`) or their `# masterdeck-builtin:<id>`
+  wrappers. Everything else stays, including queue hooks installed by hand (they keep MasterDeck's
+  queue off). It writes (backup first, atomic) only when it removed something. Nothing is switched
+  off: board moves, self-review and the PR watch are Default-workflow steps. There is no install
+  path for skill hooks any more (no `installHooks`, no `hooksInstall` IPC); the skills stay
+  installed for use by hand. Sessions alive at the migration keep the queue skill's hooks (Claude
+  Code reads hooks at session start), so when it removed a queue hook it writes `deck/legacy-sids`
+  (`DeckHooks.markLegacy`: `*` until the session list is in; then `pruneLegacy`, from the state
+  callback, turns it into the live session ids and deletes it once none of them is alive). The
+  deck hook does no `/queue` work (UserPromptSubmit store, Stop drain/request) for a listed id, so
+  no turn drains twice.
+- Review gate: `reviewGateCommand`/`installReviewGate` (marker `REVIEW_MARK`) put a PreToolUse Bash
+  hook in settings.json at every launch (via `refreshHooks()` after). It is `guardedBuiltin('pr-review')`,
+  so a session whose workflow leaves the step out is skipped; it fires only when the command runs
+  `gh pr create` (`runsOrExit`), denies the first try per session and branch with a short review instruction
+  (marker `$TMPDIR/masterdeck-review-<session>-<branch>`; a prefilter exits before jq unless the input mentions `gh pr create`), and lets the retry through, as it does when
+  `.git/pr-selfreview-<HEAD sha>` exists (a hand-run /babysit-pr).
 - `main/deckHooks.ts` writes `<home>/deck/hook.sh` (one script for every event, `$1` = event) and
   reads what it leaves: `pending/<id>.json` + `answers/<id>.json` (PermissionRequest and
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`
   (printed on SessionStart), `watch-requests/` + `watch-answers/` (Monitor takeover),
   `events.jsonl` (the rest; emptied at launch past 4 MB), `alive`, `monitors-by`.
+  It also handles `/queue`: UserPromptSubmit stores `/queue <prompt>` (any other prompt returns at
+  once, unread and unlogged); Stop hands over the next item through `queue-requests/<id>.json` →
+  claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when
+  `hooks.ts` `hookStatus().foreignQueue` sees the queue skill's own hooks in settings.json; worked
+  out again whenever settings.json's mtime changes) leaves `/queue`
+  to those hooks.
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
 
 ### Monitors (watches) and schedules
@@ -138,6 +173,30 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   delivers them through `sender.send` once the session's turn is over, as
   `[MasterDeck monitor: <description>]`. Kept in `watches.json`, restarted at launch (leftover
   process groups killed). `AppState.watches` / `watchStop`.
+- PR watch (`main/prWatch.ts` `PrWatch`, pure parts in `shared/prWatch.ts`; replaces babysit-pr's
+  Monitor phase): `sync` from the state callback adds each open PR in `sessionPrs` of a session with
+  `settings.watchPrs` on and the `pr-watch` built-in in its workflow (old PRs are baselined: their
+  items go into `seen` and the session gets one "already has K threads and L comments" line).
+  First run (no `pr-watch.json` at `load`, e.g. the upgrade from babysit-pr): PRs added in the next
+  10 min are `quiet`: their first full read goes into `seen` and nothing is sent, not even that line. Every 60 s `poll` sends one light GraphQL per 50 PRs and a heavy one (≤ 10
+  PRs) only for PRs that changed, every 10 min, or when a stalled review is due; all through `ghc`
+  (ttl 50 s) and nothing while the GitHub pause holds. Rate limits are read only from stderr, a failed
+  answer's body or a GraphQL `RATE_LIMITED` error (`ghErrorText`; `pollPrs` too), never from a good
+  answer's body (comments can say "rate limit"); a JSON answer's stdout is never scanned (gh
+  exits 1 on a partial GraphQL error but prints the data). Such an answer is still read
+  (`ghHasData`): one inaccessible PR does not starve its batch; after 3 light reads in a row
+  without it, its watch ends with one line. Pending items that make no text (a stall past its
+  nudges) are dropped. "Me" is the response's `viewer`; without it
+  nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
+  next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
+  one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
+  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told).
+  Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
+  `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
+  `state.watches` with ids `pr:<url>` (`watchStop` routes them), so they count as monitors in
+  `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
+  session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
+  BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".
 
@@ -153,9 +212,20 @@ One MasterDeck hook per trigger in settings.json reads the session's copy.
 
 ### Queue
 
-`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (the `queue` skill's file; its
-UserPromptSubmit hook appends, its Stop hook sends the first item). Writes are temp + rename; an
-empty queue has no file. Remote `session.send` with `via: queue` adds here (needs `hooks.queue`).
+`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` in the
+app's env moves it; the dir is baked into `hook.sh`, so a session's own env never splits them; the
+`queue` skill uses the same file). MasterDeck's hook stores `/queue …`; at a Stop the app (running)
+or the hook (not running) hands over the next prompt, claimed by rename so it runs once: the hook
+leaves `queue-requests/<now>-<pid>-<rand>.json` and waits until 4 s after its start;
+`DeckHooks.pumpQueue` (every second from `pumpWatches`) takes only requests under 8 s old whose
+hook pid is alive, claims, answers with `queueAnswer`, and shifts the item when the hook still runs
+or already read the answer (it removes the file right after reading); a hook that died before
+reading leaves the item queued and its answer removed. Not claimed in time, the
+hook renames the request back itself and drains one item; claimed, it waits until 7 s after its
+start (clock deadlines, under the 10 s hook timeout). Unread answers are swept after 60 s.
+`pumpWatches` also re-checks queue-off whenever `~/.claude/settings.json` changes.
+Writes are temp + rename; an empty queue has no file. Remote `session.send` with `via: queue` adds
+here (needs `hooks.queue`).
 
 ### Sender and PTYs
 
@@ -177,10 +247,55 @@ empty queue has no file. Remote `session.send` with `via: queue` adds here (need
 
 `main/masterCli.ts` runs `python -m master.cli` (the `master` skill's lib, the installed copy in
 `~/.claude/skills/master/lib` wins over the bundled one): ledger approve/reject, `draft-assign`,
-`spawn`, snapshot, board, `config detect`. `main/assign.ts` `startAssign` records + approves an
+`spawn`, snapshot, board, `config detect`. `master snapshot` reads MasterDeck's `ticket-links.json`
+(not babysit-ticket's state; `MASTERDECK_HOME` overrides the folder), and the ASSIGN prompt no longer
+asks the session to run babysit-ticket or babysit-pr: MasterDeck links it and watches its PR. `main/assign.ts` `startAssign` records + approves an
 ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/master"` in the
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).
+
+### Board writes (`main/boardOps.ts`)
+
+`BoardOps` (formerly babysit-ticket's `tt.sh`) on the `ghc` runner: `issueInfo` (item and status on
+the first configured board holding the issue; reads skip the cache), forward-only `move` (by
+`statusRank`; `setStatus` forces, for the Board's status menu), `linkPr` (Development box via
+`addCloseIssueReferences`) and `create` (issue, board, status, sprint). `linkTicket` is what
+`linkSession` runs: it writes `LinkStore.link` (a failed write returns a failed result), marks the
+session's `linked` stage (`Sources.markReached`), and moves the ticket to In Dev when
+`WorkflowStore.builtinsFor(session)` has `ticket`. There is no global switch for board moves.
+A successful `linkSession` also queues `LinkedSteps` (below).
+
+### Board moves (`main/boardFlow.ts`)
+
+`BoardFlow.tick(state)` runs from the state callback, at most every 30 s (`BOARD_TICK_MS`), one at a
+time. Links imported from tt.sh (`imported: true` in `ticket-links.json`) are history: BoardFlow
+leaves them out of (2) and (3) until a session links that ticket again (`withLink` writes a fresh
+entry). (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
+ASSIGN proposal is linked through `linkSession` (tried once per session, ever:
+`<home>/board-link-tried.json`). (2) Each new
+PR in `state.sessionPrs` of a linked session that it opened (its transcripts: `Sources.prsOpenedBy`)
+or whose repo and head branch are the link's branch key (`prOnBranch`, `PrLive.headRef`) is recorded
+(`LinkStore.addPr`; a failed write is logged and retried next tick) and, when the session keeps
+`ticket`, linked under the issue's Development box (`BoardOps.linkPr`; a failure is logged). The PR
+of whatever branch its checkout is on stays display-only. (3) Tickets with at least one session keeping
+`ticket`, whose card (and so its board) is known and not yet at Dev Done, get their PRs' states in
+one `prStates` call per tick; `boardTarget` of a ticket's PR states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
+one is merged (only when every PR's state is known). Forward only (`statusRank` against the card's
+status). A (ticket, target, PR set) move that went through, or found the card already there or past it,
+is recorded in `<home>/board-moved.json` and never tried again (a card the user moved back stays; a
+reopened ticket's new PR is a new PR set, so it moves again);
+a failed one is tried again after 30 min (`RETRY_MS`). PR states
+come from `state.prLive` for now (live sessions' PRs only).
+
+`LinkedSteps` replaces the `linked` hook for links MasterDeck makes itself (no `tt.sh link` runs, so
+the PostToolUse hook never fires): `queue(sid)` after a link adds the session to
+`<home>/linked-steps.json` when its workflow (`compiledFor`) has `linked` steps not handed yet;
+`deliver` sends their notes joined by a blank line (exactly what the hook adds; each note starts
+`Workflow step (when a session is linked to its issue):`) once the turn is over (`canDeliver`,
+the `Sender` path watches use), touches the hook's own once markers
+(`$TMPDIR/masterdeck-workflow-<step>-<sid>`, so a later hand-run `tt.sh link` does not repeat them,
+and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
+entry is dropped.
 
 ## Preload and IPC
 
@@ -245,8 +360,8 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `teamPrs`, `teamPrsAt`, `teamPrsLoading`, `teamPrsError` | `refreshTeamPrs` |
 | `inbox` | `Inbox.view()` over `collectItems` |
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
-| `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, babysit-ticket state |
-| `watches`, `schedules` | `Watches.info()`, transcripts |
+| `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, `ticket-links.json` |
+| `watches`, `schedules` | `Watches.info()` + `PrWatch.info()` (`pr:<url>` rows), transcripts |
 | `sources`, `errors`, `missingBinaries`, `ghCache` | health of each poll, `readGhCacheStatus()` |
 | `settings`, `config`, `skills`, `hooks`, `statuslineInstalled`, `masterWorkspace` | `settings.json`, `~/.claude/master/config.json`, `syncSkills`, `hookStatus` |
 | `stoppedByRestart`, `restoring` | `running-sessions.json` |
@@ -268,10 +383,16 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
-| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
+| `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
+| `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
+| `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
+| `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
+| `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
+| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
-| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection |
+| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
+| `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |
 | `remote-device-id` | random UUID sent in `hello` |
@@ -281,5 +402,5 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `claude-settings.json`, `skills/` | only with `MASTERDECK_ISOLATED=1` |
 
 Elsewhere: `~/.claude/settings.json` (hooks, status line), `~/.claude/skills/` (bundled skills),
-`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/`, `~/.claude/babysit-ticket/`,
+`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
 `~/.claude/gh-cache/`, `~/.claude/projects/` (transcripts, read-only), Electron user data.

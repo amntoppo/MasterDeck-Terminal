@@ -72,10 +72,30 @@ the repo-root [TODO.md](../TODO.md).
   filter. Needs repro steps from the user. Where: `app/src/shared/boardFilter.ts`, `BoardView.tsx`.
 - **gamerun-app PR #140 (feat/org-join-code)**: closed unmerged on purpose; the merge-conflict
   question was never answered; 4 local commits unpushed there. Other repo; ask the user.
-- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details; move a
-  board ticket to "PR Raised" only once the draft PR is ready (babysit-ticket); the pr-watch hook
-  firing on any command that contains `gh pr create` (check it uses `runsOrExit`,
-  `app/src/shared/workflow.ts`).
+- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details.
+- **Native PR watch / board / queue follow-ups** (plan H, all P3, deferred from review):
+  `LinkStore` read-modify-write has no lock across instances (`main/ticketLinks.ts`); auto-link
+  marks a ticket tried before linking, so a transient failure is never retried, and
+  `board-link-tried.json` is never pruned (`main/boardFlow.ts`); PR watch polls inaccessible PRs
+  forever and runs the heavy query every minute for CONFLICTING/UNKNOWN PRs (`main/prWatch.ts`);
+  a hook killed between the alive check and reading its answer loses one `/queue` item
+  (`main/deckHooks.ts`); review-gate markers in `$TMPDIR` are never cleaned; a ticket request has a
+  ms race between `.taken` and `rm -f .req` on timeout (`mv .req .gone` would close it).
+- **Queue item waits a turn (M2)**: when the app claims a Stop request but answers after the hook's
+  7 s wait, the hook exits without a prompt; the item stays queued (not lost) and goes at the next
+  turn's Stop (`main/deckHooks.ts` `pumpQueue`).
+- **legacy-sids `*` expansion**: `deck/legacy-sids` starts as `*` and becomes the sessions alive at the first
+  healthy session list, not those alive at the migration. If the app quits before that, sessions started in
+  between lose `/queue` until they end; if `claude agents` never succeeds, `*` blocks `/queue` everywhere.
+  Fix: store the migration time and keep only sessions that started before it.
+- **Board link branch is often empty**: the auto-link takes the branch from the session's cwd at spawn (often
+  `dev`), so `prOnBranch` rarely helps; a PR the transcript scan cannot see (opened in the browser) is not
+  linked. Fix: refresh an empty link `branch` when the checkout moves to a feature branch.
+- **Settings backups never pruned (M4)**: `settings.backup.*.json` in `<home>` pile up (up to 4 on
+  the first launch: migration, review gate, deck hook, workflow hooks) (`main/hooks.ts` `write`).
+- **Orphaned babysit-proof hook**: older machines may still have a babysit-proof `PROOF_PRE`
+  PreToolUse hook in `~/.claude/settings.json` (the skill is gone; `migrateLegacyHooks` does not
+  remove it). Remove by hand, or add it to `LEGACY`.
 - **Cleanup** (list exact paths, delete only those): remote-probe transcript folders under
   `~/.claude/projects`; scratch dirs in `~/.claude/jobs/*/tmp`; the leftover untracked
   `skills/babysit-proof/` (only `__pycache__`, skill removed in 9329db4).
@@ -84,6 +104,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |

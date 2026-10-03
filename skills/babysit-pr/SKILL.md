@@ -1,6 +1,6 @@
 ---
 name: babysit-pr
-description: Pre-PR self-review plus post-create review-comment babysitting. Use before creating a PR (review the branch diff, fix findings, write the self-review marker) and after creating one (poll review threads, fix, reply, resolve, until merged or all threads resolved). Triggered automatically by the gh pr create hooks, installed globally in ~/.claude/settings.json (MasterDeck Settings > Install hooks) or per workspace in .claude/settings.local.json.
+description: Pre-PR self-review plus post-create review-comment babysitting. Use before creating a PR (review the branch diff, fix findings, write the self-review marker) and after creating one (poll review threads, fix, reply, resolve, until merged or all threads resolved). Optional: MasterDeck has its own PR watch and self-review gate, so run it by hand (/babysit-pr) for the deeper pass, or wire its hooks per workspace in .claude/settings.local.json.
 ---
 
 # babysit-pr — self-review before, comment babysitting after
@@ -9,15 +9,11 @@ Two phases. The PreToolUse hook on `gh pr create` asks for the **Prep** phase wh
 self-review marker exists for HEAD; the PostToolUse hook asks for the **Monitor** phase
 once the PR exists. Either phase can also be run by hand (`/babysit-pr`).
 
-The hooks can live in either of two places:
-
-- **Globally, in `~/.claude/settings.json`** — MasterDeck's Setup does this for you
-  ("Install hooks" in MasterDeck Settings), so every workspace on this machine gets them.
-- **Per workspace, in `.claude/settings.local.json`** (gitignored, so per machine and per
-  workspace) — not in a shared, committed `.claude/settings.json`, which at most carries the
-  `Bash(gh pr create:*)` permission.
-
-No hooks in either place means no automatic trigger: run `/babysit-pr` by hand, or install them.
+This skill is optional. MasterDeck has its own PR watch and a short self-review gate before
+`gh pr create` (a step of its Default workflow), so inside MasterDeck nothing needs installing.
+Outside it, hooks can live in the workspace's `.claude/settings.local.json` (gitignored, so per
+machine and per workspace) — not in a shared, committed `.claude/settings.json`, which at most
+carries the `Bash(gh pr create:*)` permission. With no hooks, run `/babysit-pr` by hand.
 
 All `gh` commands run from the repo the PR belongs to — check `pwd` first; if your workspace
 holds several repos, the marker/branch/PR are per-repo.

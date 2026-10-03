@@ -12,6 +12,8 @@ export interface Settings {
   reviewQuietMinutes: number
   /** Who runs the monitors sessions arm: Claude Code (30 minutes each, re-armed) or MasterDeck (no limit, while it runs). */
   monitorsBy: 'claude' | 'masterdeck'
+  /** Watch each open PR a session makes: review comments, conflicts, a stalled review and the merge reach the session as messages. */
+  watchPrs: boolean
   /** Send Tasks and Needs you to the remote backend, and run the commands it relays (Settings → Remote). */
   remoteEnabled: boolean
   /** Web terminal: show typed characters at once, corrected when the Mac's output arrives (predictive local echo). */
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   afterRestart: 'ask',
   reviewQuietMinutes: 20,
   monitorsBy: 'claude',
+  watchPrs: true,
   remoteEnabled: false,
   instantTyping: true,
 }
@@ -48,6 +51,7 @@ export function normalizeSettings(raw: unknown): Settings {
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
     monitorsBy: r.monitorsBy === 'masterdeck' ? 'masterdeck' : 'claude',
+    watchPrs: typeof r.watchPrs === 'boolean' ? r.watchPrs : DEFAULT_SETTINGS.watchPrs,
     remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
     instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
   }

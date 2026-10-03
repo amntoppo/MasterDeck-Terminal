@@ -12,7 +12,7 @@ function sess(key: string, state: Session['state'], extra: Partial<Session> = {}
 }
 function st(sessions: Session[], openIds: string[] = [], queueHook = true): AppState {
   const e = (id: string) => ({ item: { id, kind: 'question', priority: 1, sessionKey: 'a', ticket: null, title: '', body: '', actions: [], detail: { type: 'session' } }, state: 'open', firstSeen: 0, lastSeen: 0 })
-  return { sessions, inbox: { open: openIds.map(e), snoozed: [], history: [] }, hooks: { ticket: true, pr: true, queue: queueHook } } as unknown as AppState
+  return { sessions, inbox: { open: openIds.map(e), snoozed: [], history: [] }, hooks: { queue: queueHook, foreignQueue: false, reviewGate: false } } as unknown as AppState
 }
 function deps(state: AppState | null, over: Partial<RemoteDeps> = {}): RemoteDeps {
   return {
@@ -94,11 +94,11 @@ describe('RemoteCommands', () => {
     expect(d.sendNow).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'free' }), 'go')
   })
 
-  it('via queue without the queue hook fails clearly (Review Focus 3)', async () => {
+  it('via queue when nothing runs /queue (no MasterDeck hook) fails clearly (Review Focus 3)', async () => {
     const d = deps(st([sess('busy', 'working')], [], false))
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.send', args: { key: 'busy', text: 'x', via: 'queue' } }))).toEqual({
       ok: false,
-      message: 'the queue hook is not installed (Settings → Hooks & skills), so a queued message would never be sent; send it now instead',
+      message: "nothing runs /queue on this machine (no complete queue hook is installed), so a queued message would never be sent; send it now instead",
     })
     expect(d.queueEdit).not.toHaveBeenCalled()
   })

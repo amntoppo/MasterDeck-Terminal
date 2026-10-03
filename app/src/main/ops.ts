@@ -1,7 +1,5 @@
 import { spawn } from 'node:child_process'
-import { ticketLabel, type Ticket } from '@shared/ticket'
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { summarizeTranscript, type HistoryHit } from '@shared/history'
@@ -19,7 +17,7 @@ export type { JanitorRow, Template }
 export const BUILTIN_TEMPLATES: Template[] = [
   { name: 'TDD, small PR', text: 'Work test-first: write a failing test, make it pass, refactor. Keep the change small and focused, and open one small PR.', builtin: true },
   { name: 'Investigate only', text: 'Investigate only: find the cause and report your findings with file:line references. Do not change any code or open a PR.', builtin: true },
-  { name: 'Fix and open PR', text: 'Fix it, add a test that covers the fix, run the tests, then open a PR and babysit it. Do not merge.', builtin: true },
+  { name: 'Fix and open PR', text: 'Fix it, add a test that covers the fix, run the tests, then open a PR. MasterDeck watches it and sends you review comments; act on them. Do not merge.', builtin: true },
   { name: 'Pair with me', text: 'Pair with me: propose each step and wait for my OK before you make changes.', builtin: true },
 ]
 
@@ -61,30 +59,6 @@ export class Ops {
 
   private git(dir: string, args: string[], timeoutMs = 15_000) {
     return this.run('git', ['-C', dir, ...args], { timeoutMs })
-  }
-
-  /**
-   * Move a ticket on the board through babysit-ticket, without touching any real session: a
-   * temporary TT_STATE_DIR holds a synthetic link for the issue, and `tt.sh set --force` moves it.
-   */
-  async setStatus(t: Ticket, status: string): Promise<CliResult> {
-    const issue = t.number
-    if (!Number.isInteger(issue) || issue <= 0) return { ok: false, message: 'bad issue number' }
-    if (!existsSync(this.paths.babysitTt)) return { ok: false, message: `babysit-ticket not found at ${this.paths.babysitTt}` }
-    const dir = mkdtempSync(join(tmpdir(), 'masterdeck-tt-'))
-    const fake = '00000000-0000-4000-8000-masterdeck00'
-    try {
-      writeFileSync(join(dir, 'state.json'), JSON.stringify({ sessions: { [fake]: { issue, ...(t.repo ? { repo: t.repo } : {}), title: '', branch: '', linked_at: new Date().toISOString(), prs: [] } }, branches: {} }))
-      const r = await this.run('bash', [this.paths.babysitTt, 'set', status, '--force'], {
-        cwd: dir,
-        timeoutMs: 60_000,
-        env: { TT_STATE_DIR: dir, TT_SESSION: fake, TT_CWD: dir },
-      })
-      const out = (r.stdout.trim() || r.stderr.trim()).split('\n').filter(Boolean)
-      return r.code === 0 ? { ok: true, message: out.at(-1) ?? `${ticketLabel(t.repo, issue)} → ${status}` } : { ok: false, message: out.at(-1) ?? `exit ${r.code}` }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
   }
 
   /**

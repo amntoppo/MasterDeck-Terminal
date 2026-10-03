@@ -76,6 +76,17 @@ def local_branch_head(repos_root: Path, branch_key: str) -> "str | None":
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
+def links_state(home: Path) -> dict:
+    """Session <-> ticket links: MasterDeck's ticket-links.json (it imported babysit-ticket's
+    state.json once; master never reads that file)."""
+    try:
+        raw = json.loads((home / "ticket-links.json").read_text())
+    except (OSError, ValueError):
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    return {"sessions": raw.get("sessions") or {}, "branches": raw.get("branches") or {}}
+
+
 class Live:
     """Reads the real system. Read-only: never writes to GitHub or messages a session."""
 
@@ -168,8 +179,7 @@ class Live:
         return json.loads(_run(["claude", "agents", "--json"]))
 
     def state(self) -> dict:
-        p = Path.home() / ".claude" / "babysit-ticket" / "state.json"
-        return json.loads(p.read_text()) if p.exists() else {"sessions": {}}
+        return links_state(Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck"))
 
     def branch_head(self, branch_key: str) -> str:
         # Local first: unpushed commits are real progress, and a branch deleted on GitHub

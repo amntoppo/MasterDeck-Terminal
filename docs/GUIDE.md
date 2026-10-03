@@ -63,7 +63,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   ticked (the default), your edited copy is sent after the system prompt, and the session works from
   it instead of stopping to ask. Untick it to leave the description out; your edits don't change the
   issue on GitHub.
-- **System prompt:** master's ASSIGN text (babysit-ticket, worktree, reply protocol), editable.
+- **System prompt:** master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
   follows them instead of stopping to ask.
 - **Start:** switches to Terminals at once with a "Starting…" tab. The app records and approves the
@@ -71,9 +71,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
 - **Link session…:** links a session that already exists instead. Type its name, background id or
-  session id (suggestions appear as you type). It runs babysit-ticket's `tt.sh link <issue>` for that
-  session, so like any babysit-ticket link it moves the ticket to your in-progress status if it's earlier on the board.
-  On Windows this needs Git Bash and `jq` on PATH.
+  session id (suggestions appear as you type). MasterDeck records the link itself (no
+  skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
+  moves the ticket to your in-progress status if it's earlier on the board.
 
 ## Shells and manual sessions
 
@@ -95,7 +95,8 @@ then it fast-forwards from origin. A toast says what happened. Only the workspac
 switched, and sessions running in that checkout see the new branch too.
 
 A session you start yourself (`claude` in a shell) is not linked to any ticket unless you ask:
-`/babysit-ticket` or `tt link <N>` in it, or **Link session…** in a ticket's Start dialog. Being in a
+**Link session…** in a ticket's Start dialog. (`/babysit-ticket` or `tt link <N>` by hand only
+updates the skill's own file, which MasterDeck no longer reads.) Being in a
 checkout whose branch was once linked to a ticket does not link it.
 
 ## Keeping many sessions moving
@@ -127,8 +128,8 @@ checkout whose branch was once linked to a ticket does not link it.
   - **Actions:** a skill (in a background subagent or in the session, with extra instructions), an
     instruction (text the session is told as it is), or **Notify me** (a desktop notification, after
     Needs you or Idle; after Idle, instructions are sent to the session as a message).
-  - **Built-ins:** babysit-ticket, the self-review before the PR, and the PR watch. Remove one to turn
-    it off for sessions using that workflow: its hook then skips them.
+  - **Built-ins:** board moves, the self-review before the PR, and the PR watch, all done by
+    MasterDeck. Remove one to turn it off for sessions using that workflow.
   - **Arrows:** *then* (do the next block after this one; several arrows out of a block run side by
     side), *if it worked* and *if it failed* (dashed green and red: the session follows the one that
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
@@ -194,8 +195,8 @@ checkout whose branch was once linked to a ticket does not link it.
   list of steps) are turned into flows at launch.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
-  session on it, newest first, each with Resume. The links come from babysit-ticket
-  (`~/.claude/babysit-ticket/state.json`); resumes of one background session count as one; sessions
+  session on it, newest first, each with Resume. The links are MasterDeck's own
+  (`~/.claude/masterdeck/ticket-links.json`; babysit-ticket's links were copied in once); resumes of one background session count as one; sessions
   whose conversation is gone (deleted, or only a title stub) are left out. Resume runs
   `claude --bg --resume` in the session's own folder.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
@@ -220,7 +221,11 @@ checkout whose branch was once linked to a ticket does not link it.
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
-  <prompt>`, `/queue list` and `/queue clear` do the same. Needs the queue hooks (Setup → Hooks).
+  <prompt>`, `/queue list` and `/queue clear` do the same. `/queue` is handled by MasterDeck's own
+  hook, so it works in any Claude session on macOS and Linux, MasterDeck open or not; if you
+  installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them. Sessions already
+  running when MasterDeck took the queue skill's hooks out keep using those (Claude Code reads hooks
+  when a session starts), and MasterDeck's hook stays out of `/queue` for them until they end.
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you
@@ -407,8 +412,9 @@ creation.
   that lands in that column: title, description (Markdown), repository, status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
   column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
-  the Board shows. **Create ticket** runs babysit-ticket's `tt.sh create`: the issue, added to the
-  board with its status and sprint.
+  the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
+  board with its status and sprint. Changing a card's status from the Board is also done by
+  MasterDeck.
 - **Create with Claude:** from that dialog, a Claude session opens on the right of the Board (only
   there; it keeps running while you look at another view, and its edge drags to resize). It knows
   the boards, columns, sprints, repos and people, and where the + was clicked (its folder,
@@ -419,8 +425,8 @@ creation.
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
   command). **New chat** starts over.
 
-- **Drag cards** between columns. The status moves through babysit-ticket (`tt.sh set --force`,
-  against a temporary state folder, so no real session is touched). Moving backwards asks first; a
+- **Drag cards** between columns. MasterDeck moves the status itself (the board write
+  babysit-ticket used to make, forced for a drag). Moving backwards asks first; a
   failure puts the card back.
 - **Summary:** done / in progress / blocked / to do, per person, and a burndown (one point per day, from
   each board refresh). Copy as Markdown.
@@ -458,10 +464,33 @@ Stored in `~/.claude/masterdeck/settings.json`.
 
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub account, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
-- **Skills:** each bundled skill's state in `~/.claude/skills`. MasterDeck installs missing skills
-  at launch and updates its own unchanged copies. A skill you edited, your own copy, or a symlink
+- **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
+  hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
+  (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the
+  first `gh pr create` of each branch with an instruction to review the diff, then lets the retry (same branch) go through. It is a
+  step of the Default workflow, so a workflow without the self-review step skips it. Older versions
+  installed hooks for babysit-ticket, babysit-pr and queue; MasterDeck removes exactly those once,
+  at launch (a backup of `~/.claude/settings.json` is kept), and does that work itself.
+- **Skills:** each bundled skill's state in `~/.claude/skills`, for use by hand: MasterDeck needs
+  none of them, and the Skills popup has no automatic switches (just Add, Remove, Replace with
+  bundled, and Close). MasterDeck installs missing skills at launch and updates its own unchanged
+  copies. A skill you edited, your own copy, or a symlink
   is left alone; **Replace with bundled** swaps it (the old folder goes to
   `~/.claude/skills/.masterdeck-backup/`).
+- **Watch new PRs** (Sessions, on by default): MasterDeck follows each open PR a session makes (only
+  for sessions whose workflow keeps the PR watch step). Once a minute it checks GitHub; new review
+  threads, comments, changes requested, a merge conflict, a stalled automated Claude review and the
+  merge reach the session as one message starting `[MasterDeck PR watch] repo#12:` once its turn is
+  over. A PR that was older when the watch started gets one line counting what is already on it
+  (its threads and comments are not listed); after that only new ones are sent, never twice, also
+  across restarts. The very first time (no watch file yet, e.g. right after upgrading from the
+  babysit-pr skill), PRs picked up in the first 10 minutes say nothing about what they already
+  have: only what comes after. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
+  force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
+  has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
+  tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its
+  session can take messages (it gets them already); a parked session, one on a prompt, or an
+  interactive one with master offline still gets the offer. CI offers always are. A session with a watched PR shows **Waiting** when idle.
 - **Monitors run by** (Sessions): who runs the monitors sessions arm (PR review comments, merge
   readiness, deploys, a workflow's monitor blocks).
   - **Claude Code** (default): each monitor stops after 30 minutes, Claude Code's limit, and the
@@ -476,7 +505,9 @@ Stored in `~/.claude/masterdeck/settings.json`.
   - Sessions read their hooks when they start, so one started before MasterDeck 0.6.1 keeps
     Claude Code's monitors until it is restarted.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
-    its events and a Stop button. With several, they open as a list.
+    its events and a Stop button. With several, they open as a list. A PR watch shows as
+    "PR watch · repo#12"; its Stop ends the watch and tells the session. A PR stopped this way is
+    not watched again.
 - **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
   Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
   it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the
@@ -590,20 +621,20 @@ and how long ago it connected. Click it to open Settings → Remote.
 
 ## Links survive a resume
 
-babysit-ticket links tickets to sessions **by session id**, and resuming a parked background session
+MasterDeck links tickets to sessions **by session id**, and resuming a parked background session
 gives it a new session id. MasterDeck remembers every session id each background session has had,
 in `~/.claude/masterdeck/session-history.json`. It also recognises the original one, because a
 background id is the first 8 characters of the original session id. When a resumed session has no
-link, or only babysit-ticket's automatic branch link made in the first 2 minutes after the resume,
-MasterDeck re-links it to its earlier ticket with `tt.sh link`. A link made on purpose later is left
+link, or only an automatic link made in the first 2 minutes after the resume,
+MasterDeck re-links it to its earlier ticket. A link made on purpose later is left
 alone. Each re-link is tried at most once every 10 minutes; a failure shows in the sessions column footer.
 
 ## One GitHub cache for everything
 
 Every GitHub read on this machine that matters goes through `ghc`, a drop-in for `gh` that ships
 with the master skill (`~/.claude/skills/master/ghc`, linked as `~/.local/bin/ghc`). Callers:
-master's sweep and snapshot, MasterDeck (PR status per tab, PR popups, assignees),
-babysit-ticket's `tt.sh`, and babysit-pr's poll loop.
+master's sweep and snapshot, MasterDeck (PR status per tab, PR popups, assignees, PR watch, board
+moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run them by hand.
 
 - **Short-lived cache.** Reads are kept in `~/.claude/gh-cache` for a few seconds to minutes, so
   the same read from several sessions makes one call. TTLs: PR status 45 s, PR summaries 2 min,
@@ -645,6 +676,14 @@ cards is in them.
 - **PR chips:** coloured by state (open green, draft grey, merged purple, closed red). Open PRs also
   show CI ✓ ✗ ● and 💬 unresolved threads. Clicking a chip opens the PR.
 - **Clicking a card:** opens that issue's session in Terminals, or the Assign dialog if it has none.
+- **Board moves:** MasterDeck moves the card to In Dev when a session is linked, PR Raised once its
+  PR is open and not a draft, Dev Done when all its PRs are merged — the Board moves step of the
+  Default workflow; a custom workflow can leave it out. Cards only move forward, and each move is
+  made once: a card you move back stays there. Only PRs the session opened, or ones on its linked
+  branch, count for its ticket (the PR of whatever branch its folder is on is shown, not linked).
+  Links copied in from babysit-ticket are left alone until a session links that ticket again. A session master
+  spawned for an issue is linked by MasterDeck, and a link made from MasterDeck still runs the
+  workflow's "When a session is linked" steps (sent to the session once its turn is over).
 - **Data:** `master board` (2 GitHub calls), refreshed together with the issues: at startup, every
   hour, and on **Refresh**. "refreshed 15 minutes ago" beside the button shows the last refresh. The
   board is cached with the issues, so it shows immediately on the next start.

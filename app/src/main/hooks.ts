@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CliResult, HookStatus } from "@shared/types";
-import { STEP_MARK } from "@shared/workflow";
+import { runsOrExit, shellQuote, STEP_MARK, TRIGGERS } from "@shared/workflow";
 import {
   customTriggerCommand,
   flowTriggerCommand,
@@ -21,39 +21,161 @@ import {
 import { DECK_EVENTS } from "@shared/deckHooks";
 
 /**
- * Claude Code hooks the bundled skills rely on, installed into ~/.claude/settings.json:
- * - babysit-ticket: `tt.sh hook` after each Bash call and at session start (moves the board).
- * - babysit-pr: a soft gate before `gh pr create` (self-review first) and a reminder after it
- *   (start babysitting the PR).
- * - queue: `/queue <prompt>` is stored instead of sent (UserPromptSubmit), and the next stored
- *   prompt runs when a response ends (Stop).
- * Installing is idempotent and keeps everything else in the file; a backup is written first.
+ * Claude Code hooks MasterDeck installs into ~/.claude/settings.json: its own deck hook
+ * (main/deckHooks.ts), the workflow trigger hooks, and the self-review gate. Older versions
+ * installed hooks for the babysit-ticket, babysit-pr and queue skills; migrateLegacyHooks takes
+ * exactly those out once (the skills stay installed for use by hand). Every edit keeps the rest of
+ * the file and writes a backup first.
  */
 
 type Hook = { type: "command"; command: string; timeout?: number };
 type Matcher = { matcher?: string; hooks: Hook[] };
 type Settings = Record<string, unknown> & { hooks?: Record<string, Matcher[]> };
 
-const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook';
-const TT_MARK = "babysit-ticket/scripts/tt.sh";
+/** What older MasterDeck versions wrote for the skills, exactly (the migration matches these). */
+export const LEGACY_COMMANDS = {
+  ticket: '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook',
+  prPre:
+    `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) sha=$(git rev-parse HEAD 2>/dev/null) || exit 0; ` +
+    `[ -f ".git/pr-selfreview-$sha" ] && exit 0; echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Soft gate: no self-review marker for current HEAD. ` +
+    `Before creating this PR, run the pre-PR self-review from the babysit-pr skill (review branch diff, fix findings, commit, write marker .git/pr-selfreview-<HEAD sha>). ` +
+    `Proceed without it only if the user explicitly said to skip review."}}' ;; esac`,
+  prPost:
+    `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) echo '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"PR created. ` +
+    `Arm the Monitor now (timeout_ms 1800000; re-arm on each expiry, there is no persistent flag), per the Monitor phase of the babysit-pr skill: ` +
+    `it emits an event per new review comment; on each wake fix and push, reply, resolve threads; the watch ends when the PR is merged/closed."}}' ;; esac`,
+  queueSubmit: '"$HOME/.claude/skills/queue/scripts/queue-submit.sh"',
+  queueDrain: '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"',
+} as const;
 
-const PR_PRE =
-  `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) sha=$(git rev-parse HEAD 2>/dev/null) || exit 0; ` +
-  `[ -f ".git/pr-selfreview-$sha" ] && exit 0; echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Soft gate: no self-review marker for current HEAD. ` +
-  `Before creating this PR, run the pre-PR self-review from the babysit-pr skill (review branch diff, fix findings, commit, write marker .git/pr-selfreview-<HEAD sha>). ` +
-  `Proceed without it only if the user explicitly said to skip review."}}' ;; esac`;
-const PR_POST =
-  `cmd=$(jq -r '.tool_input.command // ""'); case "$cmd" in *'gh pr create'*) echo '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"PR created. ` +
-  `Arm the Monitor now (timeout_ms 1800000; re-arm on each expiry, there is no persistent flag), per the Monitor phase of the babysit-pr skill: ` +
-  `it emits an event per new review comment; on each wake fix and push, reply, resolve threads; the watch ends when the PR is merged/closed."}}' ;; esac`;
-const Q_SUBMIT = '"$HOME/.claude/skills/queue/scripts/queue-submit.sh"';
-const Q_DRAIN = '"$HOME/.claude/skills/queue/scripts/queue-drain.sh"';
-// Script names only: an older install from ~/.claude/hooks counts too, so it is never doubled.
+const LEGACY: {
+  what: "ticket" | "pr" | "queue";
+  event: string;
+  exact: string;
+  builtin?: BuiltinId;
+  inner?: string;
+}[] = [
+  { what: "ticket", event: "PostToolUse", exact: LEGACY_COMMANDS.ticket, builtin: "ticket", inner: "babysit-ticket/scripts/tt.sh" },
+  { what: "ticket", event: "SessionStart", exact: LEGACY_COMMANDS.ticket, builtin: "ticket", inner: "babysit-ticket/scripts/tt.sh" },
+  { what: "pr", event: "PreToolUse", exact: LEGACY_COMMANDS.prPre, builtin: "pr-review", inner: "pr-selfreview-" },
+  { what: "pr", event: "PostToolUse", exact: LEGACY_COMMANDS.prPost, builtin: "pr-watch", inner: "Monitor phase of the babysit-pr skill" },
+  { what: "queue", event: "UserPromptSubmit", exact: LEGACY_COMMANDS.queueSubmit },
+  { what: "queue", event: "Stop", exact: LEGACY_COMMANDS.queueDrain },
+];
+
+/** MasterDeck wrote it: the exact old command, or its guarded wrapper (`# masterdeck-builtin:<id>`). */
+const ours = (l: (typeof LEGACY)[number], cmd: string): boolean =>
+  cmd === l.exact ||
+  (!cmd.includes(REVIEW_MARK) &&
+    !!l.builtin &&
+    !!l.inner &&
+    cmd.includes(`# masterdeck-builtin:${l.builtin}`) &&
+    cmd.includes(l.inner));
+
+/** Take out the skill hooks older MasterDeck versions installed; nothing else. Writes (with a
+ * backup) only when something was removed. */
+export function migrateLegacyHooks(
+  settingsPath: string,
+  backupDir: string,
+): { removed: string[] } {
+  const s = read(settingsPath);
+  const removed: string[] = [];
+  for (const l of LEGACY) {
+    const list = s.hooks?.[l.event];
+    if (!Array.isArray(list)) continue;
+    let hit = false;
+    const kept = list
+      .map((m) => ({
+        ...m,
+        hooks: (m.hooks ?? []).filter(
+          (h) => !(typeof h.command === "string" && ours(l, h.command) && (hit = true)),
+        ),
+      }))
+      .filter((m) => m.hooks.length > 0);
+    if (!hit) continue;
+    removed.push(`${l.what} (${l.event})`);
+    if (kept.length) s.hooks![l.event] = kept;
+    else delete s.hooks![l.event];
+  }
+  if (removed.length) write(settingsPath, backupDir, s);
+  return { removed: [...new Set(removed)] };
+}
+
+/** The self-review gate's marker (in its command line; hookStatus and the installer find it). */
+export const REVIEW_MARK = "masterdeck-review-gate";
+
+const REVIEW_REASON =
+  "MasterDeck: before creating this PR, review your diff against the base branch (git diff <base>...HEAD): look for bugs, leftover debug code and changes outside the task; " +
+  "fix what you find and commit. Then run gh pr create again (it is let through the second time on this branch). Skip the review only if the user said to.";
+
+/**
+ * Before `gh pr create` (a command that runs it, not text that mentions it): deny the first try of
+ * a session and branch with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
+ * wrote `.git/pr-selfreview-<HEAD sha>`. Skipped for sessions whose workflow left the pr-review
+ * built-in out (guardedBuiltin). bash 3.2.
+ */
+export function reviewGateCommand(home: string): string {
+  const before = TRIGGERS.find((t) => t.id === "before-pr")!.command!;
+  const inner = [
+    `input=$(cat)`,
+    `cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')`,
+    runsOrExit(before),
+    `sid=$(printf '%s' "$input" | jq -r '.session_id // "none"')`,
+    `case "$sid" in *[!A-Za-z0-9-]*) exit 0;; esac`,
+    `sha=$(git rev-parse HEAD 2>/dev/null) && [ -f "$(git rev-parse --git-path "pr-selfreview-$sha" 2>/dev/null)" ] && exit 0`,
+    `br=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' _); m="\${TMPDIR:-/tmp}/masterdeck-review-$sid-$br"; [ -f "$m" ] && exit 0; touch "$m"`,
+    `jq -n --arg r ${shellQuote(REVIEW_REASON)} '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'`,
+  ].join("; ");
+  // Prefilter before any jq: most Bash calls never mention gh pr create.
+  return (
+    `input=$(cat); case "$input" in *gh*pr*create*) ;; *) exit 0;; esac; ` +
+    `printf '%s' "$input" | { ${guardedBuiltin("pr-review", inner, home)} # ${REVIEW_MARK}\n}`
+  );
+}
+
+/** Install (or with `on` false remove) the review gate; idempotent. A changed home reinstalls. */
+export function installReviewGate(
+  settingsPath: string,
+  backupDir: string,
+  home: string,
+  on: boolean,
+): CliResult {
+  if (process.platform === "win32") return { ok: true, message: "skipped" };
+  try {
+    const s = read(settingsPath);
+    const cmd = reviewGateCommand(home);
+    if (on ? has(s, "PreToolUse", cmd) : !has(s, "PreToolUse", REVIEW_MARK))
+      return { ok: true, message: "already set" };
+    remove(s, "PreToolUse", REVIEW_MARK);
+    if (on) add(s, "PreToolUse", "Bash", cmd, REVIEW_MARK, 10);
+    write(settingsPath, backupDir, s);
+    return { ok: true, message: on ? "review gate installed" : "review gate removed" };
+  } catch (e) {
+    return { ok: false, message: `could not update ${settingsPath}: ${String(e)}` };
+  }
+}
+
+/** The queue skill's hook scripts by name: from ~/.claude/skills or ~/.claude/hooks alike. */
 const Q_SUBMIT_MARK = "queue-submit.sh";
 const Q_DRAIN_MARK = "queue-drain.sh";
 
-const PR_MARK = "pr-selfreview-";
-const PR_POST_MARK = "Monitor phase of the babysit-pr skill";
+export function hookStatus(settingsPath: string): HookStatus {
+  try {
+    const s = read(settingsPath);
+    const submit = has(s, "UserPromptSubmit", Q_SUBMIT_MARK);
+    const drain = has(s, "Stop", Q_DRAIN_MARK);
+    // Any skill queue hook switches MasterDeck's off (deckHooks.setQueueOff), so no prompt is
+    // stored or run twice; then only a complete pair runs /queue.
+    const foreignQueue = submit || drain;
+    return {
+      queue: (deckInstalledIn(s) && !foreignQueue) || (submit && drain),
+      foreignQueue,
+      reviewGate: has(s, "PreToolUse", REVIEW_MARK),
+    };
+  } catch {
+    return { queue: false, foreignQueue: false, reviewGate: false };
+  }
+}
 
 function read(path: string): Settings {
   if (!existsSync(path)) return {};
@@ -100,21 +222,6 @@ function remove(s: Settings, event: string, mark: string): void {
   else delete s.hooks![event];
 }
 
-export function hookStatus(settingsPath: string): HookStatus {
-  try {
-    const s = read(settingsPath);
-    return {
-      ticket: has(s, "PostToolUse", TT_MARK) && has(s, "SessionStart", TT_MARK),
-      pr: has(s, "PreToolUse", PR_MARK) && has(s, "PostToolUse", PR_POST_MARK),
-      queue:
-        has(s, "UserPromptSubmit", Q_SUBMIT_MARK) &&
-        has(s, "Stop", Q_DRAIN_MARK),
-    };
-  } catch {
-    return { ticket: false, pr: false, queue: false };
-  }
-}
-
 function write(settingsPath: string, backupDir: string, s: Settings): void {
   if (existsSync(settingsPath)) {
     mkdirSync(backupDir, { recursive: true });
@@ -131,52 +238,6 @@ function write(settingsPath: string, backupDir: string, s: Settings): void {
   const tmp = `${target}.masterdeck-tmp`;
   writeFileSync(tmp, JSON.stringify(s, null, 2) + "\n");
   renameSync(tmp, target);
-}
-
-export function installHooks(
-  settingsPath: string,
-  backupDir: string,
-  which: HookStatus,
-): CliResult {
-  if (process.platform === "win32")
-    return {
-      ok: false,
-      message:
-        "these hooks are bash scripts; on Windows add them by hand under Git Bash (see README)",
-    };
-  try {
-    const s = read(settingsPath);
-    const g = (id: BuiltinId, cmd: string) =>
-      guardedBuiltin(id, cmd, backupDir);
-    if (which.ticket) {
-      add(s, "PostToolUse", "Bash", g("ticket", TT), TT_MARK);
-      add(s, "SessionStart", undefined, g("ticket", TT), TT_MARK);
-    } else {
-      remove(s, "PostToolUse", TT_MARK);
-      remove(s, "SessionStart", TT_MARK);
-    }
-    if (which.pr) {
-      add(s, "PreToolUse", "Bash", g("pr-review", PR_PRE), PR_MARK);
-      add(s, "PostToolUse", "Bash", g("pr-watch", PR_POST), PR_POST_MARK);
-    } else {
-      remove(s, "PreToolUse", PR_MARK);
-      remove(s, "PostToolUse", PR_POST_MARK);
-    }
-    if (which.queue) {
-      add(s, "UserPromptSubmit", undefined, Q_SUBMIT, Q_SUBMIT_MARK, 10);
-      add(s, "Stop", undefined, Q_DRAIN, Q_DRAIN_MARK, 10);
-    } else {
-      remove(s, "UserPromptSubmit", Q_SUBMIT_MARK);
-      remove(s, "Stop", Q_DRAIN_MARK);
-    }
-    write(settingsPath, backupDir, s);
-    return { ok: true, message: "hooks saved" };
-  } catch (e) {
-    return {
-      ok: false,
-      message: `could not update ${settingsPath}: ${String(e)}`,
-    };
-  }
 }
 
 /**
@@ -257,13 +318,16 @@ const DECK_MARK = "/deck/hook.sh";
 /** Plus PreToolUse on Monitor: hands a monitor to MasterDeck when Settings say so. */
 const DECK_MONITOR_MARK = "/deck/hook.sh\" MonitorCall";
 
+function deckInstalledIn(s: Settings): boolean {
+  return (
+    DECK_EVENTS.every((e) => has(s, e, DECK_MARK)) &&
+    has(s, "PreToolUse", DECK_MONITOR_MARK)
+  );
+}
+
 export function deckHooksInstalled(settingsPath: string): boolean {
   try {
-    const s = read(settingsPath);
-    return (
-      DECK_EVENTS.every((e) => has(s, e, DECK_MARK)) &&
-      has(s, "PreToolUse", DECK_MONITOR_MARK)
-    );
+    return deckInstalledIn(read(settingsPath));
   } catch {
     return false;
   }
@@ -317,52 +381,6 @@ export function installDeckHooks(
     }
     write(settingsPath, backupDir, s);
     return { ok: true, message: "MasterDeck hooks installed" };
-  } catch (e) {
-    return {
-      ok: false,
-      message: `could not update ${settingsPath}: ${String(e)}`,
-    };
-  }
-}
-
-const GUARD_MARK = "masterdeck-builtin:";
-
-/**
- * Built-in hooks installed before workflows could leave them out: replace each with its guarded
- * version (it skips sessions whose workflow removed the built-in). `dir`: MasterDeck's home.
- */
-export function guardBuiltinHooks(
-  settingsPath: string,
-  dir: string,
-): CliResult {
-  if (process.platform === "win32") return { ok: true, message: "skipped" };
-  try {
-    const s = read(settingsPath);
-    const want: [string, string | undefined, string, string, BuiltinId][] = [
-      ["PostToolUse", "Bash", TT, TT_MARK, "ticket"],
-      ["SessionStart", undefined, TT, TT_MARK, "ticket"],
-      ["PreToolUse", "Bash", PR_PRE, PR_MARK, "pr-review"],
-      ["PostToolUse", "Bash", PR_POST, PR_POST_MARK, "pr-watch"],
-    ];
-    let changed = false;
-    for (const [event, matcher, cmd, mark, id] of want) {
-      const list = s.hooks?.[event] ?? [];
-      const found = list
-        .flatMap((m) => m.hooks ?? [])
-        .filter(
-          (h) => typeof h.command === "string" && h.command.includes(mark),
-        );
-      if (!found.length || found.every((h) => h.command.includes(GUARD_MARK)))
-        continue;
-      remove(s, event, mark);
-      add(s, event, matcher, guardedBuiltin(id, cmd, dir), mark);
-      changed = true;
-    }
-    if (changed) write(settingsPath, dir, s);
-    return {
-      ok: true,
-      message: changed ? "built-in hooks guarded" : "already guarded",
-    };
   } catch (e) {
     return {
       ok: false,

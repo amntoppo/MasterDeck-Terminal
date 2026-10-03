@@ -1,6 +1,9 @@
 import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
+import { BoardFlow, LinkedSteps } from "./boardFlow";
+import { PrWatch, prStates } from "./prWatch";
+import { canSend } from "@shared/send";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -14,8 +17,9 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
-  mkdtempSync,
   chmodSync,
+  appendFileSync,
+  renameSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
@@ -45,7 +49,6 @@ import { MASTER_NAME, sessionForProposal } from "@shared/derive";
 import type {
   AppState,
   CliResult,
-  HookStatus,
   NotifyEvent,
   PaneSpec,
   Session,
@@ -95,6 +98,8 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
+import { BoardOps, linkTicket, bodyFileAllowed, parseCreateArgs, sweepTicketDirs, ticketBuilderScript } from "./boardOps";
+import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
   reinstallSkill,
@@ -129,14 +134,14 @@ import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
-import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
+import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
   hookStatus,
   installDeckHooks,
-  installHooks,
+  installReviewGate,
   installWorkflowHooks,
-  guardBuiltinHooks,
+  migrateLegacyHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import {
@@ -177,6 +182,7 @@ const paths = resolvePaths(
   process.resourcesPath,
   app.isPackaged,
 );
+const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
@@ -200,6 +206,7 @@ function notify(events: NotifyEvent[]): void {
 
 const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
+const boardOps = new BoardOps(gh);
 const sender = new Sender(
   ptys,
   cli,
@@ -208,6 +215,49 @@ const sender = new Sender(
   (key) => latest?.sessions.find((x) => x.key === key),
 );
 const ops = new Ops(run, paths, () => claudeBin, gh);
+// Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
+const boardFlow = new BoardFlow({
+  ops: boardOps,
+  links: linkStore,
+  // One batched light read per tick (≤ 50 PRs a query, ghc-cached); none while GitHub is paused.
+  prStates: async (urls) =>
+    sources.isGithubPaused() ? {} : prStates(gh, urls),
+  link: linkSession,
+  builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
+  onMoved: (t, status) => sources.noteStatus(t, status),
+  log: (m) => console.error(m),
+  linkTriedFile: join(paths.home, "board-link-tried.json"),
+  createdPrs: (sid) => sources.prsOpenedBy(sid),
+  movedFile: join(paths.home, "board-moved.json"),
+});
+// The `linked` trigger's steps for links MasterDeck makes (no tt.sh link runs, so no hook fires).
+const linkedSteps = new LinkedSteps({
+  file: join(paths.home, "linked-steps.json"),
+  markDir: tmpdir(),
+  steps: (sid) => workflows().compiledFor(sid),
+  send: (s, text) =>
+    sender.send(
+      s,
+      text,
+      latest?.master.kind === "attached" ||
+        latest?.master.kind === "elsewhere",
+    ),
+  logRun: (sid, trigger, ids) => workflows().logRun(sid, trigger, ids),
+  log: (m) => console.error(m),
+});
+// MasterDeck's PR watch: each open PR a session made (Settings → Sessions → Watch new PRs).
+const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
+  gh,
+  paused: (o) => sources.isGithubPaused(o),
+  send: (s, text) =>
+    sender.send(
+      s,
+      text,
+      latest?.master.kind === "attached" ||
+        latest?.master.kind === "elsewhere",
+    ),
+  onChange: () => sources.changed(),
+});
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
   join(paths.home, "watches.json"),
@@ -221,10 +271,32 @@ const watches = new Watches(
     ),
   () => sources.changed(),
 );
+function mtimeMs(p: string): number {
+  try {
+    return statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+/** Hook status in the UI, and whether MasterDeck's hook leaves /queue to the skill's hooks. */
+function refreshHooks(): void {
+  const h = hookStatus(paths.claudeSettings);
+  sources.setHooks(h);
+  if (process.platform !== "win32") deckHooks.setQueueOff(h.foreignQueue);
+}
 /** Monitor calls already answered (the hook removes its file once it read the answer). */
 const answeredWatches = new Map<string, number>();
+/** settings.json's mtime when queue-off was last worked out. */
+let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
+  deckHooks.pumpQueue();
+  // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
+  const m = mtimeMs(paths.claudeSettings);
+  if (m !== settingsSeen) {
+    settingsSeen = m;
+    refreshHooks();
+  }
   const by = sources.getSettings().monitorsBy;
   const now = Date.now();
   for (const [id, at] of answeredWatches)
@@ -278,6 +350,27 @@ const sources = new Sources(
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
     }
+    if (process.platform !== "win32" && sources.isHealthy("agents"))
+      deckHooks.pruneLegacy(
+        new Set(
+          state.sessions
+            .filter((s) => s.state !== "done")
+            .map((s) => s.sessionId),
+        ),
+      );
+    // Both catch their own errors; board moves run at most every 30 s.
+    void boardFlow.tick(state);
+    try {
+      prWatch.sync(
+        state,
+        (s) =>
+          state.settings.watchPrs &&
+          workflows().builtinsFor(s.sessionId).includes("pr-watch"),
+      );
+    } catch (e) {
+      console.error(`PR watch: ${String(e)}`);
+    }
+    void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
@@ -826,9 +919,8 @@ function installHook(): CliResult {
 }
 
 /**
- * Link an existing session to an issue the way the session itself would: babysit-ticket's
- * `tt.sh link`, told which session and folder through TT_SESSION / TT_CWD. Like any
- * babysit-ticket link, it moves the ticket to In Dev (forward only).
+ * Link an existing session to an issue: MasterDeck's own ticket links (see linkTicket), then the
+ * ticket moves to In Dev when the session's workflow keeps the `ticket` built-in.
  */
 async function linkSession(
   raw: unknown,
@@ -839,29 +931,22 @@ async function linkSession(
   if (!t) return { ok: false, message: "bad issue" };
   if (!/^[0-9a-f-]{36}$/i.test(sessionId))
     return { ok: false, message: "bad session id" };
-  if (!existsSync(paths.babysitTt))
-    return {
-      ok: false,
-      message: `babysit-ticket not found at ${paths.babysitTt}`,
-    };
-  const dir = cwd && existsSync(cwd) ? cwd : homedir();
-  const r = await run(
-    "bash",
-    [paths.babysitTt, "link", ticketRef(t.repo, t.number)],
+  const r = await linkTicket(
     {
-      cwd: dir,
-      timeoutMs: 60_000,
-      env: { TT_SESSION: sessionId, TT_CWD: dir },
+      ops: boardOps,
+      link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
+      branch: (dir) => branchKey(run, dir),
+      moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
+      mark: (sid, trigger) => sources.markReached(sid, trigger),
+      reload: () => sources.reloadLinks(),
+      noteStatus: (tk, s) => sources.noteStatus(tk, s),
     },
+    t,
+    sessionId,
+    cwd,
   );
-  sources.reloadLinks();
-  const out = (r.stdout.trim() || r.stderr.trim()).split("\n").filter(Boolean);
-  return r.code === 0
-    ? {
-        ok: true,
-        message: out[0] ?? `linked to ${ticketLabel(t.repo, t.number)}`,
-      }
-    : { ok: false, message: out.at(-1) ?? `exit ${r.code}` };
+  if (r.ok) linkedSteps.queue(sessionId);
+  return r;
 }
 
 /** Is `pid` a running claude process? Guards the stop against a pid reused by something else. */
@@ -924,6 +1009,56 @@ async function resumeBg(
 
 /** The Board's ticket session works here: its CLAUDE.md, context.json, create-ticket.sh, created.jsonl. */
 const ticketDir = () => join(paths.home, "ticket-builder");
+let ticketPumping = false;
+/** Create-with-Claude asks for a ticket: claim the request, create it, answer, and log it. */
+async function pumpTicketRequests(): Promise<void> {
+  if (ticketPumping) return;
+  ticketPumping = true;
+  try {
+    sweepTicketDirs(ticketDir()); // stale requests are dropped, not created for nobody
+    const dir = join(ticketDir(), "requests");
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith(".req"));
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const id = n.slice(0, -4);
+      if (!/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue;
+      try {
+        renameSync(join(dir, n), join(dir, `${id}.taken`));
+      } catch {
+        continue; // taken back by the script (timed out)
+      }
+      let answer: object;
+      try {
+        const args = readFileSync(join(dir, `${id}.taken`), "utf8").split("\0").slice(0, -1).slice(0, 60);
+        const p = parseCreateArgs(args);
+        if ("error" in p) answer = { ok: false, error: p.error };
+        else {
+          const file = p.bodyFile ? bodyFileAllowed(ticketDir(), p.bodyFile) : "";
+          if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
+          else {
+            const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
+            answer = await boardOps.create({ ...p, body });
+          }
+        }
+      } catch (e) {
+        answer = { ok: false, error: `create: ${String(e)}` };
+      }
+      const a = join(ticketDir(), "answers");
+      mkdirSync(a, { recursive: true });
+      writeFileSync(join(a, `${id}.tmp`), JSON.stringify(answer));
+      renameSync(join(a, `${id}.tmp`), join(a, `${id}.json`));
+      // The log the Board reads (readCreatedTickets) — dry runs are not logged.
+      if ((answer as { ok?: boolean; dryRun?: boolean }).ok && !(answer as { dryRun?: boolean }).dryRun)
+        appendFileSync(join(ticketDir(), "created.jsonl"), JSON.stringify(answer) + "\n");
+    }
+  } finally {
+    ticketPumping = false;
+  }
+}
 let ticketsSeen = -1;
 /** Tickets the Board's session created (created.jsonl grew): refresh the board, and tell the page. */
 function readCreatedTickets(): void {
@@ -1194,13 +1329,6 @@ function runFlowWatch(state: AppState): void {
 /** Which skills the user removed in the Skills popup. */
 const skillsFile = () => join(paths.home, "skills.json");
 
-/** The hook that belongs to a skill (off when the skill is removed). */
-const SKILL_HOOK: Record<string, keyof HookStatus> = {
-  "babysit-ticket": "ticket",
-  "babysit-pr": "pr",
-  queue: "queue",
-};
-
 function refreshSkills(): void {
   sources.setSkills(
     syncSkills(
@@ -1382,7 +1510,7 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
-    const r = await ops.setStatus(t, status);
+    const r = await boardOps.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -1443,7 +1571,7 @@ function registerIpc(): void {
     ops.deleteTemplate(name),
   );
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
-  // babysit-ticket's `tt.sh create` (the Board's Claude session uses the same command).
+  // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;
     const str = (v: unknown, n: number) =>
@@ -1456,82 +1584,42 @@ function registerIpc(): void {
         : [];
     const title = str(o.title, 256).trim();
     if (!title) return { ok: false, message: "give it a title" };
-    if (!existsSync(paths.babysitTt))
+    const res = await boardOps.create({
+      title,
+      body: str(o.body, 60_000),
+      repo: str(o.repo, 140) || undefined,
+      project: str(o.project, 140) || undefined,
+      status: str(o.status, 100) || undefined,
+      assignees: list(o.assignees),
+      labels: list(o.labels),
+      milestone: str(o.milestone, 200) || undefined,
+      sprint: str(o.sprint, 200) || undefined,
+      sprintField: str(o.sprintField, 100) || undefined,
+      dryRun: o.dryRun === true,
+    });
+    if (!res.ok)
       return {
         ok: false,
-        message: `babysit-ticket not found at ${paths.babysitTt}`,
-      };
-    const dir = mkdtempSync(join(tmpdir(), "masterdeck-ticket-"));
-    try {
-      const bodyFile = join(dir, "body.md");
-      writeFileSync(bodyFile, str(o.body, 60_000));
-      const args = [
-        paths.babysitTt,
-        "create",
-        "--title",
-        title,
-        "--body-file",
-        bodyFile,
-      ];
-      const add = (flag: string, v: string) => v && args.push(flag, v);
-      add("--repo", str(o.repo, 140));
-      add("--project", str(o.project, 140));
-      add("--status", str(o.status, 100));
-      add("--assignee", list(o.assignees).join(","));
-      for (const l of list(o.labels)) args.push("--label", l);
-      add("--milestone", str(o.milestone, 200));
-      add("--sprint", str(o.sprint, 200));
-      add("--sprint-field", str(o.sprintField, 100));
-      if (o.dryRun === true) args.push("--dry-run");
-      const r = await run("bash", args, { cwd: dir, timeoutMs: 90_000 });
-      let res: {
-        ok?: boolean;
-        url?: string;
-        number?: number;
-        error?: string;
-        status?: string;
-        sprint?: string;
-      } = {};
-      // tt.sh prints one JSON object (after anything gh said).
-      try {
-        res = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
-      } catch {
-        /* no JSON: an error on stderr */
-      }
-      if (r.code !== 0 || !res.ok)
-        return {
-          ok: false,
-          message: res.error
-            ? `${res.error}${res.url ? `: ${res.url}` : ""}`
-            : (r.stderr || r.stdout)
-                .trim()
-                .split("\n")
-                .pop()
-                ?.replace(/^babysit-ticket: /, "") ||
-              "could not create the issue",
-          url: res.url,
-        };
-      if (o.dryRun !== true) void sources.refreshGithub(true);
-      const extra = [
-        res.status ? `in ${res.status}` : "",
-        res.sprint
-          ? `sprint ${res.sprint === "@current" ? "(current)" : res.sprint}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(", ");
-      return {
-        ok: true,
-        message:
-          o.dryRun === true
-            ? "checked (dry run)"
-            : `created #${res.number}${extra ? ` ${extra}` : ""}`,
+        message: `${res.error}${res.url ? `: ${res.url}` : ""}`,
         url: res.url,
-        number: res.number,
       };
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    if (!res.dryRun) void sources.refreshGithub(true);
+    const extra = [
+      res.status ? `in ${res.status}` : "",
+      res.sprint
+        ? `sprint ${res.sprint === "@current" ? "(current)" : res.sprint}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      ok: true,
+      message: res.dryRun
+        ? "checked (dry run)"
+        : `created #${res.number}${extra ? ` ${extra}` : ""}`,
+      url: res.url,
+      number: res.number,
+    };
   });
   // Create with Claude (Board): the ticket session's folder gets the boards, the people, where
   // the + was clicked, and a create command it may run without asking.
@@ -1546,19 +1634,7 @@ function registerIpc(): void {
     const dir = ticketDir();
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const script = join(dir, "create-ticket.sh");
-    const log = join(dir, "created.jsonl");
-    writeFileSync(
-      script,
-      [
-        "#!/usr/bin/env bash",
-        "# Written by MasterDeck: create one ticket on the board (babysit-ticket's tt.sh create) and log it.",
-        `out="$(bash ${shellQuote(paths.babysitTt)} create "$@")"; code=$?`,
-        `printf '%s\\n' "$out"`,
-        `case " $* " in *" --dry-run "*) ;; *) [ $code -eq 0 ] && printf '%s' "$out" | jq -c . >> ${shellQuote(log)} 2>/dev/null ;; esac`,
-        "exit $code",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(script, ticketBuilderScript(dir));
     chmodSync(script, 0o755);
     // The Bash it may run unasked: the create command, and reading GitHub.
     writeFileSync(
@@ -1741,7 +1817,11 @@ function registerIpc(): void {
     ),
   );
   reg.handle(CH.watchStop, (_e, id: unknown) =>
-    typeof id === "string" ? watches.stop(id) : false,
+    typeof id === "string"
+      ? id.startsWith("pr:")
+        ? prWatch.stop(id)
+        : watches.stop(id)
+      : false,
   );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
@@ -1851,15 +1931,6 @@ function registerIpc(): void {
       defaultPath: typeof start === "string" && start ? start : homedir(),
     });
     return r.canceled ? null : (r.filePaths[0] ?? null);
-  });
-  reg.handle(CH.hooksInstall, (_e, which: HookStatus) => {
-    const r = installHooks(paths.claudeSettings, paths.home, {
-      ticket: !!which?.ticket,
-      pr: !!which?.pr,
-      queue: !!which?.queue,
-    });
-    sources.setHooks(hookStatus(paths.claudeSettings));
-    return r;
   });
   reg.handle(CH.skillReinstall, (_e, name: unknown) => {
     if (typeof name !== "string")
@@ -2165,16 +2236,6 @@ function registerIpc(): void {
     const r = removeSkill(paths.bundledSkills, paths.skillsDir, name);
     if (r.ok) {
       writeRemoved(skillsFile(), [...readRemoved(skillsFile()), name]);
-      // Its hook would call a script that is gone: turn it off too.
-      const key = SKILL_HOOK[name];
-      const hooks = hookStatus(paths.claudeSettings);
-      if (key && hooks[key]) {
-        installHooks(paths.claudeSettings, paths.home, {
-          ...hooks,
-          [key]: false,
-        });
-        sources.setHooks(hookStatus(paths.claudeSettings));
-      }
     }
     refreshSkills();
     return r;
@@ -2484,6 +2545,12 @@ app.whenReady().then(async () => {
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
+  // Links made by babysit-ticket before MasterDeck kept its own: copied once.
+  try {
+    if (linkStore.importOnce()) sources.reloadLinks();
+  } catch (e) {
+    console.error(`ticket links import: ${String(e)}`);
+  }
   try {
     macKey = await loadMacKey(join(paths.home, "browser-key"), safeStorage);
   } catch (e) {
@@ -2513,7 +2580,39 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
-  sources.setHooks(hookStatus(paths.claudeSettings));
+  // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
+  // that work itself now; the skills stay for use by hand.
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  ) {
+    const marker = join(paths.home, "native-hooks.json");
+    if (!existsSync(marker))
+      try {
+        // Nothing is switched off: self-review and board moves are Default-workflow steps now.
+        const m = migrateLegacyHooks(paths.claudeSettings, paths.home);
+        // Sessions running now keep the queue skill's hooks (read at their start): the deck hook
+        // leaves /queue to those until they end (pruneLegacy below).
+        if (m.removed.some((r) => r.startsWith("queue"))) deckHooks.markLegacy();
+        writeFileSync(
+          marker,
+          JSON.stringify({ at: Date.now(), ...m }, null, 2) + "\n",
+        );
+      } catch (e) {
+        console.error(`hook migration: ${String(e)}`);
+      }
+  }
+  // Always in place; guardedBuiltin skips sessions whose workflow leaves pr-review out.
+  if (
+    process.platform !== "win32" &&
+    !SMOKE &&
+    process.env.MASTERDECK_NO_HOOK !== "1"
+  ) {
+    const g = installReviewGate(paths.claudeSettings, paths.home, paths.home, true);
+    if (!g.ok) console.error(g.message);
+  }
+  refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
   if (process.platform !== "win32") {
@@ -2521,7 +2620,6 @@ app.whenReady().then(async () => {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
       sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
-      sources.setWatchInfo(() => watches.info());
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -2540,6 +2638,8 @@ app.whenReady().then(async () => {
         );
         if (!r.ok) console.error(r.message);
       }
+      // Status and queue-off with the deck hook in place (refreshHooks ran before it was).
+      refreshHooks();
     } catch (e) {
       console.error(`MasterDeck hooks: ${String(e)}`);
     }
@@ -2554,16 +2654,39 @@ app.whenReady().then(async () => {
       workflows().migrate();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
-      // Built-ins a workflow can leave out: their hooks check the session's workflow first.
-      const g = guardBuiltinHooks(paths.claudeSettings, paths.home);
-      if (!g.ok) console.error(g.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  // PR watch (all platforms): rows join the monitors in Details; review offers for its PRs step aside.
+  sources.setWatchInfo(() => [
+    ...watches.info(),
+    ...prWatch.info(latest?.sessions ?? []),
+  ]);
+  prWatch.load();
+  // Only PRs whose session can take a message now: a parked session's offer stays in Needs you.
+  sources.setWatchedPrs(() =>
+    prWatch.watched(
+      latest?.sessions ?? [],
+      (s) =>
+        canSend(
+          s,
+          ptys.isAlive(`s:${s.key}`),
+          latest?.master.kind === "attached" ||
+            latest?.master.kind === "elsewhere",
+        ).ok,
+    ),
+  );
+  setInterval(() => void prWatch.poll(), 60_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
     try {
+      prWatch.deliver(latest?.sessions ?? []);
+    } catch (e) {
+      console.error(`PR watch: ${String(e)}`);
+    }
+    try {
       readCreatedTickets();
+      void pumpTicketRequests();
     } catch (e) {
       console.error(`tickets: ${String(e)}`);
     }
