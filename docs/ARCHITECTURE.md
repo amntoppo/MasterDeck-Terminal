@@ -200,11 +200,13 @@ A successful `linkSession` also queues `LinkedSteps` (below).
 
 `BoardFlow.tick(state)` runs from the state callback, at most every 30 s (`BOARD_TICK_MS`), one at a
 time. (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
-ASSIGN proposal is linked through `linkSession` (once per session per run of the app). (2) Each new
+ASSIGN proposal is linked through `linkSession` (tried once per session, ever:
+`<home>/board-link-tried.json`). (2) Each new
 PR in `state.sessionPrs` of a linked session is recorded (`LinkStore.addPr`; a failed write is logged
 and retried next tick) and, when the session keeps `ticket`, linked under the issue's Development
-box (`BoardOps.linkPr`). (3) Per ticket with at least one session keeping `ticket`, `boardTarget`
-of its PRs' live states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
+box (`BoardOps.linkPr`; a failure is logged). (3) Tickets with at least one session keeping
+`ticket`, whose card (and so its board) is known and not yet at Dev Done, get their PRs' states in
+one `prStates` call per tick; `boardTarget` of a ticket's PR states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
 one is merged (only when every PR's state is known). Forward only (`statusRank` against the card's
 status), each (ticket, target) tried once and again after 30 min (`RETRY_MS`) if needed. PR states
 come from `state.prLive` for now (live sessions' PRs only).
@@ -212,7 +214,8 @@ come from `state.prLive` for now (live sessions' PRs only).
 `LinkedSteps` replaces the `linked` hook for links MasterDeck makes itself (no `tt.sh link` runs, so
 the PostToolUse hook never fires): `queue(sid)` after a link adds the session to
 `<home>/linked-steps.json` when its workflow (`compiledFor`) has `linked` steps not handed yet;
-`deliver` sends them as one `Workflow step (linked): …` message once the turn is over (`canDeliver`,
+`deliver` sends their notes joined by a blank line (exactly what the hook adds; each note starts
+`Workflow step (when a session is linked to its issue):`) once the turn is over (`canDeliver`,
 the `Sender` path watches use), touches the hook's own once markers
 (`$TMPDIR/masterdeck-workflow-<step>-<sid>`, so a later hand-run `tt.sh link` does not repeat them,
 and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
@@ -305,6 +308,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
+| `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |

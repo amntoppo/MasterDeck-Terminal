@@ -22,6 +22,8 @@ export interface BoardFlowDeps {
   builtinOn: (sessionId: string) => boolean
   onMoved: (t: Ticket, status: string) => void
   log?: (m: string) => void
+  /** Sessions already tried for an auto-link (kept across restarts: one the user unlinked stays unlinked). */
+  linkTriedFile?: string
 }
 
 /**
@@ -35,9 +37,17 @@ export class BoardFlow {
   private last = -Infinity
   private running = false
   private tried = new Map<string, number>()
-  private linkTried = new Set<string>()
+  private linkTried: Set<string>
 
-  constructor(private deps: BoardFlowDeps) {}
+  constructor(private deps: BoardFlowDeps) {
+    let ids: unknown = []
+    try {
+      if (deps.linkTriedFile && existsSync(deps.linkTriedFile)) ids = JSON.parse(readFileSync(deps.linkTriedFile, 'utf8'))
+    } catch (e) {
+      deps.log?.(`board moves: ${String(e)}`)
+    }
+    this.linkTried = new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [])
+  }
 
   async tick(state: AppState, now = Date.now()): Promise<void> {
     if (this.running || now - this.last < BOARD_TICK_MS) return
@@ -61,6 +71,7 @@ export class BoardFlow {
       const p = state.proposals.find((x) => x.kind === 'ASSIGN' && ['sent', 'question', 'blocked', 'done'].includes(x.status) && x.target.spawn?.name === s.name)
       if (!p || !this.deps.builtinOn(s.sessionId)) continue
       this.linkTried.add(s.sessionId)
+      if (this.deps.linkTriedFile) writeJson(this.deps.linkTriedFile, [...this.linkTried], this.deps.log)
       const r = await this.deps.link({ repo: p.repo ?? null, number: p.issue }, s.sessionId, s.cwd || null)
       if (!r.ok) this.deps.log?.(`link ${s.name}: ${r.message}`)
     }
@@ -77,7 +88,8 @@ export class BoardFlow {
           this.deps.log?.(`ticket links: could not record ${url}: ${String(e)}`)
           continue
         }
-        if (this.deps.builtinOn(sid)) await this.deps.ops.linkPr({ repo: e.repo ?? null, number: e.issue }, url)
+        if (this.deps.builtinOn(sid) && !(await this.deps.ops.linkPr({ repo: e.repo ?? null, number: e.issue }, url)))
+          this.deps.log?.(`board: could not link ${url} under #${e.issue}'s Development`)
       }
     }
   }
@@ -85,19 +97,29 @@ export class BoardFlow {
   private async move(state: AppState, file: LinkFile, now: number): Promise<void> {
     const tickets = new Map<string, Ticket>()
     for (const e of Object.values(file.sessions)) if (!e.adopted) tickets.set(ticketKey(e.repo ?? null, e.issue), { repo: e.repo ?? null, number: e.issue })
+    const todo: { key: string; t: Ticket; urls: string[]; status: string | null; project: string }[] = []
     for (const [key, t] of tickets) {
       if (!ticketSessions(file, t).some((sid) => this.deps.builtinOn(sid))) continue
       const urls = ticketPrs(file, t)
       if (!urls.length) continue
-      const live = await this.deps.prStates(urls)
+      // Its board not known yet: wait for it rather than guess status names.
+      const card = state.board?.cards.find((c) => sameTicket(c, t)) ?? state.issues.find((i) => sameTicket(i, t))
+      if (!card?.project) continue
+      const status = card.status ?? null
+      const rank = (n: string | null) => statusRank(n, undefined, card.project)
+      if (status && rank(status) >= rank(statusesFor(card.project).devDone)) continue
+      todo.push({ key, t, urls, status, project: card.project })
+    }
+    if (!todo.length) return
+    // One read for every ticket's PRs.
+    const live = await this.deps.prStates([...new Set(todo.flatMap((x) => x.urls))])
+    for (const { key, t, urls, status, project } of todo) {
       // Dev Done needs every PR known: one we cannot read could still be open.
       const known = urls.filter((u) => live[u]).map((u) => live[u])
       const target = boardTarget(known)
       if (!target || (target === 'devDone' && known.length < urls.length)) continue
-      const card = state.board?.cards.find((c) => sameTicket(c, t)) ?? state.issues.find((i) => sameTicket(i, t))
-      const project = card?.project ?? null
       const name = statusesFor(project)[target]
-      if (card?.status && statusRank(card.status, undefined, project) >= statusRank(name, undefined, project)) continue
+      if (status && statusRank(status, undefined, project) >= statusRank(name, undefined, project)) continue
       const id = `${key}:${target}`
       if (now - (this.tried.get(id) ?? -Infinity) < RETRY_MS) continue
       this.tried.set(id, now)
@@ -106,6 +128,15 @@ export class BoardFlow {
         if (!/left at|already/.test(r.message)) this.deps.onMoved(t, name)
       } else this.deps.log?.(`board ${key}: ${r.message}`)
     }
+  }
+}
+
+function writeJson(file: string, v: unknown, log?: (m: string) => void): void {
+  try {
+    writeFileSync(`${file}.tmp`, JSON.stringify(v))
+    renameSync(`${file}.tmp`, file)
+  } catch (e) {
+    log?.(`${file}: ${String(e)}`)
   }
 }
 
@@ -143,12 +174,7 @@ export class LinkedSteps {
   private due = (sid: string) => this.deps.steps(sid).filter((s) => s.trigger === 'linked' && !existsSync(this.marker(s.id, sid)))
 
   private save(): void {
-    try {
-      writeFileSync(`${this.deps.file}.tmp`, JSON.stringify(this.pending))
-      renameSync(`${this.deps.file}.tmp`, this.deps.file)
-    } catch (e) {
-      this.deps.log?.(`linked steps: ${String(e)}`)
-    }
+    writeJson(this.deps.file, this.pending, this.deps.log)
   }
 
   /** A session was just linked. */
@@ -183,10 +209,15 @@ export class LinkedSteps {
       this.sending.add(sid)
       jobs.push(
         this.deps
-          .send(s, `Workflow step (linked): ${steps.map((x) => x.note).join('\n\n')}`)
+          .send(s, steps.map((x) => x.note).join('\n\n'))
           .then((r) => {
             if (!r.ok) return this.deps.log?.(`linked steps to ${s.name}: ${r.message}`)
-            for (const x of steps) writeFileSync(this.marker(x.id, sid), '')
+            // Each note already starts "Workflow step (…linked…):" — the same text the hook adds.
+            try {
+              for (const x of steps) writeFileSync(this.marker(x.id, sid), '')
+            } catch (e) {
+              this.deps.log?.(`linked steps: ${String(e)}`)
+            }
             this.deps.logRun(sid, 'linked', steps.map((x) => x.id))
             this.drop(sid)
           })

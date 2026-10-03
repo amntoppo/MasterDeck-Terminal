@@ -227,6 +227,7 @@ const boardFlow = new BoardFlow({
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
   log: (m) => console.error(m),
+  linkTriedFile: join(paths.home, "board-link-tried.json"),
 });
 // The `linked` trigger's steps for links MasterDeck makes (no tt.sh link runs, so no hook fires).
 const linkedSteps = new LinkedSteps({

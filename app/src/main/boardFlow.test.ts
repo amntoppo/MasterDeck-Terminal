@@ -5,7 +5,7 @@ import type { AppState, Session } from '@shared/types'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { CompiledStep } from '@shared/flow'
+import { compileFlow, edgeId, type CompiledStep, type FlowNode } from '@shared/flow'
 import { BoardFlow, LinkedSteps, type BoardFlowDeps } from './boardFlow'
 
 setConfig(parseConfig({
@@ -112,7 +112,7 @@ describe('LinkedSteps', () => {
     await ls.deliver([sess({ state: 'working' })])
     expect(sent).toEqual([])
     await ls.deliver([sess()])
-    expect(sent).toEqual(['fix-12: Workflow step (linked): Read the issue.\n\nPlan it.'])
+    expect(sent).toEqual(['fix-12: Read the issue.\n\nPlan it.'])
     expect(runs).toEqual([`${SID} linked a1 b2`])
     ls.queue(SID) // linked again
     await ls.deliver([sess()])
@@ -146,5 +146,83 @@ describe('LinkedSteps', () => {
     await ls.deliver([sess({ state: 'done' })])
     await make(linked, dir).ls.deliver([sess()])
     expect(sent).toEqual([])
+  })
+})
+
+describe('BoardFlow fix round 1', () => {
+  const S2 = '55555555-5555-4555-8555-555555555555'
+  const S3 = '66666666-6666-4666-8666-666666666666'
+  const PR2 = 'https://github.com/acme/web/pull/6'
+  const PR3 = 'https://github.com/acme/web/pull/7'
+  const card = (number: number, status: string) => ({ number, repo: null, project: 'acme/1', status })
+  it('reads every ticket\'s PR states in one call, leaving out tickets already at Dev Done', async () => {
+    let f = withLink(withLink(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', '', new Date(0)), S2, { repo: null, number: 13 }, 't', '', new Date(0)), S3, { repo: null, number: 14 }, 't', '', new Date(0))
+    f = withPr(withPr(withPr(f, SID, PR), S2, PR2), S3, PR3)
+    const s = setup(f, { [PR]: { state: 'OPEN', isDraft: false }, [PR2]: { state: 'MERGED', isDraft: false }, [PR3]: { state: 'MERGED', isDraft: false } })
+    const calls: string[][] = []
+    const inner = s.deps.prStates
+    s.deps.prStates = (urls) => (calls.push(urls), inner(urls))
+    await new BoardFlow(s.deps).tick(state({ board: { cards: [card(12, 'In Dev'), card(13, 'In Dev'), card(14, 'Dev Done')] } as never }), 0)
+    expect(calls).toEqual([[PR, PR2]])
+    expect(s.moves).toEqual(['#12 PR Raised', '#13 Dev Done'])
+  })
+  it('skips a ticket whose board is not known yet', async () => {
+    const s = setup(withPr(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', '', new Date(0)), SID, PR), { [PR]: { state: 'MERGED', isDraft: false } })
+    await s.flow.tick(state({ board: { cards: [] } as never }), 0)
+    expect(s.moves).toEqual([])
+  })
+  it('logs a PR it could not link under Development', async () => {
+    const s = setup(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', '', new Date(0)), {})
+    const logs: string[] = []
+    s.deps.log = (m) => logs.push(m)
+    s.deps.ops.linkPr = async () => false
+    await new BoardFlow(s.deps).tick(state({ sessionPrs: { [SID]: [PR] } }), 0)
+    expect(logs.join()).toContain(PR)
+  })
+  it('remembers across a restart which sessions it already tried to link', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-'))
+    const s = setup(emptyLinks(), {})
+    s.deps.linkTriedFile = join(dir, 'tried.json')
+    const st = state({ sessions: [sess({ issue: null })], proposals: [{ id: 1, kind: 'ASSIGN', issue: 12, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } }] as never })
+    await new BoardFlow(s.deps).tick(st, 0)
+    await new BoardFlow(s.deps).tick(st, 0)
+    expect(s.linked).toEqual([`${SID} #12`])
+  })
+})
+
+describe('LinkedSteps fix round 1', () => {
+  it('sends exactly what the hook would add (the compiled notes, no extra header)', async () => {
+    const at = { x: 0, y: 0 }
+    const { steps } = compileFlow({
+      nodes: [{ id: 'l', ...at, kind: 'trigger', trigger: 'linked' } as FlowNode, { id: 'i', ...at, kind: 'instruction', text: 'Read the issue.' } as FlowNode],
+      edges: [{ id: edgeId('l', 'i'), from: 'l', to: 'i', kind: 'then' }],
+    })
+    expect(steps).toHaveLength(1)
+    const dir = mkdtempSync(join(tmpdir(), 'ls-'))
+    const sent: string[] = []
+    const ls = new LinkedSteps({ file: join(dir, 'p.json'), markDir: dir, steps: () => steps, send: async (_s, t) => (sent.push(t), { ok: true, message: '' }), logRun: () => {} })
+    ls.queue(SID)
+    await ls.deliver([sess()])
+    expect(sent).toEqual([steps[0].note])
+    expect(sent[0]).toMatch(/^Workflow step \(when a session is linked to its issue\):\n/)
+  })
+  it('a marker that cannot be written still logs the run and is not sent again', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ls-'))
+    const sent: string[] = []
+    const runs: string[] = []
+    const mk = () => new LinkedSteps({
+      file: join(dir, 'p.json'), markDir: join(dir, 'missing'),
+      steps: () => [{ id: 'a1', trigger: 'linked', note: 'N' }],
+      send: async (_s, t) => (sent.push(t), { ok: true, message: '' }),
+      logRun: (sid) => runs.push(sid),
+      log: () => {},
+    })
+    const ls = mk()
+    ls.queue(SID)
+    await ls.deliver([sess()])
+    await ls.deliver([sess()])
+    await mk().deliver([sess()])
+    expect(sent).toEqual(['N'])
+    expect(runs).toEqual([SID])
   })
 })
