@@ -80,11 +80,13 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 1. `workflows().snapshot(...)` — each new session gets its own workflow copy (non-Windows).
 2. `runFlowWatch(state)` — the Needs-you / idle workflow triggers (`shared/flowWatch.ts`); may
    notify or send `Workflow step (idle): …` to the session.
-3. `emit(CH.state, state)` — to the window and to every connected browser (`bridge.event`).
-4. `cloud?.push(toRemoteSnapshot(state, version))` — the backend snapshot (see REMOTE.md).
-5. First state with healthy agents → `remoteReady = true; syncRemote()`; a `remoteEnabled` flip →
+3. `boardFlow.tick(state)` (board moves, at most every 30 s) and `linkedSteps.deliver(sessions)`
+   (the `linked` steps of native links); both catch their own errors.
+4. `emit(CH.state, state)` — to the window and to every connected browser (`bridge.event`).
+5. `cloud?.push(toRemoteSnapshot(state, version))` — the backend snapshot (see REMOTE.md).
+6. First state with healthy agents → `remoteReady = true; syncRemote()`; a `remoteEnabled` flip →
    `syncRemote()`.
-6. Notifications (`diffEvents`), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
+7. Notifications (`diffEvents`), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
    `CH.autoOpen`, dock bounce), and the SMOKE exit.
 
 ### Sessions and agents
@@ -192,6 +194,29 @@ the first configured board holding the issue; reads skip the cache), forward-onl
 `linkSession` runs: it writes `LinkStore.link` (a failed write returns a failed result), marks the
 session's `linked` stage (`Sources.markReached`), and moves the ticket to In Dev when
 `WorkflowStore.builtinsFor(session)` has `ticket`. There is no global switch for board moves.
+A successful `linkSession` also queues `LinkedSteps` (below).
+
+### Board moves (`main/boardFlow.ts`)
+
+`BoardFlow.tick(state)` runs from the state callback, at most every 30 s (`BOARD_TICK_MS`), one at a
+time. (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
+ASSIGN proposal is linked through `linkSession` (once per session per run of the app). (2) Each new
+PR in `state.sessionPrs` of a linked session is recorded (`LinkStore.addPr`; a failed write is logged
+and retried next tick) and, when the session keeps `ticket`, linked under the issue's Development
+box (`BoardOps.linkPr`). (3) Per ticket with at least one session keeping `ticket`, `boardTarget`
+of its PRs' live states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
+one is merged (only when every PR's state is known). Forward only (`statusRank` against the card's
+status), each (ticket, target) tried once and again after 30 min (`RETRY_MS`) if needed. PR states
+come from `state.prLive` for now (live sessions' PRs only).
+
+`LinkedSteps` replaces the `linked` hook for links MasterDeck makes itself (no `tt.sh link` runs, so
+the PostToolUse hook never fires): `queue(sid)` after a link adds the session to
+`<home>/linked-steps.json` when its workflow (`compiledFor`) has `linked` steps not handed yet;
+`deliver` sends them as one `Workflow step (linked): …` message once the turn is over (`canDeliver`,
+the `Sender` path watches use), touches the hook's own once markers
+(`$TMPDIR/masterdeck-workflow-<step>-<sid>`, so a later hand-run `tt.sh link` does not repeat them,
+and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
+entry is dropped.
 
 ## Preload and IPC
 
@@ -280,6 +305,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
+| `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |

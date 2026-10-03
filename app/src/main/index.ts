@@ -1,6 +1,7 @@
 import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
+import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -20,7 +21,7 @@ import {
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -213,6 +214,35 @@ const sender = new Sender(
   (key) => latest?.sessions.find((x) => x.key === key),
 );
 const ops = new Ops(run, paths, () => claudeBin, gh);
+// Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
+const boardFlow = new BoardFlow({
+  ops: boardOps,
+  links: linkStore,
+  // Replaced by prStates(gh, …) in Task 7 (covers PRs of ended sessions too).
+  prStates: async (urls) =>
+    Object.fromEntries(
+      urls.flatMap((u) => (latest?.prLive[u] ? [[u, latest.prLive[u]]] : [])),
+    ),
+  link: linkSession,
+  builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
+  onMoved: (t, status) => sources.noteStatus(t, status),
+  log: (m) => console.error(m),
+});
+// The `linked` trigger's steps for links MasterDeck makes (no tt.sh link runs, so no hook fires).
+const linkedSteps = new LinkedSteps({
+  file: join(paths.home, "linked-steps.json"),
+  markDir: tmpdir(),
+  steps: (sid) => workflows().compiledFor(sid),
+  send: (s, text) =>
+    sender.send(
+      s,
+      text,
+      latest?.master.kind === "attached" ||
+        latest?.master.kind === "elsewhere",
+    ),
+  logRun: (sid, trigger, ids) => workflows().logRun(sid, trigger, ids),
+  log: (m) => console.error(m),
+});
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
   join(paths.home, "watches.json"),
@@ -283,6 +313,9 @@ const sources = new Sources(
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
     }
+    // Both catch their own errors; board moves run at most every 30 s.
+    void boardFlow.tick(state);
+    void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
@@ -843,7 +876,7 @@ async function linkSession(
   if (!t) return { ok: false, message: "bad issue" };
   if (!/^[0-9a-f-]{36}$/i.test(sessionId))
     return { ok: false, message: "bad session id" };
-  return linkTicket(
+  const r = await linkTicket(
     {
       ops: boardOps,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
@@ -857,6 +890,8 @@ async function linkSession(
     sessionId,
     cwd,
   );
+  if (r.ok) linkedSteps.queue(sessionId);
+  return r;
 }
 
 /** Is `pid` a running claude process? Guards the stop against a pid reused by something else. */

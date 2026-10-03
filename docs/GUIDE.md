@@ -646,6 +646,11 @@ cards is in them.
 - **PR chips:** coloured by state (open green, draft grey, merged purple, closed red). Open PRs also
   show CI ✓ ✗ ● and 💬 unresolved threads. Clicking a chip opens the PR.
 - **Clicking a card:** opens that issue's session in Terminals, or the Assign dialog if it has none.
+- **Board moves:** MasterDeck moves the card to In Dev when a session is linked, PR Raised once its
+  PR is open and not a draft, Dev Done when all its PRs are merged — the Board moves step of the
+  Default workflow; a custom workflow can leave it out. Cards only move forward. A session master
+  spawned for an issue is linked by MasterDeck, and a link made from MasterDeck still runs the
+  workflow's "When a session is linked" steps (sent to the session once its turn is over).
 - **Data:** `master board` (2 GitHub calls), refreshed together with the issues: at startup, every
   hour, and on **Refresh**. "refreshed 15 minutes ago" beside the button shows the last refresh. The
   board is cached with the issues, so it shows immediately on the next start.

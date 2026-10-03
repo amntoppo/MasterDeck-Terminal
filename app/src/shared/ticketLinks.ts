@@ -90,3 +90,15 @@ export function ticketSessions(f: LinkFile, t: Ticket): string[] {
 export function ticketPrs(f: LinkFile, t: Ticket): string[] {
   return [...new Set(ticketSessions(f, t).flatMap((sid) => f.sessions[sid].prs))]
 }
+
+/**
+ * Where a ticket's PRs put its card (the status meaning; the caller maps it to the board's name and
+ * moves forward only): Dev Done once it has a merged PR and none open — a web PR merged while the
+ * backend one is open is not dev complete; PR Raised while one is open and ready for review
+ * (drafts are still work in progress).
+ */
+export function boardTarget(prs: { state: string; isDraft: boolean }[]): 'prRaised' | 'devDone' | null {
+  const open = prs.filter((p) => p.state === 'OPEN')
+  if (!open.length) return prs.some((p) => p.state === 'MERGED') ? 'devDone' : null
+  return open.some((p) => !p.isDraft) ? 'prRaised' : null
+}

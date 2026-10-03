@@ -72,8 +72,7 @@ the repo-root [TODO.md](../TODO.md).
   filter. Needs repro steps from the user. Where: `app/src/shared/boardFilter.ts`, `BoardView.tsx`.
 - **gamerun-app PR #140 (feat/org-join-code)**: closed unmerged on purpose; the merge-conflict
   question was never answered; 4 local commits unpushed there. Other repo; ask the user.
-- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details; move a
-  board ticket to "PR Raised" only once the draft PR is ready (babysit-ticket); the pr-watch hook
+- **Offers never answered** (ask before doing): show Claude Code's own monitors in Details; the pr-watch hook
   firing on any command that contains `gh pr create` (check it uses `runsOrExit`,
   `app/src/shared/workflow.ts`).
 - **Cleanup** (list exact paths, delete only those): remote-probe transcript folders under
@@ -84,6 +83,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Board moves by MasterDeck (BoardFlow: link spawned sessions, PR links, PR Raised only once the PR is ready, Dev Done when all merged; linked steps for native links) | feat/native-babysit | plan H |
 | Create with Claude hands tickets to MasterDeck (requests/answers folders; 90 s wait, stale-request sweep, body-file realpath containment) | feat/native-babysit | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
-import { emptyLinks, importLinks, linkInfoMap, parseLinkFile, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
+import { boardTarget, emptyLinks, importLinks, linkInfoMap, parseLinkFile, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
 
 setConfig(parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/web'] }))
 const A = '11111111-1111-4111-8111-111111111111'
@@ -46,5 +46,19 @@ describe('ticket links', () => {
   it('skips adopted links like Sources did', () => {
     const f = parseLinkFile({ sessions: { [A]: { issue: 12, title: '', branch: '', linked_at: '', prs: [], adopted: true } }, branches: {} })
     expect(linkInfoMap(f).size).toBe(0)
+  })
+})
+
+describe('boardTarget', () => {
+  const pr = (state: string, isDraft = false) => ({ state, isDraft })
+  it('PR Raised once a PR is open and not a draft', () => {
+    expect(boardTarget([pr('OPEN', true)])).toBeNull()
+    expect(boardTarget([pr('OPEN', true), pr('OPEN')])).toBe('prRaised')
+  })
+  it('Dev Done once every PR is merged (closed ones do not count)', () => {
+    expect(boardTarget([pr('MERGED'), pr('OPEN')])).toBe('prRaised')
+    expect(boardTarget([pr('MERGED'), pr('CLOSED')])).toBe('devDone')
+    expect(boardTarget([pr('CLOSED')])).toBeNull()
+    expect(boardTarget([])).toBeNull()
   })
 })
