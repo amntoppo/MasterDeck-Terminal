@@ -26,8 +26,8 @@ export interface BoardFlowDeps {
   linkTriedFile?: string
   /** PRs the session created, from its transcript (not the PR of its checkout's branch). */
   createdPrs: (sessionId: string) => string[]
-  /** (ticket, target) moves that went through or found nothing to do: never tried again, so a card
-   * the user moved back stays there (kept across restarts). */
+  /** (ticket, target, PR set) moves that went through or found nothing to do: never tried again, so a
+   * card the user moved back stays there (kept across restarts). */
   movedFile?: string
 }
 
@@ -36,7 +36,7 @@ export interface BoardFlowDeps {
  * knows: a session master spawned for an issue gets linked (In Dev comes with the link); a linked
  * session's new PR is recorded and linked under the issue's Development box; the card moves to PR
  * Raised once a PR is open and ready, and to Dev Done once every PR is merged. Forward only; each
- * (ticket, target) is done once (movedFile), a failed one tried again after RETRY_MS. Links imported
+ * (ticket, target, PR set) is done once (movedFile), a failed one tried again after RETRY_MS. Links imported
  * from tt.sh are left alone until a session links that ticket again.
  */
 export class BoardFlow {
@@ -125,7 +125,8 @@ export class BoardFlow {
       if (!target || (target === 'devDone' && known.length < urls.length)) continue
       const name = statusesFor(project)[target]
       if (status && statusRank(status, undefined, project) >= statusRank(name, undefined, project)) continue
-      const id = `${key}:${target}`
+      // With the PR set: a reopened ticket's new PR moves the card again; the same PRs never re-push it.
+      const id = `${key}:${target}:${[...urls].sort().join(' ')}`
       if (this.moved.has(id) || now - (this.tried.get(id) ?? -Infinity) < RETRY_MS) continue
       this.tried.set(id, now)
       const r = await this.deps.ops.move(t, name)

@@ -84,6 +84,13 @@ the repo-root [TODO.md](../TODO.md).
 - **Queue item waits a turn (M2)**: when the app claims a Stop request but answers after the hook's
   7 s wait, the hook exits without a prompt; the item stays queued (not lost) and goes at the next
   turn's Stop (`main/deckHooks.ts` `pumpQueue`).
+- **legacy-sids `*` expansion**: `deck/legacy-sids` starts as `*` and becomes the sessions alive at the first
+  healthy session list, not those alive at the migration. If the app quits before that, sessions started in
+  between lose `/queue` until they end; if `claude agents` never succeeds, `*` blocks `/queue` everywhere.
+  Fix: store the migration time and keep only sessions that started before it.
+- **Board link branch is often empty**: the auto-link takes the branch from the session's cwd at spawn (often
+  `dev`), so `prOnBranch` rarely helps; a PR the transcript scan cannot see (opened in the browser) is not
+  linked. Fix: refresh an empty link `branch` when the checkout moves to a feature branch.
 - **Settings backups never pruned (M4)**: `settings.backup.*.json` in `<home>` pile up (up to 4 on
   the first launch: migration, review gate, deck hook, workflow hooks) (`main/hooks.ts` `write`).
 - **Orphaned babysit-proof hook**: older machines may still have a babysit-proof `PROOF_PRE`

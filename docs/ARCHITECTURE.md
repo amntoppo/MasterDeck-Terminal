@@ -281,8 +281,9 @@ of whatever branch its checkout is on stays display-only. (3) Tickets with at le
 `ticket`, whose card (and so its board) is known and not yet at Dev Done, get their PRs' states in
 one `prStates` call per tick; `boardTarget` of a ticket's PR states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
 one is merged (only when every PR's state is known). Forward only (`statusRank` against the card's
-status). A (ticket, target) move that went through, or found the card already there or past it,
-is recorded in `<home>/board-moved.json` and never tried again (a card the user moved back stays);
+status). A (ticket, target, PR set) move that went through, or found the card already there or past it,
+is recorded in `<home>/board-moved.json` and never tried again (a card the user moved back stays; a
+reopened ticket's new PR is a new PR set, so it moves again);
 a failed one is tried again after 30 min (`RETRY_MS`). PR states
 come from `state.prLive` for now (live sessions' PRs only).
 
@@ -385,7 +386,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
-| `board-moved.json` | `<ticket>:<target>` board moves BoardFlow made or found done (never retried) |
+| `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |

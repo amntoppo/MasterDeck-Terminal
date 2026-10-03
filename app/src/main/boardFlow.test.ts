@@ -242,6 +242,17 @@ describe('BoardFlow final review', () => {
     await flow.tick(state({}), 2 * 30 * 60_000)
     expect(s.moves).toEqual(['#12 PR Raised'])
   })
+  it('a reopened ticket with a new PR moves again (a done move is per ticket, target and PR set)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-'))
+    const PR6 = 'https://github.com/acme/web/pull/6'
+    const s = setup(linked(), { [PR]: { state: 'OPEN', isDraft: false }, [PR6]: { state: 'OPEN', isDraft: false } })
+    s.deps.movedFile = join(dir, 'moved.json')
+    await new BoardFlow(s.deps).tick(state({}), 0)
+    const more = withPr(linked(), SID, PR6)
+    s.deps.links = { read: () => more, addPr: () => {} }
+    await new BoardFlow(s.deps).tick(state({}), 0)
+    expect(s.moves).toEqual(['#12 PR Raised', '#12 PR Raised'])
+  })
   it('a move that found the card already there (or left it) counts as done; a failure retries', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bf-'))
     const s = setup(linked(), { [PR]: { state: 'OPEN', isDraft: false } })
