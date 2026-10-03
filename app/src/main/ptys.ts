@@ -31,8 +31,11 @@ export class PtyManager {
     private installerDir: () => string = () => homedir(),
     /** The workflow builder's folder (its CLAUDE.md and drafts). */
     private builderDir: () => string = () => homedir(),
-    /** The Board's ticket session's folder. */
-    private ticketDir: () => string = () => homedir(),
+    /** The Board's ticket session: its folder, tab and account settings (one per tab with two or more accounts), or why not. */
+    private ticketPane: (spec: { tab?: string; account?: string }) => { cwd: string; tab?: string; settings: string[] } | { error: string } = () => ({
+      cwd: homedir(),
+      settings: [],
+    }),
   ) {}
 
   open(id: string, spec: PaneSpec, cols: number, rows: number): PtyOpenResult {
@@ -73,11 +76,15 @@ export class PtyManager {
         message: `refusing unsafe background id ${spec.bgId}`,
       };
     }
+    const ticket = spec.kind === "ticket-builder" ? this.ticketPane(spec) : null;
+    if (ticket && "error" in ticket)
+      return { ok: false, replay: "", seq: 0, exited: true, message: ticket.error };
     const cmd = paneCommand(
-      spec,
+      ticket && spec.kind === "ticket-builder" ? { ...spec, tab: ticket.tab } : spec,
       process.platform,
       process.env.SHELL,
       this.claude(),
+      ticket?.settings,
     );
     if (spec.kind === "installer") {
       cmd.cwd = this.installerDir();
@@ -87,8 +94,8 @@ export class PtyManager {
       cmd.cwd = this.builderDir();
       mkdirSync(cmd.cwd, { recursive: true });
     }
-    if (spec.kind === "ticket-builder") {
-      cmd.cwd = this.ticketDir();
+    if (ticket) {
+      cmd.cwd = ticket.cwd;
       mkdirSync(cmd.cwd, { recursive: true });
     }
     const pane: Pane = { proc: null, buffer: "", seq: 0, exited: false };

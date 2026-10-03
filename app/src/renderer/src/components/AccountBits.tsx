@@ -10,6 +10,15 @@ export function AccountBadge({ login }: { login?: string | null }) {
   ) : null
 }
 
+/** "as @login" at the top of a session (or a Board tab's ticket session); nothing at all without a login. */
+export function SessionAccount({ login }: { login?: string | null }) {
+  return login ? (
+    <span className="session-acct">
+      as <AccountBadge login={login} />
+    </span>
+  ) : null
+}
+
 /** A start or resume dialog's Account field: only with two or more connected accounts; unhealthy ones can't be picked. */
 export function AccountSelect({ state, value, onChange }: { state: AppState; value: string | null; onChange: (login: string) => void }) {
   if (!isMulti(state.config)) return null

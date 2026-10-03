@@ -1,4 +1,5 @@
 import { installPrompt } from "./install";
+import { ticketBuilderName } from "./ticketBuilder";
 import type { PaneSpec } from "./types";
 
 export interface PaneCommand {
@@ -7,12 +8,16 @@ export interface PaneCommand {
   cwd?: string;
 }
 
-/** The process a pane runs. `shell` is $SHELL (unused on Windows); `claude` is the resolved binary. */
+/**
+ * The process a pane runs. `shell` is $SHELL (unused on Windows); `claude` is the resolved binary;
+ * `settings`: a ticket builder's account (`--settings <file>`, two or more accounts only).
+ */
 export function paneCommand(
   spec: PaneSpec,
   platform: string,
   shell: string | undefined,
   claude = "claude",
+  settings: string[] = [],
 ): PaneCommand {
   const win = platform === "win32";
   if (spec.kind === "attach") {
@@ -29,7 +34,8 @@ export function paneCommand(
       args: [
         ...(spec.resume ? ["--continue"] : []),
         "-n",
-        "md-ticket-builder",
+        ticketBuilderName(spec.tab),
+        ...settings,
         "--setting-sources",
         "project,local",
         "--permission-mode",

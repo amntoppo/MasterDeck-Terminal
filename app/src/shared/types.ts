@@ -421,7 +421,10 @@ export type PaneSpec =
   | { kind: "installer"; tools: string[] }
   /** The workflow builder (Workflow window): a Claude session in its own folder; `resume` continues its last chat. */
   | { kind: "builder"; resume: boolean }
-  /** The Board's ticket session (Create with Claude); `prompt`: its first message, if any. */
-  | { kind: "ticket-builder"; resume: boolean; prompt?: string }
+  /**
+   * The Board's ticket session (Create with Claude); `prompt`: its first message, if any. Two or more
+   * accounts: one per Board tab (`tab`, its id), running as the tab's `account`; main ignores both with one.
+   */
+  | { kind: "ticket-builder"; resume: boolean; prompt?: string; tab?: string; account?: string }
   /** Setup's "Add an account": gh's own browser login. */
   | { kind: "gh-login" };

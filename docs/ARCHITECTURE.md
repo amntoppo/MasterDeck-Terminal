@@ -70,7 +70,7 @@ answers.
 
 With two or more accounts `master snapshot`/`board`/`sprints` read each account with its own token (`collect.Live.for_account`: `gh auth token --user`) and merge (snapshot: `accounts[].sources`, each issue and PR tagged `account`, sessions read once with the primary; board: cards tagged `account`, `errors` when some failed); `keepLastGood` keeps only a failed account's last issues/PRs; team PRs are one search per account (`teamPrPages(owner, …, ownerType)`), tagged `account`, a failed account keeping its last pages (`mergeTeamPages`). A rate limit on one account: the shared cache pauses that account's calls, and the app's polling waits for any account's pause to lift (every account's refresh waits); `snapshot source missing: <k>` names the accounts. A session's branch head is read as its repo's account (`config.account_for_repo`), its failure tagged with that account; `master sprints` merges a title found on several accounts' boards (`board.merge_sprints`). Assignable users and `me` are the primary's. One account: the same single read as before.
 
-`build()` order: raw sessions (minus the workflow/ticket builder sessions) → `attachIssues` →
+`build()` order: raw sessions (minus the workflow/ticket builder sessions: `isTicketBuilderSession`, named `md-ticket-builder[-<tab>]` or in `ticket-builder/` or a `ticket-builder/tab-*` folder) → `attachIssues` →
 `applyFreshness` → activity → hook state; asks and menus; deck hook permission requests become
 menus; `collectItems` (`shared/inbox.ts`) → `inbox.update()`; then the `AppState` object.
 The inbox is "primed" only once agents are healthy and the ledger was read, so nothing resolves or
@@ -250,6 +250,18 @@ here (needs `hooks.queue`).
   and a cumulative `seq` (characters emitted) so a view that mounts later replays and then drops
   data already covered. Output goes out as `pty:data:<id>` / `pty:exit:<id>` through `emit`.
   Closing a pane kills only `claude attach`; the background session keeps running.
+- The Board's ticket builder (`ticket-builder` spec `{resume, prompt, tab?, account?}`): one account,
+  pane `ticket-builder:<gen>`, `claude -n md-ticket-builder` in `<home>/ticket-builder/`, exactly as
+  before (`tab`/`account` ignored). Two or more (`isMulti`): one per Board tab, pane
+  `ticket-builder:<tabId>:<gen>`, `-n md-ticket-builder-<tabId>` in `<home>/ticket-builder/tab-<tabId>/`
+  (tab id `^[A-Za-z0-9_-]{1,64}$`), with the tab's account's `--settings <file>`
+  (`AccountEnv.settingsArgs`); a bad tab, no account or an account that can't start refuses the pane
+  (`main/ticketDirs.ts` `ticketPane`), never starting as gh's active account. `ticketBuilderPrepare`
+  writes the same files into the tab's folder (`ctx.tabId`). The 1 s pump (`pumpTicketDir`) answers
+  each folder (the shared one, or every `tab-*` one) and creates as that folder's `context.json`
+  account (`ticketAccount`); created.jsonl is read from every folder whatever the mode. The browser
+  bridge refuses a remote ticket-builder open with a bad `tab` or an `account` that is not a connected
+  login (`ticketSpecError`). Tab folders are never removed (see TODO).
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).
@@ -470,7 +482,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
-| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
+| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |

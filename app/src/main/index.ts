@@ -18,8 +18,6 @@ import {
   unlinkSync,
   writeFileSync,
   chmodSync,
-  appendFileSync,
-  renameSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
@@ -121,7 +119,8 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
-import { BoardOps, linkTicket, bodyFileAllowed, parseCreateArgs, sweepTicketDirs, ticketBuilderScript } from "./boardOps";
+import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
+import { pumpTicketDir, ticketBuilderDir, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -295,7 +294,10 @@ const ptys = new PtyManager(
   () => claudeBin,
   () => join(paths.home, "installer"),
   () => builderDir(),
-  () => ticketDir(),
+  (spec) =>
+    ticketPane(paths.home, isMulti(getConfig()), spec, (l) =>
+      accountEnv.settingsArgs(l),
+    ),
 );
 
 function notify(events: NotifyEvent[]): void {
@@ -807,6 +809,7 @@ bridge = new BrowserBridge({
   onChange: () => publishBrowsers(),
   hello: { appVersion: app.getVersion(), platform: process.platform, home: homedir() },
   log: (l) => console.log(l),
+  logins: () => getConfig().accounts.map((a) => a.login),
 });
 const remoteCommands = new RemoteCommands(
   {
@@ -1171,82 +1174,43 @@ async function resumeBg(
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
 }
 
-/** The Board's ticket session works here: its CLAUDE.md, context.json, create-ticket.sh, created.jsonl. */
-const ticketDir = () => join(paths.home, "ticket-builder");
+/** The Board's ticket sessions work here (one shared, or one per Board tab with two or more accounts; see ticketDirs.ts). */
+const ticketRoot = () => join(paths.home, "ticket-builder");
 let ticketPumping = false;
-/** Create-with-Claude asks for a ticket: claim the request, create it, answer, and log it. */
+/** Create-with-Claude asks for a ticket: in each ticket folder, claim the request, create it as that folder's account, answer, log it. */
 async function pumpTicketRequests(): Promise<void> {
   if (ticketPumping) return;
   ticketPumping = true;
   try {
-    sweepTicketDirs(ticketDir()); // stale requests are dropped, not created for nobody
-    const dir = join(ticketDir(), "requests");
-    let names: string[] = [];
-    try {
-      names = readdirSync(dir).filter((n) => n.endsWith(".req"));
-    } catch {
-      return;
-    }
-    for (const n of names) {
-      const id = n.slice(0, -4);
-      if (!/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue;
-      try {
-        renameSync(join(dir, n), join(dir, `${id}.taken`));
-      } catch {
-        continue; // taken back by the script (timed out)
-      }
-      let answer: object;
-      try {
-        const args = readFileSync(join(dir, `${id}.taken`), "utf8").split("\0").slice(0, -1).slice(0, 60);
-        const p = parseCreateArgs(args);
-        if ("error" in p) answer = { ok: false, error: p.error };
-        else {
-          const file = p.bodyFile ? bodyFileAllowed(ticketDir(), p.bodyFile) : "";
-          if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
-          else {
-            const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
-            // context.json says which account the dialog / tab picked.
-            let picked: string | null = null;
-            try {
-              picked = JSON.parse(readFileSync(join(ticketDir(), "context.json"), "utf8")).account ?? null;
-            } catch {
-              /* none */
-            }
-            answer = await forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create({ ...p, body });
-          }
-        }
-      } catch (e) {
-        answer = { ok: false, error: `create: ${String(e)}` };
-      }
-      const a = join(ticketDir(), "answers");
-      mkdirSync(a, { recursive: true });
-      writeFileSync(join(a, `${id}.tmp`), JSON.stringify(answer));
-      renameSync(join(a, `${id}.tmp`), join(a, `${id}.json`));
-      // The log the Board reads (readCreatedTickets) — dry runs are not logged.
-      if ((answer as { ok?: boolean; dryRun?: boolean }).ok && !(answer as { dryRun?: boolean }).dryRun)
-        appendFileSync(join(ticketDir(), "created.jsonl"), JSON.stringify(answer) + "\n");
-    }
+    const cfg = getConfig();
+    for (const dir of ticketDirs(paths.home, isMulti(cfg)))
+      await pumpTicketDir(dir, (p, picked) =>
+        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create(p),
+      );
   } finally {
     ticketPumping = false;
   }
 }
-let ticketsSeen = -1;
-/** Tickets the Board's session created (created.jsonl grew): refresh the board, and tell the page. */
+/** created.jsonl lines already seen, per ticket folder; the first read (launch) counts the old ones as seen. */
+const ticketsSeen = new Map<string, number>();
+let ticketsRead = false;
+/** Tickets the Board's sessions created (a created.jsonl grew): refresh the board, and tell the page. */
 function readCreatedTickets(): void {
-  let lines: string[] = [];
-  try {
-    lines = readFileSync(join(ticketDir(), "created.jsonl"), "utf8")
-      .split("\n")
-      .filter(Boolean);
-  } catch {
-    if (ticketsSeen < 0) ticketsSeen = 0;
-    return;
+  // Every folder, whatever the mode, so switching modes never re-announces old tickets.
+  const fresh: string[] = [];
+  for (const dir of [ticketRoot(), ...ticketDirs(paths.home, true)]) {
+    const f = join(dir, "created.jsonl");
+    let lines: string[];
+    try {
+      lines = readFileSync(f, "utf8").split("\n").filter(Boolean);
+    } catch {
+      continue;
+    }
+    const seen = ticketsSeen.get(f) ?? (ticketsRead ? 0 : lines.length);
+    ticketsSeen.set(f, lines.length);
+    if (lines.length > seen) fresh.push(...lines.slice(seen));
   }
-  // At launch: the ones already there are old news.
-  if (ticketsSeen < 0) ticketsSeen = lines.length;
-  if (lines.length <= ticketsSeen) return;
-  const fresh = lines.slice(ticketsSeen);
-  ticketsSeen = lines.length;
+  ticketsRead = true;
   const made = fresh.flatMap((l) => {
     try {
       const o = JSON.parse(l) as {
@@ -1821,7 +1785,17 @@ function registerIpc(): void {
         message: "the board is not loaded yet",
         canContinue: false,
       };
-    const dir = ticketDir();
+    // Two or more accounts: the tab's own folder (its session runs as the tab's account).
+    let dir: string;
+    try {
+      dir = ticketBuilderDir(
+        paths.home,
+        (ctx as { tabId?: string } | null)?.tabId ?? null,
+        isMulti(cfg),
+      );
+    } catch (e) {
+      return { ok: false, message: (e as Error).message, canContinue: false };
+    }
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const script = join(dir, "create-ticket.sh");
     writeFileSync(script, ticketBuilderScript(dir));

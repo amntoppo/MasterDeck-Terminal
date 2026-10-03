@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
+  accountChoices, accountLabel, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
   matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
@@ -223,5 +223,13 @@ describe('ticketAccount', () => {
     expect(ticketAccount(undefined, 'acme/api', two)).toBe('alice')
     expect(ticketAccount('carol', 'globex/app', two)).toBe('bob-work')
     expect(ticketAccount('bob-work', 'acme/api', one)).toBe('alice')
+  })
+})
+
+describe('accountLabel', () => {
+  it("a session's account with two or more; nothing with one", () => {
+    expect(accountLabel({ account: 'bob-work' }, two)).toBe('bob-work')
+    expect(accountLabel({}, two)).toBeNull()
+    expect(accountLabel({ account: 'alice' }, one)).toBeNull()
   })
 })

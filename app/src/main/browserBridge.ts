@@ -5,6 +5,7 @@ import { ARG_FIX, DECK_ACCESS, type Access } from '@shared/remoteDeck'
 import { MAX_FRAME, PROTOCOL_VERSION, type DesktopMsg, type ServerToDesktop } from '@shared/remote'
 import type { MacToWeb, WebToMac } from '@shared/bridgeWire'
 import type { BrowserRequestView } from '@shared/types'
+import { ticketSpecError } from '@shared/ticketBuilder'
 import type { ApprovedBrowser, BrowserStore } from './browserStore'
 
 export type { MacToWeb, WebToMac } from '@shared/bridgeWire'
@@ -30,6 +31,8 @@ export interface BridgeDeps {
   /** At most one resync-triggered full per connection this often. */
   resyncMs?: number
   log?: (line: string) => void
+  /** Connected GitHub logins: a remote ticket builder may only run as one of them. */
+  logins?: () => string[]
 }
 
 const BLOCKED = 'Not available on the web yet'
@@ -392,6 +395,10 @@ export class BrowserBridge {
     let args = Array.isArray(m.a) ? m.a : []
     if (access?.kind !== 'remote' || (m.m === 'ptyOpen' && !WEB_PANES.has((args[1] as { kind?: unknown } | null)?.kind as string)))
       return this.ret(c, m.id, false, BLOCKED)
+    if (m.m === 'ptyOpen' && (args[1] as { kind?: unknown }).kind === 'ticket-builder') {
+      const bad = ticketSpecError(args[1] as { tab?: unknown; account?: unknown }, this.d.logins?.() ?? [])
+      if (bad) return this.ret(c, m.id, false, bad)
+    }
     args = ARG_FIX[m.m as keyof typeof ARG_FIX]?.(args) ?? args
     try {
       const v = await this.d.call(access.ch, args)

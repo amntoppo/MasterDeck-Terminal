@@ -66,6 +66,11 @@ export function sessionAccount(o: { recorded?: string | null; spawned?: string |
   return known(o.recorded) ?? known(o.spawned) ?? defaultAccount({ origin: o.origin }, c)
 }
 
+/** The account a session's header shows ("as <login>"): its account with two or more connected; null with one. */
+export function accountLabel(s: { account?: string }, c: WithAccounts): string | null {
+  return isMulti(c) && s.account ? s.account : null
+}
+
 /** What a picker offers: every healthy account; nothing (so no picker) with fewer than two. */
 export function accountChoices(c: WithAccounts, status: GhAccountStatus[] | undefined): string[] {
   if (!isMulti(c)) return []

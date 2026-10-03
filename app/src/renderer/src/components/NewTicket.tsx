@@ -17,6 +17,8 @@ export interface TicketContext {
   tab: string;
   /** The tab's GitHub account (two or more). */
   account?: string;
+  /** The tab's id (two or more accounts): its own ticket session folder. */
+  tabId?: string;
 }
 
 /** The board a column belongs to: the one the tab filters to, else the first board (of the tab's account) that has the column. */

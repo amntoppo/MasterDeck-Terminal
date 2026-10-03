@@ -429,6 +429,12 @@ creation.
   note of what it created. What you typed in the dialog is handed over as a draft it shows you
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
   command). **New chat** starts over.
+  With two or more GitHub accounts each Board tab has its own Create with Claude session, working
+  as the tab's account (its header says `as @login`; its folder is
+  `~/.claude/masterdeck/ticket-builder/tab-<tab id>/`). Tickets it creates go in as that account.
+  Switching tabs shows that tab's session (the others keep running); closing a tab, or changing its
+  account, ends its session (reopening the tab can continue the chat). An account that needs to log
+  in again shows the error in the panel instead of starting as another account.
 
 - **Drag cards** between columns. MasterDeck moves the status itself (the board write
   babysit-ticket used to make, forced for a drag). Moving backwards asks first; a
@@ -699,7 +705,7 @@ is a `gh` login (`gh auth status` lists them).
   Start dialog. master's proposals use the issue's account (shown on the proposal).
 - **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
 - **Board and PRs**: each tab belongs to one account (see Board View, PRs).
-- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`. **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow, and the ticket is created as that account (also with **Create with Claude**, which gets the picked account); changing the account resets assignees, labels and sprint that came from the old one. **Standup** counts commits made with any connected account's email.
+- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`, and the top of each session's terminal (and of each Board tab's Create with Claude panel) says `as @login`; shell tabs show nothing (they use your own setup). **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow, and the ticket is created as that account (**Create with Claude** works and creates as the tab's account instead); changing the account resets assignees, labels and sprint that came from the old one. **Standup** counts commits made with any connected account's email.
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 

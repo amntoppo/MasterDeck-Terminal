@@ -38,6 +38,10 @@ fixes it, and move the item here to "Recently done".
   until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
+- **P3 · Old per-tab ticket-builder folders are never removed.** With two or more accounts each
+  Board tab gets `ticket-builder/tab-<id>/`; closing the tab leaves it (so reopening continues).
+  Main doesn't know which tabs exist (they live in the renderer's storage), so nothing sweeps them.
+  Approach: the renderer reports its tab ids, and `tab-*` folders of no tab untouched for 7 days go.
 
 ## Remote / web
 
@@ -131,6 +135,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |
 | Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a … 68bf172, merge b3c4d4b; deployed | — |

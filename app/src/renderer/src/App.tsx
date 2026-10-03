@@ -39,6 +39,8 @@ import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
+import { accountLabel } from "@shared/accounts";
+import { SessionAccount } from "./components/AccountBits";
 import { QUICK_KEYS } from "./quickKeys";
 import { TasksView } from "./components/TasksView";
 import { PhoneBar, Rail, type PhoneScreen } from "./components/Rail";
@@ -1158,6 +1160,14 @@ export function App() {
                   ? activeTab.title
                   : (activeTab?.name ?? "")}
             </span>
+            {activeTab?.kind === "session" && (
+              <SessionAccount
+                login={(() => {
+                  const x = state.sessions.find((y) => y.key === activeTab.key);
+                  return x ? accountLabel(x, state.config) : null;
+                })()}
+              />
+            )}
             {activeTab && (
               <button className="btn" onClick={() => setPhonePanel(true)}>
                 Panel
@@ -1560,6 +1570,7 @@ function SessionPane(p: {
   const s = p.state.sessions.find((x) => x.key === p.tab.key);
   const [exited, setExited] = useState(false);
   const [gen, setGen] = useState(0);
+  const phone = usePhone();
   const paneId = `s:${p.tab.key}`;
 
   if (!s) {
@@ -1582,8 +1593,16 @@ function SessionPane(p: {
     setGen(gen + 1);
   };
 
+  // Two or more GitHub accounts: which one this session works as (the phone shows it in its header).
+  const login = accountLabel(s, p.state.config);
   return (
     <>
+      {login && !phone && (
+        <div className="pane-head">
+          <b>{s.name}</b>
+          <SessionAccount login={login} />
+        </div>
+      )}
       {s.kind === "background" && s.bgId && !p.armed ? (
         <NotStarted
           label={

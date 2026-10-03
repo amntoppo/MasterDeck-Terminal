@@ -45,6 +45,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     stateMs: 60,
     resyncMs: 60,
     log: (l) => void w.logs.push(l),
+    logins: () => ['alice', 'bob-work'],
   })
   return w
 }
@@ -336,6 +337,16 @@ describe('BrowserBridge channel', () => {
     for (const spec of specs) expect(await c.call('ptyOpen', ['p', spec, 80, 24])).toMatchObject({ ok: true })
     expect(await c.call('ptyOpen', ['p9', { kind: 'bogus' }, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
     expect(w.call).toHaveBeenCalledTimes(specs.length)
+  })
+
+  it('ptyOpen of a ticket builder with a bad tab id or an unconnected account is refused', async () => {
+    const w = await world()
+    const c = await connected(w)
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 't1', account: 'bob-work' }, 80, 24])).toMatchObject({ ok: true })
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: '../x', account: 'alice' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 't1', account: 'mallory' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 5 }, 80, 24])).toMatchObject({ ok: false })
+    expect(w.call).toHaveBeenCalledTimes(1)
   })
 
   it('send-mode methods run without a ret', async () => {

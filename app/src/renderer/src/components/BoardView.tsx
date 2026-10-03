@@ -61,6 +61,7 @@ import {
   type TicketContext,
 } from "./NewTicket";
 import { TerminalView } from "./TerminalView";
+import { SessionAccount } from "./AccountBits";
 import type { NewTicket } from "@shared/ipc";
 
 interface Props {
@@ -181,13 +182,16 @@ export function BoardView({
   } | null>(null);
   const [moveMsg, setMoveMsg] = useState<string | null>(null);
   const [ticketCtx, setTicketCtx] = useState<TicketContext | null>(null);
-  // Kept across visits to the Board: the session keeps running while another view shows.
-  const [claude, setClaudeRaw] = useState<TicketSession | null>(
-    () => keptSession,
+  // Kept across visits to the Board: the sessions keep running while another view shows.
+  const [claudes, setClaudesRaw] = useState<Record<string, TicketSession>>(
+    () => keptSessions,
   );
-  const setClaude = (c: TicketSession | null) => {
-    keptSession = c;
-    setClaudeRaw(c);
+  const setClaudeOf = (key: string, c: TicketSession | null) => {
+    const next = { ...keptSessions };
+    if (c) next[key] = c;
+    else delete next[key];
+    keptSessions = next;
+    setClaudesRaw(next);
   };
   const [panelW, setPanelW] = useState<number>(() =>
     load<number>("ticketPanelW", 520),
@@ -273,6 +277,23 @@ export function BoardView({
   const primary = primaryLogin(cfg);
   const acct = multi ? (tabAccount(tab, logins) ?? primary) : null;
   const me = acct ?? state.me;
+  // Create with Claude: one session for the Board with one account; one per tab (as its account) with several.
+  const claudeKey = multi ? tab.id : "";
+  const claude = claudes[claudeKey] ?? null;
+  const setClaude = (c: TicketSession | null) => setClaudeOf(claudeKey, c);
+  const closeClaudeOf = (key: string) => {
+    const c = keptSessions[key];
+    if (c) deck().ptyClose(ticketPaneId(key, c.gen));
+    setClaudeOf(key, null);
+  };
+  // A tab whose account changed (picked, or disconnected): its session ran as the old one.
+  useEffect(() => {
+    if (multi && claude && claude.account !== acct) closeClaudeOf(claudeKey);
+  }, [multi, claudeKey, acct]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A second account connected or the last one removed: the other mode's sessions go.
+  useEffect(() => {
+    for (const k of Object.keys(keptSessions)) if ((k === "") === multi) closeClaudeOf(k);
+  }, [multi]); // eslint-disable-line react-hooks/exhaustive-deps
   // Connecting another account adds a "Mine" tab for it, once.
   useEffect(() => {
     const added = load<string[]>("boardTabAccounts", []);
@@ -313,6 +334,8 @@ export function BoardView({
   const closeTab = (id: string) => {
     const rest = tabs.filter((t) => t.id !== id);
     if (!rest.length) return;
+    // Its ticket session goes with it; the folder stays (reopening the tab can continue it).
+    if (multi) closeClaudeOf(id);
     setTabs(rest);
     if (id === tab.id)
       setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id);
@@ -528,14 +551,17 @@ export function BoardView({
     sprint: state.selectedSprint,
     tab: tab.name,
     account: acct ?? undefined,
+    ...(multi ? { tabId: tab.id } : {}),
   });
   // `restart`: a new conversation. Otherwise an open session keeps going: its context.json now
   // says where this + was, and what was typed in the dialog is sent to it as a message.
   const openClaude = async (
-    ctx: TicketContext,
+    picked: TicketContext,
     draft?: NewTicket,
     restart = false,
   ) => {
+    // Two or more accounts: the tab's session works as the tab's account, and creates as it too.
+    const ctx = multi ? { ...picked, account: acct ?? undefined } : picked;
     const r = await deck().ticketBuilderPrepare({
       ...ctx,
       ...(draft ? { draft } : {}),
@@ -552,26 +578,24 @@ export function BoardView({
     if (claude && !restart) {
       setClaude({ ...claude, ctx });
       if (prompt) {
-        deck().ptyWrite(`ticket-builder:${claude.gen}`, prompt);
+        deck().ptyWrite(ticketPaneId(claudeKey, claude.gen), prompt);
         setTimeout(
-          () => deck().ptyWrite(`ticket-builder:${claude.gen}`, "\r"),
+          () => deck().ptyWrite(ticketPaneId(claudeKey, claude.gen), "\r"),
           150,
         );
       }
       return;
     }
-    if (claude) deck().ptyClose(`ticket-builder:${claude.gen}`);
+    if (claude) deck().ptyClose(ticketPaneId(claudeKey, claude.gen));
     setClaude({
       gen: (claude?.gen ?? 0) + 1,
       resume: !restart && !prompt && r.canContinue,
       prompt,
       ctx,
+      ...(acct ? { account: acct } : {}),
     });
   };
-  const closeClaude = () => {
-    if (claude) deck().ptyClose(`ticket-builder:${claude.gen}`);
-    setClaude(null);
-  };
+  const closeClaude = () => closeClaudeOf(claudeKey);
   const dragPanel = (e: React.MouseEvent) => {
     e.preventDefault();
     const right = (e.currentTarget.parentElement?.getBoundingClientRect()
@@ -996,6 +1020,7 @@ export function BoardView({
               <b>
                 <ClaudeMark /> Tickets with Claude
               </b>
+              <SessionAccount login={multi ? claude.account : null} />
               <span
                 className="muted small"
                 title="Where new tickets go; + on another column changes it"
@@ -1025,12 +1050,15 @@ export function BoardView({
             </div>
             <div className="wf-builder-term">
               <TerminalView
-                key={claude.gen}
-                paneId={`ticket-builder:${claude.gen}`}
+                key={`${claudeKey}:${claude.gen}`}
+                paneId={ticketPaneId(claudeKey, claude.gen)}
                 spec={{
                   kind: "ticket-builder",
                   resume: claude.resume,
                   prompt: claude.prompt,
+                  ...(multi && claude.account
+                    ? { tab: claudeKey, account: claude.account }
+                    : {}),
                 }}
                 visible
                 focusOnShow
@@ -1054,9 +1082,14 @@ type TicketSession = {
   resume: boolean;
   prompt?: string;
   ctx: TicketContext;
+  /** The tab's account it runs as (two or more accounts). */
+  account?: string;
 };
-/** The Board's Claude session, kept while another view shows (its terminal keeps running). */
-let keptSession: TicketSession | null = null;
+/** The Board's Claude sessions by tab id ("" with one account), kept while another view shows (their terminals keep running). */
+let keptSessions: Record<string, TicketSession> = {};
+/** One account: `ticket-builder:<gen>` as before; several: `ticket-builder:<tabId>:<gen>`. */
+const ticketPaneId = (key: string, gen: number) =>
+  key ? `ticket-builder:${key}:${gen}` : `ticket-builder:${gen}`;
 
 function inSprint(start: string, days: number, now: number): boolean {
   const t = Date.parse(start);
