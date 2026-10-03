@@ -72,6 +72,13 @@ describe('RemoteCommands', () => {
     expect(d.draftAssign).toHaveBeenCalledTimes(1)
   })
 
+  it('session.start on a one-account Mac drops the account and starts', async () => {
+    const s = { ...st([]), ghAccounts: [{ login: 'alice', primary: true, healthy: true }] } as unknown as AppState
+    const d = deps(s)
+    expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 1, account: 'bob-work' } }))).toEqual({ ok: true, message: 'started' })
+    expect((d.startAssign as any).mock.calls[0][0]).not.toHaveProperty('account')
+  })
+
   it('session.start reports a failed draft', async () => {
     const d = deps(st([]), { draftAssign: vi.fn(async () => ({ ok: false as const, message: 'no workspace for o/x' })) })
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 1, repo: 'o/x' } }))).toEqual({ ok: false, message: 'no workspace for o/x' })

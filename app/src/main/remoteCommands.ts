@@ -120,9 +120,12 @@ export class RemoteCommands {
         return this.deps.inboxAct(cmd.itemId, action, { ...rest, by })
       }
       case 'session.start': {
-        // A named account must be one this Mac has connected and can use now.
-        if (cmd.args.account && !(st.ghAccounts ?? []).some((a) => a.login === cmd.args.account && a.healthy))
-          return { ok: false, message: `${cmd.args.account} is not a GitHub account connected on this Mac` }
+        // Multi mode only (two or more accounts): a named account must be one this Mac has connected and can use now.
+        // One account: the field is dropped and the session starts as today (F7).
+        const accts = st.ghAccounts ?? []
+        const account = accts.length >= 2 ? cmd.args.account : undefined
+        if (account && !accts.some((a) => a.login === account && a.healthy))
+          return { ok: false, message: `${account} is not a GitHub account connected on this Mac` }
         const d = await this.deps.draftAssign({ repo: cmd.args.repo ?? null, number: cmd.args.issue })
         if (!d.ok) return { ok: false, message: d.message }
         const prompt = cmd.args.prompt?.trim()
@@ -136,7 +139,7 @@ export class RemoteCommands {
           edited: !!prompt,
           approved: false,
           ...(cmd.args.model ? { model: cmd.args.model } : {}),
-          ...(cmd.args.account ? { account: cmd.args.account } : {}),
+          ...(account ? { account } : {}),
         }
         return this.deps.startAssign(req)
       }
