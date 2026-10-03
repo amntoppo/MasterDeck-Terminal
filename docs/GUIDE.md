@@ -471,7 +471,8 @@ Stored in `~/.claude/masterdeck/settings.json`.
   (its threads and comments are not listed); after that only new ones are sent, never twice, also
   across restarts. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
   force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
-  has no time limit. Review-thread offers for a watched PR are not added to Needs you while its
+  has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
+  tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its
   session can take messages (it gets them already); a parked session, one on a prompt, or an
   interactive one with master offline still gets the offer. CI offers always are. A session with a watched PR shows **Waiting** when idle.
 - **Monitors run by** (Sessions): who runs the monitors sessions arm (PR review comments, merge

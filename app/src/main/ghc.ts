@@ -22,14 +22,28 @@ export function makeGhRunner(run: Runner, libDir: string, python: string, platfo
  * GraphQL `RATE_LIMITED` error. Never a good answer's body: PR comments can say "rate limit".
  */
 export function ghErrorText(r: Pick<RunResult, 'code' | 'stdout' | 'stderr'>): string {
-  let limited = false
+  let json: unknown
   try {
-    const errs = (JSON.parse(r.stdout) as { errors?: { type?: unknown }[] })?.errors
-    limited = Array.isArray(errs) && errs.some((e) => e?.type === 'RATE_LIMITED')
+    json = JSON.parse(r.stdout)
   } catch {
-    // not JSON
+    // not JSON: a failed gh's stdout is its message
   }
-  return [r.stderr, r.code !== 0 ? r.stdout : '', limited ? 'GraphQL: API rate limit exceeded (RATE_LIMITED)' : ''].filter(Boolean).join('\n')
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return [r.stderr, r.code !== 0 ? r.stdout : ''].filter(Boolean).join('\n')
+  // A JSON answer (gh exits 1 on a partial GraphQL error but prints the data): only its error types count.
+  const errs = (json as { errors?: { type?: unknown }[] }).errors
+  const limited = Array.isArray(errs) && errs.some((e) => e?.type === 'RATE_LIMITED')
+  return [r.stderr, limited ? 'GraphQL: API rate limit exceeded (RATE_LIMITED)' : ''].filter(Boolean).join('\n')
+}
+
+/** gh failed, or printed GraphQL `data` anyway (a partial error): the PRs in it can be read. */
+export function ghHasData(r: Pick<RunResult, 'code' | 'stdout'>): boolean {
+  if (r.code === 0) return true
+  try {
+    const d = (JSON.parse(r.stdout) as { data?: unknown })?.data
+    return !!d && typeof d === 'object'
+  } catch {
+    return false
+  }
 }
 
 export type { GhCacheStatus }

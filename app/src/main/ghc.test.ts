@@ -51,5 +51,9 @@ describe('ghErrorText', () => {
     expect(ghErrorText({ code: 1, stdout: 'x', stderr: 'HTTP 403: API rate limit exceeded' })).toContain('rate limit')
     expect(ghErrorText({ code: 0, stdout: JSON.stringify({ data: null, errors: [{ type: 'RATE_LIMITED', message: 'm' }] }), stderr: '' })).toContain('rate limit')
     expect(ghErrorText({ code: 0, stdout: JSON.stringify({ errors: [{ type: 'NOT_FOUND', message: 'rate limit' }] }), stderr: '' })).toBe('')
+    // gh exits 1 on a partial GraphQL error but still prints the data: its bodies are never read.
+    const partial = { code: 1, stdout: JSON.stringify({ data: { p0: { pullRequest: { body: 'rate limit again' } }, p1: null }, errors: [{ type: 'NOT_FOUND', message: 'no repo' }] }), stderr: 'gh: Could not resolve to a Repository' }
+    expect(ghErrorText(partial)).toBe('gh: Could not resolve to a Repository')
+    expect(ghErrorText({ code: 1, stdout: 'API rate limit exceeded', stderr: '' })).toContain('rate limit')
   })
 })

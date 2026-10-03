@@ -148,7 +148,11 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   PRs) only for PRs that changed, every 10 min, or when a stalled review is due; all through `ghc`
   (ttl 50 s) and nothing while the GitHub pause holds. Rate limits are read only from stderr, a failed
   answer's body or a GraphQL `RATE_LIMITED` error (`ghErrorText`; `pollPrs` too), never from a good
-  answer's body (comments can say "rate limit"). "Me" is the response's `viewer`; without it
+  answer's body (comments can say "rate limit"); a JSON answer's stdout is never scanned (gh
+  exits 1 on a partial GraphQL error but prints the data). Such an answer is still read
+  (`ghHasData`): one inaccessible PR does not starve its batch; after 3 light reads in a row
+  without it, its watch ends with one line. Pending items that make no text (a stall past its
+  nudges) are dropped. "Me" is the response's `viewer`; without it
   nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),

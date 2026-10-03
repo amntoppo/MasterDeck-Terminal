@@ -301,6 +301,68 @@ describe('PrWatch hardening', () => {
   })
 })
 
+describe('PrWatch partial answers', () => {
+  /** gh exits 1 on a partial error: PR `bad` comes back null with a NOT_FOUND, the others in full. */
+  function partialGh(bad: number, body: string) {
+    const gh: GhRunner = async (args) => {
+      const q = args.find((a) => a.startsWith('query='))!
+      const heavy = q.includes('reviewThreads')
+      const data: Record<string, unknown> = { viewer: { login: 'me' } }
+      for (const m of q.matchAll(/ (p\d+): repository\([^)]*\)\{pullRequest\(number:(\d+)\)/g))
+        data[m[1]] = Number(m[2]) === bad ? null : { pullRequest: heavy ? withThread(body) : lightPr }
+      const j = { data }
+      return { code: 1, stdout: JSON.stringify({ ...j, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve' }] }), stderr: 'gh: Could not resolve to a Repository' }
+    }
+    return gh
+  }
+  const three = () => ({ sessions: [sess()], sessionPrs: { [SID]: [url(1), url(2), url(3)] }, prLive: Object.fromEntries([1, 2, 3].map((n) => [url(n), live(NOW - 60_000)])) })
+  it('one inaccessible PR does not starve its batch, and a "rate limit" comment does not pause', async () => {
+    let paused = false
+    const { w, sent, deps } = make(partialGh(2, 'we hit the rate limit here'))
+    deps.paused = (o) => (o && /rate limit/i.test(o) ? (paused = true) : paused)
+    w.sync(three(), () => true, NOW)
+    await w.poll(NOW)
+    expect(paused).toBe(false)
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('web#1: 1 new review thread')
+    expect(sent[0]).toContain('web#3: 1 new review thread')
+    expect(sent[0]).not.toContain('web#2')
+  })
+  it('a PR unreadable three polls running ends with one line', async () => {
+    const { w, sent } = make(partialGh(2, 'x'))
+    w.sync(three(), () => true, NOW)
+    for (let p = 0; p < 3; p++) await w.poll(NOW + p * 60_000)
+    expect([...w.watched()].sort()).toEqual([url(1), url(3)])
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent[0]).toContain("[MasterDeck PR watch] web#2: MasterDeck can't read this PR any more (3 tries). The PR watch has ended.")
+  })
+  it('drops what makes no message (a stall past its nudges) instead of retrying an empty send', async () => {
+    const stalled = { ...lightPr, reviewThreads: { nodes: [] }, reviews: { nodes: [] }, comments: { nodes: [{ databaseId: 9, updatedAt: '2026-10-03T09:00:00Z', author: { login: 'claude[bot]' }, body: 'Claude is reviewing\n- [ ] step' }] } }
+    let calls = 0
+    const { gh } = fakeGh((_i, heavy) => (heavy ? stalled : lightPr))
+    const { w, file, deps } = make(gh)
+    deps.send = async () => (calls++, { ok: true, message: '' })
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    await w.poll(NOW)
+    // Saved with its nudges used up: the stall item makes no text.
+    const j = JSON.parse(readFileSync(file, 'utf8'))
+    j.watches[0].nudges = 3
+    writeFileSync(file, JSON.stringify(j))
+    const b = make(gh, file)
+    b.deps.send = deps.send
+    b.w.deliver([sess()], NOW)
+    await tick()
+    b.w.deliver([sess()], NOW)
+    await tick()
+    expect(calls).toBe(0)
+    expect(b.w.info([sess()])[0].queued).toBe(0)
+  })
+})
+
 describe('prStates', () => {
   it('one light call per 50 PRs through ghc, cached five minutes', async () => {
     const { gh, calls } = fakeGh(() => ({ ...lightPr, isDraft: true }))

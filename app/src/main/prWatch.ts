@@ -7,7 +7,7 @@ import {
 } from '@shared/prWatch'
 import { canDeliver, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
-import { ghErrorText, type GhRunner } from './ghc'
+import { ghErrorText, ghHasData, type GhRunner } from './ghc'
 
 export interface PrWatchEntry {
   url: string
@@ -30,6 +30,8 @@ export interface PrWatchEntry {
   events: number
   lastEventAt: number | null
   ended: boolean
+  /** Light reads in a row that came back without this PR (gone, or no access). */
+  misses?: number
 }
 
 export interface PrWatchDeps {
@@ -43,6 +45,8 @@ const DONE_MAX = 500
 /** Items kept per PR while the session is busy (the message lists 10 per kind and "and N more"). */
 const ITEM_MAX = 30
 const TEXT_MAX = 300
+/** Light reads in a row without the PR before its watch ends. */
+const MISS_MAX = 3
 /** Longest paste: PRs past it wait for the next delivery. */
 export const PASTE_MAX = 6_000
 /** Below the 60 s poll: ghc only dedups concurrent asks; heavy answers (MBs) do not linger in its cache. */
@@ -157,11 +161,17 @@ export class PrWatch {
         if (this.deps.paused(ghErrorText(r))) return
         me = parseViewer(r.stdout) ?? me
         // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
-        if (r.code !== 0 || !me) continue
+        // gh exits 1 on a partial error (one PR it cannot read) and still prints the others.
+        if (!ghHasData(r) || !me) continue
         const viewer = me
         parseLight(r.stdout, group.length).forEach((l, i) => {
           const w = group[i]
-          if (!l) return
+          if (!l) {
+            w.misses = (w.misses ?? 0) + 1
+            if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`)
+            return
+          }
+          w.misses = 0
           if (l.author && l.author.toLowerCase() !== viewer.toLowerCase()) return this.end(w)
           const conflictKnown = w.seen.some((k) => k.startsWith('X:'))
           const due =
@@ -177,7 +187,7 @@ export class PrWatch {
         if (this.deps.paused(ghErrorText(r))) break
         const viewer = parseViewer(r.stdout) ?? me
         // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
-        if (r.code !== 0 || !viewer) continue
+        if (!ghHasData(r) || !viewer) continue
         parseHeavy(r.stdout, group.length).forEach((h, i) => {
           const { w, l } = group[i]
           if (!h) return
@@ -239,12 +249,18 @@ export class PrWatch {
       let size = 0
       for (const w of waiting) {
         const m = prWatchMessage(w, w.pending, w.nudges)
+        if (!m.text) w.pending = [] // nothing to say about them (a stall past its nudges): dropped
         const text = [m.text, ...w.notes].filter(Boolean).join('\n')
+        if (!text) continue
         if (taken.length && size + text.length > PASTE_MAX) break
         taken.push({ w, keys: new Set(w.pending.map((x) => x.key)), notes: w.notes.length, nudges: m.nudges, text })
         size += text.length + 1
       }
-      const rest = waiting.length - taken.length
+      if (!taken.length) {
+        this.save()
+        continue
+      }
+      const rest = waiting.filter((w) => w.pending.length || w.notes.length).length - taken.length
       const text = [...taken.map((t) => t.text), ...(rest ? [`(${rest} more PR update${rest === 1 ? '' : 's'} — check MasterDeck)`] : [])].join('\n')
       this.sending.add(key)
       void this.deps
@@ -313,7 +329,7 @@ export async function prStates(gh: GhRunner, urls: string[]): Promise<Record<str
   const out: Record<string, { state: string; isDraft: boolean }> = {}
   for (const group of chunks(refs, LIGHT_MAX)) {
     const r = await gh(graphql(lightQuery(group.map((g) => g.r))), { ttl: 300, timeoutMs: 30_000 })
-    if (r.code !== 0) continue
+    if (!ghHasData(r)) continue
     parseLight(r.stdout, group.length).forEach((l, i) => l && (out[group[i].u] = { state: l.state, isDraft: l.isDraft }))
   }
   return out
