@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import uuid
@@ -11,6 +12,7 @@ from . import config, ledger
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$")
+ACCOUNT_RE = re.compile(rf"^{config.LOGIN_RE}$")
 
 
 class SpawnError(RuntimeError):
@@ -37,6 +39,18 @@ def validate_model(model: "str | None") -> "str | None":
     return None
 
 
+def validate_account(account: "str | None") -> "str | None":
+    if account is not None and not ACCOUNT_RE.fullmatch(str(account)):
+        return f"invalid account: {account!r}"
+    return None
+
+
+def account_settings(account: str) -> Path:
+    """The Claude Code settings file MasterDeck writes for a connected GitHub account (two or more)."""
+    home = Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck")
+    return home / "accounts" / f"{account}.settings.json"
+
+
 def validate_resume(resume: "str | None") -> "str | None":
     try:
         if str(uuid.UUID(resume)) != resume.lower():
@@ -48,6 +62,9 @@ def validate_resume(resume: "str | None") -> "str | None":
 
 def validate_spawn_target(sp: dict) -> "str | None":
     """Validate a `target["spawn"]` dict. Returns None when valid, else the reason."""
+    err = validate_account(sp.get("account"))
+    if err:
+        return err
     if sp.get("resume"):
         return validate_resume(sp["resume"])
     err = validate_name(sp.get("name")) or validate_model(sp.get("model"))
@@ -61,10 +78,19 @@ def command(target: dict) -> list:
     err = validate_spawn_target(sp)
     if err:
         raise SpawnError(err)
+    acct = []
+    # One account: no --settings, the command as before (an account in the target is ignored).
+    if sp.get("account") and config.is_multi():
+        # Never start as gh's active account instead: that would commit as someone else.
+        f = account_settings(sp["account"])
+        if not f.is_file():
+            raise SpawnError(f"GitHub account {sp['account']} has no settings file ({f}); "
+                             "open MasterDeck (it writes them) or log the account in again there")
+        acct = ["--settings", str(f)]
     if sp.get("resume"):
-        return ["claude", "--bg", "--resume", sp["resume"]]
+        return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
-    return ["claude", "--bg", "-n", sp["name"], *model, sp["prompt"]]
+    return ["claude", "--bg", *acct, "-n", sp["name"], *model, sp["prompt"]]
 
 
 def running(session_id: str, runner=subprocess.run) -> bool:

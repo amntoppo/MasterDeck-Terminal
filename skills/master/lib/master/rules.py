@@ -66,8 +66,12 @@ def _assign(i: dict) -> dict:
         + f"3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.\n\n"
         + (REPLY if config.master_enabled() else REPLY_SOLO).format(n=lab)
     )
+    sp = {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}
+    acct = config.account_for_repo(repo)  # two or more accounts only
+    if acct:
+        sp["account"] = acct
     return {"kind": "ASSIGN", "issue": n, "repo": repo, "source": _src("issue", repo, n),
-            "target": {"spawn": {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}},
+            "target": {"spawn": sp},
             "message": prompt, "summary": f'"{i["title"]}"'}
 
 

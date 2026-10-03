@@ -210,6 +210,8 @@ export interface AssignRequest {
   model?: string;
   /** The workflow template the session starts with; absent: the default. */
   workflow?: string;
+  /** Another GitHub account than the issue's default (the Start dialog's Account field). */
+  account?: string;
 }
 
 export interface PtyOpenResult {

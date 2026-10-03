@@ -122,12 +122,12 @@ export class MasterCli {
   }
 
   /** Add an ASSIGN proposal. The prompt goes on stdin; the message is the same text. */
-  async addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string }): Promise<
+  async addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string; account?: string }): Promise<
     { ok: true; id: number } | { ok: false; message: string }
   > {
     const r = await this.exec(
       ['add', '--kind', a.kind ?? 'ASSIGN', '--issue', String(a.issue), ...(a.repo ? ['--repo', a.repo] : []), '--source', a.source, '--spawn-name', a.name, '--cwd', a.cwd,
-        '--message', a.prompt, '--prompt', '-', ...(a.model ? ['--model', a.model] : [])],
+        '--message', a.prompt, '--prompt', '-', ...(a.model ? ['--model', a.model] : []), ...(a.account ? ['--account', a.account] : [])],
       a.prompt,
     )
     const m = /added (\d+)/.exec(r.stdout)

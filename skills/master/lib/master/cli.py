@@ -131,6 +131,8 @@ def cmd_add(args) -> int:
         sp = {"name": args.spawn_name, "cwd": args.cwd or str(config.workspace()), "prompt": args.prompt}
         if args.model:
             sp["model"] = args.model
+        if args.account:
+            sp["account"] = args.account
         err = spawn.validate_spawn_target(sp)
         if err:
             print(err)
@@ -336,6 +338,7 @@ def parser() -> argparse.ArgumentParser:
     ad.add_argument("--prompt")
     ad.add_argument("--cwd")
     ad.add_argument("--model", help="claude --model for the spawned session; omitted: the default model")
+    ad.add_argument("--account", help="gh login the spawned session works as (MasterDeck's connected accounts)")
     ad.set_defaults(fn=cmd_add)
 
     for name, to in (("approve", "approved"), ("reject", "rejected")):

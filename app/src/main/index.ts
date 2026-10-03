@@ -76,7 +76,7 @@ import {
   SessionAccounts,
   sessionSettings,
 } from "./sessionAccounts";
-import { startAssign } from "./assign";
+import { assignNow as assignAs } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
@@ -270,6 +270,21 @@ function settingsFor(
     account,
     fallback,
   );
+}
+/** Start a session for an issue (the Start dialog, a browser, a phone): as its account with two or more. */
+function assignNow(
+  req: AssignRequest,
+): Promise<CliResult & { proposalId?: number }> {
+  return assignAs(cli, req, {
+    settings: (account) =>
+      settingsFor(account, async () =>
+        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
+      ),
+    proposalAccount: (id) =>
+      latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
+      null,
+    expect: (name, login) => sessionAccounts.expect(name, login),
+  });
 }
 const ptys = new PtyManager(
   env,
@@ -770,7 +785,7 @@ const remoteCommands = new RemoteCommands(
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
-    startAssign: (req) => startAssign(cli, req),
+    startAssign: (req) => assignNow(req),
     stopBg,
     resume: (id, name, cwd) => resumeBg(id, name, cwd),
     // Never relayed through master-agent: remote text goes straight to the session or not at all.
@@ -2008,7 +2023,7 @@ function registerIpc(): void {
       typeof req.name === "string"
     )
       workflows().setPending(req.name, req.workflow);
-    return startAssign(cli, req);
+    return assignNow(req);
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.

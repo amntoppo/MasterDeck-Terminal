@@ -1,6 +1,7 @@
 """Several GitHub accounts in the config: the primary's fields stay at the top level for older
 readers; repos and boards of every account count; a repo belongs to the first account listing it."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -8,7 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from master import config, setup
+from master import config, ledger, rules, setup, spawn
+from tests.test_spawn import FakeRunner
 
 A = {"login": "alice", "primary": True, "name": "Alice", "email": "a@acme.test", "owner": "acme", "ownerType": "organization",
      "issueRepo": "tracker", "repos": ["acme/tracker", "acme/api"],
@@ -118,3 +120,58 @@ class MigratedLegacyProjectTest(unittest.TestCase):
             after = setup.save({"accounts": [migrated]}, path)
         for k in ("owner", "issueRepo", "repos", "project", "projectId", "statusFieldId", "statusOptions", "columns", "statuses"):
             self.assertEqual(after[k], before[k], k)
+
+
+NOW = "2026-10-03T10:00:00Z"
+
+
+class SpawnAccountTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.tmp.name})
+        self.env.start()
+        self.multi = mock.patch.dict(config.CONFIG, {"accounts": [A, B]})
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_settings_only_with_an_account_and_its_file(self):
+        sp = {"name": "3-x", "cwd": "/w", "prompt": "go"}
+        f = Path(self.tmp.name) / "accounts" / "bob-work.settings.json"
+        f.parent.mkdir()
+        f.write_text("{}")
+        # One account: the same command as before, an account in the target or not.
+        self.assertEqual(spawn.command({"spawn": dict(sp, account="bob-work")}), ["claude", "--bg", "-n", "3-x", "go"])
+        with self.multi:
+            self.assertEqual(spawn.command({"spawn": sp}), ["claude", "--bg", "-n", "3-x", "go"])
+            self.assertEqual(spawn.command({"spawn": dict(sp, account="bob-work")}),
+                             ["claude", "--bg", "--settings", str(f), "-n", "3-x", "go"])
+            valid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+            self.assertEqual(spawn.command({"spawn": {"name": "3-x", "resume": valid, "account": "bob-work"}}),
+                             ["claude", "--bg", "--settings", str(f), "--resume", valid])
+            with self.assertRaises(spawn.SpawnError):
+                spawn.command({"spawn": dict(sp, account="bad login!")})
+
+    def test_missing_account_file_holds_the_proposal(self):
+        led = ledger.empty()
+        p = ledger.add(led, kind="ASSIGN", issue=3, source="issue:3",
+                       target={"spawn": {"name": "3-x", "cwd": self.tmp.name, "prompt": "go", "account": "carol"}},
+                       message="m", summary="s", now=NOW)
+        ledger.transition(led, p["id"], "approved", now=NOW)
+        run = FakeRunner()
+        with self.multi, self.assertRaises(spawn.SpawnError):
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+        self.assertEqual(p["status"], "held")
+        self.assertIn("GitHub account carol has no settings file", p["note"])
+        self.assertEqual(run.calls, [])
+
+
+class RulesAccountTest(unittest.TestCase):
+    ISSUE = {"number": 3, "repo": "globex/app", "title": "Fix it", "url": "https://github.com/globex/app/issues/3"}
+
+    def test_assign_names_the_account_only_with_two(self):
+        self.assertNotIn("account", rules._assign(self.ISSUE)["target"]["spawn"])
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
+            self.assertEqual(rules._assign(self.ISSUE)["target"]["spawn"]["account"], "bob-work")
+            self.assertEqual(rules._assign(dict(self.ISSUE, repo=None, url="https://github.com/acme/tracker/issues/3"))["target"]["spawn"]["account"], "alice")
