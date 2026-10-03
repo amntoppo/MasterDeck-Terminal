@@ -23,6 +23,11 @@ export function defaultFilters(me: string | null): FilterState {
   return { assignees: me ? [me] : [], labels: [], milestone: null, hasPr: 'any', search: '', hiddenColumns: [], repos: [], projects: [] }
 }
 
+/** How many filters differ from the defaults (each filter counts once, search included). */
+export function activeBoardFilterCount(f: FilterState, me: string | null): number {
+  return [f.labels.length > 0, !!f.milestone, f.hasPr !== 'any', !!f.search, f.hiddenColumns.length > 0, f.repos.length > 0, f.projects.length > 0, f.assignees.join() !== (me ?? '')].filter(Boolean).length
+}
+
 /** Saved filters from an older version lack the newer fields: fill them in. */
 export function normalizeFilters(f: Partial<FilterState> | null | undefined, me: string | null): FilterState {
   const d = defaultFilters(me)

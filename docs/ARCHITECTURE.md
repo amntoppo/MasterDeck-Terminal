@@ -361,7 +361,10 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   arrows follow DECCKM). A phone terminal uses 12px (changed and refitted when phone mode comes or goes). The panel sheet
   closes when the terminal screen is left. `html.phone` is set too while phone mode is on, so dialogs
   and menus portaled to `<body>` get the phone dialog/menu/input rules. `--vvh`/`--vvt` follow `visualViewport` (soft
-  keyboard). All phone CSS is in `src/web/web.css` under `.app.phone`; when not phone, every shared
+  keyboard). Board and PRs render their filter row through `PhoneFilters` (components/PhoneFilters.tsx) on a
+  phone: a "Filters (n)" button (n = `activeBoardFilterCount` / `activeFilterCount` without search) plus the
+  search box; the same controls JSX (`filterControls`) opens in a portaled `.dialog.filters-sheet`
+  (Reset keeps search, Done, Esc/backdrop close). All phone CSS is in `src/web/web.css` under `.app.phone`; when not phone, every shared
   component renders the same DOM as before.
 - Dev preview (web): `npm run dev:web`, then `/?preview` mounts App on a stub `window.deck` with a
   fixture AppState and fake terminal output (`src/web/preview/`), `/?preview=gate` the sign-in card.

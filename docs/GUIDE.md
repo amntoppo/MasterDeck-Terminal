@@ -617,6 +617,9 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
   and /. A tap types the key into the terminal without closing the keyboard;
   a swipe along the bar scrolls it without typing anything. The page shrinks above the
   keyboard while it is open.
+- **Board and PRs filters:** the filter row is one **Filters (n)** button (n = filters changed from
+  the tab's defaults) next to the search box. Tap it for every filter (and, on PRs, the sort) in a
+  sheet; **Reset** puts the filters back (search is kept), **Done**, Esc or a tap outside closes it.
 - **Sign out** is on the Settings screen (bottom right).
 - Terminal size: as on any browser, the Mac's size wins while the Mac shows that terminal; a
   terminal the Mac isn't showing takes the phone's width (about 45 columns).

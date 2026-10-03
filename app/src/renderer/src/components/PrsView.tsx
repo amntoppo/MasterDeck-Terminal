@@ -7,6 +7,8 @@ import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, normalizePrF
 import type { AppState, Issue, Pr, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
 import { PrIcon } from './BoardView'
+import { PhoneFilters } from './PhoneFilters'
+import { usePhone } from '../web'
 
 interface Props {
   state: AppState
@@ -110,9 +112,87 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   // The PR offers are Needs-you items: dismissing one here dismisses it there too.
   const offers = useMemo(() => state.inbox.open.flatMap((e) => (e.item.detail.type === 'offer' ? [{ ...e.item.detail.offer, itemId: e.item.id }] : [])), [state.inbox.open])
   const active = activeFilterCount(f)
+  const phone = usePhone()
   const preset = PRESETS.find((p) => (Object.keys(DEFAULT_PR_FILTERS) as (keyof PrFilters)[]).every((k) => k === 'sort' || f[k] === { ...DEFAULT_PR_FILTERS, ...p.f }[k]))
   const loading = state.teamPrsLoading
 
+  // The filter row: inline on a wide screen; on a phone, behind a "Filters (n)" button.
+  const filterControls = (
+    <>
+      <select className={`fsel ${f.state !== 'open' ? 'active' : ''}`} value={f.state} onChange={(e) => set({ state: e.target.value as PrFilters['state'] })} title="State">
+        <option value="open">Open</option>
+        <option value="merged">Merged</option>
+        <option value="unmerged">Closed (not merged)</option>
+        <option value="closed">Closed or merged</option>
+        <option value="all">Any state</option>
+      </select>
+      <select className={`fsel ${f.author ? 'active' : ''}`} value={f.author} onChange={(e) => set({ author: e.target.value })} title="Created by">
+        <option value="">Created by: anyone</option>
+        {me && <option value="@me">Me ({me}){authorCounts[me.toLowerCase()] ? ` · ${authorCounts[me.toLowerCase()]}` : ''}</option>}
+        {options.authors.map((a) => (
+          <option key={a} value={a}>
+            {a}
+            {authorCounts[a.toLowerCase()] ? ` · ${authorCounts[a.toLowerCase()]}` : ''}
+          </option>
+        ))}
+      </select>
+      <select className={`fsel ${f.repo ? 'active' : ''}`} value={f.repo} onChange={(e) => set({ repo: e.target.value })} title="Repository">
+        <option value="">All repositories</option>
+        {options.repos.map((r) => (
+          <option key={r} value={r}>
+            {r}
+            {repoCounts[r] ? ` · ${repoCounts[r]}` : ''}
+          </option>
+        ))}
+      </select>
+      <select className={`fsel ${f.review !== 'any' ? 'active' : ''}`} value={f.review} onChange={(e) => set({ review: e.target.value as PrFilters['review'] })} title="Review">
+        <option value="any">Review: any</option>
+        <option value="needs-me">Needs my review</option>
+        <option value="waiting">Waiting for review</option>
+        <option value="approved">Approved</option>
+        <option value="changes">Changes requested</option>
+        <option value="reviewed-by-me">Reviewed by me</option>
+      </select>
+      <select className={`fsel ${f.ci !== 'any' ? 'active' : ''}`} value={f.ci} onChange={(e) => set({ ci: e.target.value as PrFilters['ci'] })} title="CI checks">
+        <option value="any">CI: any</option>
+        <option value="failing">CI failing</option>
+        <option value="pending">CI running</option>
+        <option value="passing">CI passing</option>
+      </select>
+      <select className={`fsel ${f.drafts !== 'include' ? 'active' : ''}`} value={f.drafts} onChange={(e) => set({ drafts: e.target.value as PrFilters['drafts'] })} title="Drafts">
+        <option value="include">Drafts: shown</option>
+        <option value="exclude">Hide drafts</option>
+        <option value="only">Drafts only</option>
+      </select>
+      <select className={`fsel ${f.updated ? 'active' : ''}`} value={f.updated} onChange={(e) => set({ updated: Number(e.target.value) })} title="Last updated">
+        <option value={0}>Updated: any time</option>
+        <option value={1}>Updated in 24 h</option>
+        <option value={7}>Updated in 7 days</option>
+        <option value={30}>Updated in 30 days</option>
+        <option value={-3}>Stale: no update 3+ days</option>
+        <option value={-7}>Stale: no update 7+ days</option>
+      </select>
+      <select className={`fsel ${f.threads !== 'any' ? 'active' : ''}`} value={f.threads} onChange={(e) => set({ threads: e.target.value as PrFilters['threads'] })} title="Review threads">
+        <option value="any">Threads: any</option>
+        <option value="unresolved">Has unresolved threads</option>
+      </select>
+      {options.labels.length > 0 && (
+        <select className={`fsel ${f.label ? 'active' : ''}`} value={f.label} onChange={(e) => set({ label: e.target.value })} title="Label">
+          <option value="">Any label</option>
+          {options.labels.map((l) => (
+            <option key={l}>{l}</option>
+          ))}
+        </select>
+      )}
+      <select className="fsel" value={f.sort} onChange={(e) => set({ sort: e.target.value as PrFilters['sort'] })} title="Sort">
+        <option value="updated">Sort: recently updated</option>
+        <option value="created">Sort: newest</option>
+        <option value="oldest">Sort: oldest</option>
+        <option value="size">Sort: largest diff</option>
+      </select>
+    </>
+  )
+  const filterSearch = <input className="filter search" placeholder="Search title, #number, branch, ticket" value={f.search} onChange={(e) => set({ search: e.target.value })} />
   return (
     <section className="board-view panel">
       <header className="board-head">
@@ -134,85 +214,21 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
       </header>
       <ViewTabs tabs={tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
 
-      <div className="filter-bar">
-        <select className={`fsel ${f.state !== 'open' ? 'active' : ''}`} value={f.state} onChange={(e) => set({ state: e.target.value as PrFilters['state'] })} title="State">
-          <option value="open">Open</option>
-          <option value="merged">Merged</option>
-          <option value="unmerged">Closed (not merged)</option>
-          <option value="closed">Closed or merged</option>
-          <option value="all">Any state</option>
-        </select>
-        <select className={`fsel ${f.author ? 'active' : ''}`} value={f.author} onChange={(e) => set({ author: e.target.value })} title="Created by">
-          <option value="">Created by: anyone</option>
-          {me && <option value="@me">Me ({me}){authorCounts[me.toLowerCase()] ? ` · ${authorCounts[me.toLowerCase()]}` : ''}</option>}
-          {options.authors.map((a) => (
-            <option key={a} value={a}>
-              {a}
-              {authorCounts[a.toLowerCase()] ? ` · ${authorCounts[a.toLowerCase()]}` : ''}
-            </option>
-          ))}
-        </select>
-        <select className={`fsel ${f.repo ? 'active' : ''}`} value={f.repo} onChange={(e) => set({ repo: e.target.value })} title="Repository">
-          <option value="">All repositories</option>
-          {options.repos.map((r) => (
-            <option key={r} value={r}>
-              {r}
-              {repoCounts[r] ? ` · ${repoCounts[r]}` : ''}
-            </option>
-          ))}
-        </select>
-        <select className={`fsel ${f.review !== 'any' ? 'active' : ''}`} value={f.review} onChange={(e) => set({ review: e.target.value as PrFilters['review'] })} title="Review">
-          <option value="any">Review: any</option>
-          <option value="needs-me">Needs my review</option>
-          <option value="waiting">Waiting for review</option>
-          <option value="approved">Approved</option>
-          <option value="changes">Changes requested</option>
-          <option value="reviewed-by-me">Reviewed by me</option>
-        </select>
-        <select className={`fsel ${f.ci !== 'any' ? 'active' : ''}`} value={f.ci} onChange={(e) => set({ ci: e.target.value as PrFilters['ci'] })} title="CI checks">
-          <option value="any">CI: any</option>
-          <option value="failing">CI failing</option>
-          <option value="pending">CI running</option>
-          <option value="passing">CI passing</option>
-        </select>
-        <select className={`fsel ${f.drafts !== 'include' ? 'active' : ''}`} value={f.drafts} onChange={(e) => set({ drafts: e.target.value as PrFilters['drafts'] })} title="Drafts">
-          <option value="include">Drafts: shown</option>
-          <option value="exclude">Hide drafts</option>
-          <option value="only">Drafts only</option>
-        </select>
-        <select className={`fsel ${f.updated ? 'active' : ''}`} value={f.updated} onChange={(e) => set({ updated: Number(e.target.value) })} title="Last updated">
-          <option value={0}>Updated: any time</option>
-          <option value={1}>Updated in 24 h</option>
-          <option value={7}>Updated in 7 days</option>
-          <option value={30}>Updated in 30 days</option>
-          <option value={-3}>Stale: no update 3+ days</option>
-          <option value={-7}>Stale: no update 7+ days</option>
-        </select>
-        <select className={`fsel ${f.threads !== 'any' ? 'active' : ''}`} value={f.threads} onChange={(e) => set({ threads: e.target.value as PrFilters['threads'] })} title="Review threads">
-          <option value="any">Threads: any</option>
-          <option value="unresolved">Has unresolved threads</option>
-        </select>
-        {options.labels.length > 0 && (
-          <select className={`fsel ${f.label ? 'active' : ''}`} value={f.label} onChange={(e) => set({ label: e.target.value })} title="Label">
-            <option value="">Any label</option>
-            {options.labels.map((l) => (
-              <option key={l}>{l}</option>
-            ))}
-          </select>
-        )}
-        <select className="fsel" value={f.sort} onChange={(e) => set({ sort: e.target.value as PrFilters['sort'] })} title="Sort">
-          <option value="updated">Sort: recently updated</option>
-          <option value="created">Sort: newest</option>
-          <option value="oldest">Sort: oldest</option>
-          <option value="size">Sort: largest diff</option>
-        </select>
-        <input className="filter search" placeholder="Search title, #number, branch, ticket" value={f.search} onChange={(e) => set({ search: e.target.value })} />
-        {active > 0 && (
-          <button className="link-btn" onClick={() => set({ ...DEFAULT_PR_FILTERS, sort: f.sort })}>
-            Reset filters ({active})
-          </button>
-        )}
-      </div>
+      {phone ? (
+        <PhoneFilters count={activeFilterCount({ ...f, search: '' })} search={filterSearch} onReset={() => set({ ...DEFAULT_PR_FILTERS, sort: f.sort, search: f.search })}>
+          {filterControls}
+        </PhoneFilters>
+      ) : (
+        <div className="filter-bar">
+          {filterControls}
+          {filterSearch}
+          {active > 0 && (
+            <button className="link-btn" onClick={() => set({ ...DEFAULT_PR_FILTERS, sort: f.sort })}>
+              Reset filters ({active})
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="panel-body">
         {f.author === '@me' && offers.length > 0 && (
