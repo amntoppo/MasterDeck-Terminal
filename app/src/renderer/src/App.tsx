@@ -38,9 +38,10 @@ import { RestoreBanner } from "./components/RestoreBanner";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
-import { can, isWeb, keyPlatform, screenOk, shortcutOk } from "./web";
+import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
+import { QUICK_KEYS } from "./quickKeys";
 import { TasksView } from "./components/TasksView";
-import { Rail } from "./components/Rail";
+import { PhoneBar, Rail, type PhoneScreen } from "./components/Rail";
 import {
   NewSessionDialog,
   type NewAction,
@@ -52,7 +53,7 @@ import { WorktreesDialog } from "./components/WorktreesDialog";
 import { HistoryDialog } from "./components/HistoryDialog";
 import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
-import { TerminalView, typeInto } from "./components/TerminalView";
+import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
 import { deck, load, save, useAppState } from "./deck";
 
 type Tab =
@@ -98,6 +99,8 @@ function paneIdFor(tab: Tab): string {
 
 export function App() {
   const state = useAppState();
+  // Phone layout (web, narrow window): one screen at a time and a bottom tab bar. Never true in Electron.
+  const phone = usePhone();
   const remote = useMemo(
     () => mergePresence(state?.browsers, state?.remoteClients),
     [state?.browsers, state?.remoteClients],
@@ -123,6 +126,7 @@ export function App() {
     (id: string) => {
       setActive(id);
       arm(id);
+      setPhoneScreen("main");
     },
     [arm],
   );
@@ -170,6 +174,14 @@ export function App() {
       ? (v as View)
       : "terminals";
   });
+  // Phone only: the session list, the open screen (a terminal or a view), or master; and the panel sheet.
+  const [phoneScreen, setPhoneScreen] = useState<PhoneScreen>(() =>
+    view === "terminals" ? "list" : "main",
+  );
+  const [phonePanel, setPhonePanel] = useState(false);
+  useEffect(() => {
+    if (view !== "terminals") setPhoneScreen("main");
+  }, [view]);
   const [palette, setPalette] = useState(false);
   // History (⌘⇧F): a popup over any screen.
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -213,9 +225,10 @@ export function App() {
     (t: InspectorTab) => {
       setView("terminals");
       setInspTab(t);
-      setInspOpen(true);
+      if (phone) setPhonePanel(true);
+      else setInspOpen(true);
     },
-    [setInspOpen],
+    [setInspOpen, phone],
   );
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(
     null,
@@ -246,6 +259,25 @@ export function App() {
   useEffect(() => {
     document.body.classList.toggle("win", deck().platform === "win32");
   }, []);
+  // Phone: follow the visual viewport, so the terminal and its quick keys sit above the soft keyboard.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!phone || !vv) return;
+    const root = document.documentElement;
+    const fit = () => {
+      root.style.setProperty("--vvh", `${vv.height}px`);
+      root.style.setProperty("--vvt", `${vv.offsetTop}px`);
+    };
+    fit();
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+    return () => {
+      vv.removeEventListener("resize", fit);
+      vv.removeEventListener("scroll", fit);
+      root.style.removeProperty("--vvh");
+      root.style.removeProperty("--vvt");
+    };
+  }, [phone]);
 
   const flash = useCallback((text: string, bad = false) => {
     setToast({ text, bad });
@@ -846,13 +878,25 @@ export function App() {
 
   // Terminal tabs count as shown only in the Terminals view: another view (Tasks) may show the same
   // session's terminal at its own size, and the tab takes its size back when it shows again.
+  // A phone shows one terminal (no split), only on its terminal screen.
   const shown = new Set(
-    view === "terminals" ? ([active, split].filter(Boolean) as string[]) : [],
+    phone
+      ? view === "terminals" && phoneScreen === "main" && active
+        ? [active]
+        : []
+      : view === "terminals"
+        ? ([active, split].filter(Boolean) as string[])
+        : [],
   );
   // Setup can turn master-agent off: then no master pane or button, only the Queue on the right.
   const useMaster = state.config.masterEnabled;
-  const panelShown = view === "terminals" && inspOpen;
-  const masterShown = useMaster && masterOpen;
+  // A phone shows the panel as a sheet over the terminal, and master as its own screen.
+  const panelShown = phone
+    ? view === "terminals" && phoneScreen === "main" && phonePanel
+    : view === "terminals" && inspOpen;
+  const masterShown = phone
+    ? useMaster && phoneScreen === "master"
+    : useMaster && masterOpen;
   // What ⌘F searches: the open terminal, or the Board / PRs screen's text.
   const findKey =
     view === "terminals" ? (activeTab ? paneIdFor(activeTab) : "") : view;
@@ -898,7 +942,7 @@ export function App() {
 
   return (
     <div
-      className={`app view-${view} ${panelShown ? "" : "no-panel"} ${masterShown ? "" : "master-off"}`}
+      className={`app view-${view} ${panelShown ? "" : "no-panel"} ${masterShown ? "" : "master-off"}${phone ? ` phone ps-${phoneScreen}` : ""}`}
       ref={appRef}
       style={{
         gridTemplateColumns: columns,
@@ -908,6 +952,27 @@ export function App() {
           : "0px",
       }}
     >
+      {phone ? (
+        <PhoneBar
+          view={view}
+          screen={phoneScreen}
+          onView={(v) => {
+            setView(v);
+            setPhoneScreen("main");
+          }}
+          onSessions={() => {
+            setView("terminals");
+            setPhoneScreen("list");
+          }}
+          onMaster={useMaster ? () => setPhoneScreen("master") : undefined}
+          onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
+          needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
+          prAttention={
+            state.inbox.open.filter((e) => e.item.detail.type === "offer")
+              .length + state.prs.filter((p) => p.reviewRequested).length
+          }
+        />
+      ) : (
       <Rail
         view={view}
         onView={setView}
@@ -923,6 +988,7 @@ export function App() {
             .length + state.prs.filter((p) => p.reviewRequested).length
         }
       />
+      )}
       <Sidebar
         state={state}
         activeKey={activeKey}
@@ -944,7 +1010,7 @@ export function App() {
           }
         }}
         split={!!split}
-        onToggleSplit={tabs.length > 1 ? toggleSplit : undefined}
+        onToggleSplit={!phone && tabs.length > 1 ? toggleSplit : undefined}
         others={tabs
           .filter(
             (t): t is Exclude<Tab, { kind: "session" }> => t.kind !== "session",
@@ -1045,6 +1111,30 @@ export function App() {
           <div className="banner">`claude` was not found on PATH.</div>
         )}
         <RestoreBanner state={state} />
+        {phone && (
+          <div className="phone-head">
+            <button
+              className="btn"
+              onClick={() => setPhoneScreen("list")}
+              aria-label="Back to sessions"
+            >
+              ‹ Sessions
+            </button>
+            <span className="phone-title">
+              {activeTab?.kind === "session"
+                ? (state.sessions.find((x) => x.key === activeTab.key)?.name ??
+                  "Session")
+                : activeTab?.kind === "shell"
+                  ? activeTab.title
+                  : (activeTab?.name ?? "")}
+            </span>
+            {activeTab && (
+              <button className="btn" onClick={() => setPhonePanel(true)}>
+                Panel
+              </button>
+            )}
+          </div>
+        )}
         <div className="panes">
           {tabs.length === 0 && (
             <div className="welcome">
@@ -1123,6 +1213,9 @@ export function App() {
             </div>
           ))}
         </div>
+        {phone && activeTab && activeTab.kind !== "pending" && (
+          <QuickKeys paneId={paneIdFor(activeTab)} />
+        )}
       </main>
 
       {panelShown && (
@@ -1149,7 +1242,7 @@ export function App() {
           activeKey={activeKey}
           tab={inspTab}
           onTab={setInspTab}
-          onHide={() => setInspOpen(false)}
+          onHide={() => (phone ? setPhonePanel(false) : setInspOpen(false))}
           onDetach={() => active && closeTab(active)}
           onAskMaster={askMaster}
           masterAttached={masterAttached}
@@ -1170,6 +1263,9 @@ export function App() {
         style={masterShown ? undefined : { display: "none" }}
       >
         {useMaster && <MasterPane state={state} shown={masterShown} />}
+        {phone && masterAttached && state.master.kind === "attached" && (
+          <QuickKeys paneId={masterPaneId(state.master.session.bgId!)} />
+        )}
       </div>
       {view === "terminals" && !inspOpen && (
         <button
@@ -1523,6 +1619,29 @@ function SessionPane(p: {
         </div>
       )}
     </>
+  );
+}
+
+/** Phone: keys a soft keyboard lacks, under the terminal on screen. */
+function QuickKeys({ paneId }: { paneId: string }) {
+  return (
+    <div className="quick-keys" aria-label="Terminal keys">
+      {QUICK_KEYS.map((k) => (
+        <button
+          key={k}
+          className="qk"
+          // Keep the terminal focused (and the soft keyboard up): act on pointer down, never take focus.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            terminalKey(paneId, k);
+          }}
+          onClick={(e) => e.preventDefault()}
+          tabIndex={-1}
+        >
+          {k}
+        </button>
+      ))}
+    </div>
   );
 }
 

@@ -6,7 +6,8 @@ import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
-import { isWeb, keyPlatform } from '../web'
+import { quickKeyBytes, type QuickKey } from '../quickKeys'
+import { isPhone, isWeb, keyPlatform } from '../web'
 
 const THEME = {
   background: '#0b0c0f',
@@ -32,12 +33,18 @@ const THEME = {
 }
 
 /** Terminal views by pane id (one pane can show in Terminals and in Tasks at once), for ⌘F. */
-const searchers = new Map<string, { search: SearchAddon; host: HTMLElement }[]>()
+const searchers = new Map<string, { search: SearchAddon; host: HTMLElement; term: Terminal }[]>()
 
 /** The search of a pane's terminal on screen (else the last one opened), or null. */
 export function terminalSearch(paneId: string): SearchAddon | null {
   const list = searchers.get(paneId) ?? []
   return (list.find((x) => x.host.offsetParent !== null) ?? list[list.length - 1])?.search ?? null
+}
+
+/** Phone quick keys: press a key in the pane's terminal on screen, through xterm's own input path (onData). */
+export function terminalKey(paneId: string, k: QuickKey): void {
+  const t = (searchers.get(paneId) ?? []).find((x) => x.host.offsetParent !== null)?.term
+  t?.input(quickKeyBytes(k, t.modes.applicationCursorKeysMode), true)
 }
 
 interface Props {
@@ -70,7 +77,8 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     if (!host.current) return
     const t = new Terminal({
       fontFamily: deck().platform === 'win32' ? 'Cascadia Mono, Consolas, monospace' : isWeb() ? 'SF Mono, Menlo, Cascadia Mono, Consolas, monospace' : 'SF Mono, Menlo, monospace',
-      fontSize: 13,
+      // A phone gets ~45 columns at 12px; everything else keeps 13.
+      fontSize: isPhone() ? 12 : 13,
       lineHeight: 1.15,
       theme: THEME,
       cursorBlink: true,
@@ -84,7 +92,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     const search = new SearchAddon({ highlightLimit: 1000 })
     t.loadAddon(search)
     t.open(host.current)
-    const entry = { search, host: host.current }
+    const entry = { search, host: host.current, term: t }
     searchers.set(paneId, [...(searchers.get(paneId) ?? []), entry])
     term.current = t
     fit.current = f
