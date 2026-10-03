@@ -9,6 +9,10 @@ It runs on macOS and Windows.
   warnings. Each item has a one-click action.
 - **Your GitHub.** A Kanban board of your sprint from GitHub Projects, and every PR in your org
   with filters. You can assign tickets, start sessions for them and review PRs.
+- **Several GitHub accounts.** Work for more than one organization with different `gh` logins:
+  connect them in Setup, and each session, Board tab and PR tab works as one account (its own
+  token and commit identity, shown as `@login`). One account behaves as before. MasterDeck never
+  runs `gh auth switch`.
 - **Hygiene.** Costs per ticket, standup notes from your commits, a worktree janitor, history
   search, templates and broadcast.
 - **Automatic upkeep.** MasterDeck links a session to its issue and moves the board card (In Dev,
@@ -81,6 +85,9 @@ Or build it yourself (see [Develop](#develop)).
       and email for its commits (from GitHub, editable) and, with two or more, a **Primary** choice
       (master, plain shells and sessions outside your repos use it). **Add an account…** runs
       `gh auth login --web` right there. MasterDeck never changes `gh`'s active account.
+      With two or more accounts, MasterDeck keeps a token file per account in
+      `~/.claude/masterdeck/accounts/` (mode 600) and starts each session with it; tokens never leave
+      your Mac. GitHub.com only. See [Several GitHub accounts](docs/GUIDE.md#several-github-accounts).
    3. **Repos & boards.** One read lists every organization `gh` can reach, with its repositories and
       project boards. Tick the repositories whose issues you work on and the boards that track them (or
       **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).

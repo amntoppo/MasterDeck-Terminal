@@ -149,7 +149,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
-| GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts`, `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts` |
+| GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts`, `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
@@ -261,6 +261,7 @@ buttons; it does not go through macOS window drag regions.
   phone layout (merge b3c4d4b: ≤760 px, `usePhone()`, CSS in `web.css` under `.app.phone` /
   `html.phone`, dev-only preview `npm run dev:web` + `/?preview`). The web app with the phone layout
   is deployed to app.masterdeck.dev.
+- Branch `feat/multi-gh-accounts` (plan I, multiple GitHub accounts; spec and plan in the backend repo, 2026-10-03): not merged, not pushed. Backend branch `feat/session-start-account` (protocol `session.start.account`, worktree `~/Documents/masterdeck-backend-proto`): not pushed, not deployed; the drift test needs the backend checkout on it (`MASTERDECK_BACKEND`) while working on the MasterDeck branch.
 - Backend `master` = `3af02f3` (PR #8, docs only), deployed code is PR #5 (`fccbfee`).
 - Next: whatever the user picks from [docs/TODO.md](docs/TODO.md). Top of the list: decide on
   pushing/releasing, fix or accept the broken backend CI deploy, re-measure web-bridge upload with

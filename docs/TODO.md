@@ -38,6 +38,45 @@ fixes it, and move the item here to "Recently done".
   until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
+- **P2 · Unverified: does a session keep its `--settings`?** Whether `claude --resume` keeps a
+  session's original `--settings` (MasterDeck always passes it again) and whether `claude attach`
+  of a parked session keeps it. Approach: resume and attach a session started as a second account
+  and run `gh api user` in it.
+- **P3 · Accepted simplifications of several accounts.** (a) A rate limit on one account pauses
+  MasterDeck's own polling for all accounts (`Sources.githubPaused` is global; ghcache's pause is per
+  account): per-account pause if it bites. (b) Skills run by hand (`tt.sh`, babysit-pr) stay
+  single-account. (c) SSH aliases are only read from `~/.ssh/config`. (d) A global
+  `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
+  builder sessions use gh's active account. (f) master starts without `--settings` when the primary
+  needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
+  without an `origin` of any connected account is read as the primary.
+- **P3 · Phone/API clients and `session.start.account`.** The protocol field is in the backend
+  branch `feat/session-start-account` (worktree `~/Documents/masterdeck-backend-proto`), not pushed
+  or deployed; no web or phone UI sends it yet. The drift test needs that checkout (set
+  `MASTERDECK_BACKEND`) while the MasterDeck branch is unmerged.
+- **P3 · Several-accounts review leftovers (small).** Config parsing: `parseAccounts` warns on
+  every parse, top-level `repos` are ignored once an account lists repos, a duplicate board under two
+  accounts is dropped silently, `repoFromRemote` accepts any host for scp/ssh forms, `ssh://git@github.com:443/`
+  and aliases without `user@` are not rewritten, `#` anywhere strips the rest of an ssh config line,
+  login and board keys compared case-sensitively in `accountForProject`/`sessionAccount`.
+  Accounts: a removed account's file lingers up to an hour after its last session ends; a failing
+  `configSave` writes a `config.backup.<ts>.json` each launch; a transient `gh auth token` failure
+  deletes an unused file until the next refresh; `accountClients` never evicts removed logins;
+  an invalid `GHC_ACCOUNT` fails open to the default cache key; `ghc --status` reads only `paused.json`.
+  Sessions: `accountOfSession` matches spawn proposals by name only (a reused name picks an old
+  account); `proposalAccount` reads the latest snapshot; AssignDialog's default ignores a proposal's
+  `spawn.account`; a removed or unhealthy recorded login is still shown and sent on resume (fails
+  visibly); unhealthy and unknown accounts get the same remote refusal text; PR watch: an entry
+  whose account was removed falls back to the primary, and a PR shared by two sessions keeps the
+  first one's account. Setup/UI: `closeLogin` may run twice, repeated Log in clicks open duplicate
+  gh-login tabs, the gh-login pane inherits the app's env (a `GH_TOKEN` set at launch makes `gh auth
+  login` refuse), a board held by another account stays in raw `boards` state. Board/PRs: untagged cards
+  on unconfigured boards show only on the primary tab, the global `selectedSprint` may name a
+  sprint the tab's account lacks, after multi to single stale tagged team PR copies show twice until
+  the next refresh. Ticket builder: `md-ticket-builder-*` sessions are hidden by name, a corrupt
+  `context.json` skips the remote account check, and a ticket session's account is sticky.
+  Tests missing: multi-mode gating, remote refusal, dismiss-heal, the `context.json` read,
+  `Sources` glue; the `.pane-head` layout and a prettier warning on `main/index.ts` were not checked.
 - **P3 · Old per-tab ticket-builder folders are never removed.** With two or more accounts each
   Board tab gets `ticket-builder/tab-<id>/`; closing the tab leaves it (so reopening continues).
   Main doesn't know which tabs exist (they live in the renderer's storage), so nothing sweeps them.
@@ -135,6 +174,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |

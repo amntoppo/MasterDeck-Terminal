@@ -380,7 +380,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   `ipcRenderer.send` (fire-and-forget: `setSprint`, `ptyWrite`, `ptyResize`, `ptyClose`,
   `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
-  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`).
+  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
+  `onGhLogin(login)`: open a gh-login tab for that account).
+- GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
+  `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
+  `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
   distinguishes the two; remote callers skip native dialogs (the web already asked with
@@ -388,7 +392,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   (`knownDirsOnly` for standup), and obey the PTY size rule.
 - `shared/remoteDeck.ts` `DECK_ACCESS` classifies every `DeckApi` member: `remote` (invoke/send
   over the bridge), `event`, `local` (runs in the browser) or `blocked` (account, browser approval,
-  gh account switching, folder picker, editor, shell prepare, auto-open). `ARG_FIX` reshapes
+  gh accounts and gh login (`ghUser`, `ghAccounts`, `ghOwners`, `onGhLogin`), folder picker, editor,
+  shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
 
 ## Shared modules (`shared/`)
@@ -463,6 +468,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `remote` (+ `warning`), `remoteClients` | `CloudSync` status / `clients` message (`syncRemote`), bridge warning |
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
+| `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
 ## Files on disk
@@ -500,5 +506,5 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `claude-settings.json`, `skills/` | only with `MASTERDECK_ISOLATED=1` |
 
 Elsewhere: `~/.claude/settings.json` (hooks, status line), `~/.claude/skills/` (bundled skills),
-`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
+`~/.claude/master/{config.json,ledger.json}` (plus `config.backup.<ts>.json`, written once before the first-launch accounts migration), `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
 `~/.claude/gh-cache/`, `~/.claude/projects/` (transcripts, read-only), Electron user data.
