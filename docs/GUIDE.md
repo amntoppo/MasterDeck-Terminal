@@ -70,6 +70,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   proposal and runs `master spawn`. The tab attaches as soon as `claude agents` lists the session.
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
+- **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
 - **Link session…:** links a session that already exists instead. Type its name, background id or
   session id (suggestions appear as you type). MasterDeck records the link itself (no
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
@@ -685,6 +686,12 @@ is a `gh` login (`gh auth status` lists them).
   `gh auth login --web` in the dialog (gh then makes that login its active one; MasterDeck says so
   and never switches it). Under Repos & boards, an **Account** menu shows each account's own
   repositories and boards; a repository belongs to one account.
+- **Each session works as one account**: its commits (name and email from Setup), its pushes and
+  PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
+  accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
+  primary; accounts needing a new login can't be picked. Details shows the session's account. A
+  session keeps its account; to change it, stop it and resume it with another account picked in the
+  Start dialog. master's proposals use the issue's account (shown on the proposal).
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 

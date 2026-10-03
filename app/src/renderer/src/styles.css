@@ -786,6 +786,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .srow-top .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .srow-top .num { color: var(--muted); font-family: var(--mono); font-size: 10.5px; flex: none; }
+.acct-badge { flex: none; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-4); color: var(--muted); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
 .srow-sub { margin-top: 2px; padding-left: 16px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .srow-x { border: none; background: none; color: var(--faint); font-size: 14px; line-height: 1; padding: 0 2px; cursor: pointer; visibility: hidden; }
 .srow:hover .srow-x { visibility: visible; }

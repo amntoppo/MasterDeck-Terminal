@@ -25,6 +25,8 @@ import type { PaletteAction } from "./CommandPalette";
 import { OfferRow } from "./PrsView";
 import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
+import { AccountBadge } from "./AccountBits";
+import { isMulti } from "@shared/accounts";
 
 export type View =
   | "terminals"
@@ -1001,6 +1003,7 @@ function ProposalCard({
         >
           {ticketLabel(p.repo, p.issue)}{" "}
           {question && target ? target.name : dest}
+          <AccountBadge login={isMulti(state.config) ? p.target.spawn?.account : null} />
         </span>
         {!full && !question && (
           <button

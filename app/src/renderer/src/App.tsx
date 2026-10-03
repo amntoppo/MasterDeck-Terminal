@@ -1360,6 +1360,7 @@ export function App() {
       )}
       {newSession && (
         <NewSessionDialog
+          state={state}
           taken={state.sessions
             .filter((x) => x.state !== "done")
             .map((x) => x.name)}

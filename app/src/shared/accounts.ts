@@ -68,6 +68,11 @@ export function accountChoices(c: WithAccounts, status: GhAccountStatus[] | unde
   return c.accounts.map((a) => a.login).filter((l) => !bad.has(l))
 }
 
+/** The account a dialog should send: the picked one when it differs from the default (so it makes a new proposal); nothing otherwise or with one account. */
+export function accountOverride(picked: string | null, def: string | null, c: WithAccounts): string | undefined {
+  return isMulti(c) && picked && picked !== def ? picked : undefined
+}
+
 /** owner/name of a GitHub remote: https://github.com/…, git@<host or alias>:…, ssh://git@<host or alias>/…; null otherwise. */
 export function repoFromRemote(url: string): string | null {
   const m = /^(?:https?:\/\/(?:[^@/\s]+@)?github\.com\/|ssh:\/\/[^@/\s]+@[^/\s]+\/|[^@/\s]+@[^:/\s]+:)([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/.exec(url.trim())

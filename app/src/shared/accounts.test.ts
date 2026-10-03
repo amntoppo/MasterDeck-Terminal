@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountEnvBlock, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
+  accountChoices, accountEnvBlock, accountOverride, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
   matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, sessionAccount,
 } from './accounts'
 
@@ -146,5 +146,14 @@ describe('parseGhUser', () => {
     expect(parseGhUser('{"name":"x"}')).toBeNull()
     expect(parseGhUser('{"login":"bad login"}')).toBeNull()
     expect(parseGhUser('not json')).toBeNull()
+  })
+})
+
+describe('the Start dialog default', () => {
+  it("is the issue's account; only another pick is sent (and makes a new proposal)", () => {
+    const def = defaultAccount({ issue: { repo: 'globex/app' } }, two)
+    expect(def).toBe('bob-work')
+    expect([accountOverride('bob-work', def, two), accountOverride('alice', def, two), accountOverride(null, def, two)]).toEqual([undefined, 'alice', undefined])
+    expect(accountOverride('alice', 'bob-work', one)).toBeUndefined()
   })
 })
