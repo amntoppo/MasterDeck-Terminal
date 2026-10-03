@@ -220,7 +220,7 @@ export function Gate() {
   )
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+export function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="web-card">
       <h2>{title}</h2>
