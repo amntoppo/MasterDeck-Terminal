@@ -9,6 +9,10 @@ It runs on macOS and Windows.
   warnings. Each item has a one-click action.
 - **Your GitHub.** A Kanban board of your sprint from GitHub Projects, and every PR in your org
   with filters. You can assign tickets, start sessions for them and review PRs.
+- **Several GitHub accounts.** Work for more than one organization with different `gh` logins:
+  connect them in Setup, and each session, Board tab and PR tab works as one account (its own
+  token and commit identity, shown as `@login`). One account behaves as before. MasterDeck never
+  runs `gh auth switch`.
 - **Hygiene.** Costs per ticket, standup notes from your commits, a worktree janitor, history
   search, templates and broadcast.
 - **Automatic upkeep.** MasterDeck links a session to its issue and moves the board card (In Dev,
@@ -76,18 +80,26 @@ Or build it yourself (see [Develop](#develop)).
       session in the dialog that installs them (Homebrew on macOS, winget on Windows); you approve
       its steps there. Missing tools are checked again every few seconds and turn green once
       installed.
-   2. **GitHub account.** Pick one of the accounts `gh` is logged in to; the choice becomes `gh`'s active
-      account, which MasterDeck, master and your sessions share.
+   2. **GitHub accounts.** Every account `gh` is logged in to, each with a switch: connect the ones
+      MasterDeck should use (the active one is connected already). Each connected account has a name
+      and email for its commits (from GitHub, editable) and, with two or more, a **Primary** choice
+      (master, plain shells and sessions outside your repos use it). **Add an account…** runs
+      `gh auth login --web` right there. MasterDeck never changes `gh`'s active account.
+      With two or more accounts, MasterDeck keeps a token file per account in
+      `~/.claude/masterdeck/accounts/` (mode 600) and starts each session with it; tokens never leave
+      your Mac. GitHub.com only. See [Several GitHub accounts](docs/GUIDE.md#several-github-accounts).
    3. **Repos & boards.** One read lists every organization `gh` can reach, with its repositories and
       project boards. Tick the repositories whose issues you work on and the boards that track them (or
       **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).
       MasterDeck reads each board's statuses and guesses what each means (ready, in progress, PR raised,
       done); adjust the guesses per board if they are wrong. No board: you still get issues, PRs and
-      sessions. Settings → Set up MasterDeck shows the same step.
+      sessions. Settings → Set up MasterDeck shows the same step. With two or more accounts, an
+      **Account** menu picks whose repositories and boards you are choosing; a repository can be under
+      one account only (others show it as "in <login>").
    4. **Preferences.** The folder master and new shells start in (where your repos are), whether to
       use a master-agent, and notifications for new Needs-you items.
 
-   Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub account,
+   Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub accounts,
    Repos & boards, Preferences): change any of them and Save.
 
    Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the bundled skills: add or
@@ -128,6 +140,7 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `workspace` | Folder where master and new sessions start |
 | `masterName` | Name of the master session (default `master-agent`) |
 | `masterEnabled` | `false` runs MasterDeck without a master-agent (Setup → Master agent) |
+| `accounts` | Connected GitHub accounts (Setup → GitHub accounts): each `login`, `name`/`email` for its commits, `primary` (exactly one), and its own `owner`, `issueRepo`, `repos`, `projects`. The top-level fields above are the primary account's. A repo belongs to one account |
 
 </details>
 

@@ -33,6 +33,8 @@ export interface NewTicket {
   /** A sprint title, "@current", or "" for none; `sprintField` is the board's iteration field. */
   sprint: string;
   sprintField: string;
+  /** The GitHub account it is created as (two or more accounts). */
+  account?: string;
 }
 
 export interface WorkflowDraft {
@@ -125,7 +127,7 @@ export const CH = {
   setupCheck: "setup:check",
   setupTool: "setup:tool",
   ghAccounts: "setup:ghAccounts",
-  ghSwitch: "setup:ghSwitch",
+  ghUser: "setup:ghUser",
   ghOwners: "setup:ghOwners",
   configDetect: "config:detect",
   configDetectAll: "config:detectAll",
@@ -166,6 +168,7 @@ export const CH = {
   queueSendNext: "queue:sendNext",
   getSettings: "settings:get",
   setSettings: "settings:set",
+  ghLogin: "accounts:login",
   autoOpen: "app:autoOpen",
   setStatus: "board:setStatus",
   standupCommits: "standup:commits",
@@ -184,6 +187,7 @@ export const CH = {
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
+  accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
   dismissStopped: "session:dismissStopped",
@@ -209,6 +213,8 @@ export interface AssignRequest {
   model?: string;
   /** The workflow template the session starts with; absent: the default. */
   workflow?: string;
+  /** Another GitHub account than the issue's default (the Start dialog's Account field). */
+  account?: string;
 }
 
 export interface PtyOpenResult {
@@ -301,6 +307,8 @@ export interface DeckApi {
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
+  /** Needs you → Log in: open a terminal tab running gh auth login for this account. */
+  onGhLogin(cb: (login: string) => void): () => void;
   /** Move a ticket to a board column (BoardOps). */
   setStatus(issue: Ticket, status: string): Promise<CliResult>;
   standupCommits(
@@ -353,12 +361,17 @@ export interface DeckApi {
     model?: string;
     workflow?: string;
     mode?: string;
+    /** The GitHub account it works as (two or more connected); omitted: the folder's account. */
+    account?: string;
   }): Promise<CliResult>;
   resumeSession(
     sessionId: string,
     name: string,
     cwd: string | null,
+    account?: string,
   ): Promise<CliResult>;
+  /** A new session's default GitHub account for this folder; null with one account. */
+  accountFor(cwd: string): Promise<string | null>;
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
@@ -383,8 +396,8 @@ export interface DeckApi {
   setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>;
   /** The github.com accounts gh is logged in to. */
   ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>;
-  /** Make this account gh's active one (what MasterDeck, master and every session's gh use). */
-  ghSwitch(login: string): Promise<CliResult>;
+  /** Setup: the commit name and email a newly connected account starts with (its GitHub name, its noreply email). */
+  ghUser(login: string): Promise<{ name: string; email: string }>;
   /** The active account's login and the organizations it belongs to. */
   ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>;
   /** Setup: repos, projects and (for a project) statuses GitHub has for an owner. */
@@ -392,8 +405,8 @@ export interface DeckApi {
     owner: string,
     project?: number,
   ): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>;
-  /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed). */
-  configDetectAll(): Promise<
+  /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed); as this account (omitted: gh's active one). */
+  configDetectAll(login?: string): Promise<
     { ok: true; data: unknown } | { ok: false; message: string }
   >;
   /** Setup: save settings (merged into the config file), then reload everything. */

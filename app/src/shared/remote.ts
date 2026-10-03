@@ -77,6 +77,8 @@ export const CommandInput = z.discriminatedUnion('type', [
       repo: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/).nullable().optional(),
       model: z.string().regex(/^[A-Za-z0-9.[\]_-]{1,60}$/).optional(),
       prompt: noEscape.optional(),
+      /** The GitHub account the session works as (a login connected on the Mac); omitted: the issue's account. */
+      account: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/).optional(),
     }),
   }),
   z.object({ type: z.literal('session.stop'), args: z.strictObject({ key }) }),

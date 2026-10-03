@@ -1,6 +1,8 @@
 import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
-import type { Board, BoardCard, BoardPr, Session } from './types'
+import { accountForProject, accountForRepo, isMulti } from './accounts'
+import { projectKey, type AppConfig } from './appConfig'
+import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
 
 export const UNASSIGNED = '(unassigned)'
 
@@ -50,6 +52,55 @@ export interface BoardTab {
   id: string
   name: string
   filters: FilterState
+  /** The GitHub account it shows (its repos, boards and "Mine"); absent: the primary. */
+  account?: string
+}
+
+/** A tab's account: absent (old tabs) or no longer connected means the primary. */
+export function tabAccount(t: { account?: string }, logins: string[]): string | undefined {
+  return t.account && logins.includes(t.account) ? t.account : undefined
+}
+
+/** A tab for each newly connected account, once (`added` remembers which got one, so a closed tab stays closed). */
+export function withAccountTabs<T extends { id: string; account?: string }>(
+  tabs: T[],
+  logins: string[],
+  primary: string | null,
+  added: string[],
+  make: (login: string) => T,
+): { tabs: T[]; added: string[] } {
+  if (logins.length < 2) return { tabs, added }
+  const fresh = logins.filter((l) => l !== primary && !added.includes(l) && !tabs.some((t) => t.account === l))
+  return fresh.length ? { tabs: [...tabs, ...fresh.map(make)], added: [...added, ...fresh] } : { tabs, added }
+}
+
+/** The board as one account sees it: its boards' cards (a card on no board: by its repo) and columns. */
+export function boardForAccount(b: Board, login: string | null, c: AppConfig): Board {
+  if (!login || !isMulti(c)) return b
+  const keys = new Set(c.accounts.find((a) => a.login === login)?.projects.map(projectKey) ?? [])
+  const cards = b.cards.filter((card) => (card.project ? accountForProject(card.project, c) : accountForRepo(card.repo, c)) === login)
+  const boards = (b.projects ?? []).filter((p) => keys.has(p.key))
+  return { ...b, cards, projects: boards, columns: boards.length ? [...new Set(boards.flatMap((p) => p.columns))] : b.columns }
+}
+
+/** The sprints with a board of this account (a sprint with no board list is kept). */
+export function sprintsForAccount(sprints: Sprint[], login: string | null, c: AppConfig): Sprint[] {
+  if (!login || !isMulti(c)) return sprints
+  const keys = new Set(c.accounts.find((a) => a.login === login)?.projects.map(projectKey) ?? [])
+  return sprints.filter((s) => !s.projects || s.projects.some((k) => keys.has(k)))
+}
+
+/** Saved Board tabs read back (old ones have no account: the primary); null when nothing usable is saved. */
+export function parseSavedTabs(saved: unknown, me: string | null): BoardTab[] | null {
+  if (!Array.isArray(saved) || !saved.length) return null
+  return saved
+    .filter((t) => t && typeof t.id === 'string')
+    .map((t) => ({
+      id: t.id,
+      name: typeof t.name === 'string' && t.name ? t.name : 'Board',
+      filters: normalizeFilters(t.filters, me),
+      ...(typeof t.account === 'string' ? { account: t.account } : {}),
+    }))
 }
 
 export interface FilterOptions {

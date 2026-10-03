@@ -7,6 +7,9 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import { composePrompt, earlierBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
+import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
+import { isMulti } from "@shared/accounts";
+import { AccountBadge, AccountSelect } from "./AccountBits";
 import { deck } from "../deck";
 
 interface Props {
@@ -45,6 +48,11 @@ export function AssignDialog({
   const [configuredModel, setConfiguredModel] = useState<string | null>(null);
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState("default");
+  // The issue's account by default; picking another starts (or resumes) as that one.
+  const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null } }, state.config);
+  const [account, setAccount] = useState<string | null>(defAccount);
+  const [accountPicked, setAccountPicked] = useState(false);
+  const override = accountOverride(account, defAccount, state.config);
   const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([]);
   useEffect(() => {
     void deck()
@@ -154,7 +162,10 @@ export function AssignDialog({
   const start = () => {
     if (!draft || !nameOk || !promptOk) return;
     const unchanged =
-      name === draft.name && prompt === draft.prompt.trim() && !model;
+      name === draft.name &&
+      prompt === draft.prompt.trim() &&
+      !model &&
+      !override;
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
@@ -169,6 +180,7 @@ export function AssignDialog({
         draft.proposalId === approved?.id,
       model: model || undefined,
       workflow: workflow === "default" ? undefined : workflow,
+      ...(override ? { account: override } : {}),
     });
     onClose();
   };
@@ -209,6 +221,11 @@ export function AssignDialog({
             </>
           )}
         </div>
+        <AccountSelect state={state} value={account} onChange={(l) => {
+            setAccount(l);
+            setAccountPicked(true);
+          }}
+        />
 
         {past.length > 0 && (
           <div className="past">
@@ -220,6 +237,7 @@ export function AssignDialog({
               <div key={p.sessionId} className="past-row">
                 <span className="grow" title={`${p.sessionId}\n${p.cwd ?? ""}`}>
                   ⏸ {p.name}{" "}
+                  <AccountBadge login={isMulti(state.config) ? resumeAccount(p.account, account, accountPicked, state.config) : null} />{" "}
                   <span className="muted">
                     · {formatAgo(Date.now() - p.lastActivity)} ago
                     {p.cwd ? ` · ${p.cwd.split("/").slice(-2).join("/")}` : ""}
@@ -234,6 +252,7 @@ export function AssignDialog({
                       p.sessionId,
                       p.name,
                       p.cwd,
+                      resumeAccount(p.account, account, accountPicked, state.config),
                     );
                     setResuming(null);
                     if (r.ok) onClose();

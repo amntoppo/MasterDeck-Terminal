@@ -70,6 +70,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   proposal and runs `master spawn`. The tab attaches as soon as `claude agents` lists the session.
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
+- **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
 - **Link session…:** links a session that already exists instead. Type its name, background id or
   session id (suggestions appear as you type). MasterDeck records the link itself (no
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
@@ -377,6 +378,10 @@ creation.
 - **PR tabs:** like the Board, the PRs view has tabs, starting with **Mine** (my open PRs, selected) and **Everyone**: **+** adds one, double-click renames, × closes.
   Each tab keeps its own filters and preset (for example one tab "Needs my review", another "Mine"),
   over the same list fetched from GitHub. Tabs are remembered.
+  With two or more GitHub accounts each tab shows one account's PRs (its owner's), with a badge; **Mine**,
+  **Needs my review** and **Reviewed by me** use that account's login, and the presets work inside the tab's
+  account. The first select in the filter row changes the tab's account (and clears its repo, author and label
+  picks); connecting another account adds a **Mine** tab for it once. With one account nothing changes.
 - **PRs view:** every PR in the org, mine and the team's: all open PRs plus the latest 300 closed or
   merged in the last 30 days. It is fetched when the view opens (if older than 10 minutes), on
   Refresh, and with the hourly GitHub refresh, through the shared cache. The last list is kept on
@@ -409,7 +414,7 @@ creation.
 - **Dragging a card** to another column scrolls the board the same way near its left or right
   edge, and scrolls a long column near its top or bottom.
 - **New ticket (+ on a column):** each column's header has a **+**. It opens a dialog for an issue
-  that lands in that column: title, description (Markdown), repository, status, board (with
+  that lands in that column: title, description (Markdown), repository, account (two or more GitHub accounts), status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
   column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
   the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
@@ -424,6 +429,12 @@ creation.
   note of what it created. What you typed in the dialog is handed over as a draft it shows you
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
   command). **New chat** starts over.
+  With two or more GitHub accounts each Board tab has its own Create with Claude session, working
+  as the tab's account (its header says `as @login`; its folder is
+  `~/.claude/masterdeck/ticket-builder/tab-<tab id>/`). Tickets it creates go in as that account.
+  Switching tabs shows that tab's session (the others keep running); closing a tab, or changing its
+  account, ends its session (reopening the tab can continue the chat). An account that needs to log
+  in again shows the error in the panel instead of starting as another account.
 
 - **Drag cards** between columns. MasterDeck moves the status itself (the board write
   babysit-ticket used to make, forced for a drag). Moving backwards asks first; a
@@ -462,7 +473,7 @@ creation.
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
-- **Set up MasterDeck:** opens Setup as one page (tools, GitHub account, repos and boards, status mapping, workspace,
+- **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
 - **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
@@ -591,7 +602,7 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
 - **What works:** every view (Terminals with live terminals you can type in, Board, PRs, Tasks,
   Costs, Janitor, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
   page instead of on the Mac. Not on the web: signing in or out of the Mac's account, approving
-  browsers, switching the gh account, the folder picker (a repo picker instead), opening editors,
+  browsers, connecting GitHub accounts, the folder picker (a repo picker instead), opening editors,
   and turning Remote off.
 - **Terminal sizes:** while the Mac shows a terminal, its size wins; the browser's size applies
   only to terminals the Mac isn't showing.
@@ -661,6 +672,7 @@ moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run the
 - **Short-lived cache.** Reads are kept in `~/.claude/gh-cache` for a few seconds to minutes, so
   the same read from several sessions makes one call. TTLs: PR status 45 s, PR summaries 2 min,
   the board 5 min, assignees 10 min, your login 1 h.
+- **Per account.** With two or more connected accounts, MasterDeck's calls and every session started as an account carry the account (`GHC_ACCOUNT`): each account has its own cached answers and its own pause (`paused-<login>.json`). A `GH_TOKEN` set without `GHC_ACCOUNT` gets its own entries too (keyed on a hash of the token, never the token). Calls with neither (one account, your own terminals) use today's keys and `paused.json` as before.
 - **One call at a time per read.** Identical reads made at the same moment wait for the first one
   and share its answer.
 - **Writes go straight through.** Assign, comment, status change and the like reach GitHub at once.
@@ -675,6 +687,61 @@ moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run the
 babysit-pr's poll also got cheaper: one GraphQL and one REST call per poll, down from three
 GraphQL and two REST calls.
 
+## Several GitHub accounts
+
+For people who work for more than one organization with different GitHub accounts. Each account
+is a `gh` login (`gh auth status` lists them).
+
+- **Connect them** in Setup → GitHub accounts: tick each account MasterDeck should use, check the
+  name and email its commits get, and pick the primary one. **Add an account…** runs
+  `gh auth login --web` in the dialog (gh then makes that login its active one; MasterDeck says so
+  and never switches it). Under Repos & boards, an **Account** menu shows each account's own
+  repositories and boards; a repository belongs to one account.
+- **Each session works as one account**: its commits (name and email from Setup), its pushes and
+  PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
+  accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
+  primary; accounts needing a new login can't be picked. Details shows the session's account. A
+  session keeps its account; to change it, stop it and resume it with another account picked in the
+  Start dialog. master's proposals use the issue's account (shown on the proposal).
+- **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
+- **Board and PRs**: each tab belongs to one account (see Board View, PRs).
+- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`, and the top of each session's terminal (and of each Board tab's Create with Claude panel) says `as @login`; shell tabs show nothing (they use your own setup). **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow, and the ticket is created as that account (**Create with Claude** hands over to the tab's session, so its button says `as @<tab account>` and is off, with a note, while the dialog's Account is another one: switch to that account's tab to use it); changing the account resets assignees, labels and sprint that came from the old one. **Standup** counts commits made with any connected account's email.
+- **Where the tokens are.** With two or more accounts, MasterDeck keeps one Claude Code settings
+  file per account in `~/.claude/masterdeck/accounts/` (only you can read it: mode 600). A session
+  started as an account gets that file (`claude --settings`), so its token never shows in a process
+  list. A session can read its own account's token, as it could run `gh auth token` before; it could
+  also read the other files there, as it can read gh's own `hosts.yml` today. Tokens never go to
+  MasterDeck's backend, the web app or a phone; only logins do. Disconnecting an account deletes
+  its file once none of its sessions is running. GitHub Enterprise and hosts other than github.com
+  are not supported.
+- **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
+  account as before; Needs you only says so when gh's active account is not the one in Setup.
+
+With two or more GitHub accounts connected, MasterDeck reads each one's token from `gh` (it never
+switches gh's active account) and gives sessions started as that account their own token and git
+identity; GitHub remotes are pushed over HTTPS with that token, including `git@github.com:` and ssh
+aliases from `~/.ssh/config`. An account whose token GitHub refuses shows as needing a new login; an
+offline check changes nothing. With one account nothing changes.
+
+One limit: a rule in your global git config that sends GitHub over SSH (for example
+`url.git@github.com:.insteadOf https://github.com/`, or a `pushInsteadOf`) wins over the session's
+rewrite, so such a session may push as the SSH key's account. Setup shows a warning on the
+accounts when it finds one; remove the rule (`git config --global --unset …`) to fix it.
+
+Skills you run by hand inside a session (`tt.sh`, babysit-pr's poll, `/babysit-ticket`) use that
+session's `GH_TOKEN` and `GHC_ACCOUNT`, with the primary's config and boards: babysit-ticket in a
+second account's session works against the primary's boards. Run outside any session (your own
+terminal) they use `gh`'s active account.
+
+**gh's active account.** With one account MasterDeck runs as gh's active account; when that is not
+the primary set in Setup, Needs you says so and how to switch (`gh auth switch -u <primary>`). With
+several, a master-agent started without the primary's settings (by hand, or before the second
+account was connected) shows "restart master-agent so it runs as <primary>".
+
+Also still single-account: the workflow-builder sessions use `gh`'s active account; SSH host aliases are only found in
+`~/.ssh/config`; and a rate limit on one account pauses MasterDeck's own polling for all accounts
+until it lifts.
+
 ## Board View
 
 **Board** on the rail shows a Kanban board of your issues in the current sprint, in the project's column order. The
@@ -686,6 +753,7 @@ cards is in them.
   (plus one for their PRs). A ticket is a repo and a number: `#12` in the primary repository, `api#12`
   in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
   all keep the repo). A card moves only within its own board's columns.
+- **Several accounts:** with two or more GitHub accounts each tab shows one account (its badge says which): its boards, columns and sprint, and **Mine** means that account's login. The first select in the filter row changes a tab's account; connecting another account adds a Mine tab for it once; + adds a tab on the same account.
 - **Tabs:** it starts with **Mine** (your issues, selected) and **Everyone**. **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
   same fetched board. **Repos** and **Boards** filters (with **Select all**) pick what a tab shows; with
   some boards picked, only their columns show. Tabs and their filters are remembered.

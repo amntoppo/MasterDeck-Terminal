@@ -305,6 +305,11 @@ export function SessionDetails({
           <div>
             Model <b>{stats?.model ?? tail?.model ?? "—"}</b>
           </div>
+          {s.account && (
+            <div title="The GitHub account this session works as (its commits, PRs and gh calls); to change it, stop it and resume it as another">
+              Account <b>{s.account}</b>
+            </div>
+          )}
           <div>
             Diff <b>{git ? formatDiff(git) : "—"}</b>
           </div>

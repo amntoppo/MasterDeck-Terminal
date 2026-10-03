@@ -123,7 +123,7 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
 |---|---|
 | `inbox.act {itemId, args:{action, text?, key?, question?, answer?}}` | item must be open or snoozed, else `stale`; `inboxAct(..., remote=true)` with `by: remote:<by>` |
 | `inbox.snooze {minutes 1..10080}` / `inbox.dismiss` | same staleness check |
-| `session.start {issue, repo?, model?, prompt?}` | `cli.draftAssign` → `startAssign` (prompt replaces the draft text) |
+| `session.start {issue, repo?, model?, prompt?, account?}` | `cli.draftAssign` → `startAssign` (prompt replaces the draft text; `account?` a GitHub login connected on the Mac, refused when it is not or needs to log in again (only with two or more accounts; with one it is ignored), omitted: the issue's account; send it only when the user picked one, desktops before it reject a command that sets it) |
 | `session.stop {key}` | background sessions only, no confirm dialog (`stopBg`) |
 | `session.resume {key}` | only `done`/`suspended` sessions |
 | `session.send {key, text, via: queue\|now}` | refused when `needs-input` ("answer it from Needs you") or `suspended`; `now` or idle → `sender.send` straight (never via master); `queue` → `editQueue add` (needs the queue hook) |
@@ -228,7 +228,7 @@ The backend only relays opaque frames; the Mac's store is authoritative.
 
 | Web → Mac (`WebToMac`) | Mac behaviour |
 |---|---|
-| `call {id, m, a}` | only `DECK_ACCESS[m].kind === 'remote'`; `ptyOpen` only for `attach, shell, ticket-builder, builder, installer`; `ARG_FIX`; runs `reg.call(ch, args)` with `{remote:true}`; `invoke` → `ret` |
+| `call {id, m, a}` | only `DECK_ACCESS[m].kind === 'remote'`; `ptyOpen` only for `attach, shell, ticket-builder, builder, installer` (a `ticket-builder` with a bad `tab` id, an `account` that is not a connected login, or one other than the tab folder's `context.json` account is refused; logins case-insensitive); `ARG_FIX`; runs `reg.call(ch, args)` with `{remote:true}`; `invoke` → `ret` |
 | `sub {ev, arg?, patches?: 1}` / `unsub` | only `event` channels; per-id events need `arg` (≤200). `sub state` sends the state at once (full) |
 | `visible {on}` | hidden tabs get no `pty:data` (buffer cleared) |
 | `device {device}` | once per connection; sanitized (≤80) → `browsers[].device` |

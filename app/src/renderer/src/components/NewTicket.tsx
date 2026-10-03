@@ -4,6 +4,7 @@ import type { FilterState } from "@shared/boardFilter";
 import { UNASSIGNED } from "@shared/boardFilter";
 import type { NewTicket } from "@shared/ipc";
 import type { AppState } from "@shared/types";
+import { accountChoices, isMulti, primaryLogin } from "@shared/accounts";
 import { deck } from "../deck";
 
 /** Where a + was clicked on the Board: the column (status), its board, the tab's filters, the sprint shown. */
@@ -14,15 +15,23 @@ export interface TicketContext {
   sprint: string;
   /** The tab's name (e.g. "Mine"). */
   tab: string;
+  /** The tab's GitHub account (two or more). */
+  account?: string;
+  /** The tab's id (two or more accounts): its own ticket session folder. */
+  tabId?: string;
 }
 
-/** The board a column belongs to: the one the tab filters to, else the first board that has the column. */
+/** The board a column belongs to: the one the tab filters to, else the first board (of the tab's account) that has the column. */
 export function boardFor(
   state: AppState,
   status: string,
   filters: FilterState,
+  account?: string,
 ): string {
-  const boards = state.config.projects.map((p) => ({
+  const acc = account
+    ? state.config.accounts.find((a) => a.login === account)
+    : undefined;
+  const boards = (acc ? acc.projects : state.config.projects).map((p) => ({
     key: `${p.owner}/${p.number}`,
     columns: p.columns,
   }));
@@ -34,19 +43,27 @@ export function boardFor(
 
 /** The defaults a new ticket takes from where it was asked for. */
 export function ticketDefaults(state: AppState, ctx: TicketContext): NewTicket {
+  const acc = ctx.account
+    ? state.config.accounts.find((a) => a.login === ctx.account)
+    : undefined;
   const primary =
-    state.config.repos[0] ?? `${state.config.owner}/${state.config.issueRepo}`;
+    acc?.repos[0] ??
+    state.config.repos[0] ??
+    `${state.config.owner}/${state.config.issueRepo}`;
+  const me = ctx.account ?? state.me;
+  const only = ctx.filters.repos.length === 1 ? ctx.filters.repos[0] : "";
   const people = ctx.filters.assignees.filter((a) => a !== UNASSIGNED);
-  const board = state.config.projects.find(
+  const board = (acc ? acc.projects : state.config.projects).find(
     (p) => `${p.owner}/${p.number}` === ctx.project,
   );
   return {
-    repo: ctx.filters.repos.length === 1 ? ctx.filters.repos[0] : primary,
+    // A single-repo filter only counts when it is one of the account's repos.
+    repo: only && (!acc || acc.repos.includes(only)) ? only : primary,
     title: "",
     body: "",
     project: ctx.project,
     status: ctx.status,
-    assignees: people.length ? people : state.me ? [state.me] : [],
+    assignees: people.length ? people : me ? [me] : [],
     labels: [...ctx.filters.labels],
     milestone: ctx.filters.milestone ?? "",
     sprint: ctx.sprint === "none" ? "" : ctx.sprint,
@@ -107,6 +124,24 @@ function MultiPick({
  * in. Defaults come from that column and the tab's filters (people, labels, milestone, repo) and
  * the sprint shown. Create with Claude hands the same context to the Board's Claude session.
  */
+/**
+ * The dialog's Create with Claude button. Two or more accounts: it hands over to the Board tab's
+ * session, which works as the tab's account, so it says which, and is blocked (with why) while the
+ * dialog's Account is another one, rather than handing a draft for one account to another's session.
+ */
+export function claudeHandoff(
+  multi: boolean,
+  picked: string | null,
+  tabAccount: string | undefined,
+): { label: string; blocked: string | null } {
+  if (!multi || !tabAccount) return { label: "Create with Claude", blocked: null };
+  const same = !picked || picked.toLowerCase() === tabAccount.toLowerCase();
+  return {
+    label: `Create with Claude as @${tabAccount}`,
+    blocked: same ? null : `Create with Claude runs on this tab's account; switch to a @${picked} tab to use it`,
+  };
+}
+
 export function NewTicketDialog({
   state,
   ctx,
@@ -118,7 +153,29 @@ export function NewTicketDialog({
   onClose: () => void;
   onWithClaude: (ctx: TicketContext, draft: NewTicket) => void;
 }) {
-  const [t, setT] = useState<NewTicket>(() => ticketDefaults(state, ctx));
+  // Two or more GitHub accounts: the account it is created as (the tab's if it can be used);
+  // its repos and boards follow, so creation (routed by the repo's account) goes out as it.
+  const multi = isMulti(state.config);
+  const choices = accountChoices(state.config, state.ghAccounts);
+  const [account, setAccount] = useState<string | null>(() =>
+    !multi
+      ? null
+      : ctx.account && choices.includes(ctx.account)
+        ? ctx.account
+        : (choices[0] ?? primaryLogin(state.config)),
+  );
+  const [t, setT] = useState<NewTicket>(() => {
+    if (!multi || account === ctx.account) return ticketDefaults(state, ctx);
+    const a = state.config.accounts.find((x) => x.login === account);
+    const p = a?.projects[0];
+    return ticketDefaults(state, {
+      ...ctx,
+      account: account ?? undefined,
+      project: p ? `${p.owner}/${p.number}` : ctx.project,
+      status: p?.columns[0] ?? ctx.status,
+      filters: { ...ctx.filters, repos: [] },
+    });
+  });
   const [meta, setMeta] = useState<{
     labels: string[];
     milestones: string[];
@@ -146,7 +203,12 @@ export function NewTicketDialog({
     return () => window.removeEventListener("keydown", esc);
   }, [onClose, busy]);
 
-  const boards = state.config.projects;
+  const acc = multi
+    ? state.config.accounts.find((a) => a.login === account)
+    : undefined;
+  const repoList = acc ? acc.repos : state.config.repos;
+  const handoff = claudeHandoff(multi, account, ctx.account);
+  const boards = acc ? acc.projects : state.config.projects;
   const board = boards.find((p) => `${p.owner}/${p.number}` === t.project);
   const columns = board?.columns ?? state.config.columns;
   // People: the repo's assignable ones, and anyone on the board, the chosen ones first.
@@ -172,10 +234,10 @@ export function NewTicketDialog({
   );
 
   const create = async () => {
-    if (!t.title.trim() || busy) return;
+    if (!t.title.trim() || !t.repo || busy) return;
     setBusy(true);
     setMsg(null);
-    const r = await deck().ticketCreate(t);
+    const r = await deck().ticketCreate({ ...t, account: account ?? undefined });
     setBusy(false);
     setMsg({ text: r.message, ok: r.ok, url: r.url });
   };
@@ -247,6 +309,45 @@ export function NewTicketDialog({
               }
             />
             <div className="ns-grid">
+              {multi && (
+                <div>
+                  <label>Account</label>
+                  <select
+                    className="fsel full"
+                    value={account ?? ""}
+                    onChange={(e) => {
+                      const a = state.config.accounts.find(
+                        (x) => x.login === e.target.value,
+                      );
+                      const p = a?.projects[0];
+                      setAccount(e.target.value);
+                      set({
+                        repo: a?.repos[0] ?? "",
+                        milestone: "",
+                        labels: [],
+                        sprint: "",
+                        // Still the default (the old account's login)? Then the new account's.
+                        ...(t.assignees.length === 1 && t.assignees[0] === account
+                          ? { assignees: [e.target.value] }
+                          : {}),
+                        ...(p
+                          ? {
+                              project: `${p.owner}/${p.number}`,
+                              status: p.columns[0] ?? t.status,
+                              sprintField: p.sprintField || t.sprintField,
+                            }
+                          : {}),
+                      });
+                    }}
+                  >
+                    {choices.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label>Repository</label>
                 <select
@@ -254,7 +355,12 @@ export function NewTicketDialog({
                   value={t.repo}
                   onChange={(e) => set({ repo: e.target.value, milestone: "" })}
                 >
-                  {state.config.repos.map((r) => (
+                  {!repoList.length && (
+                    <option value="" disabled>
+                      No repositories
+                    </option>
+                  )}
+                  {repoList.map((r) => (
                     <option key={r} value={r}>
                       {r.split("/")[1]}
                     </option>
@@ -361,13 +467,15 @@ export function NewTicketDialog({
               placeholder="Add a label…"
             />
             {msg && !msg.ok && <div className="error">{msg.text}</div>}
+            {handoff.blocked && <div className="muted small">{handoff.blocked}</div>}
             <div className="form-buttons nt-buttons">
               <button
                 className="btn nt-claude"
+                disabled={!!handoff.blocked}
                 onClick={() => onWithClaude(ctx, t)}
                 title="Describe what you need; Claude writes the ticket(s) and creates them on this board"
               >
-                <ClaudeMark /> Create with Claude
+                <ClaudeMark /> {handoff.label}
               </button>
               <span style={{ flex: 1 }} />
               <button className="btn" onClick={onClose} disabled={busy}>
@@ -375,7 +483,7 @@ export function NewTicketDialog({
               </button>
               <button
                 className="btn primary"
-                disabled={!t.title.trim() || busy}
+                disabled={!t.title.trim() || !t.repo || busy}
                 onClick={() => void create()}
                 title="⌘↵"
               >

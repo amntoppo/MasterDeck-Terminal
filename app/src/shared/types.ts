@@ -39,6 +39,8 @@ export interface Session {
   busyWith?: string | null;
   /** Idle and its last message asks the user something. */
   asking?: string | null;
+  /** The GitHub account the session works as (two or more connected accounts only; see shared/accounts.ts sessionAccount). */
+  account?: string;
 }
 
 export interface Issue {
@@ -80,6 +82,8 @@ export interface SpawnTarget {
   cwd?: string;
   prompt?: string;
   resume?: string;
+  /** The GitHub account the session works as (two or more connected). */
+  account?: string;
 }
 
 export interface Proposal {
@@ -178,6 +182,8 @@ export interface AppState {
   browserRequests?: BrowserRequestView[];
   /** The MasterDeck account this Mac is signed in with. */
   account?: import("./account").AccountState;
+  /** Connected GitHub accounts and their health; never a token. */
+  ghAccounts?: import("./accounts").GhAccountStatus[];
   stats: Record<string, SessionStats>;
   tails: Record<string, TranscriptTail>;
   git: Record<string, GitInfo>;
@@ -415,5 +421,10 @@ export type PaneSpec =
   | { kind: "installer"; tools: string[] }
   /** The workflow builder (Workflow window): a Claude session in its own folder; `resume` continues its last chat. */
   | { kind: "builder"; resume: boolean }
-  /** The Board's ticket session (Create with Claude); `prompt`: its first message, if any. */
-  | { kind: "ticket-builder"; resume: boolean; prompt?: string };
+  /**
+   * The Board's ticket session (Create with Claude); `prompt`: its first message, if any. Two or more
+   * accounts: one per Board tab (`tab`, its id), running as the tab's `account`; main ignores both with one.
+   */
+  | { kind: "ticket-builder"; resume: boolean; prompt?: string; tab?: string; account?: string }
+  /** Setup's "Add an account": gh's own browser login. */
+  | { kind: "gh-login" };

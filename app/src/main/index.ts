@@ -2,7 +2,7 @@ import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
-import { PrWatch, prStates } from "./prWatch";
+import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
@@ -18,8 +18,6 @@ import {
   unlinkSync,
   writeFileSync,
   chmodSync,
-  appendFileSync,
-  renameSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
@@ -55,8 +53,31 @@ import type {
   SetupCheck,
 } from "@shared/types";
 import { getConfig } from "@shared/appConfig";
-import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
-import { startAssign } from "./assign";
+import {
+  AccountEnv,
+  detectEnv,
+  accountsInUse,
+  accountsKeyOf,
+  migrateLegacyConfig,
+} from "./accountEnv";
+import { parseGhAccounts, setupScopes, type GhAccount } from "@shared/ghAuth";
+import {
+  defaultAccount,
+  isMulti,
+  ticketAccount,
+  noreplyEmail,
+  parseGhUser,
+  prRepo,
+  repoFromRemote,
+  sessionAccount,
+} from "@shared/accounts";
+import {
+  bgIdFromOutput,
+  resumeAs,
+  SessionAccounts,
+  sessionSettings,
+} from "./sessionAccounts";
+import { assignNow as assignAs } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
@@ -90,6 +111,7 @@ import {
 } from "./queue";
 import { makeGhRunner, readGhCacheStatus } from "./ghc";
 import { GitHub } from "./github";
+import { accountClients } from "./accountClients";
 import { Sender } from "./send";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
@@ -98,7 +120,8 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
-import { BoardOps, linkTicket, bodyFileAllowed, parseCreateArgs, sweepTicketDirs, ticketBuilderScript } from "./boardOps";
+import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
+import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -186,13 +209,96 @@ const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
+// Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
+const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
+// The account each session was started as (resume, Details, PR watch).
+const sessionAccounts = new SessionAccounts(
+  join(paths.home, "session-accounts.json"),
+);
+/** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
+const ORIGINS_MAX = 200;
+const origins = new Map<string, string | null>();
+const originLookups = new Map<string, Promise<string | null>>();
+function originNow(cwd: string): Promise<string | null> {
+  let p = originLookups.get(cwd);
+  if (!p) {
+    // ponytail: the oldest folder goes past ORIGINS_MAX (remote callers pass any cwd); an LRU if it ever matters.
+    if (originLookups.size >= ORIGINS_MAX) {
+      const old = originLookups.keys().next().value!;
+      originLookups.delete(old);
+      origins.delete(old);
+    }
+    p = run("git", ["remote", "get-url", "origin"], {
+      cwd,
+      timeoutMs: 5_000,
+    }).then((r) => {
+      const repo = r.code === 0 ? repoFromRemote(r.stdout) : null;
+      origins.set(cwd, repo);
+      return repo;
+    });
+    originLookups.set(cwd, p);
+  }
+  return p;
+}
+/** The same for the state build, which can't wait: the answer so far, the state rebuilt once it comes. */
+function originOf(cwd: string): string | null {
+  if (!originLookups.has(cwd)) void originNow(cwd).then(() => sources.changed());
+  return origins.get(cwd) ?? null;
+}
+/** A session's account: recorded at start, its spawn proposal's, its folder's repo, the primary. */
+function accountOfSession(
+  s: { sessionId: string; key: string; name: string },
+  origin: string | null | undefined,
+): string | null {
+  return sessionAccount(
+    {
+      recorded: sessionAccounts.get(s),
+      spawned:
+        latest?.proposals.find(
+          (p) => p.target.spawn?.name === s.name && p.target.spawn.account,
+        )?.target.spawn?.account ?? null,
+      origin,
+    },
+    getConfig(),
+  );
+}
+/** `--settings` for a session as `account` (or `fallback()`'s); nothing with one account. */
+function settingsFor(
+  account: string | null | undefined,
+  fallback: () => Promise<string | null>,
+): ReturnType<typeof sessionSettings> {
+  return sessionSettings(
+    isMulti(getConfig()),
+    (l) => accountEnv.settingsArgs(l),
+    account,
+    fallback,
+  );
+}
+/** Start a session for an issue (the Start dialog, a browser, a phone): as its account with two or more. */
+function assignNow(
+  req: AssignRequest,
+): Promise<CliResult & { proposalId?: number }> {
+  return assignAs(cli, req, {
+    settings: (account) =>
+      settingsFor(account, async () =>
+        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
+      ),
+    proposalAccount: (id) =>
+      latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
+      null,
+    expect: (name, login) => sessionAccounts.expect(name, login),
+  });
+}
 const ptys = new PtyManager(
   env,
   (channel, ...args) => emit(channel, ...args),
   () => claudeBin,
   () => join(paths.home, "installer"),
   () => builderDir(),
-  () => ticketDir(),
+  (spec) =>
+    ticketPane(paths.home, isMulti(getConfig()), spec, (l) =>
+      accountEnv.settingsArgs(l),
+    ),
 );
 
 function notify(events: NotifyEvent[]): void {
@@ -207,6 +313,14 @@ function notify(events: NotifyEvent[]): void {
 const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
+// Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
+const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+  config: getConfig,
+  base: { gh, github, ops: boardOps },
+  run,
+  runEnv: (l) => accountEnv.runEnv(l),
+  ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+});
 const sender = new Sender(
   ptys,
   cli,
@@ -214,14 +328,18 @@ const sender = new Sender(
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
 );
-const ops = new Ops(run, paths, () => claudeBin, gh);
+const ops = new Ops(run, paths, () => claudeBin, ghRouted, () =>
+  isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+);
 // Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
 const boardFlow = new BoardFlow({
-  ops: boardOps,
+  ops: boardOpsByRepo,
   links: linkStore,
   // One batched light read per tick (≤ 50 PRs a query, ghc-cached); none while GitHub is paused.
   prStates: async (urls) =>
-    sources.isGithubPaused() ? {} : prStates(gh, urls),
+    sources.isGithubPaused()
+      ? {}
+      : prStatesFor((l) => forAccount(l || null).gh, getConfig(), urls),
   link: linkSession,
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
@@ -248,6 +366,7 @@ const linkedSteps = new LinkedSteps({
 // MasterDeck's PR watch: each open PR a session made (Settings → Sessions → Watch new PRs).
 const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
   gh,
+  ghFor: (account) => forAccount(account ?? null).gh,
   paused: (o) => sources.isGithubPaused(o),
   send: (s, text) =>
     sender.send(
@@ -334,6 +453,14 @@ const sources = new Sources(
   (state) => {
     const prev = latest;
     latest = state;
+    // Accounts changed (Setup saved, config edited): new tokens and settings files.
+    if (accountsKeyOf(state.config) !== accountsKey) void refreshAccounts();
+    sessionAccounts.claim(state.sessions);
+    // A past session resumes as the account it was started as (shown in the Start dialog).
+    if (isMulti(state.config))
+      for (const list of Object.values(state.pastSessions))
+        for (const p of list)
+          p.account = sessionAccounts.get({ sessionId: p.sessionId, key: p.sessionId.slice(0, 8) }) ?? undefined;
     // Each session's own workflow: copied the first time it shows up.
     if (process.platform !== "win32")
       try {
@@ -410,8 +537,20 @@ const sources = new Sources(
   },
   () => claudeBin,
   github,
-  gh,
-  () => readGhCacheStatus(),
+  ghRouted,
+  () => readGhCacheStatus(undefined, undefined, isMulti(getConfig())),
+);
+sources.setMasterAccount((s) => sessionAccounts.get(s));
+sources.setAccountRunners({
+  github: (login) => forAccount(login).github,
+  // The current branch's PR (gh pr view in the folder): the folder's `origin` account, looked up first.
+  ghForDir: (dir) =>
+    isMulti(getConfig())
+      ? async (args, opts) => forRepo(await originNow(dir)).gh(args, opts)
+      : gh,
+});
+sources.setSessionAccount((s) =>
+  accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
 );
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
@@ -672,6 +811,8 @@ bridge = new BrowserBridge({
   onChange: () => publishBrowsers(),
   hello: { appVersion: app.getVersion(), platform: process.platform, home: homedir() },
   log: (l) => console.log(l),
+  logins: () => getConfig().accounts.map((a) => a.login),
+  ticketAccount: (tab) => folderAccount(paths.home, tab),
 });
 const remoteCommands = new RemoteCommands(
   {
@@ -679,7 +820,7 @@ const remoteCommands = new RemoteCommands(
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
-    startAssign: (req) => startAssign(cli, req),
+    startAssign: (req) => assignNow(req),
     stopBg,
     resume: (id, name, cwd) => resumeBg(id, name, cwd),
     // Never relayed through master-agent: remote text goes straight to the session or not at all.
@@ -689,6 +830,8 @@ const remoteCommands = new RemoteCommands(
       return { ok, message };
     },
     setManualStatus: (key, status) => sources.setManualStatus(key, status),
+    isMulti: () => isMulti(getConfig()),
+    configLogins: () => getConfig().accounts.map((a) => a.login),
   },
   join(paths.home, "remote-done.json"),
 );
@@ -886,6 +1029,18 @@ async function runInboxAction(
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
+    case "login": {
+      if (d.type !== "account")
+        return { ok: false, message: "not a GitHub account item" };
+      // gh's browser login opens a browser on the Mac: not from a phone or browser.
+      if (remote)
+        return {
+          ok: false,
+          message: `log in to GitHub on the Mac: run gh auth login for ${d.login}`,
+        };
+      emit(CH.ghLogin, d.login);
+      return { ok: true, message: `opened gh auth login for ${d.login}` };
+    }
     default:
       return { ok: false, message: `${type} is done in the window` };
   }
@@ -933,7 +1088,7 @@ async function linkSession(
     return { ok: false, message: "bad session id" };
   const r = await linkTicket(
     {
-      ops: boardOps,
+      ops: forRepo(t.repo).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
       branch: (dir) => branchKey(run, dir),
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
@@ -991,6 +1146,8 @@ async function resumeBg(
   id: string,
   name: string,
   cwd: string | null,
+  account: string | null = null,
+  key: string | null = null,
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
@@ -998,84 +1155,68 @@ async function resumeBg(
   const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name)
     ? ["-n", name]
     : [];
-  const r = await run(claudeBin, ["--bg", "--resume", id, ...named], {
-    cwd: cwd && existsSync(cwd) ? cwd : homedir(),
-    timeoutMs: 60_000,
+  const dir = cwd && existsSync(cwd) ? cwd : homedir();
+  // The account it started as (resume always passes --settings again).
+  const r = await resumeAs(resumeDeps(dir), {
+    id,
+    key,
+    name,
+    named,
+    cwd: dir,
+    account,
   });
-  return r.code === 0
-    ? { ok: true, message: name }
-    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  return r.ok ? { ok: true, message: name } : r;
 }
 
-/** The Board's ticket session works here: its CLAUDE.md, context.json, create-ticket.sh, created.jsonl. */
-const ticketDir = () => join(paths.home, "ticket-builder");
+/** What resumeAs needs: the account resolved as for any session, recorded in sessionAccounts. */
+function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
+  return {
+    run,
+    claude: claudeBin,
+    accounts: sessionAccounts,
+    settings: settingsFor,
+    accountOf: async (s) => accountOfSession(s, await originNow(dir)),
+    live: () => latest?.sessions ?? [],
+  };
+}
+
+/** The Board's ticket sessions work here (one shared, or one per Board tab with two or more accounts; see ticketDirs.ts). */
+const ticketRoot = () => join(paths.home, "ticket-builder");
 let ticketPumping = false;
-/** Create-with-Claude asks for a ticket: claim the request, create it, answer, and log it. */
+/** Create-with-Claude asks for a ticket: in each ticket folder, claim the request, create it as that folder's account, answer, log it. */
 async function pumpTicketRequests(): Promise<void> {
   if (ticketPumping) return;
   ticketPumping = true;
   try {
-    sweepTicketDirs(ticketDir()); // stale requests are dropped, not created for nobody
-    const dir = join(ticketDir(), "requests");
-    let names: string[] = [];
-    try {
-      names = readdirSync(dir).filter((n) => n.endsWith(".req"));
-    } catch {
-      return;
-    }
-    for (const n of names) {
-      const id = n.slice(0, -4);
-      if (!/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue;
-      try {
-        renameSync(join(dir, n), join(dir, `${id}.taken`));
-      } catch {
-        continue; // taken back by the script (timed out)
-      }
-      let answer: object;
-      try {
-        const args = readFileSync(join(dir, `${id}.taken`), "utf8").split("\0").slice(0, -1).slice(0, 60);
-        const p = parseCreateArgs(args);
-        if ("error" in p) answer = { ok: false, error: p.error };
-        else {
-          const file = p.bodyFile ? bodyFileAllowed(ticketDir(), p.bodyFile) : "";
-          if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
-          else {
-            const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
-            answer = await boardOps.create({ ...p, body });
-          }
-        }
-      } catch (e) {
-        answer = { ok: false, error: `create: ${String(e)}` };
-      }
-      const a = join(ticketDir(), "answers");
-      mkdirSync(a, { recursive: true });
-      writeFileSync(join(a, `${id}.tmp`), JSON.stringify(answer));
-      renameSync(join(a, `${id}.tmp`), join(a, `${id}.json`));
-      // The log the Board reads (readCreatedTickets) — dry runs are not logged.
-      if ((answer as { ok?: boolean; dryRun?: boolean }).ok && !(answer as { dryRun?: boolean }).dryRun)
-        appendFileSync(join(ticketDir(), "created.jsonl"), JSON.stringify(answer) + "\n");
-    }
+    const cfg = getConfig();
+    for (const dir of ticketDirs(paths.home, isMulti(cfg)))
+      await pumpTicketDir(dir, (p, picked) =>
+        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create(p),
+      );
   } finally {
     ticketPumping = false;
   }
 }
-let ticketsSeen = -1;
-/** Tickets the Board's session created (created.jsonl grew): refresh the board, and tell the page. */
+/** created.jsonl lines already seen, per ticket folder; the first read (launch) counts the old ones as seen. */
+const ticketsSeen = new Map<string, number>();
+let ticketsRead = false;
+/** Tickets the Board's sessions created (a created.jsonl grew): refresh the board, and tell the page. */
 function readCreatedTickets(): void {
-  let lines: string[] = [];
-  try {
-    lines = readFileSync(join(ticketDir(), "created.jsonl"), "utf8")
-      .split("\n")
-      .filter(Boolean);
-  } catch {
-    if (ticketsSeen < 0) ticketsSeen = 0;
-    return;
+  // Every folder, whatever the mode, so switching modes never re-announces old tickets.
+  const fresh: string[] = [];
+  for (const dir of [ticketRoot(), ...ticketDirs(paths.home, true)]) {
+    const f = join(dir, "created.jsonl");
+    let lines: string[];
+    try {
+      lines = readFileSync(f, "utf8").split("\n").filter(Boolean);
+    } catch {
+      continue;
+    }
+    const seen = ticketsSeen.get(f) ?? (ticketsRead ? 0 : lines.length);
+    ticketsSeen.set(f, lines.length);
+    if (lines.length > seen) fresh.push(...lines.slice(seen));
   }
-  // At launch: the ones already there are old news.
-  if (ticketsSeen < 0) ticketsSeen = lines.length;
-  if (lines.length <= ticketsSeen) return;
-  const fresh = lines.slice(ticketsSeen);
-  ticketsSeen = lines.length;
+  ticketsRead = true;
   const made = fresh.flatMap((l) => {
     try {
       const o = JSON.parse(l) as {
@@ -1365,14 +1506,17 @@ async function startHere(o: {
       };
   }
   const cwd = o.cwd && existsSync(o.cwd) ? o.cwd : homedir();
-  const r = await run(
-    claudeBin,
-    ["--bg", "--resume", o.sessionId, "-n", o.name],
-    { cwd, timeoutMs: 60_000 },
-  );
-  return r.code === 0
+  const r = await resumeAs(resumeDeps(cwd), {
+    id: o.sessionId,
+    key: null,
+    name: o.name,
+    named: ["-n", o.name],
+    cwd,
+    account: null,
+  });
+  return r.ok
     ? { ok: true, message: r.stdout.trim().split("\n")[0] ?? "started" }
-    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+    : r;
 }
 
 /** Transcripts read for the History reader, by path and mtime; the last few are kept. */
@@ -1423,11 +1567,22 @@ async function startMaster(): Promise<CliResult> {
   if (Date.now() < masterStartingUntil)
     return { ok: false, message: "master-agent is already starting" };
   masterStartingUntil = Date.now() + 90_000;
-  const r = await run(claudeBin, ["--bg", "-n", MASTER_NAME, "/master"], {
+  // The primary account; master starts even when it needs to log in again (its sweeps read each
+  // account with that account's own token, so its own env matters little).
+  const as = isMulti(getConfig()) ? accountEnv.settingsArgs(null) : null;
+  const asArgs = as?.ok ? as.args : [];
+  const r = await run(claudeBin, ["--bg", ...asArgs, "-n", MASTER_NAME, "/master"], {
     cwd: paths.masterWorkspace,
     timeoutMs: 60_000,
   });
   if (r.code !== 0) masterStartingUntil = 0;
+  else if (as?.ok && as.account) {
+    // Recorded as the primary, so Needs you can tell a master-agent started without it (by hand,
+    // or before a second account) and ask for a restart.
+    const bg = bgIdFromOutput(r.stdout);
+    if (bg) sessionAccounts.set([bg], as.account);
+    sessionAccounts.expect(MASTER_NAME, as.account);
+  }
   return r.code === 0
     ? { ok: true, message: r.stdout.trim() }
     : { ok: false, message: (r.stderr || r.stdout).trim() };
@@ -1510,7 +1665,7 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
-    const r = await boardOps.setStatus(t, status);
+    const r = await forRepo(t.repo).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -1584,7 +1739,10 @@ function registerIpc(): void {
         : [];
     const title = str(o.title, 256).trim();
     if (!title) return { ok: false, message: "give it a title" };
-    const res = await boardOps.create({
+    // The account picked in the dialog creates it (a connected one); else the repo's account.
+    const res = await forAccount(
+      ticketAccount(str(o.account, 100) || null, str(o.repo, 140) || null, getConfig()),
+    ).ops.create({
       title,
       body: str(o.body, 60_000),
       repo: str(o.repo, 140) || undefined,
@@ -1631,7 +1789,19 @@ function registerIpc(): void {
         message: "the board is not loaded yet",
         canContinue: false,
       };
-    const dir = ticketDir();
+    // Two or more accounts: the tab's own folder (its session runs as the tab's account).
+    let dir: string;
+    try {
+      dir = ticketBuilderDir(
+        paths.home,
+        (ctx as { tabId?: string } | null)?.tabId ?? null,
+        isMulti(cfg),
+      );
+    } catch (e) {
+      return { ok: false, message: (e as Error).message, canContinue: false };
+    }
+    if (!ticketDirOk(paths.home, dir))
+      return { ok: false, message: "refusing a ticket builder folder that is a link", canContinue: false };
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const script = join(dir, "create-ticket.sh");
     writeFileSync(script, ticketBuilderScript(dir));
@@ -1689,7 +1859,7 @@ function registerIpc(): void {
     const hit = repoMetaCache.get(repo);
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.meta;
     const lines = async (args: string[]) => {
-      const r = await run("gh", args, { timeoutMs: 30_000 });
+      const r = await ghDirect(repo, args, { timeoutMs: 30_000 });
       return r.code === 0
         ? r.stdout
             .split("\n")
@@ -1744,6 +1914,7 @@ function registerIpc(): void {
       model?: unknown;
       workflow?: unknown;
       mode?: unknown;
+      account?: unknown;
     };
     const mode =
       typeof o.mode === "string" &&
@@ -1772,6 +1943,14 @@ function registerIpc(): void {
       typeof o.model === "string" && /^[\w.[\]-]{1,80}$/.test(o.model)
         ? o.model
         : "";
+    const as = await settingsFor(
+      typeof o.account === "string" ? o.account : null,
+      () =>
+        originNow(cwd).then((origin) =>
+          defaultAccount({ origin }, getConfig()),
+        ),
+    );
+    if (!as.ok) return { ok: false, message: as.message };
     if (
       typeof o.workflow === "string" &&
       o.workflow &&
@@ -1782,6 +1961,7 @@ function registerIpc(): void {
       claudeBin,
       [
         "--bg",
+        ...as.args,
         "-n",
         name,
         ...(model ? ["--model", model] : []),
@@ -1798,13 +1978,30 @@ function registerIpc(): void {
         ok: false,
         message: (r.stderr || r.stdout).trim().slice(0, 300),
       };
+    if (as.account) {
+      // On disk at once when claude printed the bg id (a quit before the first claim keeps it).
+      const bg = bgIdFromOutput(r.stdout);
+      if (bg) sessionAccounts.set([bg], as.account);
+      sessionAccounts.expect(name, as.account);
+    }
     void sources.refreshAgents();
     return { ok: true, message: name };
   });
   reg.handle(
     CH.resumeSession,
-    (_e, id: string, name: string, cwd: string | null) =>
-      resumeBg(id, name, cwd),
+    (_e, id: string, name: string, cwd: string | null, account?: unknown) =>
+      resumeBg(
+        id,
+        name,
+        cwd,
+        typeof account === "string" && account ? account : null,
+      ),
+  );
+  // A new session's account for a folder (its origin remote's account, else the primary).
+  reg.handle(CH.accountFor, async (_e, cwd: unknown) =>
+    typeof cwd === "string" && cwd && isMulti(getConfig())
+      ? defaultAccount({ origin: await originNow(cwd) }, getConfig())
+      : null,
   );
   reg.handle(CH.resumeStopped, () => sources.resumeStopped());
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
@@ -1826,7 +2023,9 @@ function registerIpc(): void {
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
-  reg.handle(CH.prSummary, (_e, url: string) => github.prSummary(url));
+  reg.handle(CH.prSummary, (_e, url: string) =>
+    forRepo(prRepo(String(url))).github.prSummary(url),
+  );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
     typeof dir === "string" && dir && dir === getConfig().workspace
@@ -1839,14 +2038,16 @@ function registerIpc(): void {
   });
   reg.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
-    return t ? github.issueBody(t) : { ok: false, message: "bad ticket" };
+    return t
+      ? forRepo(t.repo).github.issueBody(t)
+      : { ok: false, message: "bad ticket" };
   });
   reg.handle(
     CH.assignIssue,
     async (_e, issue: unknown, login: string, current: string[]) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      const r = await github.assign(t, login, current);
+      const r = await forRepo(t.repo).github.assign(t, login, current);
       if (r.ok) sources.noteAssigned(t, login);
       return r;
     },
@@ -1859,30 +2060,33 @@ function registerIpc(): void {
       typeof req.name === "string"
     )
       workflows().setPending(req.name, req.workflow);
-    return startAssign(cli, req);
+    return assignNow(req);
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
-  reg.handle(CH.refresh, () => sources.refreshGithub(true));
+  reg.handle(CH.refresh, async () => {
+    await refreshAccounts();
+    return sources.refreshGithub(true);
+  });
   reg.handle(CH.boardRefresh, () => sources.refreshGithub(true));
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
   reg.handle(CH.ghAccounts, () => ghAccounts());
-  reg.handle(CH.ghSwitch, async (_e, login: string) => {
-    const { accounts } = await ghAccounts();
-    if (!accounts.some((a) => a.login === login))
-      return { ok: false, message: `gh is not logged in to ${login}` };
-    const r = await run(
-      "gh",
-      ["auth", "switch", "--hostname", "github.com", "--user", login],
-      { timeoutMs: 20_000 },
-    );
-    return r.code === 0
-      ? { ok: true, message: `gh now uses ${login}` }
-      : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  // Setup: a newly connected account's commit identity (GitHub name, noreply email; editable there).
+  reg.handle(CH.ghUser, async (_e, login: unknown) => {
+    if (typeof login !== "string" || !GH_LOGIN.test(login))
+      return { name: "", email: "" };
+    const tok = await tokenEnv(login);
+    const env = tok && { ...tok, GHC_ACCOUNT: login };
+    // No token: no read at all (never gh's active account); a token for another login is ignored.
+    const got = env
+      ? parseGhUser((await run("gh", ["api", "user"], { env, timeoutMs: 20_000 })).stdout)
+      : null;
+    const u = got && got.login.toLowerCase() === login.toLowerCase() ? got : null;
+    return { name: u?.name ?? login, email: noreplyEmail(login, u?.id ?? null) };
   });
   reg.handle(CH.ghOwners, async () => {
-    // Straight to gh, not the shared cache: it is not per account.
+    // Straight to gh, not the shared cache (no account here).
     const [user, orgs] = await Promise.all([
       run("gh", ["api", "user", "--jq", ".login"], { timeoutMs: 20_000 }),
       run("gh", ["api", "user/orgs", "--paginate", "--jq", ".[].login"], {
@@ -1911,7 +2115,19 @@ function registerIpc(): void {
         : {}),
     };
   });
-  reg.handle(CH.configDetectAll, () => cli.configDetectAll());
+  // As the account Setup shows (its token, read-only, even with one account); from a browser only
+  // for connected accounts. No login: gh's active account.
+  reg.handle(CH.configDetectAll, async (e, login: unknown) => {
+    const r = await detectEnv(
+      login,
+      isRemote(e),
+      getConfig().accounts.map((a) => a.login),
+      tokenEnv,
+    );
+    return "error" in r
+      ? { ok: false as const, message: r.error }
+      : cli.configDetectAll(r.env);
+  });
   reg.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === "string"
       ? cli.configDetect(
@@ -1981,8 +2197,8 @@ function registerIpc(): void {
     const summary = summaries.get(s.sessionId);
     if (!summary) return { ok: false, message: "no summary yet" };
     const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`;
-    const r = await run(
-      "gh",
+    const r = await ghDirect(
+      s.issueRepo ?? null,
       [
         "issue",
         "comment",
@@ -2402,6 +2618,9 @@ function registerIpc(): void {
   reg.handle(
     CH.ptyOpen,
     (e, id: string, spec: PaneSpec, cols: number, rows: number) => {
+      // gh's browser login is Setup's on the Mac (it opens a browser there).
+      if (isRemote(e) && spec?.kind === "gh-login")
+        return { ok: false, replay: "", seq: 0, exited: true, message: "log in to GitHub on the Mac" };
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
@@ -2496,6 +2715,80 @@ async function ghAccounts(): Promise<{
       };
 }
 
+const GH_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+
+/** GH_TOKEN for one gh login (Setup's reads about an account, connected or not yet); null when gh has none. Never logged. */
+async function tokenEnv(login: string): Promise<Record<string, string> | null> {
+  const t = await run(
+    "gh",
+    ["auth", "token", "--hostname", "github.com", "--user", login],
+    { timeoutMs: 15_000 },
+  );
+  const token = t.stdout.trim();
+  return t.code === 0 && token ? { GH_TOKEN: token } : null;
+}
+
+// Set from the default config at load, so a state emitted before the first refreshAccounts (at
+// launch, after loadConfig) does not start a second one.
+let accountsKey = accountsKeyOf(getConfig());
+
+/**
+ * Tokens and settings files of the connected accounts (launch, config change, hourly). Resolves once
+ * the local token reads are done; GitHub's health answers update ghAccounts in the background.
+ */
+async function refreshAccounts(): Promise<void> {
+  const cfg = getConfig();
+  accountsKey = accountsKeyOf(cfg);
+  // A disconnected account's file stays while a live session still runs as it (until the agents
+  // poll has answered, every session recorded in session-accounts.json counts as live).
+  const inUse = accountsInUse(
+    join(paths.home, "session-accounts.json"),
+    latest && sources.isHealthy("agents") ? latest.sessions : null,
+  );
+  await accountEnv.refresh(cfg.accounts, inUse);
+  sources.setGhAccounts(accountEnv.status());
+  void refreshGhActive();
+  void accountEnv
+    .check()
+    .then(() => sources.setGhAccounts(accountEnv.status()))
+    .catch((e) => console.error(`accounts check: ${String(e)}`));
+}
+
+/**
+ * gh's active login, for the Needs-you notice when it is not MasterDeck's primary (one account runs
+ * as it). `gh config get user` reads gh's own config file: no network, so it can run every minute.
+ */
+async function refreshGhActive(): Promise<void> {
+  const r = await run("gh", ["config", "get", "user", "-h", "github.com"], {
+    timeoutMs: 5_000,
+  });
+  const login = r.stdout.trim();
+  sources.setGhActive(r.code === 0 && GH_LOGIN.test(login) ? login : null);
+}
+
+/**
+ * First launch of the multi-account version (see migrateLegacyConfig): in the background, since gh
+ * auth status and gh api user go to the network; one account behaves as before meanwhile. The
+ * config is re-read from the file after the waits (getConfig() lags the 2 s file watch).
+ */
+async function migrateAccounts(): Promise<void> {
+  const r = await migrateLegacyConfig({
+    read: () => sources.loadConfig(),
+    activeLogin: async () => {
+      const { accounts } = await ghAccounts();
+      return (accounts.find((a) => a.active) ?? accounts[0])?.login ?? null;
+    },
+    run,
+    backup: () =>
+      copyFileSync(
+        paths.config,
+        join(dirname(paths.config), `config.backup.${Date.now()}.json`),
+      ),
+    save: (patch) => cli.configSave(patch),
+  });
+  if (r === "migrated") sources.loadConfig();
+}
+
 async function setupCheck(): Promise<SetupCheck> {
   const ok = async (cmd: string, args: string[]) =>
     (await run(cmd, args, { timeoutMs: 15_000 })).code === 0;
@@ -2508,10 +2801,14 @@ async function setupCheck(): Promise<SetupCheck> {
     run("gh", ["auth", "status"], { timeoutMs: 20_000 }),
   ]);
   const login = user.code === 0 ? user.stdout.trim() : "";
-  // Several accounts print a block each: the scopes that count are the active account's.
+  // Several accounts print a block each, with that token's scopes. One account: the active
+  // account's; two or more: only scopes every connected account has (see setupScopes).
   const accounts = parseGhAccounts(status.stdout + "\n" + status.stderr);
-  const scopes =
-    (accounts.find((a) => a.active) ?? accounts[0])?.scopes.join(",") ?? "";
+  const cfg = getConfig();
+  const scopes = setupScopes(
+    accounts,
+    isMulti(cfg) ? cfg.accounts.map((a) => a.login) : null,
+  ).join(",");
   const claudeOk = await ok(claudeBin, ["--version"]);
   return {
     claude: claudeOk ? claudeBin : null,
@@ -2697,7 +2994,23 @@ app.whenReady().then(async () => {
     }
   }, 1000);
   createWindow();
-  sources.setResumer((e) => resumeBg(e.sessionId, e.name, e.cwd));
+  sources.setResumer((e) =>
+    resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
+  );
+  // Accounts before the first GitHub reads: with two or more, each read needs its account's token.
+  // Only the local token reads are awaited; nothing here waits on the network.
+  try {
+    sources.loadConfig();
+    await refreshAccounts();
+  } catch (e) {
+    console.error(`accounts: ${String(e)}`);
+  }
+  if (!SMOKE)
+    void migrateAccounts().catch((e) =>
+      console.error(`accounts migration: ${String(e)}`),
+    );
+  setInterval(() => void refreshAccounts(), 3_600_000);
+  setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
   syncRemote();
   if (SMOKE) {

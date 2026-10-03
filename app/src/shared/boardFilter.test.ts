@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
 const card = (p: Partial<BoardCard>): BoardCard => ({ number: 1, title: 'T', url: '', status: 'In Dev', prs: [], assignees: [], labels: [], milestone: null, type: null, ...p })
@@ -121,5 +122,61 @@ describe('activeBoardFilterCount', () => {
     expect(activeBoardFilterCount(defaultFilters(null), null)).toBe(0)
     expect(activeBoardFilterCount({ ...defaultFilters(ME), assignees: [] }, ME)).toBe(1)
     expect(activeBoardFilterCount({ ...defaultFilters(ME), labels: ['a', 'b'], milestone: 'Oct', hasPr: 'with', search: 'x', hiddenColumns: ['Done'], repos: ['o/r'], projects: ['p'] }, ME)).toBe(7)
+  })
+})
+
+describe('tabs per account', () => {
+  const cfg = parseConfig({ accounts: [
+    { login: 'alice', primary: true, owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'], projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] },
+    { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [{ owner: 'globex', number: 7, columns: ['Backlog', 'Shipped'] }] },
+  ] })
+  const logins = ['alice', 'bob-work']
+
+  it('a tab saved without an account, or with one no longer connected, is the primary', () => {
+    expect(tabAccount({}, logins)).toBeUndefined()
+    expect(tabAccount({ account: 'carol' }, logins)).toBeUndefined()
+    expect(tabAccount({ account: 'bob-work' }, logins)).toBe('bob-work')
+  })
+  it('adds a "Mine" tab for each newly connected account, once', () => {
+    const tabs: BoardTab[] = [{ id: 'board-mine', name: 'Mine', filters: defaultFilters('alice') }]
+    const make = (l: string): BoardTab => ({ id: `board-mine-${l}`, name: 'Mine', account: l, filters: defaultFilters(l) })
+    const r = withAccountTabs(tabs, logins, 'alice', [], make)
+    expect(r.tabs.map((t) => [t.id, t.account])).toEqual([['board-mine', undefined], ['board-mine-bob-work', 'bob-work']])
+    expect(r.added).toEqual(['bob-work'])
+    // Closed by the user: not added back.
+    const again = withAccountTabs(tabs, logins, 'alice', r.added, make)
+    expect(again.tabs).toBe(tabs)
+    expect(withAccountTabs(tabs, ['alice'], 'alice', [], make).tabs).toBe(tabs)
+  })
+  it("shows one account's boards: their cards, their columns, its own Mine", () => {
+    const b: Board = {
+      ...board([
+        card({ number: 1, project: 'acme/1', assignees: ['alice'] }),
+        card({ number: 2, project: 'globex/7', assignees: ['bob-work'] }),
+        card({ number: 3, repo: 'globex/app', project: null, assignees: [] }),
+      ]),
+      columns: ['Todo', 'Done', 'Backlog', 'Shipped'],
+      projects: [{ key: 'acme/1', title: 'A', columns: ['Todo', 'Done'] }, { key: 'globex/7', title: 'G', columns: ['Backlog', 'Shipped'] }],
+    }
+    const bob = boardForAccount(b, 'bob-work', cfg)
+    expect(bob.cards.map((c) => c.number)).toEqual([2, 3])
+    expect(bob.columns).toEqual(['Backlog', 'Shipped'])
+    expect(applyFilters(bob, defaultFilters('bob-work')).cards.map((c) => c.number)).toEqual([2])
+    expect(boardForAccount(b, 'alice', cfg).cards.map((c) => c.number)).toEqual([1])
+    expect(boardForAccount(b, null, cfg)).toBe(b)
+    expect(boardForAccount(b, 'alice', parseConfig({ accounts: [{ login: 'alice', owner: 'acme', issueRepo: 'tracker' }] }))).toBe(b)
+  })
+  it("offers a tab only its account's sprints", () => {
+    const sp = (title: string, projects?: string[]) => ({ id: title, title, startDate: '2026-10-01', duration: 14, completed: false, projects })
+    const all = [sp('S1', ['acme/1']), sp('S2', ['globex/7']), sp('S3', ['acme/1', 'globex/7']), sp('S4')]
+    expect(sprintsForAccount(all, 'bob-work', cfg).map((s) => s.title)).toEqual(['S2', 'S3', 'S4'])
+    expect(sprintsForAccount(all, null, cfg)).toBe(all)
+    expect(sprintsForAccount(all, 'alice', parseConfig({ accounts: [{ login: 'alice', owner: 'acme', issueRepo: 'tracker' }] }))).toBe(all)
+  })
+  it('saved tabs: an account is kept, an old tab has none (the primary)', () => {
+    const t = parseSavedTabs([{ id: 'a', name: 'Mine', filters: {}, account: 'bob-work' }, { id: 'b', filters: {} }, null], 'alice')
+    expect(t?.map((x) => [x.id, x.name, x.account])).toEqual([['a', 'Mine', 'bob-work'], ['b', 'Board', undefined]])
+    expect(parseSavedTabs([], 'alice')).toBeNull()
+    expect(parseSavedTabs('x', 'alice')).toBeNull()
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AssignRequest } from '@shared/ipc'
-import { startAssign, type AssignCli } from './assign'
+import { assignNow, startAssign, type AssignCli } from './assign'
 
 function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
   const calls: string[] = []
@@ -9,7 +9,7 @@ function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
     approve: async (ids) => (calls.push(`approve ${ids}`), (over.approve as never) ?? ok()),
     reject: async (ids) => (calls.push(`reject ${ids}`), ok()),
     spawn: async (id) => (calls.push(`spawn ${id}`), (over.spawn as never) ?? ok()),
-    addAssign: async (a) => (calls.push(`add ${a.name}${a.model ? ` --model ${a.model}` : ''}`), (over.addAssign as never) ?? { ok: true, id: 30 }),
+    addAssign: async (a) => (calls.push(`add ${a.name}${a.model ? ` --model ${a.model}` : ''}${a.account ? ` --account ${a.account}` : ''}`), (over.addAssign as never) ?? { ok: true, id: 30 }),
   }
   return { cli, calls }
 }
@@ -17,6 +17,17 @@ function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
 const req = (p: Partial<AssignRequest>): AssignRequest => ({ issue: 9, name: '9-x', cwd: '/w', prompt: 'P', proposalId: null, edited: false, approved: false, ...p })
 
 describe('startAssign', () => {
+  it('a chosen account makes a new proposal with it; the fallback goes only on new proposals', async () => {
+    const f = fakeCli()
+    await startAssign(f.cli, req({ proposalId: 20, account: 'bob-work' }))
+    expect(f.calls).toEqual(['add 9-x --account bob-work', 'approve 30', 'reject 20', 'spawn 30'])
+    const g = fakeCli()
+    await startAssign(g.cli, req({ proposalId: 20 }), 0, 'alice')
+    expect(g.calls).toEqual(['approve 20', 'spawn 20'])
+    const h = fakeCli()
+    await startAssign(h.cli, req({}), 0, 'alice')
+    expect(h.calls[0]).toBe('add 9-x --account alice')
+  })
   it("reuses master's unchanged proposal: approve, then spawn", async () => {
     const f = fakeCli()
     expect((await startAssign(f.cli, req({ proposalId: 20 }))).ok).toBe(true)
@@ -54,5 +65,52 @@ describe('startAssign', () => {
     const f = fakeCli()
     await startAssign(f.cli, req({ proposalId: 30, approved: true }))
     expect(f.calls).toEqual(['spawn 30'])
+  })
+})
+
+describe('assignNow', () => {
+  const multi = (proposalAccount: string | null = null) => {
+    const expected: string[] = []
+    return {
+      expected,
+      acc: {
+        settings: async (a: string | null | undefined) => ({ ok: true as const, args: ['--settings', `/f/${a || 'alice'}`], account: a || 'alice' }),
+        proposalAccount: () => proposalAccount,
+        expect: (name: string, login: string) => expected.push(`${name} ${login}`),
+      },
+    }
+  }
+
+  it("reuses master's proposal when it already names the account, and records it", async () => {
+    const f = fakeCli()
+    const m = multi('alice')
+    expect((await assignNow(f.cli, req({ proposalId: 20 }), m.acc, 0)).ok).toBe(true)
+    expect(f.calls).toEqual(['approve 20', 'spawn 20'])
+    expect(m.expected).toEqual(['9-x alice'])
+  })
+  it("a reused proposal without the account (it would start as gh's active one) becomes a new one carrying it", async () => {
+    const f = fakeCli()
+    await assignNow(f.cli, req({ proposalId: 20, approved: true }), multi(null).acc, 0)
+    expect(f.calls).toEqual(['add 9-x --account alice', 'approve 30', 'reject 20', 'spawn 30'])
+    const g = fakeCli()
+    await assignNow(g.cli, req({ proposalId: 20, account: 'bob-work' }), multi('alice').acc, 0)
+    expect(g.calls[0]).toBe('add 9-x --account bob-work')
+  })
+  it('one account: the account is dropped and nothing is recorded', async () => {
+    const f = fakeCli()
+    const m = multi()
+    const single = { ...m.acc, settings: async () => ({ ok: true as const, args: [], account: null }) }
+    await assignNow(f.cli, req({ proposalId: 20, account: 'bob-work' }), single, 0)
+    expect(f.calls).toEqual(['approve 20', 'spawn 20'])
+    await assignNow(f.cli, req({ account: 'bob-work' }), single, 0)
+    expect(f.calls[2]).toBe('add 9-x')
+    expect(m.expected).toEqual([])
+  })
+  it('an account that needs to log in again is refused before anything is added', async () => {
+    const f = fakeCli()
+    const m = multi()
+    const bad = { ...m.acc, settings: async () => ({ ok: false as const, message: 'GitHub account bob-work needs to log in again' }) }
+    expect(await assignNow(f.cli, req({ account: 'bob-work' }), bad, 0)).toEqual({ ok: false, message: 'GitHub account bob-work needs to log in again' })
+    expect(f.calls).toEqual([])
   })
 })

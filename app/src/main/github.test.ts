@@ -44,3 +44,16 @@ describe('GitHub users', () => {
     expect(await new GitHub(f.run).me()).toBe('alice')
   })
 })
+
+describe('GitHub.teamPrPages', () => {
+  const empty = JSON.stringify({ data: { search: { nodes: [], pageInfo: { hasNextPage: false } } } })
+  it("searches the given owner as its type (an account's), else the config's owner as before", async () => {
+    const f = fake(() => ({ stdout: empty }))
+    const NOW = Date.parse('2026-09-25T12:00:00Z')
+    expect((await new GitHub(f.run).teamPrPages('globex', NOW, false, 'user')).ok).toBe(true)
+    expect(f.calls.map((a) => a.find((x) => x.startsWith('q='))?.split(' ')[0])).toEqual(['q=user:globex', 'q=user:globex'])
+    f.calls.length = 0
+    await new GitHub(f.run).teamPrPages(undefined, NOW)
+    expect(f.calls.map((a) => a.find((x) => x.startsWith('q='))?.split(' ')[0])).toEqual(['q=org:acme', 'q=org:acme'])
+  })
+})

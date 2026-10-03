@@ -25,6 +25,8 @@ function deps(state: AppState | null, over: Partial<RemoteDeps> = {}): RemoteDep
     sendNow: vi.fn(async () => ok('sent')),
     queueEdit: vi.fn(() => ok('queued')),
     setManualStatus: vi.fn(() => ok('status set')),
+    isMulti: () => false,
+    configLogins: () => [],
     ...over,
   }
 }
@@ -59,6 +61,32 @@ describe('RemoteCommands', () => {
     expect(d.startAssign).toHaveBeenLastCalledWith({ issue: 142, repo: 'o/app', name: 'app-142', cwd: '/w/app', prompt: 'Work on #142', proposalId: null, edited: false, approved: false, model: 'opus' })
     await rc.run(cmd({ type: 'session.start', args: { issue: 142, prompt: 'Only read the code' } }))
     expect(d.startAssign).toHaveBeenLastCalledWith(expect.objectContaining({ prompt: 'Only read the code', edited: true }))
+  })
+
+  describe('session.start account', () => {
+    const accts = [{ login: 'alice', primary: true, healthy: true }, { login: 'bob-work', primary: false, healthy: true }, { login: 'carol', primary: false, healthy: false }]
+    const multi = (ghAccounts = accts) => deps({ ...st([]), ghAccounts } as unknown as AppState, { isMulti: () => true, configLogins: () => ['alice', 'bob-work', 'carol', 'dora'] })
+    const start = (d: RemoteDeps, account: string) => new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 1, account } }))
+    it('passes a connected healthy account, canonical login, case-insensitive', async () => {
+      const d = multi()
+      expect(await start(d, 'BOB-work')).toEqual({ ok: true, message: 'started' })
+      expect(d.startAssign).toHaveBeenLastCalledWith(expect.objectContaining({ account: 'bob-work' }))
+    })
+    it('refuses an unknown or unhealthy account', async () => {
+      const d = multi()
+      for (const a of ['carol', 'dave']) expect(await start(d, a)).toEqual({ ok: false, message: `${a} is not a GitHub account connected on this Mac` })
+      expect(d.draftAssign).not.toHaveBeenCalled()
+    })
+    it('fails closed while ghAccounts has not caught up with the config', async () => {
+      const d = multi([accts[0]])
+      expect(await start(d, 'dora')).toEqual({ ok: false, message: 'GitHub accounts are still loading on this Mac; try again in a few seconds' })
+      expect(d.startAssign).not.toHaveBeenCalled()
+    })
+    it('single mode drops the account and starts', async () => {
+      const d = deps({ ...st([]), ghAccounts: [accts[0]] } as unknown as AppState)
+      expect(await start(d, 'bob-work')).toEqual({ ok: true, message: 'started' })
+      expect((d.startAssign as any).mock.calls[0][0]).not.toHaveProperty('account')
+    })
   })
 
   it('session.start reports a failed draft', async () => {

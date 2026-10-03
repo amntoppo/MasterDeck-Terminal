@@ -128,6 +128,7 @@ Never edit it by hand: change the backend file, then `app/scripts/sync-protocol.
 `$MASTERDECK_BACKEND`, default `../../masterdeck-backend` from `app/scripts`). The drift test
 `app/src/shared/remote.drift.test.ts` compares the two; it resolves the backend as the sibling
 checkout (or `MASTERDECK_BACKEND`) and **skips** when that is missing (so it never runs in CI).
+`session.start.account` (2026-10-03) is optional; desktops before it refuse a command that sets it.
 It fails when the backend checkout is on a branch with a different `protocol.ts`.
 `PROTOCOL_VERSION` is 3 (`MIN_PROTOCOL` 2); keep changes additive so old desktops, servers and
 web tabs keep working.
@@ -144,9 +145,11 @@ web tabs keep working.
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
 | PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
+| Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
+| GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts`, `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
@@ -226,8 +229,14 @@ buttons; it does not go through macOS window drag regions.
   agents --json` first.
 - An AskUserQuestion menu is not in the transcript until it is answered: read it from the screen
   (`claude logs <id>`, rendered with `@xterm/headless`; `shared/ask.ts` `parseMenuScreen`).
-- The shared GitHub cache (`ghcache`) is not per `gh` account: reads right after an account switch
-  (Setup) go straight to GitHub.
+- The shared GitHub cache (`ghcache`) keys calls by account (`GHC_ACCOUNT`, two or more connected
+  accounts): MasterDeck's own calls and every session started as an account (its settings file sets
+  `GH_TOKEN` and `GHC_ACCOUNT`, so `ghc` in it never serves another account's answers). A `GH_TOKEN`
+  without `GHC_ACCOUNT` keys on a short hash of the token (`-t<hash>`, pause `paused--t<hash>.json`);
+  calls with neither (one account, plain shells) keep today's keys, which follow gh's active account.
+- One account runs as gh's active account: when that is not MasterDeck's primary (`gh config get user`,
+  each minute), Needs you says to `gh auth switch -u <primary>` (`accountNotices`). With two or more,
+  a master-agent not recorded as started with the primary's `--settings` gets a "restart master-agent" notice.
 - Tests that spawn bash/jq/git get a 20 s timeout; the full suite runs files in parallel.
 - `claude -p` for app features (summaries): run from an empty temp folder with
   `--no-session-persistence`, tell the model the writing style, and remove the empty
@@ -257,6 +266,7 @@ buttons; it does not go through macOS window drag regions.
   phone layout (merge b3c4d4b: ≤760 px, `usePhone()`, CSS in `web.css` under `.app.phone` /
   `html.phone`, dev-only preview `npm run dev:web` + `/?preview`). The web app with the phone layout
   is deployed to app.masterdeck.dev.
+- Branch `feat/multi-gh-accounts` (plan I, multiple GitHub accounts; spec and plan in the backend repo, 2026-10-03): not merged, not pushed. Backend branch `feat/session-start-account` (protocol `session.start.account`, worktree `~/Documents/masterdeck-backend-proto`): not pushed, not deployed; the drift test needs the backend checkout on it (`MASTERDECK_BACKEND`) while working on the MasterDeck branch.
 - Backend `master` = `3af02f3` (PR #8, docs only), deployed code is PR #5 (`fccbfee`).
 - Next: whatever the user picks from [docs/TODO.md](docs/TODO.md). Top of the list: decide on
   pushing/releasing, fix or accept the broken backend CI deploy, re-measure web-bridge upload with

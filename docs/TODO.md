@@ -26,6 +26,61 @@ fixes it, and move the item here to "Recently done".
   busy sessions and one tab on Terminals and one on Tasks.
 - **P3 · User to confirm Cloudflare billing**: Free plan, payment method, and whether
   `masterdeck.dev` auto-renews (Registrar). Not code.
+- **P2 · Global git rules sending GitHub over SSH beat a session's account.** A
+  `url.<ssh>.insteadOf`/`pushInsteadOf` for `https://github.com/` in the user's global git config
+  wins over the per-session rewrite (`accountEnvBlock`), so a session may push as the SSH key's
+  account. Today it is only detected (`githubSshRewrite` in `main/accountEnv.ts`, a `warning` on
+  `ghAccounts`). Approach: give sessions `GIT_CONFIG_GLOBAL` pointing at a copy of the global config
+  without those rules, or a per-account `core.sshCommand` with the right key.
+
+- **P3 · Multi-account polling gaps.** `master board`'s `errors` don't name the account (the app
+  shows them as is); a rate limit on one account pauses the app's polling for every account
+  until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
+  before a second account was connected are dropped (not kept as the primary's) if the primary's
+  first search fails; `me`/assignable users are the primary's only.
+- **P2 · Session accounts across resume and attach.** Verified (Claude Code 2.1.288):
+  `claude attach` of a parked session keeps its account. `claude --bg --resume` with flags starts
+  a copy under a new session id and bg id, and the old session keeps its own saved options; only a
+  resume without flags continues it (MasterDeck always passes `-n`, and `--settings` with two or
+  more accounts, so its resumes are copies). Handled: `resumeAs` records the copy's bg id from the
+  `backgrounded · <id>` line (else `claude attach <id>`), `claim` adds the new session id. Open:
+  whether a copy should be avoided (resume without flags when the saved options already match).
+- **P2 · Board tab builder folders and Claude Code's trust dialog.** Every new Board tab's
+  builder folder (`ticket-builder/tab-<id>/`) shows Claude Code's trust dialog until it is
+  accepted, and its pre-approved permissions are ignored until then. Check after a reinstall
+  whether trusting `<home>/ticket-builder` covers its `tab-*` subfolders; if not, pre-trust each
+  new folder or start them in the shared folder.
+- **P3 · Parked: gh-active notice with `GH_TOKEN` in the app's env.** When the app's environment
+  carries `GH_TOKEN` (or `GITHUB_TOKEN`) for another user, the notice that gh's active account is
+  not the primary gives wrong advice (gh uses the token, not the active account). Approach:
+  suppress the notice when `GH_TOKEN`/`GITHUB_TOKEN` is set.
+- **P3 · Accepted simplifications of several accounts.** (a) A rate limit on one account pauses
+  MasterDeck's own polling for all accounts (`Sources.githubPaused` is global; ghcache's pause is per
+  account): per-account pause if it bites. (b) Skills run by hand inside a session use its token and
+  `GHC_ACCOUNT` but the primary's config and boards; outside a session, gh's active account. (c) SSH aliases are only read from `~/.ssh/config`. (d) A global
+  `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
+  builder sessions use gh's active account. (f) master starts without `--settings` when the primary
+  needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
+  without an `origin` of any connected account is read as the primary. (h) Boards and their repos
+  belong to one account: a board holding issues from another account's repos moves cards as the
+  repo's account. (i) Select all in one account's Repos & boards may widen what another account
+  lists. (j) An account can show healthy for a few seconds before its background check fails.
+- **P3 · Phone/API clients and `session.start.account`.** The protocol field is in the backend
+  branch `feat/session-start-account` (worktree `~/Documents/masterdeck-backend-proto`), not pushed
+  or deployed; no web or phone UI sends it yet. The drift test needs that checkout (set
+  `MASTERDECK_BACKEND`) while the MasterDeck branch is unmerged.
+- **P3 · Several-accounts review leftovers (small).**
+  - Config parsing: `parseAccounts` warns on every parse, top-level `repos` are ignored once an account lists repos, a duplicate board under two accounts is dropped silently, `repoFromRemote` accepts any host for scp/ssh forms, `ssh://git@github.com:443/` and aliases without `user@` are not rewritten, `#` anywhere strips the rest of an ssh config line, login and board keys compared case-sensitively in `accountForProject`/`sessionAccount`.
+  - Accounts: a removed account's file lingers up to an hour after its last session ends; a failing `configSave` writes a `config.backup.<ts>.json` each launch; a transient `gh auth token` failure deletes an unused file until the next refresh; `accountClients` never evicts removed logins; an invalid `GHC_ACCOUNT` fails open to the default cache key; `ghc --status` reads only `paused.json`; gh's active account is read each minute (a switch shows up to a minute late); the master-agent notice also shows for a master started by hand while gh's active account is the primary; Setup's scopes with several accounts are the intersection (`project` vs `read:project` not merged).
+  - Sessions: `accountOfSession` matches spawn proposals by name only (a reused name picks an old account); `proposalAccount` reads the latest snapshot; AssignDialog's default ignores a proposal's `spawn.account`; a removed or unhealthy recorded login is still shown and sent on resume (fails visibly); unhealthy and unknown accounts get the same remote refusal text; PR watch: an entry whose account was removed falls back to the primary, and a PR shared by two sessions keeps the first one's account.
+  - Setup/UI: `closeLogin` may run twice, repeated Log in clicks open duplicate gh-login tabs, the gh-login pane inherits the app's env (a `GH_TOKEN` set at launch makes `gh auth login` refuse), a board held by another account stays in raw `boards` state.
+  - Board/PRs: untagged cards on unconfigured boards show only on the primary tab, the global `selectedSprint` may name a sprint the tab's account lacks, after multi to single stale tagged team PR copies show twice until the next refresh.
+  - Ticket builder: `md-ticket-builder-*` sessions are hidden by name, a corrupt `context.json` skips the remote account check, and a ticket session's account is sticky.
+  - Tests missing: multi-mode gating, remote refusal, dismiss-heal, the `context.json` read, `Sources` glue; the `.pane-head` layout and a prettier warning on `main/index.ts` were not checked.
+- **P3 · Old per-tab ticket-builder folders are never removed.** With two or more accounts each
+  Board tab gets `ticket-builder/tab-<id>/`; closing the tab leaves it (so reopening continues).
+  Main doesn't know which tabs exist (they live in the renderer's storage), so nothing sweeps them.
+  Approach: the renderer reports its tab ids, and `tab-*` folders of no tab untouched for 7 days go.
 
 ## Remote / web
 
@@ -119,6 +174,9 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
+| Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |
+| Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |
 | Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a … 68bf172, merge b3c4d4b; deployed | — |

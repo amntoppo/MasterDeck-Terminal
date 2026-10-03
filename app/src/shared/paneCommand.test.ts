@@ -23,4 +23,18 @@ describe('paneCommand', () => {
     expect(isSafeBgId('ea39fd38')).toBe(true)
     expect(isSafeBgId('ea39fd38; rm -rf')).toBe(false)
   })
+  it('ticket builder: one account exactly as before; a tab gets its own name and its account settings', () => {
+    expect(paneCommand({ kind: 'ticket-builder', resume: true, prompt: 'hi' }, 'darwin', '/bin/zsh')).toEqual({
+      file: 'claude',
+      args: ['--continue', '-n', 'md-ticket-builder', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits', 'hi'],
+    })
+    expect(paneCommand({ kind: 'ticket-builder', resume: false, tab: 't1', account: 'bob-work' }, 'darwin', '/bin/zsh', 'claude', ['--settings', '/a/bob-work.settings.json'])).toEqual({
+      file: 'claude',
+      args: ['-n', 'md-ticket-builder-t1', '--settings', '/a/bob-work.settings.json', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits'],
+    })
+  })
+  it("runs gh's own browser login", () => {
+    expect(paneCommand({ kind: 'gh-login' }, 'darwin', '/bin/zsh')).toEqual({ file: 'gh', args: ['auth', 'login', '--hostname', 'github.com', '--web'] })
+    expect(paneCommand({ kind: 'gh-login' }, 'win32', undefined).file).toBe('gh.exe')
+  })
 })

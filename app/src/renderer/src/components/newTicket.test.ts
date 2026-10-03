@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, ticketDefaults } from "./NewTicket";
+import { boardFor, claudeHandoff, ticketDefaults } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
 import type { AppState } from "@shared/types";
+import { parseConfig } from "@shared/appConfig";
 
 const cfg = {
   owner: "Org",
@@ -118,5 +119,38 @@ describe("new ticket", () => {
       "acceptEdits",
       "Create this ticket",
     ]);
+  });
+});
+
+describe("new ticket per account", () => {
+  const two = {
+    ...state,
+    me: "alice",
+    config: parseConfig({
+      accounts: [
+        { login: "alice", primary: true, owner: "acme", issueRepo: "tracker", repos: ["acme/tracker"], projects: [{ owner: "acme", number: 1, columns: ["Todo", "In Dev"] }] },
+        { login: "bob-work", owner: "globex", issueRepo: "app", repos: ["globex/app"], projects: [{ owner: "globex", number: 7, columns: ["Backlog", "In Dev"] }] },
+      ],
+    }),
+  } as unknown as AppState;
+  it("a tab of another account: its board, its repo, its login", () => {
+    expect(boardFor(two, "In Dev", defaultFilters(null), "bob-work")).toBe("globex/7");
+    expect(boardFor(two, "In Dev", defaultFilters(null))).toBe("acme/1");
+    const t = ticketDefaults(two, { status: "Backlog", project: "globex/7", filters: defaultFilters(null), sprint: "@current", tab: "Mine", account: "bob-work" });
+    expect([t.repo, t.assignees]).toEqual(["globex/app", ["bob-work"]]);
+  });
+});
+
+describe("Create with Claude from the dialog", () => {
+  it("one account: always offered, plain label", () => {
+    expect(claudeHandoff(false, null, undefined)).toEqual({ label: "Create with Claude", blocked: null });
+  });
+  it("several: labelled with the tab's account; blocked (with a note) when the pick is another account", () => {
+    expect(claudeHandoff(true, "alice", "alice")).toEqual({ label: "Create with Claude as @alice", blocked: null });
+    expect(claudeHandoff(true, "Alice", "alice").blocked).toBeNull();
+    expect(claudeHandoff(true, "bob-work", "alice")).toEqual({
+      label: "Create with Claude as @alice",
+      blocked: "Create with Claude runs on this tab's account; switch to a @bob-work tab to use it",
+    });
   });
 });

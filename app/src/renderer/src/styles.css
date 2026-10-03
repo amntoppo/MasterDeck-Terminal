@@ -786,6 +786,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .srow-top .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .srow-top .num { color: var(--muted); font-family: var(--mono); font-size: 10.5px; flex: none; }
+.acct-badge { flex: none; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-4); color: var(--muted); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
 .srow-sub { margin-top: 2px; padding-left: 16px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .srow-x { border: none; background: none; color: var(--faint); font-size: 14px; line-height: 1; padding: 0 2px; cursor: pointer; visibility: hidden; }
 .srow:hover .srow-x { visibility: visible; }
@@ -1248,3 +1249,7 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .ri-name { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
 .ri-sub { font-size: 11px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ri-dot { animation: none; opacity: 1; } }
+/* Two or more GitHub accounts: the account a session works as, at its top. */
+.pane-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; min-width: 0; }
+.pane-head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-acct { flex: none; display: inline-flex; align-items: center; color: var(--muted); font-size: 11.5px; white-space: nowrap; }

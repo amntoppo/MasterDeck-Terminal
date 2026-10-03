@@ -11,6 +11,7 @@ from . import config, ledger
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$")
+ACCOUNT_RE = re.compile(rf"^{config.LOGIN_RE}$")
 
 
 class SpawnError(RuntimeError):
@@ -37,6 +38,17 @@ def validate_model(model: "str | None") -> "str | None":
     return None
 
 
+def validate_account(account: "str | None") -> "str | None":
+    if account is not None and not ACCOUNT_RE.fullmatch(str(account)):
+        return f"invalid account: {account!r}"
+    return None
+
+
+def account_settings(account: str) -> Path:
+    """The Claude Code settings file MasterDeck writes for a connected GitHub account (two or more)."""
+    return config.masterdeck_home() / "accounts" / f"{account}.settings.json"
+
+
 def validate_resume(resume: "str | None") -> "str | None":
     try:
         if str(uuid.UUID(resume)) != resume.lower():
@@ -48,6 +60,9 @@ def validate_resume(resume: "str | None") -> "str | None":
 
 def validate_spawn_target(sp: dict) -> "str | None":
     """Validate a `target["spawn"]` dict. Returns None when valid, else the reason."""
+    err = validate_account(sp.get("account"))
+    if err:
+        return err
     if sp.get("resume"):
         return validate_resume(sp["resume"])
     err = validate_name(sp.get("name")) or validate_model(sp.get("model"))
@@ -61,10 +76,44 @@ def command(target: dict) -> list:
     err = validate_spawn_target(sp)
     if err:
         raise SpawnError(err)
+    acct = []
+    # One account: no --settings, the command as before (an account in the target is ignored).
+    if sp.get("account") and config.is_multi():
+        # A disconnected account's file may linger while its old sessions run: never start a new one as it.
+        login = next((a["login"] for a in config.accounts() if a["login"].lower() == str(sp["account"]).lower()), None)
+        if not login:
+            raise SpawnError(f"GitHub account {sp['account']} is not a connected account (Setup → GitHub accounts)")
+        # Never start as gh's active account instead: that would commit as someone else.
+        f = account_settings(login)
+        if not f.is_file():
+            raise SpawnError(f"GitHub account {sp['account']} has no settings file ({f}); "
+                             "open MasterDeck (it writes them) or log the account in again there")
+        acct = ["--settings", str(f)]
     if sp.get("resume"):
-        return ["claude", "--bg", "--resume", sp["resume"]]
+        return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
-    return ["claude", "--bg", "-n", sp["name"], *model, sp["prompt"]]
+    return ["claude", "--bg", *acct, "-n", sp["name"], *model, sp["prompt"]]
+
+
+def default_account(led: dict, p: dict, cwd: str) -> "str | None":
+    """The account a proposal without one starts as (two or more accounts). A resume (an ORPHAN whose
+    session MasterDeck did not record) as the app's sessionAccount: the session's own spawn proposal,
+    its folder's `origin` repo, then the issue repo's account, else the primary. A new session: the
+    issue repo's account, else the primary."""
+    sp = p["target"]["spawn"]
+    if sp.get("resume"):
+        connected = {a["login"].lower(): a["login"] for a in config.accounts()}
+        for q in reversed(led["proposals"]):
+            qs = (q.get("target") or {}).get("spawn") or {}
+            if q is not p and qs.get("name") == sp.get("name") and not qs.get("resume"):
+                login = connected.get(str(qs.get("account") or "").lower())
+                if login:
+                    return login
+        repo = config.origin_repo(cwd)
+        origin = config.match_repo(repo) if repo else None
+        if origin:
+            return origin
+    return config.account_for_repo(p.get("repo"))
 
 
 def running(session_id: str, runner=subprocess.run) -> bool:
@@ -100,6 +149,11 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         note = f"cwd does not exist: {cwd}"
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
+    if config.is_multi() and not p["target"]["spawn"].get("account"):
+        # A proposal without an account (older, or `master add` without --account) never starts as
+        # gh's active account: its repo's account, else the primary's (spec 4.2). Written to the
+        # ledger (locked by the caller) so the app attributes the session to it.
+        p["target"]["spawn"]["account"] = default_account(led, p, cwd)
     try:
         cmd = command(p["target"])
     except (KeyError, ValueError, SpawnError) as e:

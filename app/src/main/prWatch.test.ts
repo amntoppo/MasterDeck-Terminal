@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CliResult, PrLive, Session } from '@shared/types'
 import type { GhRunner } from './ghc'
-import { PrWatch, prStates, type PrWatchDeps } from './prWatch'
+import { parseConfig } from '@shared/appConfig'
+import { PrWatch, prStates, prStatesFor, type PrWatchDeps } from './prWatch'
 
 const SID = '55555555-5555-4555-8555-555555555555'
 const url = (n: number) => `https://github.com/acme/web/pull/${n}`
@@ -33,9 +34,9 @@ const withThreads = (...ts: object[]) => ({ ...lightPr, reviewThreads: { nodes: 
 const withThread = (body: string) => withThreads(thread(1, body))
 
 /** A watch past its first run (pr-watch.json there); `firstRun` starts with none. */
-function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json'), firstRun = false) {
+function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json'), firstRun = false, extra: Partial<PrWatchDeps> = {}) {
   const sent: string[] = []
-  const deps: PrWatchDeps = { gh, paused: () => false, send: async (_s, t): Promise<CliResult> => (sent.push(t), { ok: true, message: 'sent' }), onChange: () => {} }
+  const deps: PrWatchDeps = { gh, paused: () => false, send: async (_s, t): Promise<CliResult> => (sent.push(t), { ok: true, message: 'sent' }), onChange: () => {}, ...extra }
   if (!firstRun && !existsSync(file)) writeFileSync(file, '{}')
   const w = new PrWatch(file, deps)
   w.load(NOW)
@@ -44,6 +45,57 @@ function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-
 const one = (createdAt: number, n = 1) => ({ sessions: [sess()], sessionPrs: { [SID]: [url(n)] }, prLive: { [url(n)]: live(createdAt) } })
 
 describe('PrWatch', () => {
+  it('a session that gains an account after its watch began: the watch moves to that account', async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const mine = (who: string) => fakeGh((_i, heavy) => (heavy ? { ...withThreads(), author: { login: who } } : { ...lightPr, author: { login: who } }), () => who)
+    const a = mine('me')
+    const b = mine('bob-work')
+    const { w } = make(a.gh, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : a.gh) })
+    const st = { sessionPrs: { [SID2]: [url(2)] }, prLive: { [url(2)]: live(NOW - 60_000) } }
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2 }
+    w.sync({ ...st, sessions: [bob] }, () => true, NOW)
+    w.sync({ ...st, sessions: [{ ...bob, account: 'bob-work' }] }, () => true, NOW)
+    await w.poll(NOW)
+    expect(a.calls).toEqual([])
+    expect(w.info([bob]).map((i) => i.id)).toEqual([`pr:${url(2)}`])
+  })
+  it('a rate limit on one account skips only that account; the others are read and saved', async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const a = fakeGh((_i, heavy) => (heavy ? withThreads() : lightPr))
+    const limited: GhRunner = async () => ({ code: 1, stdout: '', stderr: 'API rate limit exceeded' })
+    const b = fakeGh((_i, heavy) => (heavy ? withThreads() : lightPr), () => 'me')
+    const { w, deps } = make(limited, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : limited), paused: (o) => !!o && o.includes('rate limit') })
+    void a
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2, account: 'bob-work' }
+    const alice: Session = { ...sess(), account: 'alice' }
+    w.sync({ sessions: [alice, bob], sessionPrs: { [SID]: [url(1)], [SID2]: [url(2)] }, prLive: { [url(1)]: live(NOW - 60_000), [url(2)]: live(NOW - 60_000) } }, () => true, NOW)
+    await w.poll(NOW)
+    expect(b.calls.map((c) => c.heavy)).toEqual([false, true])
+    expect(deps.paused()).toBe(false)
+  })
+  it('a runner that errors (not ready) is no data: the watch stays, no misses', async () => {
+    const down: GhRunner = async () => ({ code: 1, stdout: '', stderr: 'not ready' })
+    const { w } = make(down)
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    for (let i = 0; i < 4; i++) await w.poll(NOW + i * 60_000)
+    expect(w.info([sess()]).map((i) => i.id)).toEqual([`pr:${url(1)}`])
+    expect((w as unknown as { list: { misses?: number }[] }).list[0].misses).toBeUndefined()
+  })
+  it("reads each account's PRs with its own runner, so each one's viewer is its own author", async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const mine = (who: string) => fakeGh((_i, heavy) => (heavy ? { ...withThreads(), author: { login: who } } : { ...lightPr, author: { login: who } }), () => who)
+    const a = mine('me')
+    const b = mine('bob-work')
+    const { w } = make(a.gh, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : a.gh) })
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2, account: 'bob-work' }
+    const sessions = [sess(), bob]
+    w.sync({ sessions, sessionPrs: { [SID]: [url(1)], [SID2]: [url(2)] }, prLive: { [url(1)]: live(NOW - 60_000), [url(2)]: live(NOW - 60_000) } }, () => true, NOW)
+    await w.poll(NOW)
+    expect(a.calls.map((c) => [c.heavy, c.n])).toEqual([[false, 1], [true, 1]])
+    expect(b.calls.map((c) => [c.heavy, c.n])).toEqual([[false, 1], [true, 1]])
+    // Read with the wrong account, bob's PR would have another author than the viewer and its watch would end.
+    expect(w.info(sessions).map((i) => i.id).sort()).toEqual([`pr:${url(1)}`, `pr:${url(2)}`])
+  })
   it('watches a new PR of a session, tells it about a new thread once its turn is over, and not again', async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? withThread('rename x') : lightPr))
     const { w, sent } = make(gh)
@@ -398,5 +450,47 @@ describe('prStates', () => {
     expect(calls.map((c) => [c.heavy, c.n, c.ttl])).toEqual([[false, 50, 300], [false, 1, 300]])
     expect(out[url(1)]).toEqual({ state: 'OPEN', isDraft: true })
     expect(Object.keys(out)).toHaveLength(51)
+  })
+})
+
+describe('prStatesFor', () => {
+  it("asks each account's runner about its own PRs only", async () => {
+    const cfg = parseConfig({ accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] },
+    ] })
+    const asked: Record<string, number> = {}
+    const ghFor = (login: string): GhRunner => async (args) => {
+      const q = args.find((a) => a.startsWith('query='))!.slice(6)
+      const n = (q.match(/ p\d+: /g) ?? []).length
+      asked[login] = (asked[login] ?? 0) + n
+      const data: Record<string, unknown> = {}
+      for (let i = 0; i < n; i++) data[`p${i}`] = { pullRequest: { ...lightPr, author: { login } } }
+      return { code: 0, stdout: JSON.stringify({ data }), stderr: '' }
+    }
+    const got = await prStatesFor(ghFor, cfg, [url(1), 'https://github.com/globex/app/pull/2', url(3)])
+    expect(asked).toEqual({ alice: 2, 'bob-work': 1 })
+    expect(Object.keys(got).sort()).toEqual([url(1), url(3), 'https://github.com/globex/app/pull/2'].sort())
+  })
+
+  it("one account's failing read does not drop the others' answers", async () => {
+    const cfg = parseConfig({ accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] },
+    ] })
+    let bobThrows = false
+    const ghFor = (login: string): GhRunner => async (args) => {
+      if (login === 'bob-work' && bobThrows) throw new Error('spawn failed')
+      if (login === 'bob-work') return { code: 1, stdout: '', stderr: 'GitHub account bob-work needs to log in again' }
+      const q = args.find((a) => a.startsWith('query='))!.slice(6)
+      const n = (q.match(/ p\d+: /g) ?? []).length
+      const data: Record<string, unknown> = {}
+      for (let i = 0; i < n; i++) data[`p${i}`] = { pullRequest: lightPr }
+      return { code: 0, stdout: JSON.stringify({ data }), stderr: '' }
+    }
+    const urls = [url(1), 'https://github.com/globex/app/pull/2']
+    expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
+    bobThrows = true
+    expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
   })
 })

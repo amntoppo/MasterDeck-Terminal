@@ -55,6 +55,8 @@ export class Ops {
     private paths: Paths,
     private claude: () => string,
     private gh: GhRunner = (args, { ttl: _ttl, force: _force, ...opts } = {}) => run('gh', args, opts),
+    /** Every connected account's commit email (two or more accounts). */
+    private emails: () => string[] = () => [],
   ) {}
 
   private git(dir: string, args: string[], timeoutMs = 15_000) {
@@ -95,8 +97,11 @@ export class Ops {
     const logs = await Promise.all(
       [...repos.values()].map(async (dir) => {
         const email = (await this.git(dir, ['config', 'user.email'])).stdout.trim()
-        if (!email) return null
-        const r = await this.git(dir, ['log', '--all', '--source', `--since=${since}`, `--author=${email}`, '--format=%H%x09%at%x09%S%x09%s'], 30_000)
+        // This repo's email and every connected account's: a session commits as its account.
+        const seenEmail = new Set<string>()
+        const authors = [email, ...this.emails()].filter((e) => e && !seenEmail.has(e.toLowerCase()) && seenEmail.add(e.toLowerCase()))
+        if (!authors.length) return null
+        const r = await this.git(dir, ['log', '--all', '--source', `--since=${since}`, ...authors.map((a) => `--author=${a}`), '--format=%H%x09%at%x09%S%x09%s'], 30_000)
         return r.code === 0 ? { dir, out: r.stdout } : null
       }),
     )

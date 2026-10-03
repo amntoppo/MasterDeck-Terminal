@@ -51,15 +51,28 @@ def _gh_ttl(cmd: list) -> int:
     return GH_TTL["commits"]
 
 
-def _run(cmd: list, timeout: int = 120) -> str:
+def account_token(login: str, runner=subprocess.run) -> "str | None":
+    """gh's stored token for one of its logins (gh auth token --user), or None. Never logged."""
+    try:
+        r = runner(["gh", "auth", "token", "--hostname", "github.com", "--user", login],
+                   capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    tok = (r.stdout or "").strip()
+    return tok if r.returncode == 0 and tok else None
+
+
+def _run(cmd: list, timeout: int = 120, env: "dict | None" = None) -> str:
+    """`env`: one account's GH_TOKEN and GHC_ACCOUNT (None: the inherited environment, as before)."""
     if cmd and cmd[0] == "gh" and os.environ.get("MASTER_NO_GH_CACHE") != "1":
         # Every GitHub read goes through the cache shared with the babysit skills and MasterDeck.
         from . import ghcache
-        code, out, err = ghcache.run(cmd[1:], ttl=_gh_ttl(cmd))
+        code, out, err = ghcache.run(cmd[1:], ttl=_gh_ttl(cmd), env=env)
         if code != 0:
             raise RuntimeError((err.decode(errors="replace") or out.decode(errors="replace") or f"exit {code}").strip())
         return out.decode(errors="replace")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ, **env} if env else None)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout or f"exit {r.returncode}").strip())
     return r.stdout
@@ -88,10 +101,27 @@ def links_state(home: Path) -> dict:
 
 
 class Live:
-    """Reads the real system. Read-only: never writes to GitHub or messages a session."""
+    """Reads the real system. Read-only: never writes to GitHub or messages a session. `cfg`: one
+    account's view (its repos and boards; None: the whole config); `env`: its GH_TOKEN and
+    GHC_ACCOUNT; `error`: why its GitHub reads can't run (gh has no token for it)."""
+
+    def __init__(self, cfg: "dict | None" = None, env: "dict | None" = None, error: "str | None" = None):
+        self.cfg, self.env, self.error = cfg, env, error
+
+    @classmethod
+    def for_account(cls, view: dict, runner=subprocess.run) -> "Live":
+        tok = account_token(view["login"], runner)
+        if not tok:
+            return cls(view, None, f"gh is not logged in to {view['login']}")
+        return cls(view, {"GH_TOKEN": tok, "GHC_ACCOUNT": view["login"]})
+
+    def _gh(self, cmd: list) -> str:
+        if self.error:
+            raise RuntimeError(self.error)
+        return _run(cmd, env=self.env)
 
     def me(self) -> str:
-        return _run(["gh", "api", "user", "--jq", ".login"]).strip()
+        return self._gh(["gh", "api", "user", "--jq", ".login"]).strip()
 
     def project_items(self, reqs: list, max_pages: int = 20) -> dict:
         """Items of every (alias, project, filter) at once: one GraphQL call per page round,
@@ -107,7 +137,7 @@ class Live:
             args = ["gh", "api", "graphql", "-f", f"query={query}"]
             for k, v in variables.items():
                 args += ["-f", f"{k}={v}"]
-            data = json.loads(_run(args)).get("data") or {}
+            data = json.loads(self._gh(args)).get("data") or {}
             for alias in list(pending):
                 p, flt, _ = pending[alias]
                 items, cursor = board.items_page(data, alias)
@@ -121,7 +151,7 @@ class Live:
 
     def board_mine_ready(self) -> "tuple[list, list]":
         """My open issues and the ready ones, on every board, in one round of GraphQL."""
-        ps = config.projects()
+        ps = config.projects(self.cfg)
         got = self.project_items([(f"m{i}", p, _mine_query(p)) for i, p in enumerate(ps)] +
                                  [(f"r{i}", p, _ready_query(p)) for i, p in enumerate(ps)])
         mine = [it for i in range(len(ps)) for it in got[f"m{i}"]]
@@ -135,17 +165,17 @@ class Live:
         return self.board_mine_ready()[1]
 
     def board_sprint(self, query: str = config.BOARD_SPRINT_QUERY) -> list:
-        ps = config.projects()
+        ps = config.projects(self.cfg)
         got = self.project_items([(f"b{i}", p, query) for i, p in enumerate(ps)])
         return [it for i in range(len(ps)) for it in got[f"b{i}"]]
 
     def sprints(self) -> list:
         from . import board
-        ps = config.projects()
+        ps = config.projects(self.cfg)
         query = board.sprints_query(ps)
         if not query:
             return []
-        out = json.loads(_run(["gh", "api", "graphql", "-f", f"query={query}"]))
+        out = json.loads(self._gh(["gh", "api", "graphql", "-f", f"query={query}"]))
         return board.parse_sprints(out.get("data") or {}, ps)
 
     def pr_details(self, urls: list) -> dict:
@@ -153,19 +183,22 @@ class Live:
         query, keys = board.pr_query(urls)
         if not keys:
             return {}
-        out = json.loads(_run(["gh", "api", "graphql", "-f", f"query={query}"]))
+        out = json.loads(self._gh(["gh", "api", "graphql", "-f", f"query={query}"]))
         return board.parse_pr_details(out.get("data") or {}, keys)
 
     def _prs(self, q: str) -> list:
-        out = _run(["gh", "api", "graphql", "-f", f"q={q}", "-f", f"query={PR_QUERY}"])
+        out = self._gh(["gh", "api", "graphql", "-f", f"q={q}", "-f", f"query={PR_QUERY}"])
         return json.loads(out)["data"]["search"]["nodes"]
 
     def _owners_qualifier(self) -> str:
         """org:a user:b ... for every owner of a selected repo or board (GitHub ORs them)."""
-        owners = {}
-        for r in config.repos():
-            owners.setdefault(r.split("/", 1)[0], "org" if config.OWNER_TYPE != "user" or r.split("/", 1)[0] != config.OWNER else "user")
-        for p in config.projects():
+        view = self.cfg or config.CONFIG
+        user_owner = view.get("owner") if view.get("ownerType") == "user" else None
+        owners: dict = {}
+        for r in config.repos(self.cfg):
+            o = r.split("/", 1)[0]
+            owners.setdefault(o, "user" if o == user_owner else "org")
+        for p in config.projects(self.cfg):
             owners.setdefault(p["owner"], "user" if p["ownerType"] == "user" else "org")
         return " ".join(f"{k}:{o}" for o, k in owners.items()) or config.OWNER_QUALIFIER
 
@@ -179,7 +212,7 @@ class Live:
         return json.loads(_run(["claude", "agents", "--json"]))
 
     def state(self) -> dict:
-        return links_state(Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck"))
+        return links_state(config.masterdeck_home())
 
     def branch_head(self, branch_key: str) -> str:
         # Local first: unpushed commits are real progress, and a branch deleted on GitHub
@@ -188,7 +221,7 @@ class Live:
         if local:
             return local
         repo, branch = branch_key.split("@", 1)
-        return _run(["gh", "api", f"repos/{repo}/commits/{quote(branch, safe='')}", "--jq", ".sha"]).strip()
+        return self._gh(["gh", "api", f"repos/{repo}/commits/{quote(branch, safe='')}", "--jq", ".sha"]).strip()
 
     def session_cwd(self, session_id: str) -> "str | None":
         for f in (Path.home() / ".claude" / "projects").glob(f"*/{session_id}.jsonl"):

@@ -25,6 +25,8 @@ import type { PaletteAction } from "./CommandPalette";
 import { OfferRow } from "./PrsView";
 import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
+import { AccountBadge } from "./AccountBits";
+import { isMulti } from "@shared/accounts";
 
 export type View =
   | "terminals"
@@ -662,6 +664,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   budget: "BUDGET",
   context: "CONTEXT",
   idle: "IDLE",
+  account: "GITHUB",
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
@@ -856,6 +859,7 @@ function SessionRow({
         {s.issue !== null && (
           <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
         )}
+        <AccountBadge login={s.account} />
       </div>
       <div className="srow-sub">
         <span className={`st-${status?.key ?? s.state}`}>
@@ -1001,6 +1005,7 @@ function ProposalCard({
         >
           {ticketLabel(p.repo, p.issue)}{" "}
           {question && target ? target.name : dest}
+          <AccountBadge login={isMulti(state.config) ? p.target.spawn?.account : null} />
         </span>
         {!full && !question && (
           <button
@@ -1211,7 +1216,9 @@ function ExtraCard({
     setMsg(r.ok ? "Sent" : r.message);
   };
   const kind =
-    i.kind === "error"
+    i.kind === "account"
+      ? "GITHUB"
+      : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
         ? `${i.kind === "idle" ? "IDLE" : "WAITING"} ${i.detail.minutes}M`
@@ -1221,7 +1228,8 @@ function ExtraCard({
   const owner =
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
-    (a) => a.type === "continue" || a.type === "compact",
+    (a) =>
+      a.type === "continue" || a.type === "compact" || a.type === "login",
   );
   return (
     <div

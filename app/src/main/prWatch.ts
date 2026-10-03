@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MASTER_NAME } from '@shared/derive'
+import { groupByAccount } from '@shared/accounts'
+import type { AppConfig } from '@shared/appConfig'
 import { parsePrUrl } from '@shared/prSummary'
 import {
   BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
@@ -34,10 +36,14 @@ export interface PrWatchEntry {
   misses?: number
   /** Added in the first run: its first full read is recorded as seen and says nothing. */
   quiet?: boolean
+  /** The watched session's GitHub account (two or more connected); its runner reads this PR. */
+  account?: string
 }
 
 export interface PrWatchDeps {
   gh: GhRunner
+  /** One runner per account (two or more); absent: deps.gh for all. */
+  ghFor?: (account: string | undefined) => GhRunner
   paused: (output?: string) => boolean
   send: (s: Session, text: string) => Promise<CliResult>
   onChange: () => void
@@ -146,9 +152,18 @@ export class PrWatch {
       for (const url of state.sessionPrs[s.sessionId] ?? []) {
         const pr = state.prLive[url]
         const ref = parsePrUrl(url)
-        if (pr?.state !== 'OPEN' || !ref || !safeRef(ref) || this.done.includes(url) || this.list.some((w) => w.url === url)) continue
+        if (pr?.state !== 'OPEN' || !ref || !safeRef(ref) || this.done.includes(url)) continue
+        const have = this.list.find((w) => w.url === url)
+        if (have) {
+          // The session gained (or changed) its account after the watch began: read it as that account.
+          if (s.account && have.sessionKey === s.key && have.account !== s.account) {
+            have.account = s.account
+            changed = true
+          }
+          continue
+        }
         this.list.push({
-          url, ...ref, sessionKey: s.key, startedAt: now,
+          url, ...ref, sessionKey: s.key, ...(s.account ? { account: s.account } : {}), startedAt: now,
           baseline: pr.createdAt === null || now - pr.createdAt > BASELINE_AGE_MS,
           seen: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
           ...(now < this.quietUntil ? { quiet: true } : {}),
@@ -166,65 +181,72 @@ export class PrWatch {
     if (this.polling || this.deps.paused()) return
     this.polling = true
     try {
-      const heavy: { w: PrWatchEntry; l: LightPr }[] = []
-      let me: string | null = null
-      for (const group of chunks(this.list.filter((w) => !w.ended), LIGHT_MAX)) {
-        const r = await this.deps.gh(graphql(lightQuery(group)), { ttl: POLL_TTL, timeoutMs: 30_000 })
-        if (this.deps.paused(ghErrorText(r))) return
-        me = parseViewer(r.stdout) ?? me
-        // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
-        // gh exits 1 on a partial error (one PR it cannot read) and still prints the others.
-        if (!ghHasData(r) || !me) continue
-        const viewer = me
-        parseLight(r.stdout, group.length).forEach((l, i) => {
-          const w = group[i]
-          if (!l) {
-            w.misses = (w.misses ?? 0) + 1
-            if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`)
-            return
-          }
-          w.misses = 0
-          if (l.author && l.author.toLowerCase() !== viewer.toLowerCase()) return this.end(w)
-          const conflictKnown = w.seen.some((k) => k.startsWith('X:'))
-          const due =
-            w.heavyAt === 0 || l.updatedAt !== w.updatedAt || now - w.heavyAt >= HEAVY_EVERY_MS || (w.stallAt !== null && now >= w.stallAt) ||
-            l.state !== 'OPEN' || (l.mergeable === 'CONFLICTING') !== conflictKnown
-          // A due PR keeps its old updatedAt until its full read lands: a failed read is retried.
-          if (due) heavy.push({ w, l })
-          else w.mergeable = l.mergeable
-        })
-      }
-      for (const group of chunks(heavy, HEAVY_MAX)) {
-        const r = await this.deps.gh(graphql(heavyQuery(group.map((g) => g.w))), { ttl: POLL_TTL, timeoutMs: 30_000 })
-        if (this.deps.paused(ghErrorText(r))) break
-        const viewer = parseViewer(r.stdout) ?? me
-        // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
-        if (!ghHasData(r) || !viewer) continue
-        parseHeavy(r.stdout, group.length).forEach((h, i) => {
-          const { w, l } = group[i]
-          if (!h) return
-          const { items, stallAt } = prItems(h, viewer, now)
-          const ending = h.state !== 'OPEN'
-          const quiet = !!w.quiet
-          // Older PR: counted once in a summary, its items never listed. First run: not even that.
-          const summary = w.baseline && !ending && !quiet ? baselineMessage(w, items) : ''
-          const news = w.baseline || ending || quiet ? [] : fresh(items, w.seen)
-          w.baseline = false
-          delete w.quiet
-          w.seen = items.map((x) => x.key)
-          w.updatedAt = l.updatedAt
-          w.mergeable = h.mergeable
-          w.heavyAt = now
-          w.stallAt = stallAt
-          if (summary) w.notes.push(summary)
-          const keys = new Set(news.map((x) => x.key))
-          w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
-          if (news.length || summary || ending) {
-            w.events += news.length + (summary || ending ? 1 : 0)
-            w.lastEventAt = now
-          }
-          if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
-        })
+      // One pass per account: its own runner, so `viewer` (who "me" is) is that account.
+      const byAccount = new Map<string, PrWatchEntry[]>()
+      for (const w of this.list.filter((x) => !x.ended)) byAccount.set(w.account ?? '', [...(byAccount.get(w.account ?? '') ?? []), w])
+      // A limited answer skips only that account (its queued full reads too); the others still run and save.
+      accounts: for (const [account, ws] of byAccount) {
+        const gh = this.deps.ghFor?.(account || undefined) ?? this.deps.gh
+        const heavy: { w: PrWatchEntry; l: LightPr }[] = []
+        let me: string | null = null
+        for (const group of chunks(ws, LIGHT_MAX)) {
+          const r = await gh(graphql(lightQuery(group)), { ttl: POLL_TTL, timeoutMs: 30_000 })
+          if (this.deps.paused(ghErrorText(r))) continue accounts
+          me = parseViewer(r.stdout) ?? me
+          // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
+          // gh exits 1 on a partial error (one PR it cannot read) and still prints the others.
+          if (!ghHasData(r) || !me) continue
+          const viewer = me
+          parseLight(r.stdout, group.length).forEach((l, i) => {
+            const w = group[i]
+            if (!l) {
+              w.misses = (w.misses ?? 0) + 1
+              if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`)
+              return
+            }
+            w.misses = 0
+            if (l.author && l.author.toLowerCase() !== viewer.toLowerCase()) return this.end(w)
+            const conflictKnown = w.seen.some((k) => k.startsWith('X:'))
+            const due =
+              w.heavyAt === 0 || l.updatedAt !== w.updatedAt || now - w.heavyAt >= HEAVY_EVERY_MS || (w.stallAt !== null && now >= w.stallAt) ||
+              l.state !== 'OPEN' || (l.mergeable === 'CONFLICTING') !== conflictKnown
+            // A due PR keeps its old updatedAt until its full read lands: a failed read is retried.
+            if (due) heavy.push({ w, l })
+            else w.mergeable = l.mergeable
+          })
+        }
+        for (const group of chunks(heavy, HEAVY_MAX)) {
+          const r = await gh(graphql(heavyQuery(group.map((g) => g.w))), { ttl: POLL_TTL, timeoutMs: 30_000 })
+          if (this.deps.paused(ghErrorText(r))) continue accounts
+          const viewer = parseViewer(r.stdout) ?? me
+          // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
+          if (!ghHasData(r) || !viewer) continue
+          parseHeavy(r.stdout, group.length).forEach((h, i) => {
+            const { w, l } = group[i]
+            if (!h) return
+            const { items, stallAt } = prItems(h, viewer, now)
+            const ending = h.state !== 'OPEN'
+            const quiet = !!w.quiet
+            // Older PR: counted once in a summary, its items never listed. First run: not even that.
+            const summary = w.baseline && !ending && !quiet ? baselineMessage(w, items) : ''
+            const news = w.baseline || ending || quiet ? [] : fresh(items, w.seen)
+            w.baseline = false
+            delete w.quiet
+            w.seen = items.map((x) => x.key)
+            w.updatedAt = l.updatedAt
+            w.mergeable = h.mergeable
+            w.heavyAt = now
+            w.stallAt = stallAt
+            if (summary) w.notes.push(summary)
+            const keys = new Set(news.map((x) => x.key))
+            w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
+            if (news.length || summary || ending) {
+              w.events += news.length + (summary || ending ? 1 : 0)
+              w.lastEventAt = now
+            }
+            if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+          })
+        }
       }
       this.save()
       this.deps.onChange()
@@ -347,4 +369,11 @@ export async function prStates(gh: GhRunner, urls: string[]): Promise<Record<str
     parseLight(r.stdout, group.length).forEach((l, i) => l && (out[group[i].u] = { state: l.state, isDraft: l.isDraft }))
   }
   return out
+}
+
+/** prStates per account: one batched light read per account, with that account's runner. */
+export async function prStatesFor(ghFor: (login: string) => GhRunner, cfg: AppConfig, urls: string[]): Promise<Record<string, { state: string; isDraft: boolean }>> {
+  // In parallel; an account whose read fails (or throws) gives nothing, the others still answer.
+  const parts = await Promise.all([...groupByAccount(urls, cfg)].map(([login, us]) => prStates(ghFor(login), us).catch(() => ({}))))
+  return Object.assign({}, ...parts)
 }

@@ -1,4 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
+import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
   newScheduleScan,
@@ -60,7 +61,7 @@ import {
   type PrScanState,
 } from "@shared/prscan";
 import { BUILDER_NAME } from "@shared/flowBuilder";
-import { TICKET_BUILDER_NAME } from "@shared/ticketBuilder";
+import { isTicketBuilderSession } from "./ticketDirs";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -116,7 +117,7 @@ import {
   setConfig,
   type AppConfig,
 } from "@shared/appConfig";
-import { parseTeamPrs, type TeamPr } from "@shared/teamPrs";
+import { mergeTeamPages, parseTeamPrs, type TeamPr } from "@shared/teamPrs";
 import {
   nextRestore,
   parseRestoreFile,
@@ -290,6 +291,11 @@ export class Sources {
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
   private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
+  private ghAccounts: GhAccountStatus[] = [];
+  /** gh's active login (gh config get user), for the "not the primary" notice; null: not known. */
+  private ghActive: string | null = null;
+  /** The account master-agent was started as (session-accounts.json); null: not recorded. */
+  private masterAccountOf: (s: Session) => string | null = () => null;
   private settings: Settings = DEFAULT_SETTINGS;
   private externalItems: ExternalItem[] = [];
   private remote: AppState["remote"] = undefined;
@@ -305,6 +311,7 @@ export class Sources {
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
+  private accountOf: ((s: Session) => string | null) | null = null;
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -570,6 +577,20 @@ export class Sources {
     ) => Promise<CliResult>,
   ): void {
     this.linker = fn;
+  }
+
+  /** Which GitHub account a session works as (main's SessionAccounts + origin); used with two or more accounts. */
+  setSessionAccount(f: (s: Session) => string | null): void {
+    this.accountOf = f;
+  }
+
+  private withAccounts(ss: Session[]): Session[] {
+    const f = this.accountOf;
+    if (!f || !isMulti(this.config)) return ss;
+    return ss.map((s) => {
+      const a = f(s);
+      return a ? { ...s, account: a } : s;
+    });
   }
 
   private get historyPath(): string {
@@ -862,6 +883,32 @@ export class Sources {
     this.emit();
   }
 
+  setGhAccounts(a: GhAccountStatus[]): void {
+    this.ghAccounts = a;
+    this.emit();
+  }
+
+  setGhActive(login: string | null): void {
+    if (login === this.ghActive) return;
+    this.ghActive = login;
+    this.emit();
+  }
+
+  setMasterAccount(f: (s: Session) => string | null): void {
+    this.masterAccountOf = f;
+  }
+
+  private githubFor: ((login: string) => GitHub) | null = null;
+  private ghForDir: ((dir: string) => GhRunner) | null = null;
+  /** Per-account clients (two or more accounts): team PRs per account, the current branch's PR as its folder's account. */
+  setAccountRunners(r: {
+    github: (login: string) => GitHub;
+    ghForDir: (dir: string) => GhRunner;
+  }): void {
+    this.githubFor = r.github;
+    this.ghForDir = r.ghForDir;
+  }
+
   private started = false;
 
   start(): void {
@@ -993,10 +1040,15 @@ export class Sources {
   private async refreshPeople(
     force = false,
   ): Promise<{ ok: boolean; message: string }> {
+    // The primary issue repo's assignees and my login: the primary's (two or more accounts), as before with one.
+    const gh =
+      isMulti(this.config) && this.githubFor
+        ? this.githubFor(primaryLogin(this.config)!)
+        : this.github;
     const [sp, users, me] = await Promise.all([
       this.cli.sprints(force),
-      this.github.assignableUsers(force),
-      this.me ? Promise.resolve(this.me) : this.github.me(),
+      gh.assignableUsers(force),
+      this.me ? Promise.resolve(this.me) : gh.me(),
     ]);
     if (sp.ok) this.sprints = sp.sprints;
     if (users) this.users = users;
@@ -1055,19 +1107,53 @@ export class Sources {
     this.teamPrsLoading = true;
     this.emit();
     try {
-      const r = await this.github.teamPrPages(undefined, undefined, force);
-      if (r.ok) {
-        this.teamPrPages = r.pages;
-        this.teamPrs = parseTeamPrs(r.pages);
+      // One search per account (each owner's PRs with that account's token); one account: as before.
+      const accts =
+        isMulti(this.config) && this.githubFor ? this.config.accounts : null;
+      const got = accts
+        ? await Promise.all(
+            accts.map(async (a) => ({
+              login: a.login as string | null,
+              r: await this.githubFor!(a.login).teamPrPages(
+                a.owner,
+                undefined,
+                force,
+                a.ownerType,
+              ),
+            })),
+          )
+        : [
+            {
+              login: null as string | null,
+              r: await this.github.teamPrPages(undefined, undefined, force),
+            },
+          ];
+      const msgs = got.flatMap((g) =>
+        g.r.ok
+          ? g.r.partial
+            ? [g.r.partial]
+            : []
+          : [`${g.login ? `${g.login}: ` : ""}${g.r.message}`],
+      );
+      if (got.some((g) => g.r.ok)) {
+        this.teamPrPages = mergeTeamPages(
+          got.map((g) => ({
+            login: g.login,
+            pages: g.r.ok ? g.r.pages : null,
+          })),
+          this.teamPrPages,
+        );
+        this.teamPrs = parseTeamPrs(this.teamPrPages);
         this.teamPrsAt = Date.now();
-        this.teamPrsError = r.partial ?? null;
+        this.teamPrsError = msgs.join("; ") || null;
         this.saveGithubCache();
         return { ok: true, message: "refreshed" };
       }
       // Keep the last good list on screen; say why it didn't update.
-      this.githubPaused(r.message);
-      this.teamPrsError = r.message;
-      return { ok: false, message: r.message };
+      const msg = msgs.join("; ");
+      this.githubPaused(msg);
+      this.teamPrsError = msg;
+      return { ok: false, message: msg };
     } catch (e) {
       this.teamPrsError = String(e);
       return { ok: false, message: this.teamPrsError };
@@ -1102,7 +1188,10 @@ export class Sources {
       if (b) {
         this.boards[sprint] = b;
         if (r.ok) this.rawBoards[sprint] = r.data;
-        this.boardError = null;
+        // Two or more accounts: the board still shows when some (not all) accounts' reads failed.
+        const partial = r.ok ? (r.data as { errors?: unknown })?.errors : null;
+        this.boardError =
+          Array.isArray(partial) && partial.length ? partial.join("; ") : null;
         if (b.sprint)
           this.boardHistory[b.sprint] = addBurnPoint(
             this.boardHistory[b.sprint] ?? [],
@@ -1280,22 +1369,31 @@ export class Sources {
     try {
       const r = await this.cli.snapshot(force);
       if (r.ok) {
-        // A source that failed (board, prs) comes back empty: keep the last good list instead.
-        const raw = { ...(r.data as Record<string, unknown>) };
-        const ok = (raw.sources ?? {}) as Record<string, boolean>;
-        if (!ok.board && this.rawSnapshot?.issues)
-          raw.issues = this.rawSnapshot.issues;
-        if (!ok.prs && this.rawSnapshot?.prs) raw.prs = this.rawSnapshot.prs;
+        // A source that failed (board, prs) comes back empty: keep the last good list (per account).
+        const raw = keepLastGood(
+          { ...(r.data as Record<string, unknown>) },
+          this.rawSnapshot,
+          this.config,
+        );
         this.rawSnapshot = raw;
         this.snapshot = parseSnapshot(raw);
         this.setHealth("snapshot", true);
-        // A snapshot can succeed with some sources failed; a rate-limit failure still pauses GitHub calls.
+        // A snapshot can succeed with some sources failed; a rate-limit failure (any account's) still pauses GitHub calls.
         const errs =
           (r.data as { errors?: { message?: string }[] })?.errors ?? [];
         for (const e of errs) this.githubPaused(e?.message);
+        const parts = (raw.accounts ?? []) as {
+          login?: string;
+          sources?: Record<string, boolean>;
+        }[];
         for (const [k, v] of Object.entries(this.snapshot.sources)) {
+          // Two or more accounts: name whose read failed.
+          const whose = parts
+            .filter((a) => a.sources?.[k] === false)
+            .map((a) => a.login);
           if (!v)
-            this.errors[`snapshot:${k}`] = `snapshot source missing: ${k}`;
+            this.errors[`snapshot:${k}`] =
+              `snapshot source missing: ${k}${whose.length ? ` (${whose.join(", ")})` : ""}`;
           else delete this.errors[`snapshot:${k}`];
         }
         this.emit();
@@ -1503,7 +1601,7 @@ export class Sources {
       resolve(dir) === resolve(this.paths.masterWorkspace)
     )
       return;
-    const r = await this.gh(["pr", "view", ...PR_VIEW_ARGS], {
+    const r = await (this.ghForDir?.(dir) ?? this.gh)(["pr", "view", ...PR_VIEW_ARGS], {
       cwd: dir,
       timeoutMs: 20_000,
       ttl: 45,
@@ -1900,7 +1998,7 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now();
-    const sessions = this.withHookState(
+    const sessions = this.withAccounts(this.withHookState(
       this.withActivity(
         applyFreshness(
           attachIssues(
@@ -1908,9 +2006,7 @@ export class Sources {
             this.rawSessions.filter(
               (s) =>
                 s.name !== BUILDER_NAME &&
-                s.name !== TICKET_BUILDER_NAME &&
-                resolve(s.cwd || "/") !==
-                  resolve(join(this.paths.home, "ticket-builder")) &&
+                !isTicketBuilderSession(s, this.paths.home) &&
                 resolve(s.cwd || "/") !==
                   resolve(join(this.paths.home, "workflow-builder")),
             ),
@@ -1921,7 +2017,7 @@ export class Sources {
         ),
         now,
       ),
-    );
+    ));
     const { asks, answered } = this.collectAsks(sessions);
     const menus = Object.fromEntries(
       sessions
@@ -1959,6 +2055,8 @@ export class Sources {
         .map((x) => [x.sessionId, this.prUrlsFor(x.sessionId, x.key)])
         .filter(([, v]) => v.length),
     );
+    const m = deriveMaster(sessions);
+    const masterAs = "session" in m ? this.masterAccountOf(m.session) : undefined;
     const items = collectItems({
       sessions,
       proposals: this.proposals.filter((p) => !answered.has(p.id)),
@@ -1972,6 +2070,11 @@ export class Sources {
       failures,
       external: this.externalItems,
       watchedPrs: this.watchedPrs(),
+      // Only accounts MasterDeck uses, and only with two or more (one account is as before).
+      ghAccounts: isMulti(this.config)
+        ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
+        : undefined,
+      accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -1998,6 +2101,7 @@ export class Sources {
       remoteClients: this.remoteClients,
       browserRequests: this.browsers.browserRequests,
       account: this.account,
+      ghAccounts: this.ghAccounts,
       stats: { ...this.stats },
       tails: { ...this.tails },
       git: { ...this.git },

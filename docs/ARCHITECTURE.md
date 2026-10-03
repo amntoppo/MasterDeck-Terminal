@@ -40,7 +40,7 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
    `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
    `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
-7. `createWindow()`, `sources.start()`, `syncRemote()`.
+7. `createWindow()`, then the accounts (`refreshAccounts`, awaiting only the local `gh auth token` reads; the `gh api user` checks, and `migrateAccounts` once, run in the background — an older config becomes one account from gh's active login and the global git identity, `config.backup.<ts>.json` kept), `sources.start()`, `syncRemote()`.
 
 Env aids handled here: `MASTERDECK_USER_DATA`, `MASTERDECK_SMOKE`, `MASTERDECK_CAPTURE`
 (+ `_JS`, `_WAIT`, and a `test:shot` IPC handler while capturing). `will-quit` stops the cloud line,
@@ -68,7 +68,9 @@ GitHub rate limits pause every caller for `RATE_LIMIT_PAUSE_MS` (10 min). On sta
 cache (`cache.json`: snapshot, boards, sprints, users, team PRs) so the UI fills before GitHub
 answers.
 
-`build()` order: raw sessions (minus the workflow/ticket builder sessions) → `attachIssues` →
+With two or more accounts `master snapshot`/`board`/`sprints` read each account with its own token (`collect.Live.for_account`: `gh auth token --user`) and merge (snapshot: `accounts[].sources`, each issue and PR tagged `account`, sessions read once with the primary; board: cards tagged `account`, `errors` when some failed); `keepLastGood` keeps only a failed account's last issues/PRs; team PRs are one search per account (`teamPrPages(owner, …, ownerType)`), tagged `account`, a failed account keeping its last pages (`mergeTeamPages`). A rate limit on one account: the shared cache pauses that account's calls, and the app's polling waits for any account's pause to lift (every account's refresh waits); `snapshot source missing: <k>` names the accounts. A session's branch head is read as its repo's account (`config.account_for_repo`), its failure tagged with that account; `master sprints` merges a title found on several accounts' boards (`board.merge_sprints`). Assignable users and `me` are the primary's. One account: the same single read as before.
+
+`build()` order: raw sessions (minus the workflow/ticket builder sessions: `isTicketBuilderSession`, named `md-ticket-builder[-<tab>]` or in `ticket-builder/` or a `ticket-builder/tab-*` folder) → `attachIssues` →
 `applyFreshness` → activity → hook state; asks and menus; deck hook permission requests become
 menus; `collectItems` (`shared/inbox.ts`) → `inbox.update()`; then the `AppState` object.
 The inbox is "primed" only once agents are healthy and the ledger was read, so nothing resolves or
@@ -107,12 +109,29 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   that), re-linked after resumes (`session-history.json`, `shared/carry.ts`).
 - Restart recovery: `running-sessions.json` → `AppState.stoppedByRestart` → `resumeStopped`
   (`shared/restore.ts`).
+- GitHub account (two or more connected): every `claude --bg` MasterDeck runs (`startClaude`,
+  `resumeBg`, `startHere`, `startMaster`) gets `--settings <accounts/<login>.settings.json>` from
+  `AccountEnv.settingsArgs` (via `sessionSettings` in `main/sessionAccounts.ts`); an unhealthy or
+  unknown account, or no file yet, is refused, never started as gh's active one. Only master-agent
+  starts without it, when the primary needs to log in again or the accounts' files are still
+  being written. The account is recorded in `session-accounts.json` (`SessionAccounts`, by
+  session id and key: the bg id `claude --bg` prints is recorded at once, `bgIdFromOutput`; a new
+  session started by name is matched by name for 10 min; a live session known by only one of its
+  ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
+  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume
+  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again. `claude --bg
+  --resume` with flags (`--settings`, `-n`, `--model` …) starts a copy under a new session id and
+  bg id; the old session keeps its own saved options (only a resume without flags continues it).
+  So the account is recorded under the old ids and the copy's bg id (`bgIdFromOutput`: the
+  `backgrounded · <id>` line, else `claude attach <id>`; never the note's old id), and `claim` adds
+  the new session id; with no id printed, by name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
+  account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)
 
 - `shared/inbox.ts` `collectItems` builds every item (kinds include questions, menus, permission,
   input, blocked, proposals, offers for CI/review on my PRs, budget, context, idle/waiting nudges,
-  API errors, and `external` for API-created items), each with a stable id, priority, actions and a
+  API errors, `external` for API-created items, and `account`: a connected GitHub account whose token fails, only in multi mode; action `login` → `CH.ghLogin` → a gh-login tab, refused from a remote client; also `notice:<id>` items from `accountNotices` with no action: gh's active login (`refreshGhActive`, `gh config get user`, local, each minute) differing from the primary, with one account too, and in multi mode a master-agent not recorded in `session-accounts.json` as the primary (`startMaster` records it)), each with a stable id, priority, actions and a
   resolution reason.
 - `main/inbox.ts` `Inbox` (an `EventEmitter`) keeps state in `inbox.json` and appends every
   addition, action and resolution to `inbox-events.jsonl` (last 2000 lines kept). Its `added`
@@ -191,6 +210,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
   and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told).
+  With two or more accounts each watched PR keeps its session's account (`PrWatchEntry.account`) and `poll` reads each account's PRs with that account's runner, so "me" (`viewer`) is that account.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
   `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
   `state.watches` with ids `pr:<url>` (`watchStop` routes them), so they count as monitors in
@@ -234,6 +254,22 @@ here (needs `hooks.queue`).
   and a cumulative `seq` (characters emitted) so a view that mounts later replays and then drops
   data already covered. Output goes out as `pty:data:<id>` / `pty:exit:<id>` through `emit`.
   Closing a pane kills only `claude attach`; the background session keeps running.
+- The Board's ticket builder (`ticket-builder` spec `{resume, prompt, tab?, account?}`): one account,
+  pane `ticket-builder:<gen>`, `claude -n md-ticket-builder` in `<home>/ticket-builder/`, exactly as
+  before (`tab`/`account` ignored). Two or more (`isMulti`): one per Board tab, pane
+  `ticket-builder:<tabId>:<gen>`, `-n md-ticket-builder-<tabId>` in `<home>/ticket-builder/tab-<tabId>/`
+  (tab id `^[A-Za-z0-9_-]{1,64}$`), with the tab's account's `--settings <file>`
+  (`AccountEnv.settingsArgs`); a bad tab, no account or an account that can't start refuses the pane
+  (`main/ticketDirs.ts` `ticketPane`), never starting as gh's active account. `ticketBuilderPrepare`
+  writes the same files into the tab's folder (`ctx.tabId`). The 1 s pump (`pumpTicketDir`) answers
+  each folder (the shared one, or every `tab-*` one) and creates as that folder's `context.json`
+  account (`ticketAccount`); created.jsonl is read from every folder whatever the mode. The browser
+  bridge refuses a remote ticket-builder open with a bad `tab`, an `account` that is not a connected
+  login, or one other than the account the tab folder's `context.json` already names (logins compared
+  case-insensitively; `ticketSpecError`). Symlinked `tab-*` entries are skipped, and a folder is only
+  prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
+  (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
+  from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).
@@ -245,6 +281,8 @@ here (needs `hooks.queue`).
 
 ### master-agent integration
 
+`config.accounts()` reads the connected accounts (primary first; a repo belongs to the first account listing it) and `config.is_multi()` is the one multi-account check (two or more); `repos()`/`projects()` are every account's; `master config save` mirrors the primary account into the top-level fields and `config shell` (tt.sh) reads only those.
+
 `main/masterCli.ts` runs `python -m master.cli` (the `master` skill's lib, the installed copy in
 `~/.claude/skills/master/lib` wins over the bundled one): ledger approve/reject, `draft-assign`,
 `spawn`, snapshot, board, `config detect`. `master snapshot` reads MasterDeck's `ticket-links.json`
@@ -253,6 +291,10 @@ asks the session to run babysit-ticket or babysit-pr: MasterDeck links it and wa
 ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/master"` in the
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).
+
+master's sweep collects the same way (one read per account), so its proposals see every account's issues and PRs; `author_is_me` and the "last comment is mine" thread rule use each account's own login.
+
+With two or more accounts, master's ASSIGN proposals carry `target.spawn.account` (the issue repo's account, `config.account_for_repo`); `master spawn` adds `--settings` for it and holds the proposal (with the reason) when the account's settings file is missing, never starting it as gh's active account; a proposal without an account (older, or `master add` without `--account`) spawns as its repo's account, else the primary's, and that account is written to the proposal (so the app attributes the session to it). ORPHAN resumes name the account the session was recorded as in `session-accounts.json` (`config.session_account`, a connected login only); unrecorded, `spawn.default_account` follows the app's `sessionAccount`: the session's own spawn proposal (same name), its folder's `origin` (`config.origin_repo` + `match_repo`), then the issue repo's account, else the primary. `spawn.command` holds a proposal whose account is not connected (case-insensitive) even when a file for it lingers. With one account `master spawn` passes no `--settings`, even for a target naming an account. The app's starts (`CH.assign`, remote `startAssign`) go through `assignNow` (`main/assign.ts`, wrapped in `index.ts`): the chosen account, else the issue's (`defaultAccount`), refused when it needs to log in again; master's proposal is reused only when it already names that account, otherwise (none: it would start as gh's active account; another; or the Start dialog's Account field changed) a new proposal carries it (`master add --account`). The account is recorded with `SessionAccounts.expect`. With one account any `account` in the request is dropped.
 
 ### Board writes (`main/boardOps.ts`)
 
@@ -264,6 +306,24 @@ the first configured board holding the issue; reads skip the cache), forward-onl
 session's `linked` stage (`Sources.markReached`), and moves the ticket to In Dev when
 `WorkflowStore.builtinsFor(session)` has `ticket`. There is no global switch for board moves.
 A successful `linkSession` also queues `LinkedSteps` (below).
+
+### Which account a call uses (`main/accountClients.ts`)
+
+`accountClients` (wired in `index.ts`) gives `forAccount(login)`: the account's `gh` runner
+(`makeGhRunner` with `accountEnv.runEnv`, made once per login), `GitHub` and `BoardOps`; an unknown
+login is the primary. `forRepo(repo)` picks by `accountForRepo`: issue body, assign, the PR popup,
+status moves, ticket create (dialog and the ticket builder's requests), `linkSession`, and, straight
+to gh without the cache (`ghDirect`), New ticket's repo meta and the summary post. BoardFlow's
+`move`/`linkPr` go as the ticket's repo's account (boards are ticked under the same account as
+their repos in Setup). `ghRouted` picks from a call's own `-R`/`--repo`, a whole PR or issue URL, or a
+`repos/<owner>/<repo>/…` API path (`repoOfArgs`): Ops' janitor reads and Sources' `pr view <url>`;
+a call naming no repo (`api user`, search) goes as the primary. BoardFlow's PR states go per account (`prStatesFor`, one
+batched read each, in parallel; a failing account's read drops only its own PRs); the current branch's PR (`pr view` in the folder) is its `origin`'s account,
+looked up first. An account without a usable token fails its calls with "GitHub account <login>
+needs to log in again", and one AccountEnv has not read yet (just connected: its `runEnv` still
+answers without a token) with "GitHub account <login> is not ready yet"; they never run as another
+account or gh's active one. With one account
+every one of them is the plain `gh`/`github`/`boardOps` singleton, called exactly as before.
 
 ### Board moves (`main/boardFlow.ts`)
 
@@ -297,6 +357,25 @@ the `Sender` path watches use), touches the hook's own once markers
 and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
 entry is dropped.
 
+### GitHub accounts (`main/accountEnv.ts`)
+
+With two or more connected accounts (`isMulti`), `AccountEnv` keeps each account's token in memory
+(`refresh`: `gh auth token --user`, local only) and writes `accounts/<login>.settings.json` (mode
+600, folder 700, temp + rename) with `accountEnvBlock`'s `env` (`GH_TOKEN`, `GHC_ACCOUNT`, git identity and rules); ssh aliases come from `~/.ssh/config`
+and its Includes (`readSshConfig`). `check` then asks GitHub in the background (`gh api user`, parsed
+with `parseGhUser`: HTTP 401 or another login → unhealthy and its file removed; offline →
+unchanged; a new token clears an old refusal) and runs `git config --global --includes --get-regexp
+'^url\..*\.(push)?insteadof$'`: a rule sending `https://github.com` to an SSH form
+(`githubSshRewrite`) wins over a session's own rewrite, so it shows as a `warning` on every account.
+`refreshAccounts` in `index.ts` runs at launch, when the config's accounts (login, primary, name, email:
+`accountsKeyOf`) change (state callback) and hourly. A disconnected account's file, or one gh is no longer logged
+in to, stays while a live session runs as it (`accountsInUse` reads `session-accounts.json` for the
+live sessions; until the agents poll has answered, every recorded login counts). Leftover
+`*.settings.json.*.tmp` files go on each refresh. With one account it reads and writes nothing,
+removes every file not in use, `runEnv` gives `{env: {}}` and `settingsArgs` no arguments. The
+migration (`migrateLegacyConfig`) builds the account from the config re-read after its network
+waits, and writes nothing if accounts appeared meanwhile.
+
 ## Preload and IPC
 
 - `shared/ipc.ts` defines `CH` (every channel name, e.g. `state:update`, `pty:open`,
@@ -305,7 +384,11 @@ entry is dropped.
   `ipcRenderer.send` (fire-and-forget: `setSprint`, `ptyWrite`, `ptyResize`, `ptyClose`,
   `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
-  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`).
+  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
+  `onGhLogin(login)`: open a gh-login tab for that account).
+- GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
+  `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
+  `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
   distinguishes the two; remote callers skip native dialogs (the web already asked with
@@ -313,7 +396,8 @@ entry is dropped.
   (`knownDirsOnly` for standup), and obey the PTY size rule.
 - `shared/remoteDeck.ts` `DECK_ACCESS` classifies every `DeckApi` member: `remote` (invoke/send
   over the bridge), `event`, `local` (runs in the browser) or `blocked` (account, browser approval,
-  gh account switching, folder picker, editor, shell prepare, auto-open). `ARG_FIX` reshapes
+  gh accounts and gh login (`ghUser`, `ghAccounts`, `ghOwners`, `onGhLogin`), folder picker, editor,
+  shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
 
 ## Shared modules (`shared/`)
@@ -326,7 +410,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts`, `costs.ts`, `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
-| GitHub, board | `board.ts`, `boardFilter.ts`, `teamPrs.ts`, `prSummary.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
+| GitHub, board | `board.ts`, `boardFilter.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
@@ -388,6 +472,8 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `remote` (+ `warning`), `remoteClients` | `CloudSync` status / `clients` message (`syncRemote`), bridge warning |
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
+| `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
+| `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
 ## Files on disk
 
@@ -410,10 +496,12 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
-| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
+| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
+| `session-accounts.json` | GitHub account per session id / key (two or more accounts) |
+| `accounts/` | `<login>.settings.json` per connected account (two or more): `{"env": {GH_TOKEN, GIT_* …}}` for `claude --settings`; mode 600, folder 700 |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |
 | `remote-device-id` | random UUID sent in `hello` |
 | `remote-done.json` | last 500 remote command outcomes (run-once) |
@@ -422,5 +510,5 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `claude-settings.json`, `skills/` | only with `MASTERDECK_ISOLATED=1` |
 
 Elsewhere: `~/.claude/settings.json` (hooks, status line), `~/.claude/skills/` (bundled skills),
-`~/.claude/master/{config.json,ledger.json}`, `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
+`~/.claude/master/{config.json,ledger.json}` (plus `config.backup.<ts>.json`, written once before the first-launch accounts migration), `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
 `~/.claude/gh-cache/`, `~/.claude/projects/` (transcripts, read-only), Electron user data.

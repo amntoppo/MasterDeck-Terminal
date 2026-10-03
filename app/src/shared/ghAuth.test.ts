@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasProjectScope, parseGhAccounts } from './ghAuth'
+import { hasProjectScope, parseGhAccounts, setupScopes } from './ghAuth'
 
 const TWO = `github.com
   ✓ Logged in to github.com account alice-work (keyring)
@@ -26,5 +26,17 @@ describe('gh accounts', () => {
     const a = parseGhAccounts('github.com\n  X Failed to log in to github.com account bob (keyring)\n  - Active account: true\n  - The token in keyring is invalid.\n')
     expect(a).toEqual([{ login: 'bob', active: true, ok: false, scopes: [] }])
     expect(parseGhAccounts('You are not logged into any GitHub hosts. To log in, run: gh auth login')).toEqual([])
+  })
+})
+
+describe('setupScopes', () => {
+  it("one account: gh's active account's scopes, as before", () => {
+    expect(setupScopes(parseGhAccounts(TWO), null)).toEqual(['gist', 'project', 'read:org', 'repo', 'workflow'])
+  })
+  it("several: only the scopes every connected account's token has (one lacking project shows it missing)", () => {
+    const a = parseGhAccounts(TWO)
+    expect(setupScopes(a, ['alice-work', 'alice'])).toEqual(['gist', 'read:org', 'repo'])
+    expect(setupScopes(a, ['ALICE-WORK'])).toContain('project')
+    expect(setupScopes(a, ['alice-work', 'carol'])).toEqual([]) // gh has no token for carol
   })
 })

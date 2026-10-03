@@ -3,6 +3,8 @@ import { useState } from 'react'
 export interface ViewTab {
   id: string
   name: string
+  /** The account it shows (two or more GitHub accounts). */
+  badge?: string
 }
 
 /**
@@ -49,6 +51,7 @@ export function ViewTabs({
           ) : (
             <button onClick={() => onSelect(t.id)} onDoubleClick={() => setRenaming(t.id)} title="Double-click to rename">
               {t.name}
+              {t.badge && <span className="acct-badge">@{t.badge}</span>}
             </button>
           )}
           {tabs.length > 1 && (

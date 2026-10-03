@@ -106,6 +106,7 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
               cwd: s(spawn.cwd) ?? undefined,
               prompt: s(spawn.prompt) ?? undefined,
               resume: s(spawn.resume) ?? undefined,
+              account: /^[A-Za-z0-9-]{1,39}$/.test(s(spawn.account) ?? '') ? s(spawn.account)! : undefined,
             }
           : undefined,
       },

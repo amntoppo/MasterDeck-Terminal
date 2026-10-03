@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -102,20 +103,25 @@ def primary_repo(cfg: "dict | None" = None) -> str:
     return f"{cfg['owner']}/{cfg['issueRepo']}" if cfg.get("owner") and cfg.get("issueRepo") else ""
 
 
-def repos(cfg: "dict | None" = None) -> list:
-    """The selected repositories (owner/name), primary first."""
-    import re
-    cfg = cfg or CONFIG
+def _repos_of(cfg: dict) -> list:
     listed = [r for r in cfg.get("repos") or [] if isinstance(r, str) and re.fullmatch(REPO_RE, r)]
     prim = primary_repo(cfg)
-    out = ([prim] if prim else []) + [r for r in listed if r.lower() != prim.lower()]
-    return out
+    return ([prim] if prim else []) + [r for r in listed if r.lower() != prim.lower()]
+
+
+def repos(cfg: "dict | None" = None) -> list:
+    """The selected repositories (owner/name), primary first; with accounts, every account's (the primary's first)."""
+    cfg = cfg or CONFIG
+    union = [r for v in (accounts(cfg) if cfg.get("accounts") else []) for r in v["repos"]]
+    return union or _repos_of(cfg)
 
 
 def repo_allowed(repo: "str | None", cfg: "dict | None" = None) -> bool:
-    """Is a ticket in this repo one of ours? Every repo when the user selected all."""
+    """Is a ticket in this repo one of ours? Every repo when the user selected all (on any account)."""
     cfg = cfg or CONFIG
     if not repo or cfg.get("allRepos"):
+        return True
+    if cfg.get("accounts") and any(v["allRepos"] for v in accounts(cfg)):
         return True
     return repo.lower() in {r.lower() for r in repos(cfg)}
 
@@ -141,9 +147,7 @@ def _project(p: dict, cfg: dict) -> "dict | None":
     }
 
 
-def projects(cfg: "dict | None" = None) -> list:
-    """The selected project boards, each with its own statuses. Older configs: the one project."""
-    cfg = cfg or CONFIG
+def _projects_of(cfg: dict) -> list:
     listed = [x for x in (_project(p, cfg) for p in cfg.get("projects") or []) if x]
     if listed:
         return listed
@@ -156,12 +160,130 @@ def projects(cfg: "dict | None" = None) -> list:
     return []
 
 
+def projects(cfg: "dict | None" = None) -> list:
+    """The selected project boards, each with its own statuses; with accounts, every account's.
+    Older configs: the one project."""
+    cfg = cfg or CONFIG
+    if cfg.get("accounts"):
+        seen, out = set(), []
+        for v in accounts(cfg):
+            for p in _projects_of(v):
+                if project_key(p) not in seen:
+                    seen.add(project_key(p))
+                    out.append(p)
+        if out:
+            return out
+    return _projects_of(cfg)
+
+
 def project_key(p: dict) -> str:
     return f"{p['owner']}/{p['number']}"
 
 
 def project_by_key(key: "str | None", cfg: "dict | None" = None) -> "dict | None":
     return next((p for p in projects(cfg) if project_key(p) == key), None)
+
+
+LOGIN_RE = r"[A-Za-z0-9-]{1,39}"
+
+
+def account_view(a: dict) -> dict:
+    """One account as a config of its own (owner, repos, boards): what repos()/projects() read for it."""
+    return {"login": a["login"], "primary": a.get("primary") is True,
+            "name": str(a.get("name") or a["login"]), "email": str(a.get("email") or ""),
+            "owner": a.get("owner") or "", "ownerType": "user" if a.get("ownerType") == "user" else "organization",
+            "issueRepo": a.get("issueRepo") or "",
+            "repos": [r for r in a.get("repos") or [] if isinstance(r, str) and re.fullmatch(REPO_RE, r)],
+            "allRepos": a.get("allRepos") is True,
+            "projects": [p for p in a.get("projects") or [] if isinstance(p, dict)],
+            "allProjects": a.get("allProjects") is True}
+
+
+def accounts(cfg: "dict | None" = None) -> list:
+    """Connected GitHub accounts (MasterDeck's Setup writes them), the primary first, each login
+    once. A repo belongs to the first account that lists it; later accounts lose it."""
+    cfg = cfg or CONFIG
+    raw = [a for a in cfg.get("accounts") or [] if isinstance(a, dict) and isinstance(a.get("login"), str)
+           and re.fullmatch(LOGIN_RE, a["login"])]
+    raw.sort(key=lambda a: 0 if a.get("primary") is True else 1)
+    out: list = []
+    owner_of: dict = {}
+    for a in raw:
+        if any(v["login"].lower() == a["login"].lower() for v in out):
+            continue
+        v = account_view(a)
+        kept = []
+        for r in _repos_of(v):
+            if r.lower() not in owner_of:
+                owner_of[r.lower()] = v["login"]
+                kept.append(r)
+        v["repos"] = kept
+        v["primary"] = not out
+        out.append(v)
+    return out
+
+
+def is_multi(cfg: "dict | None" = None) -> bool:
+    """Multi-account mode: two or more connected accounts. The one place to ask; with one account
+    everything behaves as before."""
+    return len(accounts(cfg)) >= 2
+
+
+def masterdeck_home() -> Path:
+    """MasterDeck's folder (ticket links, session accounts, account settings); MASTERDECK_HOME overrides it."""
+    return Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck")
+
+
+def session_account(session_id: str) -> "str | None":
+    """The connected login MasterDeck recorded a session as (session-accounts.json); None when
+    unrecorded, the file is missing or broken, or the login is no longer connected."""
+    try:
+        login = json.loads((masterdeck_home() / "session-accounts.json").read_text()).get(session_id)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return login if isinstance(login, str) and any(a["login"] == login for a in accounts()) else None
+
+
+def match_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
+    """The account listing `repo` (None = the primary repo), or whose "Select all" org owns it; None
+    when no account does, or with one account (the app's matchRepo)."""
+    if not is_multi(cfg):
+        return None
+    views = accounts(cfg)
+    r = (repo or primary_repo(cfg)).lower()
+    for v in views:
+        if r in {x.lower() for x in v["repos"]}:
+            return v["login"]
+    owner = r.split("/", 1)[0]
+    for v in views:
+        if v["allRepos"] and v["owner"].lower() == owner:
+            return v["login"]
+    return None
+
+
+def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
+    """The login a spawned session for an issue in `repo` works as (None = the primary repo): its
+    account, else the primary. Only with two or more accounts: with one, sessions start as before."""
+    if not is_multi(cfg):
+        return None
+    return match_repo(repo, cfg) or accounts(cfg)[0]["login"]
+
+
+# https://github.com/o/r, git@<host or ssh alias>:o/r, ssh://git@<host or alias>/o/r (the app's repoFromRemote).
+_REMOTE_RE = re.compile(r"^(?:https?://(?:[^@/\s]+@)?github\.com/|ssh://[^@/\s]+@[^/\s]+/|[^@/\s]+@[^:/\s]+:)"
+                        r"([A-Za-z0-9-]{1,39})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?/?$")
+
+
+def origin_repo(cwd: str, runner=None) -> "str | None":
+    """owner/name of the folder's `origin` remote; None when it has none or it is not GitHub."""
+    import subprocess
+    try:
+        r = (runner or subprocess.run)(["git", "-C", cwd, "remote", "get-url", "origin"],
+                                       capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = _REMOTE_RE.match(r.stdout.strip()) if r.returncode == 0 else None
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 def statuses_for(key: "str | None") -> dict:

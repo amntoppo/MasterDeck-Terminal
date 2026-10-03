@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { defaultModelLabel, MODELS } from "@shared/models";
 import type { WorkflowTemplate } from "@shared/flow";
 import { actionCount, DEFAULT_TEMPLATE } from "@shared/flow";
+import type { AppState } from "@shared/types";
+import { isMulti } from "@shared/accounts";
+import { AccountSelect } from "./AccountBits";
 import { deck } from "../deck";
 import { can, keyPlatform } from "../web";
 import { RepoPicker } from "./RepoPicker";
@@ -174,6 +177,7 @@ export interface NewSessionReq {
   model?: string;
   workflow?: string;
   mode?: string;
+  account?: string;
 }
 
 /** Permission modes offered (the ones that skip checks are left out). */
@@ -190,10 +194,12 @@ const MODES: [string, string][] = [
  * message (without one the session waits idle), the model and the workflow it starts with.
  */
 export function NewSessionDialog({
+  state,
   taken,
   onStart,
   onClose,
 }: {
+  state: AppState;
   taken: string[];
   onStart: (r: NewSessionReq) => void;
   onClose: () => void;
@@ -209,6 +215,22 @@ export function NewSessionDialog({
   const [workflow, setWorkflow] = useState(DEFAULT_TEMPLATE);
   const [mode, setMode] = useState("");
   const [picking, setPicking] = useState(false);
+  // The account follows the folder (its origin remote's account) until one is picked.
+  const multi = isMulti(state.config);
+  const [account, setAccount] = useState<string | null>(null);
+  const [accountPicked, setAccountPicked] = useState(false);
+  useEffect(() => {
+    if (!multi || accountPicked) return;
+    setAccount(null);
+    if (!cwd) return;
+    let alive = true;
+    void deck()
+      .accountFor(cwd)
+      .then((a) => alive && setAccount(a));
+    return () => {
+      alive = false;
+    };
+  }, [multi, accountPicked, cwd]);
   useEffect(() => {
     void deck()
       .workspaceRepos()
@@ -237,7 +259,7 @@ export function NewSessionDialog({
   const nameOk = NAME_RE.test(name) && !taken.includes(name);
   const promptOk = !prompt.trim().startsWith("-");
   const start = () => {
-    if (!cwd || !nameOk || !promptOk) return;
+    if (!cwd || !nameOk || !promptOk || (multi && !account)) return;
     onStart({
       name,
       cwd,
@@ -245,6 +267,7 @@ export function NewSessionDialog({
       model: model || undefined,
       workflow: workflow === DEFAULT_TEMPLATE ? undefined : workflow,
       mode: mode || undefined,
+      ...(account ? { account } : {}),
     });
     onClose();
   };
@@ -297,6 +320,14 @@ export function NewSessionDialog({
               : "Letters, digits, dot, dash and underscore; up to 64 characters."}
           </div>
         )}
+        <AccountSelect
+          state={state}
+          value={account}
+          onChange={(l) => {
+            setAccount(l);
+            setAccountPicked(true);
+          }}
+        />
         <label>First message (optional)</label>
         <textarea
           value={prompt}
@@ -365,7 +396,7 @@ export function NewSessionDialog({
           </button>
           <button
             className="btn primary"
-            disabled={!cwd || !nameOk || !promptOk}
+            disabled={!cwd || !nameOk || !promptOk || (multi && !account)}
             onClick={start}
             title="⌘↵"
           >

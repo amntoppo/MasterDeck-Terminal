@@ -54,6 +54,7 @@ const api: DeckApi = {
   getSettings: () => ipcRenderer.invoke(CH.getSettings),
   setSettings: (s) => ipcRenderer.invoke(CH.setSettings, s),
   onAutoOpen: (cb) => listen(CH.autoOpen, cb),
+  onGhLogin: (cb) => listen(CH.ghLogin, cb),
   setStatus: (issue, status) => ipcRenderer.invoke(CH.setStatus, issue, status),
   standupCommits: (since, dirs, until) =>
     ipcRenderer.invoke(CH.standupCommits, since, dirs, until),
@@ -74,8 +75,9 @@ const api: DeckApi = {
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),
   workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
   startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
-  resumeSession: (id, name, cwd) =>
-    ipcRenderer.invoke(CH.resumeSession, id, name, cwd),
+  resumeSession: (id, name, cwd, account) =>
+    ipcRenderer.invoke(CH.resumeSession, id, name, cwd, account),
+  accountFor: (cwd) => ipcRenderer.invoke(CH.accountFor, cwd),
   resumeStopped: () => ipcRenderer.invoke(CH.resumeStopped),
   tokensByDay: (ids) => ipcRenderer.invoke(CH.tokensByDay, ids),
   dismissStopped: () => ipcRenderer.invoke(CH.dismissStopped),
@@ -87,11 +89,11 @@ const api: DeckApi = {
   setupCheck: () => ipcRenderer.invoke(CH.setupCheck),
   setupTool: (tool) => ipcRenderer.invoke(CH.setupTool, tool),
   ghAccounts: () => ipcRenderer.invoke(CH.ghAccounts),
-  ghSwitch: (login) => ipcRenderer.invoke(CH.ghSwitch, login),
+  ghUser: (login) => ipcRenderer.invoke(CH.ghUser, login),
   ghOwners: () => ipcRenderer.invoke(CH.ghOwners),
   configDetect: (owner, project) =>
     ipcRenderer.invoke(CH.configDetect, owner, project),
-  configDetectAll: () => ipcRenderer.invoke(CH.configDetectAll),
+  configDetectAll: (login) => ipcRenderer.invoke(CH.configDetectAll, login),
   configSave: (patch) => ipcRenderer.invoke(CH.configSave, patch),
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
   skillReinstall: (name) => ipcRenderer.invoke(CH.skillReinstall, name),

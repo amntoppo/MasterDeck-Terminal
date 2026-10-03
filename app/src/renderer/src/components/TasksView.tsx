@@ -15,6 +15,7 @@ import {
 import { sameTicket, ticketLabel } from "@shared/ticket";
 import type { AppState, Session } from "@shared/types";
 import { deck, load, save, useNow } from "../deck";
+import { AccountBadge } from "./AccountBits";
 import { AskPanel } from "./AskPanel";
 import { TerminalView } from "./TerminalView";
 
@@ -337,6 +338,7 @@ function TaskRow({
         </div>
         <div className="tv-meta">
           <span className="mono">{s.name}</span>
+          <AccountBadge login={s.account} />
           {(git?.branch || tail?.gitBranch) && (
             <span className="mono"> · {git?.branch ?? tail?.gitBranch}</span>
           )}

@@ -33,6 +33,8 @@ export interface TeamPr {
   issues: number[]
   /** The issues it closes, with their repos (issues keeps the numbers alone). */
   issueRefs?: Ticket[]
+  /** The GitHub account whose search found it (two or more connected). */
+  account?: string
 }
 
 /** The GraphQL query MasterDeck runs (one search page of 100). */
@@ -158,15 +160,28 @@ export function parseTeamPr(raw: unknown): TeamPr | null {
   }
 }
 
-/** Search result pages to PRs, newest first and without duplicates. */
+/** Search result pages to PRs, newest first and without duplicates (per account). */
 export function parseTeamPrs(pages: unknown[]): TeamPr[] {
   const seen = new Map<string, TeamPr>()
-  for (const page of pages)
+  for (const page of pages) {
+    const account = typeof obj(page).account === 'string' ? (obj(page).account as string) : undefined
     for (const raw of nodes(obj(obj(obj(page).data).search))) {
       const pr = parseTeamPr(raw)
-      if (pr && !seen.has(pr.url)) seen.set(pr.url, pr)
+      // One copy per account: a PR both accounts see belongs on both accounts' tabs.
+      const key = `${pr?.url}\0${account ?? ''}`
+      if (pr && !seen.has(key)) seen.set(key, account ? { ...pr, account } : pr)
     }
+  }
   return [...seen.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/** Each account's search pages tagged with its login; an account whose read failed (pages null) keeps its last pages. */
+export function mergeTeamPages(got: { login: string | null; pages: unknown[] | null }[], prev: unknown[]): unknown[] {
+  const failed = new Set(got.filter((g) => g.pages === null).map((g) => g.login))
+  return [
+    ...got.flatMap((g) => (g.pages ?? []).map((p) => (g.login ? { ...obj(p), account: g.login } : p))),
+    ...prev.filter((p) => failed.has(typeof obj(p).account === 'string' ? (obj(p).account as string) : null)),
+  ]
 }
 
 // --- filters ---------------------------------------------------------------------------------
@@ -304,4 +319,18 @@ export function ageText(iso: string | null, now: number): string {
   if (m < 60 * 24) return `${Math.round(m / 60)}h`
   if (m < 60 * 24 * 14) return `${Math.round(m / 1440)}d`
   return `${Math.round(m / 10_080)}w`
+}
+
+/** The PRs a tab of one account shows: that account's search (untagged ones are the primary's); all with no account. */
+export function prsForAccount(prs: TeamPr[], login: string | null, primary: string | null): TeamPr[] {
+  return login ? prs.filter((p) => (p.account ?? primary) === login) : prs
+}
+
+/** Saved PRs tabs, tolerant of old shapes (no account: the primary's); null when nothing usable is saved. */
+export function parseSavedPrTabs(saved: unknown): { id: string; name: string; filters: PrFilters; account?: string }[] | null {
+  if (!Array.isArray(saved) || !saved.length) return null
+  const tabs = saved
+    .filter((t) => t && typeof t.id === 'string')
+    .map((t) => ({ id: t.id as string, name: typeof t.name === 'string' && t.name ? (t.name as string) : 'PRs', filters: normalizePrFilters(t.filters), ...(typeof t.account === 'string' ? { account: t.account as string } : {}) }))
+  return tabs.length ? tabs : null
 }

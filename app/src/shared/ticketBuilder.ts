@@ -10,6 +10,32 @@ import type { Sprint } from "./types";
 
 export const TICKET_BUILDER_NAME = "md-ticket-builder";
 
+/** A Board tab id a ticket builder may be named and foldered by (two or more accounts: one per tab). */
+export const TICKET_TAB = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The ticket builder's session name: one shared (one account), or one per Board tab. */
+export const ticketBuilderName = (tab?: string): string =>
+  tab ? `${TICKET_BUILDER_NAME}-${tab}` : TICKET_BUILDER_NAME;
+
+/** Why a ticket-builder pane spec from a browser is refused (a bad tab id, an account not connected); null if fine. */
+export function ticketSpecError(
+  spec: { tab?: unknown; account?: unknown },
+  logins: string[],
+  /** The account the tab's folder already names (its context.json), if any. */
+  folderAccount?: (tab: string) => string | null,
+): string | null {
+  const low = (s: string) => s.toLowerCase();
+  if (spec.tab !== undefined && (typeof spec.tab !== "string" || !TICKET_TAB.test(spec.tab)))
+    return "refusing a ticket builder with a bad tab id";
+  if (spec.account === undefined) return null;
+  if (typeof spec.account !== "string" || !logins.some((l) => low(l) === low(spec.account as string)))
+    return "refusing a ticket builder as an account that is not connected";
+  const held = typeof spec.tab === "string" ? folderAccount?.(spec.tab) : null;
+  if (held && low(held) !== low(spec.account))
+    return `refusing a ticket builder as ${spec.account}: that tab's session works as ${held}`;
+  return null;
+}
+
 export function ticketContext(
   cfg: AppConfig,
   sprints: Sprint[],

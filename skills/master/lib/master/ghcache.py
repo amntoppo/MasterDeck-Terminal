@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_TTL = 60
 PAUSE_SECONDS = 600
+ACCOUNT_RE = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 RATE_LIMITED = re.compile(r"rate limit|secondary rate|abuse detection|unknown owner type", re.I)
 
 # Subcommands that only read. Everything else (create, edit, merge, review, comment, checkout,
@@ -111,29 +112,48 @@ def categories(args: list) -> set:
     return cats or {"all"}
 
 
-def cache_key(args: list, cwd: str) -> str:
+def _account(env: "dict | None" = None) -> str:
+    """GHC_ACCOUNT: the gh login a call runs as (MasterDeck sets it with GH_TOKEN); "" for gh's active one.
+
+    GH_TOKEN without GHC_ACCOUNT (a hand-run tool with its own token): "-t" + a short sha256 of the
+    token, so its answers and pause are its own; no GitHub login starts with "-", and the token
+    itself is never stored."""
+    src = env if env is not None and ("GHC_ACCOUNT" in env or "GH_TOKEN" in env) else os.environ
+    a = src.get("GHC_ACCOUNT") or ""
+    if a:
+        return a if ACCOUNT_RE.fullmatch(a) else ""
+    tok = src.get("GH_TOKEN") or ""
+    return "-t" + hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else ""
+
+
+def cache_key(args: list, cwd: str, account: "str | None" = None) -> str:
     scoped = args and args[0] in CWD_SCOPED and not _has_repo_flag(args)
     material = {"args": args, "cwd": cwd if scoped else None, "repo": os.environ.get("GH_REPO") if scoped else None}
+    acct = _account() if account is None else account
+    if acct:
+        material["account"] = acct  # one account's answers never serve another; none: today's keys
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:32]
 
 
 # --- pause -------------------------------------------------------------------------------------
 
-def _pause_path() -> Path:
-    return cache_dir() / "paused.json"
+def _pause_path(account: str = "") -> Path:
+    if account and not ACCOUNT_RE.fullmatch(account):
+        raise ValueError(f"bad account: {account!r}")
+    return cache_dir() / (f"paused-{account}.json" if account else "paused.json")
 
 
-def paused_until(now: float) -> float:
+def paused_until(now: float, account: str = "") -> float:
     try:
-        until = float(json.loads(_pause_path().read_text()).get("until", 0))
+        until = float(json.loads(_pause_path(account).read_text()).get("until", 0))
     except (OSError, ValueError, AttributeError):
         return 0.0
     return until if until > now else 0.0
 
 
-def pause(now: float, seconds: float = PAUSE_SECONDS, reason: str = "") -> None:
-    until = max(paused_until(now), now + seconds)
-    _write_json(_pause_path(), {"until": until, "reason": reason[:300], "at": now})
+def pause(now: float, seconds: float = PAUSE_SECONDS, reason: str = "", account: str = "") -> None:
+    until = max(paused_until(now, account), now + seconds)
+    _write_json(_pause_path(account), {"until": until, "reason": reason[:300], "at": now})
 
 
 # --- stats ------------------------------------------------------------------------------------
@@ -181,7 +201,7 @@ def _read_entry(key: str):
 
 def invalidate(cats: set) -> None:
     for f in cache_dir().glob("*.json"):
-        if f.name in ("paused.json", "stats.json"):
+        if f.name.startswith("paused") or f.name == "stats.json":
             continue
         try:
             entry = json.loads(f.read_text())
@@ -199,7 +219,7 @@ def invalidate(cats: set) -> None:
 def prune(max_age: float = 86_400, now: float | None = None) -> None:
     now = now or time.time()
     for f in cache_dir().glob("*.json"):
-        if f.name in ("paused.json", "stats.json"):
+        if f.name.startswith("paused") or f.name == "stats.json":
             continue
         try:
             if now - f.stat().st_mtime > max_age:
@@ -212,9 +232,10 @@ def _gh_binary() -> str:
     return os.environ.get("GHC_GH", "gh")
 
 
-def _run_gh(args: list, stdin: bytes | None) -> subprocess.CompletedProcess:
+def _run_gh(args: list, stdin: bytes | None, env: "dict | None" = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run([_gh_binary(), *args], input=stdin, capture_output=True, timeout=180)
+        return subprocess.run([_gh_binary(), *args], input=stdin, capture_output=True, timeout=180,
+                              env={**os.environ, **env} if env else None)
     except FileNotFoundError:
         return subprocess.CompletedProcess(args, 127, b"", b"ghc: gh not found on PATH\n")
     except subprocess.TimeoutExpired:
@@ -222,29 +243,32 @@ def _run_gh(args: list, stdin: bytes | None) -> subprocess.CompletedProcess:
 
 
 def run(args: list, ttl: float = DEFAULT_TTL, cwd: str | None = None, stdin: bytes | None = None,
-        now_fn=time.time, force: bool = False) -> "tuple[int, bytes, bytes]":
+        now_fn=time.time, force: bool = False, env: "dict | None" = None) -> "tuple[int, bytes, bytes]":
     """`gh <args>` through the shared cache. Returns (exit code, stdout, stderr).
 
     `force` (or GHC_FORCE=1) skips answers cached before this call, for a manual refresh; the new
     answer is still cached, and a caller already fetching the same read is waited for, not repeated.
+    `env` (MasterDeck's account calls in-process: GH_TOKEN, GHC_ACCOUNT) reaches gh and picks the
+    account's own cache entries and pause.
     """
     cwd = cwd or os.getcwd()
+    acct = _account(env)
     force = force or os.environ.get("GHC_FORCE") == "1"
     started = now_fn()
     if fcntl is None:
-        res = _run_gh(args, stdin)
+        res = _run_gh(args, stdin, env)
         return res.returncode, res.stdout, res.stderr
     if not cacheable(args) or ttl <= 0 or stdin:
         # Writes (and uncacheable reads) go straight through; writes drop what they may change.
-        res = _run_gh(args, stdin)
+        res = _run_gh(args, stdin, env)
         if RATE_LIMITED.search((res.stderr or b"").decode(errors="replace")) and res.returncode != 0:
-            pause(now_fn(), reason=res.stderr.decode(errors="replace"))
+            pause(now_fn(), reason=res.stderr.decode(errors="replace"), account=acct)
         if not is_read(args) and res.returncode == 0:
             invalidate(categories(args))
             bump("write")
         return res.returncode, res.stdout, res.stderr
 
-    key = cache_key(args, cwd)
+    key = cache_key(args, cwd, acct)
 
     def fresh(entry) -> bool:
         if entry is None or (force and entry.get("at", 0) < started):
@@ -263,7 +287,7 @@ def run(args: list, ttl: float = DEFAULT_TTL, cwd: str | None = None, stdin: byt
         if fresh(entry):
             bump("hit")
             return 0, entry["stdout"].encode(), entry.get("stderr", "").encode()
-        until = paused_until(now_fn())
+        until = paused_until(now_fn(), acct)
         if until:
             when = time.strftime("%H:%M", time.localtime(until))
             if entry is not None:
@@ -273,14 +297,14 @@ def run(args: list, ttl: float = DEFAULT_TTL, cwd: str | None = None, stdin: byt
                 return 0, entry["stdout"].encode(), note.encode()
             bump("blocked")
             return 1, b"", f"ghc: GitHub API rate limit: calls paused until {when}, nothing cached for this\n".encode()
-        res = _run_gh(args, None)
+        res = _run_gh(args, None, env)
         err = (res.stderr or b"").decode(errors="replace")
         if res.returncode == 0:
             _write_json(_entry_path(key), {"at": now_fn(), "args": args, "cats": sorted(categories(args)),
                                             "stdout": res.stdout.decode(errors="replace"), "stderr": err})
             bump("miss")
         elif RATE_LIMITED.search(err):
-            pause(now_fn(), reason=err)
+            pause(now_fn(), reason=err, account=acct)
             if entry is not None:
                 bump("stale")
                 return 0, entry["stdout"].encode(), b"ghc: GitHub rate limit hit; served the last cached answer\n"

@@ -66,8 +66,12 @@ def _assign(i: dict) -> dict:
         + f"3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.\n\n"
         + (REPLY if config.master_enabled() else REPLY_SOLO).format(n=lab)
     )
+    sp = {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}
+    acct = config.account_for_repo(repo)  # two or more accounts only
+    if acct:
+        sp["account"] = acct
     return {"kind": "ASSIGN", "issue": n, "repo": repo, "source": _src("issue", repo, n),
-            "target": {"spawn": {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}},
+            "target": {"spawn": sp},
             "message": prompt, "summary": f'"{i["title"]}"'}
 
 
@@ -118,8 +122,13 @@ def _stale(s: dict, i: dict) -> dict:
 def _orphan(s: dict, i: dict) -> dict:
     repo = refs.stored(i.get("repo"))
     lab = refs.label(repo, i["number"])
+    sp = {"name": spawn_name(i), "cwd": s["cwd"], "resume": s["session_id"]}
+    # Resume as the account the session started as; unrecorded (or gone): spawn's default, the repo's.
+    acct = config.session_account(s["session_id"]) if config.is_multi() else None
+    if acct:
+        sp["account"] = acct
     return {"kind": "ORPHAN", "issue": i["number"], "repo": repo, "source": f"orphan:{s['session_id']}",
-            "target": {"spawn": {"name": spawn_name(i), "cwd": s["cwd"], "resume": s["session_id"]}},
+            "target": {"spawn": sp},
             "message": f"Resume session {s['session_id']} for {lab} in the background.",
             "summary": f"owner session stopped, {lab} is {i['status']}; resume it"}
 

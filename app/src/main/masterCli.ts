@@ -16,11 +16,11 @@ export class MasterCli {
   ) {}
 
   /** `force` (a manual Refresh) makes GitHub reads skip what the shared gh cache already holds. */
-  private exec(args: string[], stdin?: string, timeoutMs = 30_000, force = false): Promise<RunResult> {
+  private exec(args: string[], stdin?: string, timeoutMs = 30_000, force = false, env: Record<string, string> = {}): Promise<RunResult> {
     return this.run(this.python, ['-m', 'master.cli', ...args], {
       stdin,
       timeoutMs,
-      env: { PYTHONPATH: this.libDir, PYTHONIOENCODING: 'utf-8', ...(force ? { GHC_FORCE: '1' } : {}) },
+      env: { ...env, PYTHONPATH: this.libDir, PYTHONIOENCODING: 'utf-8', ...(force ? { GHC_FORCE: '1' } : {}) },
     })
   }
 
@@ -33,7 +33,8 @@ export class MasterCli {
   async configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner)) return { ok: false, message: 'not a GitHub login' }
     const args = ['config', 'detect', '--owner', owner, ...(project && Number.isInteger(project) && project > 0 ? ['--project', String(project)] : [])]
-    // Fresh from GitHub: the shared cache is not per account, and Setup may have just switched it.
+    // Fresh from GitHub, as gh's active account (no GH_TOKEN/GHC_ACCOUNT: today's cache keys).
+    // Setup's per-account reads use configDetectAll with the account's env instead.
     const r = await this.exec(args, undefined, 90_000, true)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
@@ -43,10 +44,11 @@ export class MasterCli {
     }
   }
 
-  /** `master config detect --all`: every owner, their repos and boards, in two GraphQL calls. */
-  async configDetectAll(): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
-    // Fresh from GitHub: the shared cache is not per account, and Setup may have just switched it.
-    const r = await this.exec(['config', 'detect', '--all'], undefined, 120_000, true)
+  /** `master config detect --all`: every owner, their repos and boards, in two GraphQL calls. `env`: GH_TOKEN of the account asked about. */
+  async configDetectAll(env: Record<string, string> = {}): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+    // Fresh from GitHub; an account's env (detectEnv) carries GHC_ACCOUNT, so what it caches is that
+    // account's own. No env: gh's active account, today's keys.
+    const r = await this.exec(['config', 'detect', '--all'], undefined, 120_000, true, env)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       return { ok: true, data: JSON.parse(r.stdout) }
@@ -122,12 +124,12 @@ export class MasterCli {
   }
 
   /** Add an ASSIGN proposal. The prompt goes on stdin; the message is the same text. */
-  async addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string }): Promise<
+  async addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string; account?: string }): Promise<
     { ok: true; id: number } | { ok: false; message: string }
   > {
     const r = await this.exec(
       ['add', '--kind', a.kind ?? 'ASSIGN', '--issue', String(a.issue), ...(a.repo ? ['--repo', a.repo] : []), '--source', a.source, '--spawn-name', a.name, '--cwd', a.cwd,
-        '--message', a.prompt, '--prompt', '-', ...(a.model ? ['--model', a.model] : [])],
+        '--message', a.prompt, '--prompt', '-', ...(a.model ? ['--model', a.model] : []), ...(a.account ? ['--account', a.account] : [])],
       a.prompt,
     )
     const m = /added (\d+)/.exec(r.stdout)
