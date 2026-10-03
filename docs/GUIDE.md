@@ -694,6 +694,7 @@ is a `gh` login (`gh auth status` lists them).
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog. master's proposals use the issue's account (shown on the proposal).
 - **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
+- **Board and PRs**: each tab belongs to one account (see Board View, PRs).
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 
@@ -719,6 +720,7 @@ cards is in them.
   (plus one for their PRs). A ticket is a repo and a number: `#12` in the primary repository, `api#12`
   in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
   all keep the repo). A card moves only within its own board's columns.
+- **Several accounts:** with two or more GitHub accounts each tab shows one account (its badge says which): its boards, columns and sprint, and **Mine** means that account's login. The first select in the filter row changes a tab's account; connecting another account adds a Mine tab for it once; + adds a tab on the same account.
 - **Tabs:** it starts with **Mine** (your issues, selected) and **Everyone**. **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
   same fetched board. **Repos** and **Boards** filters (with **Select all**) pick what a tab shows; with
   some boards picked, only their columns show. Tabs and their filters are remembered.

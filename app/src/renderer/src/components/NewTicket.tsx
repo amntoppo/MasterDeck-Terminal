@@ -14,6 +14,8 @@ export interface TicketContext {
   sprint: string;
   /** The tab's name (e.g. "Mine"). */
   tab: string;
+  /** The tab's GitHub account (two or more). */
+  account?: string;
 }
 
 /** The board a column belongs to: the one the tab filters to, else the first board that has the column. */

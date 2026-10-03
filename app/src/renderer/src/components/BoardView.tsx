@@ -6,6 +6,7 @@ import {
   type StatusGroup,
 } from "@shared/appConfig";
 import { nextTabName, ViewTabs } from "./ViewTabs";
+import { isMulti, primaryLogin } from "@shared/accounts";
 import { fullRepo, ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -26,6 +27,9 @@ import {
   cardAction,
   defaultFilters,
   filterOptions,
+  boardForAccount,
+  tabAccount,
+  withAccountTabs,
   normalizeFilters,
   repoOptions,
   UNASSIGNED,
@@ -115,6 +119,7 @@ function loadTabs(me: string | null): BoardTab[] {
         id: t.id,
         name: typeof t.name === "string" && t.name ? t.name : "Board",
         filters: normalizeFilters(t.filters, me),
+        ...(typeof t.account === "string" ? { account: t.account } : {}),
       }));
   return [
     { id: MINE_TAB, name: "Mine", filters: defaultFilters(me) },
@@ -246,10 +251,10 @@ export function BoardView({
     if (back) setPendingMove({ card, to: col });
     else void doMove(card, col);
   };
-  const me = state.me;
+  const primaryMe = state.me;
   const phone = usePhone();
   // Tabs: each its own name and filters over the one board fetched from GitHub.
-  const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(me));
+  const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(primaryMe));
   const [tabId, setTabId] = useState<string>(() => load<string>(TAB_KEY, ""));
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0];
   // First run: the Mine tab filters to me once my login is known.
@@ -257,16 +262,36 @@ export function BoardView({
     () => load<BoardTab[] | null>(TABS_KEY, null) !== null,
   );
   useEffect(() => {
-    if (meFilled || !me) return;
+    if (meFilled || !primaryMe) return;
     setMeFilled(true);
     setTabs((ts) =>
       ts.map((t) =>
         t.id === MINE_TAB && t.filters.assignees.length === 0
-          ? { ...t, filters: { ...t.filters, assignees: [me] } }
+          ? { ...t, filters: { ...t.filters, assignees: [primaryMe] } }
           : t,
       ),
     );
-  }, [me, meFilled]);
+  }, [primaryMe, meFilled]);
+  // Two or more GitHub accounts: each tab shows one account's boards; "Mine" is that account's login.
+  const cfg = state.config;
+  const multi = isMulti(cfg);
+  const logins = cfg.accounts.map((a) => a.login);
+  const primary = primaryLogin(cfg);
+  const acct = multi ? (tabAccount(tab, logins) ?? primary) : null;
+  const me = acct ?? state.me;
+  // Connecting another account adds a "Mine" tab for it, once.
+  useEffect(() => {
+    const added = load<string[]>("boardTabAccounts", []);
+    const r = withAccountTabs(tabs, logins, primary, added, (l) => ({
+      id: `board-mine-${l}`,
+      name: "Mine",
+      account: l,
+      filters: defaultFilters(l),
+    }));
+    if (r.tabs !== tabs) setTabs(r.tabs);
+    if (r.added !== added) save("boardTabAccounts", r.added);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logins.join(), primary]);
   useEffect(() => save(TABS_KEY, tabs), [tabs]);
   useEffect(() => save(TAB_KEY, tab.id), [tab.id]);
   const f = tab.filters;
@@ -283,6 +308,7 @@ export function BoardView({
         id,
         name: nextTabName(tabs, "Board"),
         filters: { ...defaultFilters(me), assignees: [] },
+        ...(tab.account ? { account: tab.account } : {}),
       },
     ]);
     setTabId(id);
@@ -300,7 +326,10 @@ export function BoardView({
       ts.map((t) => (t.id === id ? { ...t, name: name.trim() || t.name } : t)),
     );
 
-  const rawBoard = state.board;
+  const rawBoard = useMemo(
+    () => (state.board && acct ? boardForAccount(state.board, acct, cfg) : state.board),
+    [state.board, acct, cfg],
+  );
   const b = useMemo(
     () =>
       rawBoard && Object.keys(moving).length
@@ -319,7 +348,7 @@ export function BoardView({
   const options = useMemo(
     () =>
       b
-        ? filterOptions(b, me, state.users)
+        ? filterOptions(b, me, acct && acct !== primary ? [] : state.users)
         : { assignees: [], labels: [], milestones: [] },
     [b, me, state.users],
   );
@@ -492,7 +521,7 @@ export function BoardView({
         title: p.title,
         columns: p.columns,
       }));
-  const repos = repoOptions(b, state.config.repos);
+  const repos = repoOptions(b, acct ? (cfg.accounts.find((a) => a.login === acct)?.repos ?? []) : state.config.repos);
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
@@ -501,6 +530,7 @@ export function BoardView({
     filters: f,
     sprint: state.selectedSprint,
     tab: tab.name,
+    account: acct ?? undefined,
   });
   // `restart`: a new conversation. Otherwise an open session keeps going: its context.json now
   // says where this + was, and what was typed in the dialog is sent to it as a message.
@@ -568,6 +598,34 @@ export function BoardView({
   // The filter row: inline on a wide screen; on a phone, behind a "Filters (n)" button.
   const filterControls = (
     <>
+    {multi && (
+      <select
+        className="fsel"
+        value={acct ?? ""}
+        title="The GitHub account this tab shows"
+        onChange={(e) => {
+          const l = e.target.value;
+          setTabs((ts) =>
+            ts.map((t) =>
+              t.id === tab.id
+                ? {
+                    ...t,
+                    account: l === primary ? undefined : l,
+                    // Its own repos and boards; "Mine" follows the account.
+                    filters: { ...t.filters, repos: [], projects: [], assignees: t.filters.assignees.length === 1 && t.filters.assignees[0] === me ? [l] : t.filters.assignees },
+                  }
+                : t,
+            ),
+          );
+        }}
+      >
+        {logins.map((l) => (
+          <option key={l} value={l}>
+            {l}
+          </option>
+        ))}
+      </select>
+    )}
     {repos.length > 1 && (
       <MultiPick
         label="Repos"
@@ -755,7 +813,7 @@ export function BoardView({
           </button>
         </header>
         <ViewTabs
-          tabs={tabs}
+          tabs={multi ? tabs.map((t) => ({ ...t, badge: tabAccount(t, logins) ?? primary ?? undefined })) : tabs}
           activeId={tab.id}
           onSelect={setTabId}
           onAdd={addTab}
