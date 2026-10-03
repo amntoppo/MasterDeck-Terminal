@@ -126,8 +126,13 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         note = f"cwd does not exist: {cwd}"
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
+    target = p["target"]
+    if config.is_multi() and not target["spawn"].get("account"):
+        # A proposal without an account (older, or `master add` without --account) never starts as
+        # gh's active account: its repo's account, else the primary's (spec 4.2). The ledger keeps it as written.
+        target = dict(target, spawn=dict(target["spawn"], account=config.account_for_repo(p.get("repo"))))
     try:
-        cmd = command(p["target"])
+        cmd = command(target)
     except (KeyError, ValueError, SpawnError) as e:
         note = str(e)
         hold(note)

@@ -167,6 +167,44 @@ class SpawnAccountTest(unittest.TestCase):
         self.assertEqual(run.calls, [])
 
 
+    def _old(self, led, repo, n):
+        # A proposal from before accounts (or `master add` without --account): no spawn.account.
+        p = ledger.add(led, kind="ASSIGN", issue=n, repo=repo, source=f"issue:{repo}#{n}",
+                       target={"spawn": {"name": f"{n}-x", "cwd": self.tmp.name, "prompt": "go"}},
+                       message="m", summary="s", now=NOW)
+        ledger.transition(led, p["id"], "approved", now=NOW)
+        return p
+
+    def test_no_account_in_multi_mode_spawns_as_the_repo_account_else_the_primary(self):
+        d = Path(self.tmp.name) / "accounts"
+        d.mkdir()
+        for login in ("alice", "bob-work"):
+            (d / f"{login}.settings.json").write_text("{}")
+        led = ledger.empty()
+        globex, other = self._old(led, "globex/app", 3), self._old(led, "initech/x", 4)
+        run = FakeRunner()
+        with self.multi:
+            spawn.spawn(led, globex["id"], now=NOW, runner=run)
+            spawn.spawn(led, other["id"], now=NOW, runner=run)
+        self.assertEqual([c[0][:4] for c in run.calls],
+                         [["claude", "--bg", "--settings", str(d / "bob-work.settings.json")],
+                          ["claude", "--bg", "--settings", str(d / "alice.settings.json")]])
+        self.assertNotIn("account", globex["target"]["spawn"])  # the ledger keeps what master wrote
+        # One account: the same command as before.
+        single = self._old(led, "globex/app", 5)
+        spawn.spawn(led, single["id"], now=NOW, runner=run)
+        self.assertEqual(run.calls[-1][0], ["claude", "--bg", "-n", "5-x", "go"])
+
+    def test_no_account_in_multi_mode_with_a_missing_file_holds(self):
+        led = ledger.empty()
+        p = self._old(led, "globex/app", 3)
+        run = FakeRunner()
+        with self.multi, self.assertRaises(spawn.SpawnError):
+            spawn.spawn(led, p["id"], now=NOW, runner=run)
+        self.assertEqual(p["status"], "held")
+        self.assertIn("GitHub account bob-work has no settings file", p["note"])
+        self.assertEqual(run.calls, [])
+
 class RulesAccountTest(unittest.TestCase):
     ISSUE = {"number": 3, "repo": "globex/app", "title": "Fix it", "url": "https://github.com/globex/app/issues/3"}
 
