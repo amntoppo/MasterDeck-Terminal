@@ -6,6 +6,8 @@ import { BrowserStore } from './browserStore'
 import { loadMacKey } from './macKey'
 import { publicRaw } from '@shared/e2e'
 
+// Windows has no POSIX file modes (stat reports 0o666).
+const mode600 = (f: string) => process.platform === 'win32' || (statSync(f).mode & 0o777) === 0o600
 const file = () => join(mkdtempSync(join(tmpdir(), 'bstore-')), 'deep', 'browsers.json')
 const b = (id: string) => ({ id, name: `B ${id}`, publicKey: 'B'.repeat(87), approvedAt: 1 })
 
@@ -17,7 +19,7 @@ describe('BrowserStore', () => {
     s.add('u2', b('b2'))
     expect(new BrowserStore(f).list('u1')).toEqual([b('b1')])
     expect(readFileSync(f, 'utf8')).not.toContain('b2')
-    expect(statSync(f).mode & 0o777).toBe(0o600)
+    expect(mode600(f)).toBe(true)
   })
   it('wipe empties the file', () => {
     const f = file()
@@ -57,10 +59,10 @@ describe('loadMacKey', () => {
     const a = await loadMacKey(f, safe())
     expect(a!.publicKey).toHaveLength(87)
     expect(readFileSync(f, 'utf8')).not.toContain(a!.publicKey) // stored through safeStorage
-    expect(statSync(f).mode & 0o777).toBe(0o600)
+    expect(mode600(f)).toBe(true)
     chmodSync(f, 0o644)
     const again = await loadMacKey(f, safe())
-    expect(statSync(f).mode & 0o777).toBe(0o600)
+    expect(mode600(f)).toBe(true)
     expect(again!.publicKey).toBe(a!.publicKey)
     expect(await publicRaw(again!.pair.publicKey)).toBe(a!.publicKey)
     expect(again!.pair.privateKey.extractable).toBe(false)
