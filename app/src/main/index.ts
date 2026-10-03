@@ -73,6 +73,7 @@ import {
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
+  resumeAs,
   SessionAccounts,
   sessionSettings,
 } from "./sessionAccounts";
@@ -1155,25 +1156,28 @@ async function resumeBg(
     ? ["-n", name]
     : [];
   const dir = cwd && existsSync(cwd) ? cwd : homedir();
-  // The account it started as (resume always passes --settings again: unverified whether it keeps it).
-  const as = await settingsFor(account, async () =>
-    accountOfSession(
-      { sessionId: id, key: key || id.slice(0, 8), name },
-      await originNow(dir),
-    ),
-  );
-  if (!as.ok) return { ok: false, message: as.message };
-  const r = await run(
-    claudeBin,
-    ["--bg", ...as.args, "--resume", id, ...named],
-    { cwd: dir, timeoutMs: 60_000 },
-  );
-  // By id only: another session may share the name. A new id (claude attach) is filled in by claim.
-  if (r.code === 0 && as.account)
-    sessionAccounts.set([id, key ?? ""], as.account);
-  return r.code === 0
-    ? { ok: true, message: name }
-    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  // The account it started as (resume always passes --settings again).
+  const r = await resumeAs(resumeDeps(dir), {
+    id,
+    key,
+    name,
+    named,
+    cwd: dir,
+    account,
+  });
+  return r.ok ? { ok: true, message: name } : r;
+}
+
+/** What resumeAs needs: the account resolved as for any session, recorded in sessionAccounts. */
+function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
+  return {
+    run,
+    claude: claudeBin,
+    accounts: sessionAccounts,
+    settings: settingsFor,
+    accountOf: async (s) => accountOfSession(s, await originNow(dir)),
+    live: () => latest?.sessions ?? [],
+  };
 }
 
 /** The Board's ticket sessions work here (one shared, or one per Board tab with two or more accounts; see ticketDirs.ts). */
@@ -1502,26 +1506,17 @@ async function startHere(o: {
       };
   }
   const cwd = o.cwd && existsSync(o.cwd) ? o.cwd : homedir();
-  const as = await settingsFor(null, async () =>
-    accountOfSession(
-      { sessionId: o.sessionId, key: o.sessionId.slice(0, 8), name: o.name },
-      await originNow(cwd),
-    ),
-  );
-  if (!as.ok) return { ok: false, message: as.message };
-  const r = await run(
-    claudeBin,
-    ["--bg", ...as.args, "--resume", o.sessionId, "-n", o.name],
-    { cwd, timeoutMs: 60_000 },
-  );
-  if (r.code === 0 && as.account)
-    sessionAccounts.set(
-      [o.sessionId, bgIdFromOutput(r.stdout) ?? ""],
-      as.account,
-    );
-  return r.code === 0
+  const r = await resumeAs(resumeDeps(cwd), {
+    id: o.sessionId,
+    key: null,
+    name: o.name,
+    named: ["-n", o.name],
+    cwd,
+    account: null,
+  });
+  return r.ok
     ? { ok: true, message: r.stdout.trim().split("\n")[0] ?? "started" }
-    : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+    : r;
 }
 
 /** Transcripts read for the History reader, by path and mtime; the last few are kept. */

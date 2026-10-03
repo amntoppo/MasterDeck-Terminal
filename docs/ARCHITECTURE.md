@@ -117,10 +117,12 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   being written. The account is recorded in `session-accounts.json` (`SessionAccounts`, by
   session id and key: the bg id `claude --bg` prints is recorded at once, `bgIdFromOutput`; a new
   session started by name is matched by name for 10 min; a live session known by only one of its
-  ids, e.g. resumed by `claude attach` under a new session id, gets the other one on the next state
-  build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
-  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume always
-  passes `--settings` again. `accountFor` (IPC) gives a new session's default for a folder. One
+  ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
+  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume
+  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again; `claude --bg
+  --resume` gives the session a new session id and bg id, so the account is recorded under the
+  old ids and the printed bg id (`claim` adds the new session id), or, when none is printed, by
+  name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
   account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)

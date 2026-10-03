@@ -2,7 +2,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { bgIdFromOutput, SessionAccounts, sessionSettings } from './sessionAccounts'
+import { bgIdFromOutput, resumeAs, SessionAccounts, sessionSettings } from './sessionAccounts'
+import type { Runner } from './run'
+import type { Session } from '@shared/types'
 
 const file = () => join(mkdtempSync(join(tmpdir(), 'sa-')), 'session-accounts.json')
 
@@ -84,5 +86,59 @@ describe('sessionSettings', () => {
     expect(await sessionSettings(true, no, 'bob-work', async () => null)).toEqual(no())
     const none = () => ({ ok: true as const, args: [], account: null })
     expect((await sessionSettings(true, none, 'bob-work', async () => null)).ok).toBe(false)
+  })
+})
+
+describe('resumeAs', () => {
+  const S1 = '11111111-1111-4111-8111-111111111111'
+  const S2 = '22222222-2222-4222-8222-222222222222'
+  const setup = (out: string) => {
+    const a = new SessionAccounts(file())
+    const calls: string[][] = []
+    const run: Runner = async (_c, args) => (calls.push(args), { code: 0, stdout: out, stderr: '' })
+    const live: { name: string; state: Session['state'] }[] = []
+    const d = {
+      run,
+      claude: 'claude',
+      accounts: a,
+      // As index.ts: the given account, else the recorded one, else the primary (alice).
+      settings: async (l: string | null, fb: () => Promise<string | null>) => {
+        const login = l || (await fb()) || 'alice'
+        return { ok: true as const, args: ['--settings', `/acc/${login}.settings.json`], account: login }
+      },
+      accountOf: async (s: { sessionId: string; key: string }) => a.get(s),
+      live: () => live,
+    }
+    return { a, calls, d, live }
+  }
+  it('a resume gets a new session id and bg id: the second resume still runs as the recorded account', async () => {
+    const { a, calls, d } = setup('Resumed in the background: 2b3c4d5e\n')
+    a.set([S1, 'aaaa1111'], 'bob-work')
+    expect((await resumeAs(d, { id: S1, key: 'aaaa1111', name: 'fix-12', named: ['-n', 'fix-12'], cwd: '/w', account: null })).ok).toBe(true)
+    expect(calls[0]).toEqual(['--bg', '--settings', '/acc/bob-work.settings.json', '--resume', S1, '-n', 'fix-12'])
+    // The new row shows up (new session id, the printed bg id), then stops.
+    a.claim([{ sessionId: S2, key: '2b3c4d5e', name: 'fix-12', state: 'working' }])
+    await resumeAs(d, { id: S2, key: null, name: 'fix-12', named: ['-n', 'fix-12'], cwd: '/w', account: null })
+    expect(calls[1]).toContain('/acc/bob-work.settings.json')
+  })
+  it('no bg id printed: matched by name, unless another live session has that name', async () => {
+    const one = setup('resumed\n')
+    await resumeAs(one.d, { id: S1, key: null, name: 'fix-12', named: [], cwd: '/w', account: 'bob-work' })
+    one.a.claim([{ sessionId: S2, key: '3c4d5e6f', name: 'fix-12', state: 'working' }])
+    expect(one.a.get({ sessionId: S2, key: 'x' })).toBe('bob-work')
+    const two = setup('resumed\n')
+    two.live.push({ name: 'resumed', state: 'working' })
+    await resumeAs(two.d, { id: S1, key: null, name: 'resumed', named: [], cwd: '/w', account: 'bob-work' })
+    two.a.claim([{ sessionId: S2, key: '3c4d5e6f', name: 'resumed', state: 'working' }])
+    expect(two.a.get({ sessionId: S2, key: '3c4d5e6f' })).toBeNull()
+  })
+  it('a refused account runs nothing', async () => {
+    const { calls, d } = setup('')
+    const r = await resumeAs(
+      { ...d, settings: async () => ({ ok: false as const, message: 'GitHub account bob-work needs to log in again' }) },
+      { id: S1, key: null, name: 'x', named: [], cwd: '/w', account: 'bob-work' },
+    )
+    expect(r).toEqual({ ok: false, message: 'GitHub account bob-work needs to log in again' })
+    expect(calls).toEqual([])
   })
 })

@@ -38,10 +38,21 @@ fixes it, and move the item here to "Recently done".
   until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
-- **P2 · Unverified: does a session keep its `--settings`?** Whether `claude --resume` keeps a
-  session's original `--settings` (MasterDeck always passes it again) and whether `claude attach`
-  of a parked session keeps it. Approach: resume and attach a session started as a second account
-  and run `gh api user` in it.
+- **P2 · Session accounts across resume and attach.** Verified (Claude Code 2.1.288):
+  `claude attach` of a parked session keeps its account, and `claude --bg --resume` gives the
+  session a new session id and bg id (handled: `resumeAs` records the printed bg id, `claim` adds
+  the new session id). Still unverified: whether `--resume` keeps the original `--settings`
+  (MasterDeck always passes it again, so it does not matter for its own resumes) and the exact
+  `claude --bg` stdout `bgIdFromOutput` relies on (no 8-hex id printed: matched by name).
+- **P2 · Board tab builder folders and Claude Code's trust dialog.** Every new Board tab's
+  builder folder (`ticket-builder/tab-<id>/`) shows Claude Code's trust dialog until it is
+  accepted, and its pre-approved permissions are ignored until then. Check after a reinstall
+  whether trusting `<home>/ticket-builder` covers its `tab-*` subfolders; if not, pre-trust each
+  new folder or start them in the shared folder.
+- **P3 · Parked: gh-active notice with `GH_TOKEN` in the app's env.** When the app's environment
+  carries `GH_TOKEN` (or `GITHUB_TOKEN`) for another user, the notice that gh's active account is
+  not the primary gives wrong advice (gh uses the token, not the active account). Approach:
+  suppress the notice when `GH_TOKEN`/`GITHUB_TOKEN` is set.
 - **P3 · Accepted simplifications of several accounts.** (a) A rate limit on one account pauses
   MasterDeck's own polling for all accounts (`Sources.githubPaused` is global; ghcache's pause is per
   account): per-account pause if it bites. (b) Skills run by hand inside a session use its token and

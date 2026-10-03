@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Session } from '@shared/types'
+import type { Runner } from './run'
 
 const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 /** ponytail: one entry per session id and key, the oldest dropped past this; a file per session if it ever matters. */
@@ -90,4 +91,34 @@ export async function sessionSettings(
   if (!multi) return { ok: true, args: [], account: null }
   const r = settingsArgs(account || (await fallback()))
   return r.ok && !r.args.length ? { ok: false, message: 'GitHub accounts are still loading; try again in a few seconds' } : r
+}
+
+/**
+ * `claude --bg [--settings <account>] --resume <id> [-n name]` (resumeBg, Start here). A resume gets
+ * a new session id and bg id: the account is recorded under the old ids and the bg id it prints
+ * (claim then adds the new session id). Nothing printed: by name, unless another live session has it.
+ */
+export async function resumeAs(
+  d: {
+    run: Runner
+    claude: string
+    accounts: SessionAccounts
+    /** `--settings` for `account`, else for `fallback()`'s (settingsFor in index.ts). */
+    settings: (account: string | null, fallback: () => Promise<string | null>) => Promise<SettingsArgs>
+    /** The account of a session when none is given (accountOfSession with its folder's origin). */
+    accountOf: (s: { sessionId: string; key: string; name: string }) => Promise<string | null>
+    live: () => Pick<Session, 'name' | 'state'>[]
+  },
+  o: { id: string; key: string | null; name: string; named: string[]; cwd: string; account: string | null },
+): Promise<{ ok: true; stdout: string } | { ok: false; message: string }> {
+  const as = await d.settings(o.account, () => d.accountOf({ sessionId: o.id, key: o.key || o.id.slice(0, 8), name: o.name }))
+  if (!as.ok) return as
+  const r = await d.run(d.claude, ['--bg', ...as.args, '--resume', o.id, ...o.named], { cwd: o.cwd, timeoutMs: 60_000 })
+  if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+  if (as.account) {
+    const bg = bgIdFromOutput(r.stdout)
+    d.accounts.set([o.id, o.key ?? '', bg ?? ''], as.account)
+    if (!bg && !d.live().some((x) => x.name === o.name && x.state !== 'done')) d.accounts.expect(o.name, as.account)
+  }
+  return { ok: true, stdout: r.stdout }
 }
