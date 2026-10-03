@@ -61,9 +61,30 @@ describe('SessionAccounts backfill', () => {
   })
 })
 
+// Claude Code 2.1.288's real output (ANSI stripped): a plain start, and a resume with flags (a copy under a new id).
+const START_OUT = `backgrounded · 1a2b3c4d
+  claude agents             list sessions
+  claude attach 1a2b3c4d    open in this terminal
+  claude logs 1a2b3c4d      show recent output
+  claude stop 1a2b3c4d      stop this session
+`
+const RESUME_OUT = `note: background session 72a76c62 keeps its own saved options, so the flags you passed started a copy as 7138e681. Without flags, the same command continues 72a76c62 itself.
+backgrounded · 7138e681
+  claude agents             list sessions
+  claude attach 7138e681    open in this terminal
+  claude logs 7138e681      show recent output
+  claude stop 7138e681      stop this session
+`
+
 describe('bgIdFromOutput', () => {
-  it('the background id claude --bg prints; not part of a session uuid', () => {
-    expect(bgIdFromOutput('Started background session 1a2b3c4d\nclaude attach 1a2b3c4d')).toBe('1a2b3c4d')
+  it('the new id: `backgrounded · <id>`, never the old id in the note', () => {
+    expect(bgIdFromOutput(START_OUT)).toBe('1a2b3c4d')
+    expect(bgIdFromOutput(RESUME_OUT)).toBe('7138e681')
+    expect(bgIdFromOutput(`\x1b[1mbackgrounded\x1b[0m · \x1b[36m7138e681\x1b[0m\n`)).toBe('7138e681')
+  })
+  it('else `claude attach <id>`; else null (no guessing from other hex)', () => {
+    expect(bgIdFromOutput('  claude attach 1a2b3c4d    open in this terminal\n')).toBe('1a2b3c4d')
+    expect(bgIdFromOutput('note: background session 72a76c62 keeps its own saved options')).toBeNull()
     expect(bgIdFromOutput('resumed 1a2b3c4d-0000-4000-8000-000000000000')).toBeNull()
     expect(bgIdFromOutput('')).toBeNull()
   })
@@ -112,12 +133,12 @@ describe('resumeAs', () => {
     return { a, calls, d, live }
   }
   it('a resume gets a new session id and bg id: the second resume still runs as the recorded account', async () => {
-    const { a, calls, d } = setup('Resumed in the background: 2b3c4d5e\n')
+    const { a, calls, d } = setup(RESUME_OUT)
     a.set([S1, 'aaaa1111'], 'bob-work')
     expect((await resumeAs(d, { id: S1, key: 'aaaa1111', name: 'fix-12', named: ['-n', 'fix-12'], cwd: '/w', account: null })).ok).toBe(true)
     expect(calls[0]).toEqual(['--bg', '--settings', '/acc/bob-work.settings.json', '--resume', S1, '-n', 'fix-12'])
     // The new row shows up (new session id, the printed bg id), then stops.
-    a.claim([{ sessionId: S2, key: '2b3c4d5e', name: 'fix-12', state: 'working' }])
+    a.claim([{ sessionId: S2, key: '7138e681', name: 'fix-12', state: 'working' }])
     await resumeAs(d, { id: S2, key: null, name: 'fix-12', named: ['-n', 'fix-12'], cwd: '/w', account: null })
     expect(calls[1]).toContain('/acc/bob-work.settings.json')
   })

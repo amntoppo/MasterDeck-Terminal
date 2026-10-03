@@ -39,11 +39,12 @@ fixes it, and move the item here to "Recently done".
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
 - **P2 · Session accounts across resume and attach.** Verified (Claude Code 2.1.288):
-  `claude attach` of a parked session keeps its account, and `claude --bg --resume` gives the
-  session a new session id and bg id (handled: `resumeAs` records the printed bg id, `claim` adds
-  the new session id). Still unverified: whether `--resume` keeps the original `--settings`
-  (MasterDeck always passes it again, so it does not matter for its own resumes) and the exact
-  `claude --bg` stdout `bgIdFromOutput` relies on (no 8-hex id printed: matched by name).
+  `claude attach` of a parked session keeps its account. `claude --bg --resume` with flags starts
+  a copy under a new session id and bg id, and the old session keeps its own saved options; only a
+  resume without flags continues it (MasterDeck always passes `-n`, and `--settings` with two or
+  more accounts, so its resumes are copies). Handled: `resumeAs` records the copy's bg id from the
+  `backgrounded · <id>` line (else `claude attach <id>`), `claim` adds the new session id. Open:
+  whether a copy should be avoided (resume without flags when the saved options already match).
 - **P2 · Board tab builder folders and Claude Code's trust dialog.** Every new Board tab's
   builder folder (`ticket-builder/tab-<id>/`) shows Claude Code's trust dialog until it is
   accepted, and its pre-approved permissions are ignored until then. Check after a reinstall

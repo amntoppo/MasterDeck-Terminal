@@ -70,9 +70,16 @@ export class SessionAccounts {
   }
 }
 
-/** The background id `claude --bg` prints (8 hex, not the start of a session uuid); null if none. */
+/**
+ * The new session's bg id from `claude --bg` stdout: `backgrounded · <id>`, else `claude attach <id>`;
+ * null otherwise. Never the first hex token: a resume with flags starts a copy under a new id and
+ * its note names the old one first.
+ */
 export function bgIdFromOutput(out: string): string | null {
-  return /(?<![0-9a-f-])([0-9a-f]{8})(?![0-9a-f-])/i.exec(out)?.[1] ?? null
+  const t = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+  return (
+    /^\s*backgrounded\s*·\s*([0-9a-f]{8})\b/im.exec(t)?.[1] ?? /^\s*claude attach ([0-9a-f]{8})\b/im.exec(t)?.[1] ?? null
+  )
 }
 
 type SettingsArgs = { ok: true; args: string[]; account: string | null } | { ok: false; message: string }

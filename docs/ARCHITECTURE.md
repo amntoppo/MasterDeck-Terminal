@@ -119,10 +119,12 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   session started by name is matched by name for 10 min; a live session known by only one of its
   ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
   proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume
-  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again; `claude --bg
-  --resume` gives the session a new session id and bg id, so the account is recorded under the
-  old ids and the printed bg id (`claim` adds the new session id), or, when none is printed, by
-  name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
+  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again. `claude --bg
+  --resume` with flags (`--settings`, `-n`, `--model` …) starts a copy under a new session id and
+  bg id; the old session keeps its own saved options (only a resume without flags continues it).
+  So the account is recorded under the old ids and the copy's bg id (`bgIdFromOutput`: the
+  `backgrounded · <id>` line, else `claude attach <id>`; never the note's old id), and `claim` adds
+  the new session id; with no id printed, by name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
   account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)
