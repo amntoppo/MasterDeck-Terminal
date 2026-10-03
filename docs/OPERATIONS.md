@@ -43,7 +43,7 @@ open /Applications/MasterDeck.app
 
 ## Release
 
-Only when the user asks. Last release: v0.6.2.
+Only when the user asks. Last release: v0.7.0 (2026-10-03).
 
 ```bash
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock

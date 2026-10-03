@@ -249,8 +249,8 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-03)
 
-- `main` = `b3c4d4b`, 53 commits ahead of `origin/main`, not pushed, not released (last release v0.6.2).
-  Installed locally. Shipped since the release: snapshot patches + volatile hold (0b6d8ed), web state
+- `main` is pushed and released as **v0.7.0** (2026-10-03; CI builds the DMGs/EXE). Installed
+  locally. In this release: snapshot patches + volatile hold (0b6d8ed), web state
   patches (75aafa1), the remote indicator (ce27e5d), instant typing (merge bacb8d6), plan H (merge
   f433be5: native PR watch, board moves, `/queue` hook, one-time migration of the skill hooks, own
   self-review gate; deploy watch and CI-failure messages are deliberate non-goals) and the web app's

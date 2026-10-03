@@ -6,9 +6,6 @@ the repo-root [TODO.md](../TODO.md).
 
 ## Shipping / ops
 
-- **P1 · Push and release decision.** `main` is 53 commits ahead of `origin/main` (9da2877 …
-  b3c4d4b); no release since v0.6.2. Approach: the user decides; then
-  [OPERATIONS § Release](OPERATIONS.md#release). Don't push before that.
 - **P1 · Backend CI deploy broken.** The CI Cloudflare token gets error 7403. Where:
   `masterdeck-backend/.github/workflows`. Approach: give the token Workers Scripts:Edit + the
   account/zone permissions the custom domains need, or drop the deploy job and keep local
