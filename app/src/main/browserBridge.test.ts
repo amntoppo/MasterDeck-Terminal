@@ -46,6 +46,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     resyncMs: 60,
     log: (l) => void w.logs.push(l),
     logins: () => ['alice', 'bob-work'],
+    ticketAccount: (tab) => (tab === 'held' ? 'bob-work' : null),
   })
   return w
 }
@@ -346,7 +347,11 @@ describe('BrowserBridge channel', () => {
     expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: '../x', account: 'alice' }, 80, 24])).toMatchObject({ ok: false })
     expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 't1', account: 'mallory' }, 80, 24])).toMatchObject({ ok: false })
     expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 5 }, 80, 24])).toMatchObject({ ok: false })
-    expect(w.call).toHaveBeenCalledTimes(1)
+    // Logins compare case-insensitively; a tab folder that already names another account is refused.
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 't1', account: 'BOB-work' }, 80, 24])).toMatchObject({ ok: true })
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 'held', account: 'alice' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 'held', account: 'Bob-Work' }, 80, 24])).toMatchObject({ ok: true })
+    expect(w.call).toHaveBeenCalledTimes(3)
   })
 
   it('send-mode methods run without a ret', async () => {

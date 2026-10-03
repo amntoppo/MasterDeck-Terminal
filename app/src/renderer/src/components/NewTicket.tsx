@@ -124,6 +124,24 @@ function MultiPick({
  * in. Defaults come from that column and the tab's filters (people, labels, milestone, repo) and
  * the sprint shown. Create with Claude hands the same context to the Board's Claude session.
  */
+/**
+ * The dialog's Create with Claude button. Two or more accounts: it hands over to the Board tab's
+ * session, which works as the tab's account, so it says which, and is blocked (with why) while the
+ * dialog's Account is another one, rather than handing a draft for one account to another's session.
+ */
+export function claudeHandoff(
+  multi: boolean,
+  picked: string | null,
+  tabAccount: string | undefined,
+): { label: string; blocked: string | null } {
+  if (!multi || !tabAccount) return { label: "Create with Claude", blocked: null };
+  const same = !picked || picked.toLowerCase() === tabAccount.toLowerCase();
+  return {
+    label: `Create with Claude as @${tabAccount}`,
+    blocked: same ? null : `Create with Claude runs on this tab's account; switch to a @${picked} tab to use it`,
+  };
+}
+
 export function NewTicketDialog({
   state,
   ctx,
@@ -189,6 +207,7 @@ export function NewTicketDialog({
     ? state.config.accounts.find((a) => a.login === account)
     : undefined;
   const repoList = acc ? acc.repos : state.config.repos;
+  const handoff = claudeHandoff(multi, account, ctx.account);
   const boards = acc ? acc.projects : state.config.projects;
   const board = boards.find((p) => `${p.owner}/${p.number}` === t.project);
   const columns = board?.columns ?? state.config.columns;
@@ -448,13 +467,15 @@ export function NewTicketDialog({
               placeholder="Add a label…"
             />
             {msg && !msg.ok && <div className="error">{msg.text}</div>}
+            {handoff.blocked && <div className="muted small">{handoff.blocked}</div>}
             <div className="form-buttons nt-buttons">
               <button
                 className="btn nt-claude"
-                onClick={() => onWithClaude(account ? { ...ctx, account } : ctx, t)}
+                disabled={!!handoff.blocked}
+                onClick={() => onWithClaude(ctx, t)}
                 title="Describe what you need; Claude writes the ticket(s) and creates them on this board"
               >
-                <ClaudeMark /> Create with Claude
+                <ClaudeMark /> {handoff.label}
               </button>
               <span style={{ flex: 1 }} />
               <button className="btn" onClick={onClose} disabled={busy}>

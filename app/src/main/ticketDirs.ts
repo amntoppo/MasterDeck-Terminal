@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { TICKET_BUILDER_NAME, TICKET_TAB } from '@shared/ticketBuilder'
 import { bodyFileAllowed, parseCreateArgs, sweepTicketDirs } from './boardOps'
@@ -31,11 +31,40 @@ export function ticketDirs(home: string, multi: boolean): string[] {
     .map((n) => join(root, n))
     .filter((d) => {
       try {
-        return statSync(d).isDirectory()
+        return lstatSync(d).isDirectory() && ticketDirOk(home, d)
       } catch {
         return false
       }
     })
+}
+
+/**
+ * A ticket folder MasterDeck may write and answer in: the shared folder, or a real (not symlinked)
+ * folder whose real path is directly inside the real `<home>/ticket-builder`. One not made yet is fine.
+ */
+export function ticketDirOk(home: string, dir: string): boolean {
+  const root = join(home, 'ticket-builder')
+  if (dir === root) return true
+  try {
+    if (!lstatSync(dir).isDirectory()) return false
+  } catch {
+    return true
+  }
+  try {
+    return dirname(realpathSync(dir)) === realpathSync(root)
+  } catch {
+    return false
+  }
+}
+
+/** The account a tab folder's context.json names (written by Create with Claude); null if none or a bad tab. */
+export function folderAccount(home: string, tab: string): string | null {
+  try {
+    const a = JSON.parse(readFileSync(join(ticketBuilderDir(home, tab, true), 'context.json'), 'utf8')).account
+    return typeof a === 'string' ? a : null
+  } catch {
+    return null
+  }
 }
 
 type SettingsArgs = (login?: string) => { ok: true; args: string[] } | { ok: false; message: string }
@@ -58,6 +87,7 @@ export function ticketPane(
   } catch (e) {
     return { error: (e as Error).message }
   }
+  if (!ticketDirOk(home, cwd)) return { error: 'refusing a ticket builder folder that is a link' }
   if (!spec.account) return { error: 'refusing a ticket builder without its tab account' }
   const s = settingsArgs(spec.account)
   return s.ok ? { cwd, tab: spec.tab, settings: s.args } : { error: s.message }

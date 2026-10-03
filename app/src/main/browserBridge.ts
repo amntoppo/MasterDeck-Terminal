@@ -33,6 +33,8 @@ export interface BridgeDeps {
   log?: (line: string) => void
   /** Connected GitHub logins: a remote ticket builder may only run as one of them. */
   logins?: () => string[]
+  /** The account a Board tab's ticket folder already names (its context.json); null if none. */
+  ticketAccount?: (tab: string) => string | null
 }
 
 const BLOCKED = 'Not available on the web yet'
@@ -396,7 +398,7 @@ export class BrowserBridge {
     if (access?.kind !== 'remote' || (m.m === 'ptyOpen' && !WEB_PANES.has((args[1] as { kind?: unknown } | null)?.kind as string)))
       return this.ret(c, m.id, false, BLOCKED)
     if (m.m === 'ptyOpen' && (args[1] as { kind?: unknown }).kind === 'ticket-builder') {
-      const bad = ticketSpecError(args[1] as { tab?: unknown; account?: unknown }, this.d.logins?.() ?? [])
+      const bad = ticketSpecError(args[1] as { tab?: unknown; account?: unknown }, this.d.logins?.() ?? [], this.d.ticketAccount)
       if (bad) return this.ret(c, m.id, false, bad)
     }
     args = ARG_FIX[m.m as keyof typeof ARG_FIX]?.(args) ?? args

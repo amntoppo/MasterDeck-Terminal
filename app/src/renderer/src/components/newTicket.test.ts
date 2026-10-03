@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, ticketDefaults } from "./NewTicket";
+import { boardFor, claudeHandoff, ticketDefaults } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -138,5 +138,19 @@ describe("new ticket per account", () => {
     expect(boardFor(two, "In Dev", defaultFilters(null))).toBe("acme/1");
     const t = ticketDefaults(two, { status: "Backlog", project: "globex/7", filters: defaultFilters(null), sprint: "@current", tab: "Mine", account: "bob-work" });
     expect([t.repo, t.assignees]).toEqual(["globex/app", ["bob-work"]]);
+  });
+});
+
+describe("Create with Claude from the dialog", () => {
+  it("one account: always offered, plain label", () => {
+    expect(claudeHandoff(false, null, undefined)).toEqual({ label: "Create with Claude", blocked: null });
+  });
+  it("several: labelled with the tab's account; blocked (with a note) when the pick is another account", () => {
+    expect(claudeHandoff(true, "alice", "alice")).toEqual({ label: "Create with Claude as @alice", blocked: null });
+    expect(claudeHandoff(true, "Alice", "alice").blocked).toBeNull();
+    expect(claudeHandoff(true, "bob-work", "alice")).toEqual({
+      label: "Create with Claude as @alice",
+      blocked: "Create with Claude runs on this tab's account; switch to a @bob-work tab to use it",
+    });
   });
 });

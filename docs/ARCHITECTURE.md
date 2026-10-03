@@ -260,8 +260,12 @@ here (needs `hooks.queue`).
   writes the same files into the tab's folder (`ctx.tabId`). The 1 s pump (`pumpTicketDir`) answers
   each folder (the shared one, or every `tab-*` one) and creates as that folder's `context.json`
   account (`ticketAccount`); created.jsonl is read from every folder whatever the mode. The browser
-  bridge refuses a remote ticket-builder open with a bad `tab` or an `account` that is not a connected
-  login (`ticketSpecError`). Tab folders are never removed (see TODO).
+  bridge refuses a remote ticket-builder open with a bad `tab`, an `account` that is not a connected
+  login, or one other than the account the tab folder's `context.json` already names (logins compared
+  case-insensitively; `ticketSpecError`). Symlinked `tab-*` entries are skipped, and a folder is only
+  prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
+  (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
+  from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).

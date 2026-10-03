@@ -120,7 +120,7 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
-import { pumpTicketDir, ticketBuilderDir, ticketDirs, ticketPane } from "./ticketDirs";
+import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -810,6 +810,7 @@ bridge = new BrowserBridge({
   hello: { appVersion: app.getVersion(), platform: process.platform, home: homedir() },
   log: (l) => console.log(l),
   logins: () => getConfig().accounts.map((a) => a.login),
+  ticketAccount: (tab) => folderAccount(paths.home, tab),
 });
 const remoteCommands = new RemoteCommands(
   {
@@ -1796,6 +1797,8 @@ function registerIpc(): void {
     } catch (e) {
       return { ok: false, message: (e as Error).message, canContinue: false };
     }
+    if (!ticketDirOk(paths.home, dir))
+      return { ok: false, message: "refusing a ticket builder folder that is a link", canContinue: false };
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const script = join(dir, "create-ticket.sh");
     writeFileSync(script, ticketBuilderScript(dir));

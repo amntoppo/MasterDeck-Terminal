@@ -21,11 +21,18 @@ export const ticketBuilderName = (tab?: string): string =>
 export function ticketSpecError(
   spec: { tab?: unknown; account?: unknown },
   logins: string[],
+  /** The account the tab's folder already names (its context.json), if any. */
+  folderAccount?: (tab: string) => string | null,
 ): string | null {
+  const low = (s: string) => s.toLowerCase();
   if (spec.tab !== undefined && (typeof spec.tab !== "string" || !TICKET_TAB.test(spec.tab)))
     return "refusing a ticket builder with a bad tab id";
-  if (spec.account !== undefined && (typeof spec.account !== "string" || !logins.includes(spec.account)))
+  if (spec.account === undefined) return null;
+  if (typeof spec.account !== "string" || !logins.some((l) => low(l) === low(spec.account as string)))
     return "refusing a ticket builder as an account that is not connected";
+  const held = typeof spec.tab === "string" ? folderAccount?.(spec.tab) : null;
+  if (held && low(held) !== low(spec.account))
+    return `refusing a ticket builder as ${spec.account}: that tab's session works as ${held}`;
   return null;
 }
 

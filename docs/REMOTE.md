@@ -228,7 +228,7 @@ The backend only relays opaque frames; the Mac's store is authoritative.
 
 | Web → Mac (`WebToMac`) | Mac behaviour |
 |---|---|
-| `call {id, m, a}` | only `DECK_ACCESS[m].kind === 'remote'`; `ptyOpen` only for `attach, shell, ticket-builder, builder, installer` (a `ticket-builder` with a bad `tab` id or an `account` that is not a connected login is refused); `ARG_FIX`; runs `reg.call(ch, args)` with `{remote:true}`; `invoke` → `ret` |
+| `call {id, m, a}` | only `DECK_ACCESS[m].kind === 'remote'`; `ptyOpen` only for `attach, shell, ticket-builder, builder, installer` (a `ticket-builder` with a bad `tab` id, an `account` that is not a connected login, or one other than the tab folder's `context.json` account is refused; logins case-insensitive); `ARG_FIX`; runs `reg.call(ch, args)` with `{remote:true}`; `invoke` → `ret` |
 | `sub {ev, arg?, patches?: 1}` / `unsub` | only `event` channels; per-id events need `arg` (≤200). `sub state` sends the state at once (full) |
 | `visible {on}` | hidden tabs get no `pty:data` (buffer cleared) |
 | `device {device}` | once per connection; sanitized (≤80) → `browsers[].device` |

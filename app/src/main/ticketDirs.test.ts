@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseConfig } from '@shared/appConfig'
 import { ticketAccount } from '@shared/accounts'
-import { isTicketBuilderSession, pumpTicketDir, ticketBuilderDir, ticketDirs, ticketPane } from './ticketDirs'
+import { folderAccount, isTicketBuilderSession, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from './ticketDirs'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [] }
 const B = { login: 'bob-work', name: 'Bob', email: 'b@globex.test', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [] }
@@ -95,5 +95,33 @@ describe('isTicketBuilderSession', () => {
     expect(isTicketBuilderSession({ name: 'md-ticket-builder', cwd: '/w' }, h)).toBe(true)
     expect(isTicketBuilderSession({ name: 'fix', cwd: join(h, 'ticket-builder', 'other') }, h)).toBe(false)
     expect(isTicketBuilderSession({ name: 'fix', cwd: '/w' }, h)).toBe(false)
+  })
+})
+
+describe('symlinked tab folders', () => {
+  it('are skipped by the pump and refused by ticketDirOk; real ones pass', () => {
+    const home = mkdtempSync(join(tmpdir(), 'tl-'))
+    const root = join(home, 'ticket-builder')
+    const elsewhere = mkdtempSync(join(tmpdir(), 'tl-out-'))
+    mkdirSync(join(root, 'tab-a'), { recursive: true })
+    symlinkSync(elsewhere, join(root, 'tab-x'))
+    expect(ticketDirs(home, true)).toEqual([join(root, 'tab-a')])
+    expect(ticketDirOk(home, join(root, 'tab-a'))).toBe(true)
+    expect(ticketDirOk(home, join(root, 'tab-x'))).toBe(false)
+    expect(ticketDirOk(home, join(root, 'tab-new'))).toBe(true) // not made yet
+    expect(ticketDirOk(home, root)).toBe(true)
+    expect(ticketPane(home, true, { tab: 'x', account: 'alice' }, () => ({ ok: true, args: [] }))).toMatchObject({ error: expect.stringMatching(/folder/) })
+  })
+})
+
+describe('folderAccount', () => {
+  it("a tab folder's context.json account; null when none", () => {
+    const home = mkdtempSync(join(tmpdir(), 'fa-'))
+    const d = join(home, 'ticket-builder', 'tab-a')
+    mkdirSync(d, { recursive: true })
+    expect(folderAccount(home, 'a')).toBeNull()
+    writeFileSync(join(d, 'context.json'), JSON.stringify({ account: 'bob-work' }))
+    expect(folderAccount(home, 'a')).toBe('bob-work')
+    expect(folderAccount(home, '../x')).toBeNull()
   })
 })
