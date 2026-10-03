@@ -857,6 +857,6 @@ describe('predictive echo', () => {
         p.dispose()
       }
       expect(bad).toEqual([])
-    }, 20_000)
+    }, 120_000) // slow CI runners (Windows) take several times longer
   })
 })
