@@ -7,7 +7,7 @@ import { keyOverride } from '@shared/keys'
 import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
 import { quickKeyBytes, type QuickKey } from '../quickKeys'
-import { isPhone, isWeb, keyPlatform } from '../web'
+import { isPhone, isWeb, keyPlatform, usePhone } from '../web'
 
 const THEME = {
   background: '#0b0c0f',
@@ -191,6 +191,20 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
     // The PTY outlives this view; only the owner (tab close) closes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneId, specKey, generation])
+
+  // Phone width came or went (rotation, a resized window): change the font, then refit.
+  const phone = usePhone()
+  useEffect(() => {
+    const t = term.current
+    const size = phone ? 12 : 13
+    if (!t || t.options.fontSize === size) return
+    t.options.fontSize = size
+    try {
+      fit.current?.fit()
+    } catch {
+      // hidden; fitted when shown
+    }
+  }, [phone])
 
   useEffect(() => {
     if (!visible) return

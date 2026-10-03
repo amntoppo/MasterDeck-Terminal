@@ -182,6 +182,10 @@ export function App() {
   useEffect(() => {
     if (view !== "terminals") setPhoneScreen("main");
   }, [view]);
+  // The panel sheet belongs to the terminal screen: leaving it (Sessions, Master, a view) closes it.
+  useEffect(() => {
+    if (phoneScreen !== "main" || view !== "terminals") setPhonePanel(false);
+  }, [phoneScreen, view]);
   const [palette, setPalette] = useState(false);
   // History (⌘⇧F): a popup over any screen.
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -259,6 +263,12 @@ export function App() {
   useEffect(() => {
     document.body.classList.toggle("win", deck().platform === "win32");
   }, []);
+  // Phone: `html.phone` too, for dialogs and menus portaled to <body> (outside .app).
+  useEffect(() => {
+    if (!phone) return;
+    document.documentElement.classList.add("phone");
+    return () => document.documentElement.classList.remove("phone");
+  }, [phone]);
   // Phone: follow the visual viewport, so the terminal and its quick keys sit above the soft keyboard.
   useEffect(() => {
     const vv = window.visualViewport;
@@ -1630,12 +1640,14 @@ function QuickKeys({ paneId }: { paneId: string }) {
         <button
           key={k}
           className="qk"
-          // Keep the terminal focused (and the soft keyboard up): act on pointer down, never take focus.
-          onPointerDown={(e) => {
+          // Never take focus (the terminal keeps it, and the soft keyboard stays up). Send on click,
+          // so a swipe along the bar scrolls it instead of sending a key.
+          onPointerDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
             e.preventDefault();
             terminalKey(paneId, k);
           }}
-          onClick={(e) => e.preventDefault()}
           tabIndex={-1}
         >
           {k}

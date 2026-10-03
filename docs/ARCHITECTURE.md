@@ -355,9 +355,12 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   and keeps `phoneScreen` (session list, terminal or view, master) and `phonePanel` (Inspector as a
   sheet); `shown`/`panelShown`/`masterShown` follow those on a phone (one terminal, no split). The
   Rail becomes `PhoneBar` (Rail.tsx: tabs + More menu); the terminal screen gets a `phone-head` and
-  `QuickKeys` (App.tsx), which press keys through `terminalKey()` (TerminalView.tsx: xterm's
+  `QuickKeys` (App.tsx; a key is sent on click, so a swipe along the bar only scrolls it, and
+  pointer/mouse down are prevented so the terminal keeps focus), which press keys through `terminalKey()` (TerminalView.tsx: xterm's
   `input()`, so predictive echo and `ptyWrite` see them like typing; bytes from `quickKeys.ts`,
-  arrows follow DECCKM). A phone terminal uses 12px. `--vvh`/`--vvt` follow `visualViewport` (soft
+  arrows follow DECCKM). A phone terminal uses 12px (changed and refitted when phone mode comes or goes). The panel sheet
+  closes when the terminal screen is left. `html.phone` is set too while phone mode is on, so dialogs
+  and menus portaled to `<body>` get the phone dialog/menu/input rules. `--vvh`/`--vvt` follow `visualViewport` (soft
   keyboard). All phone CSS is in `src/web/web.css` under `.app.phone`; when not phone, every shared
   component renders the same DOM as before.
 - Dev preview (web): `npm run dev:web`, then `/?preview` mounts App on a stub `window.deck` with a

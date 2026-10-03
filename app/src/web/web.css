@@ -51,8 +51,8 @@
 .phone-bar .pb .rb-badge { top: 4px; right: calc(50% - 22px); }
 .phone-more-back { position: fixed; inset: 0; z-index: 60; }
 .phone-bar .menu.phone-more { position: absolute; top: auto; right: 6px; bottom: calc(100% + 6px); z-index: 61; min-width: 210px; max-height: 70dvh; overflow-y: auto; }
-.phone-bar .phone-more button { display: flex; align-items: center; gap: 10px; padding: 11px 12px; font-size: 15px; }
-.phone-bar .phone-more button.on { color: var(--accent); }
+.app.phone > .phone-bar .phone-more button { display: flex; align-items: center; gap: 10px; padding: 11px 12px; font-size: 15px; }
+.app.phone > .phone-bar .phone-more button.on { color: var(--accent); }
 
 /* The terminal screen: a header, one terminal, quick keys. */
 .phone-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
@@ -68,21 +68,21 @@
 .app.phone .srow .srow-x { visibility: visible; }
 .app.phone .tab .x { opacity: .6; }
 .app.phone .rb:hover::after { display: none; }
-.app.phone .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+html.phone .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
 .app.phone .col-btn, .app.phone .icon-btn, .app.phone .card-x { min-width: 36px; min-height: 36px; }
 .app.phone .srow { padding: 10px 12px; }
-.app.phone input, .app.phone textarea, .app.phone select { font-size: 16px !important; }
+html.phone input, html.phone textarea, html.phone select { font-size: 16px !important; }
 
-/* Dialogs and menus fit the screen. */
-.app.phone .dialog { width: calc(100vw - 24px) !important; max-height: calc(var(--vvh, 100dvh) - 24px); padding: 14px; }
-.app.phone .menu { min-width: 0; max-width: calc(100vw - 24px); }
-.app.phone .menu button { padding: 10px 12px; font-size: 14px; }
-.app.phone .menu.session-menu { max-height: 70dvh; }
+/* Dialogs and menus fit the screen (html.phone: also the ones portaled to <body>). */
+html.phone .dialog { width: calc(100vw - 24px) !important; max-height: calc(var(--vvh, 100dvh) - 24px); padding: 14px; }
+html.phone .menu { min-width: 0; max-width: calc(100vw - 24px); }
+html.phone .menu button { padding: 10px 12px; font-size: 14px; }
+html.phone .menu.session-menu { max-height: 70dvh; }
 .app.phone > .toast { bottom: calc(var(--tabbar-h) + 12px); max-width: calc(100vw - 24px); }
 
 /* One column where the desktop has two; wide tables scroll inside themselves. */
-.app.phone .setup-body, .app.phone .two-col, .app.phone .setup-tools, .app.phone .status-map { grid-template-columns: 1fr; }
-.app.phone .setup-body { min-height: 0; }
+html.phone .setup-body, html.phone .two-col, html.phone .setup-tools, html.phone .status-map { grid-template-columns: 1fr; }
+html.phone .setup-body { min-height: 0; }
 .app.phone .tv-flow { grid-template-columns: repeat(5, minmax(110px, 1fr)); overflow-x: auto; }
 .app.phone .kpi { min-width: 0; flex: 1 1 120px; }
 .app.phone .tv-bar { width: 100px; }

@@ -614,7 +614,8 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
   **Panel** opens Details / Queue / Summary as a sheet (› closes it). One terminal at a time (no
   split).
 - **Quick keys** under the terminal (and under master): Esc, Tab, ⇧Tab, ^C, ↑ ↓ ← →, Enter, y, n
-  and /. They type into the terminal without closing the keyboard. The page shrinks above the
+  and /. A tap types the key into the terminal without closing the keyboard;
+  a swipe along the bar scrolls it without typing anything. The page shrinks above the
   keyboard while it is open.
 - **Sign out** is on the Settings screen (bottom right).
 - Terminal size: as on any browser, the Mac's size wins while the Mac shows that terminal; a
