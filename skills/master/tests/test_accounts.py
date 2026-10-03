@@ -66,6 +66,18 @@ class AccountsSaveTest(unittest.TestCase):
             cfg = setup.save({"accounts": [A, B]}, p)
             self.assertEqual((cfg["owner"], cfg["issueRepo"], cfg["project"]), ("acme", "tracker", 1))
 
+    def test_primary_without_a_board_leaves_no_stale_board(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.json"
+            setup.save({"accounts": [dict(A, projects=[dict(A["projects"][0], id="PVT_x", statusFieldId="F1", statusOptions={"To Do": "o1"})])]}, p)
+            cfg = setup.save({"accounts": [dict(A, projects=[])]}, p)
+            for k in ("project", "projectId", "statusFieldId", "statusOptions", "columns", "statuses", "sprintField"):
+                self.assertEqual(cfg[k], config.DEFAULTS[k], k)
+            sh = setup.shell(cfg)
+            self.assertIn("PROJECT_NUMBER=0", sh)
+            self.assertIn("PROJECT_ID=''", sh)
+            self.assertNotIn("o1", sh)
+
     def test_save_refuses_bad_accounts(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ValueError):

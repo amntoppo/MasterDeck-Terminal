@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -229,8 +230,9 @@ def _mirror(cfg: dict) -> dict:
                            for a in cfg["accounts"] if isinstance(a, dict)]
         cfg.update(owner=p["owner"], ownerType=p["ownerType"], issueRepo=p["issueRepo"], repos=p["repos"],
                    allRepos=p["allRepos"], projects=p["projects"], allProjects=p["allProjects"])
-        if not p["projects"]:
-            cfg["project"] = 0
+        if not p["projects"]:  # no board on the primary: the top level mirrors that, not the previous board
+            cfg.update({k: copy.deepcopy(config.DEFAULTS[k]) for k in
+                        ("project", "projectId", "statusFieldId", "statusOptions", "columns", "statuses", "sprintField")})
     repos = cfg.get("repos") or []
     if repos and not (cfg.get("owner") and cfg.get("issueRepo")):
         cfg["owner"], cfg["issueRepo"] = repos[0].split("/", 1)
