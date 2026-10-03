@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { emptyLinks, importLinks, parseLinkFile, withLink, withPr, type LinkFile } from '@shared/ticketLinks'
 import type { Ticket } from '@shared/ticket'
@@ -16,38 +16,72 @@ export class LinkStore {
     private legacy: string,
   ) {}
 
-  private load(path: string): LinkFile {
+  private lastGood: LinkFile = emptyLinks()
+
+  /** null: the file exists but is unreadable or broken. A missing file is just empty. */
+  private load(path: string): LinkFile | null {
     try {
       return parseLinkFile(JSON.parse(readFileSync(path, 'utf8')))
-    } catch {
-      return emptyLinks()
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code === 'ENOENT' ? emptyLinks() : null
     }
+  }
+
+  /** Our own file for a write: a broken one is moved aside (never overwritten), then we start empty. */
+  private forWrite(): { f: LinkFile; wasBroken: boolean } {
+    const f = this.load(this.file)
+    if (f) return { f, wasBroken: false }
+    const aside = this.file.replace(/\.json$/, '') + `.corrupt.${Date.now()}.json`
+    renameSync(this.file, aside)
+    console.error(`ticket links: ${this.file} is unreadable, moved to ${aside}`)
+    return { f: emptyLinks(), wasBroken: true }
   }
 
   private save(f: LinkFile): void {
     mkdirSync(dirname(this.file), { recursive: true })
-    writeFileSync(`${this.file}.tmp`, JSON.stringify(f, null, 2) + '\n')
-    renameSync(`${this.file}.tmp`, this.file)
+    const tmp = `${this.file}.${process.pid}.tmp`
+    try {
+      writeFileSync(tmp, JSON.stringify(f, null, 2) + '\n')
+      renameSync(tmp, this.file)
+    } catch (e) {
+      try {
+        unlinkSync(tmp)
+      } catch {
+        // nothing to clean
+      }
+      throw e
+    }
+    this.lastGood = f
   }
 
+  /** The links for display; an unreadable file keeps the last good ones. */
   read(): LinkFile {
-    return this.load(this.file)
+    const f = this.load(this.file)
+    if (f) this.lastGood = f
+    return this.lastGood
   }
 
   /** Copy tt.sh's links in, the first time only. True when it ran. */
   importOnce(now = Date.now()): boolean {
-    const own = this.load(this.file)
+    const { f: own, wasBroken } = this.forWrite()
+    if (wasBroken) {
+      // Its data is in the backup; never fall back to tt.sh's file.
+      this.save({ ...own, importedAt: now })
+      return false
+    }
     if (own.importedAt !== undefined) return false
-    this.save({ ...importLinks(own, this.load(this.legacy)), importedAt: now })
+    const legacy = this.load(this.legacy)
+    if (!legacy) return false // mid-write or unreadable: try again next launch
+    this.save({ ...importLinks(own, legacy), importedAt: now })
     return true
   }
 
   link(sessionId: string, t: Ticket, title: string, branch: string): void {
-    this.save(withLink(this.load(this.file), sessionId, t, title, branch, new Date()))
+    this.save(withLink(this.forWrite().f, sessionId, t, title, branch, new Date()))
   }
 
   addPr(sessionId: string, url: string): void {
-    this.save(withPr(this.load(this.file), sessionId, url))
+    this.save(withPr(this.forWrite().f, sessionId, url))
   }
 }
 

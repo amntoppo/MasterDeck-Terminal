@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -35,10 +35,48 @@ describe('LinkStore', () => {
     expect(s.read().sessions[A]).toMatchObject({ issue: 7, prs: ['https://github.com/acme/web/pull/9'] })
     expect(readFileSync(legacy, 'utf8')).toBe('{"sessions":{},"branches":{}}')
   })
-  it('reads a missing or broken file as empty', () => {
+  it('reads a missing file as empty', () => {
     const d = mkdtempSync(join(tmpdir(), 'links-'))
-    writeFileSync(join(d, 'ticket-links.json'), '{oops')
     expect(new LinkStore(join(d, 'ticket-links.json'), join(d, 'none.json')).read().sessions).toEqual({})
+  })
+  it('moves a corrupt file aside before linking, never overwriting it', () => {
+    const d = mkdtempSync(join(tmpdir(), 'links-'))
+    const file = join(d, 'ticket-links.json')
+    writeFileSync(file, '{oops')
+    new LinkStore(file, join(d, 'none.json')).link(A, { repo: null, number: 7 }, 't', '')
+    const bak = readdirSync(d).filter((n) => n.startsWith('ticket-links.corrupt.'))
+    expect(bak).toHaveLength(1)
+    expect(readFileSync(join(d, bak[0]), 'utf8')).toBe('{oops')
+    expect(JSON.parse(readFileSync(file, 'utf8')).sessions[A].issue).toBe(7)
+  })
+  it('does not re-import from tt.sh over a corrupt own file', () => {
+    const d = mkdtempSync(join(tmpdir(), 'links-'))
+    const file = join(d, 'ticket-links.json')
+    const legacy = join(d, 'state.json')
+    writeFileSync(legacy, JSON.stringify({ sessions: { [A]: { issue: 12, title: '', branch: '', linked_at: '', prs: [] } }, branches: {} }))
+    writeFileSync(file, '{oops')
+    const s = new LinkStore(file, legacy)
+    expect(s.importOnce(5)).toBe(false)
+    expect(s.read().sessions).toEqual({})
+    expect(readdirSync(d).some((n) => n.startsWith('ticket-links.corrupt.'))).toBe(true)
+    expect(s.importOnce(6)).toBe(false)
+  })
+  it('keeps the last good links when the file turns unreadable', () => {
+    const d = mkdtempSync(join(tmpdir(), 'links-'))
+    const file = join(d, 'ticket-links.json')
+    const s = new LinkStore(file, join(d, 'none.json'))
+    s.link(A, { repo: null, number: 7 }, 't', '')
+    writeFileSync(file, '{oops')
+    expect(s.read().sessions[A].issue).toBe(7)
+  })
+  it('does not stamp the import when tt.sh is unreadable, but does when it is absent', () => {
+    const d = mkdtempSync(join(tmpdir(), 'links-'))
+    const legacy = join(d, 'state.json')
+    writeFileSync(legacy, '{half')
+    const s = new LinkStore(join(d, 'ticket-links.json'), legacy)
+    expect(s.importOnce(5)).toBe(false)
+    expect(existsSync(join(d, 'ticket-links.json'))).toBe(false)
+    expect(new LinkStore(join(d, 'ticket-links.json'), join(d, 'none.json')).importOnce(5)).toBe(true)
   })
 })
 
