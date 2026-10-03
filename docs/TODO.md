@@ -4,6 +4,10 @@ Open work, grouped and roughly prioritized (P1 first). Each item: context, where
 a suggested approach. Nothing here is started. The older design note for Codex/Copilot support is
 the repo-root [TODO.md](../TODO.md).
 
+Each open item below is also a GitHub issue with code pointers, approach and acceptance criteria:
+[issues #4–#29](https://github.com/amntoppo/MasterDeck-Terminal/issues). Close the issue in the PR that
+fixes it, and move the item here to "Recently done".
+
 ## Shipping / ops
 
 - **P2 · First launch after a local reinstall hangs.** Seen twice on 2026-10-03: after
