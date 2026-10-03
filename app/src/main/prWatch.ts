@@ -152,7 +152,16 @@ export class PrWatch {
       for (const url of state.sessionPrs[s.sessionId] ?? []) {
         const pr = state.prLive[url]
         const ref = parsePrUrl(url)
-        if (pr?.state !== 'OPEN' || !ref || !safeRef(ref) || this.done.includes(url) || this.list.some((w) => w.url === url)) continue
+        if (pr?.state !== 'OPEN' || !ref || !safeRef(ref) || this.done.includes(url)) continue
+        const have = this.list.find((w) => w.url === url)
+        if (have) {
+          // The session gained (or changed) its account after the watch began: read it as that account.
+          if (s.account && have.sessionKey === s.key && have.account !== s.account) {
+            have.account = s.account
+            changed = true
+          }
+          continue
+        }
         this.list.push({
           url, ...ref, sessionKey: s.key, ...(s.account ? { account: s.account } : {}), startedAt: now,
           baseline: pr.createdAt === null || now - pr.createdAt > BASELINE_AGE_MS,
@@ -175,14 +184,14 @@ export class PrWatch {
       // One pass per account: its own runner, so `viewer` (who "me" is) is that account.
       const byAccount = new Map<string, PrWatchEntry[]>()
       for (const w of this.list.filter((x) => !x.ended)) byAccount.set(w.account ?? '', [...(byAccount.get(w.account ?? '') ?? []), w])
-      let stopped = false
-      for (const [account, ws] of byAccount) {
+      // A limited answer skips only that account (its queued full reads too); the others still run and save.
+      accounts: for (const [account, ws] of byAccount) {
         const gh = this.deps.ghFor?.(account || undefined) ?? this.deps.gh
         const heavy: { w: PrWatchEntry; l: LightPr }[] = []
         let me: string | null = null
         for (const group of chunks(ws, LIGHT_MAX)) {
           const r = await gh(graphql(lightQuery(group)), { ttl: POLL_TTL, timeoutMs: 30_000 })
-          if (this.deps.paused(ghErrorText(r))) return
+          if (this.deps.paused(ghErrorText(r))) continue accounts
           me = parseViewer(r.stdout) ?? me
           // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
           // gh exits 1 on a partial error (one PR it cannot read) and still prints the others.
@@ -208,10 +217,7 @@ export class PrWatch {
         }
         for (const group of chunks(heavy, HEAVY_MAX)) {
           const r = await gh(graphql(heavyQuery(group.map((g) => g.w))), { ttl: POLL_TTL, timeoutMs: 30_000 })
-          if (this.deps.paused(ghErrorText(r))) {
-            stopped = true
-            break
-          }
+          if (this.deps.paused(ghErrorText(r))) continue accounts
           const viewer = parseViewer(r.stdout) ?? me
           // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
           if (!ghHasData(r) || !viewer) continue
@@ -241,7 +247,6 @@ export class PrWatch {
             if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
           })
         }
-        if (stopped) break
       }
       this.save()
       this.deps.onChange()

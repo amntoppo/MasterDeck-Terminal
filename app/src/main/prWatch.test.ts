@@ -45,6 +45,42 @@ function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-
 const one = (createdAt: number, n = 1) => ({ sessions: [sess()], sessionPrs: { [SID]: [url(n)] }, prLive: { [url(n)]: live(createdAt) } })
 
 describe('PrWatch', () => {
+  it('a session that gains an account after its watch began: the watch moves to that account', async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const mine = (who: string) => fakeGh((_i, heavy) => (heavy ? { ...withThreads(), author: { login: who } } : { ...lightPr, author: { login: who } }), () => who)
+    const a = mine('me')
+    const b = mine('bob-work')
+    const { w } = make(a.gh, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : a.gh) })
+    const st = { sessionPrs: { [SID2]: [url(2)] }, prLive: { [url(2)]: live(NOW - 60_000) } }
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2 }
+    w.sync({ ...st, sessions: [bob] }, () => true, NOW)
+    w.sync({ ...st, sessions: [{ ...bob, account: 'bob-work' }] }, () => true, NOW)
+    await w.poll(NOW)
+    expect(a.calls).toEqual([])
+    expect(w.info([bob]).map((i) => i.id)).toEqual([`pr:${url(2)}`])
+  })
+  it('a rate limit on one account skips only that account; the others are read and saved', async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const a = fakeGh((_i, heavy) => (heavy ? withThreads() : lightPr))
+    const limited: GhRunner = async () => ({ code: 1, stdout: '', stderr: 'API rate limit exceeded' })
+    const b = fakeGh((_i, heavy) => (heavy ? withThreads() : lightPr), () => 'me')
+    const { w, deps } = make(limited, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : limited), paused: (o) => !!o && o.includes('rate limit') })
+    void a
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2, account: 'bob-work' }
+    const alice: Session = { ...sess(), account: 'alice' }
+    w.sync({ sessions: [alice, bob], sessionPrs: { [SID]: [url(1)], [SID2]: [url(2)] }, prLive: { [url(1)]: live(NOW - 60_000), [url(2)]: live(NOW - 60_000) } }, () => true, NOW)
+    await w.poll(NOW)
+    expect(b.calls.map((c) => c.heavy)).toEqual([false, true])
+    expect(deps.paused()).toBe(false)
+  })
+  it('a runner that errors (not ready) is no data: the watch stays, no misses', async () => {
+    const down: GhRunner = async () => ({ code: 1, stdout: '', stderr: 'not ready' })
+    const { w } = make(down)
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    for (let i = 0; i < 4; i++) await w.poll(NOW + i * 60_000)
+    expect(w.info([sess()]).map((i) => i.id)).toEqual([`pr:${url(1)}`])
+    expect((w as unknown as { list: { misses?: number }[] }).list[0].misses).toBeUndefined()
+  })
   it("reads each account's PRs with its own runner, so each one's viewer is its own author", async () => {
     const SID2 = '66666666-6666-4666-8666-666666666666'
     const mine = (who: string) => fakeGh((_i, heavy) => (heavy ? { ...withThreads(), author: { login: who } } : { ...lightPr, author: { login: who } }), () => who)
