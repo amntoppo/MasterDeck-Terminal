@@ -17,6 +17,21 @@ export function makeGhRunner(run: Runner, libDir: string, python: string, platfo
     })
 }
 
+/**
+ * What of a gh answer may be checked for a rate limit: stderr, the body only when gh failed, and a
+ * GraphQL `RATE_LIMITED` error. Never a good answer's body: PR comments can say "rate limit".
+ */
+export function ghErrorText(r: Pick<RunResult, 'code' | 'stdout' | 'stderr'>): string {
+  let limited = false
+  try {
+    const errs = (JSON.parse(r.stdout) as { errors?: { type?: unknown }[] })?.errors
+    limited = Array.isArray(errs) && errs.some((e) => e?.type === 'RATE_LIMITED')
+  } catch {
+    // not JSON
+  }
+  return [r.stderr, r.code !== 0 ? r.stdout : '', limited ? 'GraphQL: API rate limit exceeded (RATE_LIMITED)' : ''].filter(Boolean).join('\n')
+}
+
 export type { GhCacheStatus }
 
 export function ghCacheDir(): string {

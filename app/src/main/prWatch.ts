@@ -3,11 +3,11 @@ import { dirname } from 'node:path'
 import { MASTER_NAME } from '@shared/derive'
 import { parsePrUrl } from '@shared/prSummary'
 import {
-  BASELINE_AGE_MS, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrRef,
+  BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
 } from '@shared/prWatch'
 import { canDeliver, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
-import type { GhRunner } from './ghc'
+import { ghErrorText, type GhRunner } from './ghc'
 
 export interface PrWatchEntry {
   url: string
@@ -23,7 +23,10 @@ export interface PrWatchEntry {
   heavyAt: number
   stallAt: number | null
   nudges: number
-  pending: string[]
+  /** New items not yet delivered (newest ITEM_MAX); one message per PR is built from them at delivery. */
+  pending: PrItem[]
+  /** Lines that go after the items: the baseline summary, merged/closed, stopped. */
+  notes: string[]
   events: number
   lastEventAt: number | null
   ended: boolean
@@ -37,6 +40,11 @@ export interface PrWatchDeps {
 }
 
 const DONE_MAX = 500
+/** Items kept per PR while the session is busy (the message lists 10 per kind and "and N more"). */
+const ITEM_MAX = 30
+const TEXT_MAX = 300
+/** Longest paste: PRs past it wait for the next delivery. */
+export const PASTE_MAX = 6_000
 /** Below the 60 s poll: ghc only dedups concurrent asks; heavy answers (MBs) do not linger in its cache. */
 const POLL_TTL = 50
 const chunks = <T>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
@@ -55,23 +63,44 @@ export class PrWatch {
   private sending = new Set<string>()
   private missingSince = new Map<string, number>()
   private polling = false
+  private loaded = false
 
   constructor(
     private file: string,
     private deps: PrWatchDeps,
   ) {}
 
+  /** Until it ran, sync and save do nothing (a watch list not read yet must not be overwritten). */
   load(): void {
+    let text: string
     try {
-      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as { watches?: PrWatchEntry[]; done?: string[] }
-      this.list = (raw.watches ?? []).filter((w) => typeof w?.url === 'string' && safeRef(w) && Array.isArray(w.seen) && Array.isArray(w.pending))
-      this.done = (raw.done ?? []).filter((u) => typeof u === 'string').slice(-DONE_MAX)
-    } catch {
-      // first launch
+      text = readFileSync(this.file, 'utf8')
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') this.loaded = true
+      else console.error(`PR watch: cannot read ${this.file}: ${String(e)}`)
+      return
     }
+    try {
+      const raw = JSON.parse(text) as { watches?: PrWatchEntry[]; done?: string[] }
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not an object')
+      this.list = (Array.isArray(raw.watches) ? raw.watches : [])
+        .filter((w) => typeof w?.url === 'string' && safeRef(w) && Array.isArray(w.seen) && Array.isArray(w.pending))
+        .map((w) => ({ ...w, pending: w.pending.filter((i) => typeof i?.key === 'string'), notes: Array.isArray(w.notes) ? w.notes.filter((n) => typeof n === 'string') : [] }))
+      this.done = (Array.isArray(raw.done) ? raw.done : []).filter((u) => typeof u === 'string').slice(-DONE_MAX)
+    } catch (e) {
+      const aside = `${this.file.replace(/\.json$/, '')}.corrupt.${Date.now()}.json`
+      try {
+        renameSync(this.file, aside)
+      } catch {
+        // left in place: overwritten by the next save
+      }
+      console.error(`PR watch: ${this.file} unreadable (${String(e)}); moved to ${aside}`)
+    }
+    this.loaded = true
   }
 
   private save(): void {
+    if (!this.loaded) return
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       writeFileSync(`${this.file}.tmp`, JSON.stringify({ watches: this.list, done: this.done.slice(-DONE_MAX) }, null, 1))
@@ -83,11 +112,12 @@ export class PrWatch {
 
   private end(w: PrWatchEntry, line?: string): void {
     w.ended = true
-    if (line) w.pending.push(line)
+    if (line) w.notes.push(line)
     if (!this.done.includes(w.url)) this.done.push(w.url)
   }
 
   sync(state: Pick<AppState, 'sessions' | 'sessionPrs' | 'prLive'>, on: (s: Session) => boolean, now = Date.now()): void {
+    if (!this.loaded) return
     let changed = false
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
@@ -105,7 +135,7 @@ export class PrWatch {
         this.list.push({
           url, ...ref, sessionKey: s.key, startedAt: now,
           baseline: pr.createdAt === null || now - pr.createdAt > BASELINE_AGE_MS,
-          seen: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], events: 0, lastEventAt: null, ended: false,
+          seen: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
         })
         changed = true
       }
@@ -124,7 +154,7 @@ export class PrWatch {
       let me: string | null = null
       for (const group of chunks(this.list.filter((w) => !w.ended), LIGHT_MAX)) {
         const r = await this.deps.gh(graphql(lightQuery(group)), { ttl: POLL_TTL, timeoutMs: 30_000 })
-        if (this.deps.paused(r.stderr + r.stdout)) return
+        if (this.deps.paused(ghErrorText(r))) return
         me = parseViewer(r.stdout) ?? me
         // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
         if (r.code !== 0 || !me) continue
@@ -144,7 +174,7 @@ export class PrWatch {
       }
       for (const group of chunks(heavy, HEAVY_MAX)) {
         const r = await this.deps.gh(graphql(heavyQuery(group.map((g) => g.w))), { ttl: POLL_TTL, timeoutMs: 30_000 })
-        if (this.deps.paused(r.stderr + r.stdout)) break
+        if (this.deps.paused(ghErrorText(r))) break
         const viewer = parseViewer(r.stdout) ?? me
         // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
         if (r.code !== 0 || !viewer) continue
@@ -152,22 +182,24 @@ export class PrWatch {
           const { w, l } = group[i]
           if (!h) return
           const { items, stallAt } = prItems(h, viewer, now)
-          const news = w.baseline ? [] : fresh(items, w.seen)
+          const ending = h.state !== 'OPEN'
+          // Older PR: counted once in a summary, its items never listed.
+          const summary = w.baseline && !ending ? baselineMessage(w, items) : ''
+          const news = w.baseline || ending ? [] : fresh(items, w.seen)
           w.baseline = false
           w.seen = items.map((x) => x.key)
           w.updatedAt = l.updatedAt
           w.mergeable = h.mergeable
           w.heavyAt = now
           w.stallAt = stallAt
-          const msg = prWatchMessage(w, news, w.nudges)
-          w.nudges = msg.nudges
-          if (msg.text) {
-            w.pending.push(msg.text)
-            w.events += news.length
+          if (summary) w.notes.push(summary)
+          const keys = new Set(news.map((x) => x.key))
+          w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
+          if (news.length || summary || ending) {
+            w.events += news.length + (summary || ending ? 1 : 0)
             w.lastEventAt = now
           }
-          // The merge/close line goes once: as the news, or (baselined) here.
-          if (h.state !== 'OPEN') this.end(w, msg.text ? undefined : prWatchMessage(w, items, w.nudges).text)
+          if (ending) this.end(w, prWatchMessage(w, items, w.nudges).text)
         })
       }
       this.save()
@@ -194,22 +226,37 @@ export class PrWatch {
         continue
       }
       if (!s || this.sending.has(key) || !canDeliver(s)) continue
-      const taken = ws.filter((w) => w.pending.length).map((w) => ({ w, n: w.pending.length }))
-      if (!taken.length) {
+      const waiting = ws.filter((w) => w.pending.length || w.notes.length)
+      if (!waiting.length) {
         if (ws.some((w) => w.ended)) {
           this.list = this.list.filter((w) => !(w.sessionKey === key && w.ended))
           this.save()
         }
         continue
       }
-      const text = taken.flatMap(({ w, n }) => w.pending.slice(0, n)).join('\n')
+      // One message per PR, built now from what accumulated; PRs past PASTE_MAX wait for next time.
+      const taken: { w: PrWatchEntry; keys: Set<string>; notes: number; nudges: number; text: string }[] = []
+      let size = 0
+      for (const w of waiting) {
+        const m = prWatchMessage(w, w.pending, w.nudges)
+        const text = [m.text, ...w.notes].filter(Boolean).join('\n')
+        if (taken.length && size + text.length > PASTE_MAX) break
+        taken.push({ w, keys: new Set(w.pending.map((x) => x.key)), notes: w.notes.length, nudges: m.nudges, text })
+        size += text.length + 1
+      }
+      const rest = waiting.length - taken.length
+      const text = [...taken.map((t) => t.text), ...(rest ? [`(${rest} more PR update${rest === 1 ? '' : 's'} — check MasterDeck)`] : [])].join('\n')
       this.sending.add(key)
       void this.deps
         .send(s, text)
         .then((r) => {
           if (!r.ok) return
-          for (const { w, n } of taken) w.pending.splice(0, n)
-          this.list = this.list.filter((w) => !(w.ended && !w.pending.length))
+          for (const t of taken) {
+            t.w.pending = t.w.pending.filter((x) => !t.keys.has(x.key))
+            t.w.notes.splice(0, t.notes)
+            t.w.nudges = t.nudges
+          }
+          this.list = this.list.filter((w) => !(w.ended && !w.pending.length && !w.notes.length))
           this.save()
           this.deps.onChange()
         })
@@ -229,7 +276,7 @@ export class PrWatch {
         startedAt: w.startedAt,
         events: w.events,
         lastEventAt: w.lastEventAt,
-        queued: w.pending.length,
+        queued: w.pending.length + w.notes.length,
       }))
   }
 
@@ -242,8 +289,21 @@ export class PrWatch {
     return true
   }
 
-  watched(): Set<string> {
-    return new Set(this.list.filter((w) => !w.ended).map((w) => w.url))
+  /**
+   * PRs being watched. With `reachable`: only those whose session can take a message now (a review
+   * offer stays in Needs you for a parked session, one on a prompt, or one master cannot reach).
+   */
+  watched(sessions?: Session[], reachable?: (s: Session) => boolean): Set<string> {
+    return new Set(
+      this.list
+        .filter((w) => {
+          if (w.ended) return false
+          if (!sessions || !reachable) return true
+          const s = sessions.find((x) => x.key === w.sessionKey)
+          return !!s && reachable(s)
+        })
+        .map((w) => w.url),
+    )
   }
 }
 

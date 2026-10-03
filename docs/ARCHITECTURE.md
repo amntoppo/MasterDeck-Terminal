@@ -143,16 +143,21 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   process groups killed). `AppState.watches` / `watchStop`.
 - PR watch (`main/prWatch.ts` `PrWatch`, pure parts in `shared/prWatch.ts`; replaces babysit-pr's
   Monitor phase): `sync` from the state callback adds each open PR in `sessionPrs` of a session with
-  `settings.watchPrs` on and the `pr-watch` built-in in its workflow (old PRs are baselined: what is
-  on them is not news). Every 60 s `poll` sends one light GraphQL per 50 PRs and a heavy one (≤ 10
+  `settings.watchPrs` on and the `pr-watch` built-in in its workflow (old PRs are baselined: their
+  items go into `seen` and the session gets one "already has K threads and L comments" line). Every 60 s `poll` sends one light GraphQL per 50 PRs and a heavy one (≤ 10
   PRs) only for PRs that changed, every 10 min, or when a stalled review is due; all through `ghc`
-  (ttl 50 s) and nothing while the GitHub pause holds. "Me" is the response's `viewer`; without it
+  (ttl 50 s) and nothing while the GitHub pause holds. Rate limits are read only from stderr, a failed
+  answer's body or a GraphQL `RATE_LIMITED` error (`ghErrorText`; `pollPrs` too), never from a good
+  answer's body (comments can say "rate limit"). "Me" is the response's `viewer`; without it
   nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
-  next poll). New items queue as one `[MasterDeck PR watch]` message per PR, delivered (1 s timer)
-  once the turn is over. Ends on merge/close (told), on another author (silent) or by Stop (told).
-  Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched). Rows join
+  next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
+  one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
+  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told).
+  Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
+  `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
   `state.watches` with ids `pr:<url>` (`watchStop` routes them), so they count as monitors in
-  `withActivity`. Review offers for watched PRs are left out of Needs you (`InboxInput.watchedPrs`).
+  `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
+  session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".

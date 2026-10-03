@@ -467,11 +467,13 @@ Stored in `~/.claude/masterdeck/settings.json`.
   for sessions whose workflow keeps the PR watch step). Once a minute it checks GitHub; new review
   threads, comments, changes requested, a merge conflict, a stalled automated Claude review and the
   merge reach the session as one message starting `[MasterDeck PR watch] repo#12:` once its turn is
-  over. What was already on an older PR when the watch started is not news, and nothing is sent
-  twice, also across restarts. The session is told reviewer text is for it to judge, never to
+  over. A PR that was older when the watch started gets one line counting what is already on it
+  (its threads and comments are not listed); after that only new ones are sent, never twice, also
+  across restarts. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
   force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
-  has no time limit. Review-thread offers for a watched PR are not added to Needs you (the session
-  gets them already); CI offers still are. A session with a watched PR shows **Waiting** when idle.
+  has no time limit. Review-thread offers for a watched PR are not added to Needs you while its
+  session can take messages (it gets them already); a parked session, one on a prompt, or an
+  interactive one with master offline still gets the offer. CI offers always are. A session with a watched PR shows **Waiting** when idle.
 - **Monitors run by** (Sessions): who runs the monitors sessions arm (PR review comments, merge
   readiness, deploys, a workflow's monitor blocks).
   - **Claude Code** (default): each monitor stops after 30 minutes, Claude Code's limit, and the
@@ -487,7 +489,8 @@ Stored in `~/.claude/masterdeck/settings.json`.
     Claude Code's monitors until it is restarted.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
     its events and a Stop button. With several, they open as a list. A PR watch shows as
-    "PR watch · repo#12"; its Stop ends the watch and tells the session.
+    "PR watch · repo#12"; its Stop ends the watch and tells the session. A PR stopped this way is
+    not watched again.
 - **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
   Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
   it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the

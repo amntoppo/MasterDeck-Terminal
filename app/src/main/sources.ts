@@ -141,7 +141,7 @@ import {
 import { sessionScreen } from "./screen";
 import { TokenIndex } from "./tokens";
 import { loadCache, saveCache } from "./cache";
-import type { GhRunner } from "./ghc";
+import { ghErrorText, type GhRunner } from "./ghc";
 import { GitHub } from "./github";
 import {
   mtime,
@@ -1482,7 +1482,7 @@ export class Sources {
         ttl: 45,
       });
       this.noteBinary("gh", r.code);
-      if (this.githubPaused(r.stderr + r.stdout)) return;
+      if (this.githubPaused(ghErrorText(r))) return;
       // Keep the last good value through a network blip.
       const pr = r.code === 0 ? parsePrView(r.stdout) : null;
       if (pr) this.prLive[url] = pr;
@@ -1500,7 +1500,7 @@ export class Sources {
       ttl: 45,
     });
     this.noteBinary("gh", r.code);
-    if (this.githubPaused(r.stderr + r.stdout)) return;
+    if (this.githubPaused(ghErrorText(r))) return;
     const pr = r.code === 0 ? parsePrView(r.stdout) : null;
     if (pr?.url) {
       this.prLive[pr.url] = pr;

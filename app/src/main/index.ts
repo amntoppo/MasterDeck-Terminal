@@ -3,6 +3,7 @@ import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { PrWatch, prStates } from "./prWatch";
+import { canSend } from "@shared/send";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -2626,7 +2627,19 @@ app.whenReady().then(async () => {
     ...prWatch.info(latest?.sessions ?? []),
   ]);
   prWatch.load();
-  sources.setWatchedPrs(() => prWatch.watched());
+  // Only PRs whose session can take a message now: a parked session's offer stays in Needs you.
+  sources.setWatchedPrs(() =>
+    prWatch.watched(
+      latest?.sessions ?? [],
+      (s) =>
+        canSend(
+          s,
+          ptys.isAlive(`s:${s.key}`),
+          latest?.master.kind === "attached" ||
+            latest?.master.kind === "elsewhere",
+        ).ok,
+    ),
+  );
   setInterval(() => void prWatch.poll(), 60_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
