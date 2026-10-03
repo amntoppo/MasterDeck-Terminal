@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ownerOf, prOffers } from './offers'
+import { ciMessage, ownerOf, prOffers } from './offers'
 import type { Pr, Proposal, Session } from './types'
 
 const pr = (p: Partial<Pr>): Pr => ({ url: 'https://github.com/acme/mobile-app/pull/137', repo: 'mobile-app', number: 137, title: 't', unresolvedThreads: 0, ci: null, headRef: 'x', refsIssue: 1036, ...p })
@@ -31,5 +31,11 @@ describe('prOffers', () => {
     const maker = s({ sessionId: 's2', key: 'k2', name: 'maker', issue: null })
     expect(ownerOf(pr({}), [s({}), maker], { s2: ['https://github.com/acme/mobile-app/pull/137'] })?.name).toBe('maker')
     expect(ownerOf(pr({ refsIssue: null }), [s({})], {})).toBeNull()
+  })
+})
+
+describe('the reply instruction', () => {
+  it('never lets a session hand its report to another session when master-agent is not running', () => {
+    expect(ciMessage(pr({ ci: 'failure' }))).toContain('do not send it to any other session')
   })
 })

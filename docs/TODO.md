@@ -115,10 +115,22 @@ fixes it, and move the item here to "Recently done".
   `~/.claude/projects`; scratch dirs in `~/.claude/jobs/*/tmp`; the leftover untracked
   `skills/babysit-proof/` (only `__pycache__`, skill removed in 9329db4).
 
+## Product ideas (from the user, 2026-10-03)
+
+- **P2 · Notes section.** A place in MasterDeck to write notes (free text, kept between launches;
+  could live in the left rail as its own view, saved under `~/.claude/masterdeck/`). Open questions:
+  per ticket / per session or global, Markdown, sync to the web app.
+- **P2 · Working hours per GitHub account, from tickets worked on.** Estimate time worked per
+  account from what MasterDeck already knows: each session's account (`session-accounts.json`, plan I),
+  its linked ticket (`ticket-links.json`), session activity/turn times and commit times. Show per
+  account per day and per ticket (e.g. in Costs or a new view), exportable. Open questions: how idle
+  time counts, sessions without a ticket, accounts on several machines.
+
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Sessions never hand a report to another session when master-agent is not running: the reply instruction (assign/CI/review/stale prompts, master SKILL) now says to ask the user instead. Seen when a #440 session messaged two sessions named `masterdeck` | fix/master-reply-only | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |
 | Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a … 68bf172, merge b3c4d4b; deployed | — |

@@ -110,6 +110,8 @@ class MasterOffTest(unittest.TestCase):
         self.assertTrue(prompt.endswith(rules.REPLY_SOLO.format(n="#981")))
         config.CONFIG["masterEnabled"] = True
         self.assertIn("tell master-agent", rules._assign(issue(981, "To Do"))["target"]["spawn"]["prompt"])
+        # master-agent not running: never hand the report to another session (one named "masterdeck" got it once)
+        self.assertIn("do not send it to any other session", rules._assign(issue(981, "To Do"))["target"]["spawn"]["prompt"])
 
 
 class ReviewAndCiTest(unittest.TestCase):

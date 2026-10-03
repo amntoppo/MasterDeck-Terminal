@@ -51,7 +51,7 @@ The MasterBar app (and `master say` in any shell) writes to master's inbox and a
        --message - <<'MASTER_EOF_7f3a'
      <text>
 
-     (From the user via master-agent. Reply to master-agent with SendMessage.)
+     (From the user via master-agent. Reply to master-agent with SendMessage; if it is not reachable, do not message any other session — answer the user here.)
      MASTER_EOF_7f3a
      ```
   2. `master approve <id>`, then `master mark <id> sent`.
@@ -99,7 +99,7 @@ master ack N
 
      <one or two sentences of context from the summary>
 
-     When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '#N: done', '#N: blocked — <reason>' or '#N: question — <question>'. When you have a question, ALSO ask the user directly in this session (so they see it here too), and wait for the answer from either place. If the user answers you here, tell master-agent '#N: answered — <answer>'.
+     When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '#N: done', '#N: blocked — <reason>' or '#N: question — <question>'. When you have a question, ALSO ask the user directly in this session (so they see it here too), and wait for the answer from either place. If the user answers you here, tell master-agent '#N: answered — <answer>'. If SendMessage says master-agent is not reachable, do not send it to any other session (none of them is master-agent, whatever its name); ask the user here instead.
      MASTER_EOF_7f3a
      ```
    - Item matches an issue with no owner: do not add it. Mention it under the batch; `ASSIGN` covers spawning.
