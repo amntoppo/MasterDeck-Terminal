@@ -308,13 +308,13 @@ describe("Setup's GitHub read as an account", () => {
     expect(await detectEnv(undefined, false, [], token)).toEqual({ env: {} })
   })
   it("a login: that account's token", async () => {
-    expect(await detectEnv('alice', false, [], token)).toEqual({ env: { GH_TOKEN: 't'.repeat(40) } })
+    expect(await detectEnv('alice', false, [], token)).toEqual({ env: { GH_TOKEN: 't'.repeat(40), GHC_ACCOUNT: 'alice' } })
   })
   it('a login without a token, an invalid one, or (from a browser) one not connected is refused, never read as the active account', async () => {
     const msg = (l: string) => ({ error: `gh has no token for ${l}: log in again with Add an account` })
     expect(await detectEnv('bob-work', false, ['bob-work'], token)).toEqual(msg('bob-work'))
     expect(await detectEnv('no such/login', false, [], token)).toEqual(msg('no such/login'))
     expect(await detectEnv('alice', true, ['bob-work'], token)).toEqual(msg('alice'))
-    expect(await detectEnv('alice', true, ['alice'], token)).toEqual({ env: { GH_TOKEN: 't'.repeat(40) } })
+    expect(await detectEnv('alice', true, ['alice'], token)).toEqual({ env: { GH_TOKEN: 't'.repeat(40), GHC_ACCOUNT: 'alice' } })
   })
 })

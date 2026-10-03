@@ -301,5 +301,6 @@ export async function detectEnv(
   if (login === undefined || login === null || login === '') return { env: {} }
   const env =
     typeof login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(login) && (!remote || connected.includes(login)) ? await token(login) : null
-  return env ? { env } : { error: `gh has no token for ${String(login)}: log in again with Add an account` }
+  // GHC_ACCOUNT: the cache entries of this read are this account's own.
+  return env ? { env: { ...env, GHC_ACCOUNT: String(login) } } : { error: `gh has no token for ${String(login)}: log in again with Add an account` }
 }

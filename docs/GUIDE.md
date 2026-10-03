@@ -662,6 +662,7 @@ moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run the
 - **Short-lived cache.** Reads are kept in `~/.claude/gh-cache` for a few seconds to minutes, so
   the same read from several sessions makes one call. TTLs: PR status 45 s, PR summaries 2 min,
   the board 5 min, assignees 10 min, your login 1 h.
+- **Per account.** With two or more connected accounts, MasterDeck's calls carry the account (`GHC_ACCOUNT`): each account has its own cached answers and its own pause (`paused-<login>.json`); calls without one (hand-run tools) use `paused.json` as before.
 - **One call at a time per read.** Identical reads made at the same moment wait for the first one
   and share its answer.
 - **Writes go straight through.** Assign, comment, status change and the like reach GitHub at once.

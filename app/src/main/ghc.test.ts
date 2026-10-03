@@ -57,3 +57,29 @@ describe('ghErrorText', () => {
     expect(ghErrorText({ code: 1, stdout: 'API rate limit exceeded', stderr: '' })).toContain('rate limit')
   })
 })
+
+describe('ghc per account', () => {
+  it("adds the account's GH_TOKEN and GHC_ACCOUNT, or refuses with its reason", async () => {
+    const envs: (NodeJS.ProcessEnv | undefined)[] = []
+    const fake = async (_c: string, _a: string[], opts?: RunOpts) => (envs.push(opts?.env), { code: 0, stdout: 'ok', stderr: '' })
+    const bob = makeGhRunner(fake, '/lib', 'python3', 'darwin', () => ({ env: { GH_TOKEN: 't-bob', GHC_ACCOUNT: 'bob-work' } }))
+    await bob(['api', 'user'])
+    expect(envs[0]).toMatchObject({ GH_TOKEN: 't-bob', GHC_ACCOUNT: 'bob-work', PYTHONPATH: '/lib' })
+    const gone = makeGhRunner(fake, '/lib', 'python3', 'darwin', () => ({ error: 'GitHub account bob-work needs to log in again' }))
+    expect(await gone(['api', 'user'])).toEqual({ code: 1, stdout: '', stderr: 'GitHub account bob-work needs to log in again' })
+    expect(envs).toHaveLength(1)
+    const win = makeGhRunner(fake, '/lib', 'python', 'win32', () => ({ env: { GH_TOKEN: 't-bob', GHC_ACCOUNT: 'bob-work' } }))
+    await win(['api', 'user'])
+    expect(envs[1]).toEqual({ GH_TOKEN: 't-bob', GHC_ACCOUNT: 'bob-work' })
+    const plain = makeGhRunner(fake, '/lib', 'python3', 'darwin')
+    await plain(['api', 'user'])
+    expect(envs[2]?.GH_TOKEN).toBeUndefined()
+  })
+  it("shows any account's pause", () => {
+    const d = mkdtempSync(join(tmpdir(), 'ghc-'))
+    const now = 1_790_000_000_000
+    writeFileSync(join(d, 'paused-bob-work.json'), JSON.stringify({ until: now / 1000 + 600, reason: 'bob limit' }))
+    writeFileSync(join(d, 'paused.json'), JSON.stringify({ until: now / 1000 + 300, reason: 'rate limit' }))
+    expect(readGhCacheStatus(d, now)).toMatchObject({ pausedUntil: now + 600_000, pauseReason: 'bob limit' })
+  })
+})

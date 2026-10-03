@@ -33,7 +33,7 @@ export class MasterCli {
   async configDetect(owner: string, project?: number): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner)) return { ok: false, message: 'not a GitHub login' }
     const args = ['config', 'detect', '--owner', owner, ...(project && Number.isInteger(project) && project > 0 ? ['--project', String(project)] : [])]
-    // Fresh from GitHub: the shared cache is not per account.
+    // Fresh from GitHub; env carries GHC_ACCOUNT, so what it caches is this account's own.
     const r = await this.exec(args, undefined, 90_000, true)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
@@ -45,7 +45,7 @@ export class MasterCli {
 
   /** `master config detect --all`: every owner, their repos and boards, in two GraphQL calls. `env`: GH_TOKEN of the account asked about. */
   async configDetectAll(env: Record<string, string> = {}): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
-    // Fresh from GitHub: the shared cache is not per account.
+    // Fresh from GitHub; env carries GHC_ACCOUNT, so what it caches is this account's own.
     const r = await this.exec(['config', 'detect', '--all'], undefined, 120_000, true, env)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {

@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from master import ghcache
 
@@ -55,6 +56,49 @@ class GhCacheTest(unittest.TestCase):
 
     def set_mode(self, m: str):
         self.mode.write_text(m)
+
+    def test_account_is_part_of_the_key_and_has_its_own_pause(self):
+        k0 = ghcache.cache_key(["api", "user"], "/w")
+        with mock.patch.dict(os.environ, {"GHC_ACCOUNT": "bob-work"}):
+            k1 = ghcache.cache_key(["api", "user"], "/w")
+        self.assertNotEqual(k0, k1)
+        self.assertEqual(ghcache.cache_key(["api", "user"], "/w", account=""), k0)  # no account: today's key
+        ghcache.pause(1000.0, reason="x", account="bob-work")
+        self.assertTrue((Path(os.environ["GH_CACHE_DIR"]) / "paused-bob-work.json").exists())
+        self.assertEqual(ghcache.paused_until(1001.0), 0.0)
+        self.assertGreater(ghcache.paused_until(1001.0, account="bob-work"), 0)
+        ghcache.invalidate({"all"})
+        self.assertTrue((Path(os.environ["GH_CACHE_DIR"]) / "paused-bob-work.json").exists())
+
+    def test_env_reaches_gh_and_gets_its_own_entry(self):
+        d = Path(self.tmp.name)
+        echo = d / "gh-echo"
+        echo.write_text("#!/usr/bin/env python3\nimport os, sys\nopen(os.environ['FAKE_LOG'], 'a').write('x\\n')\n"
+                        "sys.stdout.write('token=' + os.environ.get('GH_TOKEN', '') + '\\n')\n")
+        echo.chmod(0o755)
+        os.environ["GHC_GH"] = str(echo)
+        with mock.patch.dict(os.environ):
+            # The developer's own GH_TOKEN must neither leak into the output nor change the keys.
+            os.environ.pop("GH_TOKEN", None)
+            os.environ.pop("GHC_ACCOUNT", None)
+            code, out, _ = ghcache.run(["api", "user"], env={"GH_TOKEN": "t-bob", "GHC_ACCOUNT": "bob-work"})
+            self.assertEqual((code, out), (0, b"token=t-bob\n"))
+            _, out2, _ = ghcache.run(["api", "user"])
+            self.assertEqual(out2, b"token=\n")  # another key: not bob's cached answer
+            _, out3, _ = ghcache.run(["api", "user"], env={"GH_TOKEN": "t-bob", "GHC_ACCOUNT": "bob-work"})
+            self.assertEqual(out3, b"token=t-bob\n")
+        self.assertEqual(self.calls(), 2)
+
+    def test_account_must_be_a_login(self):
+        # No path traversal through a file name; an invalid value is no account (today's key and pause).
+        k0 = ghcache.cache_key(["api", "user"], "/w")
+        with mock.patch.dict(os.environ, {"GHC_ACCOUNT": "../../x"}):
+            self.assertEqual(ghcache.cache_key(["api", "user"], "/w"), k0)
+            self.assertEqual(ghcache._account(), "")
+        self.assertEqual(ghcache._account({"GHC_ACCOUNT": "a/b"}), "")
+        self.assertEqual(ghcache._account({"GHC_ACCOUNT": "bob-work"}), "bob-work")
+        with self.assertRaises(ValueError):
+            ghcache.pause(1.0, account="../x")
 
     # classification ---------------------------------------------------------------------------
 

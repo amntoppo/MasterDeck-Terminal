@@ -2041,7 +2041,8 @@ function registerIpc(): void {
   reg.handle(CH.ghUser, async (_e, login: unknown) => {
     if (typeof login !== "string" || !GH_LOGIN.test(login))
       return { name: "", email: "" };
-    const env = await tokenEnv(login);
+    const tok = await tokenEnv(login);
+    const env = tok && { ...tok, GHC_ACCOUNT: login };
     // No token: no read at all (never gh's active account); a token for another login is ignored.
     const got = env
       ? parseGhUser((await run("gh", ["api", "user"], { env, timeoutMs: 20_000 })).stdout)
@@ -2050,7 +2051,7 @@ function registerIpc(): void {
     return { name: u?.name ?? login, email: noreplyEmail(login, u?.id ?? null) };
   });
   reg.handle(CH.ghOwners, async () => {
-    // Straight to gh, not the shared cache: it is not per account.
+    // Straight to gh, not the shared cache (no account here).
     const [user, orgs] = await Promise.all([
       run("gh", ["api", "user", "--jq", ".login"], { timeoutMs: 20_000 }),
       run("gh", ["api", "user/orgs", "--paginate", "--jq", ".[].login"], {
