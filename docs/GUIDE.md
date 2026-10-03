@@ -699,7 +699,7 @@ is a `gh` login (`gh auth status` lists them).
   Start dialog. master's proposals use the issue's account (shown on the proposal).
 - **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
 - **Board and PRs**: each tab belongs to one account (see Board View, PRs).
-- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`. **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow. **Standup** counts commits made with any connected account's email.
+- **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`. **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow, and the ticket is created as that account (also with **Create with Claude**, which gets the picked account); changing the account resets assignees, labels and sprint that came from the old one. **Standup** counts commits made with any connected account's email.
 - **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
   account as before.
 

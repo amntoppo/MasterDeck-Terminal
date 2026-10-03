@@ -19,4 +19,17 @@ describe('standupCommits', () => {
     await one.standupCommits(0, [process.cwd()])
     expect(logs[1].filter((a) => a.startsWith('--author='))).toEqual(['--author=me@acme.test'])
   })
+
+  it('dedupes emails case-insensitively', async () => {
+    const logs: string[][] = []
+    const run: Runner = async (_cmd, args) => {
+      if (args.includes('--git-common-dir')) return { code: 0, stdout: '/r/app/.git\n', stderr: '' }
+      if (args.includes('user.email')) return { code: 0, stdout: 'me@acme.test\n', stderr: '' }
+      logs.push(args)
+      return { code: 0, stdout: '', stderr: '' }
+    }
+    const ops = new Ops(run, { masterWorkspace: '/r' } as Paths, () => 'claude', undefined, () => ['ME@Acme.test', 'B@globex.test', 'b@GLOBEX.test'])
+    await ops.standupCommits(0, [process.cwd()])
+    expect(logs[0].filter((a) => a.startsWith('--author='))).toEqual(['--author=me@acme.test', '--author=B@globex.test'])
+  })
 })

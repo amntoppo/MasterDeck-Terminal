@@ -66,6 +66,7 @@ import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
 import {
   defaultAccount,
   isMulti,
+  ticketAccount,
   noreplyEmail,
   parseGhUser,
   prRepo,
@@ -1202,7 +1203,14 @@ async function pumpTicketRequests(): Promise<void> {
           if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
           else {
             const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
-            answer = await forRepo(p.repo || null).ops.create({ ...p, body });
+            // context.json says which account the dialog / tab picked.
+            let picked: string | null = null;
+            try {
+              picked = JSON.parse(readFileSync(join(ticketDir(), "context.json"), "utf8")).account ?? null;
+            } catch {
+              /* none */
+            }
+            answer = await forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create({ ...p, body });
           }
         }
       } catch (e) {
@@ -1761,7 +1769,10 @@ function registerIpc(): void {
         : [];
     const title = str(o.title, 256).trim();
     if (!title) return { ok: false, message: "give it a title" };
-    const res = await forRepo(str(o.repo, 140) || null).ops.create({
+    // The account picked in the dialog creates it (a connected one); else the repo's account.
+    const res = await forAccount(
+      ticketAccount(str(o.account, 100) || null, str(o.repo, 140) || null, getConfig()),
+    ).ops.create({
       title,
       body: str(o.body, 60_000),
       repo: str(o.repo, 140) || undefined,

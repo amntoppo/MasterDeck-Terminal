@@ -98,7 +98,8 @@ export class Ops {
       [...repos.values()].map(async (dir) => {
         const email = (await this.git(dir, ['config', 'user.email'])).stdout.trim()
         // This repo's email and every connected account's: a session commits as its account.
-        const authors = [...new Set([email, ...this.emails()].filter(Boolean))]
+        const seenEmail = new Set<string>()
+        const authors = [email, ...this.emails()].filter((e) => e && !seenEmail.has(e.toLowerCase()) && seenEmail.add(e.toLowerCase()))
         if (!authors.length) return null
         const r = await this.git(dir, ['log', '--all', '--source', `--since=${since}`, ...authors.map((a) => `--author=${a}`), '--format=%H%x09%at%x09%S%x09%s'], 30_000)
         return r.code === 0 ? { dir, out: r.stdout } : null

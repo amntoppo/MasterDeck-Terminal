@@ -45,6 +45,11 @@ export function accountForRepo(repo: string | null | undefined, c: AppConfig): s
   return matchRepo(repo, c) ?? primaryLogin(c)
 }
 
+/** A new ticket's account: the one picked in the dialog when it is connected (two or more), else the repo's. */
+export function ticketAccount(picked: string | null | undefined, repo: string | null | undefined, c: AppConfig): string | null {
+  return isMulti(c) && picked && c.accounts.some((a) => a.login === picked) ? picked : accountForRepo(repo, c)
+}
+
 /** Board calls: the account whose boards include this one, else the primary. */
 export function accountForProject(key: string | null | undefined, c: AppConfig): string | null {
   return (key && c.accounts.find((a) => a.projects.some((p) => projectKey(p) === key))?.login) || primaryLogin(c)

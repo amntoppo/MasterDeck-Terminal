@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
   accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
-  matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount,
+  matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] }
@@ -214,5 +214,14 @@ describe('keepLastGood', () => {
     const raw = { sources: { board: true, prs: true }, issues: [issue(null, 5)], prs: [] }
     expect(keepLastGood(raw, { issues: [issue(null, 1)], prs: [{ url: 'u' }] }, two)).toEqual(raw)
     expect(keepLastGood({ ...raw, sources: { board: false, prs: false } }, null, one).issues).toEqual([issue(null, 5)])
+  })
+})
+
+describe('ticketAccount', () => {
+  it('the picked connected account creates, whatever the repo says; otherwise the repo routes', () => {
+    expect(ticketAccount('bob-work', 'acme/api', two)).toBe('bob-work')
+    expect(ticketAccount(undefined, 'acme/api', two)).toBe('alice')
+    expect(ticketAccount('carol', 'globex/app', two)).toBe('bob-work')
+    expect(ticketAccount('bob-work', 'acme/api', one)).toBe('alice')
   })
 })

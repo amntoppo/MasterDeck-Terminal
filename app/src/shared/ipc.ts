@@ -33,6 +33,8 @@ export interface NewTicket {
   /** A sprint title, "@current", or "" for none; `sprintField` is the board's iteration field. */
   sprint: string;
   sprintField: string;
+  /** The GitHub account it is created as (two or more accounts). */
+  account?: string;
 }
 
 export interface WorkflowDraft {

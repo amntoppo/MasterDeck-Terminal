@@ -213,10 +213,10 @@ export function NewTicketDialog({
   );
 
   const create = async () => {
-    if (!t.title.trim() || busy) return;
+    if (!t.title.trim() || !t.repo || busy) return;
     setBusy(true);
     setMsg(null);
-    const r = await deck().ticketCreate(t);
+    const r = await deck().ticketCreate({ ...t, account: account ?? undefined });
     setBusy(false);
     setMsg({ text: r.message, ok: r.ok, url: r.url });
   };
@@ -301,8 +301,14 @@ export function NewTicketDialog({
                       const p = a?.projects[0];
                       setAccount(e.target.value);
                       set({
-                        repo: a?.repos[0] ?? t.repo,
+                        repo: a?.repos[0] ?? "",
                         milestone: "",
+                        labels: [],
+                        sprint: "",
+                        // Still the default (the old account's login)? Then the new account's.
+                        ...(t.assignees.length === 1 && t.assignees[0] === account
+                          ? { assignees: [e.target.value] }
+                          : {}),
                         ...(p
                           ? {
                               project: `${p.owner}/${p.number}`,
@@ -328,6 +334,11 @@ export function NewTicketDialog({
                   value={t.repo}
                   onChange={(e) => set({ repo: e.target.value, milestone: "" })}
                 >
+                  {!repoList.length && (
+                    <option value="" disabled>
+                      No repositories
+                    </option>
+                  )}
                   {repoList.map((r) => (
                     <option key={r} value={r}>
                       {r.split("/")[1]}
@@ -438,7 +449,7 @@ export function NewTicketDialog({
             <div className="form-buttons nt-buttons">
               <button
                 className="btn nt-claude"
-                onClick={() => onWithClaude(ctx, t)}
+                onClick={() => onWithClaude(account ? { ...ctx, account } : ctx, t)}
                 title="Describe what you need; Claude writes the ticket(s) and creates them on this board"
               >
                 <ClaudeMark /> Create with Claude
@@ -449,7 +460,7 @@ export function NewTicketDialog({
               </button>
               <button
                 className="btn primary"
-                disabled={!t.title.trim() || busy}
+                disabled={!t.title.trim() || !t.repo || busy}
                 onClick={() => void create()}
                 title="⌘↵"
               >
