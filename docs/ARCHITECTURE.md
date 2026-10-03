@@ -282,7 +282,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
-| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection |
+| `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |

@@ -17,7 +17,6 @@ export interface Paths {
   masterWorkspace: string
   python: string
   /** babysit-ticket's CLI. */
-  babysitTt: string
   /** tt.sh's links: read once, for the one-time import. */
   babysitState: string
   /** MasterDeck's session ↔ ticket links. */
@@ -59,7 +58,6 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
     // Replaced by the config's workspace once it loads (see Sources.applyConfig).
     masterWorkspace: process.env.MASTER_WORKSPACE || join(h, 'Documents'),
     python: process.platform === 'win32' ? 'python' : 'python3',
-    babysitTt: join(h, '.claude', 'skills', 'babysit-ticket', 'scripts', 'tt.sh'),
     babysitState: join(process.env.TT_STATE_DIR || join(h, '.claude', 'babysit-ticket'), 'state.json'),
     ticketLinks: join(home, 'ticket-links.json'),
     bundledSkills,

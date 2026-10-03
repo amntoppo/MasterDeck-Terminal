@@ -227,3 +227,29 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
   }
   return { ok: true, message: `linked session to ${label} ${info.title}${moved}` }
 }
+
+/**
+ * The ticket builder session's create command: it hands its tt.sh-style flags to MasterDeck (which
+ * runs BoardOps.create) and prints the answer, waiting up to two minutes. MasterDeck runs while this
+ * session does (the session lives in its window), so no fallback is needed.
+ */
+export function ticketBuilderScript(dir: string): string {
+  const d = dir.replace(/'/g, `'\\''`)
+  return `#!/usr/bin/env bash
+# Written by MasterDeck: create one ticket on the board (MasterDeck does it) and print the result.
+d='${d}'
+mkdir -p "$d/requests" "$d/answers"
+id="$(date +%s)-$$-$RANDOM"
+# One NUL-terminated argument each: any text survives, no jq needed.
+printf '%s\\0' "$@" > "$d/requests/$id.tmp" && mv "$d/requests/$id.tmp" "$d/requests/$id.req"
+i=0
+while [ $i -lt 480 ]; do
+  if [ -f "$d/answers/$id.json" ]; then cat "$d/answers/$id.json"; echo; rm -f "$d/answers/$id.json" "$d/requests/$id.taken"; exit 0; fi
+  sleep 0.25
+  i=$((i + 1))
+done
+rm -f "$d/requests/$id.req"
+echo '{"ok":false,"error":"MasterDeck did not answer (is it running?)"}'
+exit 1
+`
+}

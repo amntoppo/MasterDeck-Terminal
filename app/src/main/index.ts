@@ -15,6 +15,8 @@ import {
   unlinkSync,
   writeFileSync,
   chmodSync,
+  appendFileSync,
+  renameSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
@@ -94,7 +96,7 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
-import { BoardOps, linkTicket } from "./boardOps";
+import { BoardOps, linkTicket, parseCreateArgs, ticketBuilderScript } from "./boardOps";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -917,6 +919,55 @@ async function resumeBg(
 
 /** The Board's ticket session works here: its CLAUDE.md, context.json, create-ticket.sh, created.jsonl. */
 const ticketDir = () => join(paths.home, "ticket-builder");
+let ticketPumping = false;
+/** Create-with-Claude asks for a ticket: claim the request, create it, answer, and log it. */
+async function pumpTicketRequests(): Promise<void> {
+  if (ticketPumping) return;
+  ticketPumping = true;
+  try {
+    const dir = join(ticketDir(), "requests");
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith(".req"));
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const id = n.slice(0, -4);
+      if (!/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue;
+      try {
+        renameSync(join(dir, n), join(dir, `${id}.taken`));
+      } catch {
+        continue; // taken back by the script (timed out)
+      }
+      let answer: object;
+      try {
+        const args = readFileSync(join(dir, `${id}.taken`), "utf8").split("\0").slice(0, -1).slice(0, 60);
+        const p = parseCreateArgs(args);
+        if ("error" in p) answer = { ok: false, error: p.error };
+        else {
+          const file = p.bodyFile ? resolve(ticketDir(), p.bodyFile) : "";
+          if (p.bodyFile && !file.startsWith(ticketDir() + sep)) answer = { ok: false, error: "create: body file outside the ticket folder" };
+          else {
+            const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
+            answer = await boardOps.create({ ...p, body });
+          }
+        }
+      } catch (e) {
+        answer = { ok: false, error: `create: ${String(e)}` };
+      }
+      const a = join(ticketDir(), "answers");
+      mkdirSync(a, { recursive: true });
+      writeFileSync(join(a, `${id}.tmp`), JSON.stringify(answer));
+      renameSync(join(a, `${id}.tmp`), join(a, `${id}.json`));
+      // The log the Board reads (readCreatedTickets) — dry runs are not logged.
+      if ((answer as { ok?: boolean; dryRun?: boolean }).ok && !(answer as { dryRun?: boolean }).dryRun)
+        appendFileSync(join(ticketDir(), "created.jsonl"), JSON.stringify(answer) + "\n");
+    }
+  } finally {
+    ticketPumping = false;
+  }
+}
 let ticketsSeen = -1;
 /** Tickets the Board's session created (created.jsonl grew): refresh the board, and tell the page. */
 function readCreatedTickets(): void {
@@ -1499,19 +1550,7 @@ function registerIpc(): void {
     const dir = ticketDir();
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const script = join(dir, "create-ticket.sh");
-    const log = join(dir, "created.jsonl");
-    writeFileSync(
-      script,
-      [
-        "#!/usr/bin/env bash",
-        "# Written by MasterDeck: create one ticket on the board (babysit-ticket's tt.sh create) and log it.",
-        `out="$(bash ${shellQuote(paths.babysitTt)} create "$@")"; code=$?`,
-        `printf '%s\\n' "$out"`,
-        `case " $* " in *" --dry-run "*) ;; *) [ $code -eq 0 ] && printf '%s' "$out" | jq -c . >> ${shellQuote(log)} 2>/dev/null ;; esac`,
-        "exit $code",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(script, ticketBuilderScript(dir));
     chmodSync(script, 0o755);
     // The Bash it may run unasked: the create command, and reading GitHub.
     writeFileSync(
@@ -2523,6 +2562,7 @@ app.whenReady().then(async () => {
   setInterval(() => {
     try {
       readCreatedTickets();
+      void pumpTicketRequests();
     } catch (e) {
       console.error(`tickets: ${String(e)}`);
     }

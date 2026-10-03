@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { execFile } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { parseConfig, setConfig, type AppConfig } from '@shared/appConfig'
-import { BoardOps, linkTicket, parseCreateArgs, type LinkDeps } from './boardOps'
+import { BoardOps, linkTicket, parseCreateArgs, ticketBuilderScript, type LinkDeps } from './boardOps'
 import type { GhRunner } from './ghc'
 
 const cfg: AppConfig = parseConfig({
@@ -118,4 +122,25 @@ describe('linkTicket', () => {
     expect(r.message).toMatch(/could not save the link.*EACCES/)
     expect(log).toEqual([])
   })
+})
+
+describe.skipIf(process.platform === 'win32')('create-ticket.sh', () => {
+  it('hands its flags to MasterDeck and prints the answer', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb-'))
+    mkdirSync(join(dir, 'requests'), { recursive: true })
+    const script = join(dir, 'create-ticket.sh')
+    writeFileSync(script, ticketBuilderScript(dir), { mode: 0o755 })
+    const done = new Promise<string>((res) => execFile(script, ['--title', 'A "quoted" title', '--dry-run'], (_e, out) => res(out)))
+    let req: string | undefined
+    for (let i = 0; i < 40 && !req; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+      req = readdirSync(join(dir, 'requests')).find((n) => n.endsWith('.req'))
+    }
+    expect(req).toBeDefined()
+    const id = req!.slice(0, -4)
+    expect(readFileSync(join(dir, 'requests', req!), 'utf8').split('\0').slice(0, -1)).toEqual(['--title', 'A "quoted" title', '--dry-run'])
+    renameSync(join(dir, 'requests', req!), join(dir, 'requests', `${id}.taken`))
+    writeFileSync(join(dir, 'answers', `${id}.json`), '{"ok":true,"dryRun":true}')
+    expect(JSON.parse(await done)).toEqual({ ok: true, dryRun: true })
+  }, 20_000)
 })
