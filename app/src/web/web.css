@@ -108,3 +108,15 @@ html.phone .setup-body { min-height: 0; }
 .app.phone .set-ctl { flex-wrap: wrap; min-width: 0; }
 .app.phone .set-ctl code { overflow-wrap: anywhere; }
 .app.phone > .master-slot { flex-direction: column; }
+
+/* Board and PRs: the filter row is a "Filters (n)" button + search (PhoneFilters); the controls
+   open in a sheet, one per row, with multi-pick lists inline instead of dropdowns. */
+.app.phone .phone-filters { flex-wrap: nowrap; padding: 8px 12px; }
+.app.phone .phone-filters > .btn { flex: none; }
+.app.phone .phone-filters > .btn.active { border-color: var(--accent); background: var(--accent-soft); }
+.app.phone .phone-filters .search { flex: 1; min-width: 0; width: auto; }
+html.phone .filters-sheet { display: flex; flex-direction: column; overflow: hidden; }
+html.phone .filters-sheet-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+html.phone .filters-sheet-body .fsel { width: 100%; min-height: 40px; padding: 8px 10px; text-align: left; font-size: 16px; }
+html.phone .filters-sheet-body .mpick-menu { position: static; max-height: none; margin-top: 4px; box-shadow: none; }
+html.phone .filters-sheet-body .mpick-row { padding: 9px 10px; font-size: 14px; }

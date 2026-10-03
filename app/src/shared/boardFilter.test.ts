@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
 const card = (p: Partial<BoardCard>): BoardCard => ({ number: 1, title: 'T', url: '', status: 'In Dev', prs: [], assignees: [], labels: [], milestone: null, type: null, ...p })
@@ -112,5 +112,14 @@ describe('repos and boards', () => {
   it('older saved filters get the new fields', () => {
     expect(normalizeFilters({ assignees: ['x'], labels: ['bug'] } as never, 'me')).toMatchObject({ assignees: ['x'], labels: ['bug'], repos: [], projects: [] })
     expect(normalizeFilters(null, 'me').assignees).toEqual(['me'])
+  })
+})
+
+describe('activeBoardFilterCount', () => {
+  it('is 0 for the defaults and counts each changed filter once', () => {
+    expect(activeBoardFilterCount(defaultFilters(ME), ME)).toBe(0)
+    expect(activeBoardFilterCount(defaultFilters(null), null)).toBe(0)
+    expect(activeBoardFilterCount({ ...defaultFilters(ME), assignees: [] }, ME)).toBe(1)
+    expect(activeBoardFilterCount({ ...defaultFilters(ME), labels: ['a', 'b'], milestone: 'Oct', hasPr: 'with', search: 'x', hiddenColumns: ['Done'], repos: ['o/r'], projects: ['p'] }, ME)).toBe(7)
   })
 })

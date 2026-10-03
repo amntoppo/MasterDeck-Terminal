@@ -17,8 +17,11 @@ import {
   visibleColumns,
 } from "@shared/board";
 import { createPortal } from "react-dom";
+import { usePhone } from "../web";
+import { PhoneFilters } from "./PhoneFilters";
 import type { PastSession } from "@shared/pastSessions";
 import {
+  activeBoardFilterCount,
   applyFilters,
   cardAction,
   defaultFilters,
@@ -244,6 +247,7 @@ export function BoardView({
     else void doMove(card, col);
   };
   const me = state.me;
+  const phone = usePhone();
   // Tabs: each its own name and filters over the one board fetched from GitHub.
   const [tabs, setTabs] = useState<BoardTab[]>(() => loadTabs(me));
   const [tabId, setTabId] = useState<string>(() => load<string>(TAB_KEY, ""));
@@ -561,6 +565,121 @@ export function BoardView({
     window.addEventListener("mouseup", up);
   };
 
+  // The filter row: inline on a wide screen; on a phone, behind a "Filters (n)" button.
+  const filterControls = (
+    <>
+    {repos.length > 1 && (
+      <MultiPick
+        label="Repos"
+        all="All repos"
+        values={f.repos}
+        options={repos.map((r) => ({
+          value: r,
+          label: r.split("/")[1] ?? r,
+        }))}
+        onChange={(v) =>
+          set({ repos: v.length === repos.length ? [] : v })
+        }
+        quick={[{ label: "Select all", values: [] }]}
+      />
+    )}
+    {boards.length > 1 && (
+      <MultiPick
+        label="Boards"
+        all="All boards"
+        values={f.projects}
+        options={boards.map((p) => ({ value: p.key, label: p.title }))}
+        onChange={(v) =>
+          set({
+            projects: v.length === boards.length ? [] : v,
+            hiddenColumns: [],
+          })
+        }
+        quick={[{ label: "Select all", values: [] }]}
+      />
+    )}
+    <MultiPick
+      label="Assignee"
+      all="Everyone"
+      values={f.assignees}
+      options={[
+        ...options.assignees.map((u) => ({
+          value: u,
+          label: u === me ? `${u} (me)` : u,
+        })),
+        { value: UNASSIGNED, label: "Unassigned" },
+      ]}
+      onChange={(assignees) => set({ assignees })}
+      quick={
+        me
+          ? [
+              { label: "Me", values: [me] },
+              { label: "Everyone", values: [] },
+            ]
+          : []
+      }
+    />
+    <MultiPick
+      label="Labels"
+      all="Any label"
+      values={f.labels}
+      options={options.labels.map((l) => ({ value: l, label: l }))}
+      onChange={(labels) => set({ labels })}
+    />
+    <select
+      className="fsel"
+      value={f.milestone ?? ""}
+      onChange={(e) => set({ milestone: e.target.value || null })}
+    >
+      <option value="">Any milestone</option>
+      {options.milestones.map((m) => (
+        <option key={m}>{m}</option>
+      ))}
+    </select>
+    <select
+      className="fsel"
+      value={f.hasPr}
+      onChange={(e) =>
+        set({ hasPr: e.target.value as FilterState["hasPr"] })
+      }
+    >
+      <option value="any">PR: any</option>
+      <option value="with">Has a PR</option>
+      <option value="without">No PR</option>
+    </select>
+    <MultiPick
+      label="Columns"
+      all="All columns"
+      values={
+        shown
+          ? visibleColumns(shown, f.projects).filter(
+              (c) => !f.hiddenColumns.includes(c),
+            )
+          : []
+      }
+      options={(shown ? visibleColumns(shown, f.projects) : []).map(
+        (c) => ({ value: c, label: c }),
+      )}
+      onChange={(vis) =>
+        set({
+          hiddenColumns: (shown
+            ? visibleColumns(shown, f.projects)
+            : []
+          ).filter((c) => !vis.includes(c)),
+        })
+      }
+      invertAll
+    />
+    </>
+  );
+  const filterSearch = (
+    <input
+      className="filter search"
+      placeholder="Search title or #number"
+      value={f.search}
+      onChange={(e) => set({ search: e.target.value })}
+    />
+  );
   return (
     <>
       <section
@@ -645,131 +764,30 @@ export function BoardView({
           addTitle="Another board tab, with its own repos, boards and filters"
         />
 
-        <div className="filter-bar">
-          {repos.length > 1 && (
-            <MultiPick
-              label="Repos"
-              all="All repos"
-              values={f.repos}
-              options={repos.map((r) => ({
-                value: r,
-                label: r.split("/")[1] ?? r,
-              }))}
-              onChange={(v) =>
-                set({ repos: v.length === repos.length ? [] : v })
-              }
-              quick={[{ label: "Select all", values: [] }]}
-            />
-          )}
-          {boards.length > 1 && (
-            <MultiPick
-              label="Boards"
-              all="All boards"
-              values={f.projects}
-              options={boards.map((p) => ({ value: p.key, label: p.title }))}
-              onChange={(v) =>
-                set({
-                  projects: v.length === boards.length ? [] : v,
-                  hiddenColumns: [],
-                })
-              }
-              quick={[{ label: "Select all", values: [] }]}
-            />
-          )}
-          <MultiPick
-            label="Assignee"
-            all="Everyone"
-            values={f.assignees}
-            options={[
-              ...options.assignees.map((u) => ({
-                value: u,
-                label: u === me ? `${u} (me)` : u,
-              })),
-              { value: UNASSIGNED, label: "Unassigned" },
-            ]}
-            onChange={(assignees) => set({ assignees })}
-            quick={
-              me
-                ? [
-                    { label: "Me", values: [me] },
-                    { label: "Everyone", values: [] },
-                  ]
-                : []
-            }
-          />
-          <MultiPick
-            label="Labels"
-            all="Any label"
-            values={f.labels}
-            options={options.labels.map((l) => ({ value: l, label: l }))}
-            onChange={(labels) => set({ labels })}
-          />
-          <select
-            className="fsel"
-            value={f.milestone ?? ""}
-            onChange={(e) => set({ milestone: e.target.value || null })}
-          >
-            <option value="">Any milestone</option>
-            {options.milestones.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-          <select
-            className="fsel"
-            value={f.hasPr}
-            onChange={(e) =>
-              set({ hasPr: e.target.value as FilterState["hasPr"] })
+        {phone ? (
+          <PhoneFilters
+            count={activeBoardFilterCount({ ...f, search: "" }, me)}
+            search={filterSearch}
+            onReset={() =>
+              setFilters({ ...defaultFilters(me), search: f.search })
             }
           >
-            <option value="any">PR: any</option>
-            <option value="with">Has a PR</option>
-            <option value="without">No PR</option>
-          </select>
-          <MultiPick
-            label="Columns"
-            all="All columns"
-            values={
-              shown
-                ? visibleColumns(shown, f.projects).filter(
-                    (c) => !f.hiddenColumns.includes(c),
-                  )
-                : []
-            }
-            options={(shown ? visibleColumns(shown, f.projects) : []).map(
-              (c) => ({ value: c, label: c }),
+            {filterControls}
+          </PhoneFilters>
+        ) : (
+          <div className="filter-bar">
+            {filterControls}
+            {filterSearch}
+            {activeBoardFilterCount(f, me) > 0 && (
+              <button
+                className="link-btn"
+                onClick={() => setFilters(defaultFilters(me))}
+              >
+                Reset filters
+              </button>
             )}
-            onChange={(vis) =>
-              set({
-                hiddenColumns: (shown
-                  ? visibleColumns(shown, f.projects)
-                  : []
-                ).filter((c) => !vis.includes(c)),
-              })
-            }
-            invertAll
-          />
-          <input
-            className="filter search"
-            placeholder="Search title or #number"
-            value={f.search}
-            onChange={(e) => set({ search: e.target.value })}
-          />
-          {(f.labels.length > 0 ||
-            f.milestone ||
-            f.hasPr !== "any" ||
-            f.search ||
-            f.hiddenColumns.length > 0 ||
-            f.repos.length > 0 ||
-            f.projects.length > 0 ||
-            f.assignees.join() !== (me ?? "")) && (
-            <button
-              className="link-btn"
-              onClick={() => setFilters(defaultFilters(me))}
-            >
-              Reset filters
-            </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {!b || !shown ? (
           <div className="welcome">

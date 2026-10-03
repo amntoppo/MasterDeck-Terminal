@@ -64,11 +64,10 @@ the repo-root [TODO.md](../TODO.md).
   tabs reload the new web app.
 
 - **P3 · Phone layout follow-ups** (web, ≤760 px). Where: `src/web/web.css` (`.app.phone`),
-  `PrsView`/`BoardView` filters. (a) The PRs and Board filter rows take half the screen; fold them
-  behind a "Filters" button on a phone. (b) The Board is one wide row of columns that scrolls
-  sideways; a one-column-at-a-time picker would read better. (c) Checked only in emulation (the dev
+  `BoardView`. (a) The Board is one wide row of columns that scrolls
+  sideways; a one-column-at-a-time picker would read better. (b) Checked only in emulation (the dev
   preview, Chrome); try a real iPhone/Android for the soft keyboard (`visualViewport`) and safe
-  areas. (d) Dialogs that are fixed-layout grids (Setup, Workflow canvas) were only made to fit, not
+  areas. (c) Dialogs that are fixed-layout grids (Setup, Workflow canvas) were only made to fit, not
   redesigned.
 
 ## Older (pre-remote)
@@ -109,6 +108,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |
 | Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a … 68bf172, merge b3c4d4b; deployed | — |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
