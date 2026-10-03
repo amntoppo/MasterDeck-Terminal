@@ -160,14 +160,16 @@ export function parseTeamPr(raw: unknown): TeamPr | null {
   }
 }
 
-/** Search result pages to PRs, newest first and without duplicates. */
+/** Search result pages to PRs, newest first and without duplicates (per account). */
 export function parseTeamPrs(pages: unknown[]): TeamPr[] {
   const seen = new Map<string, TeamPr>()
   for (const page of pages) {
     const account = typeof obj(page).account === 'string' ? (obj(page).account as string) : undefined
     for (const raw of nodes(obj(obj(obj(page).data).search))) {
       const pr = parseTeamPr(raw)
-      if (pr && !seen.has(pr.url)) seen.set(pr.url, account ? { ...pr, account } : pr)
+      // One copy per account: a PR both accounts see belongs on both accounts' tabs.
+      const key = `${pr?.url}\0${account ?? ''}`
+      if (pr && !seen.has(key)) seen.set(key, account ? { ...pr, account } : pr)
     }
   }
   return [...seen.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

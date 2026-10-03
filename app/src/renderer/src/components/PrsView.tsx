@@ -96,7 +96,8 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const set = (patch: Partial<PrFilters>) => setF((cur) => ({ ...cur, ...patch }))
   const addTab = () => {
     const id = `prs-${Date.now().toString(36)}`
-    setTabs([...tabs, { id, name: nextTabName(tabs, 'PRs'), filters: { ...DEFAULT_PR_FILTERS }, ...(tabAccount(tab, logins) ? { account: tabAccount(tab, logins) } : {}) }])
+    const ta = tabAccount(tab, logins)
+    setTabs([...tabs, { id, name: nextTabName(tabs, 'PRs'), filters: { ...DEFAULT_PR_FILTERS }, ...(ta ? { account: ta } : {}) }])
     setTabId(id)
     return id
   }
@@ -145,7 +146,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           title="The GitHub account this tab shows"
           onChange={(e) => {
             const l = e.target.value
-            setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, account: l === primary ? undefined : l, filters: { ...t.filters, repo: '', author: '', label: '' } } : t)))
+            setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, account: l === primary ? undefined : l, filters: { ...t.filters, repo: '', author: t.filters.author === '@me' ? '@me' : '', label: '' } } : t)))
           }}
         >
           {logins.map((l) => (

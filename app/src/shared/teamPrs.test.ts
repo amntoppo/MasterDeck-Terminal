@@ -124,4 +124,9 @@ describe('PRs tabs per account', () => {
     expect(parseSavedPrTabs([])).toBeNull()
     expect(parseSavedPrTabs('x')).toBeNull()
   })
+  it('a PR both accounts can see is on both tabs', () => {
+    const both = parseTeamPrs([{ ...page({ number: 7, requested: ['bob-work'] }), account: 'alice' }, { ...page({ number: 7, requested: ['bob-work'] }), account: 'bob-work' }])
+    expect(prsForAccount(both, 'alice', 'alice').map((p) => p.number)).toEqual([7])
+    expect(filterPrs(prsForAccount(both, 'bob-work', 'alice'), { ...DEFAULT_PR_FILTERS, review: 'needs-me' }, 'bob-work', NOW).map((p) => p.number)).toEqual([7])
+  })
 })
