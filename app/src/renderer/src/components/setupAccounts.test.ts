@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -74,22 +74,44 @@ describe('switching accounts on Repos & boards', () => {
 describe("an account's choices once its repos are read", () => {
   it("Select all on one account does not tick the next account's repos", () => {
     // The account read is bob-work, whose own choices are not "Select all" (alice's were).
-    const r = withFound({ ...EMPTY, repos: ['globex/app'], primary: 'globex/app' }, globex, () => false)
+    const r = withFound({ ...EMPTY, repos: ['globex/app'], primary: 'globex/app' }, globex, 'bob-work', {})
     expect(r.repos).toEqual(['globex/app'])
     expect(r.allRepos).toBe(false)
   })
   it('Select all takes every repo there is now, but not one under another account', () => {
-    const r = withFound({ ...EMPTY, allRepos: true }, globex, (x) => x === 'globex/web')
+    const r = withFound({ ...EMPTY, allRepos: true }, globex, 'bob-work', { alice: { ...EMPTY, repos: ['globex/web'] } })
     expect(r.repos).toEqual(['globex/app'])
   })
   it('a first pick starts from the repo with the most open issues and its only board', () => {
-    const r = withFound(EMPTY, globex, () => false)
+    const r = withFound(EMPTY, globex, 'bob-work', {})
     expect(r).toMatchObject({ repos: ['globex/web'], primary: 'globex/web' })
     expect(Object.keys(r.boards)).toEqual(['globex/7'])
   })
   it('chosen boards take GitHub’s title and keep their statuses', () => {
     const had = { ...board, title: 'Old', statuses: { ...board.statuses, ready: 'Mine' } }
-    const r = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': had } }, globex, () => false)
+    const r = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': had } }, globex, 'bob-work', {})
     expect(r.boards['globex/7']).toMatchObject({ title: 'Roadmap', statuses: { ready: 'Mine' } })
+  })
+})
+
+describe('a board belongs to one account', () => {
+  it('a board ticked under another account is taken (case-insensitive)', () => {
+    expect(boardTakenBy('GLOBEX/7', 'alice', sel)).toBe('bob-work')
+    expect(boardTakenBy('globex/7', 'bob-work', sel)).toBeNull()
+  })
+  it('Select all and a first pick skip boards under another account', () => {
+    const other = { alice: { ...EMPTY, boards: { 'globex/7': board } } }
+    expect(withFound({ ...EMPTY, repos: ['globex/app'], allBoards: true }, globex, 'bob-work', other).boards).toEqual({})
+    expect(withFound(EMPTY, globex, 'bob-work', other).boards).toEqual({})
+  })
+})
+
+describe('Look again keeps what changed while it read', () => {
+  it("the answer is applied to the screen's choices when it arrives", () => {
+    // Started with nothing; meanwhile the user ticked globex/app and edited a board's statuses.
+    const now: AccountSel = { ...EMPTY, repos: ['globex/app'], primary: 'globex/app', boards: { 'globex/7': { ...board, statuses: { ...board.statuses, ready: 'Mine' } } } }
+    const r = withFound(now, globex, 'bob-work', {})
+    expect(r.repos).toEqual(['globex/app'])
+    expect(r.boards['globex/7'].statuses.ready).toBe('Mine')
   })
 })

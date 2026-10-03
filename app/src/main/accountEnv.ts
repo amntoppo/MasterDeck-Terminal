@@ -286,3 +286,20 @@ export class AccountEnv {
     })
   }
 }
+
+/**
+ * The env for Setup's GitHub read as `login` (its token, read-only, even with one account). No
+ * login: gh's active account. A login that is invalid, has no token, or (from a browser) is not
+ * connected is refused: reading it as the active account would list one account's repos under another.
+ */
+export async function detectEnv(
+  login: unknown,
+  remote: boolean,
+  connected: string[],
+  token: (login: string) => Promise<Record<string, string> | null>,
+): Promise<{ env: Record<string, string> } | { error: string }> {
+  if (login === undefined || login === null || login === '') return { env: {} }
+  const env =
+    typeof login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(login) && (!remote || connected.includes(login)) ? await token(login) : null
+  return env ? { env } : { error: `gh has no token for ${String(login)}: log in again with Add an account` }
+}

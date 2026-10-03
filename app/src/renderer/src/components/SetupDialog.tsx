@@ -12,7 +12,7 @@ import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
 
 
 const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
@@ -155,6 +155,8 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const [sel, setSel] = useState<Record<string, AccountSel>>(() => Object.fromEntries(cfg.accounts.map((a) => [a.login, selFromConfig(a)])))
   const selRef = useRef(sel)
   selRef.current = sel
+  // What the screen shows (set each render): a finished read applies to it, not to what it showed when asked.
+  const onScreenRef = useRef<AccountSel | null>(null)
   const [foundBy, setFoundBy] = useState<Record<string, DetectAll>>({})
 
   const show = (s: AccountSel) => {
@@ -164,24 +166,29 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     setBoards(s.boards)
     setAllBoards(s.allBoards)
   }
-  /** Read `login`'s repos and boards ('' gh's active account); `s`: that account's choices when asked. */
+  /**
+   * Read `login`'s repos and boards ('' gh's active account). The answer is applied to that
+   * account's choices as they are when it arrives (ticks and status edits made meanwhile stay):
+   * the screen's if it is still shown, else its entry in `sel`; `s` (its choices when asked) only
+   * when it has neither.
+   */
   const loadFound = async (login: string, s: AccountSel) => {
     setLoads((n) => n + 1)
     setMsg(null)
     const r = await deck().configDetectAll(login || undefined)
     setLoads((n) => n - 1)
-    if (!r.ok) return setMsg(r.message)
+    const shown = login === editingRef.current
+    if (!r.ok) return shown ? setMsg(r.message) : undefined
     const d = parseDetectAll(r.data)
     setFoundBy((cur) => ({ ...cur, [login]: d }))
-    const taken = (repo: string) => !!takenBy(repo, login, selRef.current)
-    if (login !== editingRef.current) {
-      // Switched to another account meanwhile: these choices wait in `sel`.
-      setSel((cur) => (cur[login] ? { ...cur, [login]: withFound(cur[login], d, taken) } : cur))
+    if (!shown) {
+      // Switched to another account meanwhile: these choices wait in `sel` (its errors are not shown).
+      setSel((cur) => (cur[login] ? { ...cur, [login]: withFound(cur[login], d, login, cur) } : cur))
       return
     }
     setFound(d)
     if (d.error) setMsg(d.error)
-    show(withFound(s, d, taken))
+    show(withFound(onScreenRef.current ?? s, d, login, selRef.current))
   }
 
   // Step 5.
@@ -212,10 +219,12 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     setStep(to)
   }
 
-  // Repos under another account never count under this one.
+  // Repos and boards under another account never count under this one.
+  const selectedBoards = Object.fromEntries(Object.entries(boards).filter(([k]) => !boardTakenBy(k, editing, sel)))
   const selectedRepos = (allRepos ? (found ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : repos) : repos).filter((r) => !takenBy(r, editing, sel))
   const primaryRepo = selectedRepos.includes(primary) ? primary : (selectedRepos[0] ?? '')
-  const onScreen = (): AccountSel => ({ repos: selectedRepos, allRepos, primary: primaryRepo, boards, allBoards })
+  const onScreen = (): AccountSel => ({ repos: selectedRepos, allRepos, primary: primaryRepo, boards: selectedBoards, allBoards })
+  onScreenRef.current = onScreen()
   /** Show another account's repos and boards; `drop`: an account just disconnected (its choices go). */
   const switchTo = (login: string, drop?: string) => {
     if (login === editing) return
@@ -277,7 +286,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     signedIn && state.account?.kind === 'signedIn' ? state.account.email : 'not signed in',
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
     !ghHere ? 'on your Mac' : connected.length ? connected.map((c) => c.login).join(', ') : accounts === null ? '—' : 'none connected',
-    primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(boards).length} board${Object.keys(boards).length === 1 ? '' : 's'}`}` : 'none chosen',
+    primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(selectedBoards).length} board${Object.keys(selectedBoards).length === 1 ? '' : 's'}`}` : 'none chosen',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
   // Next from Repos & boards needs a repository under the primary account (on screen or not).
@@ -587,7 +596,16 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                       checked={allBoards}
                       onChange={(e) => {
                         setAllBoards(e.target.checked)
-                        setBoards(e.target.checked ? Object.fromEntries(found.owners.flatMap((o) => o.projects).map((p) => [projectKey(p), boards[projectKey(p)] ?? p])) : {})
+                        setBoards(
+                          e.target.checked
+                            ? Object.fromEntries(
+                                found.owners
+                                  .flatMap((o) => o.projects)
+                                  .filter((p) => !boardTakenBy(projectKey(p), editing, sel))
+                                  .map((p) => [projectKey(p), boards[projectKey(p)] ?? p]),
+                              )
+                            : {},
+                        )
                       }}
                     />
                     <span>Select all</span>
@@ -602,23 +620,26 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                     .map((o) => (
                       <div key={o.login} className="pick-group">
                         <div className="pick-owner">{o.login}</div>
-                        {o.projects.map((p) => (
-                          <label key={projectKey(p)} className="mpick-row pick-row">
-                            <input type="checkbox" checked={!!boards[projectKey(p)]} onChange={() => toggleBoard(p)} />
-                            <span className="grow">
-                              #{p.number} {p.title}
-                            </span>
-                            <span className="muted">
-                              {p.items} item{p.items === 1 ? '' : 's'}
-                              {p.sprintField ? ` · sprints (${p.sprintField})` : ''}
-                              {p.error ? ` · ${p.error}` : ''}
-                            </span>
-                          </label>
-                        ))}
+                        {o.projects.map((p) => {
+                          const other = boardTakenBy(projectKey(p), editing, sel)
+                          return (
+                            <label key={projectKey(p)} className="mpick-row pick-row">
+                              <input type="checkbox" checked={!other && !!boards[projectKey(p)]} disabled={!!other} onChange={() => toggleBoard(p)} />
+                              <span className="grow">
+                                #{p.number} {p.title}
+                              </span>
+                              <span className="muted">
+                                {other ? `in ${other}` : `${p.items} item${p.items === 1 ? '' : 's'}`}
+                                {!other && p.sprintField ? ` · sprints (${p.sprintField})` : ''}
+                                {!other && p.error ? ` · ${p.error}` : ''}
+                              </span>
+                            </label>
+                          )
+                        })}
                       </div>
                     ))}
                 </div>
-                {Object.values(boards).map((p) => (
+                {Object.values(selectedBoards).map((p) => (
                   <details key={projectKey(p)} className="status-more">
                     <summary>What the statuses on {p.title} mean</summary>
                     <StatusEditor columns={p.columns} statuses={p.statuses} onChange={(st) => setStatuses(projectKey(p), st)} />

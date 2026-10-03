@@ -57,6 +57,7 @@ import type {
 import { getConfig } from "@shared/appConfig";
 import {
   AccountEnv,
+  detectEnv,
   accountsInUse,
   accountsKeyOf,
   migrateLegacyConfig,
@@ -1884,9 +1885,11 @@ function registerIpc(): void {
     if (typeof login !== "string" || !GH_LOGIN.test(login))
       return { name: "", email: "" };
     const env = await tokenEnv(login);
-    const u = env
+    // No token: no read at all (never gh's active account); a token for another login is ignored.
+    const got = env
       ? parseGhUser((await run("gh", ["api", "user"], { env, timeoutMs: 20_000 })).stdout)
       : null;
+    const u = got && got.login.toLowerCase() === login.toLowerCase() ? got : null;
     return { name: u?.name ?? login, email: noreplyEmail(login, u?.id ?? null) };
   });
   reg.handle(CH.ghOwners, async () => {
@@ -1922,11 +1925,15 @@ function registerIpc(): void {
   // As the account Setup shows (its token, read-only, even with one account); from a browser only
   // for connected accounts. No login: gh's active account.
   reg.handle(CH.configDetectAll, async (e, login: unknown) => {
-    const ok =
-      typeof login === "string" &&
-      GH_LOGIN.test(login) &&
-      (!isRemote(e) || getConfig().accounts.some((a) => a.login === login));
-    return cli.configDetectAll(ok ? ((await tokenEnv(login)) ?? {}) : {});
+    const r = await detectEnv(
+      login,
+      isRemote(e),
+      getConfig().accounts.map((a) => a.login),
+      tokenEnv,
+    );
+    return "error" in r
+      ? { ok: false as const, message: r.error }
+      : cli.configDetectAll(r.env);
   });
   reg.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === "string"

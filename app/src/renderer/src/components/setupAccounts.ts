@@ -55,6 +55,12 @@ export function takenBy(repo: string, login: string, sel: Record<string, Account
   return Object.entries(sel).find(([l, s]) => l !== login && s.repos.some((x) => x.toLowerCase() === r))?.[0] ?? null
 }
 
+/** Another connected account that has this board (owner/number) ticked already. */
+export function boardTakenBy(key: string, login: string, sel: Record<string, AccountSel>): string | null {
+  const k = key.toLowerCase()
+  return Object.entries(sel).find(([l, s]) => l !== login && Object.keys(s.boards).some((x) => x.toLowerCase() === k))?.[0] ?? null
+}
+
 /** An account from the config as Setup's choices. */
 export function selFromConfig(a: AccountConfig): AccountSel {
   return {
@@ -88,12 +94,13 @@ export function switchSel(
 /**
  * One account's choices once GitHub answered for it: chosen boards take GitHub's current title,
  * ids and columns (keeping what their statuses mean); "Select all" takes everything there is now;
- * a first pick starts from the repo with the most open issues and its owner's only board.
- * `taken`: a repo under another account (never picked here).
+ * a first pick starts from the repo with the most open issues and its owner's only board. Repos
+ * and boards under another account in `sel` are never picked for `login`.
  */
-export function withFound(s: AccountSel, d: DetectAll, taken: (repo: string) => boolean): AccountSel {
+export function withFound(s: AccountSel, d: DetectAll, login: string, sel: Record<string, AccountSel>): AccountSel {
+  const taken = (repo: string) => !!takenBy(repo, login, sel)
   const every = d.owners.flatMap((o) => o.repos.map((x) => x.repo)).filter((r) => !taken(r))
-  const everyBoard = d.owners.flatMap((o) => o.projects)
+  const everyBoard = d.owners.flatMap((o) => o.projects).filter((p) => !boardTakenBy(projectKey(p), login, sel))
   const fresh = (p: ProjectConfig): ProjectConfig => {
     const had = s.boards[projectKey(p)]
     return had ? { ...p, statuses: had.statuses } : p
