@@ -66,6 +66,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   workspaceRepos: invoke(CH.workspaceRepos),
   startClaude: invoke(CH.startClaude),
   resumeSession: invoke(CH.resumeSession),
+  accountFor: invoke(CH.accountFor),
   resumeStopped: invoke(CH.resumeStopped),
   tokensByDay: invoke(CH.tokensByDay),
   dismissStopped: invoke(CH.dismissStopped),

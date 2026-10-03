@@ -74,8 +74,9 @@ const api: DeckApi = {
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),
   workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
   startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
-  resumeSession: (id, name, cwd) =>
-    ipcRenderer.invoke(CH.resumeSession, id, name, cwd),
+  resumeSession: (id, name, cwd, account) =>
+    ipcRenderer.invoke(CH.resumeSession, id, name, cwd, account),
+  accountFor: (cwd) => ipcRenderer.invoke(CH.accountFor, cwd),
   resumeStopped: () => ipcRenderer.invoke(CH.resumeStopped),
   tokensByDay: (ids) => ipcRenderer.invoke(CH.tokensByDay, ids),
   dismissStopped: () => ipcRenderer.invoke(CH.dismissStopped),

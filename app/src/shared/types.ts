@@ -82,6 +82,8 @@ export interface SpawnTarget {
   cwd?: string;
   prompt?: string;
   resume?: string;
+  /** The GitHub account the session works as (two or more connected). */
+  account?: string;
 }
 
 export interface Proposal {

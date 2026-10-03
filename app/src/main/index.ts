@@ -63,7 +63,15 @@ import {
   migrateLegacyConfig,
 } from "./accountEnv";
 import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
-import { noreplyEmail, parseGhUser } from "@shared/accounts";
+import {
+  defaultAccount,
+  isMulti,
+  noreplyEmail,
+  parseGhUser,
+  repoFromRemote,
+  sessionAccount,
+} from "@shared/accounts";
+import { SessionAccounts, sessionSettings } from "./sessionAccounts";
 import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -196,6 +204,62 @@ const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
 // Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
 const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
+// The account each session was started as (resume, Details, PR watch).
+const sessionAccounts = new SessionAccounts(
+  join(paths.home, "session-accounts.json"),
+);
+/** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
+const origins = new Map<string, string | null>();
+const originLookups = new Map<string, Promise<string | null>>();
+function originNow(cwd: string): Promise<string | null> {
+  let p = originLookups.get(cwd);
+  if (!p) {
+    p = run("git", ["remote", "get-url", "origin"], {
+      cwd,
+      timeoutMs: 5_000,
+    }).then((r) => {
+      const repo = r.code === 0 ? repoFromRemote(r.stdout) : null;
+      origins.set(cwd, repo);
+      return repo;
+    });
+    originLookups.set(cwd, p);
+  }
+  return p;
+}
+/** The same for the state build, which can't wait: the answer so far, the state rebuilt once it comes. */
+function originOf(cwd: string): string | null {
+  if (!originLookups.has(cwd)) void originNow(cwd).then(() => sources.changed());
+  return origins.get(cwd) ?? null;
+}
+/** A session's account: recorded at start, its spawn proposal's, its folder's repo, the primary. */
+function accountOfSession(
+  s: { sessionId: string; key: string; name: string },
+  origin: string | null | undefined,
+): string | null {
+  return sessionAccount(
+    {
+      recorded: sessionAccounts.get(s),
+      spawned:
+        latest?.proposals.find(
+          (p) => p.target.spawn?.name === s.name && p.target.spawn.account,
+        )?.target.spawn?.account ?? null,
+      origin,
+    },
+    getConfig(),
+  );
+}
+/** `--settings` for a session as `account` (or `fallback()`'s); nothing with one account. */
+function settingsFor(
+  account: string | null | undefined,
+  fallback: () => Promise<string | null>,
+): ReturnType<typeof sessionSettings> {
+  return sessionSettings(
+    isMulti(getConfig()),
+    (l) => accountEnv.settingsArgs(l),
+    account,
+    fallback,
+  );
+}
 const ptys = new PtyManager(
   env,
   (channel, ...args) => emit(channel, ...args),
@@ -346,6 +410,7 @@ const sources = new Sources(
     latest = state;
     // Accounts changed (Setup saved, config edited): new tokens and settings files.
     if (accountsKeyOf(state.config) !== accountsKey) void refreshAccounts();
+    sessionAccounts.claim(state.sessions);
     // Each session's own workflow: copied the first time it shows up.
     if (process.platform !== "win32")
       try {
@@ -424,6 +489,9 @@ const sources = new Sources(
   github,
   gh,
   () => readGhCacheStatus(),
+);
+sources.setSessionAccount((s) =>
+  accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
 );
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
@@ -1003,6 +1071,7 @@ async function resumeBg(
   id: string,
   name: string,
   cwd: string | null,
+  account: string | null = null,
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
@@ -1010,10 +1079,24 @@ async function resumeBg(
   const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name)
     ? ["-n", name]
     : [];
-  const r = await run(claudeBin, ["--bg", "--resume", id, ...named], {
-    cwd: cwd && existsSync(cwd) ? cwd : homedir(),
-    timeoutMs: 60_000,
-  });
+  const dir = cwd && existsSync(cwd) ? cwd : homedir();
+  // The account it started as (resume always passes --settings again: unverified whether it keeps it).
+  const as = await settingsFor(account, async () =>
+    accountOfSession(
+      { sessionId: id, key: id.slice(0, 8), name },
+      await originNow(dir),
+    ),
+  );
+  if (!as.ok) return { ok: false, message: as.message };
+  const r = await run(
+    claudeBin,
+    ["--bg", ...as.args, "--resume", id, ...named],
+    { cwd: dir, timeoutMs: 60_000 },
+  );
+  if (r.code === 0 && as.account) {
+    sessionAccounts.set([id], as.account);
+    sessionAccounts.expect(name, as.account);
+  }
   return r.code === 0
     ? { ok: true, message: name }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
@@ -1377,11 +1460,20 @@ async function startHere(o: {
       };
   }
   const cwd = o.cwd && existsSync(o.cwd) ? o.cwd : homedir();
+  const as = await settingsFor(null, async () =>
+    accountOfSession(
+      { sessionId: o.sessionId, key: o.sessionId.slice(0, 8), name: o.name },
+      await originNow(cwd),
+    ),
+  );
+  if (!as.ok) return { ok: false, message: as.message };
   const r = await run(
     claudeBin,
-    ["--bg", "--resume", o.sessionId, "-n", o.name],
+    ["--bg", ...as.args, "--resume", o.sessionId, "-n", o.name],
     { cwd, timeoutMs: 60_000 },
   );
+  if (r.code === 0 && as.account)
+    sessionAccounts.set([o.sessionId], as.account);
   return r.code === 0
     ? { ok: true, message: r.stdout.trim().split("\n")[0] ?? "started" }
     : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
@@ -1435,7 +1527,11 @@ async function startMaster(): Promise<CliResult> {
   if (Date.now() < masterStartingUntil)
     return { ok: false, message: "master-agent is already starting" };
   masterStartingUntil = Date.now() + 90_000;
-  const r = await run(claudeBin, ["--bg", "-n", MASTER_NAME, "/master"], {
+  // The primary account; master starts even when it needs to log in again (its sweeps read each
+  // account with that account's own token, so its own env matters little).
+  const as = isMulti(getConfig()) ? accountEnv.settingsArgs(null) : null;
+  const asArgs = as?.ok ? as.args : [];
+  const r = await run(claudeBin, ["--bg", ...asArgs, "-n", MASTER_NAME, "/master"], {
     cwd: paths.masterWorkspace,
     timeoutMs: 60_000,
   });
@@ -1756,6 +1852,7 @@ function registerIpc(): void {
       model?: unknown;
       workflow?: unknown;
       mode?: unknown;
+      account?: unknown;
     };
     const mode =
       typeof o.mode === "string" &&
@@ -1790,10 +1887,19 @@ function registerIpc(): void {
       o.workflow !== DEFAULT_TEMPLATE
     )
       workflows().setPending(name, o.workflow);
+    const as = await settingsFor(
+      typeof o.account === "string" ? o.account : null,
+      () =>
+        originNow(cwd).then((origin) =>
+          defaultAccount({ origin }, getConfig()),
+        ),
+    );
+    if (!as.ok) return { ok: false, message: as.message };
     const r = await run(
       claudeBin,
       [
         "--bg",
+        ...as.args,
         "-n",
         name,
         ...(model ? ["--model", model] : []),
@@ -1810,13 +1916,25 @@ function registerIpc(): void {
         ok: false,
         message: (r.stderr || r.stdout).trim().slice(0, 300),
       };
+    if (as.account) sessionAccounts.expect(name, as.account);
     void sources.refreshAgents();
     return { ok: true, message: name };
   });
   reg.handle(
     CH.resumeSession,
-    (_e, id: string, name: string, cwd: string | null) =>
-      resumeBg(id, name, cwd),
+    (_e, id: string, name: string, cwd: string | null, account?: unknown) =>
+      resumeBg(
+        id,
+        name,
+        cwd,
+        typeof account === "string" && account ? account : null,
+      ),
+  );
+  // A new session's account for a folder (its origin remote's account, else the primary).
+  reg.handle(CH.accountFor, async (_e, cwd: unknown) =>
+    typeof cwd === "string" && cwd && isMulti(getConfig())
+      ? defaultAccount({ origin: await originNow(cwd) }, getConfig())
+      : null,
   );
   reg.handle(CH.resumeStopped, () => sources.resumeStopped());
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>

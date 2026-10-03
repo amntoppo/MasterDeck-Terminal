@@ -53,6 +53,16 @@ describe('parseSnapshot / parseLedger', () => {
     const assign = l.proposals.find((p) => p.kind === 'ASSIGN')!
     expect(assign.target.spawn?.name).toBeTruthy()
   })
+  it("keeps a spawn's account; a malformed login is dropped", () => {
+    const l = parseLedger({
+      proposals: [
+        { id: 1, target: { spawn: { name: 'fix-12', account: 'bob-work' } } },
+        { id: 2, target: { spawn: { name: 'fix-13', account: 'bad login!' } } },
+        { id: 3, target: { spawn: { name: 'fix-14' } } },
+      ],
+    })
+    expect(l.proposals.map((p) => p.target.spawn?.account)).toEqual(['bob-work', undefined, undefined])
+  })
   it('survives garbage', () => {
     expect(parseSnapshot(null).issues).toEqual([])
     expect(parseLedger('nope').proposals).toEqual([])

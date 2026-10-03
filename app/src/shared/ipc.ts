@@ -184,6 +184,7 @@ export const CH = {
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
+  accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
   dismissStopped: "session:dismissStopped",
@@ -353,12 +354,17 @@ export interface DeckApi {
     model?: string;
     workflow?: string;
     mode?: string;
+    /** The GitHub account it works as (two or more connected); omitted: the folder's account. */
+    account?: string;
   }): Promise<CliResult>;
   resumeSession(
     sessionId: string,
     name: string,
     cwd: string | null,
+    account?: string,
   ): Promise<CliResult>;
+  /** A new session's default GitHub account for this folder; null with one account. */
+  accountFor(cwd: string): Promise<string | null>;
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */

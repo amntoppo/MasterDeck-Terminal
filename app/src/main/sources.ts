@@ -1,5 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
-import type { GhAccountStatus } from "@shared/accounts";
+import { isMulti, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
   newScheduleScan,
@@ -307,6 +307,7 @@ export class Sources {
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
+  private accountOf: ((s: Session) => string | null) | null = null;
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -572,6 +573,20 @@ export class Sources {
     ) => Promise<CliResult>,
   ): void {
     this.linker = fn;
+  }
+
+  /** Which GitHub account a session works as (main's SessionAccounts + origin); used with two or more accounts. */
+  setSessionAccount(f: (s: Session) => string | null): void {
+    this.accountOf = f;
+  }
+
+  private withAccounts(ss: Session[]): Session[] {
+    const f = this.accountOf;
+    if (!f || !isMulti(this.config)) return ss;
+    return ss.map((s) => {
+      const a = f(s);
+      return a ? { ...s, account: a } : s;
+    });
   }
 
   private get historyPath(): string {
@@ -1907,7 +1922,7 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now();
-    const sessions = this.withHookState(
+    const sessions = this.withAccounts(this.withHookState(
       this.withActivity(
         applyFreshness(
           attachIssues(
@@ -1928,7 +1943,7 @@ export class Sources {
         ),
         now,
       ),
-    );
+    ));
     const { asks, answered } = this.collectAsks(sessions);
     const menus = Object.fromEntries(
       sessions

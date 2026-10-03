@@ -107,6 +107,16 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   that), re-linked after resumes (`session-history.json`, `shared/carry.ts`).
 - Restart recovery: `running-sessions.json` → `AppState.stoppedByRestart` → `resumeStopped`
   (`shared/restore.ts`).
+- GitHub account (two or more connected): every `claude --bg` MasterDeck runs (`startClaude`,
+  `resumeBg`, `startHere`, `startMaster`) gets `--settings <accounts/<login>.settings.json>` from
+  `AccountEnv.settingsArgs` (via `sessionSettings` in `main/sessionAccounts.ts`); an unhealthy or
+  unknown account, or no file yet, is refused, never started as gh's active one. Only master-agent
+  starts without it when the primary needs to log in again. The account is recorded in
+  `session-accounts.json` (`SessionAccounts`, by session id and key; by name until a new session
+  shows up, 10 min) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
+  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume always
+  passes `--settings` again. `accountFor` (IPC) gives a new session's default for a folder. One
+  account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)
 
@@ -436,6 +446,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |
 | `account.json` | signed-in identity `{email, provider, deviceId}` |
+| `session-accounts.json` | GitHub account per session id / key (two or more accounts) |
 | `accounts/` | `<login>.settings.json` per connected account (two or more): `{"env": {GH_TOKEN, GIT_* …}}` for `claude --settings`; mode 600, folder 700 |
 | `remote-token` | device token, Keychain-encrypted (`safeStorage`), mode 600 |
 | `remote-device-id` | random UUID sent in `hello` |
