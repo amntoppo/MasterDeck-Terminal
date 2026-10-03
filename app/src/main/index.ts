@@ -286,9 +286,9 @@ function refreshHooks(): void {
 }
 /** Monitor calls already answered (the hook removes its file once it read the answer). */
 const answeredWatches = new Map<string, number>();
-/** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 /** settings.json's mtime when queue-off was last worked out. */
 let settingsSeen = 0;
+/** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
   deckHooks.pumpQueue();
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.

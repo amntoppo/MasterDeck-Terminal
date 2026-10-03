@@ -313,17 +313,22 @@ export class DeckHooks {
 
   /**
    * A session's turn ended with prompts queued: hand each waiting hook the next one (once). The
-   * hook must still be there (its pid is in the id) when we claim and again before the item goes:
-   * peek, answer, then take it off, so a crash or a hook gone meanwhile repeats a prompt rather
-   * than losing it.
+   * hook must be there (its pid is in the id) when we claim; the item goes once the hook read the
+   * answer or still runs to read it. Peek, answer, then take it off: a crash, or a hook that died
+   * before reading, repeats a prompt rather than losing it.
    */
-  pumpQueue(now = Date.now()): void {
+  pumpQueue(now = Date.now(), isAlive = alive): void {
     for (const r of this.queueRequests(now)) {
       const pid = Number(r.id.split('-')[1])
-      if (!alive(pid) || !this.claimQueue(r.id)) continue
+      if (!isAlive(pid) || !this.claimQueue(r.id)) continue
       const items = readQueue(r.sid, this.queues)
       this.answerQueue(r.id, items.length ? queueAnswer(items[0], items.length - 1) : {})
-      if (items.length && alive(pid)) shiftQueue(r.sid, this.queues)
+      if (!items.length) continue
+      // Alive: it will read the answer. Gone: the hook removes its answer right after reading it,
+      // so an answer still there was never read. Checked in this order, the file can't change after.
+      const unread = join(this.dir, 'queue-answers', `${r.id}.json`)
+      if (isAlive(pid) || !existsSync(unread)) shiftQueue(r.sid, this.queues)
+      else rm(unread)
     }
     // Answers nobody read (the hook was killed after its claim).
     const dir = join(this.dir, 'queue-answers')

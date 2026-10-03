@@ -198,6 +198,29 @@ describe('pumpQueue (MasterDeck answers a Stop)', () => {
     expect(existsSync(answer(dead))).toBe(false)
     expect(existsSync(answer(old))).toBe(false)
   })
+  it('a hook that reads its answer and exits at once still gets the item exactly once', () => {
+    const { d, queues, request, answer } = setup()
+    const id = request(process.pid)
+    let calls = 0
+    // Alive at the claim; by the shift check it has read (removed) its answer and exited.
+    const isAlive = () => {
+      if (calls++ === 0) return true
+      rmSync(answer(id), { force: true })
+      return false
+    }
+    d.pumpQueue(Date.now(), isAlive)
+    expect(readQueue(SID, queues)).toEqual(['b'])
+    d.pumpQueue()
+    expect(readQueue(SID, queues)).toEqual(['b'])
+  })
+  it('a hook that died before reading its answer: the item stays, the answer goes', () => {
+    const { d, queues, request, answer } = setup()
+    const id = request(process.pid)
+    let calls = 0
+    d.pumpQueue(Date.now(), () => calls++ === 0)
+    expect(readQueue(SID, queues)).toEqual(['a', 'b'])
+    expect(existsSync(answer(id))).toBe(false)
+  })
   it('cannot claim a request the hook took back', () => {
     const { d, request } = setup()
     const id = request(process.pid)

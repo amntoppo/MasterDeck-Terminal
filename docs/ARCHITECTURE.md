@@ -189,8 +189,9 @@ app's env moves it; the dir is baked into `hook.sh`, so a session's own env neve
 or the hook (not running) hands over the next prompt, claimed by rename so it runs once: the hook
 leaves `queue-requests/<now>-<pid>-<rand>.json` and waits until 4 s after its start;
 `DeckHooks.pumpQueue` (every second from `pumpWatches`) takes only requests under 8 s old whose
-hook pid is alive, claims, answers with `queueAnswer`, and shifts the item only if the hook is still
-alive (a hook gone or a crash repeats a prompt rather than losing it). Not claimed in time, the
+hook pid is alive, claims, answers with `queueAnswer`, and shifts the item when the hook still runs
+or already read the answer (it removes the file right after reading); a hook that died before
+reading leaves the item queued and its answer removed. Not claimed in time, the
 hook renames the request back itself and drains one item; claimed, it waits until 7 s after its
 start (clock deadlines, under the 10 s hook timeout). Unread answers are swept after 60 s.
 `pumpWatches` also re-checks queue-off whenever `~/.claude/settings.json` changes.
