@@ -360,6 +360,7 @@ const linkedSteps = new LinkedSteps({
 // MasterDeck's PR watch: each open PR a session made (Settings → Sessions → Watch new PRs).
 const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
   gh,
+  ghFor: (account) => forAccount(account ?? null).gh,
   paused: (o) => sources.isGithubPaused(o),
   send: (s, text) =>
     sender.send(

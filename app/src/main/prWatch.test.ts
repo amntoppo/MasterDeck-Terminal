@@ -34,9 +34,9 @@ const withThreads = (...ts: object[]) => ({ ...lightPr, reviewThreads: { nodes: 
 const withThread = (body: string) => withThreads(thread(1, body))
 
 /** A watch past its first run (pr-watch.json there); `firstRun` starts with none. */
-function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json'), firstRun = false) {
+function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json'), firstRun = false, extra: Partial<PrWatchDeps> = {}) {
   const sent: string[] = []
-  const deps: PrWatchDeps = { gh, paused: () => false, send: async (_s, t): Promise<CliResult> => (sent.push(t), { ok: true, message: 'sent' }), onChange: () => {} }
+  const deps: PrWatchDeps = { gh, paused: () => false, send: async (_s, t): Promise<CliResult> => (sent.push(t), { ok: true, message: 'sent' }), onChange: () => {}, ...extra }
   if (!firstRun && !existsSync(file)) writeFileSync(file, '{}')
   const w = new PrWatch(file, deps)
   w.load(NOW)
@@ -45,6 +45,21 @@ function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-
 const one = (createdAt: number, n = 1) => ({ sessions: [sess()], sessionPrs: { [SID]: [url(n)] }, prLive: { [url(n)]: live(createdAt) } })
 
 describe('PrWatch', () => {
+  it("reads each account's PRs with its own runner, so each one's viewer is its own author", async () => {
+    const SID2 = '66666666-6666-4666-8666-666666666666'
+    const mine = (who: string) => fakeGh((_i, heavy) => (heavy ? { ...withThreads(), author: { login: who } } : { ...lightPr, author: { login: who } }), () => who)
+    const a = mine('me')
+    const b = mine('bob-work')
+    const { w } = make(a.gh, undefined, false, { ghFor: (acct) => (acct === 'bob-work' ? b.gh : a.gh) })
+    const bob: Session = { ...sess(), key: 'k2', bgId: 'k2', sessionId: SID2, account: 'bob-work' }
+    const sessions = [sess(), bob]
+    w.sync({ sessions, sessionPrs: { [SID]: [url(1)], [SID2]: [url(2)] }, prLive: { [url(1)]: live(NOW - 60_000), [url(2)]: live(NOW - 60_000) } }, () => true, NOW)
+    await w.poll(NOW)
+    expect(a.calls.map((c) => [c.heavy, c.n])).toEqual([[false, 1], [true, 1]])
+    expect(b.calls.map((c) => [c.heavy, c.n])).toEqual([[false, 1], [true, 1]])
+    // Read with the wrong account, bob's PR would have another author than the viewer and its watch would end.
+    expect(w.info(sessions).map((i) => i.id).sort()).toEqual([`pr:${url(1)}`, `pr:${url(2)}`])
+  })
   it('watches a new PR of a session, tells it about a new thread once its turn is over, and not again', async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? withThread('rename x') : lightPr))
     const { w, sent } = make(gh)
