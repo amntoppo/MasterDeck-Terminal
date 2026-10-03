@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
   accountChoices, accountEnvBlock, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti,
-  matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, sessionAccount,
+  matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount,
 } from './accounts'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] }
@@ -166,5 +166,14 @@ describe('resumeAccount', () => {
     expect(resumeAccount('alice', null, false, two)).toBe('alice')
     expect(resumeAccount(undefined, null, false, two)).toBeUndefined()
     expect(resumeAccount('alice', 'alice', true, one)).toBeUndefined()
+  })
+})
+
+describe('repoOfArgs', () => {
+  it('finds the repo a gh call is about', () => {
+    expect(repoOfArgs(['pr', 'list', '-R', 'globex/app', '--json', 'url'])).toBe('globex/app')
+    expect(repoOfArgs(['issue', 'view', '3', '--repo', 'acme/api'])).toBe('acme/api')
+    expect(repoOfArgs(['pr', 'view', 'https://github.com/globex/app/pull/2', '--json', 'state'])).toBe('globex/app')
+    expect(repoOfArgs(['api', 'user'])).toBeNull()
   })
 })

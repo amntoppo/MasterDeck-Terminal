@@ -91,6 +91,21 @@ export function prRepo(url: string): string | null {
   return id ? `${id.owner}/${id.repo}` : null
 }
 
+const REPO_ARG = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+
+/** The repo a gh call is about: its `-R`/`--repo` value, else a PR URL among its arguments. */
+export function repoOfArgs(args: string[]): string | null {
+  const i = args.findIndex((a) => a === '-R' || a === '--repo')
+  if (i >= 0 && REPO_ARG.test(args[i + 1] ?? '')) return args[i + 1]
+  const eq = args.find((a) => a.startsWith('--repo='))?.slice(7)
+  if (eq && REPO_ARG.test(eq)) return eq
+  for (const a of args) {
+    const r = prRepo(a)
+    if (r) return r
+  }
+  return null
+}
+
 /** PR URLs by their repo's account ('' with no accounts): one batched call per account. */
 export function groupByAccount(urls: string[], c: AppConfig): Map<string, string[]> {
   const out = new Map<string, string[]>()

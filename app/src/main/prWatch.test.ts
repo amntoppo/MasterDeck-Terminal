@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CliResult, PrLive, Session } from '@shared/types'
 import type { GhRunner } from './ghc'
-import { PrWatch, prStates, type PrWatchDeps } from './prWatch'
+import { parseConfig } from '@shared/appConfig'
+import { PrWatch, prStates, prStatesFor, type PrWatchDeps } from './prWatch'
 
 const SID = '55555555-5555-4555-8555-555555555555'
 const url = (n: number) => `https://github.com/acme/web/pull/${n}`
@@ -398,5 +399,26 @@ describe('prStates', () => {
     expect(calls.map((c) => [c.heavy, c.n, c.ttl])).toEqual([[false, 50, 300], [false, 1, 300]])
     expect(out[url(1)]).toEqual({ state: 'OPEN', isDraft: true })
     expect(Object.keys(out)).toHaveLength(51)
+  })
+})
+
+describe('prStatesFor', () => {
+  it("asks each account's runner about its own PRs only", async () => {
+    const cfg = parseConfig({ accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] },
+    ] })
+    const asked: Record<string, number> = {}
+    const ghFor = (login: string): GhRunner => async (args) => {
+      const q = args.find((a) => a.startsWith('query='))!.slice(6)
+      const n = (q.match(/ p\d+: /g) ?? []).length
+      asked[login] = (asked[login] ?? 0) + n
+      const data: Record<string, unknown> = {}
+      for (let i = 0; i < n; i++) data[`p${i}`] = { pullRequest: { ...lightPr, author: { login } } }
+      return { code: 0, stdout: JSON.stringify({ data }), stderr: '' }
+    }
+    const got = await prStatesFor(ghFor, cfg, [url(1), 'https://github.com/globex/app/pull/2', url(3)])
+    expect(asked).toEqual({ alice: 2, 'bob-work': 1 })
+    expect(Object.keys(got).sort()).toEqual([url(1), url(3), 'https://github.com/globex/app/pull/2'].sort())
   })
 })

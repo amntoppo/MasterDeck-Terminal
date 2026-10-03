@@ -884,6 +884,17 @@ export class Sources {
     this.emit();
   }
 
+  private githubFor: ((login: string) => GitHub) | null = null;
+  private ghForDir: ((dir: string) => GhRunner) | null = null;
+  /** Per-account clients (two or more accounts): team PRs per account, the current branch's PR as its folder's account. */
+  setAccountRunners(r: {
+    github: (login: string) => GitHub;
+    ghForDir: (dir: string) => GhRunner;
+  }): void {
+    this.githubFor = r.github;
+    this.ghForDir = r.ghForDir;
+  }
+
   private started = false;
 
   start(): void {
@@ -1525,7 +1536,7 @@ export class Sources {
       resolve(dir) === resolve(this.paths.masterWorkspace)
     )
       return;
-    const r = await this.gh(["pr", "view", ...PR_VIEW_ARGS], {
+    const r = await (this.ghForDir?.(dir) ?? this.gh)(["pr", "view", ...PR_VIEW_ARGS], {
       cwd: dir,
       timeoutMs: 20_000,
       ttl: 45,

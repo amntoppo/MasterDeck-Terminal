@@ -2,7 +2,7 @@ import { parseIdentity, remoteUrl } from "@shared/account";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
-import { PrWatch, prStates } from "./prWatch";
+import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
@@ -68,6 +68,7 @@ import {
   isMulti,
   noreplyEmail,
   parseGhUser,
+  prRepo,
   repoFromRemote,
   sessionAccount,
 } from "@shared/accounts";
@@ -110,6 +111,7 @@ import {
 } from "./queue";
 import { makeGhRunner, readGhCacheStatus } from "./ghc";
 import { GitHub } from "./github";
+import { accountClients } from "./accountClients";
 import { Sender } from "./send";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
@@ -307,6 +309,14 @@ function notify(events: NotifyEvent[]): void {
 const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
+// Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
+const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+  config: getConfig,
+  base: { gh, github, ops: boardOps },
+  run,
+  runEnv: (l) => accountEnv.runEnv(l),
+  ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+});
 const sender = new Sender(
   ptys,
   cli,
@@ -314,14 +324,16 @@ const sender = new Sender(
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
 );
-const ops = new Ops(run, paths, () => claudeBin, gh);
+const ops = new Ops(run, paths, () => claudeBin, ghRouted);
 // Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
 const boardFlow = new BoardFlow({
-  ops: boardOps,
+  ops: boardOpsByRepo,
   links: linkStore,
   // One batched light read per tick (≤ 50 PRs a query, ghc-cached); none while GitHub is paused.
   prStates: async (urls) =>
-    sources.isGithubPaused() ? {} : prStates(gh, urls),
+    sources.isGithubPaused()
+      ? {}
+      : prStatesFor((l) => forAccount(l || null).gh, getConfig(), urls),
   link: linkSession,
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
@@ -518,9 +530,17 @@ const sources = new Sources(
   },
   () => claudeBin,
   github,
-  gh,
+  ghRouted,
   () => readGhCacheStatus(),
 );
+sources.setAccountRunners({
+  github: (login) => forAccount(login).github,
+  // The current branch's PR (gh pr view in the folder): the folder's `origin` account, looked up first.
+  ghForDir: (dir) =>
+    isMulti(getConfig())
+      ? async (args, opts) => forRepo(await originNow(dir)).gh(args, opts)
+      : gh,
+});
 sources.setSessionAccount((s) =>
   accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
 );
@@ -1044,7 +1064,7 @@ async function linkSession(
     return { ok: false, message: "bad session id" };
   const r = await linkTicket(
     {
-      ops: boardOps,
+      ops: forRepo(t.repo).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
       branch: (dir) => branchKey(run, dir),
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
@@ -1167,7 +1187,7 @@ async function pumpTicketRequests(): Promise<void> {
           if (file === null) answer = { ok: false, error: "create: body file outside the ticket folder" };
           else {
             const body = file ? readFileSync(file, "utf8").slice(0, 60_000) : "";
-            answer = await boardOps.create({ ...p, body });
+            answer = await forRepo(p.repo || null).ops.create({ ...p, body });
           }
         }
       } catch (e) {
@@ -1652,7 +1672,7 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
-    const r = await boardOps.setStatus(t, status);
+    const r = await forRepo(t.repo).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -1726,7 +1746,7 @@ function registerIpc(): void {
         : [];
     const title = str(o.title, 256).trim();
     if (!title) return { ok: false, message: "give it a title" };
-    const res = await boardOps.create({
+    const res = await forRepo(str(o.repo, 140) || null).ops.create({
       title,
       body: str(o.body, 60_000),
       repo: str(o.repo, 140) || undefined,
@@ -1831,7 +1851,7 @@ function registerIpc(): void {
     const hit = repoMetaCache.get(repo);
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.meta;
     const lines = async (args: string[]) => {
-      const r = await run("gh", args, { timeoutMs: 30_000 });
+      const r = await ghDirect(repo, args, { timeoutMs: 30_000 });
       return r.code === 0
         ? r.stdout
             .split("\n")
@@ -1995,7 +2015,9 @@ function registerIpc(): void {
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
-  reg.handle(CH.prSummary, (_e, url: string) => github.prSummary(url));
+  reg.handle(CH.prSummary, (_e, url: string) =>
+    forRepo(prRepo(String(url))).github.prSummary(url),
+  );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
     typeof dir === "string" && dir && dir === getConfig().workspace
@@ -2008,14 +2030,16 @@ function registerIpc(): void {
   });
   reg.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
-    return t ? github.issueBody(t) : { ok: false, message: "bad ticket" };
+    return t
+      ? forRepo(t.repo).github.issueBody(t)
+      : { ok: false, message: "bad ticket" };
   });
   reg.handle(
     CH.assignIssue,
     async (_e, issue: unknown, login: string, current: string[]) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      const r = await github.assign(t, login, current);
+      const r = await forRepo(t.repo).github.assign(t, login, current);
       if (r.ok) sources.noteAssigned(t, login);
       return r;
     },
@@ -2162,8 +2186,8 @@ function registerIpc(): void {
     const summary = summaries.get(s.sessionId);
     if (!summary) return { ok: false, message: "no summary yet" };
     const body = `### Session summary: ${s.name}\n\n${summary.text}\n\n<sub>Made by MasterDeck from the session's transcript.</sub>\n`;
-    const r = await run(
-      "gh",
+    const r = await ghDirect(
+      s.issueRepo ?? null,
       [
         "issue",
         "comment",

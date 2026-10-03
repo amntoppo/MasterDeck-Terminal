@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MASTER_NAME } from '@shared/derive'
+import { groupByAccount } from '@shared/accounts'
+import type { AppConfig } from '@shared/appConfig'
 import { parsePrUrl } from '@shared/prSummary'
 import {
   BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
@@ -346,5 +348,12 @@ export async function prStates(gh: GhRunner, urls: string[]): Promise<Record<str
     if (!ghHasData(r)) continue
     parseLight(r.stdout, group.length).forEach((l, i) => l && (out[group[i].u] = { state: l.state, isDraft: l.isDraft }))
   }
+  return out
+}
+
+/** prStates per account: one batched light read per account, with that account's runner. */
+export async function prStatesFor(ghFor: (login: string) => GhRunner, cfg: AppConfig, urls: string[]): Promise<Record<string, { state: string; isDraft: boolean }>> {
+  const out: Record<string, { state: string; isDraft: boolean }> = {}
+  for (const [login, us] of groupByAccount(urls, cfg)) Object.assign(out, await prStates(ghFor(login), us))
   return out
 }
