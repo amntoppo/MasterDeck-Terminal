@@ -207,11 +207,30 @@ def _validate(cfg: dict) -> "str | None":
     ps = cfg.get("projects", [])
     if not isinstance(ps, list) or not all(isinstance(p, dict) and isinstance(p.get("number"), int) and _LOGIN.fullmatch(str(p.get("owner") or "")) for p in ps):
         return "projects must be a list of {owner, number, ...}"
+    accs = cfg.get("accounts", [])
+    if not isinstance(accs, list) or not all(isinstance(a, dict) and _LOGIN.fullmatch(str(a.get("login") or "")) for a in accs):
+        return "accounts must be a list of {login, ...}"
+    for a in accs:
+        if not isinstance(a.get("repos", []), list) or not all(isinstance(r, str) and re.fullmatch(config.REPO_RE, r) for r in a.get("repos", [])):
+            return f"accounts: {a['login']}'s repos must be a list of owner/name"
+        if not isinstance(a.get("email", ""), str) or not isinstance(a.get("name", ""), str):
+            return f"accounts: {a['login']}'s name and email must be text"
     return None
 
 
 def _mirror(cfg: dict) -> dict:
-    """The first repo and project also go in the single-repo fields that older readers use."""
+    """The primary account's repos and boards also go in the top-level fields (older readers, tt.sh),
+    with exactly one account marked primary; then the first repo and project also go in the
+    single-repo fields."""
+    accs = config.accounts(cfg) if cfg.get("accounts") else []
+    if accs:
+        p = accs[0]
+        cfg["accounts"] = [{**{k: v for k, v in a.items() if k != "primary"}, **({"primary": True} if a.get("login") == p["login"] else {})}
+                           for a in cfg["accounts"] if isinstance(a, dict)]
+        cfg.update(owner=p["owner"], ownerType=p["ownerType"], issueRepo=p["issueRepo"], repos=p["repos"],
+                   allRepos=p["allRepos"], projects=p["projects"], allProjects=p["allProjects"])
+        if not p["projects"]:
+            cfg["project"] = 0
     repos = cfg.get("repos") or []
     if repos and not (cfg.get("owner") and cfg.get("issueRepo")):
         cfg["owner"], cfg["issueRepo"] = repos[0].split("/", 1)
@@ -252,6 +271,7 @@ def shell(cfg: dict, project: "str | None" = None) -> str:
     """Assignments and two functions (option_id, rank) for tt.sh to eval. `project` (owner/number)
     gives that board's status field, options and meanings; otherwise the primary board's.
     REPOS_JSON and PROJECTS_JSON list every selected repo and board (key, owner, number, id)."""
+    cfg = {k: v for k, v in cfg.items() if k != "accounts"}  # tt.sh stays on the primary account
     q = shlex.quote
     boards = config.projects(cfg)
     if project:

@@ -245,6 +245,8 @@ here (needs `hooks.queue`).
 
 ### master-agent integration
 
+`config.accounts()` reads the connected accounts (primary first; a repo belongs to the first account listing it) and `config.is_multi()` is the one multi-account check (two or more); `repos()`/`projects()` are every account's; `master config save` mirrors the primary account into the top-level fields and `config shell` (tt.sh) reads only those.
+
 `main/masterCli.ts` runs `python -m master.cli` (the `master` skill's lib, the installed copy in
 `~/.claude/skills/master/lib` wins over the bundled one): ledger approve/reject, `draft-assign`,
 `spawn`, snapshot, board, `config detect`. `master snapshot` reads MasterDeck's `ticket-links.json`
