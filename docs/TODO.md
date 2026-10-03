@@ -66,6 +66,14 @@ the repo-root [TODO.md](../TODO.md).
   device" and no connected-since (they never send `device`, `connectedAt` unknown) — goes away as
   tabs reload the new web app.
 
+- **P3 · Phone layout follow-ups** (web, ≤760 px). Where: `src/web/web.css` (`.app.phone`),
+  `PrsView`/`BoardView` filters. (a) The PRs and Board filter rows take half the screen; fold them
+  behind a "Filters" button on a phone. (b) The Board is one wide row of columns that scrolls
+  sideways; a one-column-at-a-time picker would read better. (c) Checked only in emulation (the dev
+  preview, Chrome); try a real iPhone/Android for the soft keyboard (`visualViewport`) and safe
+  areas. (d) Dialogs that are fixed-layout grids (Setup, Workflow canvas) were only made to fit, not
+  redesigned.
+
 ## Older (pre-remote)
 
 - **P3 · Board "Everyone" tab**: own issues not shown when selecting yourself as the person
@@ -105,6 +113,7 @@ the repo-root [TODO.md](../TODO.md).
 | What | MasterDeck | Backend |
 |---|---|---|
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
+| Phone layout for the web app (`isWeb() && max-width 760px`: tab bar, one screen at a time, terminal with quick keys, master screen, panel sheet, visual-viewport height) + dev-only preview (`/?preview`, stub deck and fixture state) | 643352a, 96e1606 + docs commit, branch feat/phone-web (not merged) | — |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |

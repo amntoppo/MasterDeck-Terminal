@@ -350,6 +350,23 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   `screenOk`, `shortcutOk`, `actionOk`, `keyPlatform`. `webConfirm.ts` + `WebConfirm.tsx` replace
   native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker.
 - One stylesheet: `styles.css` (the web adds `src/web/web.css`).
+- Phone layout (web only): `web.ts` `isPhone()` / `usePhone()` = `isWeb() && matchMedia(PHONE_QUERY)`
+  (`(max-width: 760px)`), so Electron never gets it. App adds `phone ps-list|main|master` to `.app`
+  and keeps `phoneScreen` (session list, terminal or view, master) and `phonePanel` (Inspector as a
+  sheet); `shown`/`panelShown`/`masterShown` follow those on a phone (one terminal, no split). The
+  Rail becomes `PhoneBar` (Rail.tsx: tabs + More menu); the terminal screen gets a `phone-head` and
+  `QuickKeys` (App.tsx; a key is sent on click, so a swipe along the bar only scrolls it, and
+  pointer/mouse down are prevented so the terminal keeps focus), which press keys through `terminalKey()` (TerminalView.tsx: xterm's
+  `input()`, so predictive echo and `ptyWrite` see them like typing; bytes from `quickKeys.ts`,
+  arrows follow DECCKM). A phone terminal uses 12px (changed and refitted when phone mode comes or goes). The panel sheet
+  closes when the terminal screen is left. `html.phone` is set too while phone mode is on, so dialogs
+  and menus portaled to `<body>` get the phone dialog/menu/input rules. `--vvh`/`--vvt` follow `visualViewport` (soft
+  keyboard). All phone CSS is in `src/web/web.css` under `.app.phone`; when not phone, every shared
+  component renders the same DOM as before.
+- Dev preview (web): `npm run dev:web`, then `/?preview` mounts App on a stub `window.deck` with a
+  fixture AppState and fake terminal output (`src/web/preview/`), `/?preview=gate` the sign-in card.
+  `main.tsx` imports it only under `import.meta.env.DEV`, so `build:web` leaves it out (check:
+  `grep -l "nothing was sent" out/web/assets/*` finds nothing).
 
 ## AppState: fields and producers
 

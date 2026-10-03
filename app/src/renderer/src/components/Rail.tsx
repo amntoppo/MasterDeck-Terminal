@@ -18,6 +18,8 @@ const ICONS: Record<string, string> = {
   standup: 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 8h8M8 12h8M8 16h5',
   skills: 'M12 2l3 6 6 .9-4.5 4.3 1 6.3L12 16.8 6.5 19.5l1-6.3L3 8.9 9 8z',
   palette: 'M11 5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM20 20l-4-4',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  master: 'M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z',
   settings: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
 }
 
@@ -136,6 +138,68 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
         </button>
       ))}
       {screenOk('settings') && viewBtn('settings', 'Settings', '⌘,')}
+    </nav>
+  )
+}
+
+export type PhoneScreen = 'list' | 'main' | 'master'
+
+interface PhoneProps {
+  view: View
+  screen: PhoneScreen
+  /** A view tab (Tasks, Board, PRs, or one from More). */
+  onView: (v: View) => void
+  /** Sessions: the session list. */
+  onSessions: () => void
+  /** Master, when master-agent is on. */
+  onMaster?: () => void
+  onAction: (a: RailAction) => void
+  needs: number
+  prAttention: number
+}
+
+/** The phone's bottom tab bar (web, narrow window): the rail's views as tabs, the rest under More. */
+export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction, needs, prAttention }: PhoneProps) {
+  const [more, setMore] = useState(false)
+  const main = screen === 'main'
+  const tab = (key: string, label: string, icon: string, on: boolean, click: () => void, badge = 0) => (
+    <button key={key} className={`pb ${on ? 'on' : ''}`} aria-label={label} aria-current={on ? 'page' : undefined} onClick={() => (setMore(false), click())}>
+      <RailIcon name={icon} size={20} />
+      {badge > 0 && <span className="rb-badge">{badge}</span>}
+      <span className="pb-l">{label}</span>
+    </button>
+  )
+  const tools = [...TOOLS, ['settings', 'Settings'] as [View, string]].filter(([v]) => screenOk(v))
+  const moreOn = main && tools.some(([v]) => v === view)
+  return (
+    <nav className="rail phone-bar" aria-label="Views">
+      {tab('sessions', 'Sessions', 'terminals', screen === 'list' || (main && view === 'terminals'), onSessions, needs)}
+      {(['tasks', 'board', 'prs'] as View[]).filter(screenOk).map((v) =>
+        tab(v, v === 'prs' ? 'PRs' : v[0].toUpperCase() + v.slice(1), v, main && view === v, () => onView(v), v === 'prs' ? prAttention : 0),
+      )}
+      {onMaster && tab('master', 'Master', 'master', screen === 'master', onMaster)}
+      <button className={`pb ${moreOn || more ? 'on' : ''}`} aria-label="More" aria-expanded={more} onClick={() => setMore(!more)}>
+        <RailIcon name="more" size={20} />
+        <span className="pb-l">More</span>
+      </button>
+      {more && (
+        <>
+          <div className="phone-more-back" onClick={() => setMore(false)} />
+          <div className="menu phone-more" role="menu">
+            {tools.map(([v, label]) => (
+              <button key={v} role="menuitem" className={main && view === v ? 'on' : ''} onClick={() => (setMore(false), onView(v))}>
+                <RailIcon name={v} /> {label}
+              </button>
+            ))}
+            <hr />
+            {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label]) => (
+              <button key={a} role="menuitem" onClick={() => (setMore(false), onAction(a))}>
+                <RailIcon name={a} /> {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </nav>
   )
 }

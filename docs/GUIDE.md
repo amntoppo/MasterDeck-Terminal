@@ -602,6 +602,25 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
   forgets every approved browser. Three failed connections from one browser within an hour show
   "Possible tampering on the connection to …".
 
+### On a phone
+
+Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); a window up to
+760 px wide gets the phone layout, wider ones the normal one.
+
+- **Tab bar** at the bottom: **Sessions** (Needs you and the session list; badge = what needs
+  you), **Tasks**, **Board**, **PRs** (badge = PRs waiting on you), **Master** (when master-agent is
+  on) and **More** (Costs, Janitor, Workflow, Settings, Broadcast, Standup, Skills, Commands).
+- **A session:** tap it in Sessions. The terminal fills the screen: **‹ Sessions** goes back,
+  **Panel** opens Details / Queue / Summary as a sheet (› closes it). One terminal at a time (no
+  split).
+- **Quick keys** under the terminal (and under master): Esc, Tab, ⇧Tab, ^C, ↑ ↓ ← →, Enter, y, n
+  and /. A tap types the key into the terminal without closing the keyboard;
+  a swipe along the bar scrolls it without typing anything. The page shrinks above the
+  keyboard while it is open.
+- **Sign out** is on the Settings screen (bottom right).
+- Terminal size: as on any browser, the Mac's size wins while the Mac shows that terminal; a
+  terminal the Mac isn't showing takes the phone's width (about 45 columns).
+
 ### Instant typing (web)
 
 The web terminal shows what you type at once, dim, and corrects it when the Mac's real output

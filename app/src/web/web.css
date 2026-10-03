@@ -7,13 +7,104 @@
 .web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 30; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
 .web-signout:hover { color: var(--red); }
 
-/* Narrow windows: one column, stacked (a proper phone layout waits for the phone app). */
-@media (max-width: 720px) {
+/* Narrow windows: the sign-in cards get a gutter (the app itself switches to the phone layout below). */
+@media (max-width: 760px) {
   .web-card { margin: 8vh 16px 0; }
-  .app { display: flex !important; flex-direction: column; height: auto; min-height: 100%; }
-  .app > * { position: relative !important; left: auto !important; right: auto !important; width: auto !important; }
-  .app .rail { flex-direction: row; width: auto; height: auto; padding: 4px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .app .side-resizer, .app .divider { display: none !important; }
-  .app .workspace, .app .master-slot { min-height: 60vh; }
-  .web-signout { position: static; width: auto; margin: 8px 16px; }
 }
+
+/* ── Phone layout ─────────────────────────────────────────────────────────────────────────────
+   The web app in a window up to 760px wide: App adds `phone` (and `ps-list|main|master`) to .app,
+   only when isWeb() && matchMedia(PHONE_QUERY). Every rule here is scoped under .app.phone, so the
+   desktop app and wide web windows never see it. One screen at a time, a bottom tab bar. */
+.app.phone {
+  --tabbar-h: calc(56px + env(safe-area-inset-bottom));
+  position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh);
+  display: flex; flex-direction: column; padding-top: env(safe-area-inset-top);
+}
+.app.phone > .side-resizer, .app.phone > .divider, .app.phone > .panel-show, .app.phone > .panel-shows,
+.app.phone > .master-toggle, .app.phone > .find-slot { display: none !important; }
+
+/* Screens: the session list, a terminal or a view, master. */
+.app.phone > .sidebar { display: none; }
+.app.phone.ps-list > .sidebar { display: flex; flex: 1; min-height: 0; width: auto; border-right: 0; }
+.app.phone > .workspace { display: none; }
+.app.phone.ps-main.view-terminals > .workspace { display: flex; flex: 1; min-height: 0; }
+.app.phone > .board-view { position: relative; inset: auto; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.app.phone:not(.ps-main) > .board-view { display: none; }
+.app.phone > .master-slot { flex: 1; min-height: 0; }
+.app.phone .master { border-left: 0; }
+.app.phone .master .mhead { padding-right: 10px !important; height: 44px; }
+.app.phone > .insp-slot { position: absolute; left: 0; right: 0; top: env(safe-area-inset-top); bottom: var(--tabbar-h); z-index: 45; background: var(--bg-2); }
+.app.phone > .insp-slot > .inspector { flex: 1; min-width: 0; border-left: 0; }
+.app.phone .insp-hide { min-width: 44px; min-height: 40px; font-size: 20px; }
+.app.phone .board-view > .board-head, .app.phone .insp-head, .app.phone .set-main > .board-head { padding-left: 12px; padding-right: 12px; }
+
+/* Bottom tab bar (the rail). */
+.app.phone > .phone-bar {
+  order: 10; position: relative; flex: none; width: auto; height: var(--tabbar-h);
+  flex-direction: row; align-items: stretch; gap: 0; padding: 0 4px env(safe-area-inset-bottom);
+  border-right: 0; border-top: 1px solid var(--line); background: var(--bg-2);
+}
+.phone-bar .pb { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; background: none; color: var(--muted); font-size: 10.5px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.phone-bar .pb.on { color: var(--text); }
+.phone-bar .pb.on svg { color: var(--accent); }
+.phone-bar .pb .rb-badge { top: 4px; right: calc(50% - 22px); }
+.phone-more-back { position: fixed; inset: 0; z-index: 60; }
+.phone-bar .menu.phone-more { position: absolute; top: auto; right: 6px; bottom: calc(100% + 6px); z-index: 61; min-width: 210px; max-height: 70dvh; overflow-y: auto; }
+.app.phone > .phone-bar .phone-more button { display: flex; align-items: center; gap: 10px; padding: 11px 12px; font-size: 15px; }
+.app.phone > .phone-bar .phone-more button.on { color: var(--accent); }
+
+/* The terminal screen: a header, one terminal, quick keys. */
+.phone-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
+.phone-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 15px; text-align: center; }
+.app.phone .term-wrap { padding: 4px; }
+.app.phone .term { inset: 4px; }
+.quick-keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; flex: none; background: var(--bg-2); border-top: 1px solid var(--line); scrollbar-width: none; }
+.quick-keys::-webkit-scrollbar { display: none; }
+.quick-keys .qk { flex: none; min-width: 44px; height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg-3); color: var(--text); font: 14px var(--mono); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.quick-keys .qk:active { background: var(--accent-soft); border-color: var(--accent); }
+
+/* Touch: hover-only controls show, tooltips go, targets grow, inputs stop iOS zooming. */
+.app.phone .srow .srow-x { visibility: visible; }
+.app.phone .tab .x { opacity: .6; }
+.app.phone .rb:hover::after { display: none; }
+html.phone .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.app.phone .col-btn, .app.phone .icon-btn, .app.phone .card-x { min-width: 36px; min-height: 36px; }
+.app.phone .srow { padding: 10px 12px; }
+html.phone input, html.phone textarea, html.phone select { font-size: 16px !important; }
+
+/* Dialogs and menus fit the screen (html.phone: also the ones portaled to <body>). */
+html.phone .dialog { width: calc(100vw - 24px) !important; max-height: calc(var(--vvh, 100dvh) - 24px); padding: 14px; }
+html.phone .menu { min-width: 0; max-width: calc(100vw - 24px); }
+html.phone .menu button { padding: 10px 12px; font-size: 14px; }
+html.phone .menu.session-menu { max-height: 70dvh; }
+.app.phone > .toast { bottom: calc(var(--tabbar-h) + 12px); max-width: calc(100vw - 24px); }
+
+/* One column where the desktop has two; wide tables scroll inside themselves. */
+html.phone .setup-body, html.phone .two-col, html.phone .setup-tools, html.phone .status-map { grid-template-columns: 1fr; }
+html.phone .setup-body { min-height: 0; }
+.app.phone .tv-flow { grid-template-columns: repeat(5, minmax(110px, 1fr)); overflow-x: auto; }
+.app.phone .kpi { min-width: 0; flex: 1 1 120px; }
+.app.phone .tv-bar { width: 100px; }
+.app.phone .tv-side { min-width: 0; }
+.app.phone .prs-tbl .pr-title, .app.phone .prs-tbl td.pr-cell { max-width: 60vw; }
+
+/* Sign out lives on the Settings screen, above the tab bar. */
+.app.phone ~ .web-signout { display: none; }
+.app.phone.view-settings.ps-main ~ .web-signout { display: block; left: auto; right: 12px; bottom: calc(66px + env(safe-area-inset-bottom)); width: auto; padding: 8px 12px; font-size: 13px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-3); }
+
+/* Screen headers wrap instead of running off the right edge; segmented switches scroll sideways. */
+.app.phone .board-head { height: auto; min-height: 48px; flex-wrap: wrap; row-gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+.app.phone .board-head .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.app.phone .sidebar .col-head { padding-left: 14px; }
+
+/* Settings: the section list becomes a row that scrolls sideways, over the section. */
+.app.phone .settings-view { flex-direction: column; }
+.app.phone .set-nav { width: auto; flex-direction: row; overflow-x: auto; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.app.phone .set-nav > :not(button) { display: none; }
+.app.phone .set-nav button { flex: none; white-space: nowrap; padding: 8px 12px; font-size: 14px; }
+.app.phone .set-body { padding: 4px 14px 80px; }
+.app.phone .set-field { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.app.phone .set-ctl { flex-wrap: wrap; min-width: 0; }
+.app.phone .set-ctl code { overflow-wrap: anywhere; }
+.app.phone > .master-slot { flex-direction: column; }
