@@ -51,19 +51,18 @@ def _assign(i: dict) -> dict:
     lab, full = refs.label(repo, n), refs.ref(repo, n)
     prompt = (
         f"You own {full} ({i['title']}). {i['url']}\n\n"
-        f"Set up only — do not plan, brainstorm or write code yet:\n"
-        f"1. Use the babysit-ticket skill to link this session to {full}.\n"
-        f"2. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and use the babysit-worktree skill "
+        f"Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to {full}):\n"
+        f"1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and use the babysit-worktree skill "
         f"there to create a worktree for {lab}.\n"
-        + (f"3. Then stop and ask the user for instructions: tell master-agent "
+        + (f"2. Then stop and ask the user for instructions: tell master-agent "
            f"'{lab}: question — ready for instructions on {lab}: <one-line summary of the issue, the repo and "
            f"the worktree/branch you created>', and ask them the same here. Wait for their answer; they will "
            f"brainstorm and plan the work with you in this session.\n"
            if config.master_enabled() else
-           f"3. Then stop and ask the user for instructions here: '{lab}: question — ready for instructions on "
+           f"2. Then stop and ask the user for instructions here: '{lab}: question — ready for instructions on "
            f"{lab}: <one-line summary of the issue, the repo and the worktree/branch you created>'. Wait for their "
            f"answer; they will brainstorm and plan the work with you in this session.\n")
-        + f"4. Once a PR exists, use the babysit-pr skill to babysit it. Do not merge.\n\n"
+        + f"3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.\n\n"
         + (REPLY if config.master_enabled() else REPLY_SOLO).format(n=lab)
     )
     return {"kind": "ASSIGN", "issue": n, "repo": repo, "source": _src("issue", repo, n),

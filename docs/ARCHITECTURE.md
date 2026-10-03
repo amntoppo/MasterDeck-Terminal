@@ -180,7 +180,9 @@ empty queue has no file. Remote `session.send` with `via: queue` adds here (need
 
 `main/masterCli.ts` runs `python -m master.cli` (the `master` skill's lib, the installed copy in
 `~/.claude/skills/master/lib` wins over the bundled one): ledger approve/reject, `draft-assign`,
-`spawn`, snapshot, board, `config detect`. `main/assign.ts` `startAssign` records + approves an
+`spawn`, snapshot, board, `config detect`. `master snapshot` reads MasterDeck's `ticket-links.json`
+(not babysit-ticket's state; `MASTERDECK_HOME` overrides the folder), and the ASSIGN prompt no longer
+asks the session to run babysit-ticket or babysit-pr: MasterDeck links it and watches its PR. `main/assign.ts` `startAssign` records + approves an
 ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/master"` in the
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).

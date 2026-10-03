@@ -17,7 +17,7 @@ export type { JanitorRow, Template }
 export const BUILTIN_TEMPLATES: Template[] = [
   { name: 'TDD, small PR', text: 'Work test-first: write a failing test, make it pass, refactor. Keep the change small and focused, and open one small PR.', builtin: true },
   { name: 'Investigate only', text: 'Investigate only: find the cause and report your findings with file:line references. Do not change any code or open a PR.', builtin: true },
-  { name: 'Fix and open PR', text: 'Fix it, add a test that covers the fix, run the tests, then open a PR and babysit it. Do not merge.', builtin: true },
+  { name: 'Fix and open PR', text: 'Fix it, add a test that covers the fix, run the tests, then open a PR. MasterDeck watches it and sends you review comments; act on them. Do not merge.', builtin: true },
   { name: 'Pair with me', text: 'Pair with me: propose each step and wait for my OK before you make changes.', builtin: true },
 ]
 

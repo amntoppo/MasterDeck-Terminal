@@ -104,7 +104,7 @@ class MultiTest(unittest.TestCase):
         self.assertEqual((a["issue"], a["repo"], a["source"]), (5, "acme/api", "issue:acme/api#5"))
         self.assertEqual(a["target"]["spawn"]["name"], "api-5-fix-login")
         self.assertIn("You own acme/api#5 (Fix login)", a["message"])
-        self.assertIn("link this session to acme/api#5", a["message"])
+        self.assertIn("links this session to acme/api#5", a["message"])
         self.assertIn("'api#5: done'", a["message"])
         prim = rules._assign({"number": 5, "title": "Fix login", "url": "u"})
         self.assertEqual((prim["repo"], prim["source"], prim["target"]["spawn"]["name"]), (None, "issue:5", "5-fix-login"))

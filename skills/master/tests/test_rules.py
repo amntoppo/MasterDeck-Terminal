@@ -71,9 +71,10 @@ class AssignTest(unittest.TestCase):
         sp = c["target"]["spawn"]
         self.assertEqual((sp["name"], sp["cwd"]), ("981-coupon-expiry-banner-981", str(Path("/ws"))))
         self.assertIn("acme/tracker#981", sp["prompt"])
-        self.assertIn("babysit-ticket", sp["prompt"])
+        self.assertNotIn("babysit-ticket", sp["prompt"])
+        self.assertNotIn("babysit-pr", sp["prompt"])
         self.assertIn("babysit-worktree", sp["prompt"])
-        self.assertIn("babysit-pr", sp["prompt"])
+        self.assertIn("MasterDeck watches it", sp["prompt"])
         self.assertIn("ask the user for instructions", sp["prompt"])
         self.assertIn("#981: question — ready for instructions", sp["prompt"])
         self.assertNotIn("issue-to-pr", sp["prompt"])
