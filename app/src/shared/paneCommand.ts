@@ -50,6 +50,8 @@ export function paneCommand(
         "acceptEdits",
       ],
     };
+  if (spec.kind === "gh-login")
+    return { file: win ? "gh.exe" : "gh", args: ["auth", "login", "--hostname", "github.com", "--web"] };
   if (win) return { file: "powershell.exe", args: ["-NoLogo"], cwd: spec.cwd };
   return { file: shell || "/bin/zsh", args: ["-l"], cwd: spec.cwd };
 }

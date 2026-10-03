@@ -125,7 +125,7 @@ export const CH = {
   setupCheck: "setup:check",
   setupTool: "setup:tool",
   ghAccounts: "setup:ghAccounts",
-  ghSwitch: "setup:ghSwitch",
+  ghUser: "setup:ghUser",
   ghOwners: "setup:ghOwners",
   configDetect: "config:detect",
   configDetectAll: "config:detectAll",
@@ -383,8 +383,8 @@ export interface DeckApi {
   setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>;
   /** The github.com accounts gh is logged in to. */
   ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>;
-  /** Make this account gh's active one (what MasterDeck, master and every session's gh use). */
-  ghSwitch(login: string): Promise<CliResult>;
+  /** Setup: the commit name and email a newly connected account starts with (its GitHub name, its noreply email). */
+  ghUser(login: string): Promise<{ name: string; email: string }>;
   /** The active account's login and the organizations it belongs to. */
   ghOwners(): Promise<{ user: string | null; orgs: string[]; error?: string }>;
   /** Setup: repos, projects and (for a project) statuses GitHub has for an owner. */
@@ -392,8 +392,8 @@ export interface DeckApi {
     owner: string,
     project?: number,
   ): Promise<{ ok: true; data: unknown } | { ok: false; message: string }>;
-  /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed). */
-  configDetectAll(): Promise<
+  /** `master config detect --all`: every owner gh can reach, with repos and boards (statuses guessed); as this account (omitted: gh's active one). */
+  configDetectAll(login?: string): Promise<
     { ok: true; data: unknown } | { ok: false; message: string }
   >;
   /** Setup: save settings (merged into the config file), then reload everything. */

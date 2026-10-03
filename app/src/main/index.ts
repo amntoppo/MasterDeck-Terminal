@@ -62,6 +62,7 @@ import {
   migrateLegacyConfig,
 } from "./accountEnv";
 import { parseGhAccounts, type GhAccount } from "@shared/ghAuth";
+import { noreplyEmail, parseGhUser } from "@shared/accounts";
 import { startAssign } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -1878,18 +1879,15 @@ function registerIpc(): void {
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
   reg.handle(CH.ghAccounts, () => ghAccounts());
-  reg.handle(CH.ghSwitch, async (_e, login: string) => {
-    const { accounts } = await ghAccounts();
-    if (!accounts.some((a) => a.login === login))
-      return { ok: false, message: `gh is not logged in to ${login}` };
-    const r = await run(
-      "gh",
-      ["auth", "switch", "--hostname", "github.com", "--user", login],
-      { timeoutMs: 20_000 },
-    );
-    return r.code === 0
-      ? { ok: true, message: `gh now uses ${login}` }
-      : { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  // Setup: a newly connected account's commit identity (GitHub name, noreply email; editable there).
+  reg.handle(CH.ghUser, async (_e, login: unknown) => {
+    if (typeof login !== "string" || !GH_LOGIN.test(login))
+      return { name: "", email: "" };
+    const env = await tokenEnv(login);
+    const u = env
+      ? parseGhUser((await run("gh", ["api", "user"], { env, timeoutMs: 20_000 })).stdout)
+      : null;
+    return { name: u?.name ?? login, email: noreplyEmail(login, u?.id ?? null) };
   });
   reg.handle(CH.ghOwners, async () => {
     // Straight to gh, not the shared cache: it is not per account.
@@ -1921,7 +1919,15 @@ function registerIpc(): void {
         : {}),
     };
   });
-  reg.handle(CH.configDetectAll, () => cli.configDetectAll());
+  // As the account Setup shows (its token, read-only, even with one account); from a browser only
+  // for connected accounts. No login: gh's active account.
+  reg.handle(CH.configDetectAll, async (e, login: unknown) => {
+    const ok =
+      typeof login === "string" &&
+      GH_LOGIN.test(login) &&
+      (!isRemote(e) || getConfig().accounts.some((a) => a.login === login));
+    return cli.configDetectAll(ok ? ((await tokenEnv(login)) ?? {}) : {});
+  });
   reg.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === "string"
       ? cli.configDetect(
@@ -2412,6 +2418,9 @@ function registerIpc(): void {
   reg.handle(
     CH.ptyOpen,
     (e, id: string, spec: PaneSpec, cols: number, rows: number) => {
+      // gh's browser login is Setup's on the Mac (it opens a browser there).
+      if (isRemote(e) && spec?.kind === "gh-login")
+        return { ok: false, replay: "", seq: 0, exited: true, message: "log in to GitHub on the Mac" };
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
@@ -2504,6 +2513,19 @@ async function ghAccounts(): Promise<{
         error:
           (r.stderr || r.stdout).trim().slice(0, 300) || "gh is not logged in",
       };
+}
+
+const GH_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+
+/** GH_TOKEN for one gh login (Setup's reads about an account, connected or not yet); null when gh has none. Never logged. */
+async function tokenEnv(login: string): Promise<Record<string, string> | null> {
+  const t = await run(
+    "gh",
+    ["auth", "token", "--hostname", "github.com", "--user", login],
+    { timeoutMs: 15_000 },
+  );
+  const token = t.stdout.trim();
+  return t.code === 0 && token ? { GH_TOKEN: token } : null;
 }
 
 // Set from the default config at load, so a state emitted before the first refreshAccounts (at

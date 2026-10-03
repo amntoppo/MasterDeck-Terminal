@@ -462,7 +462,7 @@ creation.
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
-- **Set up MasterDeck:** opens Setup as one page (tools, GitHub account, repos and boards, status mapping, workspace,
+- **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
 - **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
@@ -591,7 +591,7 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
 - **What works:** every view (Terminals with live terminals you can type in, Board, PRs, Tasks,
   Costs, Janitor, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
   page instead of on the Mac. Not on the web: signing in or out of the Mac's account, approving
-  browsers, switching the gh account, the folder picker (a repo picker instead), opening editors,
+  browsers, connecting GitHub accounts, the folder picker (a repo picker instead), opening editors,
   and turning Remote off.
 - **Terminal sizes:** while the Mac shows a terminal, its size wins; the browser's size applies
   only to terminals the Mac isn't showing.
@@ -676,6 +676,17 @@ babysit-pr's poll also got cheaper: one GraphQL and one REST call per poll, down
 GraphQL and two REST calls.
 
 ## Several GitHub accounts
+
+For people who work for more than one organization with different GitHub accounts. Each account
+is a `gh` login (`gh auth status` lists them).
+
+- **Connect them** in Setup → GitHub accounts: tick each account MasterDeck should use, check the
+  name and email its commits get, and pick the primary one. **Add an account…** runs
+  `gh auth login --web` in the dialog (gh then makes that login its active one; MasterDeck says so
+  and never switches it). Under Repos & boards, an **Account** menu shows each account's own
+  repositories and boards; a repository belongs to one account.
+- **One account** (the usual case): nothing changes. Sessions and GitHub calls use `gh`'s active
+  account as before.
 
 With two or more GitHub accounts connected, MasterDeck reads each one's token from `gh` (it never
 switches gh's active account) and gives sessions started as that account their own token and git

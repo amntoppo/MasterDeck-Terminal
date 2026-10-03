@@ -76,18 +76,23 @@ Or build it yourself (see [Develop](#develop)).
       session in the dialog that installs them (Homebrew on macOS, winget on Windows); you approve
       its steps there. Missing tools are checked again every few seconds and turn green once
       installed.
-   2. **GitHub account.** Pick one of the accounts `gh` is logged in to; the choice becomes `gh`'s active
-      account, which MasterDeck, master and your sessions share.
+   2. **GitHub accounts.** Every account `gh` is logged in to, each with a switch: connect the ones
+      MasterDeck should use (the active one is connected already). Each connected account has a name
+      and email for its commits (from GitHub, editable) and, with two or more, a **Primary** choice
+      (master, plain shells and sessions outside your repos use it). **Add an account…** runs
+      `gh auth login --web` right there. MasterDeck never changes `gh`'s active account.
    3. **Repos & boards.** One read lists every organization `gh` can reach, with its repositories and
       project boards. Tick the repositories whose issues you work on and the boards that track them (or
       **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).
       MasterDeck reads each board's statuses and guesses what each means (ready, in progress, PR raised,
       done); adjust the guesses per board if they are wrong. No board: you still get issues, PRs and
-      sessions. Settings → Set up MasterDeck shows the same step.
+      sessions. Settings → Set up MasterDeck shows the same step. With two or more accounts, an
+      **Account** menu picks whose repositories and boards you are choosing; a repository can be under
+      one account only (others show it as "in <login>").
    4. **Preferences.** The folder master and new shells start in (where your repos are), whether to
       use a master-agent, and notifications for new Needs-you items.
 
-   Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub account,
+   Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub accounts,
    Repos & boards, Preferences): change any of them and Save.
 
    Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the bundled skills: add or

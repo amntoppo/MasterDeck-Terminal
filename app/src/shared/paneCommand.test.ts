@@ -23,4 +23,8 @@ describe('paneCommand', () => {
     expect(isSafeBgId('ea39fd38')).toBe(true)
     expect(isSafeBgId('ea39fd38; rm -rf')).toBe(false)
   })
+  it("runs gh's own browser login", () => {
+    expect(paneCommand({ kind: 'gh-login' }, 'darwin', '/bin/zsh')).toEqual({ file: 'gh', args: ['auth', 'login', '--hostname', 'github.com', '--web'] })
+    expect(paneCommand({ kind: 'gh-login' }, 'win32', undefined).file).toBe('gh.exe')
+  })
 })

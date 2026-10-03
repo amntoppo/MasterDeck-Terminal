@@ -87,11 +87,11 @@ const api: DeckApi = {
   setupCheck: () => ipcRenderer.invoke(CH.setupCheck),
   setupTool: (tool) => ipcRenderer.invoke(CH.setupTool, tool),
   ghAccounts: () => ipcRenderer.invoke(CH.ghAccounts),
-  ghSwitch: (login) => ipcRenderer.invoke(CH.ghSwitch, login),
+  ghUser: (login) => ipcRenderer.invoke(CH.ghUser, login),
   ghOwners: () => ipcRenderer.invoke(CH.ghOwners),
   configDetect: (owner, project) =>
     ipcRenderer.invoke(CH.configDetect, owner, project),
-  configDetectAll: () => ipcRenderer.invoke(CH.configDetectAll),
+  configDetectAll: (login) => ipcRenderer.invoke(CH.configDetectAll, login),
   configSave: (patch) => ipcRenderer.invoke(CH.configSave, patch),
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
   skillReinstall: (name) => ipcRenderer.invoke(CH.skillReinstall, name),

@@ -420,4 +420,6 @@ export type PaneSpec =
   /** The workflow builder (Workflow window): a Claude session in its own folder; `resume` continues its last chat. */
   | { kind: "builder"; resume: boolean }
   /** The Board's ticket session (Create with Claude); `prompt`: its first message, if any. */
-  | { kind: "ticket-builder"; resume: boolean; prompt?: string };
+  | { kind: "ticket-builder"; resume: boolean; prompt?: string }
+  /** Setup's "Add an account": gh's own browser login. */
+  | { kind: "gh-login" };

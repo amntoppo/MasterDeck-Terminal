@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { claudeInstall } from '@shared/install'
 import { projectKey, type AppConfig, type ProjectConfig, type StatusMap } from '@shared/appConfig'
 import { parseDetectAll, type DetectAll } from '@shared/detect'
@@ -12,11 +12,13 @@ import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
+import { accountsFromSetup, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
 
 
-const STEPS = ['Account', 'Tools', 'GitHub account', 'Repos & boards', 'Preferences'] as const
+const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
 
 const INSTALLER_PANE = 'setup:installer'
+const GH_LOGIN_PANE = 'setup:gh-login'
 
 /** Claude's mark, for the button that starts a Claude session. */
 function ClaudeMark() {
@@ -38,7 +40,7 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 ]
 
 /**
- * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the gh account, the
+ * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the GitHub accounts, the
  * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master and MasterDeck share.
@@ -80,65 +82,106 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     deck().ptyClose(INSTALLER_PANE)
     setInstalling(null)
   }
-  // The session goes when the dialog does, or when the user leaves the tools step.
-  useEffect(() => () => deck().ptyClose(INSTALLER_PANE), [])
+  // The sessions go when the dialog does.
+  useEffect(
+    () => () => {
+      deck().ptyClose(INSTALLER_PANE)
+      deck().ptyClose(GH_LOGIN_PANE)
+    },
+    [],
+  )
 
-  // Step 3: the gh account.
+  // Step 3: the GitHub accounts MasterDeck uses: gh's own logins, connected here. MasterDeck never
+  // changes gh's active account (gh auth login itself makes a new login active; Setup says so).
   const [accounts, setAccounts] = useState<GhAccount[] | null>(null)
   const [accountsErr, setAccountsErr] = useState<string | null>(null)
-  const [login, setLogin] = useState('')
-  const loadAccounts = async () => {
+  const [connected, setConnected] = useState<Connected[]>(() => cfg.accounts.map((a) => ({ login: a.login, name: a.name, email: a.email })))
+  const [primaryLogin, setPrimaryLogin] = useState(() => cfg.accounts.find((a) => a.primary)?.login ?? '')
+  // "Add an account" open: gh's active login when it opened (to notice gh switching it).
+  const [adding, setAdding] = useState<string | null>(null)
+  const [activeNote, setActiveNote] = useState<string | null>(null)
+  const connect = async (login: string) => {
+    const u = await deck().ghUser(login)
+    setConnected((cur) => (cur.some((c) => c.login === login) ? cur : [...cur, { login, name: u.name, email: u.email }]))
+    setPrimaryLogin((p) => p || login)
+  }
+  const disconnect = (login: string) => {
+    const rest = connected.filter((c) => c.login !== login)
+    setConnected(rest)
+    if (primaryLogin === login) setPrimaryLogin(rest[0]?.login ?? '')
+    if (editing === login && rest[0]) switchTo(rest[0].login, login)
+    else setSel(({ [login]: _gone, ...others }) => others)
+  }
+  const loadAccounts = async (): Promise<GhAccount[]> => {
     setAccounts(null)
     setAccountsErr(null)
     const r = await deck().ghAccounts()
     setAccounts(r.accounts)
     setAccountsErr(r.error ?? null)
-    setLogin((cur) => (cur && r.accounts.some((a) => a.login === cur) ? cur : (r.accounts.find((a) => a.active) ?? r.accounts[0])?.login ?? ''))
+    // First setup: the account gh uses now is connected.
+    const first = r.accounts.find((a) => a.active) ?? r.accounts[0]
+    if (!connected.length && first) await connect(first.login)
+    return r.accounts
   }
-  const account = accounts?.find((a) => a.login === login) ?? null
+  const closeLogin = async () => {
+    deck().ptyClose(GH_LOGIN_PANE)
+    const before = adding
+    setAdding(null)
+    const now = (await loadAccounts()).find((a) => a.active)?.login ?? null
+    if (before && now && now !== before)
+      setActiveNote(`gh made ${now} its active account (gh auth login does that). MasterDeck doesn't depend on it; for your own terminals, run gh auth switch -u ${before} to go back.`)
+  }
+  // What MasterDeck knows of each connected account (token health; a git rule that may send GitHub over SSH).
+  const sshWarning = state.ghAccounts?.find((a) => a.warning)?.warning
 
-  // Step 4: the repos and boards to follow (every org gh can reach), which repo is primary, and
-  // what each board's statuses mean.
+  // Step 4: the repos and boards to follow (every org the account can reach), which repo is primary,
+  // and what each board's statuses mean; one set per connected account.
   const [found, setFound] = useState<DetectAll | null>(null)
-  const [finding, setFinding] = useState(false)
-  const [repos, setRepos] = useState<string[]>(() => cfg.repos)
-  const [allRepos, setAllRepos] = useState(cfg.allRepos)
-  const [primary, setPrimary] = useState(() => (cfg.owner && cfg.issueRepo ? `${cfg.owner}/${cfg.issueRepo}` : ''))
-  const [boards, setBoards] = useState<Record<string, ProjectConfig>>(() => Object.fromEntries(cfg.projects.map((p) => [projectKey(p), p])))
-  const [allBoards, setAllBoards] = useState(cfg.allProjects)
+  // Reads of GitHub under way (one per account asked about).
+  const [loads, setLoads] = useState(0)
+  const finding = loads > 0
+  // The primary account's choices first; the others wait in `sel` until shown.
+  const firstSel = cfg.accounts[0] ? selFromConfig(cfg.accounts[0]) : null
+  const [repos, setRepos] = useState<string[]>(() => firstSel?.repos ?? cfg.repos)
+  const [allRepos, setAllRepos] = useState(firstSel?.allRepos ?? cfg.allRepos)
+  const [primary, setPrimary] = useState(() => firstSel?.primary ?? (cfg.owner && cfg.issueRepo ? `${cfg.owner}/${cfg.issueRepo}` : ''))
+  const [boards, setBoards] = useState<Record<string, ProjectConfig>>(() => firstSel?.boards ?? Object.fromEntries(cfg.projects.map((p) => [projectKey(p), p])))
+  const [allBoards, setAllBoards] = useState(firstSel?.allBoards ?? cfg.allProjects)
   const [repoSearch, setRepoSearch] = useState('')
+  // Which account's repos and boards are on screen ('' none yet: a config without accounts).
+  const [editing, setEditing] = useState(() => cfg.accounts.find((a) => a.primary)?.login ?? '')
+  const editingRef = useRef(editing)
+  editingRef.current = editing
+  const [sel, setSel] = useState<Record<string, AccountSel>>(() => Object.fromEntries(cfg.accounts.map((a) => [a.login, selFromConfig(a)])))
+  const selRef = useRef(sel)
+  selRef.current = sel
+  const [foundBy, setFoundBy] = useState<Record<string, DetectAll>>({})
 
-  const loadFound = async () => {
-    setFinding(true)
+  const show = (s: AccountSel) => {
+    setRepos(s.repos)
+    setAllRepos(s.allRepos)
+    setPrimary(s.primary)
+    setBoards(s.boards)
+    setAllBoards(s.allBoards)
+  }
+  /** Read `login`'s repos and boards ('' gh's active account); `s`: that account's choices when asked. */
+  const loadFound = async (login: string, s: AccountSel) => {
+    setLoads((n) => n + 1)
     setMsg(null)
-    const r = await deck().configDetectAll()
-    setFinding(false)
+    const r = await deck().configDetectAll(login || undefined)
+    setLoads((n) => n - 1)
     if (!r.ok) return setMsg(r.message)
     const d = parseDetectAll(r.data)
+    setFoundBy((cur) => ({ ...cur, [login]: d }))
+    const taken = (repo: string) => !!takenBy(repo, login, selRef.current)
+    if (login !== editingRef.current) {
+      // Switched to another account meanwhile: these choices wait in `sel`.
+      setSel((cur) => (cur[login] ? { ...cur, [login]: withFound(cur[login], d, taken) } : cur))
+      return
+    }
     setFound(d)
     if (d.error) setMsg(d.error)
-    const every = d.owners.flatMap((o) => o.repos.map((x) => x.repo))
-    const everyBoard = d.owners.flatMap((o) => o.projects)
-    // Boards already chosen take GitHub's current title, ids and columns, keeping what the user
-    // said their statuses mean.
-    const fresh = (p: ProjectConfig): ProjectConfig => {
-      const had = boards[projectKey(p)]
-      return had ? { ...p, statuses: had.statuses } : p
-    }
-    setBoards((cur) => Object.fromEntries(Object.entries(cur).map(([k, b]) => [k, everyBoard.find((p) => projectKey(p) === k) ? fresh(everyBoard.find((p) => projectKey(p) === k)!) : b])))
-    // "Select all" last time: everything there is now, including repos and boards added since.
-    if (allRepos) setRepos(every)
-    if (allBoards) setBoards(Object.fromEntries(everyBoard.map((p) => [projectKey(p), fresh(p)])))
-    // First setup: start from the repo with the most open issues (usually the tracker) and its owner's boards.
-    if (!repos.length && !allRepos) {
-      const top = d.owners.flatMap((o) => o.repos).sort((a, b) => b.openIssues - a.openIssues)[0]
-      if (top) {
-        setRepos([top.repo])
-        setPrimary(top.repo)
-        const own = everyBoard.filter((p) => p.owner === top.repo.split('/')[0])
-        if (own.length === 1 && !Object.keys(boards).length) setBoards({ [projectKey(own[0])]: own[0] })
-      }
-    }
+    show(withFound(s, d, taken))
   }
 
   // Step 5.
@@ -163,21 +206,28 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     // Leaving Account for the next step (not Skip): apply the Remote switch.
     if (firstRun && step === 0 && to === 1 && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
     if (to === 3) {
-      // The chosen account becomes gh's active one: MasterDeck, master and the sessions all use it.
-      if (account && !account.active) {
-        setBusy(true)
-        const r = await deck().ghSwitch(account.login)
-        setBusy(false)
-        if (!r.ok) return setMsg(r.message)
-        setAccounts((cur) => cur?.map((a) => ({ ...a, active: a.login === account.login })) ?? cur)
-        void loadFound()
-      } else if (found === null) void loadFound()
+      if (!editing && primaryLogin) switchTo(primaryLogin)
+      else if (found === null && !finding) void loadFound(editing, onScreen())
     }
     setStep(to)
   }
 
-  const selectedRepos = allRepos ? (found ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : repos) : repos
+  // Repos under another account never count under this one.
+  const selectedRepos = (allRepos ? (found ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : repos) : repos).filter((r) => !takenBy(r, editing, sel))
   const primaryRepo = selectedRepos.includes(primary) ? primary : (selectedRepos[0] ?? '')
+  const onScreen = (): AccountSel => ({ repos: selectedRepos, allRepos, primary: primaryRepo, boards, allBoards })
+  /** Show another account's repos and boards; `drop`: an account just disconnected (its choices go). */
+  const switchTo = (login: string, drop?: string) => {
+    if (login === editing) return
+    const r = switchSel(sel, editing, onScreen(), login, drop)
+    setSel(r.sel)
+    selRef.current = r.sel
+    show(r.shown)
+    setEditing(login)
+    editingRef.current = login
+    setFound(foundBy[login] ?? null)
+    if (!foundBy[login]) void loadFound(login, r.shown)
+  }
   const toggleRepo = (r: string) => {
     setAllRepos(false)
     setRepos(repos.includes(r) ? repos.filter((x) => x !== r) : [...repos, r])
@@ -193,53 +243,31 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const setStatuses = (k: string, st: StatusMap) => setBoards((b) => (b[k] ? { ...b, [k]: { ...b[k], statuses: st } } : b))
 
   const save = async () => {
-    if (!primaryRepo) return setMsg('Go back and pick at least one repository.')
+    // The account on screen ('' before any was shown: the primary) keeps what the screen shows.
+    const key = editing || primaryLogin
+    const all = key ? { ...sel, [key]: onScreen() } : sel
+    const ownerType = (login: string, owner: string) =>
+      (foundBy[login] ?? (login === key ? found : null))?.owners.find((o) => o.login === owner)?.type ??
+      cfg.accounts.find((a) => a.login === login)?.ownerType ??
+      (owner === cfg.owner ? cfg.ownerType : 'organization')
+    const list = accountsFromSetup(connected, primaryLogin, all, ownerType)
+    if (!list.length) return setMsg('Go back and connect a GitHub account.')
+    if (!list[0].issueRepo) return setMsg(`Go back and pick at least one repository for ${list[0].login}.`)
+    if (list.some((a) => !a.email.includes('@'))) return setMsg('Each connected account needs an email for its commits.')
     if (!(await webConfirm('Save this setup to your Mac?', { confirmLabel: 'Save' }))) return
     setBusy(true)
     setMsg(null)
-    // The chosen account becomes gh's active one (from Settings, Save may come straight from its section).
-    if (account && !account.active) {
-      const sw = await deck().ghSwitch(account.login)
-      if (!sw.ok) {
-        setBusy(false)
-        return setMsg(sw.message)
-      }
-    }
     if (notify !== state.settings.notifyNeedsYou) await deck().setSettings({ ...(await deck().getSettings()), notifyNeedsYou: notify })
-    const [owner, issueRepo] = primaryRepo.split('/')
-    const ownerType = found?.owners.find((o) => o.login === owner)?.type ?? (owner === cfg.owner ? cfg.ownerType : 'organization')
-    const list = Object.values(boards)
-    const patch: Partial<AppConfig> & Record<string, unknown> = {
-      owner,
-      ownerType,
-      issueRepo,
-      repos: [primaryRepo, ...selectedRepos.filter((r) => r !== primaryRepo)],
-      allRepos,
-      projects: list.map((p) => ({
-        owner: p.owner,
-        ownerType: p.ownerType,
-        number: p.number,
-        id: p.id,
-        title: p.title,
-        statusField: p.statusField,
-        statusFieldId: p.statusFieldId,
-        statusOptions: p.statusOptions,
-        columns: p.columns,
-        statuses: p.statuses,
-        sprintField: p.sprintField,
-      })),
-      allProjects: allBoards,
-      // No board: issues and PRs only (the first board otherwise fills these, see master config save).
-      ...(list.length ? {} : { project: 0 }),
+    const patch: Record<string, unknown> = {
+      accounts: list,
+      // No board on the primary account: issues and PRs only (master config save mirrors the rest from it).
+      ...(list[0].projects.length ? {} : { project: 0 }),
       ...(workspace ? { workspace } : {}),
       masterEnabled: useMaster,
     }
     const r = await deck().configSave(patch)
-    if (!r.ok) {
-      setBusy(false)
-      return setMsg(r.message)
-    }
     setBusy(false)
+    if (!r.ok) return setMsg(r.message)
     onClose()
   }
 
@@ -248,11 +276,14 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const sectionSummary = [
     signedIn && state.account?.kind === 'signedIn' ? state.account.email : 'not signed in',
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
-    !ghHere ? 'on your Mac' : login || (accounts === null ? '—' : 'not logged in'),
+    !ghHere ? 'on your Mac' : connected.length ? connected.map((c) => c.login).join(', ') : accounts === null ? '—' : 'none connected',
     primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(boards).length} board${Object.keys(boards).length === 1 ? '' : 's'}`}` : 'none chosen',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
-  const canNext = canAdvance(step, { signedIn, toolsDone, ghOk: !!account && account.ok, hasPrimaryRepo: !!primaryRepo, finding })
+  // Next from Repos & boards needs a repository under the primary account (on screen or not).
+  const hasPrimaryRepo = !editing || editing === primaryLogin ? !!primaryRepo : !!sel[primaryLogin]?.repos.length
+  const ghOk = connected.length > 0 && connected.every((c) => accounts?.find((a) => a.login === c.login)?.ok !== false)
+  const canNext = canAdvance(step, { signedIn, toolsDone, ghOk, hasPrimaryRepo, finding })
   const Spin = ({ text }: { text: string }) => (
     <div className="tool-row wait">
       <span className="tool-mark">
@@ -377,50 +408,88 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         {step === 2 && (
           <>
             <div className="meta">
-              The GitHub account MasterDeck, master and your sessions use: gh's active account. Choosing another one here switches it.
+              The GitHub accounts MasterDeck and your sessions use. A session works as one of them: its commits, PRs and gh calls. MasterDeck never changes gh's active account.
             </div>
             {!ghHere ? (
-              <div className="meta">Choose the GitHub account on your Mac (Settings → Set up MasterDeck).</div>
+              <div className="meta">
+                Connect GitHub accounts on your Mac (Settings → Set up MasterDeck).{connected.length ? ` Connected: ${connected.map((c) => c.login).join(', ')}.` : ''}
+              </div>
             ) : accounts === null ? (
               <Spin text="Looking for the accounts gh is logged in to…" />
-            ) : accounts.length === 0 ? (
-              <div className="meta">
-                gh is not logged in to GitHub{accountsErr ? ` (${accountsErr})` : ''}. Run <code>gh auth login</code> in a terminal, then{' '}
-                <button className="link-btn" onClick={() => void loadAccounts()}>
-                  look again
-                </button>
-                .
-              </div>
             ) : (
               <>
-                <label>GitHub account</label>
-                <select className="fsel full" value={login} onChange={(e) => setLogin(e.target.value)} disabled={accounts.length === 1}>
-                  {accounts.map((a) => (
-                    <option key={a.login} value={a.login}>
-                      {a.login}
-                      {a.active ? ' (active now)' : ''}
-                      {a.ok ? '' : ' (token no longer works)'}
-                    </option>
-                  ))}
-                </select>
-                {accounts.length === 1 && (
-                  <div className="meta">
-                    The only account gh is logged in to. Add another with <code>gh auth login</code>.
-                  </div>
+                {accounts.length === 0 && <div className="meta">gh is not logged in to GitHub{accountsErr ? ` (${accountsErr})` : ''}. Add an account below.</div>}
+                <div className="pick-list">
+                  {[
+                    ...accounts,
+                    // Connected before, but gh is no longer logged in to it: still listed, so it can be disconnected.
+                    ...connected.filter((c) => !accounts.some((a) => a.login === c.login)).map((c): GhAccount => ({ login: c.login, active: false, ok: false, scopes: [] })),
+                  ].map((a) => {
+                    const c = connected.find((x) => x.login === a.login)
+                    const inGh = accounts.some((x) => x.login === a.login)
+                    const health = state.ghAccounts?.find((x) => x.login === a.login)
+                    const setC = (patch: Partial<Connected>) => setConnected((cur) => cur.map((x) => (x.login === a.login ? { ...x, ...patch } : x)))
+                    return (
+                      <div key={a.login} className="pick-group">
+                        <div className="mpick-row pick-row">
+                          <label className="mpick-row grow">
+                            <input type="checkbox" checked={!!c} disabled={busy || (!!c && connected.length === 1)} onChange={() => (c ? disconnect(a.login) : void connect(a.login))} />
+                            <span>
+                              {a.login}
+                              {!inGh ? ' (gh is not logged in to it)' : a.ok ? '' : ' (token no longer works)'}
+                            </span>
+                          </label>
+                          {c && connected.length > 1 && (
+                            <label className="mpick-row">
+                              <input type="radio" name="primary-account" checked={primaryLogin === a.login} onChange={() => setPrimaryLogin(a.login)} /> Primary
+                            </label>
+                          )}
+                        </div>
+                        {c && (
+                          <div className="row-inputs">
+                            <input value={c.name} placeholder="Name on commits" aria-label={`Commit name for ${a.login}`} onChange={(e) => setC({ name: e.target.value })} />
+                            <input value={c.email} placeholder="Email on commits" aria-label={`Commit email for ${a.login}`} onChange={(e) => setC({ email: e.target.value })} />
+                          </div>
+                        )}
+                        {c && !a.ok && <div className="meta bad">MasterDeck can't use this account until it logs in again: use Add an account.</div>}
+                        {c && a.ok && health && !health.healthy && (
+                          <div className="meta bad">MasterDeck can't use this account{health.error ? `: ${health.error}` : ''}. Log in again with Add an account.</div>
+                        )}
+                        {c && a.ok && !hasProjectScope(a) && (
+                          <div className="meta">
+                            To use project boards, this account needs the <code>project</code> scope: run <code>gh auth refresh -h github.com -s project -u {a.login}</code>, then{' '}
+                            <button className="link-btn" onClick={() => void loadAccounts()}>
+                              look again
+                            </button>
+                            .
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                {sshWarning && <div className="meta bad">{sshWarning}</div>}
+                {connected.length > 1 && (
+                  <div className="meta">Primary: master-agent, plain shells and sessions outside every account's repos use it. Unticking an account stops MasterDeck using it; gh stays logged in.</div>
                 )}
-                {account && !account.ok && (
-                  <div className="meta bad">
-                    This account's token no longer works: run <code>gh auth login</code> again.
+                {activeNote && <div className="meta">{activeNote}</div>}
+                {adding !== null ? (
+                  <div className="installer">
+                    <div className="installer-head">
+                      <b>Add a GitHub account</b>
+                      <span className="meta grow">gh opens GitHub in your browser: log in there as the other account. gh then makes it its active account; MasterDeck leaves that as it is.</span>
+                      <button className="btn" onClick={() => void closeLogin()}>
+                        Close
+                      </button>
+                    </div>
+                    <div className="installer-term">
+                      <TerminalView paneId={GH_LOGIN_PANE} spec={{ kind: 'gh-login' }} visible focusOnShow onExit={() => void closeLogin()} />
+                    </div>
                   </div>
-                )}
-                {account && account.ok && !hasProjectScope(account) && (
-                  <div className="meta">
-                    To use a project board, this account needs the <code>project</code> scope: run <code>gh auth refresh -h github.com -s project</code>, then{' '}
-                    <button className="link-btn" onClick={() => void loadAccounts()}>
-                      look again
-                    </button>
-                    . Issues and PRs work without it.
-                  </div>
+                ) : (
+                  <button className="btn" onClick={() => setAdding(accounts.find((a) => a.active)?.login ?? '')}>
+                    Add an account…
+                  </button>
                 )}
               </>
             )}
@@ -432,10 +501,25 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             <div className="meta">
               The repositories whose issues you work on, and the project boards that track them. Tickets from all of them show on
               the Board and can start sessions; each board keeps its own statuses.{' '}
-              <button className="link-btn" onClick={() => void loadFound()} disabled={finding}>
+              <button className="link-btn" onClick={() => void loadFound(editing, onScreen())} disabled={finding}>
                 Look again
               </button>
             </div>
+            {connected.length > 1 && (
+              <div className="pick-head">
+                <label>Account</label>
+                <select className="fsel" value={editing} disabled={finding} onChange={(e) => switchTo(e.target.value)}>
+                  {!editing && <option value="">—</option>}
+                  {connected.map((c) => (
+                    <option key={c.login} value={c.login}>
+                      {c.login}
+                      {c.login === primaryLogin ? ' (primary)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="meta">Each account has its own repositories and boards; a repository belongs to one account.</span>
+              </div>
+            )}
             {finding && !found ? (
               <Spin text="Reading your organizations, repositories and boards from GitHub…" />
             ) : found ? (
@@ -448,7 +532,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                       checked={allRepos}
                       onChange={(e) => {
                         setAllRepos(e.target.checked)
-                        setRepos(e.target.checked ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)) : primaryRepo ? [primaryRepo] : [])
+                        setRepos(e.target.checked ? found.owners.flatMap((o) => o.repos.map((x) => x.repo)).filter((r) => !takenBy(r, editing, sel)) : primaryRepo ? [primaryRepo] : [])
                       }}
                     />
                     <span>Select all</span>
@@ -469,13 +553,16 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                           {o.login}
                           <span className="muted"> · {o.type === 'user' ? 'you' : 'organization'}</span>
                         </div>
-                        {rs.map((x) => (
-                          <label key={x.repo} className="mpick-row pick-row">
-                            <input type="checkbox" checked={selectedRepos.includes(x.repo)} onChange={() => toggleRepo(x.repo)} />
-                            <span className="grow">{x.repo.split('/')[1]}</span>
-                            <span className="muted">{x.openIssues ? `${x.openIssues} open issue${x.openIssues === 1 ? '' : 's'}` : 'no open issues'}</span>
-                          </label>
-                        ))}
+                        {rs.map((x) => {
+                          const other = takenBy(x.repo, editing, sel)
+                          return (
+                            <label key={x.repo} className="mpick-row pick-row">
+                              <input type="checkbox" checked={selectedRepos.includes(x.repo)} disabled={!!other} onChange={() => toggleRepo(x.repo)} />
+                              <span className="grow">{x.repo.split('/')[1]}</span>
+                              <span className="muted">{other ? `in ${other}` : x.openIssues ? `${x.openIssues} open issue${x.openIssues === 1 ? '' : 's'}` : 'no open issues'}</span>
+                            </label>
+                          )
+                        })}
                       </div>
                     )
                   })}
@@ -483,7 +570,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                 </div>
                 {selectedRepos.length > 1 && (
                   <>
-                    <label>Primary repository (where a plain #12 points)</label>
+                    <label>{editing && editing !== primaryLogin ? `Main repository of ${editing}` : 'Primary repository (where a plain #12 points)'}</label>
                     <select className="fsel full" value={primaryRepo} onChange={(e) => setPrimary(e.target.value)}>
                       {selectedRepos.map((r) => (
                         <option key={r}>{r}</option>
@@ -592,7 +679,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             </button>
           )}
           {!firstRun ? (
-            <button className="btn primary" disabled={busy || finding || !primaryRepo} onClick={save} title={primaryRepo ? '' : 'Pick at least one repository'}>
+            <button className="btn primary" disabled={busy || finding} onClick={save}>
               {busy ? 'Saving…' : 'Save'}
             </button>
           ) : null}
@@ -608,7 +695,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
           )}
           {!firstRun ? null : step < STEPS.length - 1 ? (
             <button className="btn primary" disabled={busy || !canNext} onClick={() => void go(step + 1)}>
-              {busy ? 'Switching account…' : 'Next'}
+              Next
             </button>
           ) : (
             <button className="btn primary" disabled={busy} onClick={save}>

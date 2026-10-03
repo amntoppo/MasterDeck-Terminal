@@ -78,7 +78,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setupCheck: invoke(CH.setupCheck),
   setupTool: invoke(CH.setupTool),
   ghAccounts: blocked,
-  ghSwitch: blocked,
+  ghUser: blocked,
   ghOwners: blocked,
   configDetect: invoke(CH.configDetect),
   configDetectAll: invoke(CH.configDetectAll),
