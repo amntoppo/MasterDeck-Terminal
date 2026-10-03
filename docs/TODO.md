@@ -34,8 +34,8 @@ fixes it, and move the item here to "Recently done".
   without those rules, or a per-account `core.sshCommand` with the right key.
 
 - **P3 · Multi-account polling gaps.** `master board`'s `errors` don't name the account (the app
-  shows them as is); a session's `branch_head` for a repo not cloned locally is read with the
-  primary's token (another account's private repo comes back empty); untagged team PR pages cached
+  shows them as is); a rate limit on one account pauses the app's polling for every account
+  until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
 

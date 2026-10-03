@@ -230,7 +230,15 @@ export function keepLastGood(raw: Raw, prev: Raw | null, c: AppConfig): Raw {
     const failed = new Set(accts.filter((a) => (a.sources as Record<string, boolean> | undefined)?.[src] === false).map((a) => String(a.login)))
     const of = (x: Raw) =>
       typeof x.account === 'string' ? x.account : (accountForRepo(list === 'issues' ? ((x.repo as string | null) ?? null) : prRepo(String(x.url ?? '')), c) ?? '')
-    out[list] = [...rows(raw[list]).filter((x) => !failed.has(of(x))), ...before.filter((x) => failed.has(of(x)))]
+    // One row per issue (repo#number) or PR (url): a fresh row wins over one kept from before.
+    const key = (x: Raw) => (list === 'issues' ? `${low(String(x.repo ?? primaryRepo(c)))}#${String(x.number)}` : String(x.url ?? ''))
+    const seen = new Set<string>()
+    out[list] = [...rows(raw[list]).filter((x) => !failed.has(of(x))), ...before.filter((x) => failed.has(of(x)))].filter((x) => {
+      const k = key(x)
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
   }
   return out
 }

@@ -17,7 +17,10 @@ def build(src, *, now_iso: str, today: date, master_name: str = config.MASTER_NA
         try:
             value = fn()
         except Exception as e:  # any source failure makes a partial snapshot, never a crash
-            errors.append({"source": name, "message": str(e)[:300]})
+            err = {"source": name, "message": str(e)[:300]}
+            if isinstance(getattr(e, "account", None), str):
+                err["account"] = e.account  # read as another account than this part's (a session's branch)
+            errors.append(err)
             sources[name] = False
             return default
         sources.setdefault(name, True)
@@ -82,7 +85,7 @@ def merge(parts: list) -> dict:
             if p["url"] not in seen_p:
                 seen_p.add(p["url"])
                 prs.append(dict(p, account=login))
-        errors += [dict(e, account=login) for e in s["errors"]]
+        errors += [{"account": login, **e} for e in s["errors"]]
     return {**first, "issues": issues, "prs": prs, "errors": errors,
             "sources": {k: all(s["sources"][k] for _, s in parts) for k in SOURCES},
             "accounts": [{"login": login, "sources": s["sources"]} for login, s in parts]}

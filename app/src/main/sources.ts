@@ -1135,9 +1135,9 @@ export class Sources {
         this.saveGithubCache();
         return { ok: true, message: "refreshed" };
       }
-      // Keep the last good list on screen; say why it didn't update. Per account, ghc pauses only the limited one.
+      // Keep the last good list on screen; say why it didn't update.
       const msg = msgs.join("; ");
-      if (!accts) this.githubPaused(msg);
+      this.githubPaused(msg);
       this.teamPrsError = msg;
       return { ok: false, message: msg };
     } catch (e) {
@@ -1364,12 +1364,10 @@ export class Sources {
         this.rawSnapshot = raw;
         this.snapshot = parseSnapshot(raw);
         this.setHealth("snapshot", true);
-        // A snapshot can succeed with some sources failed; a rate-limit failure still pauses GitHub calls.
-        // One account's (two or more: tagged) pauses only that account, in the shared cache (ghc).
+        // A snapshot can succeed with some sources failed; a rate-limit failure (any account's) still pauses GitHub calls.
         const errs =
-          (r.data as { errors?: { message?: string; account?: string }[] })
-            ?.errors ?? [];
-        for (const e of errs) if (!e?.account) this.githubPaused(e?.message);
+          (r.data as { errors?: { message?: string }[] })?.errors ?? [];
+        for (const e of errs) this.githubPaused(e?.message);
         const parts = (raw.accounts ?? []) as {
           login?: string;
           sources?: Record<string, boolean>;

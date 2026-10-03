@@ -396,5 +396,59 @@ class BoardAccountTest(unittest.TestCase):
         self.assertEqual(json.loads(buf.getvalue()), [{"title": "Sprint 6"}])
 
 
+    def test_sprints_merge_across_accounts_by_title(self):
+        class S:
+            def __init__(self, sprints): self.s = sprints
+            def sprints(self): return self.s
+        alice = S([{"title": "Sprint 6", "startDate": "2026-09-21", "completed": False, "projects": ["acme/1"]},
+                   {"title": "Sprint 5", "startDate": "2026-09-07", "completed": True, "projects": ["acme/1"]}])
+        bob = S([{"title": "Sprint 7", "startDate": "2026-10-05", "completed": False, "projects": ["globex/7"]},
+                 {"title": "Sprint 5", "startDate": "2026-09-07", "completed": False, "projects": ["globex/7"]}])
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=lambda v, runner=None: alice if v["login"] == "alice" else bob), redirect_stdout(buf):
+            self.assertEqual(cli.main(["sprints"]), 0)
+        got = json.loads(buf.getvalue())
+        self.assertEqual([(x["title"], x["completed"], x["projects"]) for x in got],
+                         [("Sprint 7", False, ["globex/7"]), ("Sprint 6", False, ["acme/1"]), ("Sprint 5", False, ["acme/1", "globex/7"])])
+
+
+class BranchHeadAccountTest(unittest.TestCase):
+    """A session's branch head is read as the account that owns its repo, and its failure is that account's."""
+    BR = "globex/app@feat/y"
+
+    def snap(self, bob_fails=False):
+        reads = []
+
+        class Alice(FakeSource):
+            env = {"GHC_ACCOUNT": "alice"}
+
+            def state(self): return {"sessions": {"s1": {"issue": 939, "branch": BranchHeadAccountTest.BR, "linked_at": "x", "prs": []}}}
+
+            def branch_head(self, key): raise AssertionError("read as alice")
+
+        class BobS(Bob):
+            env = {"GHC_ACCOUNT": "bob-work"}
+
+            def branch_head(self, key):
+                reads.append((key, self.env))
+                if bob_fails:
+                    raise RuntimeError("HTTP 404")
+                return "b0b"
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=lambda v, runner=None: Alice() if v["login"] == "alice" else BobS()):
+            return cli._snap(types.SimpleNamespace(fixtures=None, now=SNAP_NOW)), reads
+
+    def test_read_with_the_repos_account(self):
+        snap, reads = self.snap()
+        self.assertEqual(reads, [(self.BR, {"GHC_ACCOUNT": "bob-work"})])
+        self.assertEqual(snap["sessions"][0]["branch_head"], "b0b")
+        self.assertEqual(snap["errors"], [])
+
+    def test_its_failure_is_tagged_with_that_account(self):
+        snap, _ = self.snap(bob_fails=True)
+        self.assertEqual(snap["errors"], [{"source": "branches", "message": "HTTP 404", "account": "bob-work"}])
+
+
 if __name__ == "__main__":
     unittest.main()

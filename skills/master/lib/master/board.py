@@ -145,10 +145,24 @@ def sprints_query(projects: list) -> str:
     return "query { " + " ".join(parts) + " }" if parts else ""
 
 
+def merge_sprints(sprints: list) -> list:
+    """A title several boards (or accounts) share is one sprint: its boards joined, completed only
+    where every one has it completed; newest first."""
+    out: dict = {}
+    for sp in sprints:
+        cur = out.get(sp["title"])
+        if cur is None:
+            out[sp["title"]] = dict(sp)
+            continue
+        cur["completed"] = bool(cur.get("completed")) and bool(sp.get("completed"))
+        cur["projects"] = list(dict.fromkeys([*(cur.get("projects") or []), *(sp.get("projects") or [])]))
+    return sorted(out.values(), key=lambda s: s.get("startDate") or "", reverse=True)
+
+
 def parse_sprints(data: dict, projects: list) -> list:
     """Every iteration of every project's sprint field, newest first, completed ones marked. A
     title that several boards share is one sprint (it filters each of them)."""
-    out: dict = {}
+    found: list = []
     for owner in (data or {}).values():
         if not isinstance(owner, dict):
             continue
@@ -156,14 +170,9 @@ def parse_sprints(data: dict, projects: list) -> list:
             cfg = (((proj or {}).get("field") or {}).get("configuration") or {}) if isinstance(proj, dict) else {}
             key = config.project_key(projects[int(alias[1:])]) if alias[1:].isdigit() and int(alias[1:]) < len(projects) else None
             for done, lst in ((False, cfg.get("iterations")), (True, cfg.get("completedIterations"))):
-                for it in lst or []:
-                    if not isinstance(it.get("title"), str):
-                        continue
-                    cur = out.setdefault(it["title"], dict(it, completed=done, projects=[]))
-                    cur["completed"] = cur["completed"] and done
-                    if key and key not in cur["projects"]:
-                        cur["projects"].append(key)
-    return sorted(out.values(), key=lambda s: s.get("startDate") or "", reverse=True)
+                found += [dict(it, completed=done, projects=[key] if key else []) for it in lst or []
+                          if isinstance(it.get("title"), str)]
+    return merge_sprints(found)
 
 
 def sprint_query(sprint: str, mine: bool) -> str:

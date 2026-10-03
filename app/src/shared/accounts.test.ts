@@ -202,6 +202,14 @@ describe('keepLastGood', () => {
     const prev = { issues: [], prs: [pr('https://github.com/acme/api/pull/1', 'alice'), pr('https://github.com/globex/app/pull/8', 'bob-work'), pr('https://github.com/globex/app/pull/7', 'alice')] }
     expect(keepLastGood(raw, prev, two).prs).toEqual([pr('https://github.com/globex/app/pull/9', 'bob-work'), pr('https://github.com/acme/api/pull/1', 'alice'), pr('https://github.com/globex/app/pull/7', 'alice')])
   })
+  it('a row both fresh and kept from before is listed once, the fresh one', () => {
+    const raw = { sources: { board: false, prs: false }, accounts: [{ login: 'alice', sources: { board: true, prs: true } }, { login: 'bob-work', sources: { board: false, prs: false } }],
+      issues: [{ repo: 'globex/app', number: 2, title: 'new', account: 'alice' }], prs: [{ url: 'https://github.com/globex/app/pull/8', title: 'new', account: 'alice' }] }
+    const prev = { issues: [{ repo: 'GLOBEX/app', number: 2, title: 'old', account: 'bob-work' }, issue('globex/app', 3)], prs: [{ url: 'https://github.com/globex/app/pull/8', title: 'old', account: 'bob-work' }] }
+    const out = keepLastGood(raw, prev, two)
+    expect(out.issues).toEqual([{ repo: 'globex/app', number: 2, title: 'new', account: 'alice' }, issue('globex/app', 3)])
+    expect(out.prs).toEqual([{ url: 'https://github.com/globex/app/pull/8', title: 'new', account: 'alice' }])
+  })
   it('nothing failed, or nothing before: the new lists as they came', () => {
     const raw = { sources: { board: true, prs: true }, issues: [issue(null, 5)], prs: [] }
     expect(keepLastGood(raw, { issues: [issue(null, 1)], prs: [{ url: 'u' }] }, two)).toEqual(raw)

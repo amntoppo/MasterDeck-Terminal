@@ -35,14 +35,35 @@ def _sources(args) -> list:
     return [collect.Live.for_account(a) for a in config.accounts()]
 
 
+class _BranchesByRepo:
+    """The primary's source, with each session's branch head read as the account owning its repo
+    (its failure tagged with that account)."""
+
+    def __init__(self, primary, by_login: dict):
+        self._primary, self._by = primary, by_login
+
+    def __getattr__(self, name):
+        return getattr(self._primary, name)
+
+    def branch_head(self, key: str) -> str:
+        login = config.account_for_repo(key.split("@", 1)[0])
+        try:
+            return self._by.get(login, self._primary).branch_head(key)
+        except Exception as e:
+            e.account = login
+            raise
+
+
 def _snap(args) -> dict:
     now = _now(args)
     srcs = _sources(args)
     if len(srcs) == 1:
         return snapshot.build(srcs[0], now_iso=now, today=_today(args))
     # Each account's issues and PRs with its own token; the sessions once, with the primary.
-    return snapshot.merge([(a["login"], snapshot.build(s, now_iso=now, today=_today(args), with_sessions=i == 0))
-                           for i, (a, s) in enumerate(zip(config.accounts(), srcs))])
+    logins = [a["login"] for a in config.accounts()]
+    srcs[0] = _BranchesByRepo(srcs[0], dict(zip(logins, srcs)))
+    return snapshot.merge([(login, snapshot.build(s, now_iso=now, today=_today(args), with_sessions=i == 0))
+                           for i, (login, s) in enumerate(zip(logins, srcs))])
 
 
 def cmd_snapshot(args) -> int:
@@ -325,7 +346,8 @@ def cmd_sprints(args) -> int:
     if len(errors) == len(srcs):
         print(errors[0])
         return 1
-    print(json.dumps(out))
+    # Two or more accounts: a sprint title on several accounts' boards is one sprint.
+    print(json.dumps(board.merge_sprints(out) if len(srcs) > 1 else out))
     return 0
 
 
