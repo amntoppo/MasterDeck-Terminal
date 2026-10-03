@@ -128,6 +128,7 @@ Never edit it by hand: change the backend file, then `app/scripts/sync-protocol.
 `$MASTERDECK_BACKEND`, default `../../masterdeck-backend` from `app/scripts`). The drift test
 `app/src/shared/remote.drift.test.ts` compares the two; it resolves the backend as the sibling
 checkout (or `MASTERDECK_BACKEND`) and **skips** when that is missing (so it never runs in CI).
+`session.start.account` (2026-10-03) is optional; desktops before it refuse a command that sets it.
 It fails when the backend checkout is on a branch with a different `protocol.ts`.
 `PROTOCOL_VERSION` is 3 (`MIN_PROTOCOL` 2); keep changes additive so old desktops, servers and
 web tabs keep working.

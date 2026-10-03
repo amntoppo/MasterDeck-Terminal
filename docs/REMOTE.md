@@ -123,7 +123,7 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
 |---|---|
 | `inbox.act {itemId, args:{action, text?, key?, question?, answer?}}` | item must be open or snoozed, else `stale`; `inboxAct(..., remote=true)` with `by: remote:<by>` |
 | `inbox.snooze {minutes 1..10080}` / `inbox.dismiss` | same staleness check |
-| `session.start {issue, repo?, model?, prompt?}` | `cli.draftAssign` → `startAssign` (prompt replaces the draft text) |
+| `session.start {issue, repo?, model?, prompt?, account?}` | `cli.draftAssign` → `startAssign` (prompt replaces the draft text; `account?` a GitHub login connected on the Mac, refused when it is not or needs to log in again, omitted: the issue's account; send it only when the user picked one, desktops before it reject a command that sets it) |
 | `session.stop {key}` | background sessions only, no confirm dialog (`stopBg`) |
 | `session.resume {key}` | only `done`/`suspended` sessions |
 | `session.send {key, text, via: queue\|now}` | refused when `needs-input` ("answer it from Needs you") or `suspended`; `now` or idle → `sender.send` straight (never via master); `queue` → `editQueue add` (needs the queue hook) |

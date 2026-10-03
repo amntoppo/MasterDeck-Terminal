@@ -61,6 +61,17 @@ describe('RemoteCommands', () => {
     expect(d.startAssign).toHaveBeenLastCalledWith(expect.objectContaining({ prompt: 'Only read the code', edited: true }))
   })
 
+  it('session.start passes a connected account and refuses any other', async () => {
+    const s = { ...st([]), ghAccounts: [{ login: 'alice', primary: true, healthy: true }, { login: 'bob-work', primary: false, healthy: true }, { login: 'carol', primary: false, healthy: false }] } as unknown as AppState
+    const d = deps(s)
+    const rc = new RemoteCommands(d, file())
+    await rc.run(cmd({ type: 'session.start', args: { issue: 142, repo: 'globex/app', account: 'bob-work' } }))
+    expect(d.startAssign).toHaveBeenLastCalledWith(expect.objectContaining({ account: 'bob-work' }))
+    expect(await rc.run(cmd({ type: 'session.start', args: { issue: 1, account: 'carol' } }))).toEqual({ ok: false, message: 'carol is not a GitHub account connected on this Mac' })
+    expect(await rc.run(cmd({ type: 'session.start', args: { issue: 1, account: 'dave' } }))).toEqual({ ok: false, message: 'dave is not a GitHub account connected on this Mac' })
+    expect(d.draftAssign).toHaveBeenCalledTimes(1)
+  })
+
   it('session.start reports a failed draft', async () => {
     const d = deps(st([]), { draftAssign: vi.fn(async () => ({ ok: false as const, message: 'no workspace for o/x' })) })
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 1, repo: 'o/x' } }))).toEqual({ ok: false, message: 'no workspace for o/x' })
