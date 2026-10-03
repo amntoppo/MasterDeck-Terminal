@@ -49,34 +49,22 @@ fixes it, and move the item here to "Recently done".
   `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
   builder sessions use gh's active account. (f) master starts without `--settings` when the primary
   needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
-  without an `origin` of any connected account is read as the primary.
+  without an `origin` of any connected account is read as the primary. (h) Boards and their repos
+  belong to one account: a board holding issues from another account's repos moves cards as the
+  repo's account. (i) Select all in one account's Repos & boards may widen what another account
+  lists. (j) An account can show healthy for a few seconds before its background check fails.
 - **P3 · Phone/API clients and `session.start.account`.** The protocol field is in the backend
   branch `feat/session-start-account` (worktree `~/Documents/masterdeck-backend-proto`), not pushed
   or deployed; no web or phone UI sends it yet. The drift test needs that checkout (set
   `MASTERDECK_BACKEND`) while the MasterDeck branch is unmerged.
-- **P3 · Several-accounts review leftovers (small).** Config parsing: `parseAccounts` warns on
-  every parse, top-level `repos` are ignored once an account lists repos, a duplicate board under two
-  accounts is dropped silently, `repoFromRemote` accepts any host for scp/ssh forms, `ssh://git@github.com:443/`
-  and aliases without `user@` are not rewritten, `#` anywhere strips the rest of an ssh config line,
-  login and board keys compared case-sensitively in `accountForProject`/`sessionAccount`.
-  Accounts: a removed account's file lingers up to an hour after its last session ends; a failing
-  `configSave` writes a `config.backup.<ts>.json` each launch; a transient `gh auth token` failure
-  deletes an unused file until the next refresh; `accountClients` never evicts removed logins;
-  an invalid `GHC_ACCOUNT` fails open to the default cache key; `ghc --status` reads only `paused.json`.
-  Sessions: `accountOfSession` matches spawn proposals by name only (a reused name picks an old
-  account); `proposalAccount` reads the latest snapshot; AssignDialog's default ignores a proposal's
-  `spawn.account`; a removed or unhealthy recorded login is still shown and sent on resume (fails
-  visibly); unhealthy and unknown accounts get the same remote refusal text; PR watch: an entry
-  whose account was removed falls back to the primary, and a PR shared by two sessions keeps the
-  first one's account. Setup/UI: `closeLogin` may run twice, repeated Log in clicks open duplicate
-  gh-login tabs, the gh-login pane inherits the app's env (a `GH_TOKEN` set at launch makes `gh auth
-  login` refuse), a board held by another account stays in raw `boards` state. Board/PRs: untagged cards
-  on unconfigured boards show only on the primary tab, the global `selectedSprint` may name a
-  sprint the tab's account lacks, after multi to single stale tagged team PR copies show twice until
-  the next refresh. Ticket builder: `md-ticket-builder-*` sessions are hidden by name, a corrupt
-  `context.json` skips the remote account check, and a ticket session's account is sticky.
-  Tests missing: multi-mode gating, remote refusal, dismiss-heal, the `context.json` read,
-  `Sources` glue; the `.pane-head` layout and a prettier warning on `main/index.ts` were not checked.
+- **P3 · Several-accounts review leftovers (small).**
+  - Config parsing: `parseAccounts` warns on every parse, top-level `repos` are ignored once an account lists repos, a duplicate board under two accounts is dropped silently, `repoFromRemote` accepts any host for scp/ssh forms, `ssh://git@github.com:443/` and aliases without `user@` are not rewritten, `#` anywhere strips the rest of an ssh config line, login and board keys compared case-sensitively in `accountForProject`/`sessionAccount`.
+  - Accounts: a removed account's file lingers up to an hour after its last session ends; a failing `configSave` writes a `config.backup.<ts>.json` each launch; a transient `gh auth token` failure deletes an unused file until the next refresh; `accountClients` never evicts removed logins; an invalid `GHC_ACCOUNT` fails open to the default cache key; `ghc --status` reads only `paused.json`.
+  - Sessions: `accountOfSession` matches spawn proposals by name only (a reused name picks an old account); `proposalAccount` reads the latest snapshot; AssignDialog's default ignores a proposal's `spawn.account`; a removed or unhealthy recorded login is still shown and sent on resume (fails visibly); unhealthy and unknown accounts get the same remote refusal text; PR watch: an entry whose account was removed falls back to the primary, and a PR shared by two sessions keeps the first one's account.
+  - Setup/UI: `closeLogin` may run twice, repeated Log in clicks open duplicate gh-login tabs, the gh-login pane inherits the app's env (a `GH_TOKEN` set at launch makes `gh auth login` refuse), a board held by another account stays in raw `boards` state.
+  - Board/PRs: untagged cards on unconfigured boards show only on the primary tab, the global `selectedSprint` may name a sprint the tab's account lacks, after multi to single stale tagged team PR copies show twice until the next refresh.
+  - Ticket builder: `md-ticket-builder-*` sessions are hidden by name, a corrupt `context.json` skips the remote account check, and a ticket session's account is sticky.
+  - Tests missing: multi-mode gating, remote refusal, dismiss-heal, the `context.json` read, `Sources` glue; the `.pane-head` layout and a prettier warning on `main/index.ts` were not checked.
 - **P3 · Old per-tab ticket-builder folders are never removed.** With two or more accounts each
   Board tab gets `ticket-builder/tab-<id>/`; closing the tab leaves it (so reopening continues).
   Main doesn't know which tabs exist (they live in the renderer's storage), so nothing sweeps them.
