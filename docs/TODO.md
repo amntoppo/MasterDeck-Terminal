@@ -73,6 +73,14 @@ the repo-root [TODO.md](../TODO.md).
 - **gamerun-app PR #140 (feat/org-join-code)**: closed unmerged on purpose; the merge-conflict
   question was never answered; 4 local commits unpushed there. Other repo; ask the user.
 - **Offers never answered** (ask before doing): show Claude Code's own monitors in Details.
+- **Native PR watch / board / queue follow-ups** (plan H, all P3, deferred from review):
+  `LinkStore` read-modify-write has no lock across instances (`main/ticketLinks.ts`); auto-link
+  marks a ticket tried before linking, so a transient failure is never retried, and
+  `board-link-tried.json` is never pruned (`main/boardFlow.ts`); PR watch polls inaccessible PRs
+  forever and runs the heavy query every minute for CONFLICTING/UNKNOWN PRs (`main/prWatch.ts`);
+  a hook killed between the alive check and reading its answer loses one `/queue` item
+  (`main/deckHooks.ts`); review-gate markers in `$TMPDIR` are never cleaned; a ticket request has a
+  ms race between `.taken` and `rm -f .req` on timeout (`mv .req .gone` would close it).
 - **Orphaned babysit-proof hook**: older machines may still have a babysit-proof `PROOF_PRE`
   PreToolUse hook in `~/.claude/settings.json` (the skill is gone; `migrateLegacyHooks` does not
   remove it). Remove by hand, or add it to `LEGACY`.
@@ -84,12 +92,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
-| Self-review gate of MasterDeck's own (`reviewGateCommand`/`installReviewGate`, always installed, `pr-review` decides per session; first `gh pr create` of a session denied with a review instruction; passes on a babysit-pr marker); built-ins say MasterDeck does them | feat/native-babysit | plan H |
-| Skill hooks out, once (`migrateLegacyHooks`: exact MasterDeck commands and `masterdeck-builtin` wrappers only, `native-hooks.json`); Settings → Hooks shows Queue and Self-review gate as status; Skills popup without switches; `/queue` gates on MasterDeck's queue | feat/native-babysit | plan H |
-| `/queue` through MasterDeck's own hook (UserPromptSubmit stores; Stop handshake: app claims by rename and answers, else the hook drains; queue-off when the skill's hooks are installed; `MASTERDECK_QUEUE_DIR`) | feat/native-babysit | plan H |
-| PR watch by MasterDeck (PrWatch: light query per 50 PRs, heavy only when changed, viewer-gated seen set, Details rows, review offers de-duplicated; Settings → Watch new PRs) | feat/native-babysit | plan H |
-| Board moves by MasterDeck (BoardFlow: link spawned sessions, PR links, PR Raised only once the PR is ready, Dev Done when all merged; linked steps for native links) | feat/native-babysit | plan H |
-| Create with Claude hands tickets to MasterDeck (requests/answers folders; 90 s wait, stale-request sweep, body-file realpath containment) | feat/native-babysit | plan H |
+| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI) | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |

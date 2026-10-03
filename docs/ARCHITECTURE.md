@@ -29,13 +29,16 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
 1. Reconciles the remote token file and `account.json` (a token without identity is deleted; an
    identity without a token → `account.signedOutRemotely`).
 2. `loginPath()` (the login shell's PATH) and `resolveClaude()`.
-3. `registerIpc()` — every handler through `reg = new IpcRegistry(ipcMain)`.
+3. `registerIpc()` — every handler through `reg = new IpcRegistry(ipcMain)`; then
+   `linkStore.importOnce()` (babysit-ticket's links copied into `ticket-links.json`, first launch only).
 4. `loadMacKey(<home>/browser-key, safeStorage)` (the web app's Mac key).
 5. Status line hook (`statusline.ts`: install or refresh `statusline_tee.py`), bundled skills
    (`syncSkills`), the one-time `migrateLegacyHooks` (non-Windows, not smoke, no
-   `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), hook status, MasterDeck's deck hook
-   (non-Windows: `deckHooks.setup()`, monitors, `setInterval(pumpWatches, 1000)`,
-   `installDeckHooks`, then `refreshHooks()` again), workflow migration + hook sync.
+   `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), `installReviewGate` (same conditions),
+   hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
+   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue`, then
+   `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
+   `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
 7. `createWindow()`, `sources.start()`, `syncRemote()`.
 
@@ -343,8 +346,8 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `teamPrs`, `teamPrsAt`, `teamPrsLoading`, `teamPrsError` | `refreshTeamPrs` |
 | `inbox` | `Inbox.view()` over `collectItems` |
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
-| `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, babysit-ticket state |
-| `watches`, `schedules` | `Watches.info()`, transcripts |
+| `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, `ticket-links.json` |
+| `watches`, `schedules` | `Watches.info()` + `PrWatch.info()` (`pr:<url>` rows), transcripts |
 | `sources`, `errors`, `missingBinaries`, `ghCache` | health of each poll, `readGhCacheStatus()` |
 | `settings`, `config`, `skills`, `hooks`, `statuslineInstalled`, `masterWorkspace` | `settings.json`, `~/.claude/master/config.json`, `syncSkills`, `hookStatus` |
 | `stoppedByRestart`, `restoring` | `running-sessions.json` |

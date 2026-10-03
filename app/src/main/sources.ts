@@ -544,7 +544,7 @@ export class Sources {
     this.emit();
   }
 
-  /** Each session's ticket: the snapshot's, then babysit-ticket's fresher links. */
+  /** Each session's ticket: the snapshot's, then MasterDeck's fresher links (ticket-links.json). */
   private issueOf(): Map<string, Ticket> {
     return new Map([
       ...this.snapshot.sessionIssue,

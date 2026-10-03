@@ -63,7 +63,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   ticked (the default), your edited copy is sent after the system prompt, and the session works from
   it instead of stopping to ask. Untick it to leave the description out; your edits don't change the
   issue on GitHub.
-- **System prompt:** master's ASSIGN text (babysit-ticket, worktree, reply protocol), editable.
+- **System prompt:** master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
   follows them instead of stopping to ask.
 - **Start:** switches to Terminals at once with a "Starting…" tab. The app records and approves the
@@ -95,7 +95,8 @@ then it fast-forwards from origin. A toast says what happened. Only the workspac
 switched, and sessions running in that checkout see the new branch too.
 
 A session you start yourself (`claude` in a shell) is not linked to any ticket unless you ask:
-`/babysit-ticket` or `tt link <N>` in it, or **Link session…** in a ticket's Start dialog. Being in a
+**Link session…** in a ticket's Start dialog. (`/babysit-ticket` or `tt link <N>` by hand only
+updates the skill's own file, which MasterDeck no longer reads.) Being in a
 checkout whose branch was once linked to a ticket does not link it.
 
 ## Keeping many sessions moving
@@ -194,8 +195,8 @@ checkout whose branch was once linked to a ticket does not link it.
   list of steps) are turned into flows at launch.
 - **Stopped sessions on an issue:** a card whose issue had a session that is no longer running shows
   **Stopped** (or Done) with that session and **Resume**; opening the issue lists every earlier
-  session on it, newest first, each with Resume. The links come from babysit-ticket
-  (`~/.claude/babysit-ticket/state.json`); resumes of one background session count as one; sessions
+  session on it, newest first, each with Resume. The links are MasterDeck's own
+  (`~/.claude/masterdeck/ticket-links.json`; babysit-ticket's links were copied in once); resumes of one background session count as one; sessions
   whose conversation is gone (deleted, or only a title stub) are left out. Resume runs
   `claude --bg --resume` in the session's own folder.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
@@ -422,8 +423,8 @@ creation.
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
   command). **New chat** starts over.
 
-- **Drag cards** between columns. The status moves through babysit-ticket (`tt.sh set --force`,
-  against a temporary state folder, so no real session is touched). Moving backwards asks first; a
+- **Drag cards** between columns. MasterDeck moves the status itself (the board write
+  babysit-ticket used to make, forced for a drag). Moving backwards asks first; a
   failure puts the card back.
 - **Summary:** done / in progress / blocked / to do, per person, and a burndown (one point per day, from
   each board refresh). Copy as Markdown.
@@ -616,20 +617,20 @@ and how long ago it connected. Click it to open Settings → Remote.
 
 ## Links survive a resume
 
-babysit-ticket links tickets to sessions **by session id**, and resuming a parked background session
+MasterDeck links tickets to sessions **by session id**, and resuming a parked background session
 gives it a new session id. MasterDeck remembers every session id each background session has had,
 in `~/.claude/masterdeck/session-history.json`. It also recognises the original one, because a
 background id is the first 8 characters of the original session id. When a resumed session has no
-link, or only babysit-ticket's automatic branch link made in the first 2 minutes after the resume,
-MasterDeck re-links it to its earlier ticket with `tt.sh link`. A link made on purpose later is left
+link, or only an automatic link made in the first 2 minutes after the resume,
+MasterDeck re-links it to its earlier ticket. A link made on purpose later is left
 alone. Each re-link is tried at most once every 10 minutes; a failure shows in the sessions column footer.
 
 ## One GitHub cache for everything
 
 Every GitHub read on this machine that matters goes through `ghc`, a drop-in for `gh` that ships
 with the master skill (`~/.claude/skills/master/ghc`, linked as `~/.local/bin/ghc`). Callers:
-master's sweep and snapshot, MasterDeck (PR status per tab, PR popups, assignees),
-babysit-ticket's `tt.sh`, and babysit-pr's poll loop.
+master's sweep and snapshot, MasterDeck (PR status per tab, PR popups, assignees, PR watch, board
+moves), and babysit-ticket's `tt.sh` and babysit-pr's poll loop when you run them by hand.
 
 - **Short-lived cache.** Reads are kept in `~/.claude/gh-cache` for a few seconds to minutes, so
   the same read from several sessions makes one call. TTLs: PR status 45 s, PR summaries 2 min,
