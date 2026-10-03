@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -153,7 +153,9 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     try {
       const d = new DeckHooks(home)
       d.setup()
-      execFileSync(d.script, ['UserPromptSubmit'], { input: JSON.stringify({ session_id: SID, prompt: '/queue moved' }) })
+      // The session's own env never splits it from the app: the hook uses the dir the app baked in.
+      const env = { ...process.env, MASTERDECK_QUEUE_DIR: join(home, 'other') }
+      execFileSync(d.script, ['UserPromptSubmit'], { input: JSON.stringify({ session_id: SID, prompt: '/queue moved' }), env })
       expect(readQueue(SID)).toEqual(['moved'])
       expect(readQueue(SID, queues)).toEqual(['moved'])
     } finally {
@@ -161,4 +163,56 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
       else process.env.MASTERDECK_QUEUE_DIR = prev
     }
   }, 20_000)
+})
+
+describe('pumpQueue (MasterDeck answers a Stop)', () => {
+  const setup = () => {
+    const home = mkdtempSync(join(tmpdir(), 'dp-'))
+    const queues = join(home, 'queue')
+    const d = new DeckHooks(home, queues)
+    for (const sub of ['queue-requests', 'queue-answers']) mkdirSync(join(d.dir, sub), { recursive: true })
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    editQueue(SID, { op: 'add', text: 'b' }, queues)
+    const request = (pid: number, ageMs = 0) => {
+      const id = `${Math.floor((Date.now() - ageMs) / 1000)}-${pid}-7`
+      writeFileSync(join(d.dir, 'queue-requests', `${id}.json`), JSON.stringify({ id, sid: SID }))
+      return id
+    }
+    const answer = (id: string) => join(d.dir, 'queue-answers', `${id}.json`)
+    return { d, queues, request, answer }
+  }
+  it('a live hook gets the next prompt, and the item goes once', () => {
+    const { d, queues, request, answer } = setup()
+    const id = request(process.pid)
+    d.pumpQueue()
+    d.pumpQueue()
+    expect(JSON.parse(readFileSync(answer(id), 'utf8'))).toEqual(queueAnswer('a', 1))
+    expect(readQueue(SID, queues)).toEqual(['b'])
+  })
+  it('a hook that is gone (dead pid, or older than its wait) loses nothing', () => {
+    const { d, queues, request, answer } = setup()
+    const dead = request(99_999_999)
+    const old = request(process.pid, 20_000)
+    d.pumpQueue()
+    expect(readQueue(SID, queues)).toEqual(['a', 'b'])
+    expect(existsSync(answer(dead))).toBe(false)
+    expect(existsSync(answer(old))).toBe(false)
+  })
+  it('cannot claim a request the hook took back', () => {
+    const { d, request } = setup()
+    const id = request(process.pid)
+    const r = join(d.dir, 'queue-requests', id)
+    writeFileSync(`${r}.gone`, readFileSync(`${r}.json`))
+    rmSync(`${r}.json`)
+    expect(d.claimQueue(id)).toBe(false)
+  })
+  it('sweeps answers nobody read after a minute', () => {
+    const { d, answer } = setup()
+    const id = `${Math.floor(Date.now() / 1000) - 120}-1-1`
+    writeFileSync(answer(id), '{}')
+    const fresh = `${Math.floor(Date.now() / 1000)}-1-1`
+    writeFileSync(answer(fresh), '{}')
+    d.pumpQueue()
+    expect(readdirSync(join(d.dir, 'queue-answers'))).toEqual([`${fresh}.json`])
+  })
 })

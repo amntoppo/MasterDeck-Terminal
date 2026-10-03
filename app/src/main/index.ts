@@ -85,7 +85,6 @@ import { configuredModel } from "./models";
 import {
   editQueue,
   isQueueEdit,
-  queueAnswer,
   readQueue,
   shiftQueue,
   unshiftQueue,
@@ -272,17 +271,11 @@ const watches = new Watches(
     ),
   () => sources.changed(),
 );
-/** A session's turn ended with prompts queued: hand it the next one through the hook (once). */
-function pumpQueue(): void {
-  for (const r of deckHooks.queueRequests()) {
-    if (!deckHooks.claimQueue(r.id)) continue;
-    const items = readQueue(r.sid);
-    // Peek, answer, then take it off: a crash in between repeats a prompt rather than losing it.
-    deckHooks.answerQueue(
-      r.id,
-      items.length ? queueAnswer(items[0], items.length - 1) : {},
-    );
-    if (items.length) shiftQueue(r.sid);
+function mtimeMs(p: string): number {
+  try {
+    return statSync(p).mtimeMs;
+  } catch {
+    return 0;
   }
 }
 /** Hook status in the UI, and whether MasterDeck's hook leaves /queue to the skill's hooks. */
@@ -294,8 +287,16 @@ function refreshHooks(): void {
 /** Monitor calls already answered (the hook removes its file once it read the answer). */
 const answeredWatches = new Map<string, number>();
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
+/** settings.json's mtime when queue-off was last worked out. */
+let settingsSeen = 0;
 function pumpWatches(): void {
-  pumpQueue();
+  deckHooks.pumpQueue();
+  // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
+  const m = mtimeMs(paths.claudeSettings);
+  if (m !== settingsSeen) {
+    settingsSeen = m;
+    deckHooks.setQueueOff(queueSkillHooked(paths.claudeSettings));
+  }
   const by = sources.getSettings().monitorsBy;
   const now = Date.now();
   for (const [id, at] of answeredWatches)

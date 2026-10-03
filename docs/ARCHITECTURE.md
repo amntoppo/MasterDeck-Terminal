@@ -183,13 +183,17 @@ One MasterDeck hook per trigger in settings.json reads the session's copy.
 
 ### Queue
 
-`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` moves it;
-the `queue` skill uses the same file). MasterDeck's hook stores `/queue …`; at a Stop the app
-(running) or the hook (not running) hands over the next prompt, claimed by rename so it runs once:
-the hook leaves a request and waits 4 s; `pumpQueue` (`index.ts`, every second with `pumpWatches`)
-claims it, answers with `queueAnswer` and only then shifts the item (a crash repeats a prompt rather
-than losing it). Not claimed in time, the hook renames the request back itself and drains one item;
-claimed, it waits up to 3 s more for the answer (worst case ~7 s, under the 10 s hook timeout).
+`main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` in the
+app's env moves it; the dir is baked into `hook.sh`, so a session's own env never splits them; the
+`queue` skill uses the same file). MasterDeck's hook stores `/queue …`; at a Stop the app (running)
+or the hook (not running) hands over the next prompt, claimed by rename so it runs once: the hook
+leaves `queue-requests/<now>-<pid>-<rand>.json` and waits until 4 s after its start;
+`DeckHooks.pumpQueue` (every second from `pumpWatches`) takes only requests under 8 s old whose
+hook pid is alive, claims, answers with `queueAnswer`, and shifts the item only if the hook is still
+alive (a hook gone or a crash repeats a prompt rather than losing it). Not claimed in time, the
+hook renames the request back itself and drains one item; claimed, it waits until 7 s after its
+start (clock deadlines, under the 10 s hook timeout). Unread answers are swept after 60 s.
+`pumpWatches` also re-checks queue-off whenever `~/.claude/settings.json` changes.
 Writes are temp + rename; an empty queue has no file. Remote `session.send` with `via: queue` adds
 here (needs `hooks.queue`).
 

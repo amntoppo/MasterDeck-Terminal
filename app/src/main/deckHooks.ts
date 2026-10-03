@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { join } from 'node:path'
 import { applyEventLine, parseRequest, type HookRequest, type HookSessionState } from '@shared/deckHooks'
 import { readNewLines, type FollowState } from './files'
-import { queueDir } from './queue'
+import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
 
 /** events.jsonl is emptied at launch once it grows past this. */
 const EVENTS_MAX = 4 * 1024 * 1024
@@ -25,8 +25,8 @@ const EVENTS_MAX = 4 * 1024 * 1024
  *   next one over. While MasterDeck runs it leaves `queue-requests/<id>.json` and waits up to 4s
  *   for MasterDeck to claim it (rename to `.taken`) and write `queue-answers/<id>.json`. Not
  *   claimed: the hook takes the request back by renaming it itself and drains one item; claimed:
- *   it waits up to 3s more for the answer. One rename wins, so exactly one of them takes the
- *   item. Worst case ~7s, under the 10s hook timeout.
+ *   it waits until 7s after its start for the answer. One rename wins, so exactly one of them
+ *   takes the item. Deadlines are by the clock: at most ~7s, under the 10s hook timeout.
  * - `queue-off` (the queue skill's hooks installed by hand): both leave /queue to those hooks.
  * - The rest: one line in `events.jsonl`.
  */
@@ -36,7 +36,6 @@ export function hookScript(dir: string, queueDir: string): string {
 # MasterDeck hook: written by MasterDeck at each launch; edits are overwritten.
 D='${esc(dir)}'
 Q='${esc(queueDir)}'
-[ -n "$MASTERDECK_QUEUE_DIR" ] && Q="$MASTERDECK_QUEUE_DIR"
 ev="$1"
 in=$(cat)
 sid=$(printf '%s' "$in" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p' | head -n 1)
@@ -108,20 +107,17 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
       r="$D/queue-requests/$id"
       a="$D/queue-answers/$id.json"
       printf '{"id":"%s","sid":"%s"}' "$id" "$sid" > "$r.tmp" && mv "$r.tmp" "$r.json"
-      i=0
-      while [ $i -lt 16 ]; do
+      # Deadlines by the clock (from the hook's start), so a slow machine never meets the 10s kill.
+      while [ "$(date +%s)" -lt $((now + 4)) ]; do
         if [ -f "$a" ]; then cat "$a"; rm -f "$a" "$r.taken"; exit 0; fi
         sleep 0.25
-        i=$((i + 1))
       done
       if mv "$r.json" "$r.gone" 2>/dev/null; then
         rm -f "$r.gone"   # never claimed: drain it here
       else
-        i=0
-        while [ $i -lt 12 ]; do
+        while [ "$(date +%s)" -lt $((now + 7)) ]; do
           if [ -f "$a" ]; then cat "$a"; rm -f "$a" "$r.taken"; exit 0; fi
           sleep 0.25
-          i=$((i + 1))
         done
         rm -f "$r.taken"
         exit 0
@@ -303,6 +299,8 @@ export class DeckHooks {
         continue
       }
       if (!n.endsWith('.json') || !/^[0-9]+-[0-9]+-[0-9]+$/.test(id)) continue
+      // Past the hook's wait (7 s from its start): nobody would read an answer.
+      if (!(now - Number(id.split('-')[0]) * 1000 < 8_000)) continue
       try {
         const r = JSON.parse(readFileSync(p, 'utf8')) as { sid?: unknown }
         if (typeof r.sid === 'string' && /^[0-9a-f-]{36}$/i.test(r.sid)) out.push({ id, sid: r.sid })
@@ -311,6 +309,29 @@ export class DeckHooks {
       }
     }
     return out
+  }
+
+  /**
+   * A session's turn ended with prompts queued: hand each waiting hook the next one (once). The
+   * hook must still be there (its pid is in the id) when we claim and again before the item goes:
+   * peek, answer, then take it off, so a crash or a hook gone meanwhile repeats a prompt rather
+   * than losing it.
+   */
+  pumpQueue(now = Date.now()): void {
+    for (const r of this.queueRequests(now)) {
+      const pid = Number(r.id.split('-')[1])
+      if (!alive(pid) || !this.claimQueue(r.id)) continue
+      const items = readQueue(r.sid, this.queues)
+      this.answerQueue(r.id, items.length ? queueAnswer(items[0], items.length - 1) : {})
+      if (items.length && alive(pid)) shiftQueue(r.sid, this.queues)
+    }
+    // Answers nobody read (the hook was killed after its claim).
+    const dir = join(this.dir, 'queue-answers')
+    try {
+      for (const n of readdirSync(dir)) if (now - Number(n.split('-')[0]) * 1000 > 60_000) rm(join(dir, n))
+    } catch {
+      // none yet
+    }
   }
 
   /** Take this Stop: false when the hook took it back first (it drains the queue itself then). */
