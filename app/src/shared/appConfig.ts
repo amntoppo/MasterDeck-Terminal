@@ -32,6 +32,29 @@ export interface ProjectConfig {
   sprintField: string
 }
 
+/**
+ * One connected GitHub account (`accounts` in config.json). The primary one's owner, repos and
+ * boards are also written as the top-level fields (`master config save` mirrors them), so the
+ * master CLI's older readers, tt.sh and older app builds keep working.
+ */
+export interface AccountConfig {
+  /** gh login: the key. */
+  login: string
+  /** git user.name in this account's sessions. */
+  name: string
+  /** git user.email in this account's sessions. */
+  email: string
+  /** Exactly one: master, plain shells and sessions outside every account's repos use it. */
+  primary?: true
+  owner: string
+  ownerType: 'organization' | 'user'
+  issueRepo: string
+  repos: string[]
+  allRepos?: boolean
+  projects: ProjectConfig[]
+  allProjects?: boolean
+}
+
 export interface AppConfig {
   configured: boolean
   path: string
@@ -57,6 +80,9 @@ export interface AppConfig {
   /** Every selected board; older configs: the one project above. */
   projects: ProjectConfig[]
   allProjects: boolean
+  /** Connected GitHub accounts, the primary first; [] before the first launch of the multi-account
+   * version. A repo is under one account only. `repos`/`projects` above are every account's. */
+  accounts: AccountConfig[]
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -91,6 +117,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   allRepos: false,
   projects: [],
   allProjects: false,
+  accounts: [],
 }
 
 let current: AppConfig = DEFAULT_CONFIG
@@ -133,7 +160,68 @@ function options(v: unknown): Record<string, string> {
   return out
 }
 
+const isProject = (p: Obj, owner: string): boolean => typeof p.number === 'number' && p.number > 0 && (typeof p.owner === 'string' || !!owner)
+
+function parseProject(p: Obj, owner: string): ProjectConfig {
+  return {
+    owner: str(p.owner, owner),
+    ownerType: p.ownerType === 'user' ? 'user' : 'organization',
+    number: p.number as number,
+    id: str(p.id, ''),
+    title: str(p.title, `Project ${p.number}`),
+    statusField: str(p.statusField, 'Status'),
+    statusFieldId: str(p.statusFieldId, ''),
+    statusOptions: options(p.statusOptions),
+    columns: strs(p.columns, []),
+    statuses: parseStatuses(p.statuses),
+    sprintField: str(p.sprintField, ''),
+  }
+}
+
+const LOGIN = /^[A-Za-z0-9-]{1,39}$/
+const low = (s: string) => s.toLowerCase()
+
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+
+/** The `accounts` list: the primary first (exactly one), each login once, each repo under the first account that lists it. */
+function parseAccounts(v: unknown): AccountConfig[] {
+  const raw = (Array.isArray(v) ? v : []).map(obj).filter((a) => typeof a.login === 'string' && LOGIN.test(a.login))
+  raw.sort((a, b) => Number(b.primary === true) - Number(a.primary === true))
+  const ownerOf = new Map<string, string>()
+  const out: AccountConfig[] = []
+  for (const a of raw) {
+    const login = a.login as string
+    if (out.some((x) => low(x.login) === low(login))) continue
+    const owner = str(a.owner, '')
+    const issueRepo = str(a.issueRepo, '')
+    const listed = [owner && issueRepo ? `${owner}/${issueRepo}` : '', ...strs(a.repos, [])].filter((r) => REPO.test(r))
+    const repos: string[] = []
+    for (const r of listed) {
+      const had = ownerOf.get(low(r))
+      if (had === login) continue
+      if (had) {
+        console.warn(`config: ${r} is under ${had} already; left out of ${login}`)
+        continue
+      }
+      ownerOf.set(low(r), login)
+      repos.push(r)
+    }
+    out.push({
+      login,
+      name: str(a.name, '') || login,
+      email: str(a.email, ''),
+      ...(out.length === 0 ? { primary: true as const } : {}),
+      owner,
+      ownerType: a.ownerType === 'user' ? 'user' : 'organization',
+      issueRepo,
+      repos,
+      allRepos: a.allRepos === true,
+      projects: (Array.isArray(a.projects) ? a.projects : []).map(obj).filter((p) => isProject(p, owner)).map((p) => parseProject(p, owner)),
+      allProjects: a.allProjects === true,
+    })
+  }
+  return out
+}
 
 /** `master config show` output (or anything like it) to an AppConfig, defaults filling gaps. */
 export function parseConfig(raw: unknown): AppConfig {
@@ -147,22 +235,7 @@ export function parseConfig(raw: unknown): AppConfig {
   const statuses = parseStatuses(c.statuses)
   const columns = strs(c.columns, d.columns)
   const project = typeof c.project === 'number' ? c.project : 0
-  let projects: ProjectConfig[] = (Array.isArray(c.projects) ? c.projects : [])
-    .map(obj)
-    .filter((p) => typeof p.number === 'number' && p.number > 0 && (typeof p.owner === 'string' || owner))
-    .map((p) => ({
-      owner: str(p.owner, owner),
-      ownerType: p.ownerType === 'user' ? ('user' as const) : ('organization' as const),
-      number: p.number as number,
-      id: str(p.id, ''),
-      title: str(p.title, `Project ${p.number}`),
-      statusField: str(p.statusField, 'Status'),
-      statusFieldId: str(p.statusFieldId, ''),
-      statusOptions: options(p.statusOptions),
-      columns: strs(p.columns, []),
-      statuses: parseStatuses(p.statuses),
-      sprintField: str(p.sprintField, ''),
-    }))
+  let projects: ProjectConfig[] = (Array.isArray(c.projects) ? c.projects : []).map(obj).filter((p) => isProject(p, owner)).map((p) => parseProject(p, owner))
   if (!projects.length && project > 0)
     projects = [
       {
@@ -179,6 +252,10 @@ export function parseConfig(raw: unknown): AppConfig {
         sprintField: str(c.sprintField, d.sprintField),
       },
     ]
+  const accounts = parseAccounts(c.accounts)
+  // Every account's repos and boards count (primary first): the Board, tickets and statuses see them all.
+  const unionRepos = accounts.flatMap((a) => a.repos)
+  const unionProjects = accounts.flatMap((a) => a.projects).filter((p, i, all) => all.findIndex((x) => projectKey(x) === projectKey(p)) === i)
   return {
     configured: typeof top.configured === 'boolean' ? top.configured : !!(owner && issueRepo),
     path: str(top.path, ''),
@@ -196,10 +273,11 @@ export function parseConfig(raw: unknown): AppConfig {
     workspace: str(c.workspace, d.workspace),
     masterName: str(c.masterName, d.masterName),
     masterEnabled: c.masterEnabled !== false,
-    repos: primary ? [primary, ...listed] : listed,
-    allRepos: c.allRepos === true,
-    projects,
-    allProjects: c.allProjects === true,
+    repos: unionRepos.length ? unionRepos : primary ? [primary, ...listed] : listed,
+    allRepos: c.allRepos === true || accounts.some((a) => a.allRepos),
+    projects: unionProjects.length ? unionProjects : projects,
+    allProjects: c.allProjects === true || accounts.some((a) => a.allProjects),
+    accounts,
   }
 }
 

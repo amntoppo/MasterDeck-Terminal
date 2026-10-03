@@ -128,6 +128,7 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `workspace` | Folder where master and new sessions start |
 | `masterName` | Name of the master session (default `master-agent`) |
 | `masterEnabled` | `false` runs MasterDeck without a master-agent (Setup → Master agent) |
+| `accounts` | Connected GitHub accounts (Setup → GitHub accounts): each `login`, `name`/`email` for its commits, `primary` (exactly one), and its own `owner`, `issueRepo`, `repos`, `projects`. The top-level fields above are the primary account's. A repo belongs to one account |
 
 </details>
 
