@@ -284,7 +284,8 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   `https://` URLs.
 - Build/serve/deploy: `npm run build:web` (→ `app/out/web`, `MD_API` default
   `https://dev.masterdeck.dev`, must be https for production), `npm run dev:web` (Vite;
-  `MD_API=http://localhost:8787` adds the local backend to the CSP), `npm run deploy:web`
+  `MD_API=http://localhost:8787` adds the local backend to the CSP; `/?preview` shows the app on fixture data
+  with no Mac, dev server only, see ARCHITECTURE), `npm run deploy:web`
   (wrangler 4, `app/web/wrangler.jsonc`: Worker `masterdeck-web`, static assets SPA, custom domain
   `app.masterdeck.dev`). Deploy only when the user asks.
 

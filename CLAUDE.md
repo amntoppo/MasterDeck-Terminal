@@ -258,6 +258,10 @@ buttons; it does not go through macOS window drag regions.
   shipped: snapshot patches + volatile hold (0b6d8ed), web state patches (75aafa1), the remote
   indicator (ce27e5d) and instant typing (merge bacb8d6). Backend PRs #4 (ea53f9e) and #5
   (fccbfee) are merged and deployed.
+- Branch `feat/phone-web` (off `main`, not merged, not pushed, not deployed): the web app's phone
+  layout (≤760 px, `usePhone()`, CSS only in `web.css` under `.app.phone`) and a dev-only preview
+  (`npm run dev:web`, `/?preview`) for looking at the web UI without a Mac. Desktop screenshots
+  before/after were pixel-identical. Follow-ups in TODO (P3 phone layout).
 - Next: whatever the user picks from [docs/TODO.md](docs/TODO.md). Top of the list: decide on
   pushing/releasing, fix or accept the broken backend CI deploy, re-measure web-bridge upload with
   a tab open, and the small remote hardening items.
