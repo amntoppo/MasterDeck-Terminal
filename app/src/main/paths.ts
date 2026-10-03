@@ -16,9 +16,12 @@ export interface Paths {
   ledger: string
   masterWorkspace: string
   python: string
-  /** babysit-ticket's CLI and its session↔issue links. */
+  /** babysit-ticket's CLI. */
   babysitTt: string
+  /** tt.sh's links: read once, for the one-time import. */
   babysitState: string
+  /** MasterDeck's session ↔ ticket links. */
+  ticketLinks: string
   /** Skills shipped with the app (copied into skillsDir on first launch). */
   bundledSkills: string
   /** Where Claude Code looks for the user's skills. */
@@ -58,6 +61,7 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
     python: process.platform === 'win32' ? 'python' : 'python3',
     babysitTt: join(h, '.claude', 'skills', 'babysit-ticket', 'scripts', 'tt.sh'),
     babysitState: join(process.env.TT_STATE_DIR || join(h, '.claude', 'babysit-ticket'), 'state.json'),
+    ticketLinks: join(home, 'ticket-links.json'),
     bundledSkills,
     skillsDir,
     config: process.env.MASTER_CONFIG || join(masterHome, 'config.json'),

@@ -49,7 +49,6 @@ import {
 } from "@shared/review";
 import {
   sameTicket,
-  storedRepo,
   ticketKey,
   ticketLabel,
   type Ticket,
@@ -180,6 +179,8 @@ import {
 } from "@shared/deckHooks";
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
+import { LinkStore } from "./ticketLinks";
+import { linkInfoMap } from "@shared/ticketLinks";
 import type { Runner } from "./run";
 
 const AGENTS_MS = 3_000;
@@ -296,8 +297,9 @@ export class Sources {
   private allStats: AppState["allStats"] = {};
   private costBook: CostBook = {};
   private costDirty = false;
-  /** babysit-ticket's links (sessionId → issue and when), read from its state file; fresher than the snapshot. */
+  /** MasterDeck's ticket links (sessionId → issue and when). */
   private links = new Map<string, LinkInfo>();
+  private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
@@ -360,6 +362,7 @@ export class Sources {
     private gh: GhRunner = (args, opts) => run("gh", args, opts),
     private readGhCache: () => GhCacheStatus | null = () => null,
   ) {
+    this.linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
     this.transcripts = new TranscriptIndex(paths.projectsDir);
     this.inbox = new Inbox(
       join(paths.home, "inbox.json"),
@@ -1178,37 +1181,9 @@ export class Sources {
     this.emit();
   }
 
-  /** Re-read babysit-ticket's state file. Called every agents poll and right after a link. */
+  /** Re-read MasterDeck's ticket links. Called every agents poll and right after a link. */
   reloadLinks(): void {
-    try {
-      const raw = JSON.parse(readFileSync(this.paths.babysitState, "utf8")) as {
-        sessions?: Record<
-          string,
-          {
-            issue?: unknown;
-            repo?: unknown;
-            linked_at?: unknown;
-            adopted?: unknown;
-          }
-        >;
-      };
-      const next = new Map<string, LinkInfo>();
-      for (const [sid, v] of Object.entries(raw.sessions ?? {})) {
-        if (typeof v?.issue !== "number") continue;
-        // Adopted from the checkout's branch by older babysit-ticket versions, never asked for.
-        if (v.adopted === true) continue;
-        const at =
-          typeof v.linked_at === "string" ? Date.parse(v.linked_at) : NaN;
-        next.set(sid, {
-          issue: v.issue,
-          repo: storedRepo(typeof v.repo === "string" ? v.repo : null),
-          linkedAt: Number.isFinite(at) ? at : null,
-        });
-      }
-      this.links = next;
-    } catch {
-      // missing or mid-write: keep the last good links
-    }
+    this.links = linkInfoMap(this.linkStore.read());
     this.emit();
   }
 

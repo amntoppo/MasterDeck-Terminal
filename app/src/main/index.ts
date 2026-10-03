@@ -95,6 +95,7 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
+import { LinkStore } from "./ticketLinks";
 import {
   readRemoved,
   reinstallSkill,
@@ -177,6 +178,7 @@ const paths = resolvePaths(
   process.resourcesPath,
   app.isPackaged,
 );
+const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
@@ -2484,6 +2486,12 @@ app.whenReady().then(async () => {
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
+  // Links made by babysit-ticket before MasterDeck kept its own: copied once.
+  try {
+    if (linkStore.importOnce()) sources.reloadLinks();
+  } catch (e) {
+    console.error(`ticket links import: ${String(e)}`);
+  }
   try {
     macKey = await loadMacKey(join(paths.home, "browser-key"), safeStorage);
   } catch (e) {

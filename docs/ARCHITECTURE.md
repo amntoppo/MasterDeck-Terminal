@@ -96,8 +96,9 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   (`attached | elsewhere | duplicate | absent`).
 - Statuses shown to the user come from `sessionStatus` (`shared/review.ts`) with `prStage` and
   `manualStatus` (`session-status.json`).
-- Session ↔ ticket links come from babysit-ticket's state (`~/.claude/babysit-ticket/state.json`),
-  re-linked after resumes (`session-history.json`, `shared/carry.ts`).
+- Session ↔ ticket links: MasterDeck's `ticket-links.json` (`main/ticketLinks.ts` `LinkStore`,
+  imported once from babysit-ticket's `~/.claude/babysit-ticket/state.json`; never read again after
+  that), re-linked after resumes (`session-history.json`, `shared/carry.ts`).
 - Restart recovery: `running-sessions.json` → `AppState.stoppedByRestart` → `resumeStopped`
   (`shared/restore.ts`).
 
@@ -268,6 +269,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection |
