@@ -110,7 +110,7 @@ const REVIEW_REASON =
 
 /**
  * Before `gh pr create` (a command that runs it, not text that mentions it): deny the first try of
- * a session and branch and branch with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
+ * a session and branch with the review instruction; the retry passes. Also passes when a hand-run /babysit-pr
  * wrote `.git/pr-selfreview-<HEAD sha>`. Skipped for sessions whose workflow left the pr-review
  * built-in out (guardedBuiltin). bash 3.2.
  */
