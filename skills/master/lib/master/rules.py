@@ -52,8 +52,9 @@ def _assign(i: dict) -> dict:
     prompt = (
         f"You own {full} ({i['title']}). {i['url']}\n\n"
         f"Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to {full}):\n"
-        f"1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and use the babysit-worktree skill "
-        f"there to create a worktree for {lab}.\n"
+        f"1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git "
+        f"worktree there for {lab} (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), "
+        f"so the main checkout stays clean.\n"
         + (f"2. Then stop and ask the user for instructions: tell master-agent "
            f"'{lab}: question — ready for instructions on {lab}: <one-line summary of the issue, the repo and "
            f"the worktree/branch you created>', and ask them the same here. Wait for their answer; they will "

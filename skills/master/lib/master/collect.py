@@ -83,6 +83,7 @@ def links_state(home: Path) -> dict:
         raw = json.loads((home / "ticket-links.json").read_text())
     except (OSError, ValueError):
         raw = {}
+    raw = raw if isinstance(raw, dict) else {}
     return {"sessions": raw.get("sessions") or {}, "branches": raw.get("branches") or {}}
 
 

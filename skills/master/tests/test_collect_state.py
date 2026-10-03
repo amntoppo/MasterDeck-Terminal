@@ -17,3 +17,8 @@ class LinksState(unittest.TestCase):
             self.assertEqual(links_state(Path(d)), {"sessions": {}, "branches": {}})
             Path(d, "ticket-links.json").write_text("{oops")
             self.assertEqual(links_state(Path(d)), {"sessions": {}, "branches": {}})
+
+    def test_non_dict_json_is_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "ticket-links.json").write_text("[1]")
+            self.assertEqual(links_state(Path(d)), {"sessions": {}, "branches": {}})
