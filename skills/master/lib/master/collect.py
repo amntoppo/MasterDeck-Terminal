@@ -179,7 +179,7 @@ class Live:
         return json.loads(_run(["claude", "agents", "--json"]))
 
     def state(self) -> dict:
-        return links_state(Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck"))
+        return links_state(config.masterdeck_home())
 
     def branch_head(self, branch_key: str) -> str:
         # Local first: unpushed commits are real progress, and a branch deleted on GitHub

@@ -122,8 +122,13 @@ def _stale(s: dict, i: dict) -> dict:
 def _orphan(s: dict, i: dict) -> dict:
     repo = refs.stored(i.get("repo"))
     lab = refs.label(repo, i["number"])
+    sp = {"name": spawn_name(i), "cwd": s["cwd"], "resume": s["session_id"]}
+    # Resume as the account the session started as; unrecorded (or gone): spawn's default, the repo's.
+    acct = config.session_account(s["session_id"]) if config.is_multi() else None
+    if acct:
+        sp["account"] = acct
     return {"kind": "ORPHAN", "issue": i["number"], "repo": repo, "source": f"orphan:{s['session_id']}",
-            "target": {"spawn": {"name": spawn_name(i), "cwd": s["cwd"], "resume": s["session_id"]}},
+            "target": {"spawn": sp},
             "message": f"Resume session {s['session_id']} for {lab} in the background.",
             "summary": f"owner session stopped, {lab} is {i['status']}; resume it"}
 

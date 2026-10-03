@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import uuid
@@ -47,8 +46,7 @@ def validate_account(account: "str | None") -> "str | None":
 
 def account_settings(account: str) -> Path:
     """The Claude Code settings file MasterDeck writes for a connected GitHub account (two or more)."""
-    home = Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck")
-    return home / "accounts" / f"{account}.settings.json"
+    return config.masterdeck_home() / "accounts" / f"{account}.settings.json"
 
 
 def validate_resume(resume: "str | None") -> "str | None":
@@ -126,13 +124,13 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         note = f"cwd does not exist: {cwd}"
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
-    target = p["target"]
-    if config.is_multi() and not target["spawn"].get("account"):
+    if config.is_multi() and not p["target"]["spawn"].get("account"):
         # A proposal without an account (older, or `master add` without --account) never starts as
-        # gh's active account: its repo's account, else the primary's (spec 4.2). The ledger keeps it as written.
-        target = dict(target, spawn=dict(target["spawn"], account=config.account_for_repo(p.get("repo"))))
+        # gh's active account: its repo's account, else the primary's (spec 4.2). Written to the
+        # ledger (locked by the caller) so the app attributes the session to it.
+        p["target"]["spawn"]["account"] = config.account_for_repo(p.get("repo"))
     try:
-        cmd = command(target)
+        cmd = command(p["target"])
     except (KeyError, ValueError, SpawnError) as e:
         note = str(e)
         hold(note)

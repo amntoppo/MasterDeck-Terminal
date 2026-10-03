@@ -229,6 +229,21 @@ def is_multi(cfg: "dict | None" = None) -> bool:
     return len(accounts(cfg)) >= 2
 
 
+def masterdeck_home() -> Path:
+    """MasterDeck's folder (ticket links, session accounts, account settings); MASTERDECK_HOME overrides it."""
+    return Path(os.environ.get("MASTERDECK_HOME") or Path.home() / ".claude" / "masterdeck")
+
+
+def session_account(session_id: str) -> "str | None":
+    """The connected login MasterDeck recorded a session as (session-accounts.json); None when
+    unrecorded, the file is missing or broken, or the login is no longer connected."""
+    try:
+        login = json.loads((masterdeck_home() / "session-accounts.json").read_text()).get(session_id)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return login if isinstance(login, str) and any(a["login"] == login for a in accounts()) else None
+
+
 def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
     """The login a spawned session for an issue in `repo` works as (None = the primary repo). Only
     with two or more accounts: with one, sessions start exactly as before."""

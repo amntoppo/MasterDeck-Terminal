@@ -94,10 +94,6 @@ class AccountsSaveTest(unittest.TestCase):
         self.assertEqual(out, 'acme|["acme/tracker", "acme/api"]')
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MigratedLegacyProjectTest(unittest.TestCase):
     def test_migrated_single_project_keeps_top_level_board(self):
         """An older config with one `project` becomes one account (as the app's migrationAccount
@@ -189,11 +185,13 @@ class SpawnAccountTest(unittest.TestCase):
         self.assertEqual([c[0][:4] for c in run.calls],
                          [["claude", "--bg", "--settings", str(d / "bob-work.settings.json")],
                           ["claude", "--bg", "--settings", str(d / "alice.settings.json")]])
-        self.assertNotIn("account", globex["target"]["spawn"])  # the ledger keeps what master wrote
+        # The ledger records the account it started as (the app attributes the session by it).
+        self.assertEqual((globex["target"]["spawn"]["account"], other["target"]["spawn"]["account"]), ("bob-work", "alice"))
         # One account: the same command as before.
         single = self._old(led, "globex/app", 5)
         spawn.spawn(led, single["id"], now=NOW, runner=run)
         self.assertEqual(run.calls[-1][0], ["claude", "--bg", "-n", "5-x", "go"])
+        self.assertNotIn("account", single["target"]["spawn"])
 
     def test_no_account_in_multi_mode_with_a_missing_file_holds(self):
         led = ledger.empty()
@@ -213,3 +211,43 @@ class RulesAccountTest(unittest.TestCase):
         with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
             self.assertEqual(rules._assign(self.ISSUE)["target"]["spawn"]["account"], "bob-work")
             self.assertEqual(rules._assign(dict(self.ISSUE, repo=None, url="https://github.com/acme/tracker/issues/3"))["target"]["spawn"]["account"], "alice")
+
+class OrphanAccountTest(unittest.TestCase):
+    """An ORPHAN resume works as the account the session was started as (session-accounts.json)."""
+    SID = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+    ISSUE = {"number": 3, "repo": None, "title": "Fix it", "status": "In Dev"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.tmp.name})
+        self.env.start()
+        self.s = {"session_id": self.SID, "cwd": self.tmp.name, "name": "3-fix-it"}
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def record(self, text):
+        (Path(self.tmp.name) / "session-accounts.json").write_text(text)
+
+    def test_resumes_as_the_recorded_account(self):
+        self.record(json.dumps({self.SID: "bob-work", "a1b2c3d4": "bob-work"}))
+        (Path(self.tmp.name) / "accounts").mkdir()
+        f = Path(self.tmp.name) / "accounts" / "bob-work.settings.json"
+        f.write_text("{}")
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
+            o = rules._orphan(self.s, self.ISSUE)  # acme/tracker: alice's repo
+            self.assertEqual(o["target"]["spawn"]["account"], "bob-work")
+            self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--settings", str(f), "--resume", self.SID])
+        self.assertNotIn("account", rules._orphan(self.s, self.ISSUE)["target"]["spawn"])  # one account
+
+    def test_no_usable_record_leaves_the_default(self):
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
+            for text in (None, "not json", "[]", json.dumps({self.SID: "bad login!"}), json.dumps({self.SID: "carol"})):
+                if text is not None:
+                    self.record(text)
+                self.assertNotIn("account", rules._orphan(self.s, self.ISSUE)["target"]["spawn"], text)
+
+
+if __name__ == "__main__":
+    unittest.main()
