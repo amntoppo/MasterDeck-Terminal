@@ -378,6 +378,10 @@ creation.
 - **PR tabs:** like the Board, the PRs view has tabs, starting with **Mine** (my open PRs, selected) and **Everyone**: **+** adds one, double-click renames, × closes.
   Each tab keeps its own filters and preset (for example one tab "Needs my review", another "Mine"),
   over the same list fetched from GitHub. Tabs are remembered.
+  With two or more GitHub accounts each tab shows one account's PRs (its owner's), with a badge; **Mine**,
+  **Needs my review** and **Reviewed by me** use that account's login, and the presets work inside the tab's
+  account. The first select in the filter row changes the tab's account (and clears its repo, author and label
+  picks); connecting another account adds a **Mine** tab for it once. With one account nothing changes.
 - **PRs view:** every PR in the org, mine and the team's: all open PRs plus the latest 300 closed or
   merged in the last 30 days. It is fetched when the view opens (if older than 10 minutes), on
   Refresh, and with the hourly GitHub refresh, through the shared cache. The last list is kept on

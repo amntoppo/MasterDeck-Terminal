@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, mergeTeamPages, normalizePrFilters, parseTeamPrs, prFilterOptions, reviewLabel, teamPrSearches, type PrFilters } from './teamPrs'
+import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, mergeTeamPages, normalizePrFilters, parseSavedPrTabs, parseTeamPrs, prsForAccount, prFilterOptions, reviewLabel, teamPrSearches, type PrFilters } from './teamPrs'
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
 const node = (o: Record<string, unknown>) => ({
@@ -99,5 +99,29 @@ describe('team PRs per account', () => {
     expect(parseTeamPrs(merged).map((p) => [p.number, p.account])).toEqual([[1, 'alice'], [2, 'bob-work']])
     expect(mergeTeamPages([{ login: null, pages: [page({ number: 1 })] }], [])).toEqual([page({ number: 1 })])
     expect(parseTeamPrs([page({ number: 1 })])[0].account).toBeUndefined()
+  })
+})
+
+describe('PRs tabs per account', () => {
+  const tagged = parseTeamPrs([
+    { ...page({ number: 1 }), account: 'alice' },
+    { ...page({ number: 2, repo: 'gx' }, { number: 4, repo: 'gx', requested: ['bob-work'], author: 'carol' }), account: 'bob-work' },
+    page({ number: 3 }),
+  ])
+  it("a tab shows its account's PRs; old untagged ones are the primary's", () => {
+    expect(prsForAccount(tagged, 'bob-work', 'alice').map((p) => p.number).sort()).toEqual([2, 4])
+    expect(prsForAccount(tagged, 'alice', 'alice').map((p) => p.number).sort()).toEqual([1, 3])
+    expect(prsForAccount(tagged, null, 'alice')).toBe(tagged)
+  })
+  it("'needs my review' and '@me' use the tab's login", () => {
+    const bobs = prsForAccount(tagged, 'bob-work', 'alice')
+    expect(filterPrs(bobs, { ...DEFAULT_PR_FILTERS, review: 'needs-me' }, 'bob-work', NOW).map((p) => p.number)).toEqual([4])
+    expect(filterPrs(bobs, { ...DEFAULT_PR_FILTERS, author: '@me' }, 'bob-work', NOW)).toEqual([])
+  })
+  it('saved tabs round-trip their account; a tab saved without one has none (the primary)', () => {
+    const t = parseSavedPrTabs([{ id: 'a', name: 'Mine', filters: DEFAULT_PR_FILTERS, account: 'bob-work' }, { id: 'b', name: 'Old', filters: DEFAULT_PR_FILTERS }, { nope: 1 }])
+    expect(t?.map((x) => [x.id, x.account])).toEqual([['a', 'bob-work'], ['b', undefined]])
+    expect(parseSavedPrTabs([])).toBeNull()
+    expect(parseSavedPrTabs('x')).toBeNull()
   })
 })

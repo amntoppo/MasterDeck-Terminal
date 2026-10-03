@@ -318,3 +318,17 @@ export function ageText(iso: string | null, now: number): string {
   if (m < 60 * 24 * 14) return `${Math.round(m / 1440)}d`
   return `${Math.round(m / 10_080)}w`
 }
+
+/** The PRs a tab of one account shows: that account's search (untagged ones are the primary's); all with no account. */
+export function prsForAccount(prs: TeamPr[], login: string | null, primary: string | null): TeamPr[] {
+  return login ? prs.filter((p) => (p.account ?? primary) === login) : prs
+}
+
+/** Saved PRs tabs, tolerant of old shapes (no account: the primary's); null when nothing usable is saved. */
+export function parseSavedPrTabs(saved: unknown): { id: string; name: string; filters: PrFilters; account?: string }[] | null {
+  if (!Array.isArray(saved) || !saved.length) return null
+  const tabs = saved
+    .filter((t) => t && typeof t.id === 'string')
+    .map((t) => ({ id: t.id as string, name: typeof t.name === 'string' && t.name ? (t.name as string) : 'PRs', filters: normalizePrFilters(t.filters), ...(typeof t.account === 'string' ? { account: t.account as string } : {}) }))
+  return tabs.length ? tabs : null
+}

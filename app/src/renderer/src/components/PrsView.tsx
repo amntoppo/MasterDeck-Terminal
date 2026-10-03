@@ -2,8 +2,10 @@ import { sameTicket, ticketLabel, ticketUrl, type Ticket } from '@shared/ticket'
 import { nextTabName, ViewTabs } from './ViewTabs'
 import { useEffect, useMemo, useState } from 'react'
 import { ciMessage, ownerOf, reviewMessage, type PrOffer } from '@shared/offers'
+import { isMulti, primaryLogin } from '@shared/accounts'
+import { tabAccount, withAccountTabs } from '@shared/boardFilter'
 import { formatRefreshed } from '@shared/format'
-import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, normalizePrFilters, prFilterOptions, reviewLabel, type PrFilters, type TeamPr } from '@shared/teamPrs'
+import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, parseSavedPrTabs, prFilterOptions, prsForAccount, reviewLabel, type PrFilters, type TeamPr } from '@shared/teamPrs'
 import type { AppState, Issue, Pr, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
 import { PrIcon } from './BoardView'
@@ -28,17 +30,17 @@ interface PrTab {
   id: string
   name: string
   filters: PrFilters
+  /** The GitHub account it shows; absent: the primary. */
+  account?: string
 }
 
 /** The saved tabs; before any are saved, Mine (my open PRs, selected) and Everyone. */
 function loadTabs(): PrTab[] {
-  const saved = load<PrTab[] | null>(TABS, null)
-  if (Array.isArray(saved) && saved.length)
-    return saved.filter((t) => t && typeof t.id === 'string').map((t) => ({ id: t.id, name: typeof t.name === 'string' && t.name ? t.name : 'PRs', filters: normalizePrFilters(t.filters) }))
-  const preset = (label: string) => ({ ...DEFAULT_PR_FILTERS, ...(PRESETS.find((p) => p.label === label)?.f ?? {}) })
+  const saved = parseSavedPrTabs(load<unknown>(TABS, null))
+  if (saved) return saved
   return [
-    { id: 'prs-mine', name: 'Mine', filters: preset('Mine') },
-    { id: 'prs-everyone', name: 'Everyone', filters: preset('Everyone') },
+    { id: 'prs-mine', name: 'Mine', filters: presetFilters('Mine') },
+    { id: 'prs-everyone', name: 'Everyone', filters: presetFilters('Everyone') },
   ]
 }
 const PRESETS: { label: string; title: string; f: Partial<PrFilters> }[] = [
@@ -48,6 +50,8 @@ const PRESETS: { label: string; title: string; f: Partial<PrFilters> }[] = [
   { label: 'Failing CI', title: 'Open PRs with failing checks', f: { state: 'open', author: '', review: 'any', ci: 'failing' } },
   { label: 'Recently merged', title: 'Merged in the last 7 days', f: { state: 'merged', author: '', review: 'any', ci: 'any', updated: 7 } },
 ]
+
+const presetFilters = (label: string): PrFilters => ({ ...DEFAULT_PR_FILTERS, ...(PRESETS.find((p) => p.label === label)?.f ?? {}) })
 
 function asPr(p: TeamPr, snapshot: Pr[]): Pr {
   const known = snapshot.find((x) => x.url === p.url)
@@ -70,6 +74,21 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const [tabs, setTabs] = useState<PrTab[]>(loadTabs)
   const [tabId, setTabId] = useState<string>(() => load<string>(TAB, ''))
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0]
+  // Two or more GitHub accounts: each tab shows one account's PRs; "me" is that account's login.
+  const cfg = state.config
+  const multi = isMulti(cfg)
+  const logins = cfg.accounts.map((a) => a.login)
+  const primary = primaryLogin(cfg)
+  const acct = multi ? (tabAccount(tab, logins) ?? primary) : null
+  // Connecting another account adds a Mine tab for it, once.
+  useEffect(() => {
+    const added = load<string[]>('prTabAccounts', [])
+    const make = (l: string): PrTab => ({ id: `prs-mine-${l}`, name: 'Mine', account: l, filters: presetFilters('Mine') })
+    const r = withAccountTabs(tabs, logins, primary, added, make)
+    if (r.added === added) return
+    save('prTabAccounts', r.added)
+    setTabs((ts) => withAccountTabs(ts, logins, primary, added, make).tabs)
+  }, [logins.join(), primary]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => save(TABS, tabs), [tabs])
   useEffect(() => save(TAB, tab.id), [tab.id])
   const f = tab.filters
@@ -77,7 +96,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const set = (patch: Partial<PrFilters>) => setF((cur) => ({ ...cur, ...patch }))
   const addTab = () => {
     const id = `prs-${Date.now().toString(36)}`
-    setTabs([...tabs, { id, name: nextTabName(tabs, 'PRs'), filters: { ...DEFAULT_PR_FILTERS } }])
+    setTabs([...tabs, { id, name: nextTabName(tabs, 'PRs'), filters: { ...DEFAULT_PR_FILTERS }, ...(tabAccount(tab, logins) ? { account: tabAccount(tab, logins) } : {}) }])
     setTabId(id)
     return id
   }
@@ -88,7 +107,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
   const renameTab = (id: string, name: string) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, name } : t)))
-  const me = state.me
+  const me = acct ?? state.me
   const isMe = (login: string) => !!me && login.toLowerCase() === me.toLowerCase()
 
   // Fetch on open when the list is older than 10 minutes (the shared cache absorbs repeats).
@@ -96,7 +115,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     void deck().refreshTeamPrs(600_000)
   }, [])
 
-  const all = state.teamPrs
+  const all = useMemo(() => prsForAccount(state.teamPrs, acct, primary), [state.teamPrs, acct, primary])
   const shown = useMemo(() => filterPrs(all, f, me, now), [all, f, me, now])
   const options = useMemo(() => prFilterOptions(all, me), [all, me])
   const repoCounts = useMemo(() => {
@@ -119,6 +138,23 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   // The filter row: inline on a wide screen; on a phone, behind a "Filters (n)" button.
   const filterControls = (
     <>
+      {multi && (
+        <select
+          className="fsel"
+          value={acct ?? ''}
+          title="The GitHub account this tab shows"
+          onChange={(e) => {
+            const l = e.target.value
+            setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, account: l === primary ? undefined : l, filters: { ...t.filters, repo: '', author: '', label: '' } } : t)))
+          }}
+        >
+          {logins.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+      )}
       <select className={`fsel ${f.state !== 'open' ? 'active' : ''}`} value={f.state} onChange={(e) => set({ state: e.target.value as PrFilters['state'] })} title="State">
         <option value="open">Open</option>
         <option value="merged">Merged</option>
@@ -212,7 +248,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </header>
-      <ViewTabs tabs={tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
+      <ViewTabs tabs={multi ? tabs.map((t) => ({ ...t, badge: tabAccount(t, logins) ?? primary ?? undefined })) : tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
 
       {phone ? (
         <PhoneFilters count={activeFilterCount({ ...f, search: '' })} search={filterSearch} onReset={() => set({ ...DEFAULT_PR_FILTERS, sort: f.sort, search: f.search })}>
