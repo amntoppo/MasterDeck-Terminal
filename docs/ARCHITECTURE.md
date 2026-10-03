@@ -326,7 +326,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts`, `costs.ts`, `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
-| GitHub, board | `board.ts`, `boardFilter.ts`, `teamPrs.ts`, `prSummary.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
+| GitHub, board | `board.ts`, `boardFilter.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
