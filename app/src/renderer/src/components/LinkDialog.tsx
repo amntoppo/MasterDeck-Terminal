@@ -70,7 +70,7 @@ export function LinkDialog({ issue, state, onClose, onLinked }: Props) {
           </span>
           #{issue.number} {issue.title}
         </h3>
-        <div className="meta">Link a session that already exists to this ticket, as babysit-ticket does. The ticket moves to In Dev if it is earlier on the board.</div>
+        <div className="meta">Link a session that already exists to this ticket. MasterDeck records the link and, as a step of the session's workflow (Default: on), moves the ticket to In Dev if it is earlier on the board.</div>
         <label>Session ID or name</label>
         <input
           ref={inputRef}

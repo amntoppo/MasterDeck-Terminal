@@ -183,6 +183,16 @@ ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).
 
+### Board writes (`main/boardOps.ts`)
+
+`BoardOps` (formerly babysit-ticket's `tt.sh`) on the `ghc` runner: `issueInfo` (item and status on
+the first configured board holding the issue; reads skip the cache), forward-only `move` (by
+`statusRank`; `setStatus` forces, for the Board's status menu), `linkPr` (Development box via
+`addCloseIssueReferences`) and `create` (issue, board, status, sprint). `linkTicket` is what
+`linkSession` runs: it writes `LinkStore.link` (a failed write returns a failed result), marks the
+session's `linked` stage (`Sources.markReached`), and moves the ticket to In Dev when
+`WorkflowStore.builtinsFor(session)` has `ticket`. There is no global switch for board moves.
+
 ## Preload and IPC
 
 - `shared/ipc.ts` defines `CH` (every channel name, e.g. `state:update`, `pty:open`,

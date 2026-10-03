@@ -71,9 +71,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
 - **Link session…:** links a session that already exists instead. Type its name, background id or
-  session id (suggestions appear as you type). It runs babysit-ticket's `tt.sh link <issue>` for that
-  session, so like any babysit-ticket link it moves the ticket to your in-progress status if it's earlier on the board.
-  On Windows this needs Git Bash and `jq` on PATH.
+  session id (suggestions appear as you type). MasterDeck records the link itself (no
+  skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
+  moves the ticket to your in-progress status if it's earlier on the board.
 
 ## Shells and manual sessions
 
@@ -407,8 +407,9 @@ creation.
   that lands in that column: title, description (Markdown), repository, status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
   column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
-  the Board shows. **Create ticket** runs babysit-ticket's `tt.sh create`: the issue, added to the
-  board with its status and sprint.
+  the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
+  board with its status and sprint. Changing a card's status from the Board is also done by
+  MasterDeck.
 - **Create with Claude:** from that dialog, a Claude session opens on the right of the Board (only
   there; it keeps running while you look at another view, and its edge drags to resize). It knows
   the boards, columns, sprints, repos and people, and where the + was clicked (its folder,

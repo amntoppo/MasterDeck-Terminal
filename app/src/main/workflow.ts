@@ -27,8 +27,10 @@ import {
   defaultFlow,
   docJson,
   parseDoc,
+  BUILTINS,
   templateId,
   validSessionId,
+  type BuiltinId,
   type CompiledStep,
   type Flow,
   type WorkflowDoc,
@@ -493,6 +495,26 @@ export class WorkflowStore {
     const steps = compileFlow(parseDoc(readRaw(f)).flow).steps;
     this.compiled.set(f, { mtime, steps });
     return steps;
+  }
+
+  private builtinCache = new Map<string, { mtime: number; ids: BuiltinId[] }>();
+  /** The built-ins a session's workflow keeps (its copy, else the default); all of them when none can be read. */
+  builtinsFor(sessionId: string): BuiltinId[] {
+    const own = validSessionId(sessionId)
+      ? join(this.sessionsDir, `${sessionId}.json`)
+      : null;
+    const f = own && existsSync(own) ? own : this.defaultFile;
+    let mtime = 0;
+    try {
+      mtime = statSync(f).mtimeMs;
+    } catch {
+      return BUILTINS.map((b) => b.id);
+    }
+    const hit = this.builtinCache.get(f);
+    if (hit && hit.mtime === mtime) return hit.ids;
+    const ids = compileFlow(parseDoc(readRaw(f)).flow).builtins;
+    this.builtinCache.set(f, { mtime, ids });
+    return ids;
   }
 
   private get runsFile(): string {

@@ -14,12 +14,11 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
-  mkdtempSync,
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { readFile } from "node:fs/promises";
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -95,7 +94,8 @@ import { resolvePaths } from "./paths";
 import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
-import { LinkStore } from "./ticketLinks";
+import { BoardOps, linkTicket } from "./boardOps";
+import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
   reinstallSkill,
@@ -130,7 +130,7 @@ import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
-import { asTicket, fullRepo, ticketLabel, ticketRef } from "@shared/ticket";
+import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -202,6 +202,7 @@ function notify(events: NotifyEvent[]): void {
 
 const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
+const boardOps = new BoardOps(gh);
 const sender = new Sender(
   ptys,
   cli,
@@ -828,9 +829,8 @@ function installHook(): CliResult {
 }
 
 /**
- * Link an existing session to an issue the way the session itself would: babysit-ticket's
- * `tt.sh link`, told which session and folder through TT_SESSION / TT_CWD. Like any
- * babysit-ticket link, it moves the ticket to In Dev (forward only).
+ * Link an existing session to an issue: MasterDeck's own ticket links (see linkTicket), then the
+ * ticket moves to In Dev when the session's workflow keeps the `ticket` built-in.
  */
 async function linkSession(
   raw: unknown,
@@ -841,29 +841,20 @@ async function linkSession(
   if (!t) return { ok: false, message: "bad issue" };
   if (!/^[0-9a-f-]{36}$/i.test(sessionId))
     return { ok: false, message: "bad session id" };
-  if (!existsSync(paths.babysitTt))
-    return {
-      ok: false,
-      message: `babysit-ticket not found at ${paths.babysitTt}`,
-    };
-  const dir = cwd && existsSync(cwd) ? cwd : homedir();
-  const r = await run(
-    "bash",
-    [paths.babysitTt, "link", ticketRef(t.repo, t.number)],
+  return linkTicket(
     {
-      cwd: dir,
-      timeoutMs: 60_000,
-      env: { TT_SESSION: sessionId, TT_CWD: dir },
+      ops: boardOps,
+      link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
+      branch: (dir) => branchKey(run, dir),
+      moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
+      mark: (sid, trigger) => sources.markReached(sid, trigger),
+      reload: () => sources.reloadLinks(),
+      noteStatus: (tk, s) => sources.noteStatus(tk, s),
     },
+    t,
+    sessionId,
+    cwd,
   );
-  sources.reloadLinks();
-  const out = (r.stdout.trim() || r.stderr.trim()).split("\n").filter(Boolean);
-  return r.code === 0
-    ? {
-        ok: true,
-        message: out[0] ?? `linked to ${ticketLabel(t.repo, t.number)}`,
-      }
-    : { ok: false, message: out.at(-1) ?? `exit ${r.code}` };
 }
 
 /** Is `pid` a running claude process? Guards the stop against a pid reused by something else. */
@@ -1384,7 +1375,7 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
-    const r = await ops.setStatus(t, status);
+    const r = await boardOps.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -1445,7 +1436,7 @@ function registerIpc(): void {
     ops.deleteTemplate(name),
   );
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
-  // babysit-ticket's `tt.sh create` (the Board's Claude session uses the same command).
+  // BoardOps.create (the Board's Claude session uses tt.sh create through the ticket builder script).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;
     const str = (v: unknown, n: number) =>
@@ -1458,82 +1449,42 @@ function registerIpc(): void {
         : [];
     const title = str(o.title, 256).trim();
     if (!title) return { ok: false, message: "give it a title" };
-    if (!existsSync(paths.babysitTt))
+    const res = await boardOps.create({
+      title,
+      body: str(o.body, 60_000),
+      repo: str(o.repo, 140) || undefined,
+      project: str(o.project, 140) || undefined,
+      status: str(o.status, 100) || undefined,
+      assignees: list(o.assignees),
+      labels: list(o.labels),
+      milestone: str(o.milestone, 200) || undefined,
+      sprint: str(o.sprint, 200) || undefined,
+      sprintField: str(o.sprintField, 100) || undefined,
+      dryRun: o.dryRun === true,
+    });
+    if (!res.ok)
       return {
         ok: false,
-        message: `babysit-ticket not found at ${paths.babysitTt}`,
-      };
-    const dir = mkdtempSync(join(tmpdir(), "masterdeck-ticket-"));
-    try {
-      const bodyFile = join(dir, "body.md");
-      writeFileSync(bodyFile, str(o.body, 60_000));
-      const args = [
-        paths.babysitTt,
-        "create",
-        "--title",
-        title,
-        "--body-file",
-        bodyFile,
-      ];
-      const add = (flag: string, v: string) => v && args.push(flag, v);
-      add("--repo", str(o.repo, 140));
-      add("--project", str(o.project, 140));
-      add("--status", str(o.status, 100));
-      add("--assignee", list(o.assignees).join(","));
-      for (const l of list(o.labels)) args.push("--label", l);
-      add("--milestone", str(o.milestone, 200));
-      add("--sprint", str(o.sprint, 200));
-      add("--sprint-field", str(o.sprintField, 100));
-      if (o.dryRun === true) args.push("--dry-run");
-      const r = await run("bash", args, { cwd: dir, timeoutMs: 90_000 });
-      let res: {
-        ok?: boolean;
-        url?: string;
-        number?: number;
-        error?: string;
-        status?: string;
-        sprint?: string;
-      } = {};
-      // tt.sh prints one JSON object (after anything gh said).
-      try {
-        res = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
-      } catch {
-        /* no JSON: an error on stderr */
-      }
-      if (r.code !== 0 || !res.ok)
-        return {
-          ok: false,
-          message: res.error
-            ? `${res.error}${res.url ? `: ${res.url}` : ""}`
-            : (r.stderr || r.stdout)
-                .trim()
-                .split("\n")
-                .pop()
-                ?.replace(/^babysit-ticket: /, "") ||
-              "could not create the issue",
-          url: res.url,
-        };
-      if (o.dryRun !== true) void sources.refreshGithub(true);
-      const extra = [
-        res.status ? `in ${res.status}` : "",
-        res.sprint
-          ? `sprint ${res.sprint === "@current" ? "(current)" : res.sprint}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(", ");
-      return {
-        ok: true,
-        message:
-          o.dryRun === true
-            ? "checked (dry run)"
-            : `created #${res.number}${extra ? ` ${extra}` : ""}`,
+        message: `${res.error}${res.url ? `: ${res.url}` : ""}`,
         url: res.url,
-        number: res.number,
       };
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    if (!res.dryRun) void sources.refreshGithub(true);
+    const extra = [
+      res.status ? `in ${res.status}` : "",
+      res.sprint
+        ? `sprint ${res.sprint === "@current" ? "(current)" : res.sprint}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      ok: true,
+      message: res.dryRun
+        ? "checked (dry run)"
+        : `created #${res.number}${extra ? ` ${extra}` : ""}`,
+      url: res.url,
+      number: res.number,
+    };
   });
   // Create with Claude (Board): the ticket session's folder gets the boards, the people, where
   // the + was clicked, and a create command it may run without asking.

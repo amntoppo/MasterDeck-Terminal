@@ -1181,6 +1181,14 @@ export class Sources {
     this.emit();
   }
 
+  /** A trigger point was reached by something other than a transcript (the app's own link). */
+  markReached(sessionId: string, trigger: FlowTrigger): void {
+    const key = this.rawSessions.find((x) => x.sessionId === sessionId)?.key;
+    if (!key) return;
+    const track = (this.flowTracks[key] ??= newFlowTrack());
+    track.reached[trigger] = Date.now();
+  }
+
   /** Re-read MasterDeck's ticket links. Called every agents poll and right after a link. */
   reloadLinks(): void {
     this.links = linkInfoMap(this.linkStore.read());
