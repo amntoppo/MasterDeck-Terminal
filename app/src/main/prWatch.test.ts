@@ -421,4 +421,25 @@ describe('prStatesFor', () => {
     expect(asked).toEqual({ alice: 2, 'bob-work': 1 })
     expect(Object.keys(got).sort()).toEqual([url(1), url(3), 'https://github.com/globex/app/pull/2'].sort())
   })
+
+  it("one account's failing read does not drop the others' answers", async () => {
+    const cfg = parseConfig({ accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] },
+    ] })
+    let bobThrows = false
+    const ghFor = (login: string): GhRunner => async (args) => {
+      if (login === 'bob-work' && bobThrows) throw new Error('spawn failed')
+      if (login === 'bob-work') return { code: 1, stdout: '', stderr: 'GitHub account bob-work needs to log in again' }
+      const q = args.find((a) => a.startsWith('query='))!.slice(6)
+      const n = (q.match(/ p\d+: /g) ?? []).length
+      const data: Record<string, unknown> = {}
+      for (let i = 0; i < n; i++) data[`p${i}`] = { pullRequest: lightPr }
+      return { code: 0, stdout: JSON.stringify({ data }), stderr: '' }
+    }
+    const urls = [url(1), 'https://github.com/globex/app/pull/2']
+    expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
+    bobThrows = true
+    expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
+  })
 })

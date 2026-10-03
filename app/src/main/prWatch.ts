@@ -353,7 +353,7 @@ export async function prStates(gh: GhRunner, urls: string[]): Promise<Record<str
 
 /** prStates per account: one batched light read per account, with that account's runner. */
 export async function prStatesFor(ghFor: (login: string) => GhRunner, cfg: AppConfig, urls: string[]): Promise<Record<string, { state: string; isDraft: boolean }>> {
-  const out: Record<string, { state: string; isDraft: boolean }> = {}
-  for (const [login, us] of groupByAccount(urls, cfg)) Object.assign(out, await prStates(ghFor(login), us))
-  return out
+  // In parallel; an account whose read fails (or throws) gives nothing, the others still answer.
+  const parts = await Promise.all([...groupByAccount(urls, cfg)].map(([login, us]) => prStates(ghFor(login), us).catch(() => ({}))))
+  return Object.assign({}, ...parts)
 }

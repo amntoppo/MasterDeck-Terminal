@@ -290,11 +290,14 @@ login is the primary. `forRepo(repo)` picks by `accountForRepo`: issue body, ass
 status moves, ticket create (dialog and the ticket builder's requests), `linkSession`, and, straight
 to gh without the cache (`ghDirect`), New ticket's repo meta and the summary post. BoardFlow's
 `move`/`linkPr` go as the ticket's repo's account (boards are ticked under the same account as
-their repos in Setup). `ghRouted` picks from a call's own `-R`/`--repo`/PR URL (`repoOfArgs`): Ops'
-janitor reads and Sources' `pr view <url>`. BoardFlow's PR states go per account (`prStatesFor`, one
-batched read each); the current branch's PR (`pr view` in the folder) is its `origin`'s account,
+their repos in Setup). `ghRouted` picks from a call's own `-R`/`--repo`, a whole PR or issue URL, or a
+`repos/<owner>/<repo>/…` API path (`repoOfArgs`): Ops' janitor reads and Sources' `pr view <url>`;
+a call naming no repo (`api user`, search) goes as the primary. BoardFlow's PR states go per account (`prStatesFor`, one
+batched read each, in parallel; a failing account's read drops only its own PRs); the current branch's PR (`pr view` in the folder) is its `origin`'s account,
 looked up first. An account without a usable token fails its calls with "GitHub account <login>
-needs to log in again"; they never run as another account or gh's active one. With one account
+needs to log in again", and one AccountEnv has not read yet (just connected: its `runEnv` still
+answers without a token) with "GitHub account <login> is not ready yet"; they never run as another
+account or gh's active one. With one account
 every one of them is the plain `gh`/`github`/`boardOps` singleton, called exactly as before.
 
 ### Board moves (`main/boardFlow.ts`)

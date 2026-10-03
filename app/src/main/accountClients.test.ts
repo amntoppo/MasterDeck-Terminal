@@ -73,6 +73,21 @@ describe('accountClients', () => {
     expect(s.baseCalls).toEqual([])
   })
 
+  it("an account AccountEnv has not read yet (no token in its env) is not ready: no call runs as gh's active account", async () => {
+    const calls: RunOpts[] = []
+    const run: Runner = async (_c, _a, opts) => (calls.push(opts ?? {}), { code: 0, stdout: '{}', stderr: '' })
+    const baseGh: GhRunner = (args, opts) => run('gh', args, opts)
+    const base: Clients = { gh: baseGh, github: new GitHub(run, baseGh), ops: new BoardOps(baseGh) }
+    // Config already has two accounts; AccountEnv still has one, so it answers {env: {}}.
+    const c = accountClients({ config: () => two, base, run, runEnv: () => ({ env: {} }), ghFor: (a) => makeGhRunner(run, '/lib', 'python3', 'win32', a) })
+    const r = await c.forRepo('globex/app').gh(['pr', 'list', '-R', 'globex/app'])
+    const d = await c.ghDirect('globex/app', ['issue', 'comment', '1'], { stdin: 'x' })
+    expect([r.code, d.code]).toEqual([1, 1])
+    expect(r.stderr).toBe('GitHub account bob-work is not ready yet')
+    expect(d.stderr).toBe('GitHub account bob-work is not ready yet')
+    expect(calls).toEqual([])
+  })
+
   it('an account without a usable token fails its calls visibly, never as another account', async () => {
     const s = setup(two, ['bob-work'])
     const r = await s.c.ghRouted(['pr', 'list', '-R', 'globex/app'])

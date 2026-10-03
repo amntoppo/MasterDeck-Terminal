@@ -176,4 +176,11 @@ describe('repoOfArgs', () => {
     expect(repoOfArgs(['pr', 'view', 'https://github.com/globex/app/pull/2', '--json', 'state'])).toBe('globex/app')
     expect(repoOfArgs(['api', 'user'])).toBeNull()
   })
+  it('finds it in a REST path or an issue URL too', () => {
+    expect(repoOfArgs(['api', 'repos/globex/app/issues/3/comments'])).toBe('globex/app')
+    expect(repoOfArgs(['api', '/repos/globex/app/pulls?per_page=5'])).toBe('globex/app')
+    expect(repoOfArgs(['issue', 'view', 'https://github.com/globex/app/issues/7'])).toBe('globex/app')
+    expect(repoOfArgs(['api', 'repos/globex'])).toBeNull()
+    expect(repoOfArgs(['api', 'search/issues?q=repos/globex/app/'])).toBeNull()
+  })
 })

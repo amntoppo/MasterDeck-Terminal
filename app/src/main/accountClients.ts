@@ -32,13 +32,19 @@ export interface AccountClientsDeps {
  */
 export function accountClients(d: AccountClientsDeps) {
   const per = new Map<string, Clients>()
+  // Routing says multi from the config; AccountEnv catches up on its next refresh and until then
+  // answers {env: {}} (one account). Without a token that call would run as gh's active account.
+  const envOf = (l: string): AccountRunEnv => {
+    const a = d.runEnv(l)
+    return 'error' in a || a.env.GH_TOKEN ? a : { error: `GitHub account ${l} is not ready yet` }
+  }
   function forAccount(login: string | null | undefined): Clients {
     const cfg = d.config()
     if (!isMulti(cfg)) return d.base
     const l = login && cfg.accounts.some((a) => a.login === login) ? login : primaryLogin(cfg)!
     let r = per.get(l)
     if (!r) {
-      const gh = d.ghFor(() => d.runEnv(l))
+      const gh = d.ghFor(() => envOf(l))
       r = { gh, github: new GitHub(d.run, gh), ops: new BoardOps(gh) }
       per.set(l, r)
     }
@@ -46,13 +52,17 @@ export function accountClients(d: AccountClientsDeps) {
   }
   /** Repo-scoped calls: the repo's account, else the primary. */
   const forRepo = (repo: string | null | undefined): Clients => forAccount(accountForRepo(repo, d.config()))
-  /** Picks the account from the call itself (`-R owner/name` or a PR URL); else the primary. */
+  /**
+   * Picks the account from the call itself: `-R`/`--repo owner/name`, a whole PR or issue URL, or a
+   * `repos/<owner>/<repo>/…` API path (`repoOfArgs`). Anything else (`api user`, search) names no
+   * repo and goes as the primary.
+   */
   const ghRouted: GhRunner = (args, opts) => forRepo(repoOfArgs(args)).gh(args, opts)
   /** gh straight (no cache) as a repo's account: calls with stdin, or that must not be cached. */
   function ghDirect(repo: string | null | undefined, args: string[], opts: RunOpts = {}): Promise<RunResult> {
     const cfg = d.config()
     if (!isMulti(cfg)) return d.run('gh', args, opts)
-    const a = d.runEnv(accountForRepo(repo, cfg)!)
+    const a = envOf(accountForRepo(repo, cfg)!)
     if ('error' in a) return Promise.resolve({ code: 1, stdout: '', stderr: a.error })
     return d.run('gh', args, { ...opts, env: { ...(opts.env ?? {}), ...a.env } })
   }

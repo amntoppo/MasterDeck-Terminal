@@ -93,15 +93,18 @@ export function prRepo(url: string): string | null {
 
 const REPO_ARG = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 
-/** The repo a gh call is about: its `-R`/`--repo` value, else a PR URL among its arguments. */
+// A PR or issue URL, or a REST path `repos/<owner>/<repo>/…` (the whole argument).
+const REPO_IN_ARG = /^(?:https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})\/(?:pull|issues)\/\d+$|\/?repos\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})(?:[/?]|$))/
+
+/** The repo a gh call is about: its `-R`/`--repo` value, else a PR or issue URL or a `repos/<owner>/<repo>/` API path among its arguments. */
 export function repoOfArgs(args: string[]): string | null {
   const i = args.findIndex((a) => a === '-R' || a === '--repo')
   if (i >= 0 && REPO_ARG.test(args[i + 1] ?? '')) return args[i + 1]
   const eq = args.find((a) => a.startsWith('--repo='))?.slice(7)
   if (eq && REPO_ARG.test(eq)) return eq
   for (const a of args) {
-    const r = prRepo(a)
-    if (r) return r
+    const m = REPO_IN_ARG.exec(a)
+    if (m) return m[1] ? `${m[1]}/${m[2]}` : `${m[3]}/${m[4]}`
   }
   return null
 }
