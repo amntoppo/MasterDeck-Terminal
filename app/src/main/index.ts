@@ -227,6 +227,8 @@ const boardFlow = new BoardFlow({
   onMoved: (t, status) => sources.noteStatus(t, status),
   log: (m) => console.error(m),
   linkTriedFile: join(paths.home, "board-link-tried.json"),
+  createdPrs: (sid) => sources.prsOpenedBy(sid),
+  movedFile: join(paths.home, "board-moved.json"),
 });
 // The `linked` trigger's steps for links MasterDeck makes (no tt.sh link runs, so no hook fires).
 const linkedSteps = new LinkedSteps({
@@ -348,6 +350,14 @@ const sources = new Sources(
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
     }
+    if (process.platform !== "win32" && sources.isHealthy("agents"))
+      deckHooks.pruneLegacy(
+        new Set(
+          state.sessions
+            .filter((s) => s.state !== "done")
+            .map((s) => s.sessionId),
+        ),
+      );
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -2582,6 +2592,9 @@ app.whenReady().then(async () => {
       try {
         // Nothing is switched off: self-review and board moves are Default-workflow steps now.
         const m = migrateLegacyHooks(paths.claudeSettings, paths.home);
+        // Sessions running now keep the queue skill's hooks (read at their start): the deck hook
+        // leaves /queue to those until they end (pruneLegacy below).
+        if (m.removed.some((r) => r.startsWith("queue"))) deckHooks.markLegacy();
         writeFileSync(
           marker,
           JSON.stringify({ at: Date.now(), ...m }, null, 2) + "\n",

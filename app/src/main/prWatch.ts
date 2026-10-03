@@ -32,6 +32,8 @@ export interface PrWatchEntry {
   ended: boolean
   /** Light reads in a row that came back without this PR (gone, or no access). */
   misses?: number
+  /** Added in the first run: its first full read is recorded as seen and says nothing. */
+  quiet?: boolean
 }
 
 export interface PrWatchDeps {
@@ -51,6 +53,12 @@ const MISS_MAX = 3
 export const PASTE_MAX = 6_000
 /** Below the 60 s poll: ghc only dedups concurrent asks; heavy answers (MBs) do not linger in its cache. */
 const POLL_TTL = 50
+/**
+ * The first run (no pr-watch.json: a new install, or the upgrade from the babysit-pr skill): PRs
+ * that sessions already have show up over the first polls, and their history is not news.
+ * ponytail: a fixed window; a PR opened inside it is baselined silently too.
+ */
+const FIRST_RUN_MS = 10 * 60_000
 const chunks = <T>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const graphql = (q: string) => ['api', 'graphql', '-f', `query=${q}`]
 
@@ -68,6 +76,7 @@ export class PrWatch {
   private missingSince = new Map<string, number>()
   private polling = false
   private loaded = false
+  private quietUntil = 0
 
   constructor(
     private file: string,
@@ -75,13 +84,15 @@ export class PrWatch {
   ) {}
 
   /** Until it ran, sync and save do nothing (a watch list not read yet must not be overwritten). */
-  load(): void {
+  load(now = Date.now()): void {
     let text: string
     try {
       text = readFileSync(this.file, 'utf8')
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') this.loaded = true
-      else console.error(`PR watch: cannot read ${this.file}: ${String(e)}`)
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.loaded = true
+        this.quietUntil = now + FIRST_RUN_MS
+      } else console.error(`PR watch: cannot read ${this.file}: ${String(e)}`)
       return
     }
     try {
@@ -140,6 +151,7 @@ export class PrWatch {
           url, ...ref, sessionKey: s.key, startedAt: now,
           baseline: pr.createdAt === null || now - pr.createdAt > BASELINE_AGE_MS,
           seen: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
+          ...(now < this.quietUntil ? { quiet: true } : {}),
         })
         changed = true
       }
@@ -193,10 +205,12 @@ export class PrWatch {
           if (!h) return
           const { items, stallAt } = prItems(h, viewer, now)
           const ending = h.state !== 'OPEN'
-          // Older PR: counted once in a summary, its items never listed.
-          const summary = w.baseline && !ending ? baselineMessage(w, items) : ''
-          const news = w.baseline || ending ? [] : fresh(items, w.seen)
+          const quiet = !!w.quiet
+          // Older PR: counted once in a summary, its items never listed. First run: not even that.
+          const summary = w.baseline && !ending && !quiet ? baselineMessage(w, items) : ''
+          const news = w.baseline || ending || quiet ? [] : fresh(items, w.seen)
           w.baseline = false
+          delete w.quiet
           w.seen = items.map((x) => x.key)
           w.updatedAt = l.updatedAt
           w.mergeable = h.mergeable
@@ -209,7 +223,7 @@ export class PrWatch {
             w.events += news.length + (summary || ending ? 1 : 0)
             w.lastEventAt = now
           }
-          if (ending) this.end(w, prWatchMessage(w, items, w.nudges).text)
+          if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
         })
       }
       this.save()

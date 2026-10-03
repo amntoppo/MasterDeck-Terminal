@@ -138,7 +138,12 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   queue off). It writes (backup first, atomic) only when it removed something. Nothing is switched
   off: board moves, self-review and the PR watch are Default-workflow steps. There is no install
   path for skill hooks any more (no `installHooks`, no `hooksInstall` IPC); the skills stay
-  installed for use by hand.
+  installed for use by hand. Sessions alive at the migration keep the queue skill's hooks (Claude
+  Code reads hooks at session start), so when it removed a queue hook it writes `deck/legacy-sids`
+  (`DeckHooks.markLegacy`: `*` until the session list is in; then `pruneLegacy`, from the state
+  callback, turns it into the live session ids and deletes it once none of them is alive). The
+  deck hook does no `/queue` work (UserPromptSubmit store, Stop drain/request) for a listed id, so
+  no turn drains twice.
 - Review gate: `reviewGateCommand`/`installReviewGate` (marker `REVIEW_MARK`) put a PreToolUse Bash
   hook in settings.json at every launch (via `refreshHooks()` after). It is `guardedBuiltin('pr-review')`,
   so a session whose workflow leaves the step out is skipped; it fires only when the command runs
@@ -171,7 +176,9 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 - PR watch (`main/prWatch.ts` `PrWatch`, pure parts in `shared/prWatch.ts`; replaces babysit-pr's
   Monitor phase): `sync` from the state callback adds each open PR in `sessionPrs` of a session with
   `settings.watchPrs` on and the `pr-watch` built-in in its workflow (old PRs are baselined: their
-  items go into `seen` and the session gets one "already has K threads and L comments" line). Every 60 s `poll` sends one light GraphQL per 50 PRs and a heavy one (≤ 10
+  items go into `seen` and the session gets one "already has K threads and L comments" line).
+  First run (no `pr-watch.json` at `load`, e.g. the upgrade from babysit-pr): PRs added in the next
+  10 min are `quiet`: their first full read goes into `seen` and nothing is sent, not even that line. Every 60 s `poll` sends one light GraphQL per 50 PRs and a heavy one (≤ 10
   PRs) only for PRs that changed, every 10 min, or when a stalled review is due; all through `ghc`
   (ttl 50 s) and nothing while the GitHub pause holds. Rate limits are read only from stderr, a failed
   answer's body or a GraphQL `RATE_LIMITED` error (`ghErrorText`; `pollPrs` too), never from a good
@@ -261,16 +268,22 @@ A successful `linkSession` also queues `LinkedSteps` (below).
 ### Board moves (`main/boardFlow.ts`)
 
 `BoardFlow.tick(state)` runs from the state callback, at most every 30 s (`BOARD_TICK_MS`), one at a
-time. (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
+time. Links imported from tt.sh (`imported: true` in `ticket-links.json`) are history: BoardFlow
+leaves them out of (2) and (3) until a session links that ticket again (`withLink` writes a fresh
+entry). (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
 ASSIGN proposal is linked through `linkSession` (tried once per session, ever:
 `<home>/board-link-tried.json`). (2) Each new
-PR in `state.sessionPrs` of a linked session is recorded (`LinkStore.addPr`; a failed write is logged
-and retried next tick) and, when the session keeps `ticket`, linked under the issue's Development
-box (`BoardOps.linkPr`; a failure is logged). (3) Tickets with at least one session keeping
+PR in `state.sessionPrs` of a linked session that it opened (its transcripts: `Sources.prsOpenedBy`)
+or whose repo and head branch are the link's branch key (`prOnBranch`, `PrLive.headRef`) is recorded
+(`LinkStore.addPr`; a failed write is logged and retried next tick) and, when the session keeps
+`ticket`, linked under the issue's Development box (`BoardOps.linkPr`; a failure is logged). The PR
+of whatever branch its checkout is on stays display-only. (3) Tickets with at least one session keeping
 `ticket`, whose card (and so its board) is known and not yet at Dev Done, get their PRs' states in
 one `prStates` call per tick; `boardTarget` of a ticket's PR states: PR Raised once a PR is open and not a draft, Dev Done once none is open and
 one is merged (only when every PR's state is known). Forward only (`statusRank` against the card's
-status), each (ticket, target) tried once and again after 30 min (`RETRY_MS`) if needed. PR states
+status). A (ticket, target) move that went through, or found the card already there or past it,
+is recorded in `<home>/board-moved.json` and never tried again (a card the user moved back stays);
+a failed one is tried again after 30 min (`RETRY_MS`). PR states
 come from `state.prLive` for now (live sessions' PRs only).
 
 `LinkedSteps` replaces the `linked` hook for links MasterDeck makes itself (no `tt.sh link` runs, so
@@ -372,8 +385,9 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
+| `board-moved.json` | `<ticket>:<target>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
-| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `events.jsonl`, `alive`, `monitors-by` |
+| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |

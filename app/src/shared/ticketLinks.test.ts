@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
-import { boardTarget, emptyLinks, importLinks, linkInfoMap, parseLinkFile, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
+import { boardTarget, emptyLinks, importLinks, linkInfoMap, parseLinkFile, prOnBranch, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
 
 setConfig(parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/web'] }))
 const A = '11111111-1111-4111-8111-111111111111'
@@ -24,6 +24,22 @@ describe('ticket links', () => {
     expect(m.sessions[A].issue).toBe(12)
     expect(m.sessions[B].issue).toBe(5)
     expect(m.branches['acme/web@f']).toBe(5)
+    // Imported ones are history: marked, kept through a parse, ignored by board moves until re-linked.
+    expect(m.sessions[B].imported).toBe(true)
+    expect(m.sessions[A].imported).toBeUndefined()
+    expect(parseLinkFile(JSON.parse(JSON.stringify(m))).sessions[B].imported).toBe(true)
+    expect(ticketSessions(m, { repo: null, number: 5 })).toEqual([])
+    const relinked = withLink(m, B, { repo: null, number: 5 }, 'v', 'acme/web@f', new Date(0))
+    expect(relinked.sessions[B].imported).toBeUndefined()
+    expect(ticketSessions(relinked, { repo: null, number: 5 })).toEqual([B])
+  })
+  it('a PR is on a link\'s branch when its repo and head branch match the branch key', () => {
+    const u = 'https://github.com/Acme/Web/pull/3'
+    expect(prOnBranch(u, 'feat/12', 'acme/web@feat/12')).toBe(true)
+    expect(prOnBranch(u, 'feat/13', 'acme/web@feat/12')).toBe(false)
+    expect(prOnBranch(u, 'feat/12', 'acme/api@feat/12')).toBe(false)
+    expect(prOnBranch(u, undefined, 'acme/web@feat/12')).toBe(false)
+    expect(prOnBranch(u, 'feat/12', '')).toBe(false)
   })
   it('stores the primary repo as a bare number and others with their repo', () => {
     let f = withLink(emptyLinks(), A, { repo: null, number: 12 }, 't', 'acme/web@feat/12', new Date(0))

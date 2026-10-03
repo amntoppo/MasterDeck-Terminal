@@ -278,6 +278,8 @@ export class Sources {
   ) => { text: string; at: number } | null = () => null;
   /** PRs each session created, by session key (survives a resume's new sessionId). */
   private createdPrs: Record<string, string[]> = {};
+  /** Of those, the ones its transcripts show it opened (the rest came from its checkout's branch). Rebuilt each launch: transcripts are read from the start. */
+  private openedPrs: Record<string, string[]> = {};
   private ghPausedUntil = 0;
   private ghCache: GhCacheStatus | null = null;
   private teamPrs: TeamPr[] = [];
@@ -1429,6 +1431,7 @@ export class Sources {
     for (const p of f.wt.paths) if (!all.paths.includes(p)) all.paths.push(p);
     // Most recent last; a resumed session adds a second transcript to the same key.
     this.notePrs(key, f.scan.urls);
+    addPrUrls((this.openedPrs[key] ??= []), f.scan.urls);
     return found;
   }
 
@@ -1453,6 +1456,12 @@ export class Sources {
       if (w) out.push(w);
     }
     return out;
+  }
+
+  /** PRs the session opened, from its transcripts (board moves link only these, or its linked branch's). */
+  prsOpenedBy(sessionId: string): string[] {
+    const s = this.lastSessions.find((x) => x.sessionId === sessionId);
+    return s ? (this.openedPrs[s.key] ?? []) : [];
   }
 
   private prUrlsFor(sessionId: string, key: string): string[] {

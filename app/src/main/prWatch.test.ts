@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -32,11 +32,13 @@ const thread = (id: number, body: string) => ({ isResolved: false, comments: { n
 const withThreads = (...ts: object[]) => ({ ...lightPr, reviewThreads: { nodes: ts }, reviews: { nodes: [] }, comments: { nodes: [] } })
 const withThread = (body: string) => withThreads(thread(1, body))
 
-function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json')) {
+/** A watch past its first run (pr-watch.json there); `firstRun` starts with none. */
+function make(gh: GhRunner, file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json'), firstRun = false) {
   const sent: string[] = []
   const deps: PrWatchDeps = { gh, paused: () => false, send: async (_s, t): Promise<CliResult> => (sent.push(t), { ok: true, message: 'sent' }), onChange: () => {} }
+  if (!firstRun && !existsSync(file)) writeFileSync(file, '{}')
   const w = new PrWatch(file, deps)
-  w.load()
+  w.load(NOW)
   return { w, sent, file, deps }
 }
 const one = (createdAt: number, n = 1) => ({ sessions: [sess()], sessionPrs: { [SID]: [url(n)] }, prLive: { [url(n)]: live(createdAt) } })
@@ -58,6 +60,31 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW + 60_000)
     await tick()
     expect(sent).toHaveLength(1)
+  })
+  it('first run (no pr-watch.json): what PRs already have is recorded silently, only later items go', async () => {
+    let body = 'old'
+    const { gh } = fakeGh((_i, heavy) => (heavy ? withThreads(thread(1, 'old'), ...(body === 'new' ? [thread(2, 'new')] : [])) : { ...lightPr, updatedAt: body }))
+    const { w, sent } = make(gh, undefined, true)
+    w.sync({ sessions: [sess()], sessionPrs: { [SID]: [url(1), url(2)] }, prLive: { [url(1)]: live(NOW - 60_000), [url(2)]: live(NOW - 86_400_000) } }, () => true, NOW)
+    await w.poll(NOW)
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toEqual([])
+    body = 'new'
+    await w.poll(NOW + 60_000)
+    w.deliver([sess()], NOW + 60_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('"new"')
+    expect(sent[0]).not.toContain('"old"')
+    // Past the first run's window a new PR is watched as usual.
+    w.sync({ sessions: [sess()], sessionPrs: { [SID]: [url(3)] }, prLive: { [url(3)]: live(NOW + 59 * 60_000) } }, () => true, NOW + 60 * 60_000)
+    body = 'newer'
+    await w.poll(NOW + 60 * 60_000)
+    w.deliver([sess()], NOW + 60 * 60_000)
+    await tick()
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toContain('web#3')
   })
   it('baselines an old PR: one summary of what is there, never the items themselves, never again', async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? withThread('old') : lightPr))

@@ -223,7 +223,9 @@ checkout whose branch was once linked to a ticket does not link it.
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
   <prompt>`, `/queue list` and `/queue clear` do the same. `/queue` is handled by MasterDeck's own
   hook, so it works in any Claude session on macOS and Linux, MasterDeck open or not; if you
-  installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them.
+  installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them. Sessions already
+  running when MasterDeck took the queue skill's hooks out keep using those (Claude Code reads hooks
+  when a session starts), and MasterDeck's hook stays out of `/queue` for them until they end.
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you
@@ -481,7 +483,9 @@ Stored in `~/.claude/masterdeck/settings.json`.
   merge reach the session as one message starting `[MasterDeck PR watch] repo#12:` once its turn is
   over. A PR that was older when the watch started gets one line counting what is already on it
   (its threads and comments are not listed); after that only new ones are sent, never twice, also
-  across restarts. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
+  across restarts. The very first time (no watch file yet, e.g. right after upgrading from the
+  babysit-pr skill), PRs picked up in the first 10 minutes say nothing about what they already
+  have: only what comes after. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
   force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
   has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
   tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its
@@ -674,7 +678,10 @@ cards is in them.
 - **Clicking a card:** opens that issue's session in Terminals, or the Assign dialog if it has none.
 - **Board moves:** MasterDeck moves the card to In Dev when a session is linked, PR Raised once its
   PR is open and not a draft, Dev Done when all its PRs are merged — the Board moves step of the
-  Default workflow; a custom workflow can leave it out. Cards only move forward. A session master
+  Default workflow; a custom workflow can leave it out. Cards only move forward, and each move is
+  made once: a card you move back stays there. Only PRs the session opened, or ones on its linked
+  branch, count for its ticket (the PR of whatever branch its folder is on is shown, not linked).
+  Links copied in from babysit-ticket are left alone until a session links that ticket again. A session master
   spawned for an issue is linked by MasterDeck, and a link made from MasterDeck still runs the
   workflow's "When a session is linked" steps (sent to the session once its turn is over).
 - **Data:** `master board` (2 GitHub calls), refreshed together with the issues: at startup, every

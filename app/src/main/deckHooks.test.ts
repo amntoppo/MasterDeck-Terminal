@@ -145,6 +145,30 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     d.setQueueOff(false)
     expect(JSON.parse(run('Stop', { session_id: SID }))).toEqual(queueAnswer('a', 0))
   }, 20_000)
+  it('legacy sessions (alive at the migration, still running the skill hooks) get no queue work from it', () => {
+    const { d, queues, run, stale } = setup()
+    const OTHER = '5d1bc2b2-2edb-4304-91fd-6633dc9bd935'
+    const file = join(d.dir, 'legacy-sids')
+    // At the migration the session list is not in yet: every session is skipped.
+    d.markLegacy()
+    expect(run('UserPromptSubmit', { session_id: OTHER, prompt: '/queue y' })).toBe('')
+    // The first list names them: only those stay skipped.
+    d.pruneLegacy(new Set([SID]))
+    expect(readFileSync(file, 'utf8')).toBe(`${SID}\n`)
+    expect(run('UserPromptSubmit', { session_id: SID, prompt: '/queue x' })).toBe('')
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    stale()
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(readQueue(SID, queues)).toEqual(['a'])
+    expect(d.readEvents()).toEqual(new Set([SID])) // the Stop is still logged
+    expect(JSON.parse(run('UserPromptSubmit', { session_id: OTHER, prompt: '/queue y' })).reason).toBe('Queued #1: y')
+    d.pruneLegacy(new Set([SID, OTHER]))
+    expect(readFileSync(file, 'utf8')).toBe(`${SID}\n`)
+    // None of them alive any more: the file goes.
+    d.pruneLegacy(new Set([OTHER]))
+    expect(existsSync(file)).toBe(false)
+    expect(JSON.parse(run('Stop', { session_id: SID }))).toEqual(queueAnswer('a', 0))
+  }, 20_000)
   it('MASTERDECK_QUEUE_DIR moves the queue for the app and for the hook', () => {
     const home = mkdtempSync(join(tmpdir(), 'dq-'))
     const queues = join(home, 'elsewhere')

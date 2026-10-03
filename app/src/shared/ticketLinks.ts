@@ -16,6 +16,8 @@ export interface LinkEntry {
   linked_at: string
   prs: string[]
   adopted?: boolean
+  /** Copied from tt.sh's file at the import: history, which board moves leave alone until re-linked. */
+  imported?: boolean
 }
 
 export interface LinkFile {
@@ -46,15 +48,17 @@ export function parseLinkFile(raw: unknown): LinkFile {
       linked_at: str(e.linked_at),
       prs: Array.isArray(e.prs) ? e.prs.filter((u): u is string => typeof u === 'string' && PR.test(u)) : [],
       ...(e.adopted === true ? { adopted: true } : {}),
+      ...(e.imported === true ? { imported: true } : {}),
     }
   }
   for (const [k, v] of Object.entries(obj(o.branches))) if (typeof v === 'number' || typeof v === 'string') out.branches[k] = v
   return out
 }
 
-/** The one-time import: tt.sh's links fill what MasterDeck does not have yet; ours always win. */
+/** The one-time import: tt.sh's links fill what MasterDeck does not have yet (marked imported); ours always win. */
 export function importLinks(own: LinkFile, legacy: LinkFile): LinkFile {
-  return { ...own, sessions: { ...legacy.sessions, ...own.sessions }, branches: { ...legacy.branches, ...own.branches } }
+  const old = Object.fromEntries(Object.entries(legacy.sessions).map(([sid, e]) => [sid, { ...e, imported: true }]))
+  return { ...own, sessions: { ...old, ...own.sessions }, branches: { ...legacy.branches, ...own.branches } }
 }
 
 export function linkInfoMap(f: LinkFile): Map<string, LinkInfo> {
@@ -83,12 +87,20 @@ export function withPr(f: LinkFile, sessionId: string, url: string): LinkFile {
 
 const isTicket = (e: LinkEntry, t: Ticket) => ticketKey(e.repo ?? null, e.issue) === ticketKey(t.repo, t.number)
 
+/** The sessions board moves act for: not adopted, not imported history. */
 export function ticketSessions(f: LinkFile, t: Ticket): string[] {
-  return Object.entries(f.sessions).filter(([, e]) => !e.adopted && isTicket(e, t)).map(([sid]) => sid)
+  return Object.entries(f.sessions).filter(([, e]) => !e.adopted && !e.imported && isTicket(e, t)).map(([sid]) => sid)
 }
 
 export function ticketPrs(f: LinkFile, t: Ticket): string[] {
   return [...new Set(ticketSessions(f, t).flatMap((sid) => f.sessions[sid].prs))]
+}
+
+/** The PR's repo and head branch are the link's branch key (`Owner/repo@branch`; the repo in any case). */
+export function prOnBranch(url: string, headRef: string | null | undefined, branch: string): boolean {
+  const m = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+$/.exec(url)
+  const at = branch.indexOf('@')
+  return !!m && !!headRef && at > 0 && m[1].toLowerCase() === branch.slice(0, at).toLowerCase() && headRef === branch.slice(at + 1)
 }
 
 /**

@@ -28,6 +28,9 @@ const EVENTS_MAX = 4 * 1024 * 1024
  *   it waits until 7s after its start for the answer. One rename wins, so exactly one of them
  *   takes the item. Deadlines are by the clock: at most ~7s, under the 10s hook timeout.
  * - `queue-off` (the queue skill's hooks installed by hand): both leave /queue to those hooks.
+ * - `legacy-sids` (one session id a line, or `*`): sessions alive when the migration took the queue
+ *   skill's hooks out still run them (Claude Code reads hooks at session start), so the hook does no
+ *   queue work for them (markLegacy, pruneLegacy).
  * - The rest: one line in `events.jsonl`.
  */
 export function hookScript(dir: string, queueDir: string): string {
@@ -40,6 +43,8 @@ ev="$1"
 in=$(cat)
 sid=$(printf '%s' "$in" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p' | head -n 1)
 now=$(date +%s)
+# Sessions that still run the queue skill's hooks (alive at the migration; "*": not known yet).
+legacy() { [ -f "$D/legacy-sids" ] && grep -qxF -e "$sid" -e '*' "$D/legacy-sids"; }
 mkdir -p "$D/pending" "$D/answers" "$D/context" 2>/dev/null
 case "$ev" in
   MonitorCall)
@@ -78,6 +83,7 @@ case "$ev" in
     [ -f "$D/queue-off" ] && exit 0
     command -v jq >/dev/null 2>&1 || exit 0
     case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac
+    legacy && exit 0
     prompt=$(printf '%s' "$in" | jq -r '.prompt // ""')
     case "$prompt" in /queue|/queue[[:space:]]*) ;; *) exit 0 ;; esac
     mkdir -p "$Q" 2>/dev/null
@@ -96,6 +102,7 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
     printf '{"at":%s000,"event":"Stop","data":{"session_id":"%s"}}\\n' "$now" "$sid" >> "$D/events.jsonl"
     case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac
     [ -f "$D/queue-off" ] && exit 0
+    legacy && exit 0
     f="$Q/$sid.jsonl"
     [ -s "$f" ] || exit 0
     m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
@@ -364,6 +371,33 @@ export class DeckHooks {
       else rm(p)
     } catch {
       // next launch
+    }
+  }
+
+  /** The migration took the queue skill's hooks out: sessions alive now keep running them. Their
+   * ids are not known yet (the session list comes later), so every session is skipped until then. */
+  markLegacy(): void {
+    mkdirSync(this.dir, { recursive: true })
+    writeFileSync(join(this.dir, 'legacy-sids'), '*\n')
+  }
+
+  /** With the session list in: `*` becomes the live sessions; the file goes once none of them is alive. */
+  pruneLegacy(live: Set<string>): void {
+    const p = join(this.dir, 'legacy-sids')
+    let ids: string[]
+    try {
+      ids = readFileSync(p, 'utf8').split('\n').filter(Boolean)
+    } catch {
+      return // none
+    }
+    const left = ids.includes('*') ? [...live] : ids.filter((id) => live.has(id))
+    try {
+      if (!left.length) return rm(p)
+      if (left.length === ids.length && !ids.includes('*')) return
+      writeFileSync(`${p}.tmp`, left.join('\n') + '\n')
+      renameSync(`${p}.tmp`, p)
+    } catch {
+      // next state
     }
   }
 

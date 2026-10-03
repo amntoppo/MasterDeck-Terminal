@@ -81,6 +81,11 @@ the repo-root [TODO.md](../TODO.md).
   a hook killed between the alive check and reading its answer loses one `/queue` item
   (`main/deckHooks.ts`); review-gate markers in `$TMPDIR` are never cleaned; a ticket request has a
   ms race between `.taken` and `rm -f .req` on timeout (`mv .req .gone` would close it).
+- **Queue item waits a turn (M2)**: when the app claims a Stop request but answers after the hook's
+  7 s wait, the hook exits without a prompt; the item stays queued (not lost) and goes at the next
+  turn's Stop (`main/deckHooks.ts` `pumpQueue`).
+- **Settings backups never pruned (M4)**: `settings.backup.*.json` in `<home>` pile up (up to 4 on
+  the first launch: migration, review gate, deck hook, workflow hooks) (`main/hooks.ts` `write`).
 - **Orphaned babysit-proof hook**: older machines may still have a babysit-proof `PROOF_PRE`
   PreToolUse hook in `~/.claude/settings.json` (the skill is gone; `migrateLegacyHooks` does not
   remove it). Remove by hand, or add it to `LEGACY`.
@@ -92,7 +97,7 @@ the repo-root [TODO.md](../TODO.md).
 
 | What | MasterDeck | Backend |
 |---|---|---|
-| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI) | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
+| Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 5e24c8b + docs commit, branch feat/native-babysit (not merged) | plan H |
 | Remote backend v1 + MasterDeck remote client (snapshot relay, commands run-once, API items, Settings → Remote) | 50d39d7 … 2f694a7, merge 8042d6d (PR #1) | plan A |
 | Accounts / OAuth sign-in, device token in Keychain, Settings → Account | 955712d … 27dd416, merge 99d2d68 (PR #3) | plans C/D |
 | Desktop loopback sign-in (no code; code flow as fallback) | 66ed2c8 … 83de748, merge ab6df30 | plan E |

@@ -151,6 +151,8 @@ export interface PrLive {
   reviewCheck: "success" | "failure" | "pending" | null;
   buildCi: "success" | "failure" | "pending" | null;
   isDraft: boolean;
+  /** Its head branch (absent from older reads). */
+  headRef?: string;
   /** When it was opened, and its latest comment or review (ms); for "Ready for Review". */
   createdAt: number | null;
   mergedAt: number | null;

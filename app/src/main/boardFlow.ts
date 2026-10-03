@@ -4,7 +4,7 @@ import { statusesFor, statusRank } from '@shared/appConfig'
 import type { CompiledStep } from '@shared/flow'
 import { canDeliver } from '@shared/watches'
 import { MASTER_NAME } from '@shared/derive'
-import { boardTarget, ticketPrs, ticketSessions, type LinkFile } from '@shared/ticketLinks'
+import { boardTarget, prOnBranch, ticketPrs, ticketSessions, type LinkFile } from '@shared/ticketLinks'
 import { sameTicket, ticketKey, type Ticket } from '@shared/ticket'
 import type { AppState, CliResult, Session } from '@shared/types'
 import type { BoardOps } from './boardOps'
@@ -24,6 +24,11 @@ export interface BoardFlowDeps {
   log?: (m: string) => void
   /** Sessions already tried for an auto-link (kept across restarts: one the user unlinked stays unlinked). */
   linkTriedFile?: string
+  /** PRs the session created, from its transcript (not the PR of its checkout's branch). */
+  createdPrs: (sessionId: string) => string[]
+  /** (ticket, target) moves that went through or found nothing to do: never tried again, so a card
+   * the user moved back stays there (kept across restarts). */
+  movedFile?: string
 }
 
 /**
@@ -31,22 +36,19 @@ export interface BoardFlowDeps {
  * knows: a session master spawned for an issue gets linked (In Dev comes with the link); a linked
  * session's new PR is recorded and linked under the issue's Development box; the card moves to PR
  * Raised once a PR is open and ready, and to Dev Done once every PR is merged. Forward only; each
- * (ticket, target) is tried once, again after RETRY_MS if it failed.
+ * (ticket, target) is done once (movedFile), a failed one tried again after RETRY_MS. Links imported
+ * from tt.sh are left alone until a session links that ticket again.
  */
 export class BoardFlow {
   private last = -Infinity
   private running = false
   private tried = new Map<string, number>()
   private linkTried: Set<string>
+  private moved: Set<string>
 
   constructor(private deps: BoardFlowDeps) {
-    let ids: unknown = []
-    try {
-      if (deps.linkTriedFile && existsSync(deps.linkTriedFile)) ids = JSON.parse(readFileSync(deps.linkTriedFile, 'utf8'))
-    } catch (e) {
-      deps.log?.(`board moves: ${String(e)}`)
-    }
-    this.linkTried = new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [])
+    this.linkTried = readIds(deps.linkTriedFile, deps.log)
+    this.moved = readIds(deps.movedFile, deps.log)
   }
 
   async tick(state: AppState, now = Date.now()): Promise<void> {
@@ -79,8 +81,11 @@ export class BoardFlow {
 
   private async recordPrs(state: AppState, file: LinkFile): Promise<void> {
     for (const [sid, e] of Object.entries(file.sessions)) {
+      if (e.imported) continue
+      const created = this.deps.createdPrs(sid)
       for (const url of state.sessionPrs[sid] ?? []) {
-        if (e.prs.includes(url)) continue
+        // Only its own PRs: the PR of whatever branch its checkout is on is shown, not linked.
+        if (e.prs.includes(url) || !(created.includes(url) || prOnBranch(url, state.prLive?.[url]?.headRef, e.branch))) continue
         try {
           this.deps.links.addPr(sid, url)
         } catch (e) {
@@ -96,7 +101,7 @@ export class BoardFlow {
 
   private async move(state: AppState, file: LinkFile, now: number): Promise<void> {
     const tickets = new Map<string, Ticket>()
-    for (const e of Object.values(file.sessions)) if (!e.adopted) tickets.set(ticketKey(e.repo ?? null, e.issue), { repo: e.repo ?? null, number: e.issue })
+    for (const e of Object.values(file.sessions)) if (!e.adopted && !e.imported) tickets.set(ticketKey(e.repo ?? null, e.issue), { repo: e.repo ?? null, number: e.issue })
     const todo: { key: string; t: Ticket; urls: string[]; status: string | null; project: string }[] = []
     for (const [key, t] of tickets) {
       if (!ticketSessions(file, t).some((sid) => this.deps.builtinOn(sid))) continue
@@ -121,14 +126,26 @@ export class BoardFlow {
       const name = statusesFor(project)[target]
       if (status && statusRank(status, undefined, project) >= statusRank(name, undefined, project)) continue
       const id = `${key}:${target}`
-      if (now - (this.tried.get(id) ?? -Infinity) < RETRY_MS) continue
+      if (this.moved.has(id) || now - (this.tried.get(id) ?? -Infinity) < RETRY_MS) continue
       this.tried.set(id, now)
       const r = await this.deps.ops.move(t, name)
       if (r.ok) {
+        this.moved.add(id)
+        if (this.deps.movedFile) writeJson(this.deps.movedFile, [...this.moved], this.deps.log)
         if (!/left at|already/.test(r.message)) this.deps.onMoved(t, name)
       } else this.deps.log?.(`board ${key}: ${r.message}`)
     }
   }
+}
+
+function readIds(file: string | undefined, log?: (m: string) => void): Set<string> {
+  let ids: unknown = []
+  try {
+    if (file && existsSync(file)) ids = JSON.parse(readFileSync(file, 'utf8'))
+  } catch (e) {
+    log?.(`board moves: ${String(e)}`)
+  }
+  return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [])
 }
 
 function writeJson(file: string, v: unknown, log?: (m: string) => void): void {

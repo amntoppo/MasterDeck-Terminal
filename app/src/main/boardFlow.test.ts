@@ -31,6 +31,7 @@ function setup(file: LinkFile, prs: Record<string, { state: string; isDraft: boo
     link: async (t, sid) => (linked.push(`${sid} #${t.number}`), { ok: true, message: 'linked' }),
     builtinOn: () => true,
     onMoved: () => {},
+    createdPrs: () => [PR, 'https://github.com/acme/web/pull/6'],
   }
   return { flow: new BoardFlow(deps), moves, linked, prLinks, deps }
 }
@@ -224,5 +225,53 @@ describe('LinkedSteps fix round 1', () => {
     await mk().deliver([sess()])
     expect(sent).toEqual(['N'])
     expect(runs).toEqual([SID])
+  })
+})
+
+describe('BoardFlow final review', () => {
+  const linked = () => withPr(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', 'acme/web@feat-12', new Date(0)), SID, PR)
+  it('never re-pushes a card the user moved back, even after a restart: done moves are kept on disk', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-'))
+    const s = setup(linked(), { [PR]: { state: 'OPEN', isDraft: false } })
+    s.deps.movedFile = join(dir, 'moved.json')
+    await new BoardFlow(s.deps).tick(state({}), 0)
+    expect(s.moves).toEqual(['#12 PR Raised'])
+    // Moved back to In Dev by hand (the card still says In Dev): not again, not after a restart.
+    const flow = new BoardFlow(s.deps)
+    await flow.tick(state({}), 0)
+    await flow.tick(state({}), 2 * 30 * 60_000)
+    expect(s.moves).toEqual(['#12 PR Raised'])
+  })
+  it('a move that found the card already there (or left it) counts as done; a failure retries', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-'))
+    const s = setup(linked(), { [PR]: { state: 'OPEN', isDraft: false } })
+    s.deps.movedFile = join(dir, 'moved.json')
+    s.deps.ops.move = async (t, st) => (s.moves.push(`#${t.number} ${st}`), { ok: true, message: 'already at PR Raised' })
+    await new BoardFlow(s.deps).tick(state({}), 0)
+    await new BoardFlow(s.deps).tick(state({}), 31 * 60_000)
+    expect(s.moves).toEqual(['#12 PR Raised'])
+    const f = setup(linked(), { [PR]: { state: 'OPEN', isDraft: false } })
+    f.deps.movedFile = join(dir, 'moved-f.json')
+    f.deps.ops.move = async (t, st) => (f.moves.push(`#${t.number} ${st}`), { ok: false, message: 'no access' })
+    const flow = new BoardFlow(f.deps)
+    await flow.tick(state({}), 0)
+    await flow.tick(state({}), 31 * 60_000)
+    expect(f.moves).toEqual(['#12 PR Raised', '#12 PR Raised'])
+  })
+  it('imported links are history: no PRs recorded or moves made until a session re-links the ticket', async () => {
+    const imported = { ...linked(), sessions: { [SID]: { ...linked().sessions[SID], imported: true } } }
+    const s = setup(imported, { [PR]: { state: 'MERGED', isDraft: false }, 'https://github.com/acme/web/pull/6': { state: 'OPEN', isDraft: false } })
+    await s.flow.tick(state({ sessionPrs: { [SID]: ['https://github.com/acme/web/pull/6'] } }), 0)
+    expect(s.moves).toEqual([])
+    expect(s.prLinks).toEqual([])
+  })
+  it('records only PRs the session created or that are on its linked branch; a cwd-branch PR stays display-only', async () => {
+    const PR7 = 'https://github.com/acme/web/pull/7'
+    const PR8 = 'https://github.com/acme/web/pull/8'
+    const s = setup(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', 'acme/web@feat-12', new Date(0)), {})
+    s.deps.createdPrs = (sid) => (sid === SID ? [PR] : [])
+    const prLive = { [PR7]: { headRef: 'feat-12' }, [PR8]: { headRef: 'main' } }
+    await new BoardFlow(s.deps).tick(state({ sessionPrs: { [SID]: [PR, PR7, PR8] }, prLive } as never), 0)
+    expect(s.prLinks).toEqual([PR, PR7])
   })
 })
