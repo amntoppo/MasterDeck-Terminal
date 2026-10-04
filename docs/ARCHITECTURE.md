@@ -432,7 +432,7 @@ entry is dropped.
 
 With two or more connected accounts (`isMulti`), `AccountEnv` keeps each account's token in memory
 (`refresh`: `gh auth token --user`, local only) and writes `accounts/<login>.settings.json` (mode
-600, folder 700, temp + rename) with `accountEnvBlock`'s `env` (`GH_TOKEN`, `GHC_ACCOUNT`, git identity and rules); ssh aliases come from `~/.ssh/config`
+600, folder 700, temp + rename) with `accountEnvBlock`'s `env` (`GH_TOKEN`, which `gh` prefers over its stored logins; `GHC_ACCOUNT`; `GIT_AUTHOR_*`/`GIT_COMMITTER_*`; and `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` for `user.name`, `user.email`, an empty then `!gh auth git-credential` helper for `credential.https://github.com`, and `url.https://github.com/.insteadOf` per SSH form; the variable table is in GUIDE "Several GitHub accounts"); ssh aliases come from `~/.ssh/config`
 and its Includes (`readSshConfig`). `check` then asks GitHub in the background (`gh api user`, parsed
 with `parseGhUser`: HTTP 401 or another login → unhealthy and its file removed; offline →
 unchanged; a new token clears an old refusal) and runs `git config --global --includes --get-regexp

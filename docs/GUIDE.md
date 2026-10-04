@@ -753,6 +753,33 @@ identity; GitHub remotes are pushed over HTTPS with that token, including `git@g
 aliases from `~/.ssh/config`. An account whose token GitHub refuses shows as needing a new login; an
 offline check changes nothing. With one account nothing changes.
 
+**How commits, pushes and PRs work in a session.** The commands are the ordinary ones, with no
+account flag: `git commit`, `git push`, `gh pr create`. The session's environment carries the account
+(from the `--settings` file MasterDeck starts it with):
+
+| Variable | What it does |
+|---|---|
+| `GH_TOKEN` | That account's token. `gh` uses `GH_TOKEN` before its stored logins, so every `gh` call in the session (PRs, comments, reviews, `gh api`) is made as this account, whichever account is active in `gh`. |
+| `GHC_ACCOUNT` | Keeps the shared GitHub cache apart per account. |
+| `GIT_AUTHOR_NAME` / `_EMAIL`, `GIT_COMMITTER_NAME` / `_EMAIL` | The name and email from Setup, so commits are authored as this account. |
+| `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n` | Git settings for this session only: `user.name`, `user.email`; the github.com credential helper cleared (so a password in your Mac's keychain is not used) and set to `gh auth git-credential` (which answers with `GH_TOKEN`); `url.https://github.com/.insteadOf` for `git@github.com:`, `ssh://git@github.com/` and each ssh alias, so SSH remotes push over HTTPS as this account. |
+
+So with `alice` as the primary and active `gh` account, a session started as `amntoppo` still
+commits, pushes and opens PRs as `amntoppo`. To check in any session: `gh api user --jq .login` and
+`git config user.email`. The account needs access to the repo: without it the push or PR fails with a
+permission error; nothing falls back to the primary. Shell tabs and your own terminal do not get
+these variables: they use your global git setup and `gh`'s active account.
+
+**Adding a scope to a second account.** `gh auth refresh` only works on `gh`'s active account (it has
+no user flag); signing in as another account in the browser fails with "error refreshing credentials
+for <active>, received credentials for <other>". Switch first, then switch back:
+
+```bash
+gh auth switch -u <second account>
+gh auth refresh -h github.com -s project    # sign in as the second account
+gh auth switch -u <primary>
+```
+
 One limit: a rule in your global git config that sends GitHub over SSH (for example
 `url.git@github.com:.insteadOf https://github.com/`, or a `pushInsteadOf`) wins over the session's
 rewrite, so such a session may push as the SSH key's account. Setup shows a warning on the
