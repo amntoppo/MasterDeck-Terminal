@@ -101,10 +101,10 @@ export function accountOverride(picked: string | null, def: string | null, c: Wi
   return isMulti(c) && picked && picked !== def ? picked : undefined
 }
 
-/** The account a resume sends: the user's pick, else the one the session was recorded with, else what the select shows; nothing with one account. */
+/** The account a resume sends: the user's pick, else the one the session was recorded with; nothing with one account, or with neither (an account that is not the recorded one starts a copy, so the select's default is never sent on its own). */
 export function resumeAccount(recorded: string | null | undefined, selected: string | null, picked: boolean, c: WithAccounts): string | undefined {
   if (!isMulti(c)) return undefined
-  return (picked ? selected : (recorded ?? selected)) ?? undefined
+  return (picked ? selected : recorded) ?? undefined
 }
 
 /** owner/name of a GitHub remote: https://github.com/…, git@<host or alias>:…, ssh://git@<host or alias>/…; null otherwise. */

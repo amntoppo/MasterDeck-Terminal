@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import uuid
@@ -92,9 +93,10 @@ def command(target: dict) -> list:
     if sp.get("resume"):
         # No flag at all wakes the session itself, with its saved options (its account's --settings
         # among them). Any flag starts a copy under new ids and leaves the old session listed, so
-        # --settings goes only to a session MasterDeck did not record as started as this account
-        # (it would run as gh's active account otherwise); spawn() then removes the old one.
-        if acct and (config.session_account(sp["resume"]) or "").lower() == login.lower():
+        # --settings goes only when the proposal names another account than the one MasterDeck
+        # recorded the session as: a copy on purpose. No record: bare.
+        rec = config.session_account(sp["resume"]) if acct else None
+        if not rec or rec.lower() == login.lower():
             acct = []
         return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
@@ -125,23 +127,27 @@ def default_account(led: dict, p: dict, cwd: str) -> "str | None":
 _COPY = re.compile(r"background session ([0-9a-f]{8}) keeps its own saved options[^\n]*?started a copy as ([0-9a-f]{8})\b")
 
 
-def copied(out: str) -> "str | None":
-    """The bg id of the session a resume copied (`note: background session <old> keeps its own saved
-    options, so the flags you passed started a copy as <new>`); None when it woke the session itself."""
+def copy_of(out: str) -> "tuple[str, str] | None":
+    """(old bg id, new bg id) when a resume started a copy (`note: background session <old> keeps its
+    own saved options, so the flags you passed started a copy as <new>`); None when it woke the session itself."""
     m = _COPY.search(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", out))
-    return m.group(1) if m and m.group(1) != m.group(2) else None
+    return (m.group(1), m.group(2)) if m and m.group(1) != m.group(2) else None
 
 
-def running(session_id: str, runner=subprocess.run) -> bool:
-    """Whether `claude agents` shows a live process for this session. `claude --bg --resume` on a
-    running session starts a copy, so a resume checks first. Unknown counts as not running."""
+def running(session_id: str, runner=subprocess.run) -> "bool | None":
+    """Whether `claude agents` shows a live process for this session: by its session id, or its
+    background id (the first 8 characters of the id it started with; it survives a resume under a
+    new session id). `claude --bg --resume` beside a running session would be a second one of it, so
+    a resume checks first. None: not known (`claude agents` failed or printed something else)."""
     try:
         r = runner(["claude", "agents", "--json"], capture_output=True, text=True, timeout=30)
-        rows = json.loads(r.stdout) if r.returncode == 0 else []
+        rows = json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired, ValueError):
-        return False
-    return isinstance(rows, list) and any(
-        isinstance(x, dict) and x.get("sessionId") == session_id and x.get("pid") for x in rows)
+        return None
+    if not isinstance(rows, list):
+        return None
+    return any(isinstance(x, dict) and x.get("pid") and (x.get("sessionId") == session_id or x.get("id") == session_id[:8])
+               for x in rows)
 
 
 def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
@@ -177,9 +183,16 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
     resume = p["target"]["spawn"].get("resume")
-    if resume and running(resume, runner):
-        # Resumed already (MasterDeck's Resume all, or by hand): the session is working again.
-        return ledger.transition(led, pid, "sent", now=now, note="already running; not resumed again")
+    if resume:
+        live = running(resume, runner)
+        if live:
+            # Resumed already (MasterDeck's Resume all, or by hand): the session is working again.
+            return ledger.transition(led, pid, "sent", now=now, note="already running; not resumed again")
+        if live is None:
+            # Not known: a resume beside a running session would be a second one of it.
+            note = "`claude agents` failed, so it is not known whether the session runs; not resumed"
+            hold(note)
+            raise SpawnError(f"proposal {pid}: {note}")
     try:
         r = runner(cmd, cwd=cwd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
@@ -195,15 +208,34 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         err = (r.stderr or r.stdout or f"exit {r.returncode}").strip()[:500]
         hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
-    note = (r.stdout or "").strip()[:200]
-    old = copied(r.stdout or "") if resume else None
-    if old:
-        # The flags started a copy; the old session (not running: checked above) would stay listed
-        # beside it under the same name.
-        try:
-            rm = runner(["claude", "rm", old], capture_output=True, text=True, timeout=30)
-            note = (f"removed the old session {old}; " if rm.returncode == 0
-                    else f"old session {old} not removed ({(rm.stderr or rm.stdout or '').strip()[:80]}); ") + note
-        except (OSError, subprocess.TimeoutExpired) as e:
-            note = f"old session {old} not removed ({e}); " + note
-    return ledger.transition(led, pid, "sent", now=now, note=note[:300])
+    out = r.stdout or ""
+    if resume:
+        c = copy_of(out)
+        if c:
+            # The flags started a copy. The old session stays as it is (never removed: `claude rm`
+            # deletes its worktree too); MasterDeck hides it while it does not run, and knows the
+            # copy's account, so its own resume of the copy stays bare.
+            old, new = c
+            login = p["target"]["spawn"].get("account")
+            try:
+                if login:
+                    merge_json(config.masterdeck_home() / "session-accounts.json",
+                               lambda d: {**(d if isinstance(d, dict) else {}), new: login})
+                merge_json(config.masterdeck_home() / "superseded-sessions.json",
+                           lambda d: list(dict.fromkeys([*(d if isinstance(d, list) else []), old, resume])))
+            except OSError:
+                pass  # the app then shows both, and copies once more
+    return ledger.transition(led, pid, "sent", now=now, note=out.strip()[:200])
+
+
+def merge_json(path: Path, change) -> None:
+    """Read `path` (missing or broken: None), apply `change`, and replace it atomically (temp file +
+    rename). MasterDeck writes the same files the same way; the read happens right before the write."""
+    try:
+        cur = json.loads(path.read_text())
+    except (OSError, ValueError):
+        cur = None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(change(cur)))
+    os.replace(tmp, path)

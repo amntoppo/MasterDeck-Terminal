@@ -859,7 +859,7 @@ function SessionRow({
         {s.issue !== null && (
           <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
         )}
-        <AccountBadge login={s.account} />
+        <AccountBadge login={s.account} ghActive={s.ghActive} />
       </div>
       <div className="srow-sub">
         <span className={`st-${status?.key ?? s.state}`}>

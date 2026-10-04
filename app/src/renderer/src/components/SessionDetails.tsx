@@ -310,6 +310,11 @@ export function SessionDetails({
               Account <b>{s.account}</b>
             </div>
           )}
+          {s.ghActive && !s.account && (
+            <div title="This session was started without an account, so its commits, PRs and gh calls use gh's active account (gh auth status). To give it one, stop it and resume it with an account picked.">
+              Account <b>gh&apos;s active account</b> (started without an account)
+            </div>
+          )}
           <div>
             Diff <b>{git ? formatDiff(git) : "—"}</b>
           </div>

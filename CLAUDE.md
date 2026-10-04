@@ -149,7 +149,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
-| GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts`, `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
+| GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts` (also resume: `resumeAs`), `main/superseded.ts` + `shared/superseded.ts` (the old side of a copy, hidden), `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
@@ -213,7 +213,9 @@ buttons; it does not go through macOS window drag regions.
 - **Resume a background session with no flags**: `claude --bg --resume <id>` alone wakes the same
   session; any flag (`-n`, `--settings`, `--model` …) starts a copy and leaves the old one listed
   (duplicate sessions). Go through `resumeAs` (`main/sessionAccounts.ts`) / `spawn.command`; they
-  pass flags only to change the account or name, and remove the old session then.
+  pass flags only when the user picked another account or a name. MasterDeck never removes a
+  session (`claude rm` deletes its worktree too): the old side of a copy is listed in
+  `superseded-sessions.json` (`main/superseded.ts`) and hidden while it does not run.
 - **Shell scripts run under macOS bash 3.2**: write `${var}` before non-ASCII text (`"$chip…"` breaks).
 - **Tickets are (repo, number)** (`shared/ticket.ts`, Python `refs.py`). The primary repo (`issueRepo`)
   keeps bare numbers in every record (ledger, babysit-ticket state, snapshot), so older readers still

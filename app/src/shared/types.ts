@@ -41,6 +41,8 @@ export interface Session {
   asking?: string | null;
   /** The GitHub account the session works as (two or more connected accounts only; see shared/accounts.ts sessionAccount). */
   account?: string;
+  /** Two or more accounts, and the session was started without one: it works as gh's active account (no `account` then). */
+  ghActive?: boolean;
 }
 
 export interface Issue {

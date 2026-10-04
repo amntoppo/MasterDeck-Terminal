@@ -295,11 +295,16 @@ describe.skipIf(process.platform === 'win32')('the master reports guard (PreTool
   it('denies a report to any other session, with the reason', () => {
     const { send, denied } = setup()
     expect(denied(send('masterdeck [a11992]', Q))).toBe(
-      "MasterDeck: reports like 'gamerun-expo#440: question' go only to master-agent. It is not reachable, so do not send this to any other session; ask the user here instead.",
+      "MasterDeck: reports like 'gamerun-expo#440: question' go only to master-agent. Send it to master-agent by name; if SendMessage then says it is not reachable, do not send it to any other session — ask the user here.",
     )
     expect(denied(send('masterdeck', '#12: done'))).toMatch(/reports like '#12: done' go only to master-agent\./)
     expect(denied(send('master-agent-2', '\n\n  #7 : ANSWERED — use the staging key'))).toMatch(/'#7: answered'/)
     expect(denied(send('master-agent [x] extra', '#12: blocked — stuck'))).toMatch(/go only to master-agent/)
+    // owner/name#N, and markdown or quote characters before the label.
+    expect(denied(send('masterdeck', 'gamerun/gamerun-expo#440: blocked — no access'))).toMatch(/'gamerun\/gamerun-expo#440: blocked'/)
+    expect(denied(send('masterdeck', '**#12: done** PR is up'))).toMatch(/'#12: done'/)
+    expect(denied(send('masterdeck', '> `#12: question` — which key?'))).toMatch(/'#12: question'/)
+    expect(denied(send('masterdeck', ' - _acme/app#3: answered_ — yes'))).toMatch(/'acme\/app#3: answered'/)
     // The report in the summary alone is still a report.
     expect(denied(send('masterdeck', 'see below', { summary: '#12: done' }))).toMatch(/'#12: done'/)
   }, 20_000)
@@ -311,6 +316,7 @@ describe.skipIf(process.platform === 'win32')('the master reports guard (PreTool
     expect(send('researcher', '#12: master-agent here — you went idle; are you done?')).toBe('')
     expect(send('researcher', '#12: doneness is a spectrum')).toBe('')
     expect(send('team-lead', { type: 'shutdown_response', request_id: '#12: done' })).toBe('')
+    expect(send('masterdeck', 'a/b/c#12: done')).toBe('')
     expect(send(undefined, '#12: done')).toBe('')
     expect(raw('{"tool_input": {"to": "masterdeck", "message": "#12: done"')).toBe('')
     expect(raw('not json #1')).toBe('')
@@ -348,6 +354,26 @@ describe.skipIf(process.platform === 'win32')('the master reports guard (PreTool
     d.setMasterSessions([])
     expect(existsSync(join(d.dir, 'master-sids'))).toBe(false)
     expect(denied(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER))).toMatch(/go only to/)
+  }, 20_000)
+  it('a subagent or teammate reporting to its parent is not checked', () => {
+    const { raw, denied } = setup()
+    const input = (extra: object) => JSON.stringify({ session_id: SID, tool_name: 'SendMessage', tool_input: { to: 'team-lead', message: '#12: done' }, ...extra })
+    expect(raw(input({ agent_id: 'a1b2c3' }))).toBe('')
+    expect(raw(input({ agent_type: 'general-purpose' }))).toBe('')
+    expect(denied(raw(input({ agent_id: null, agent_type: '' })))).toMatch(/go only to/)
+  }, 20_000)
+  it('the master is exempt by its background id too, at once after a start, done or not', () => {
+    const { d, send, denied } = setup()
+    // startMaster knows only the bg id (the first 8 characters of the session id) until the next poll.
+    d.addMasterSession(MASTER.slice(0, 8), 1_000)
+    expect(readFileSync(join(d.dir, 'master-sids'), 'utf8')).toBe(`${MASTER.slice(0, 8)}\n`)
+    expect(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER)).toBe('')
+    expect(denied(send('gamerun-expo-440', '#440: answered — x', {}, SID))).toMatch(/go only to/)
+    // A poll that does not list it yet keeps it; ten minutes later it is only what the polls say.
+    d.setMasterSessions([], 2_000)
+    expect(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER)).toBe('')
+    d.setMasterSessions([], 1_000 + 11 * 60_000)
+    expect(existsSync(join(d.dir, 'master-sids'))).toBe(false)
   }, 20_000)
   it('does nothing without jq', () => {
     const { d, denied } = setup()

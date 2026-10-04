@@ -39,7 +39,7 @@ import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
-import { accountLabel } from "@shared/accounts";
+import { accountLabel, isMulti } from "@shared/accounts";
 import { SessionAccount } from "./components/AccountBits";
 import { QUICK_KEYS } from "./quickKeys";
 import { TasksView } from "./components/TasksView";
@@ -1166,6 +1166,10 @@ export function App() {
                   const x = state.sessions.find((y) => y.key === activeTab.key);
                   return x ? accountLabel(x, state.config) : null;
                 })()}
+                ghActive={
+                  isMulti(state.config) &&
+                  !!state.sessions.find((y) => y.key === activeTab.key)?.ghActive
+                }
               />
             )}
             {activeTab && (
@@ -1595,12 +1599,13 @@ function SessionPane(p: {
 
   // Two or more GitHub accounts: which one this session works as (the phone shows it in its header).
   const login = accountLabel(s, p.state.config);
+  const ghActive = isMulti(p.state.config) && !!s.ghActive;
   return (
     <>
-      {login && !phone && (
+      {(login || ghActive) && !phone && (
         <div className="pane-head">
           <b>{s.name}</b>
-          <SessionAccount login={login} />
+          <SessionAccount login={login} ghActive={ghActive} />
         </div>
       )}
       {s.kind === "background" && s.bgId && !p.armed ? (

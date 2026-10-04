@@ -1,4 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
+import { hideSuperseded } from "@shared/superseded";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
@@ -318,6 +319,8 @@ export class Sources {
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
   private accountOf: ((s: Session) => string | null) | null = null;
+  private ghActiveOf: (s: Session) => boolean = () => false;
+  private superseded: () => Set<string> = () => new Set();
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -539,6 +542,8 @@ export class Sources {
             );
           return x;
         },
+        // Awaited: the decision is made on the list as it is now, not on the last poll.
+        () => this.pollAgents(),
       );
       ({ failed, resumed } = r);
       if (this.restore) {
@@ -594,14 +599,25 @@ export class Sources {
   }
 
   /** Which GitHub account a session works as (main's SessionAccounts + origin); used with two or more accounts. */
-  setSessionAccount(f: (s: Session) => string | null): void {
+  setSessionAccount(
+    f: (s: Session) => string | null,
+    ghActive: (s: Session) => boolean = () => false,
+  ): void {
     this.accountOf = f;
+    this.ghActiveOf = ghActive;
+  }
+
+  /** Ids of sessions a copy replaced (shared/superseded.ts): hidden while they do not run. */
+  setSuperseded(f: () => Set<string>): void {
+    this.superseded = f;
   }
 
   private withAccounts(ss: Session[]): Session[] {
     const f = this.accountOf;
     if (!f || !isMulti(this.config)) return ss;
     return ss.map((s) => {
+      // Woken without --settings: gh's active account, so no login is shown for it.
+      if (this.ghActiveOf(s)) return { ...s, ghActive: true };
       const a = f(s);
       return a ? { ...s, account: a } : s;
     });
@@ -2017,7 +2033,7 @@ export class Sources {
         applyFreshness(
           attachIssues(
             // The Workflow window's builder is MasterDeck's own, not the user's work.
-            this.rawSessions.filter(
+            hideSuperseded(this.rawSessions, this.superseded()).filter(
               (s) =>
                 s.name !== BUILDER_NAME &&
                 !isTicketBuilderSession(s, this.paths.home) &&

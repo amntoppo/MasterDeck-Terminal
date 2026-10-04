@@ -10,29 +10,33 @@ const EVENTS_MAX = 4 * 1024 * 1024
 /**
  * The master reports guard, as a jq program (no single quote in it: it sits in a quoted bash
  * string; `$q` is one). A SendMessage is a report when the first non-empty line of its message (or of
- * its summary) reads `#12: done`, `name#12: question — …` and so on. A report passes only to the
+ * its summary) reads `#12: done`, `name#12: question — …`, `owner/name#12: blocked` and so on, after
+ * any markdown or quote characters. A call from a subagent or teammate (`agent_id` / `agent_type`
+ * in the hook input) is not checked: it reports to its parent. A report passes only to the
  * master (config masterName, also in the ListAgents form `name [ref]`) or from the master session
  * itself; with master turned off it passes to nobody. Anything else, and anything unreadable,
  * prints nothing: the call goes on as usual.
  */
 const MASTER_REPORT_JQ = String.raw`
 def line: if type == "string" then ([splits("\r?\n") | select(test("\\S"))][0] // "") else "" end;
-def report: line | capture("^\\s*(?<label>#\\d+|[A-Za-z0-9._-]+#\\d+)\\s*:\\s*(?<kind>done|blocked|question|answered)\\b"; "i");
+def report: line | sub("^[\\s>*_\\x60-]+"; "") | capture("^(?<label>(?:(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\\d+)\\s*:\\s*(?<kind>done|blocked|question|answered)(?![A-Za-z0-9])"; "i");
+def set: type == "string" and test("\\S");
 (try ($cfg | fromjson) catch {}) as $raw
 | (if ($raw | type) == "object" then $raw else {} end) as $c
 | (if ($c.masterName | type) == "string" and ($c.masterName | test("\\S")) then ($c.masterName | gsub("^\\s+|\\s+$"; "")) else "master-agent" end) as $name
 | ($c.masterEnabled != false) as $on
 | (.session_id) as $sid
-| ($sids | split("\n") | any(. != "" and . == $sid)) as $me
+| ($sids | split("\n") | any(. as $m | $m != "" and ($sid | type) == "string" and ($sid | startswith($m)))) as $me
+| ((.agent_id | set) or (.agent_type | set)) as $sub
 | (.tool_input // {}) as $t
 | ([($t.message | report), ($t.summary | report)][0]) as $r
-| if $r == null or ($t.to | type) != "string" then empty else
+| if $r == null or $sub or ($t.to | type) != "string" then empty else
     ($t.to | ascii_downcase | gsub("^\\s+|\\s+$"; "")) as $to
     | ($name | ascii_downcase) as $n
     | "\($q)\($r.label): \($r.kind | ascii_downcase)\($q)" as $what
     | if $on and ($me or $to == $n or (($to | startswith($n + " [")) and ($to | ltrimstr($n + " [") | test("^[^\\[\\]]*\\]$")))) then empty
       else {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: (
-        if $on then "MasterDeck: reports like \($what) go only to \($name). It is not reachable, so do not send this to any other session; ask the user here instead."
+        if $on then "MasterDeck: reports like \($what) go only to \($name). Send it to \($name) by name; if SendMessage then says it is not reachable, do not send it to any other session — ask the user here."
         else "MasterDeck: \($name) is turned off, so reports like \($what) go to no session; say it to the user here instead." end)}}
       end
   end
@@ -204,6 +208,8 @@ export class DeckHooks {
   readonly sessions: Record<string, HookSessionState> = {}
   /** What master-sids holds (null: not written by this run yet). */
   private masterSids: string | null = null
+  private masterListed: string[] = []
+  private masterNew = new Map<string, number>()
 
   constructor(
     home: string,
@@ -411,10 +417,16 @@ export class DeckHooks {
     renameSync(join(dir, `${id}.tmp`), join(dir, `${id}.json`))
   }
 
-  /** The live master sessions (ids): the reports guard lets them send anything. Written on change. */
-  setMasterSessions(ids: string[]): void {
+  /**
+   * The master's sessions (session ids; the hook also takes a bg id, the first 8 characters of one):
+   * the reports guard lets them send anything. From every state, plus the ones just started
+   * (addMasterSession), kept 10 minutes until a poll lists them. Written on change.
+   */
+  setMasterSessions(ids: string[], now = Date.now()): void {
+    for (const [id, at] of this.masterNew) if (now - at > 10 * 60_000) this.masterNew.delete(id)
     const p = join(this.dir, 'master-sids')
-    const text = [...new Set(ids.filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].sort().join('\n')
+    const text = [...new Set([...ids, ...this.masterNew.keys()].filter((id) => /^[0-9a-f-]{36}$/i.test(id) || /^[0-9a-f]{8}$/i.test(id)))].sort().join('\n')
+    this.masterListed = ids
     if (text === this.masterSids) return
     try {
       if (!text) rm(p)
@@ -427,6 +439,12 @@ export class DeckHooks {
     } catch {
       // next state
     }
+  }
+
+  /** The master was just started or resumed (its bg id or session id): exempt at once, before the next poll. */
+  addMasterSession(id: string, now = Date.now()): void {
+    this.masterNew.set(id, now)
+    this.setMasterSessions(this.masterListed, now)
   }
 
   /** Queue hooks installed by hand handle /queue: MasterDeck's hook leaves it to them. */

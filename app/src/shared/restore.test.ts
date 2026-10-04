@@ -66,20 +66,26 @@ describe('resumeEntries (Resume all, and the automatic resume at app start)', ()
       return { ok: true, message: 'ok' }
     }
     const first = nextRestore(saved, BOOT + 86_400_000, sessions, 'm', NOW)
-    expect(await resumeEntries(first.stopped, () => sessions, resume)).toEqual({ resumed: 2, failed: [], left: [] })
+    expect(await resumeEntries(first.stopped, () => sessions, resume, async () => {})).toEqual({ resumed: 2, failed: [], left: [] })
     expect(calls).toEqual(['a', 'b'])
     // MasterDeck quits and starts again (same boot, then even a stale list from the file): nothing to resume.
     const second = nextRestore(first, BOOT + 86_400_000, sessions, 'm', NOW)
     expect(second.stopped).toEqual([])
-    expect(await resumeEntries(first.stopped, () => sessions, resume)).toEqual({ resumed: 2, failed: [], left: [] })
+    expect(await resumeEntries(first.stopped, () => sessions, resume, async () => {})).toEqual({ resumed: 2, failed: [], left: [] })
     expect(calls).toEqual(['a', 'b'])
   })
-  it('skips a session that runs again under a new session id (same background id), and keeps the failed ones', async () => {
-    const sessions = [s({ sessionId: 'a-new', bgId: 'a1', pid: 9 })]
+  it('reads the session list afresh before each decision; skips what runs again by session id or background id; keeps the failed ones', async () => {
+    // The last poll is stale: a runs again under a new session id (same background id), seen only after a refresh.
+    let sessions: Session[] = []
+    let refreshes = 0
+    const refresh = async () => {
+      refreshes++
+      sessions = [s({ sessionId: 'a-new', bgId: 'a1', pid: 9 })]
+    }
     const calls: string[] = []
-    const got = await resumeEntries([e('a'), e('b'), e('c', null)], () => sessions, async (x) => (calls.push(x.sessionId), x.sessionId === 'b' ? { ok: false, message: 'no such session' } : { ok: true, message: '' }))
+    const got = await resumeEntries([e('a'), e('b'), e('c', null)], () => sessions, async (x) => (calls.push(x.sessionId), x.sessionId === 'b' ? { ok: false, message: 'no such session' } : { ok: true, message: '' }), refresh)
     expect(calls).toEqual(['b', 'c'])
+    expect(refreshes).toBe(3)
     expect(got).toEqual({ resumed: 2, failed: ['n-b: no such session'], left: [e('b')] })
   })
 })
-

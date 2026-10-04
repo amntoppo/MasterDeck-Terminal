@@ -203,7 +203,10 @@ checkout whose branch was once linked to a ticket does not link it.
   wakes with its name, model and account as they were. (Any option there makes Claude Code start a
   copy and keep the old session in the list, which is how duplicate sessions with old messages
   appeared before.) A copy is made only when you pick another account for it; the old session must
-  be stopped first, and MasterDeck removes it once the copy runs, so the name stays unique.
+  be stopped first. MasterDeck never removes a session: the old one stays in Claude Code, stopped,
+  and MasterDeck leaves it out of its lists while it does not run (`~/.claude/masterdeck/superseded-sessions.json`).
+  Duplicates made before this fix are not cleaned up: remove the ones you don't need yourself
+  (Session hygiene, or `claude rm <id>`; that also deletes the session's worktree).
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
   MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
   ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers
@@ -358,12 +361,14 @@ after a restart.
 - **Reports go only to master:** a session MasterDeck starts reports to master with SendMessage,
   first line `#12: done`, `#12: blocked — <reason>`, `#12: question — <question>` or
   `#12: answered — <answer>` (`repo#12` for a ticket in another repo). The hook checks every
-  SendMessage: a message that starts like that goes through only to the master session (the
+  SendMessage: a message that starts like that (also `owner/repo#12`, and after `>`, `**` or a
+  backtick) goes through only to the master session (the
   `masterName` in `~/.claude/master/config.json`, default `master-agent`). Sent to any other
-  session (because master is not running, say), it is stopped and the session is told to ask you
-  there instead, so no other session ever receives a report or answers as if it were master.
-  Everything else is untouched: other messages between sessions, messages to subagents, and
-  whatever the master session itself sends. With master turned off (Setup → Preferences) a report
+  session, it is stopped and the session is told to send it to master by name and, if master is
+  not reachable, to ask you there, so no other session ever receives a report or answers as if it
+  were master. Everything else is untouched: other messages between sessions, messages to and
+  from subagents (a subagent's `#12: done` to its parent passes), and whatever the master session
+  itself sends. With master turned off (Setup → Preferences) a report
   goes to no session; sessions report in their own terminal. A changed master name applies at once.
   Needs `jq`; without it the hook lets every message through.
 
@@ -721,9 +726,12 @@ is a `gh` login (`gh auth status` lists them).
   accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
   primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
-  Start dialog: that starts a copy of the conversation as the new account and removes the old
-  session (a running session is refused). A session started before the second account was
-  connected gets the same treatment on its first resume, so it never runs as gh's active account. master's proposals use the issue's account (shown on the proposal).
+  Start dialog: that starts a copy of the conversation as the new account (a running session is
+  refused; the old session stays, stopped and hidden). Leaving the Account field alone never
+  copies. A session started without an account (before the second one was connected, or outside
+  MasterDeck) keeps working as gh's active account; after its first resume MasterDeck knows and
+  shows **gh's active account (started without an account)** instead of a login. Pick an account
+  when resuming it to move it to one. master's proposals use the issue's account (shown on the proposal).
 - **An account that needs to log in again** (its token expired or was revoked) shows in Needs you: **Log in** opens a terminal tab running `gh auth login` (on the Mac only; from a browser or phone the card says to run it there). Only that account stops: its sessions keep running, it is left out of the Account fields, and the other accounts keep refreshing. Refresh checks the accounts again. If the primary account needs to log in, master uses gh's active account until then.
 - **Board and PRs**: each tab belongs to one account (see Board View, PRs).
 - **Badges**: with two or more accounts each session row (Sessions, Tasks), proposal and Board/PRs tab shows `@login`, and the top of each session's terminal (and of each Board tab's Create with Claude panel) says `as @login`; shell tabs show nothing (they use your own setup). **New ticket** has an Account menu (the tab's account by default; accounts needing a new login are not offered); its repositories and boards follow, and the ticket is created as that account (**Create with Claude** hands over to the tab's session, so its button says `as @<tab account>` and is off, with a note, while the dialog's Account is another one: switch to that account's tab to use it); changing the account resets assignees, labels and sprint that came from the old one. **Standup** counts commits made with any connected account's email.

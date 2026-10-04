@@ -77,6 +77,7 @@ import {
   SessionAccounts,
   sessionSettings,
 } from "./sessionAccounts";
+import { Superseded } from "./superseded";
 import { assignNow as assignAs } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -215,6 +216,8 @@ const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 const sessionAccounts = new SessionAccounts(
   join(paths.home, "session-accounts.json"),
 );
+// The old side of a copy (a resume as another account): hidden while it does not run.
+const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -482,7 +485,7 @@ const sources = new Sources(
       const master = getConfig().masterName.trim().toLowerCase();
       deckHooks.setMasterSessions(
         state.sessions
-          .filter((s) => s.state !== "done" && s.name.toLowerCase() === master)
+          .filter((s) => s.name.toLowerCase() === master)
           .map((s) => s.sessionId),
       );
     }
@@ -558,9 +561,11 @@ sources.setAccountRunners({
       ? async (args, opts) => forRepo(await originNow(dir)).gh(args, opts)
       : gh,
 });
-sources.setSessionAccount((s) =>
-  accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
+sources.setSessionAccount(
+  (s) => accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
+  (s) => sessionAccounts.ghActive(s),
 );
+sources.setSuperseded(() => superseded.ids());
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
 function reveal(target: NotifyEvent["target"]): void {
@@ -1169,7 +1174,15 @@ async function resumeBg(
     cwd: dir,
     account,
   });
-  if (r.ok) void sources.refreshAgents();
+  if (r.ok) {
+    // master-agent resumed: the reports guard lets it send anything at once.
+    if (
+      process.platform !== "win32" &&
+      name.toLowerCase() === getConfig().masterName.trim().toLowerCase()
+    )
+      deckHooks.addMasterSession(id);
+    void sources.refreshAgents();
+  }
   return r.ok ? { ok: true, message: name } : r;
 }
 
@@ -1181,8 +1194,10 @@ function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
     accounts: sessionAccounts,
     settings: settingsFor,
     accountOf: async (s) => accountOfSession(s, await originNow(dir)),
+    multi: () => isMulti(getConfig()),
     live: () => sources.sessionsNow(),
-    remove: (bgId) => ops.removeSession(bgId),
+    refresh: () => sources.refreshAgents(),
+    supersede: (ids) => superseded.add(ids),
   };
 }
 
@@ -1587,6 +1602,11 @@ async function startMaster(): Promise<CliResult> {
     const bg = bgIdFromOutput(r.stdout);
     if (bg) sessionAccounts.set([bg], as.account);
     sessionAccounts.expect(MASTER_NAME, as.account);
+  }
+  // The reports guard lets the master send anything: known at once, not at the next poll.
+  if (r.code === 0 && process.platform !== "win32") {
+    const bg = bgIdFromOutput(r.stdout);
+    if (bg) deckHooks.addMasterSession(bg);
   }
   return r.code === 0
     ? { ok: true, message: r.stdout.trim() }

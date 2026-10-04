@@ -1,8 +1,8 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { bgIdFromOutput, copyFromOutput, resumeAs, SessionAccounts, sessionSettings } from './sessionAccounts'
+import { bgIdFromOutput, copyFromOutput, resumeAs, wokeFromOutput, SessionAccounts, sessionSettings } from './sessionAccounts'
 import type { Runner } from './run'
 import type { Session } from '@shared/types'
 
@@ -36,6 +36,35 @@ describe('SessionAccounts', () => {
     a.claim([], 11 * 60_000)
     a.claim([{ sessionId: 's8', key: 'k8', name: 'late', state: 'idle' }], 11 * 60_000 + 1)
     expect(a.get({ sessionId: 's8', key: 'k8' })).toBeNull()
+  })
+})
+
+describe('SessionAccounts: gh\'s active account, and writes from elsewhere', () => {
+  it('a session known to run without --settings has no login, and says so; a real account replaces the mark', () => {
+    const f = file()
+    const a = new SessionAccounts(f)
+    a.set(['s1', 'k1'], 'bob-work')
+    a.markGhActive(['s1', 'k1'])
+    expect(a.get({ sessionId: 's1', key: 'k1' })).toBeNull()
+    expect(a.ghActive({ sessionId: 's1', key: 'k1' })).toBe(true)
+    expect(a.ghActive({ sessionId: 's2', key: 'k2' })).toBe(false)
+    const b = new SessionAccounts(f)
+    expect(b.ghActive({ sessionId: 'x', key: 'k1' })).toBe(true)
+    expect(b.get({ sessionId: 'x', key: 'k1' })).toBeNull()
+    b.set(['s1', 'k1'], 'alice')
+    expect(b.ghActive({ sessionId: 's1', key: 'k1' })).toBe(false)
+    expect(b.get({ sessionId: 's1', key: 'k1' })).toBe('alice')
+  })
+  it('keeps what `master spawn` wrote to the file meanwhile, and reads it', () => {
+    const f = file()
+    const a = new SessionAccounts(f)
+    a.set(['s1'], 'alice')
+    writeFileSync(f, JSON.stringify({ s1: 'alice', '6d996951': 'bob-work' }))
+    a.claim([])
+    expect(a.get({ sessionId: 'new', key: '6d996951' })).toBe('bob-work')
+    writeFileSync(f, JSON.stringify({ s1: 'alice', '6d996951': 'bob-work', aaaa1111: 'bob-work' }))
+    a.set(['s2'], 'alice')
+    expect(Object.keys(JSON.parse(readFileSync(f, 'utf8'))).sort()).toEqual(['6d996951', 'aaaa1111', 's1', 's2'])
   })
 })
 
@@ -118,6 +147,11 @@ const WOKE_OUT = `note: woke session e168c2bf with its saved options (-n, --mode
 backgrounded · e168c2bf · dupprobe-md (idle — send a prompt to start)
 `
 
+// 2.1.288: `--settings` is in the list only when the session was started with it.
+const WOKE_SETTINGS_OUT = `note: woke session 458e2f9e with its saved options (-n, --settings, --model, --permission-mode).
+backgrounded · 458e2f9e · fix-12 (idle — send a prompt to start)
+`
+
 describe('resume output', () => {
   it('the id after `backgrounded ·` is the one that runs now, with the name after it or not', () => {
     expect(bgIdFromOutput(COPY_OUT)).toBe('6d996951')
@@ -130,6 +164,12 @@ describe('resume output', () => {
     expect(copyFromOutput(START_OUT)).toBeNull()
     expect(copyFromOutput('')).toBeNull()
   })
+  it('wokeFromOutput: the session and the options it was started with', () => {
+    expect(wokeFromOutput(WOKE_OUT)).toEqual({ id: 'e168c2bf', options: ['-n', '--model', '--permission-mode'] })
+    expect(wokeFromOutput(WOKE_SETTINGS_OUT)).toEqual({ id: '458e2f9e', options: ['-n', '--settings', '--model', '--permission-mode'] })
+    expect(wokeFromOutput(COPY_OUT)).toBeNull()
+    expect(wokeFromOutput(START_OUT)).toBeNull()
+  })
 })
 
 describe('resumeAs', () => {
@@ -139,94 +179,128 @@ describe('resumeAs', () => {
   const setup = (out: string, multi = true) => {
     const a = new SessionAccounts(file())
     const calls: string[][] = []
-    const removed: string[] = []
+    const superseded: string[] = []
     const run: Runner = async (_c, args) => (calls.push(args), { code: 0, stdout: out, stderr: '' })
-    const st: { live: Row[] | null } = { live: [row()] }
+    // `live` is the last poll; a refresh replaces it with `fresh` when that is set.
+    const st: { live: Row[] | null; fresh?: Row[] | null; refreshes: number; asked: number } = { live: [row()], refreshes: 0, asked: 0 }
     const d = {
       run,
       claude: 'claude',
       accounts: a,
+      multi: () => multi,
       // As index.ts: nothing with one account; else the given account, the recorded one, the primary (alice).
       settings: async (l: string | null, fb: () => Promise<string | null>) => {
+        st.asked++
         if (!multi) return { ok: true as const, args: [], account: null }
         const login = l || (await fb()) || 'alice'
         return { ok: true as const, args: ['--settings', `/acc/${login}.settings.json`], account: login }
       },
       accountOf: async (s: { sessionId: string; key: string }) => a.get(s),
       live: () => st.live,
-      remove: async (bg: string) => (removed.push(bg), { ok: true, message: 'removed' }),
+      refresh: async () => {
+        st.refreshes++
+        if (st.fresh !== undefined) st.live = st.fresh
+      },
+      supersede: (ids: string[]) => void superseded.push(...ids),
     }
-    return { a, calls, removed, d, st }
+    return { a, calls, superseded, d, st }
   }
   const o = { id: S1, key: 'e168c2bf', name: 'fix-12', cwd: '/w', account: null as string | null }
 
-  it('one account: a bare resume wakes the same session, no flags, nothing removed or recorded', async () => {
-    const { a, calls, removed, d } = setup(WOKE_OUT, false)
-    const r = await resumeAs(d, o)
-    expect(r).toMatchObject({ ok: true, copy: null })
+  it('one account: a bare resume wakes the same session; no flags, nothing recorded, no account asked', async () => {
+    const { a, calls, superseded, d, st } = setup(WOKE_OUT, false)
+    expect(await resumeAs(d, o)).toMatchObject({ ok: true, copy: null })
     expect(calls).toEqual([['--bg', '--resume', S1]])
-    expect(removed).toEqual([])
-    expect(a.get({ sessionId: S1, key: 'e168c2bf' })).toBeNull()
+    expect(superseded).toEqual([])
+    expect(st.asked).toBe(0)
+    expect(a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(false)
   })
-  it('two accounts, resumed as the account it was started as: bare too, every time', async () => {
-    const { a, calls, removed, d } = setup(WOKE_OUT)
+  it('two accounts, resumed as its recorded account (or none given): bare, and the account is not even resolved', async () => {
+    const { a, calls, d, st } = setup(WOKE_SETTINGS_OUT)
     a.set([S1, 'e168c2bf'], 'bob-work')
     await resumeAs(d, o)
     await resumeAs(d, { ...o, account: 'Bob-Work' })
     expect(calls).toEqual([['--bg', '--resume', S1], ['--bg', '--resume', S1]])
-    expect(removed).toEqual([])
+    expect(st.asked).toBe(0)
+    // Started with --settings: the record stands.
+    expect(a.get({ sessionId: S1, key: 'e168c2bf' })).toBe('bob-work')
   })
-  it('another account picked: a copy with --settings and its name, recorded, and the old session removed', async () => {
-    const { a, calls, removed, d } = setup(COPY_OUT)
+  it('two accounts, no record: still bare (no copy on its own)', async () => {
+    const { calls, superseded, d } = setup(WOKE_SETTINGS_OUT)
+    await resumeAs(d, o)
+    expect(calls).toEqual([['--bg', '--resume', S1]])
+    expect(superseded).toEqual([])
+  })
+  it('two accounts, woken without --settings: it runs as gh\'s active account; a stale record goes and it is marked', async () => {
+    const { a, calls, d } = setup(WOKE_OUT)
+    a.set([S1, 'e168c2bf'], 'bob-work') // recorded by an earlier build under the old ids
+    await resumeAs(d, o)
+    expect(calls).toEqual([['--bg', '--resume', S1]])
+    expect(a.get({ sessionId: S1, key: 'e168c2bf' })).toBeNull()
+    expect(a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(true)
+    // One account: nothing to mark.
+    const one = setup(WOKE_OUT, false)
+    await resumeAs(one.d, o)
+    expect(one.a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(false)
+  })
+  it('another account picked: a copy with --settings and its name, recorded; the old session is left alone and superseded', async () => {
+    const { a, calls, superseded, d } = setup(COPY_OUT)
     a.set([S1, 'e168c2bf'], 'bob-work')
     const r = await resumeAs(d, { ...o, account: 'alice' })
     expect(r).toMatchObject({ ok: true, copy: { old: 'e168c2bf', copy: '6d996951' } })
     expect(calls).toEqual([['--bg', '--settings', '/acc/alice.settings.json', '--resume', S1, '-n', 'fix-12']])
-    expect(removed).toEqual(['e168c2bf'])
+    expect(calls.flat()).not.toContain('rm')
+    expect(superseded.sort()).toEqual(['e168c2bf', S1].sort())
     expect(a.get({ sessionId: 'new', key: '6d996951' })).toBe('alice')
+    // The old session keeps its own record.
+    expect(a.get({ sessionId: S1, key: 'e168c2bf' })).toBe('bob-work')
   })
-  it('started before the second account (not recorded): bare would run as gh\'s active account, so a copy with --settings', async () => {
-    const { a, calls, removed, d } = setup(COPY_OUT)
-    await resumeAs(d, o)
+  it('an account picked for a session with no record is a choice too', async () => {
+    const { calls, superseded, d } = setup(COPY_OUT)
+    await resumeAs(d, { ...o, account: 'alice' })
     expect(calls).toEqual([['--bg', '--settings', '/acc/alice.settings.json', '--resume', S1, '-n', 'fix-12']])
-    expect(removed).toEqual(['e168c2bf'])
-    expect(a.get({ sessionId: 'new', key: '6d996951' })).toBe('alice')
+    expect(superseded).toContain('e168c2bf')
   })
-  it('a rename: a copy under the new name, the old one removed', async () => {
-    const { calls, removed, d } = setup(COPY_OUT, false)
+  it('a rename: a copy under the new name; the same name is no rename', async () => {
+    const { calls, superseded, d } = setup(COPY_OUT, false)
     await resumeAs(d, { ...o, rename: 'fix-12-again' })
     expect(calls).toEqual([['--bg', '--resume', S1, '-n', 'fix-12-again']])
-    expect(removed).toEqual(['e168c2bf'])
-    // The same name is no rename.
+    expect(superseded).toContain('e168c2bf')
     const same = setup(WOKE_OUT, false)
     await resumeAs(same.d, { ...o, rename: 'fix-12' })
     expect(same.calls).toEqual([['--bg', '--resume', S1]])
   })
-  it('a live session is never copied or removed: refused', async () => {
-    const { calls, removed, d, st } = setup(COPY_OUT)
-    st.live = [row({ pid: 4242, state: 'working' })]
+  it('a copy is refused while the old session runs, by a fresh read of the list and its pid alone', async () => {
+    // The last poll says stopped; the fresh read shows a process (state done or not).
+    const { calls, superseded, d, st } = setup(COPY_OUT)
+    st.fresh = [row({ pid: 4242, state: 'done' })]
     const r = await resumeAs(d, { ...o, account: 'alice' })
     expect(r.ok).toBe(false)
     expect(!r.ok && r.message).toMatch(/fix-12 is running/)
+    expect(st.refreshes).toBe(1)
     expect(calls).toEqual([])
-    expect(removed).toEqual([])
+    expect(superseded).toEqual([])
+    // The fresh read failed: no guess.
+    const none = setup(COPY_OUT)
+    none.st.fresh = null
+    expect((await resumeAs(none.d, { ...o, account: 'alice' })).ok).toBe(false)
+    expect(none.calls).toEqual([])
   })
-  it('removes only what the output says was copied: a wake, or no note, removes nothing', async () => {
+  it('nothing is superseded unless the output says this session was copied', async () => {
     const woke = setup(WOKE_OUT)
     await resumeAs(woke.d, { ...o, account: 'alice' })
-    expect(woke.removed).toEqual([])
+    expect(woke.superseded).toEqual([])
     const other = setup(COPY_OUT)
     other.st.live = [row({ key: 'aaaa1111', bgId: 'aaaa1111' })]
     await resumeAs(other.d, { ...o, key: 'aaaa1111', account: 'alice' })
-    // The note names another session than the one resumed: left alone.
-    expect(other.removed).toEqual([])
+    expect(other.superseded).toEqual([])
   })
-  it('not a background session any more (History, or interactive): flags as before, nothing to copy or remove', async () => {
+  it('not a background session (History, an interactive one for Start here): --settings and -n as a new start', async () => {
     const multi = setup(START_OUT)
     multi.st.live = []
     await resumeAs(multi.d, { ...o, key: null, account: 'bob-work' })
     expect(multi.calls).toEqual([['--bg', '--settings', '/acc/bob-work.settings.json', '--resume', S1, '-n', 'fix-12']])
-    expect(multi.removed).toEqual([])
+    expect(multi.superseded).toEqual([])
     expect(multi.a.get({ sessionId: S1, key: 'x' })).toBe('bob-work')
     expect(multi.a.get({ sessionId: 'new', key: '1a2b3c4d' })).toBe('bob-work')
     const one = setup(START_OUT, false)
@@ -239,16 +313,17 @@ describe('resumeAs', () => {
     await resumeAs(odd.d, { ...o, key: null, name: '--model x' })
     expect(odd.calls).toEqual([['--bg', '--resume', S1]])
   })
-  it('the session list not loaded yet: bare with one account; refused with two (no guess between a copy and gh\'s account)', async () => {
-    const one = setup(WOKE_OUT, false)
-    one.st.live = null
-    await resumeAs(one.d, o)
-    expect(one.calls).toEqual([['--bg', '--resume', S1]])
-    const two = setup(WOKE_OUT)
-    two.st.live = null
-    const r = await resumeAs(two.d, o)
+  it('the session list not loaded: read once more; still unknown is refused (a flag could copy, none could lose the name)', async () => {
+    const got = setup(WOKE_OUT, false)
+    got.st.live = null
+    got.st.fresh = [row()]
+    await resumeAs(got.d, o)
+    expect(got.calls).toEqual([['--bg', '--resume', S1]])
+    const none = setup(WOKE_OUT, false)
+    none.st.live = null
+    const r = await resumeAs(none.d, o)
     expect(r.ok).toBe(false)
-    expect(two.calls).toEqual([])
+    expect(none.calls).toEqual([])
   })
   it('no bg id printed for a new background session: matched by name, unless another live session has that name', async () => {
     const one = setup('resumed\n')
@@ -262,14 +337,14 @@ describe('resumeAs', () => {
     two.a.claim([{ sessionId: 's2', key: '3c4d5e6f', name: 'fix-12', state: 'working' }])
     expect(two.a.get({ sessionId: 's2', key: '3c4d5e6f' })).toBeNull()
   })
-  it('a refused account, or a failed command, runs or records nothing', async () => {
+  it('a refused account (only asked when flags are needed), or a failed command, runs or records nothing', async () => {
     const { calls, d } = setup('')
-    const r = await resumeAs(
-      { ...d, settings: async () => ({ ok: false as const, message: 'GitHub account bob-work needs to log in again' }) },
-      { ...o, account: 'bob-work' },
-    )
-    expect(r).toEqual({ ok: false, message: 'GitHub account bob-work needs to log in again' })
+    const no = { ...d, settings: async () => ({ ok: false as const, message: 'GitHub account bob-work needs to log in again' }) }
+    expect(await resumeAs(no, { ...o, account: 'bob-work' })).toEqual({ ok: false, message: 'GitHub account bob-work needs to log in again' })
     expect(calls).toEqual([])
+    // A bare resume needs no account: still loading or logged out, it wakes all the same.
+    expect((await resumeAs(no, o)).ok).toBe(true)
+    expect(calls).toEqual([['--bg', '--resume', S1]])
     const bad = setup('', false)
     const f = await resumeAs({ ...bad.d, run: async () => ({ code: 1, stdout: '', stderr: 'no such session' }) }, o)
     expect(f).toEqual({ ok: false, message: 'no such session' })

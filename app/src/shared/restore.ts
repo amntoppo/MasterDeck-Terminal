@@ -66,18 +66,21 @@ export function nextRestore(saved: RestoreFile | null, bootAt: number, sessions:
 }
 
 /**
- * Resume the stopped sessions one at a time. One that runs again meanwhile (master's ORPHAN, by
- * hand, an earlier pass) is skipped: `sessions()` is read before each. The failed ones stay listed.
+ * Resume the stopped sessions one at a time. Before each, the session list is read afresh
+ * (`refresh`, awaited): one that runs again (master's ORPHAN, by hand, an earlier pass, another
+ * start of the app) under the same session id or background id is skipped. The failed ones stay listed.
  */
 export async function resumeEntries(
   stopped: RestoreEntry[],
   sessions: () => Session[],
   resume: (e: RestoreEntry) => Promise<{ ok: boolean; message: string }>,
+  refresh: () => Promise<void>,
 ): Promise<{ resumed: number; failed: string[]; left: RestoreEntry[] }> {
   const failed: string[] = []
   const left: RestoreEntry[] = []
   let resumed = 0
   for (const e of stopped) {
+    await refresh()
     const r = isLive(e, sessions()) ? { ok: true, message: 'already running' } : await resume(e)
     if (r.ok) resumed++
     else {

@@ -338,7 +338,7 @@ function TaskRow({
         </div>
         <div className="tv-meta">
           <span className="mono">{s.name}</span>
-          <AccountBadge login={s.account} />
+          <AccountBadge login={s.account} ghActive={s.ghActive} />
           {(git?.branch || tail?.gitBranch) && (
             <span className="mono"> · {git?.branch ?? tail?.gitBranch}</span>
           )}

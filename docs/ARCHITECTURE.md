@@ -126,26 +126,42 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   name, model, mode, `--settings`); **any** flag (`-n`, `--settings`, `--model`,
   `--permission-mode`) starts a copy under new ids and leaves the old session listed, so two
   sessions share a name and the old one shows outdated messages. Rules:
-  - A listed background session resumes bare. Nothing is recorded: its ids do not change.
-  - Flags only when something must change: another account than the one it was started as, or a
-    new name (`rename`). "Started as" is the record in `session-accounts.json`; a session with no
-    record was started without `--settings` (before a second account was connected, or outside
-    MasterDeck), so a bare resume would run as gh's active account, and it counts as a change. A
-    copy is then meant: refused while the session runs; else started with `--settings` and `-n`,
-    recorded under the copy's bg id (`bgIdFromOutput`: the id after `backgrounded ·`, whatever
-    follows it; `claim` adds its session id), and the old session is removed with `claude rm`
-    (`Ops.removeSession`), only when the output names it as the copied one (`copyFromOutput`: the
-    `note: background session <old> keeps its own saved options … started a copy as <new>` line).
+  - A listed background session resumes bare, with one account or several, recorded or not. The
+    account is not resolved for it (an account still loading or logged out does not block it).
+  - After a bare resume with two or more accounts the note is read (`wokeFromOutput`: `note: woke
+    session <id> with its saved options (-n, --settings, …)`; `--settings` is listed only when the
+    session was started with it). Without it the session works as gh's active account: its ids
+    are marked in `session-accounts.json` (`SessionAccounts.markGhActive`, value `*gh-active*`,
+    which replaces a record an earlier build left under the old ids), `Session.ghActive` is set
+    and `Session.account` is not, and the UI shows "gh's active account (started without an
+    account)" (AccountBadge, SessionAccount, Details), never a login. With it the record stands.
+  - A copy happens only when the user chose one: an account given that is not the recorded one
+    (`resumeAccount` sends the pick, else the record, never the select's default), or a new name
+    (`rename`). The account is resolved, the session list is read afresh (`sources.refreshAgents`,
+    awaited) and the resume is refused while the old session has a process (`pid !== null`
+    alone). The copy is started with `--settings` and `-n` and recorded under its own bg id
+    (`bgIdFromOutput`: the id after `backgrounded ·`, whatever follows it; `claim` adds its
+    session id). **MasterDeck never removes a session** (`claude rm` deletes its worktree too):
+    the old one stays, stopped, and its bg id and session id go to `superseded-sessions.json`
+    (`main/superseded.ts`), only when the output names it as the copied one (`copyFromOutput`).
+    `Sources.build` leaves superseded rows that do not run out of the list
+    (`shared/superseded.ts` `hideSuperseded`); running again, they show. The copy does not carry
+    the old session's `--model` / `--permission-mode` (not known reliably; see TODO).
   - Not a listed background session (History, an interactive session for Start here): there are no
     saved options and nothing to copy, so `--settings` and `-n` as for a new start.
-  - The session list not loaded yet (`Sources.sessionsNow()` null): bare with one account, refused
-    with two or more.
-  - `master spawn` (ORPHAN): bare when `config.session_account(<id>)` is the proposal's account;
-    else `--settings`, and `claude rm` of the old session when the output says a copy was started
-    (`spawn.copied`). It resumes nothing that runs again (`spawn.running`).
-  - The restorer (`shared/restore.ts` `resumeEntries`, used by `Sources.resumeStopped`) skips an
-    entry that runs again under the same session id or bg id, read before each resume, so a second
-    app start resumes nothing twice.
+  - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown, the
+    resume is refused.
+  - `master spawn` (ORPHAN): bare when there is no record (`config.session_account`) or it is the
+    proposal's account; `--settings` (a copy) only when the proposal names another account than
+    the record. Never `claude rm`. `spawn.running` is true / false / None, by session id or bg
+    id: true marks the proposal sent ("already running"), None (`claude agents` failed) holds
+    it. After a copy (`spawn.copy_of`) it writes the copy's bg id to `session-accounts.json` and
+    the old ids to `superseded-sessions.json` (`spawn.merge_json`: read, merge, temp file +
+    rename). The app reads both files again when their mtime changes, and its own writes of
+    `session-accounts.json` keep entries it does not know (`SessionAccounts.sync`).
+  - The restorer (`shared/restore.ts` `resumeEntries`, used by `Sources.resumeStopped`) awaits a
+    fresh `claude agents` read before each entry and skips one that runs again under the same
+    session id or bg id, so a second app start resumes nothing twice.
   Deviation from the several-accounts spec (plan I, "resume always passes `--settings` again"):
   that rule made every resume a copy; the saved options carry the account instead.
   `accountFor` (IPC) gives a new session's default for a folder. One
@@ -210,17 +226,23 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `deckInstalledIn`, so an install from before it is completed at the next launch; the legacy
   migration and the review gate never match it). The script's `MasterReport` branch exits before jq
   unless the input holds `#<digit>`, then runs one jq program (`MASTER_REPORT_JQ`): a report is a
-  message (or `summary`) whose first non-empty line matches
-  `^\s*(#\d+|[A-Za-z0-9._-]+#\d+)\s*:\s*(done|blocked|question|answered)\b`, case-insensitive. A report
-  is denied (`permissionDecision: "deny"`, the reason tells the session to ask the user) unless `to`
+  message (or `summary`) whose first non-empty line, after leading markdown or quote characters
+  (`>`, `*`, `_`, backticks, `-`, spaces), matches
+  `^((?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\d+\s*:\s*(done|blocked|question|answered)` (not followed
+  by a letter or digit), case-insensitive: `#12`, `name#12` or `owner/name#12`. A report
+  is denied (`permissionDecision: "deny"`; the reason says to send it to the master by name and,
+  if that is not reachable, to ask the user, never another session) unless `to`
   is the master: `masterName`, case-insensitive, or `<masterName> [<ref>]`. The name and
   `masterEnabled` are read from the config file on every call (its path, `paths.config`, is baked
   into the script like the queue dir), so a config change needs no reinstall; a missing or broken
   config means `master-agent`, enabled. With `masterEnabled: false` every report to a session is
-  denied. The master session is exempt: the state callback in `index.ts` writes the ids of live
-  sessions named `masterName` to `deck/master-sids` (`DeckHooks.setMasterSessions`, on change), and
-  the hook passes anything whose `session_id` is listed. It fails open: no jq, input that does not
-  parse, a `to` or message that is not a string, all print nothing.
+  denied. Not checked: a call from a subagent or teammate (`agent_id` or `agent_type` in the hook
+  input; it reports to its parent), and the master session itself: `deck/master-sids` lists its
+  session ids (every session named `masterName`, done or not, from the state callback in
+  `index.ts`: `DeckHooks.setMasterSessions`) and, right after `startMaster` or a resume of the
+  master, its bg id or session id (`addMasterSession`, kept 10 minutes until a poll lists it); the
+  hook passes a `session_id` that equals a line or starts with it. It fails open: no jq, input
+  that does not parse, a `to` or message that is not a string, all print nothing.
 
 ### Monitors (watches) and schedules
 
