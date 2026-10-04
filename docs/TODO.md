@@ -41,13 +41,14 @@ fixes it, and move the item here to "Recently done".
   until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
-- **P2 · Session accounts across resume and attach.** Verified (Claude Code 2.1.288):
-  `claude attach` of a parked session keeps its account. `claude --bg --resume` with flags starts
-  a copy under a new session id and bg id, and the old session keeps its own saved options; only a
-  resume without flags continues it (MasterDeck always passes `-n`, and `--settings` with two or
-  more accounts, so its resumes are copies). Handled: `resumeAs` records the copy's bg id from the
-  `backgrounded · <id>` line (else `claude attach <id>`), `claim` adds the new session id. Open:
-  whether a copy should be avoided (resume without flags when the saved options already match).
+- **P3 · A "duplicates" hint.** Resumes no longer make copies (see Recently done), but copies made
+  before the fix, or by hand (`claude --bg --resume <id> -n …`), still show as two sessions of one
+  name. Show a hint on live sessions that share a name (Sources/Sidebar), with **Remove** for the
+  stopped one.
+- **P3 · Sessions `master spawn` copies are not recorded.** An ORPHAN resume of an unrecorded
+  session passes `--settings` (a copy, the old one removed) but does not write
+  `session-accounts.json` (the app owns that file), so the app's next resume of it copies once
+  more before it is recorded.
 - **P2 · Board tab builder folders and Claude Code's trust dialog.** Every new Board tab's
   builder folder (`ticket-builder/tab-<id>/`) shows Claude Code's trust dialog until it is
   accepted, and its pre-approved permissions are ignored until then. Check after a reinstall
@@ -191,6 +192,7 @@ fixes it, and move the item here to "Recently done".
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |
 | Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |
+| Duplicate sessions: every resume cloned the session (`claude --bg --resume <id>` with any flag starts a copy; MasterDeck always passed `-n`, and `--settings` with two accounts, so each app start after a reboot cloned every running session). Resume is bare now (`resumeAs`, `spawn.command`); flags only for another account or a rename, then the old session is removed (`copyFromOutput`, `claude rm`); the restorer skips what runs again by session id or bg id (`resumeEntries`). Closes "Session accounts across resume and attach" | fix/master-reports-only | — |
 | Master reports guard: a PreToolUse hook on `SendMessage` (`hook.sh MasterReport`, installed with the deck hook) denies a report (`#12: done`/blocked/question/answered) sent to any session but the master; `masterName`/`masterEnabled` read from config.json at run time, the master session exempt through `deck/master-sids`; Settings → Hooks & skills shows it (`HookStatus.masterGuard`) | fix/master-reports-only | — |
 | Sessions never hand a report to another session when master-agent is not running: the reply instruction (assign/CI/review/stale prompts, master SKILL) now says to ask the user instead. Seen when a #440 session messaged two sessions named `masterdeck` | fix/master-reply-only | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |

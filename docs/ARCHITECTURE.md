@@ -119,13 +119,36 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   session id and key: the bg id `claude --bg` prints is recorded at once, `bgIdFromOutput`; a new
   session started by name is matched by name for 10 min; a live session known by only one of its
   ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
-  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume
-  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again. `claude --bg
-  --resume` with flags (`--settings`, `-n`, `--model` …) starts a copy under a new session id and
-  bg id; the old session keeps its own saved options (only a resume without flags continues it).
-  So the account is recorded under the old ids and the copy's bg id (`bgIdFromOutput`: the
-  `backgrounded · <id>` line, else `claude attach <id>`; never the note's old id), and `claim` adds
-  the new session id; with no id printed, by name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
+  proposal's `target.spawn.account`, then its folder's `origin`, then the primary).
+- Resume (`resumeAs` in `main/sessionAccounts.ts`, for `resumeBg`, `startHere` and the restorer;
+  `spawn.command` in the master skill). Claude Code 2.1.288: `claude --bg --resume <id>` with **no
+  other flag** wakes the background session itself (same session id and bg id, its saved options:
+  name, model, mode, `--settings`); **any** flag (`-n`, `--settings`, `--model`,
+  `--permission-mode`) starts a copy under new ids and leaves the old session listed, so two
+  sessions share a name and the old one shows outdated messages. Rules:
+  - A listed background session resumes bare. Nothing is recorded: its ids do not change.
+  - Flags only when something must change: another account than the one it was started as, or a
+    new name (`rename`). "Started as" is the record in `session-accounts.json`; a session with no
+    record was started without `--settings` (before a second account was connected, or outside
+    MasterDeck), so a bare resume would run as gh's active account, and it counts as a change. A
+    copy is then meant: refused while the session runs; else started with `--settings` and `-n`,
+    recorded under the copy's bg id (`bgIdFromOutput`: the id after `backgrounded ·`, whatever
+    follows it; `claim` adds its session id), and the old session is removed with `claude rm`
+    (`Ops.removeSession`), only when the output names it as the copied one (`copyFromOutput`: the
+    `note: background session <old> keeps its own saved options … started a copy as <new>` line).
+  - Not a listed background session (History, an interactive session for Start here): there are no
+    saved options and nothing to copy, so `--settings` and `-n` as for a new start.
+  - The session list not loaded yet (`Sources.sessionsNow()` null): bare with one account, refused
+    with two or more.
+  - `master spawn` (ORPHAN): bare when `config.session_account(<id>)` is the proposal's account;
+    else `--settings`, and `claude rm` of the old session when the output says a copy was started
+    (`spawn.copied`). It resumes nothing that runs again (`spawn.running`).
+  - The restorer (`shared/restore.ts` `resumeEntries`, used by `Sources.resumeStopped`) skips an
+    entry that runs again under the same session id or bg id, read before each resume, so a second
+    app start resumes nothing twice.
+  Deviation from the several-accounts spec (plan I, "resume always passes `--settings` again"):
+  that rule made every resume a copy; the saved options carry the account instead.
+  `accountFor` (IPC) gives a new session's default for a folder. One
   account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)

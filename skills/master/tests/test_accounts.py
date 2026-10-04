@@ -311,6 +311,16 @@ class OrphanAccountTest(unittest.TestCase):
         with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
             o = rules._orphan(self.s, self.ISSUE)  # acme/tracker: alice's repo
             self.assertEqual(o["target"]["spawn"]["account"], "bob-work")
+            # Recorded as bob-work: started with its --settings, which a bare resume keeps. No flag,
+            # so the session itself wakes (a flag would start a copy beside it).
+            self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--resume", self.SID])
+            self.assertEqual(spawn.command({"spawn": dict(o["target"]["spawn"], account="BOB-WORK")}),
+                             ["claude", "--bg", "--resume", self.SID])
+            # Another account than the recorded one, or no record at all (started before the second
+            # account): --settings, a copy on purpose.
+            (Path(self.tmp.name) / "accounts" / "alice.settings.json").write_text("{}")
+            self.assertEqual(spawn.command({"spawn": dict(o["target"]["spawn"], account="alice")})[2], "--settings")
+            self.record("{}")
             self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--settings", str(f), "--resume", self.SID])
         self.assertNotIn("account", rules._orphan(self.s, self.ISSUE)["target"]["spawn"])  # one account
 

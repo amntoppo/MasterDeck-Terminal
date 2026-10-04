@@ -1150,7 +1150,7 @@ async function stopPid(pid: number): Promise<void> {
  * background session (then the tab attaches it). With `stopOther`, first stop the other copy,
  * but only when its pid really is a claude process.
  */
-/** `claude --bg --resume <id>`: continue a stopped session in the background under the same id. */
+/** `claude --bg --resume <id>`: continue a stopped session in the background under the same id (resumeAs: no flags, so no copy). */
 async function resumeBg(
   id: string,
   name: string,
@@ -1160,20 +1160,16 @@ async function resumeBg(
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
-  // A name we can't pass safely is left out: the session keeps the one it has.
-  const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name)
-    ? ["-n", name]
-    : [];
   const dir = cwd && existsSync(cwd) ? cwd : homedir();
-  // The account it started as (resume always passes --settings again).
+  // Bare (`claude --bg --resume <id>`) unless the account must change: see resumeAs.
   const r = await resumeAs(resumeDeps(dir), {
     id,
     key,
     name,
-    named,
     cwd: dir,
     account,
   });
+  if (r.ok) void sources.refreshAgents();
   return r.ok ? { ok: true, message: name } : r;
 }
 
@@ -1185,7 +1181,8 @@ function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
     accounts: sessionAccounts,
     settings: settingsFor,
     accountOf: async (s) => accountOfSession(s, await originNow(dir)),
-    live: () => latest?.sessions ?? [],
+    live: () => sources.sessionsNow(),
+    remove: (bgId) => ops.removeSession(bgId),
   };
 }
 
@@ -1519,7 +1516,6 @@ async function startHere(o: {
     id: o.sessionId,
     key: null,
     name: o.name,
-    named: ["-n", o.name],
     cwd,
     account: null,
   });

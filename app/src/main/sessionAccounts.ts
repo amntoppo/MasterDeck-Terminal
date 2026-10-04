@@ -100,10 +100,30 @@ export async function sessionSettings(
   return r.ok && !r.args.length ? { ok: false, message: 'GitHub accounts are still loading; try again in a few seconds' } : r
 }
 
+/** A resume that started a copy (`note: background session <old> keeps its own saved options … started a copy as <copy>`); null: it woke the session itself, or started a new one. */
+export function copyFromOutput(out: string): { old: string; copy: string } | null {
+  const t = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+  const m = /background session ([0-9a-f]{8}) keeps its own saved options[^\n]*?started a copy as ([0-9a-f]{8})\b/i.exec(t)
+  return m ? { old: m[1], copy: m[2] } : null
+}
+
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/
+type Row = Pick<Session, 'sessionId' | 'key' | 'bgId' | 'name' | 'state' | 'pid' | 'kind'>
+
 /**
- * `claude --bg [--settings <account>] --resume <id> [-n name]` (resumeBg, Start here). A resume gets
- * a new session id and bg id: the account is recorded under the old ids and the bg id it prints
- * (claim then adds the new session id). Nothing printed: by name, unless another live session has it.
+ * Resume a session in the background (resumeBg, Start here, the restorer).
+ *
+ * `claude --bg --resume <id>` with no other flag wakes the background session itself (same ids,
+ * its saved options: name, model, `--settings`). ANY flag (`-n`, `--settings`, `--model` …) starts
+ * a copy under new ids and leaves the old session listed: two sessions of one name. So:
+ * - a listed background session resumes bare, unless something must change: another account than
+ *   the one it was started as (recorded in session-accounts.json; a session with no record was
+ *   started without `--settings` and would run as gh's active account), or a new name. Then a copy
+ *   is meant: refused while the session runs; else started with the flags, recorded under its own
+ *   bg id, and the old session removed (`claude rm`), only when the output names it as the copied one.
+ * - a session that is not a listed background session (History, an interactive one for Start
+ *   here) has no saved options and nothing to copy: `--settings` and `-n` as a new start.
+ * - the list not known yet: bare with one account; refused with two or more.
  */
 export async function resumeAs(
   d: {
@@ -114,18 +134,58 @@ export async function resumeAs(
     settings: (account: string | null, fallback: () => Promise<string | null>) => Promise<SettingsArgs>
     /** The account of a session when none is given (accountOfSession with its folder's origin). */
     accountOf: (s: { sessionId: string; key: string; name: string }) => Promise<string | null>
-    live: () => Pick<Session, 'name' | 'state'>[]
+    /** The session list; null: not loaded yet. */
+    live: () => Row[] | null
+    /** `claude rm <bg id>` (Ops.removeSession). */
+    remove: (bgId: string) => Promise<{ ok: boolean; message: string }>
   },
-  o: { id: string; key: string | null; name: string; named: string[]; cwd: string; account: string | null },
-): Promise<{ ok: true; stdout: string } | { ok: false; message: string }> {
-  const as = await d.settings(o.account, () => d.accountOf({ sessionId: o.id, key: o.key || o.id.slice(0, 8), name: o.name }))
+  o: { id: string; key: string | null; name: string; cwd: string; account: string | null; rename?: string | null },
+): Promise<{ ok: true; stdout: string; copy: { old: string; copy: string } | null } | { ok: false; message: string }> {
+  const key = o.key || o.id.slice(0, 8)
+  const as = await d.settings(o.account, () => d.accountOf({ sessionId: o.id, key, name: o.name }))
   if (!as.ok) return as
-  const r = await d.run(d.claude, ['--bg', ...as.args, '--resume', o.id, ...o.named], { cwd: o.cwd, timeoutMs: 60_000 })
-  if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
-  if (as.account) {
-    const bg = bgIdFromOutput(r.stdout)
-    d.accounts.set([o.id, o.key ?? '', bg ?? ''], as.account)
-    if (!bg && !d.live().some((x) => x.name === o.name && x.state !== 'done')) d.accounts.expect(o.name, as.account)
+  const rows = d.live()
+  const bg = rows?.find((x) => x.kind === 'background' && (x.sessionId === o.id || (!!o.key && (x.key === o.key || x.bgId === o.key)))) ?? null
+  const newName = o.rename && o.rename !== o.name ? o.rename : null
+  const name = newName ?? o.name
+  const named = SAFE_NAME.test(name) ? ['-n', name] : []
+  const recorded = d.accounts.get({ sessionId: o.id, key })
+  let args: string[]
+  let record = false
+  let old: Row | null = null
+  if (!rows) {
+    // Flags could start a copy that nobody removes; no flags could run as gh's active account.
+    if (as.account || newName) return { ok: false, message: 'the session list is not loaded yet; try again in a few seconds' }
+    args = ['--resume', o.id]
+  } else if (bg) {
+    const change = !!newName || (as.account !== null && recorded?.toLowerCase() !== as.account.toLowerCase())
+    if (change && bg.pid !== null && bg.state !== 'done')
+      return { ok: false, message: `${o.name} is running; stop it first (changing its ${newName ? 'name' : 'account'} starts a copy and removes this session)` }
+    args = change ? [...as.args, '--resume', o.id, ...named] : ['--resume', o.id]
+    record = change
+    old = change ? bg : null
+  } else {
+    args = [...as.args, '--resume', o.id, ...named]
+    record = true
   }
-  return { ok: true, stdout: r.stdout }
+  return finish(await d.run(d.claude, ['--bg', ...args], { cwd: o.cwd, timeoutMs: 60_000 }))
+
+  async function finish(
+    r: Awaited<ReturnType<Runner>>,
+  ): Promise<{ ok: true; stdout: string; copy: { old: string; copy: string } | null } | { ok: false; message: string }> {
+    if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) }
+    const id = bgIdFromOutput(r.stdout)
+    const copy = copyFromOutput(r.stdout)
+    if (as.ok && as.account && record) {
+      // A copy has its own ids; anything else keeps the ones it was resumed by.
+      d.accounts.set(copy ? [id ?? copy.copy] : [o.id, o.key ?? '', id ?? ''], as.account)
+      if (!id && !copy && !(d.live() ?? []).some((x) => x.name === name && x.state !== 'done')) d.accounts.expect(name, as.account)
+    }
+    // The old session stays listed beside its copy: take it out, but only the one the output named.
+    if (copy && old && old.bgId === copy.old && copy.copy !== copy.old) {
+      const x = await d.remove(copy.old)
+      if (!x.ok) console.error(`resume: the copied session ${copy.old} was not removed: ${x.message}`)
+    }
+    return { ok: true, stdout: r.stdout, copy }
+  }
 }

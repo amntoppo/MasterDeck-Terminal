@@ -90,6 +90,12 @@ def command(target: dict) -> list:
                              "open MasterDeck (it writes them) or log the account in again there")
         acct = ["--settings", str(f)]
     if sp.get("resume"):
+        # No flag at all wakes the session itself, with its saved options (its account's --settings
+        # among them). Any flag starts a copy under new ids and leaves the old session listed, so
+        # --settings goes only to a session MasterDeck did not record as started as this account
+        # (it would run as gh's active account otherwise); spawn() then removes the old one.
+        if acct and (config.session_account(sp["resume"]) or "").lower() == login.lower():
+            acct = []
         return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
     return ["claude", "--bg", *acct, "-n", sp["name"], *model, sp["prompt"]]
@@ -114,6 +120,16 @@ def default_account(led: dict, p: dict, cwd: str) -> "str | None":
         if origin:
             return origin
     return config.account_for_repo(p.get("repo"))
+
+
+_COPY = re.compile(r"background session ([0-9a-f]{8}) keeps its own saved options[^\n]*?started a copy as ([0-9a-f]{8})\b")
+
+
+def copied(out: str) -> "str | None":
+    """The bg id of the session a resume copied (`note: background session <old> keeps its own saved
+    options, so the flags you passed started a copy as <new>`); None when it woke the session itself."""
+    m = _COPY.search(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", out))
+    return m.group(1) if m and m.group(1) != m.group(2) else None
 
 
 def running(session_id: str, runner=subprocess.run) -> bool:
@@ -179,4 +195,15 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         err = (r.stderr or r.stdout or f"exit {r.returncode}").strip()[:500]
         hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
-    return ledger.transition(led, pid, "sent", now=now, note=(r.stdout or "").strip()[:200])
+    note = (r.stdout or "").strip()[:200]
+    old = copied(r.stdout or "") if resume else None
+    if old:
+        # The flags started a copy; the old session (not running: checked above) would stay listed
+        # beside it under the same name.
+        try:
+            rm = runner(["claude", "rm", old], capture_output=True, text=True, timeout=30)
+            note = (f"removed the old session {old}; " if rm.returncode == 0
+                    else f"old session {old} not removed ({(rm.stderr or rm.stdout or '').strip()[:80]}); ") + note
+        except (OSError, subprocess.TimeoutExpired) as e:
+            note = f"old session {old} not removed ({e}); " + note
+    return ledger.transition(led, pid, "sent", now=now, note=note[:300])

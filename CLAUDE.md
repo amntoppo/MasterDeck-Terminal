@@ -210,6 +210,10 @@ buttons; it does not go through macOS window drag regions.
 - **Hooks that match a Bash command** must match a command that runs (start of line or after
   `; & | (`), with heredoc bodies stripped (`runsOrExit` in `shared/workflow.ts`); otherwise text
   written to a file that mentions `gh pr create` fires them.
+- **Resume a background session with no flags**: `claude --bg --resume <id>` alone wakes the same
+  session; any flag (`-n`, `--settings`, `--model` …) starts a copy and leaves the old one listed
+  (duplicate sessions). Go through `resumeAs` (`main/sessionAccounts.ts`) / `spawn.command`; they
+  pass flags only to change the account or name, and remove the old session then.
 - **Shell scripts run under macOS bash 3.2**: write `${var}` before non-ASCII text (`"$chip…"` breaks).
 - **Tickets are (repo, number)** (`shared/ticket.ts`, Python `refs.py`). The primary repo (`issueRepo`)
   keeps bare numbers in every record (ledger, babysit-ticket state, snapshot), so older readers still

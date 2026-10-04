@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from master import ledger, spawn
 
@@ -142,6 +143,43 @@ class SpawnTest(unittest.TestCase):
         run = FakeRunner(out='[{"sessionId": "%s", "pid": null}]' % sid)
         spawn.spawn(self.led, p["id"], now=NOW, runner=run)
         self.assertEqual(run.calls[-1][0], ["claude", "--bg", "--resume", sid])
+
+    # Claude Code 2.1.288, real output: any flag on a resume starts a copy; none wakes the session.
+    COPY_OUT = ("note: background session e168c2bf keeps its own saved options, so the flags you passed started a copy "
+                "as 6d996951. Without flags, the same command continues e168c2bf itself.\n"
+                "backgrounded · 6d996951 · dupprobe-md (idle — send a prompt to start)\n")
+    WOKE_OUT = ("note: woke session e168c2bf with its saved options (-n, --model, --permission-mode).\n"
+                "backgrounded · e168c2bf · dupprobe-md (idle — send a prompt to start)\n")
+
+    def test_copied_reads_the_old_id_only_from_a_copy_note(self):
+        self.assertEqual(spawn.copied(self.COPY_OUT), "e168c2bf")
+        self.assertIsNone(spawn.copied(self.WOKE_OUT))
+        self.assertIsNone(spawn.copied("backgrounded · 1a2b3c4d\n"))
+        self.assertIsNone(spawn.copied(""))
+
+    def test_a_bare_resume_wakes_the_session_and_removes_nothing(self):
+        sid = "e168c2bf-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(out=self.WOKE_OUT)
+        with mock.patch.object(spawn, "running", return_value=False):
+            got = spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual([c[0] for c in run.calls], [["claude", "--bg", "--resume", sid]])
+        self.assertEqual(got["status"], "sent")
+
+    def test_a_resume_that_started_a_copy_removes_the_old_session(self):
+        sid = "e168c2bf-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(out=self.COPY_OUT)
+        with mock.patch.object(spawn, "running", return_value=False):
+            got = spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual([c[0] for c in run.calls], [["claude", "--bg", "--resume", sid], ["claude", "rm", "e168c2bf"]])
+        self.assertTrue(got["note"].startswith("removed the old session e168c2bf; "))
+        # A new session (no resume) never removes anything, whatever it prints.
+        self.led = ledger.empty()
+        q = self.add({"spawn": {"name": "6-z", "cwd": self.tmp.name, "prompt": "go"}})
+        run = FakeRunner(out=self.COPY_OUT)
+        spawn.spawn(self.led, q["id"], now=NOW, runner=run)
+        self.assertEqual(len(run.calls), 1)
 
     def test_refuses_unapproved_and_session_targets(self):
         p = self.add({"spawn": {"name": "a", "cwd": self.tmp.name, "prompt": "go"}}, approve=False)

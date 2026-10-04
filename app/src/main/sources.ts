@@ -120,6 +120,7 @@ import {
 import { mergeTeamPages, parseTeamPrs, type TeamPr } from "@shared/teamPrs";
 import {
   nextRestore,
+  resumeEntries,
   parseRestoreFile,
   type RestoreEntry,
   type RestoreFile,
@@ -458,6 +459,11 @@ export class Sources {
     );
   }
 
+  /** The sessions of the last `claude agents` scan; null until one succeeded. */
+  sessionsNow(): Session[] | null {
+    return this.isHealthy("agents") ? this.rawSessions : null;
+  }
+
   /** How to resume a stopped background session (`claude --bg --resume`). */
   setResumer(fn: (e: RestoreEntry) => Promise<CliResult>): void {
     this.resumer = fn;
@@ -517,26 +523,29 @@ export class Sources {
       return { ok: true, message: "nothing to resume" };
     this.restoring = true;
     this.emit();
-    const failed: string[] = [];
+    let failed: string[] = [];
     let resumed = 0;
     try {
-      for (const e of [...this.restore.stopped]) {
-        // Resumed meanwhile (master's ORPHAN, or by hand): resuming again would start a copy.
-        const live = this.rawSessions.some(
-          (s) =>
-            s.pid !== null && s.state !== "done" && s.sessionId === e.sessionId,
-        );
-        const r = live
-          ? { ok: true, message: "already running" }
-          : await this.resumer(e);
-        if (r.ok) {
-          resumed++;
+      // One that runs again (by session id or background id) is skipped: never resumed twice.
+      const r = await resumeEntries(
+        [...this.restore.stopped],
+        () => this.rawSessions,
+        async (e) => {
+          const x = await this.resumer!(e);
           // Off the list now; the next scan also drops it once its process shows up.
-          if (this.restore)
+          if (x.ok && this.restore)
             this.restore.stopped = this.restore.stopped.filter(
-              (x) => x.sessionId !== e.sessionId,
+              (y) => y.sessionId !== e.sessionId,
             );
-        } else failed.push(`${e.name}: ${r.message}`);
+          return x;
+        },
+      );
+      ({ failed, resumed } = r);
+      if (this.restore) {
+        const keep = new Set(r.left.map((e) => e.sessionId));
+        this.restore.stopped = this.restore.stopped.filter((e) =>
+          keep.has(e.sessionId),
+        );
       }
     } finally {
       this.restoring = false;
