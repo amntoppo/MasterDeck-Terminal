@@ -10,13 +10,16 @@ fixes it, and move the item here to "Recently done".
 
 ## Shipping / ops
 
-- **P2 · First launch after a local reinstall hangs.** Seen twice on 2026-10-03: after
-  `install-mac.sh`, the first `open` leaves the main process idle (0% CPU), writing nothing, ignoring
-  quit and SIGTERM; `kill -9` and a second launch work. Suspect a synchronous `safeStorage` Keychain
-  prompt (a new ad-hoc signature each build) with no visible window, or the old instance not fully
-  gone. Approach: `sample <pid>` while hung, log a line before each startup await in `main/index.ts`,
-  and check Console for a Keychain prompt. Workaround in the reinstall recipe: if no file in
-  `~/.claude/masterdeck` changes within 30 s, `pkill -9 -f MacOS/MasterDeck$` and open again.
+- **P2 · First launch after a local reinstall hangs — cause found (2026-10-03).** A stack sample of the
+  hung main process shows it inside a JS timer → `SecItemCopyMatching` → `SecKeychainItemCopyContent` →
+  `SecurityServer::ClientSession::decrypt` (blocked in `mach_msg`): a synchronous Keychain read
+  (`safeStorage` / "MasterDeck Safe Storage") waiting on macOS's "allow access" prompt, which appears
+  because every local build has a new ad-hoc signature. It runs before `createWindow()`, so there is no
+  window, and the blocked main thread ignores quit and SIGTERM. Fix options: (a) sign local builds with one
+  stable self-signed identity (`CSC_NAME` / `codesign -s`) so "Always Allow" sticks; (b) create the window
+  first and do every `safeStorage` read after it, off the startup path, with a visible "waiting for
+  Keychain" state; (c) both. Until then: click Always Allow on the prompt (it can sit behind other
+  windows). GitHub issue #6.
 - **P1 · Backend CI deploy broken.** The CI Cloudflare token gets error 7403. Where:
   `masterdeck-backend/.github/workflows`. Approach: give the token Workers Scripts:Edit + the
   account/zone permissions the custom domains need, or drop the deploy job and keep local

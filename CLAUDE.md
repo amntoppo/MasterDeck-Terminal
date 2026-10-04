@@ -266,7 +266,11 @@ buttons; it does not go through macOS window drag regions.
   phone layout (merge b3c4d4b: ≤760 px, `usePhone()`, CSS in `web.css` under `.app.phone` /
   `html.phone`, dev-only preview `npm run dev:web` + `/?preview`). The web app with the phone layout
   is deployed to app.masterdeck.dev.
-- Branch `feat/multi-gh-accounts` (plan I, multiple GitHub accounts; spec and plan in the backend repo, 2026-10-03): not merged, not pushed. Backend branch `feat/session-start-account` (protocol `session.start.account`, worktree `~/Documents/masterdeck-backend-proto`): not pushed, not deployed; the drift test needs the backend checkout on it (`MASTERDECK_BACKEND`) while working on the MasterDeck branch.
+- Several GitHub accounts (plan I) and the master-reply fix are merged into `main` locally (merges 6a83862,
+  592dc54; not pushed, installed locally 2026-10-03). The real config was migrated (one account, primary).
+  The backend's optional `session.start.account` is on backend branch `feat/session-start-account`
+  (worktree `~/Documents/masterdeck-backend-proto`), not merged or deployed; until it merges, run the
+  drift test with `MASTERDECK_BACKEND=~/Documents/masterdeck-backend-proto`.
 - Backend `master` = `3af02f3` (PR #8, docs only), deployed code is PR #5 (`fccbfee`).
 - Next: whatever the user picks from [docs/TODO.md](docs/TODO.md). Top of the list: decide on
   pushing/releasing, fix or accept the broken backend CI deploy, re-measure web-bridge upload with
