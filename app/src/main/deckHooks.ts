@@ -8,12 +8,48 @@ import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
 const EVENTS_MAX = 4 * 1024 * 1024
 
 /**
+ * The master reports guard, as a jq program (no single quote in it: it sits in a quoted bash
+ * string; `$q` is one). A SendMessage is a report when the first non-empty line of its message (or of
+ * its summary) reads `#12: done`, `name#12: question — …` and so on. A report passes only to the
+ * master (config masterName, also in the ListAgents form `name [ref]`) or from the master session
+ * itself; with master turned off it passes to nobody. Anything else, and anything unreadable,
+ * prints nothing: the call goes on as usual.
+ */
+const MASTER_REPORT_JQ = String.raw`
+def line: if type == "string" then ([splits("\r?\n") | select(test("\\S"))][0] // "") else "" end;
+def report: line | capture("^\\s*(?<label>#\\d+|[A-Za-z0-9._-]+#\\d+)\\s*:\\s*(?<kind>done|blocked|question|answered)\\b"; "i");
+(try ($cfg | fromjson) catch {}) as $raw
+| (if ($raw | type) == "object" then $raw else {} end) as $c
+| (if ($c.masterName | type) == "string" and ($c.masterName | test("\\S")) then ($c.masterName | gsub("^\\s+|\\s+$"; "")) else "master-agent" end) as $name
+| ($c.masterEnabled != false) as $on
+| (.session_id) as $sid
+| ($sids | split("\n") | any(. != "" and . == $sid)) as $me
+| (.tool_input // {}) as $t
+| ([($t.message | report), ($t.summary | report)][0]) as $r
+| if $r == null or ($t.to | type) != "string" then empty else
+    ($t.to | ascii_downcase | gsub("^\\s+|\\s+$"; "")) as $to
+    | ($name | ascii_downcase) as $n
+    | "\($q)\($r.label): \($r.kind | ascii_downcase)\($q)" as $what
+    | if $on and ($me or $to == $n or (($to | startswith($n + " [")) and ($to | ltrimstr($n + " [") | test("^[^\\[\\]]*\\]$")))) then empty
+      else {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: (
+        if $on then "MasterDeck: reports like \($what) go only to \($name). It is not reachable, so do not send this to any other session; ask the user here instead."
+        else "MasterDeck: \($name) is turned off, so reports like \($what) go to no session; say it to the user here instead." end)}}
+      end
+  end
+`.trim()
+
+/**
  * The hook script, one for every event (its name is $1). It never blocks a session for long:
  * - PermissionRequest: while MasterDeck runs (it touches `alive`), leaves the request in
  *   `pending/<id>.json` and waits for `answers/<id>.json`, which it prints as the hook's answer.
  *   The terminal shows the prompt meanwhile and can be answered there too. It gives up when
  *   MasterDeck withdraws the request (deletes the pending file) or after ~9 minutes.
  * - SessionStart: prints `context/<session id>.json` when MasterDeck left one (the ticket's context).
+ * - MasterReport (PreToolUse on SendMessage): a report meant for master (`#12: done`, see
+ *   MASTER_REPORT_JQ) is denied unless it goes to the master, whose name is read from the config
+ *   file (`configPath`, baked in) on every call. The sessions in `master-sids` (the master
+ *   itself, setMasterSessions) may send anything. No `#<digit>` in the input, no jq, or input
+ *   that does not parse: nothing is printed and the call goes on.
  * - MonitorCall (PreToolUse on Monitor): only with Settings → Monitors run by MasterDeck (the
  *   `monitors-by` file) and while MasterDeck runs. Leaves the call in `watch-requests/<id>.json`
  *   and waits up to 10s for `watch-answers/<id>.json` (MasterDeck took it over: the call is
@@ -33,18 +69,26 @@ const EVENTS_MAX = 4 * 1024 * 1024
  *   queue work for them (markLegacy, pruneLegacy).
  * - The rest: one line in `events.jsonl`.
  */
-export function hookScript(dir: string, queueDir: string): string {
+export function hookScript(dir: string, queueDir: string, configPath = join(dir, 'config.json')): string {
   const esc = (p: string) => p.replace(/'/g, `'\\''`)
   return `#!/bin/bash
 # MasterDeck hook: written by MasterDeck at each launch; edits are overwritten.
 D='${esc(dir)}'
 Q='${esc(queueDir)}'
+C='${esc(configPath)}'
 ev="$1"
 in=$(cat)
 sid=$(printf '%s' "$in" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p' | head -n 1)
 now=$(date +%s)
 # Sessions that still run the queue skill's hooks (alive at the migration; "*": not known yet).
 legacy() { [ -f "$D/legacy-sids" ] && grep -qxF -e "$sid" -e '*' "$D/legacy-sids"; }
+if [ "$ev" = MasterReport ]; then
+  # Fast path: a report carries a ticket number (#12); most messages go no further (no jq).
+  case "$in" in *'#'[0-9]*) ;; *) exit 0 ;; esac
+  command -v jq >/dev/null 2>&1 || exit 0
+  printf '%s' "$in" | jq -c --arg cfg "$(cat "$C" 2>/dev/null)" --arg sids "$(cat "$D/master-sids" 2>/dev/null)" --arg q "'" '${MASTER_REPORT_JQ}' 2>/dev/null
+  exit 0
+fi
 mkdir -p "$D/pending" "$D/answers" "$D/context" 2>/dev/null
 case "$ev" in
   MonitorCall)
@@ -158,10 +202,14 @@ export class DeckHooks {
   private follow: FollowState
   /** By session id (the full one). */
   readonly sessions: Record<string, HookSessionState> = {}
+  /** What master-sids holds (null: not written by this run yet). */
+  private masterSids: string | null = null
 
   constructor(
     home: string,
     private queues = queueDir(),
+    /** The shared config file (masterName, masterEnabled): the hook reads it on every report. */
+    private config = join(home, 'deck', 'config.json'),
   ) {
     this.dir = join(home, 'deck')
     this.script = join(this.dir, 'hook.sh')
@@ -171,7 +219,7 @@ export class DeckHooks {
   /** Write the script (every launch: it follows this version) and the folders it uses. */
   setup(): void {
     for (const d of ['', 'pending', 'answers', 'context', 'watch-requests', 'watch-answers', 'queue-requests', 'queue-answers']) mkdirSync(join(this.dir, d), { recursive: true })
-    writeFileSync(this.script, hookScript(this.dir, this.queues))
+    writeFileSync(this.script, hookScript(this.dir, this.queues, this.config))
     chmodSync(this.script, 0o755)
     try {
       if (statSync(this.follow.path).size > EVENTS_MAX) truncateSync(this.follow.path, 0)
@@ -361,6 +409,24 @@ export class DeckHooks {
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, `${id}.tmp`), JSON.stringify(answer))
     renameSync(join(dir, `${id}.tmp`), join(dir, `${id}.json`))
+  }
+
+  /** The live master sessions (ids): the reports guard lets them send anything. Written on change. */
+  setMasterSessions(ids: string[]): void {
+    const p = join(this.dir, 'master-sids')
+    const text = [...new Set(ids.filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].sort().join('\n')
+    if (text === this.masterSids) return
+    try {
+      if (!text) rm(p)
+      else {
+        mkdirSync(this.dir, { recursive: true })
+        writeFileSync(`${p}.tmp`, text + '\n')
+        renameSync(`${p}.tmp`, p)
+      }
+      this.masterSids = text
+    } catch {
+      // next state
+    }
   }
 
   /** Queue hooks installed by hand handle /queue: MasterDeck's hook leaves it to them. */

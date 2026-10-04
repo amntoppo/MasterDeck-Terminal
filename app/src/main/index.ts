@@ -445,7 +445,7 @@ const summaries = new Summaries(
   join(paths.home, "summaries"),
   paths.projectsDir,
 );
-const deckHooks = new DeckHooks(paths.home);
+const deckHooks = new DeckHooks(paths.home, undefined, paths.config);
 const sources = new Sources(
   paths,
   run,
@@ -476,6 +476,15 @@ const sources = new Sources(
       runFlowWatch(state);
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
+    }
+    // The master session may send anything; the reports guard (hook.sh MasterReport) reads this.
+    if (process.platform !== "win32" && sources.isHealthy("agents")) {
+      const master = getConfig().masterName.trim().toLowerCase();
+      deckHooks.setMasterSessions(
+        state.sessions
+          .filter((s) => s.state !== "done" && s.name.toLowerCase() === master)
+          .map((s) => s.sessionId),
+      );
     }
     if (process.platform !== "win32" && sources.isHealthy("agents"))
       deckHooks.pruneLegacy(

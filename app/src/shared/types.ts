@@ -283,6 +283,8 @@ export interface HookStatus {
   foreignQueue: boolean;
   /** MasterDeck's self-review gate before `gh pr create`. */
   reviewGate: boolean;
+  /** MasterDeck's guard on SendMessage: a report like `#12: done` goes only to the master session. */
+  masterGuard: boolean;
 }
 
 /** What Setup checks before GitHub can work. */

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -261,5 +261,123 @@ describe('pumpQueue (MasterDeck answers a Stop)', () => {
     writeFileSync(answer(fresh), '{}')
     d.pumpQueue()
     expect(readdirSync(join(d.dir, 'queue-answers'))).toEqual([`${fresh}.json`])
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('the master reports guard (PreToolUse on SendMessage)', () => {
+  const MASTER = '11111111-1111-4111-8111-111111111111'
+  const setup = (config?: object | string) => {
+    const home = mkdtempSync(join(tmpdir(), 'mr-'))
+    const cfg = join(home, 'master-config.json')
+    const write = (c: object | string) => writeFileSync(cfg, typeof c === 'string' ? c : JSON.stringify(c))
+    if (config !== undefined) write(config)
+    const d = new DeckHooks(home, join(home, 'queue'), cfg)
+    d.setup()
+    execFileSync('bash', ['-n', d.script])
+    const raw = (input: string) => execFileSync(d.script, ['MasterReport'], { input }).toString()
+    const send = (to: unknown, message: unknown, extra: object = {}, sid = SID) =>
+      raw(JSON.stringify({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_input: { to, message, ...extra } }))
+    const denied = (out: string) => {
+      const o = JSON.parse(out).hookSpecificOutput
+      expect(o).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' })
+      return o.permissionDecisionReason as string
+    }
+    return { d, write, raw, send, denied }
+  }
+  const Q = 'gamerun-expo#440: question — ready for instructions; what should I pick up?'
+
+  it('lets a report to master through, by name or in the ListAgents form', () => {
+    const { send } = setup()
+    expect(send('master-agent', '#12: done\n\nPR is up')).toBe('')
+    expect(send('master-agent [abc123]', Q)).toBe('')
+    expect(send('Master-Agent', '#12: blocked — no access')).toBe('')
+  }, 20_000)
+  it('denies a report to any other session, with the reason', () => {
+    const { send, denied } = setup()
+    expect(denied(send('masterdeck [a11992]', Q))).toBe(
+      "MasterDeck: reports like 'gamerun-expo#440: question' go only to master-agent. It is not reachable, so do not send this to any other session; ask the user here instead.",
+    )
+    expect(denied(send('masterdeck', '#12: done'))).toMatch(/reports like '#12: done' go only to master-agent\./)
+    expect(denied(send('master-agent-2', '\n\n  #7 : ANSWERED — use the staging key'))).toMatch(/'#7: answered'/)
+    expect(denied(send('master-agent [x] extra', '#12: blocked — stuck'))).toMatch(/go only to master-agent/)
+    // The report in the summary alone is still a report.
+    expect(denied(send('masterdeck', 'see below', { summary: '#12: done' }))).toMatch(/'#12: done'/)
+  }, 20_000)
+  it('leaves everything that is not a report alone', () => {
+    const { send, raw } = setup()
+    expect(send('masterdeck', 'can you check PR #12 for me?')).toBe('')
+    expect(send('masterdeck', 'I think #12: is done by now')).toBe('')
+    expect(send('masterdeck', 'All done with #12: the PR is up\n#12: done')).toBe('')
+    expect(send('researcher', '#12: master-agent here — you went idle; are you done?')).toBe('')
+    expect(send('researcher', '#12: doneness is a spectrum')).toBe('')
+    expect(send('team-lead', { type: 'shutdown_response', request_id: '#12: done' })).toBe('')
+    expect(send(undefined, '#12: done')).toBe('')
+    expect(raw('{"tool_input": {"to": "masterdeck", "message": "#12: done"')).toBe('')
+    expect(raw('not json #1')).toBe('')
+    expect(raw('')).toBe('')
+  }, 20_000)
+  it('reads the master name from the config at run time', () => {
+    const { send, write, denied } = setup({ masterName: 'boss' })
+    expect(send('boss', '#12: done')).toBe('')
+    expect(send('Boss [9f]', '#12: done')).toBe('')
+    expect(denied(send('master-agent', '#12: done'))).toMatch(/go only to boss\./)
+    write({ masterName: 'chief' })
+    expect(send('chief', '#12: done')).toBe('')
+    expect(denied(send('boss', '#12: done'))).toMatch(/go only to chief\./)
+    // A broken or empty config falls back to master-agent.
+    write('{ nope')
+    expect(send('master-agent', '#12: done')).toBe('')
+    expect(denied(send('chief', '#12: done'))).toMatch(/go only to master-agent\./)
+    write({ masterName: '  ' })
+    expect(send('master-agent', '#12: done')).toBe('')
+  }, 20_000)
+  it('with master turned off, a report goes to no session at all', () => {
+    const { send, denied } = setup({ masterEnabled: false })
+    expect(denied(send('master-agent', '#12: done'))).toBe(
+      "MasterDeck: master-agent is turned off, so reports like '#12: done' go to no session; say it to the user here instead.",
+    )
+    expect(denied(send('masterdeck', '#12: question — which key?'))).toMatch(/turned off/)
+    expect(send('masterdeck', 'hello')).toBe('')
+  }, 20_000)
+  it('the master session itself may send anything', () => {
+    const { d, send, denied } = setup()
+    expect(denied(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER))).toMatch(/go only to/)
+    d.setMasterSessions([MASTER])
+    expect(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER)).toBe('')
+    expect(denied(send('masterdeck', '#440: done'))).toMatch(/go only to/)
+    d.setMasterSessions([])
+    expect(existsSync(join(d.dir, 'master-sids'))).toBe(false)
+    expect(denied(send('gamerun-expo-440', '#440: answered — use staging', {}, MASTER))).toMatch(/go only to/)
+  }, 20_000)
+  it('does nothing without jq', () => {
+    const { d, denied } = setup()
+    // A PATH with what the script needs, except jq.
+    const bin = mkdtempSync(join(tmpdir(), 'nojq-'))
+    for (const tool of ['cat', 'sed', 'head', 'date', 'grep']) symlinkSync(execFileSync('/bin/sh', ['-c', `command -v ${tool}`]).toString().trim(), join(bin, tool))
+    const input = JSON.stringify({ session_id: SID, tool_input: { to: 'masterdeck', message: '#12: done' } })
+    expect(denied(execFileSync('/bin/bash', [d.script, 'MasterReport'], { input }).toString())).toMatch(/go only to/)
+    expect(execFileSync('/bin/bash', [d.script, 'MasterReport'], { input, env: { PATH: bin } }).toString()).toBe('')
+  }, 20_000)
+})
+
+describe.skipIf(process.platform === 'win32')('installDeckHooks, the master reports guard', () => {
+  it('adds the SendMessage entry, upgrades an older install, and follows a moved script', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'set-'))
+    const p = join(dir, 'settings.json')
+    installDeckHooks(p, dir, '/h/deck/hook.sh')
+    const guard = () => (JSON.parse(readFileSync(p, 'utf8')).hooks.PreToolUse as { matcher?: string; hooks: { command: string; timeout?: number }[] }[]).filter((m) => m.matcher === 'SendMessage')
+    expect(guard()).toEqual([{ matcher: 'SendMessage', hooks: [{ type: 'command', command: '"/h/deck/hook.sh" MasterReport', timeout: 10 }] }])
+    // An install from before the guard existed is not complete: it gets the entry at the next launch.
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    s.hooks.PreToolUse = s.hooks.PreToolUse.filter((m: { matcher?: string }) => m.matcher !== 'SendMessage')
+    writeFileSync(p, JSON.stringify(s))
+    expect(deckHooksInstalled(p)).toBe(false)
+    expect(installDeckHooks(p, dir, '/h/deck/hook.sh').message).toBe('MasterDeck hooks installed')
+    expect(guard()).toHaveLength(1)
+    expect(deckHooksInstalled(p)).toBe(true)
+    expect(installDeckHooks(p, dir, '/h/deck/hook.sh').message).toBe('already installed')
+    installDeckHooks(p, dir, '/other/deck/hook.sh')
+    expect(guard()).toEqual([{ matcher: 'SendMessage', hooks: [{ type: 'command', command: '"/other/deck/hook.sh" MasterReport', timeout: 10 }] }])
+    expect(JSON.parse(readFileSync(p, 'utf8')).hooks.PreToolUse.filter((m: { matcher?: string }) => m.matcher === 'Monitor')).toHaveLength(1)
   })
 })

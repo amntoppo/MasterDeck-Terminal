@@ -186,7 +186,7 @@ export function fixtureState(): AppState {
       repos: ['acme/web', 'acme/api'],
     },
     skills: [],
-    hooks: { queue: true, foreignQueue: false, reviewGate: true },
+    hooks: { queue: true, foreignQueue: false, reviewGate: true, masterGuard: true },
     stoppedByRestart: [],
     restoring: false,
     tokens: {},

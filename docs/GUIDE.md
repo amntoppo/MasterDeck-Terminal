@@ -336,7 +336,8 @@ see at a glance where the work stands:
 
 At launch MasterDeck writes `~/.claude/masterdeck/deck/hook.sh` and registers it in
 `~/.claude/settings.json` (a backup is kept) for PermissionRequest, Notification, StopFailure,
-PreCompact, PostCompact, CwdChanged, SessionStart and Stop. New sessions pick it up; running ones
+PreCompact, PostCompact, CwdChanged, SessionStart, UserPromptSubmit and Stop, and before the
+Monitor and SendMessage tools. New sessions pick it up; running ones
 after a restart.
 
 - **Permissions:** answered from Needs you or Tasks (above). While MasterDeck is closed the hook
@@ -350,6 +351,17 @@ after a restart.
 - **The ticket after a compaction:** a session on a ticket is told, after a compaction, resume or
   `/clear`, which ticket it works on and what earlier sessions on it did (their saved summaries).
   New sessions get the same from the Start dialog: **Include what earlier sessions did**.
+- **Reports go only to master:** a session MasterDeck starts reports to master with SendMessage,
+  first line `#12: done`, `#12: blocked — <reason>`, `#12: question — <question>` or
+  `#12: answered — <answer>` (`repo#12` for a ticket in another repo). The hook checks every
+  SendMessage: a message that starts like that goes through only to the master session (the
+  `masterName` in `~/.claude/master/config.json`, default `master-agent`). Sent to any other
+  session (because master is not running, say), it is stopped and the session is told to ask you
+  there instead, so no other session ever receives a report or answers as if it were master.
+  Everything else is untouched: other messages between sessions, messages to subagents, and
+  whatever the master session itself sends. With master turned off (Setup → Preferences) a report
+  goes to no session; sessions report in their own terminal. A changed master name applies at once.
+  Needs `jq`; without it the hook lets every message through.
 
 Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
 creation.
@@ -479,7 +491,10 @@ Stored in `~/.claude/masterdeck/settings.json`.
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
   (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the
   first `gh pr create` of each branch with an instruction to review the diff, then lets the retry (same branch) go through. It is a
-  step of the Default workflow, so a workflow without the self-review step skips it. Older versions
+  step of the Default workflow, so a workflow without the self-review step skips it.
+  **Master reports guard** says whether the check on SendMessage is installed (macOS and Linux): a
+  session's report (`#12: done`, blocked, question, answered) goes only to the master session, never
+  to another session (see MasterDeck's hook). Older versions
   installed hooks for babysit-ticket, babysit-pr and queue; MasterDeck removes exactly those once,
   at launch (a backup of `~/.claude/settings.json` is kept), and does that work itself.
 - **Skills:** each bundled skill's state in `~/.claude/skills`, for use by hand: MasterDeck needs

@@ -36,7 +36,8 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
    (`syncSkills`), the one-time `migrateLegacyHooks` (non-Windows, not smoke, no
    `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), `installReviewGate` (same conditions),
    hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
-   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue`, then
+   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue` and the
+   `SendMessage` reports guard, then
    `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
    `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
@@ -148,7 +149,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `hookStatus` (`HookStatus`: `queue` = something runs `/queue`: the deck hook with no skill queue
   hook beside it, or both skill queue hooks; `foreignQueue` = any queue skill hook, e.g. a
   hand-installed `$HOME/.claude/hooks/queue-submit.sh`; `reviewGate` = `REVIEW_MARK` in
-  PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
+  PreToolUse; `masterGuard` = the deck hook's `MasterReport` entry in PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
 - `migrateLegacyHooks(settingsPath, backupDir)` runs once at launch (`<home>/native-hooks.json`
   records it with what it removed). It removes only what older MasterDeck versions wrote for the
   skills: the exact commands in `LEGACY_COMMANDS` (tt.sh hook, babysit-pr's pre/post `gh pr create`
@@ -181,6 +182,22 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   out again whenever settings.json's mtime changes) leaves `/queue`
   to those hooks.
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
+- Master reports guard: `installDeckHooks` also registers `"<home>/deck/hook.sh" MasterReport` as a
+  PreToolUse hook on `SendMessage` (marker `/deck/hook.sh" MasterReport`, timeout 10 s; part of
+  `deckInstalledIn`, so an install from before it is completed at the next launch; the legacy
+  migration and the review gate never match it). The script's `MasterReport` branch exits before jq
+  unless the input holds `#<digit>`, then runs one jq program (`MASTER_REPORT_JQ`): a report is a
+  message (or `summary`) whose first non-empty line matches
+  `^\s*(#\d+|[A-Za-z0-9._-]+#\d+)\s*:\s*(done|blocked|question|answered)\b`, case-insensitive. A report
+  is denied (`permissionDecision: "deny"`, the reason tells the session to ask the user) unless `to`
+  is the master: `masterName`, case-insensitive, or `<masterName> [<ref>]`. The name and
+  `masterEnabled` are read from the config file on every call (its path, `paths.config`, is baked
+  into the script like the queue dir), so a config change needs no reinstall; a missing or broken
+  config means `master-agent`, enabled. With `masterEnabled: false` every report to a session is
+  denied. The master session is exempt: the state callback in `index.ts` writes the ids of live
+  sessions named `masterName` to `deck/master-sids` (`DeckHooks.setMasterSessions`, on change), and
+  the hook passes anything whose `session_id` is listed. It fails open: no jq, input that does not
+  parse, a `to` or message that is not a string, all print nothing.
 
 ### Monitors (watches) and schedules
 

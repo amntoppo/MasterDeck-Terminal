@@ -290,7 +290,12 @@ export class Sources {
   private teamPrsError: string | null = null;
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
-  private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
+  private hooks: HookStatus = {
+    queue: false,
+    foreignQueue: false,
+    reviewGate: false,
+    masterGuard: false,
+  };
   private ghAccounts: GhAccountStatus[] = [];
   /** gh's active login (gh config get user), for the "not the primary" notice; null: not known. */
   private ghActive: string | null = null;

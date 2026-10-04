@@ -79,7 +79,7 @@ describe.skipIf(process.platform === 'win32')('monitors run by MasterDeck', () =
     require('node:fs').writeFileSync(p, '{}')
     installDeckHooks(p, dir, '/h/deck/hook.sh')
     const s = JSON.parse(require('node:fs').readFileSync(p, 'utf8'))
-    expect(s.hooks.PreToolUse).toEqual([{ matcher: 'Monitor', hooks: [{ type: 'command', command: '"/h/deck/hook.sh" MonitorCall', timeout: 15 }] }])
+    expect(s.hooks.PreToolUse.filter((m: { matcher?: string }) => m.matcher === 'Monitor')).toEqual([{ matcher: 'Monitor', hooks: [{ type: 'command', command: '"/h/deck/hook.sh" MonitorCall', timeout: 15 }] }])
     expect(installDeckHooks(p, dir, '/h/deck/hook.sh').message).toBe('already installed')
   })
   it('runs the script with no time limit and sends what it prints once the turn is over', async () => {

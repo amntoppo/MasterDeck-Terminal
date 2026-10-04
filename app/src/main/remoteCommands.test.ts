@@ -12,7 +12,7 @@ function sess(key: string, state: Session['state'], extra: Partial<Session> = {}
 }
 function st(sessions: Session[], openIds: string[] = [], queueHook = true): AppState {
   const e = (id: string) => ({ item: { id, kind: 'question', priority: 1, sessionKey: 'a', ticket: null, title: '', body: '', actions: [], detail: { type: 'session' } }, state: 'open', firstSeen: 0, lastSeen: 0 })
-  return { sessions, inbox: { open: openIds.map(e), snoozed: [], history: [] }, hooks: { queue: queueHook, foreignQueue: false, reviewGate: false } } as unknown as AppState
+  return { sessions, inbox: { open: openIds.map(e), snoozed: [], history: [] }, hooks: { queue: queueHook, foreignQueue: false, reviewGate: false, masterGuard: false } } as unknown as AppState
 }
 function deps(state: AppState | null, over: Partial<RemoteDeps> = {}): RemoteDeps {
   return {
