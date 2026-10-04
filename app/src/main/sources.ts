@@ -76,6 +76,7 @@ import {
 } from "@shared/stats";
 import { parseBoard } from "@shared/board";
 import {
+  carryCopy,
   linksToCarry,
   recordHistory,
   type LinkInfo,
@@ -763,6 +764,13 @@ export class Sources {
     } catch {
       // best effort; the next change tries again
     }
+  }
+
+  /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
+  noteCopy(old: { bgId: string; sessionId: string }, copyBg: string): void {
+    if (!carryCopy(this.history, this.createdPrs, old, copyBg)) return;
+    this.saveHistory();
+    this.saveSessionPrs();
   }
 
   /** Re-link resumed background sessions to the ticket their earlier session id had. */

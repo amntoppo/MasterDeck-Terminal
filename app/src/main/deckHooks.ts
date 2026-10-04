@@ -11,7 +11,7 @@ const EVENTS_MAX = 4 * 1024 * 1024
  * The master reports guard, as a jq program (no single quote in it: it sits in a quoted bash
  * string; `$q` is one). A SendMessage is a report when the first non-empty line of its message (or of
  * its summary) reads `#12: done`, `name#12: question — …`, `owner/name#12: blocked` and so on, after
- * any markdown or quote characters. A call from a subagent or teammate (`agent_id` / `agent_type`
+ * any markdown or quote characters, heading markers (`## `) and list numbers (`1. `). A call from a subagent or teammate (`agent_id` / `agent_type`
  * in the hook input) is not checked: it reports to its parent. A report passes only to the
  * master (config masterName, also in the ListAgents form `name [ref]`) or from the master session
  * itself; with master turned off it passes to nobody. Anything else, and anything unreadable,
@@ -19,7 +19,7 @@ const EVENTS_MAX = 4 * 1024 * 1024
  */
 const MASTER_REPORT_JQ = String.raw`
 def line: if type == "string" then ([splits("\r?\n") | select(test("\\S"))][0] // "") else "" end;
-def report: line | sub("^[\\s>*_\\x60-]+"; "") | capture("^(?<label>(?:(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\\d+)\\s*:\\s*(?<kind>done|blocked|question|answered)(?![A-Za-z0-9])"; "i");
+def report: line | sub("^(?:[\\s>*_\\x60-]+|#+\\s+|\\d+[.)]\\s+)+"; "") | capture("^(?<label>(?:(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\\d+)\\s*:\\s*(?<kind>done|blocked|question|answered)(?![A-Za-z0-9])"; "i");
 def set: type == "string" and test("\\S");
 (try ($cfg | fromjson) catch {}) as $raw
 | (if ($raw | type) == "object" then $raw else {} end) as $c

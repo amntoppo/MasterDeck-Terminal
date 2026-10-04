@@ -22,6 +22,23 @@ def no_cwd(_sid):
 
 
 class SessionsTest(unittest.TestCase):
+    def test_superseded_sessions_are_left_out_unless_they_run(self):
+        # The old side of a copy (resumed as another account): never an owner, so never an ORPHAN.
+        old, copy = agent("s-old", "3-x", kind="background", bg_id="e168c2bf"), agent("s-new", "3-x", kind="background", bg_id="6d996951")
+        old["pid"] = None
+        state = {"sessions": {"s-old": link(3), "s-dead": link(4), "s-new": link(3)}}
+        out = join.sessions([old, copy], state, MASTER, no_cwd, superseded={"e168c2bf", "s-old", "s-dead"})
+        self.assertEqual([s["session_id"] for s in out], ["s-new"])
+        # Running again (resumed by hand): it shows.
+        old["pid"] = 7
+        out = join.sessions([old, copy], state, MASTER, no_cwd, superseded={"e168c2bf", "s-old", "s-dead"})
+        self.assertEqual(sorted(s["session_id"] for s in out), ["s-new", "s-old"])
+        # No list: as before.
+        old["pid"] = None
+        self.assertEqual(len(join.sessions([old, copy], state, MASTER, no_cwd)), 3)
+        # A listed background row goes by its background id only (as the app hides it).
+        self.assertEqual(len(join.sessions([old, copy], state, MASTER, no_cwd, superseded={"s-old"})), 3)
+
     def test_live_explicit_owner(self):
         out = join.sessions([agent("s1", "paywall")], {"sessions": {"s1": link(939, prs=["u1"])}}, MASTER, no_cwd)
         self.assertEqual(out, [{

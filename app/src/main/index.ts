@@ -43,7 +43,7 @@ import { diffEvents, newlyNeedsInput } from "@shared/notify";
 import { inboxNotice, type InboxItem } from "@shared/inbox";
 import { isSafeBgId } from "@shared/paneCommand";
 import { isClaudeCommand, tasklistImage } from "@shared/procs";
-import { MASTER_NAME, sessionForProposal } from "@shared/derive";
+import { MASTER_NAME, sessionForProposal, isMasterSession } from "@shared/derive";
 import type {
   AppState,
   CliResult,
@@ -1162,9 +1162,12 @@ async function resumeBg(
   cwd: string | null,
   account: string | null = null,
   key: string | null = null,
+  grantMaster = false,
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
+  // As listed before the resume (see grantMaster below).
+  const wasRows = sources.sessionsNow();
   const dir = cwd && existsSync(cwd) ? cwd : homedir();
   // Bare (`claude --bg --resume <id>`) unless the account must change: see resumeAs.
   const r = await resumeAs(resumeDeps(dir), {
@@ -1175,10 +1178,12 @@ async function resumeBg(
     account,
   });
   if (r.ok) {
-    // master-agent resumed: the reports guard lets it send anything at once.
+    // master-agent resumed: the reports guard lets it send anything at once. Only for the window
+    // (never a remote caller), and only when the session list names this id as the master.
     if (
+      grantMaster &&
       process.platform !== "win32" &&
-      name.toLowerCase() === getConfig().masterName.trim().toLowerCase()
+      isMasterSession(wasRows, id, getConfig().masterName)
     )
       deckHooks.addMasterSession(id);
     void sources.refreshAgents();
@@ -1197,7 +1202,10 @@ function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
     multi: () => isMulti(getConfig()),
     live: () => sources.sessionsNow(),
     refresh: () => sources.refreshAgents(),
-    supersede: (ids) => superseded.add(ids),
+    copied: (old, copy) => {
+      superseded.add([old.bgId, old.sessionId]);
+      sources.noteCopy(old, copy);
+    },
   };
 }
 
@@ -2014,12 +2022,14 @@ function registerIpc(): void {
   });
   reg.handle(
     CH.resumeSession,
-    (_e, id: string, name: string, cwd: string | null, account?: unknown) =>
+    (e, id: string, name: string, cwd: string | null, account?: unknown) =>
       resumeBg(
         id,
         name,
         cwd,
         typeof account === "string" && account ? account : null,
+        null,
+        !isRemote(e),
       ),
   );
   // A new session's account for a folder (its origin remote's account, else the primary).

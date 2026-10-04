@@ -144,11 +144,17 @@ export function copyFromOutput(out: string): { old: string; copy: string } | nul
   return m ? { old: m[1], copy: m[2] } : null
 }
 
-/** A bare resume's note (`note: woke session <id> with its saved options (-n, --settings, …).`): the options it was started with; null: no such note. */
-export function wokeFromOutput(out: string): { id: string; options: string[] } | null {
+/**
+ * A bare resume's note (`note: woke session <id> with its saved options (-n, --settings, …).`): the
+ * options it was started with; null: no such note. `complete` only when the whole list was read (its
+ * closing parenthesis is there and nothing was elided): an option missing from a cut list proves nothing.
+ */
+export function wokeFromOutput(out: string): { id: string; options: string[]; complete: boolean } | null {
   const t = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-  const m = /woke session ([0-9a-f]{8}) with its saved options \(([^)\n]*)\)/i.exec(t)
-  return m ? { id: m[1], options: m[2].split(',').map((x) => x.trim()).filter(Boolean) } : null
+  const m = /woke session ([0-9a-f]{8}) with its saved options \(([^)\n]*)(\)?)/i.exec(t)
+  if (!m) return null
+  const options = m[2].split(',').map((x) => x.trim()).filter(Boolean)
+  return { id: m[1], options, complete: m[3] === ')' && !/…|\.\.\./.test(m[2]) && options.every((x) => /^--?[a-z][a-z-]*$/.test(x)) }
 }
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/
@@ -171,7 +177,8 @@ type Resumed = { ok: true; stdout: string; copy: { old: string; copy: string } |
  *   session) and listed as superseded, so it is hidden while it does not run.
  * - not a listed background session (History, an interactive one for Start here): no saved
  *   options and nothing to copy, so `--settings` and `-n` as for a new start.
- * - the list unknown, also after one more read: refused.
+ * - the list unknown, also after one more read: bare with one account; refused with two or more
+ *   (and for a rename).
  */
 export async function resumeAs(
   d: {
@@ -188,8 +195,8 @@ export async function resumeAs(
     live: () => Row[] | null
     /** Read `claude agents` now. */
     refresh: () => Promise<void>
-    /** The old side of a copy (its bg id and session id): hidden from the list while it does not run. */
-    supersede: (ids: string[]) => void
+    /** A copy was started: the old side (hidden from the list while it does not run) and the copy's bg id (it inherits the ticket link and PRs). */
+    copied: (old: { bgId: string; sessionId: string }, copy: string) => void
   },
   o: { id: string; key: string | null; name: string; cwd: string; account: string | null; rename?: string | null },
 ): Promise<Resumed> {
@@ -205,10 +212,15 @@ export async function resumeAs(
     await d.refresh()
     rows = d.live()
   }
-  // A flag could start a copy of a background session; none could lose a past session's name.
-  if (!rows) return NOT_LOADED
-  const bg = find(rows)
   const newName = o.rename && o.rename !== o.name ? o.rename : null
+  if (!rows) {
+    // Two or more accounts: a flag could start a copy, none could run a past session as gh's
+    // active account. One account: bare, which never copies.
+    if (d.multi() || newName) return NOT_LOADED
+    const r = await start(['--resume', o.id])
+    return r.code !== 0 ? failed(r) : { ok: true, stdout: r.stdout, copy: null }
+  }
+  const bg = find(rows)
   const name = newName ?? o.name
   const named = SAFE_NAME.test(name) ? ['-n', name] : []
 
@@ -220,7 +232,7 @@ export async function resumeAs(
       if (r.code !== 0) return failed(r)
       const woke = wokeFromOutput(r.stdout)
       // Started without --settings: it works as gh's active account, whatever was recorded.
-      if (d.multi() && woke && !woke.options.includes('--settings')) d.accounts.markGhActive([o.id, key, woke.id])
+      if (d.multi() && woke?.complete && !woke.options.includes('--settings')) d.accounts.markGhActive([o.id, key, woke.id])
       return { ok: true, stdout: r.stdout, copy: null }
     }
     const as = await account()
@@ -237,7 +249,7 @@ export async function resumeAs(
     const copy = copyFromOutput(r.stdout)
     if (as.account) d.accounts.set(copy ? [id ?? copy.copy] : [o.id, key, id ?? ''], as.account)
     // Only the session the output names as copied: it stays (stopped), out of the list.
-    if (copy && copy.old === bg.bgId && copy.copy !== copy.old) d.supersede([copy.old, bg.sessionId])
+    if (copy && copy.old === bg.bgId && copy.copy !== copy.old) d.copied({ bgId: copy.old, sessionId: bg.sessionId }, copy.copy)
     return { ok: true, stdout: r.stdout, copy }
   }
 

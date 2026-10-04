@@ -45,6 +45,10 @@ fixes it, and move the item here to "Recently done".
   before the fix, or by hand (`claude --bg --resume <id> -n …`), still show as two sessions of one
   name. They are not cleaned up automatically (MasterDeck never removes a session): the user
   removes them. Show a hint on sessions that share a name (Sources/Sidebar).
+- **P3 · A copy made by `master spawn` does not inherit the ticket link in the app.** `resumeAs`
+  calls `Sources.noteCopy`; `master spawn` only writes the copy's account and the superseded ids,
+  so the app does not know which session the copy came from. Write the pair (old → copy) to a
+  file the app reads, or parse it from the proposal's note.
 - **P3 · A copy does not carry the old session's model and permission mode.** A resume as another
   account passes `--settings` and `-n` only; the status line's model is a display name, not
   always a valid `--model` value. Read the saved options from the bare-resume note or the

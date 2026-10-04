@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from master import ledger, spawn
+from master import config, ledger, spawn
 
 NOW = "2026-09-24T10:00:00Z"
 
@@ -186,6 +186,25 @@ class SpawnTest(unittest.TestCase):
         # The app's files: the copy's account (so the app does not copy it again), and the old side.
         self.assertEqual(json.loads((home / "session-accounts.json").read_text()), {"s1": "alice", "6d996951": "bob-work"})
         self.assertEqual(json.loads((home / "superseded-sessions.json").read_text()), ["e168c2bf", sid])
+
+    def test_merge_json_leaves_an_unreadable_file_alone(self):
+        f = Path(self.tmp.name) / "x.json"
+        spawn.merge_json(f, lambda d: {**(d or {}), "a": 1})  # missing: created
+        self.assertEqual(json.loads(f.read_text()), {"a": 1})
+        spawn.merge_json(f, lambda d: {**d, "b": 2})
+        self.assertEqual(json.loads(f.read_text()), {"a": 1, "b": 2})
+        f.write_text('{"a": 1, half')  # broken (or half-written by someone else): not replaced
+        spawn.merge_json(f, lambda d: {"b": 2})
+        self.assertEqual(f.read_text(), '{"a": 1, half')
+        self.assertEqual([p.name for p in Path(self.tmp.name).iterdir()], ["x.json"])
+
+    def test_superseded_ids_reads_the_apps_list(self):
+        with mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.tmp.name}):
+            self.assertEqual(config.superseded_ids(), set())
+            (Path(self.tmp.name) / "superseded-sessions.json").write_text(json.dumps(["e168c2bf", 7, "s-old"]))
+            self.assertEqual(config.superseded_ids(), {"e168c2bf", "s-old"})
+            (Path(self.tmp.name) / "superseded-sessions.json").write_text("{nope")
+            self.assertEqual(config.superseded_ids(), set())
 
     def test_running_is_true_false_or_unknown(self):
         sid = "4f2a9c1e-1234-4abc-9def-0123456789ab"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { linksToCarry, recordHistory, type LinkInfo, type SessionHistory } from './carry'
+import { carryCopy, linksToCarry, recordHistory, type LinkInfo, type SessionHistory } from './carry'
 import type { Session } from './types'
 
 const T = 1_790_000_000_000
@@ -53,3 +53,20 @@ describe('linksToCarry', () => {
     expect(linksToCarry(h, [{ ...bg({}), kind: 'interactive', bgId: null }], l)).toEqual([])
   })
 })
+
+describe('carryCopy (a resume as another account started a copy)', () => {
+  it('the copy inherits the old session\'s earlier ids, so its ticket link is carried, and its PRs', () => {
+    const h: SessionHistory = { e168c2bf: ['e168c2bf-old', 'sid-2'] }
+    const prs: Record<string, string[]> = { e168c2bf: ['https://github.com/a/b/pull/1'], '6d996951': ['https://github.com/a/b/pull/2'] }
+    expect(carryCopy(h, prs, { bgId: 'e168c2bf', sessionId: 'sid-3' }, '6d996951')).toBe(true)
+    expect(h['6d996951']).toEqual(['e168c2bf-old', 'sid-2', 'sid-3'])
+    expect(prs['6d996951']).toEqual(['https://github.com/a/b/pull/1', 'https://github.com/a/b/pull/2'])
+    expect(carryCopy(h, prs, { bgId: 'e168c2bf', sessionId: 'sid-3' }, '6d996951')).toBe(false)
+    // The copy shows up under its own session id: the old link is carried to it.
+    const links = new Map<string, LinkInfo>([['sid-2', { issue: 440, repo: 'acme/app', linkedAt: 5 }]])
+    const copy = bg({ sessionId: 'copy-sid', bgId: '6d996951', key: '6d996951' })
+    recordHistory(h, [copy])
+    expect(linksToCarry(h, [copy], links)).toMatchObject([{ bgId: '6d996951', sessionId: 'copy-sid', issue: 440, repo: 'acme/app' }])
+  })
+})
+

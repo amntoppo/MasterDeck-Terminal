@@ -204,7 +204,8 @@ checkout whose branch was once linked to a ticket does not link it.
   copy and keep the old session in the list, which is how duplicate sessions with old messages
   appeared before.) A copy is made only when you pick another account for it; the old session must
   be stopped first. MasterDeck never removes a session: the old one stays in Claude Code, stopped,
-  and MasterDeck leaves it out of its lists while it does not run (`~/.claude/masterdeck/superseded-sessions.json`).
+  and MasterDeck leaves it out of its lists while it does not run (`~/.claude/masterdeck/superseded-sessions.json`);
+  the copy keeps its ticket link and PRs, and master never proposes to resume the old one.
   Duplicates made before this fix are not cleaned up: remove the ones you don't need yourself
   (Session hygiene, or `claude rm <id>`; that also deletes the session's worktree).
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
@@ -361,8 +362,8 @@ after a restart.
 - **Reports go only to master:** a session MasterDeck starts reports to master with SendMessage,
   first line `#12: done`, `#12: blocked — <reason>`, `#12: question — <question>` or
   `#12: answered — <answer>` (`repo#12` for a ticket in another repo). The hook checks every
-  SendMessage: a message that starts like that (also `owner/repo#12`, and after `>`, `**` or a
-  backtick) goes through only to the master session (the
+  SendMessage: a message that starts like that (also `owner/repo#12`, and after `>`, `**`, a
+  backtick, `## ` or `1. `) goes through only to the master session (the
   `masterName` in `~/.claude/master/config.json`, default `master-agent`). Sent to any other
   session, it is stopped and the session is told to send it to master by name and, if master is
   not reachable, to ask you there, so no other session ever receives a report or answers as if it

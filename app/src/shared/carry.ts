@@ -75,3 +75,27 @@ export function linksToCarry(history: SessionHistory, sessions: Session[], links
   }
   return out
 }
+
+/**
+ * A resume as another account (or name) started a copy under a new background id. The copy is the
+ * same work: it gets the old session's earlier ids (so linksToCarry gives it the ticket link once
+ * it shows up) and the PRs known for it. True when anything changed.
+ */
+export function carryCopy(history: SessionHistory, prs: Record<string, string[]>, old: { bgId: string; sessionId: string }, copyBg: string): boolean {
+  if (!copyBg || copyBg === old.bgId) return false
+  let changed = false
+  const ids = (history[copyBg] ??= [])
+  const earlier = [...(history[old.bgId] ?? []), old.sessionId].filter((id, i, all) => all.indexOf(id) === i && !ids.includes(id))
+  if (earlier.length) {
+    ids.unshift(...earlier)
+    changed = true
+  }
+  const have = (prs[copyBg] ??= [])
+  const more = (prs[old.bgId] ?? []).filter((u) => !have.includes(u))
+  if (more.length) {
+    have.unshift(...more)
+    changed = true
+  }
+  if (!have.length) delete prs[copyBg]
+  return changed
+}

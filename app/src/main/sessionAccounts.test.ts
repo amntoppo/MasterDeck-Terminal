@@ -152,6 +152,13 @@ const WOKE_SETTINGS_OUT = `note: woke session 458e2f9e with its saved options (-
 backgrounded · 458e2f9e · fix-12 (idle — send a prompt to start)
 `
 
+const WOKE_CUT = [
+  'note: woke session e168c2bf with its saved options (-n, --model\nbackgrounded · e168c2bf · fix-12\n',
+  'note: woke session e168c2bf with its saved options (-n, --model, …).\nbackgrounded · e168c2bf\n',
+  'note: woke session e168c2bf with its saved options (-n, ...)\nbackgrounded · e168c2bf\n',
+  'note: woke session e168c2bf with its saved options (-n, --mod',
+]
+
 describe('resume output', () => {
   it('the id after `backgrounded ·` is the one that runs now, with the name after it or not', () => {
     expect(bgIdFromOutput(COPY_OUT)).toBe('6d996951')
@@ -165,8 +172,10 @@ describe('resume output', () => {
     expect(copyFromOutput('')).toBeNull()
   })
   it('wokeFromOutput: the session and the options it was started with', () => {
-    expect(wokeFromOutput(WOKE_OUT)).toEqual({ id: 'e168c2bf', options: ['-n', '--model', '--permission-mode'] })
-    expect(wokeFromOutput(WOKE_SETTINGS_OUT)).toEqual({ id: '458e2f9e', options: ['-n', '--settings', '--model', '--permission-mode'] })
+    expect(wokeFromOutput(WOKE_OUT)).toEqual({ id: 'e168c2bf', options: ['-n', '--model', '--permission-mode'], complete: true })
+    expect(wokeFromOutput(WOKE_SETTINGS_OUT)).toEqual({ id: '458e2f9e', options: ['-n', '--settings', '--model', '--permission-mode'], complete: true })
+    // Cut short (no closing parenthesis, or an ellipsis): the list is not the whole truth.
+    for (const cut of WOKE_CUT) expect(wokeFromOutput(cut)).toMatchObject({ id: 'e168c2bf', complete: false })
     expect(wokeFromOutput(COPY_OUT)).toBeNull()
     expect(wokeFromOutput(START_OUT)).toBeNull()
   })
@@ -180,6 +189,7 @@ describe('resumeAs', () => {
     const a = new SessionAccounts(file())
     const calls: string[][] = []
     const superseded: string[] = []
+    const copies: string[] = []
     const run: Runner = async (_c, args) => (calls.push(args), { code: 0, stdout: out, stderr: '' })
     // `live` is the last poll; a refresh replaces it with `fresh` when that is set.
     const st: { live: Row[] | null; fresh?: Row[] | null; refreshes: number; asked: number } = { live: [row()], refreshes: 0, asked: 0 }
@@ -201,9 +211,9 @@ describe('resumeAs', () => {
         st.refreshes++
         if (st.fresh !== undefined) st.live = st.fresh
       },
-      supersede: (ids: string[]) => void superseded.push(...ids),
+      copied: (old: { bgId: string; sessionId: string }, copy: string) => void (superseded.push(old.bgId, old.sessionId), copies.push(`${old.bgId}>${copy}`)),
     }
-    return { a, calls, superseded, d, st }
+    return { a, calls, superseded, copies, d, st }
   }
   const o = { id: S1, key: 'e168c2bf', name: 'fix-12', cwd: '/w', account: null as string | null }
 
@@ -238,15 +248,25 @@ describe('resumeAs', () => {
     expect(calls).toEqual([['--bg', '--resume', S1]])
     expect(a.get({ sessionId: S1, key: 'e168c2bf' })).toBeNull()
     expect(a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(true)
+    // A note that was cut short proves nothing: the record stays.
+    for (const cut of WOKE_CUT) {
+      const c = setup(cut)
+      c.a.set([S1, 'e168c2bf'], 'bob-work')
+      await resumeAs(c.d, o)
+      expect(c.a.get({ sessionId: S1, key: 'e168c2bf' })).toBe('bob-work')
+      expect(c.a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(false)
+    }
     // One account: nothing to mark.
     const one = setup(WOKE_OUT, false)
     await resumeAs(one.d, o)
     expect(one.a.ghActive({ sessionId: S1, key: 'e168c2bf' })).toBe(false)
   })
   it('another account picked: a copy with --settings and its name, recorded; the old session is left alone and superseded', async () => {
-    const { a, calls, superseded, d } = setup(COPY_OUT)
+    const { a, calls, superseded, copies, d } = setup(COPY_OUT)
     a.set([S1, 'e168c2bf'], 'bob-work')
     const r = await resumeAs(d, { ...o, account: 'alice' })
+    // The copy is told apart from the old one: its ticket link and PRs follow (Sources.noteCopy).
+    expect(copies).toEqual(['e168c2bf>6d996951'])
     expect(r).toMatchObject({ ok: true, copy: { old: 'e168c2bf', copy: '6d996951' } })
     expect(calls).toEqual([['--bg', '--settings', '/acc/alice.settings.json', '--resume', S1, '-n', 'fix-12']])
     expect(calls.flat()).not.toContain('rm')
@@ -313,17 +333,27 @@ describe('resumeAs', () => {
     await resumeAs(odd.d, { ...o, key: null, name: '--model x' })
     expect(odd.calls).toEqual([['--bg', '--resume', S1]])
   })
-  it('the session list not loaded: read once more; still unknown is refused (a flag could copy, none could lose the name)', async () => {
+  it('the session list not loaded: read once more; still unknown, one account resumes bare as it always did, two refuse', async () => {
     const got = setup(WOKE_OUT, false)
     got.st.live = null
     got.st.fresh = [row()]
     await resumeAs(got.d, o)
     expect(got.calls).toEqual([['--bg', '--resume', S1]])
-    const none = setup(WOKE_OUT, false)
-    none.st.live = null
-    const r = await resumeAs(none.d, o)
+    expect(got.st.refreshes).toBe(1)
+    const one = setup(WOKE_OUT, false)
+    one.st.live = null
+    expect((await resumeAs(one.d, o)).ok).toBe(true)
+    expect(one.calls).toEqual([['--bg', '--resume', S1]])
+    const two = setup(WOKE_OUT)
+    two.st.live = null
+    const r = await resumeAs(two.d, o)
     expect(r.ok).toBe(false)
-    expect(none.calls).toEqual([])
+    expect(two.calls).toEqual([])
+    // A rename needs the list (it starts a copy): refused with one account too.
+    const ren = setup(COPY_OUT, false)
+    ren.st.live = null
+    expect((await resumeAs(ren.d, { ...o, rename: 'other' })).ok).toBe(false)
+    expect(ren.calls).toEqual([])
   })
   it('no bg id printed for a new background session: matched by name, unless another live session has that name', async () => {
     const one = setup('resumed\n')

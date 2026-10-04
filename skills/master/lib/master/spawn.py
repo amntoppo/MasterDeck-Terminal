@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -229,12 +230,16 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
 
 
 def merge_json(path: Path, change) -> None:
-    """Read `path` (missing or broken: None), apply `change`, and replace it atomically (temp file +
-    rename). MasterDeck writes the same files the same way; the read happens right before the write."""
-    try:
-        cur = json.loads(path.read_text())
-    except (OSError, ValueError):
-        cur = None
+    """Read `path`, apply `change`, and replace it atomically (temp file + rename). A missing file is
+    created (`change(None)`); one that is there but cannot be read or parsed is left untouched (it may
+    be half-written, or not ours to overwrite). MasterDeck writes the same files the same way."""
+    cur = None
+    if path.exists():
+        try:
+            cur = json.loads(path.read_text())
+        except (OSError, ValueError) as e:
+            print(f"master: {path.name} is unreadable ({e}); not updated", file=sys.stderr)
+            return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(change(cur)))

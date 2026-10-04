@@ -305,6 +305,10 @@ describe.skipIf(process.platform === 'win32')('the master reports guard (PreTool
     expect(denied(send('masterdeck', '**#12: done** PR is up'))).toMatch(/'#12: done'/)
     expect(denied(send('masterdeck', '> `#12: question` — which key?'))).toMatch(/'#12: question'/)
     expect(denied(send('masterdeck', ' - _acme/app#3: answered_ — yes'))).toMatch(/'acme\/app#3: answered'/)
+    // A heading marker or a list number before the label.
+    expect(denied(send('masterdeck', '## #12: done'))).toMatch(/'#12: done'/)
+    expect(denied(send('masterdeck', '1. acme/app#3: blocked — no access'))).toMatch(/'acme\/app#3: blocked'/)
+    expect(denied(send('masterdeck', '> 2) **#12: question** — which?'))).toMatch(/'#12: question'/)
     // The report in the summary alone is still a report.
     expect(denied(send('masterdeck', 'see below', { summary: '#12: done' }))).toMatch(/'#12: done'/)
   }, 20_000)
@@ -317,6 +321,8 @@ describe.skipIf(process.platform === 'win32')('the master reports guard (PreTool
     expect(send('researcher', '#12: doneness is a spectrum')).toBe('')
     expect(send('team-lead', { type: 'shutdown_response', request_id: '#12: done' })).toBe('')
     expect(send('masterdeck', 'a/b/c#12: done')).toBe('')
+    expect(send('masterdeck', '12. done')).toBe('')
+    expect(send('masterdeck', '##12: done')).toBe('')
     expect(send(undefined, '#12: done')).toBe('')
     expect(raw('{"tool_input": {"to": "masterdeck", "message": "#12: done"')).toBe('')
     expect(raw('not json #1')).toBe('')

@@ -244,6 +244,16 @@ def session_account(session_id: str) -> "str | None":
     return login if isinstance(login, str) and any(a["login"] == login for a in accounts()) else None
 
 
+def superseded_ids() -> set:
+    """Ids (bg ids and session ids) of sessions a copy replaced (superseded-sessions.json, written by
+    MasterDeck and `master spawn`): the old side of a resume as another account. Missing or broken: none."""
+    try:
+        ids = json.loads((masterdeck_home() / "superseded-sessions.json").read_text())
+    except (OSError, ValueError):
+        return set()
+    return {x for x in ids if isinstance(x, str)} if isinstance(ids, list) else set()
+
+
 def match_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
     """The account listing `repo` (None = the primary repo), or whose "Select all" org owns it; None
     when no account does, or with one account (the app's matchRepo)."""

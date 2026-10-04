@@ -130,7 +130,8 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
     account is not resolved for it (an account still loading or logged out does not block it).
   - After a bare resume with two or more accounts the note is read (`wokeFromOutput`: `note: woke
     session <id> with its saved options (-n, --settings, …)`; `--settings` is listed only when the
-    session was started with it). Without it the session works as gh's active account: its ids
+    session was started with it; the list counts only when it was read whole: closing
+    parenthesis, no `…`, else nothing is changed). Without it the session works as gh's active account: its ids
     are marked in `session-accounts.json` (`SessionAccounts.markGhActive`, value `*gh-active*`,
     which replaces a record an earlier build left under the old ids), `Session.ghActive` is set
     and `Session.account` is not, and the UI shows "gh's active account (started without an
@@ -144,20 +145,26 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
     session id). **MasterDeck never removes a session** (`claude rm` deletes its worktree too):
     the old one stays, stopped, and its bg id and session id go to `superseded-sessions.json`
     (`main/superseded.ts`), only when the output names it as the copied one (`copyFromOutput`).
-    `Sources.build` leaves superseded rows that do not run out of the list
-    (`shared/superseded.ts` `hideSuperseded`); running again, they show. The copy does not carry
+    `Sources.build` leaves superseded background rows that do not run out of the list, matched
+    by bg id only (`shared/superseded.ts` `hideSuperseded`); running again, they show. The copy
+    inherits the old session's ticket link and PRs: `Sources.noteCopy` (`shared/carry.ts`
+    `carryCopy`) puts the old session ids into the copy's `session-history.json` entry, so
+    `linksToCarry` links the copy once it shows up, and copies its `session-prs.json` list. The
+    master skill reads the same list (`config.superseded_ids`, `join.sessions`): a superseded
+    session that does not run is left out of the snapshot, so it owns no issue and gets no
+    ORPHAN proposal beside its copy. The copy does not carry
     the old session's `--model` / `--permission-mode` (not known reliably; see TODO).
   - Not a listed background session (History, an interactive session for Start here): there are no
     saved options and nothing to copy, so `--settings` and `-n` as for a new start.
-  - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown, the
-    resume is refused.
+  - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown,
+    one account resumes bare (it cannot copy), two or more (or a rename) are refused.
   - `master spawn` (ORPHAN): bare when there is no record (`config.session_account`) or it is the
     proposal's account; `--settings` (a copy) only when the proposal names another account than
     the record. Never `claude rm`. `spawn.running` is true / false / None, by session id or bg
     id: true marks the proposal sent ("already running"), None (`claude agents` failed) holds
     it. After a copy (`spawn.copy_of`) it writes the copy's bg id to `session-accounts.json` and
     the old ids to `superseded-sessions.json` (`spawn.merge_json`: read, merge, temp file +
-    rename). The app reads both files again when their mtime changes, and its own writes of
+    rename; a file that is there but unreadable is left untouched). The app reads both files again when their mtime changes, and its own writes of
     `session-accounts.json` keep entries it does not know (`SessionAccounts.sync`).
   - The restorer (`shared/restore.ts` `resumeEntries`, used by `Sources.resumeStopped`) awaits a
     fresh `claude agents` read before each entry and skips one that runs again under the same
@@ -227,7 +234,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   migration and the review gate never match it). The script's `MasterReport` branch exits before jq
   unless the input holds `#<digit>`, then runs one jq program (`MASTER_REPORT_JQ`): a report is a
   message (or `summary`) whose first non-empty line, after leading markdown or quote characters
-  (`>`, `*`, `_`, backticks, `-`, spaces), matches
+  (`>`, `*`, `_`, backticks, `-`, spaces, heading markers `## `, list numbers `1. `), matches
   `^((?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\d+\s*:\s*(done|blocked|question|answered)` (not followed
   by a letter or digit), case-insensitive: `#12`, `name#12` or `owner/name#12`. A report
   is denied (`permissionDecision: "deny"`; the reason says to send it to the master by name and,
@@ -240,7 +247,9 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   input; it reports to its parent), and the master session itself: `deck/master-sids` lists its
   session ids (every session named `masterName`, done or not, from the state callback in
   `index.ts`: `DeckHooks.setMasterSessions`) and, right after `startMaster` or a resume of the
-  master, its bg id or session id (`addMasterSession`, kept 10 minutes until a poll lists it); the
+  master, its bg id or session id (`addMasterSession`, kept 10 minutes until a poll lists it; on a
+  resume only when the session list names that id as the master, `isMasterSession`, and only
+  from the window, never a remote caller); the
   hook passes a `session_id` that equals a line or starts with it. It fails open: no jq, input
   that does not parse, a `to` or message that is not a string, all print nothing.
 
