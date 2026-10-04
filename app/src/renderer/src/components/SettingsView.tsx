@@ -169,6 +169,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <Field label="Self-review gate" hint="Before gh pr create, a session reviews its branch first. A step of the Default workflow (pr-review): a workflow without it skips the gate.">
           <span className={hooks.reviewGate ? 'ok' : 'muted'}>{hooks.reviewGate ? 'Installed' : 'Not installed'}</span>
         </Field>
+        <Field label="Master reports guard" hint="A session's report (#12: done, blocked, question, answered) goes only to the master session; SendMessage to any other session is stopped and the session asks you instead.">
+          <span className={hooks.masterGuard ? 'ok' : 'muted'}>{hooks.masterGuard ? 'Installed' : 'Not installed'}</span>
+        </Field>
         <Field label="MasterDeck hook" hint="Permissions from Needs you, exact status, API errors, compactions and ticket context. Installed at launch (macOS and Linux).">
           <span className="ok">Managed by MasterDeck</span>
         </Field>

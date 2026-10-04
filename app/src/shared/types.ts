@@ -41,6 +41,8 @@ export interface Session {
   asking?: string | null;
   /** The GitHub account the session works as (two or more connected accounts only; see shared/accounts.ts sessionAccount). */
   account?: string;
+  /** Two or more accounts, and the session was started without one: it works as gh's active account (no `account` then). */
+  ghActive?: boolean;
 }
 
 export interface Issue {
@@ -283,6 +285,8 @@ export interface HookStatus {
   foreignQueue: boolean;
   /** MasterDeck's self-review gate before `gh pr create`. */
   reviewGate: boolean;
+  /** MasterDeck's guard on SendMessage: a report like `#12: done` goes only to the master session. */
+  masterGuard: boolean;
 }
 
 /** What Setup checks before GitHub can work. */

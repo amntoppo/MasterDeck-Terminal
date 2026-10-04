@@ -1,4 +1,5 @@
 import type { WatchInfo } from "@shared/watches";
+import { hideSuperseded } from "@shared/superseded";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import {
   liveSchedules,
@@ -75,6 +76,7 @@ import {
 } from "@shared/stats";
 import { parseBoard } from "@shared/board";
 import {
+  carryCopy,
   linksToCarry,
   recordHistory,
   type LinkInfo,
@@ -120,6 +122,7 @@ import {
 import { mergeTeamPages, parseTeamPrs, type TeamPr } from "@shared/teamPrs";
 import {
   nextRestore,
+  resumeEntries,
   parseRestoreFile,
   type RestoreEntry,
   type RestoreFile,
@@ -290,7 +293,12 @@ export class Sources {
   private teamPrsError: string | null = null;
   private config: AppConfig = DEFAULT_CONFIG;
   private skills: SkillStatus[] = [];
-  private hooks: HookStatus = { queue: false, foreignQueue: false, reviewGate: false };
+  private hooks: HookStatus = {
+    queue: false,
+    foreignQueue: false,
+    reviewGate: false,
+    masterGuard: false,
+  };
   private ghAccounts: GhAccountStatus[] = [];
   /** gh's active login (gh config get user), for the "not the primary" notice; null: not known. */
   private ghActive: string | null = null;
@@ -312,6 +320,8 @@ export class Sources {
   private history: SessionHistory = {};
   private carryTried: Record<string, number> = {};
   private accountOf: ((s: Session) => string | null) | null = null;
+  private ghActiveOf: (s: Session) => boolean = () => false;
+  private superseded: () => Set<string> = () => new Set();
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -453,6 +463,11 @@ export class Sources {
     );
   }
 
+  /** The sessions of the last `claude agents` scan; null until one succeeded. */
+  sessionsNow(): Session[] | null {
+    return this.isHealthy("agents") ? this.rawSessions : null;
+  }
+
   /** How to resume a stopped background session (`claude --bg --resume`). */
   setResumer(fn: (e: RestoreEntry) => Promise<CliResult>): void {
     this.resumer = fn;
@@ -512,26 +527,31 @@ export class Sources {
       return { ok: true, message: "nothing to resume" };
     this.restoring = true;
     this.emit();
-    const failed: string[] = [];
+    let failed: string[] = [];
     let resumed = 0;
     try {
-      for (const e of [...this.restore.stopped]) {
-        // Resumed meanwhile (master's ORPHAN, or by hand): resuming again would start a copy.
-        const live = this.rawSessions.some(
-          (s) =>
-            s.pid !== null && s.state !== "done" && s.sessionId === e.sessionId,
-        );
-        const r = live
-          ? { ok: true, message: "already running" }
-          : await this.resumer(e);
-        if (r.ok) {
-          resumed++;
+      // One that runs again (by session id or background id) is skipped: never resumed twice.
+      const r = await resumeEntries(
+        [...this.restore.stopped],
+        () => this.rawSessions,
+        async (e) => {
+          const x = await this.resumer!(e);
           // Off the list now; the next scan also drops it once its process shows up.
-          if (this.restore)
+          if (x.ok && this.restore)
             this.restore.stopped = this.restore.stopped.filter(
-              (x) => x.sessionId !== e.sessionId,
+              (y) => y.sessionId !== e.sessionId,
             );
-        } else failed.push(`${e.name}: ${r.message}`);
+          return x;
+        },
+        // Awaited: the decision is made on the list as it is now, not on the last poll.
+        () => this.pollAgents(),
+      );
+      ({ failed, resumed } = r);
+      if (this.restore) {
+        const keep = new Set(r.left.map((e) => e.sessionId));
+        this.restore.stopped = this.restore.stopped.filter((e) =>
+          keep.has(e.sessionId),
+        );
       }
     } finally {
       this.restoring = false;
@@ -580,14 +600,25 @@ export class Sources {
   }
 
   /** Which GitHub account a session works as (main's SessionAccounts + origin); used with two or more accounts. */
-  setSessionAccount(f: (s: Session) => string | null): void {
+  setSessionAccount(
+    f: (s: Session) => string | null,
+    ghActive: (s: Session) => boolean = () => false,
+  ): void {
     this.accountOf = f;
+    this.ghActiveOf = ghActive;
+  }
+
+  /** Ids of sessions a copy replaced (shared/superseded.ts): hidden while they do not run. */
+  setSuperseded(f: () => Set<string>): void {
+    this.superseded = f;
   }
 
   private withAccounts(ss: Session[]): Session[] {
     const f = this.accountOf;
     if (!f || !isMulti(this.config)) return ss;
     return ss.map((s) => {
+      // Woken without --settings: gh's active account, so no login is shown for it.
+      if (this.ghActiveOf(s)) return { ...s, ghActive: true };
       const a = f(s);
       return a ? { ...s, account: a } : s;
     });
@@ -733,6 +764,13 @@ export class Sources {
     } catch {
       // best effort; the next change tries again
     }
+  }
+
+  /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
+  noteCopy(old: { bgId: string; sessionId: string }, copyBg: string): void {
+    if (!carryCopy(this.history, this.createdPrs, old, copyBg)) return;
+    this.saveHistory();
+    this.saveSessionPrs();
   }
 
   /** Re-link resumed background sessions to the ticket their earlier session id had. */
@@ -2003,7 +2041,7 @@ export class Sources {
         applyFreshness(
           attachIssues(
             // The Workflow window's builder is MasterDeck's own, not the user's work.
-            this.rawSessions.filter(
+            hideSuperseded(this.rawSessions, this.superseded()).filter(
               (s) =>
                 s.name !== BUILDER_NAME &&
                 !isTicketBuilderSession(s, this.paths.home) &&

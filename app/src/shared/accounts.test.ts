@@ -162,7 +162,9 @@ describe('the Start dialog default', () => {
 describe('resumeAccount', () => {
   it('an untouched select resumes as the recorded account; a pick wins; one account sends none', () => {
     expect(resumeAccount('alice', 'bob-work', false, two)).toBe('alice')
-    expect(resumeAccount(undefined, 'bob-work', false, two)).toBe('bob-work')
+    // No record and no pick: nothing is sent, so the resume changes nothing (no copy).
+    expect(resumeAccount(undefined, 'bob-work', false, two)).toBeUndefined()
+    expect(resumeAccount(undefined, 'bob-work', true, two)).toBe('bob-work')
     expect(resumeAccount('alice', 'bob-work', true, two)).toBe('bob-work')
     expect(resumeAccount('alice', null, false, two)).toBe('alice')
     expect(resumeAccount(undefined, null, false, two)).toBeUndefined()

@@ -149,8 +149,9 @@ class SpawnAccountTest(unittest.TestCase):
             self.assertEqual(spawn.command({"spawn": dict(sp, account="bob-work")}),
                              ["claude", "--bg", "--settings", str(f), "-n", "3-x", "go"])
             valid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+            # A resume wakes the session itself: no flag (any flag would start a copy), record or not.
             self.assertEqual(spawn.command({"spawn": {"name": "3-x", "resume": valid, "account": "bob-work"}}),
-                             ["claude", "--bg", "--settings", str(f), "--resume", valid])
+                             ["claude", "--bg", "--resume", valid])
             with self.assertRaises(spawn.SpawnError):
                 spawn.command({"spawn": dict(sp, account="bad login!")})
 
@@ -311,7 +312,19 @@ class OrphanAccountTest(unittest.TestCase):
         with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}):
             o = rules._orphan(self.s, self.ISSUE)  # acme/tracker: alice's repo
             self.assertEqual(o["target"]["spawn"]["account"], "bob-work")
-            self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--settings", str(f), "--resume", self.SID])
+            # Recorded as bob-work: started with its --settings, which a bare resume keeps. No flag,
+            # so the session itself wakes (a flag would start a copy beside it).
+            self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--resume", self.SID])
+            self.assertEqual(spawn.command({"spawn": dict(o["target"]["spawn"], account="BOB-WORK")}),
+                             ["claude", "--bg", "--resume", self.SID])
+            # A proposal naming another account than the recorded one: --settings, a copy on purpose.
+            a = Path(self.tmp.name) / "accounts" / "alice.settings.json"
+            a.write_text("{}")
+            self.assertEqual(spawn.command({"spawn": dict(o["target"]["spawn"], account="alice")}),
+                             ["claude", "--bg", "--settings", str(a), "--resume", self.SID])
+            # No record at all: bare (nothing says the account would change).
+            self.record("{}")
+            self.assertEqual(spawn.command(o["target"]), ["claude", "--bg", "--resume", self.SID])
         self.assertNotIn("account", rules._orphan(self.s, self.ISSUE)["target"]["spawn"])  # one account
 
     def test_no_usable_record_leaves_the_default(self):

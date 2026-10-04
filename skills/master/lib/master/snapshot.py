@@ -50,7 +50,7 @@ def build(src, *, now_iso: str, today: date, master_name: str = config.MASTER_NA
     if not sources["gh"]:
         sources["prs"] = False  # without knowing who I am, author_is_me is meaningless
 
-    sessions = join.sessions(agents, state, master_name, cwd_lookup)
+    sessions = join.sessions(agents, state, master_name, cwd_lookup, config.superseded_ids())
     for s in sessions:
         s["branch_head"] = None
         if s["branch"]:

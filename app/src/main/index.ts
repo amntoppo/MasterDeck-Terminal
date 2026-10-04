@@ -43,7 +43,7 @@ import { diffEvents, newlyNeedsInput } from "@shared/notify";
 import { inboxNotice, type InboxItem } from "@shared/inbox";
 import { isSafeBgId } from "@shared/paneCommand";
 import { isClaudeCommand, tasklistImage } from "@shared/procs";
-import { MASTER_NAME, sessionForProposal } from "@shared/derive";
+import { MASTER_NAME, sessionForProposal, isMasterSession } from "@shared/derive";
 import type {
   AppState,
   CliResult,
@@ -77,6 +77,7 @@ import {
   SessionAccounts,
   sessionSettings,
 } from "./sessionAccounts";
+import { Superseded } from "./superseded";
 import { assignNow as assignAs } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -215,6 +216,8 @@ const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 const sessionAccounts = new SessionAccounts(
   join(paths.home, "session-accounts.json"),
 );
+// The old side of a copy (a resume as another account): hidden while it does not run.
+const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -445,7 +448,7 @@ const summaries = new Summaries(
   join(paths.home, "summaries"),
   paths.projectsDir,
 );
-const deckHooks = new DeckHooks(paths.home);
+const deckHooks = new DeckHooks(paths.home, undefined, paths.config);
 const sources = new Sources(
   paths,
   run,
@@ -476,6 +479,15 @@ const sources = new Sources(
       runFlowWatch(state);
     } catch (e) {
       console.error(`workflow watch: ${String(e)}`);
+    }
+    // The master session may send anything; the reports guard (hook.sh MasterReport) reads this.
+    if (process.platform !== "win32" && sources.isHealthy("agents")) {
+      const master = getConfig().masterName.trim().toLowerCase();
+      deckHooks.setMasterSessions(
+        state.sessions
+          .filter((s) => s.name.toLowerCase() === master)
+          .map((s) => s.sessionId),
+      );
     }
     if (process.platform !== "win32" && sources.isHealthy("agents"))
       deckHooks.pruneLegacy(
@@ -549,9 +561,11 @@ sources.setAccountRunners({
       ? async (args, opts) => forRepo(await originNow(dir)).gh(args, opts)
       : gh,
 });
-sources.setSessionAccount((s) =>
-  accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
+sources.setSessionAccount(
+  (s) => accountOfSession(s, s.cwd ? originOf(s.cwd) : null),
+  (s) => sessionAccounts.ghActive(s),
 );
+sources.setSuperseded(() => superseded.ids());
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
 function reveal(target: NotifyEvent["target"]): void {
@@ -1141,30 +1155,39 @@ async function stopPid(pid: number): Promise<void> {
  * background session (then the tab attaches it). With `stopOther`, first stop the other copy,
  * but only when its pid really is a claude process.
  */
-/** `claude --bg --resume <id>`: continue a stopped session in the background under the same id. */
+/** `claude --bg --resume <id>`: continue a stopped session in the background under the same id (resumeAs: no flags, so no copy). */
 async function resumeBg(
   id: string,
   name: string,
   cwd: string | null,
   account: string | null = null,
   key: string | null = null,
+  grantMaster = false,
 ): Promise<CliResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
-  // A name we can't pass safely is left out: the session keeps the one it has.
-  const named = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/.test(name)
-    ? ["-n", name]
-    : [];
+  // As listed before the resume (see grantMaster below).
+  const wasRows = sources.sessionsNow();
   const dir = cwd && existsSync(cwd) ? cwd : homedir();
-  // The account it started as (resume always passes --settings again).
+  // Bare (`claude --bg --resume <id>`) unless the account must change: see resumeAs.
   const r = await resumeAs(resumeDeps(dir), {
     id,
     key,
     name,
-    named,
     cwd: dir,
     account,
   });
+  if (r.ok) {
+    // master-agent resumed: the reports guard lets it send anything at once. Only for the window
+    // (never a remote caller), and only when the session list names this id as the master.
+    if (
+      grantMaster &&
+      process.platform !== "win32" &&
+      isMasterSession(wasRows, id, getConfig().masterName)
+    )
+      deckHooks.addMasterSession(id);
+    void sources.refreshAgents();
+  }
   return r.ok ? { ok: true, message: name } : r;
 }
 
@@ -1176,7 +1199,13 @@ function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
     accounts: sessionAccounts,
     settings: settingsFor,
     accountOf: async (s) => accountOfSession(s, await originNow(dir)),
-    live: () => latest?.sessions ?? [],
+    multi: () => isMulti(getConfig()),
+    live: () => sources.sessionsNow(),
+    refresh: () => sources.refreshAgents(),
+    copied: (old, copy) => {
+      superseded.add([old.bgId, old.sessionId]);
+      sources.noteCopy(old, copy);
+    },
   };
 }
 
@@ -1510,7 +1539,6 @@ async function startHere(o: {
     id: o.sessionId,
     key: null,
     name: o.name,
-    named: ["-n", o.name],
     cwd,
     account: null,
   });
@@ -1582,6 +1610,11 @@ async function startMaster(): Promise<CliResult> {
     const bg = bgIdFromOutput(r.stdout);
     if (bg) sessionAccounts.set([bg], as.account);
     sessionAccounts.expect(MASTER_NAME, as.account);
+  }
+  // The reports guard lets the master send anything: known at once, not at the next poll.
+  if (r.code === 0 && process.platform !== "win32") {
+    const bg = bgIdFromOutput(r.stdout);
+    if (bg) deckHooks.addMasterSession(bg);
   }
   return r.code === 0
     ? { ok: true, message: r.stdout.trim() }
@@ -1989,12 +2022,14 @@ function registerIpc(): void {
   });
   reg.handle(
     CH.resumeSession,
-    (_e, id: string, name: string, cwd: string | null, account?: unknown) =>
+    (e, id: string, name: string, cwd: string | null, account?: unknown) =>
       resumeBg(
         id,
         name,
         cwd,
         typeof account === "string" && account ? account : null,
+        null,
+        !isRemote(e),
       ),
   );
   // A new session's account for a folder (its origin remote's account, else the primary).

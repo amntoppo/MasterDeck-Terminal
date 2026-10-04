@@ -36,7 +36,8 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
    (`syncSkills`), the one-time `migrateLegacyHooks` (non-Windows, not smoke, no
    `MASTERDECK_NO_HOOK`; recorded in `native-hooks.json`), `installReviewGate` (same conditions),
    hook status, MasterDeck's deck hook (non-Windows: `deckHooks.setup()`, monitors,
-   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue`, then
+   `setInterval(pumpWatches, 1000)`, `installDeckHooks` with `UserPromptSubmit` for `/queue` and the
+   `SendMessage` reports guard, then
    `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
    `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
@@ -118,13 +119,59 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   session id and key: the bg id `claude --bg` prints is recorded at once, `bgIdFromOutput`; a new
   session started by name is matched by name for 10 min; a live session known by only one of its
   ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
-  proposal's `target.spawn.account`, then its folder's `origin`, then the primary). Resume
-  (`resumeAs`, for `resumeBg` and `startHere`) always passes `--settings` again. `claude --bg
-  --resume` with flags (`--settings`, `-n`, `--model` …) starts a copy under a new session id and
-  bg id; the old session keeps its own saved options (only a resume without flags continues it).
-  So the account is recorded under the old ids and the copy's bg id (`bgIdFromOutput`: the
-  `backgrounded · <id>` line, else `claude attach <id>`; never the note's old id), and `claim` adds
-  the new session id; with no id printed, by name unless another live session has that name. `accountFor` (IPC) gives a new session's default for a folder. One
+  proposal's `target.spawn.account`, then its folder's `origin`, then the primary).
+- Resume (`resumeAs` in `main/sessionAccounts.ts`, for `resumeBg`, `startHere` and the restorer;
+  `spawn.command` in the master skill). Claude Code 2.1.288: `claude --bg --resume <id>` with **no
+  other flag** wakes the background session itself (same session id and bg id, its saved options:
+  name, model, mode, `--settings`); **any** flag (`-n`, `--settings`, `--model`,
+  `--permission-mode`) starts a copy under new ids and leaves the old session listed, so two
+  sessions share a name and the old one shows outdated messages. Rules:
+  - A listed background session resumes bare, with one account or several, recorded or not. The
+    account is not resolved for it (an account still loading or logged out does not block it).
+  - After a bare resume with two or more accounts the note is read (`wokeFromOutput`: `note: woke
+    session <id> with its saved options (-n, --settings, …)`; `--settings` is listed only when the
+    session was started with it; the list counts only when it was read whole: closing
+    parenthesis, no `…`, else nothing is changed). Without it the session works as gh's active account: its ids
+    are marked in `session-accounts.json` (`SessionAccounts.markGhActive`, value `*gh-active*`,
+    which replaces a record an earlier build left under the old ids), `Session.ghActive` is set
+    and `Session.account` is not, and the UI shows "gh's active account (started without an
+    account)" (AccountBadge, SessionAccount, Details), never a login. With it the record stands.
+  - A copy happens only when the user chose one: an account given that is not the recorded one
+    (`resumeAccount` sends the pick, else the record, never the select's default), or a new name
+    (`rename`). The account is resolved, the session list is read afresh (`sources.refreshAgents`,
+    awaited) and the resume is refused while the old session has a process (`pid !== null`
+    alone). The copy is started with `--settings` and `-n` and recorded under its own bg id
+    (`bgIdFromOutput`: the id after `backgrounded ·`, whatever follows it; `claim` adds its
+    session id). **MasterDeck never removes a session** (`claude rm` deletes its worktree too):
+    the old one stays, stopped, and its bg id and session id go to `superseded-sessions.json`
+    (`main/superseded.ts`), only when the output names it as the copied one (`copyFromOutput`).
+    `Sources.build` leaves superseded background rows that do not run out of the list, matched
+    by bg id only (`shared/superseded.ts` `hideSuperseded`); running again, they show. The copy
+    inherits the old session's ticket link and PRs: `Sources.noteCopy` (`shared/carry.ts`
+    `carryCopy`) puts the old session ids into the copy's `session-history.json` entry, so
+    `linksToCarry` links the copy once it shows up, and copies its `session-prs.json` list. The
+    master skill reads the same list (`config.superseded_ids`, `join.sessions`): a superseded
+    session that does not run is left out of the snapshot, so it owns no issue and gets no
+    ORPHAN proposal beside its copy. The copy does not carry
+    the old session's `--model` / `--permission-mode` (not known reliably; see TODO).
+  - Not a listed background session (History, an interactive session for Start here): there are no
+    saved options and nothing to copy, so `--settings` and `-n` as for a new start.
+  - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown,
+    one account resumes bare (it cannot copy), two or more (or a rename) are refused.
+  - `master spawn` (ORPHAN): bare when there is no record (`config.session_account`) or it is the
+    proposal's account; `--settings` (a copy) only when the proposal names another account than
+    the record. Never `claude rm`. `spawn.running` is true / false / None, by session id or bg
+    id: true marks the proposal sent ("already running"), None (`claude agents` failed) holds
+    it. After a copy (`spawn.copy_of`) it writes the copy's bg id to `session-accounts.json` and
+    the old ids to `superseded-sessions.json` (`spawn.merge_json`: read, merge, temp file +
+    rename; a file that is there but unreadable is left untouched). The app reads both files again when their mtime changes, and its own writes of
+    `session-accounts.json` keep entries it does not know (`SessionAccounts.sync`).
+  - The restorer (`shared/restore.ts` `resumeEntries`, used by `Sources.resumeStopped`) awaits a
+    fresh `claude agents` read before each entry and skips one that runs again under the same
+    session id or bg id, so a second app start resumes nothing twice.
+  Deviation from the several-accounts spec (plan I, "resume always passes `--settings` again"):
+  that rule made every resume a copy; the saved options carry the account instead.
+  `accountFor` (IPC) gives a new session's default for a folder. One
   account: no `--settings`, the same arguments as before.
 
 ### Needs you (the inbox)
@@ -148,7 +195,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `hookStatus` (`HookStatus`: `queue` = something runs `/queue`: the deck hook with no skill queue
   hook beside it, or both skill queue hooks; `foreignQueue` = any queue skill hook, e.g. a
   hand-installed `$HOME/.claude/hooks/queue-submit.sh`; `reviewGate` = `REVIEW_MARK` in
-  PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
+  PreToolUse; `masterGuard` = the deck hook's `MasterReport` entry in PreToolUse), `installWorkflowHooks`, `installDeckHooks`, `migrateLegacyHooks`.
 - `migrateLegacyHooks(settingsPath, backupDir)` runs once at launch (`<home>/native-hooks.json`
   records it with what it removed). It removes only what older MasterDeck versions wrote for the
   skills: the exact commands in `LEGACY_COMMANDS` (tt.sh hook, babysit-pr's pre/post `gh pr create`
@@ -181,6 +228,30 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   out again whenever settings.json's mtime changes) leaves `/queue`
   to those hooks.
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
+- Master reports guard: `installDeckHooks` also registers `"<home>/deck/hook.sh" MasterReport` as a
+  PreToolUse hook on `SendMessage` (marker `/deck/hook.sh" MasterReport`, timeout 10 s; part of
+  `deckInstalledIn`, so an install from before it is completed at the next launch; the legacy
+  migration and the review gate never match it). The script's `MasterReport` branch exits before jq
+  unless the input holds `#<digit>`, then runs one jq program (`MASTER_REPORT_JQ`): a report is a
+  message (or `summary`) whose first non-empty line, after leading markdown or quote characters
+  (`>`, `*`, `_`, backticks, `-`, spaces, heading markers `## `, list numbers `1. `), matches
+  `^((?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+)?#\d+\s*:\s*(done|blocked|question|answered)` (not followed
+  by a letter or digit), case-insensitive: `#12`, `name#12` or `owner/name#12`. A report
+  is denied (`permissionDecision: "deny"`; the reason says to send it to the master by name and,
+  if that is not reachable, to ask the user, never another session) unless `to`
+  is the master: `masterName`, case-insensitive, or `<masterName> [<ref>]`. The name and
+  `masterEnabled` are read from the config file on every call (its path, `paths.config`, is baked
+  into the script like the queue dir), so a config change needs no reinstall; a missing or broken
+  config means `master-agent`, enabled. With `masterEnabled: false` every report to a session is
+  denied. Not checked: a call from a subagent or teammate (`agent_id` or `agent_type` in the hook
+  input; it reports to its parent), and the master session itself: `deck/master-sids` lists its
+  session ids (every session named `masterName`, done or not, from the state callback in
+  `index.ts`: `DeckHooks.setMasterSessions`) and, right after `startMaster` or a resume of the
+  master, its bg id or session id (`addMasterSession`, kept 10 minutes until a poll lists it; on a
+  resume only when the session list names that id as the master, `isMasterSession`, and only
+  from the window, never a remote caller); the
+  hook passes a `session_id` that equals a line or starts with it. It fails open: no jq, input
+  that does not parse, a `to` or message that is not a string, all print nothing.
 
 ### Monitors (watches) and schedules
 

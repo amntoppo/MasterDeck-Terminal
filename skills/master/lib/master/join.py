@@ -12,15 +12,21 @@ def _rec(sid, *, name, kind, status, pid, bg_id, cwd) -> dict:
 
 
 def sessions(agents: list, state: dict, master_name: str,
-             cwd_lookup: Callable[[str], "str | None"]) -> list:
+             cwd_lookup: Callable[[str], "str | None"], superseded=frozenset()) -> list:
+    """`superseded`: ids of sessions a copy replaced (config.superseded_ids). While one does not run it
+    is left out altogether, so it never owns an issue and is never resumed beside its copy."""
     master_ids = {a["sessionId"] for a in agents if a.get("name") == master_name}
     recs: dict = {}
+    gone: set = set()
     for a in agents:
         sid = a["sessionId"]
         if sid in master_ids:
             continue
         background = a.get("kind") == "background"
         if background and a.get("state") == "done":
+            continue
+        if background and not a.get("pid") and a.get("id") in superseded:
+            gone.add(sid)
             continue
         recs[sid] = _rec(
             sid,
@@ -37,6 +43,9 @@ def sessions(agents: list, state: dict, master_name: str,
         if sid in master_ids or entry.get("issue") is None or entry.get("adopted"):
             continue
         r = recs.get(sid)
+        # Not running (or no longer listed) and superseded: its copy carries the work.
+        if sid in gone or (r is None and sid in superseded):
+            continue
         if r is None:
             r = recs[sid] = _rec(sid, name=f"dead-{sid[:8]}", kind=None, status="dead",
                                  pid=None, bg_id=None, cwd=cwd_lookup(sid))

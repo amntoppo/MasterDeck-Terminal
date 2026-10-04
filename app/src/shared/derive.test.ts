@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   attachIssues,
+  isMasterSession,
   deriveMaster,
   deriveNeedsYou,
   issueSessionMark,
@@ -137,3 +138,19 @@ describe('sessionForProposal', () => {
     expect(sessionForProposal(prop({ issue: 3, target: {} }), [a, b])).toBe(a)
   })
 })
+
+describe('isMasterSession (the reports guard\'s exemption on a resume)', () => {
+  const rows = [
+    { sessionId: 'm1', key: 'aaaa1111', bgId: 'aaaa1111', name: 'Master-Agent' },
+    { sessionId: 's1', key: 'bbbb2222', bgId: 'bbbb2222', name: 'fix-12' },
+  ]
+  it('goes by the name the session list has for that id, never by what the caller says', () => {
+    expect(isMasterSession(rows, 'm1', 'master-agent')).toBe(true)
+    expect(isMasterSession(rows, 'aaaa1111', ' master-agent ')).toBe(true)
+    expect(isMasterSession(rows, 's1', 'master-agent')).toBe(false)
+    expect(isMasterSession(rows, 'unknown', 'master-agent')).toBe(false)
+    expect(isMasterSession(null, 'm1', 'master-agent')).toBe(false)
+    expect(isMasterSession(rows, 'm1', '')).toBe(false)
+  })
+})
+

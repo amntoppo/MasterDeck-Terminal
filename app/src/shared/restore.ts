@@ -2,8 +2,8 @@ import type { Session } from './types'
 
 /**
  * Background sessions don't outlive the machine: a restart (or a crash) ends every session process,
- * though each conversation stays on disk and `claude --bg --resume <id>` continues it under the same
- * id. MasterDeck keeps a list of the background sessions that are running; when it next starts on a
+ * though each conversation stays on disk and `claude --bg --resume <id>` (no other flag: any flag
+ * starts a copy) continues it under the same id. MasterDeck keeps a list of the background sessions that are running; when it next starts on a
  * new boot, the ones that were running and no longer are can be resumed.
  */
 
@@ -43,7 +43,8 @@ export function runningNow(sessions: Session[], masterName: string): RestoreEntr
     .map((s) => ({ sessionId: s.sessionId, bgId: s.bgId, name: s.name, cwd: s.cwd, issue: s.issue, ...(s.issueRepo ? { issueRepo: s.issueRepo } : {}) }))
 }
 
-function isLive(e: RestoreEntry, sessions: Session[]): boolean {
+/** Runs now: a process under the same session id or the same background id (which survives a resume). */
+export function isLive(e: RestoreEntry, sessions: Session[]): boolean {
   return sessions.some((s) => s.pid !== null && s.state !== 'done' && (s.sessionId === e.sessionId || (!!e.bgId && s.bgId === e.bgId)))
 }
 
@@ -62,6 +63,32 @@ export function nextRestore(saved: RestoreFile | null, bootAt: number, sessions:
     running: runningNow(sessions, masterName),
     stopped: stopped.filter((e) => !isLive(e, sessions)),
   }
+}
+
+/**
+ * Resume the stopped sessions one at a time. Before each, the session list is read afresh
+ * (`refresh`, awaited): one that runs again (master's ORPHAN, by hand, an earlier pass, another
+ * start of the app) under the same session id or background id is skipped. The failed ones stay listed.
+ */
+export async function resumeEntries(
+  stopped: RestoreEntry[],
+  sessions: () => Session[],
+  resume: (e: RestoreEntry) => Promise<{ ok: boolean; message: string }>,
+  refresh: () => Promise<void>,
+): Promise<{ resumed: number; failed: string[]; left: RestoreEntry[] }> {
+  const failed: string[] = []
+  const left: RestoreEntry[] = []
+  let resumed = 0
+  for (const e of stopped) {
+    await refresh()
+    const r = isLive(e, sessions()) ? { ok: true, message: 'already running' } : await resume(e)
+    if (r.ok) resumed++
+    else {
+      failed.push(`${e.name}: ${r.message}`)
+      left.push(e)
+    }
+  }
+  return { resumed, failed, left }
 }
 
 export function parseRestoreFile(raw: unknown): RestoreFile | null {

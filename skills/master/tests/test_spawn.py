@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+import json
+import os
+from pathlib import Path
 import unittest
+from unittest import mock
 
-from master import ledger, spawn
+from master import config, ledger, spawn
 
 NOW = "2026-09-24T10:00:00Z"
 
@@ -142,6 +146,88 @@ class SpawnTest(unittest.TestCase):
         run = FakeRunner(out='[{"sessionId": "%s", "pid": null}]' % sid)
         spawn.spawn(self.led, p["id"], now=NOW, runner=run)
         self.assertEqual(run.calls[-1][0], ["claude", "--bg", "--resume", sid])
+
+    # Claude Code 2.1.288, real output: any flag on a resume starts a copy; none wakes the session.
+    COPY_OUT = ("note: background session e168c2bf keeps its own saved options, so the flags you passed started a copy "
+                "as 6d996951. Without flags, the same command continues e168c2bf itself.\n"
+                "backgrounded · 6d996951 · dupprobe-md (idle — send a prompt to start)\n")
+    WOKE_OUT = ("note: woke session e168c2bf with its saved options (-n, --model, --permission-mode).\n"
+                "backgrounded · e168c2bf · dupprobe-md (idle — send a prompt to start)\n")
+
+    def test_copy_of_reads_the_ids_only_from_a_copy_note(self):
+        self.assertEqual(spawn.copy_of(self.COPY_OUT), ("e168c2bf", "6d996951"))
+        self.assertIsNone(spawn.copy_of(self.WOKE_OUT))
+        self.assertIsNone(spawn.copy_of("backgrounded · 1a2b3c4d\n"))
+        self.assertIsNone(spawn.copy_of(""))
+
+    def test_a_bare_resume_wakes_the_session(self):
+        sid = "e168c2bf-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(out=self.WOKE_OUT)
+        with mock.patch.object(spawn, "running", return_value=False):
+            got = spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual([c[0] for c in run.calls], [["claude", "--bg", "--resume", sid]])
+        self.assertEqual(got["status"], "sent")
+
+    def test_a_copy_is_never_removed_it_is_recorded_and_the_old_one_superseded(self):
+        sid = "e168c2bf-1234-4abc-9def-0123456789ab"
+        home = Path(self.tmp.name) / "md"
+        home.mkdir()
+        (home / "session-accounts.json").write_text(json.dumps({"s1": "alice"}))
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid, "account": "bob-work"}})
+        run = FakeRunner(out=self.COPY_OUT)
+        with mock.patch.dict(os.environ, {"MASTERDECK_HOME": str(home)}), \
+                mock.patch.object(spawn, "running", return_value=False), \
+                mock.patch.object(spawn, "command", return_value=["claude", "--bg", "--settings", "/f", "--resume", sid]):
+            got = spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        # MasterDeck never removes a session: `claude rm` also deletes its worktree.
+        self.assertEqual([c[0][:2] for c in run.calls], [["claude", "--bg"]])
+        self.assertEqual(got["status"], "sent")
+        # The app's files: the copy's account (so the app does not copy it again), and the old side.
+        self.assertEqual(json.loads((home / "session-accounts.json").read_text()), {"s1": "alice", "6d996951": "bob-work"})
+        self.assertEqual(json.loads((home / "superseded-sessions.json").read_text()), ["e168c2bf", sid])
+
+    def test_merge_json_leaves_an_unreadable_file_alone(self):
+        f = Path(self.tmp.name) / "x.json"
+        spawn.merge_json(f, lambda d: {**(d or {}), "a": 1})  # missing: created
+        self.assertEqual(json.loads(f.read_text()), {"a": 1})
+        spawn.merge_json(f, lambda d: {**d, "b": 2})
+        self.assertEqual(json.loads(f.read_text()), {"a": 1, "b": 2})
+        f.write_text('{"a": 1, half')  # broken (or half-written by someone else): not replaced
+        spawn.merge_json(f, lambda d: {"b": 2})
+        self.assertEqual(f.read_text(), '{"a": 1, half')
+        self.assertEqual([p.name for p in Path(self.tmp.name).iterdir()], ["x.json"])
+
+    def test_superseded_ids_reads_the_apps_list(self):
+        with mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.tmp.name}):
+            self.assertEqual(config.superseded_ids(), set())
+            (Path(self.tmp.name) / "superseded-sessions.json").write_text(json.dumps(["e168c2bf", 7, "s-old"]))
+            self.assertEqual(config.superseded_ids(), {"e168c2bf", "s-old"})
+            (Path(self.tmp.name) / "superseded-sessions.json").write_text("{nope")
+            self.assertEqual(config.superseded_ids(), set())
+
+    def test_running_is_true_false_or_unknown(self):
+        sid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+        rows = lambda *r: FakeRunner(out=json.dumps(list(r)))
+        self.assertIs(spawn.running(sid, rows({"sessionId": sid, "pid": 42})), True)
+        # Resumed under a new session id (claude attach): the same background id.
+        self.assertIs(spawn.running(sid, rows({"sessionId": "other", "id": "4f2a9c1e", "pid": 42})), True)
+        self.assertIs(spawn.running(sid, rows({"sessionId": sid, "pid": None}, {"sessionId": "x", "id": "aaaa1111", "pid": 7})), False)
+        self.assertIs(spawn.running(sid, rows()), False)
+        # `claude agents` failed or printed something else: not known.
+        self.assertIsNone(spawn.running(sid, FakeRunner(code=1, out="")))
+        self.assertIsNone(spawn.running(sid, FakeRunner(out="not json")))
+        self.assertIsNone(spawn.running(sid, FakeRunner(out='{"a": 1}')))
+
+    def test_resume_is_held_when_it_is_not_known_whether_the_session_runs(self):
+        sid = "4f2a9c1e-1234-4abc-9def-0123456789ab"
+        p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})
+        run = FakeRunner(code=1, out="", err="daemon not reachable")
+        with self.assertRaises(spawn.SpawnError):
+            spawn.spawn(self.led, p["id"], now=NOW, runner=run)
+        self.assertEqual(p["status"], "held")
+        self.assertIn("claude agents", p["note"])
+        self.assertEqual([c[0][:2] for c in run.calls], [["claude", "agents"]])  # nothing resumed
 
     def test_refuses_unapproved_and_session_targets(self):
         p = self.add({"spawn": {"name": "a", "cwd": self.tmp.name, "prompt": "go"}}, approve=False)

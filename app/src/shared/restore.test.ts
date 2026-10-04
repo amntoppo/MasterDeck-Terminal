@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextRestore, parseRestoreFile, runningNow, sameBoot } from './restore'
+import { nextRestore, resumeEntries, parseRestoreFile, runningNow, sameBoot } from './restore'
 import type { Session } from './types'
 
 const s = (p: Partial<Session>): Session => ({
@@ -49,5 +49,43 @@ describe('restore after a restart', () => {
     expect(parseRestoreFile({ bootAt: 1, running: [{ sessionId: 'x' }, { nope: 1 }], stopped: 'bad' })).toEqual({
       bootAt: 1, savedAt: 0, running: [{ sessionId: 'x', bgId: null, name: 'x', cwd: '', issue: null }], stopped: [],
     })
+  })
+})
+
+describe('resumeEntries (Resume all, and the automatic resume at app start)', () => {
+  const e = (id: string, bg: string | null = `${id}1`) => ({ sessionId: id, bgId: bg, name: `n-${id}`, cwd: '/w', issue: null })
+  it('resumes each stopped session once; a second app start resumes nothing again', async () => {
+    // Before the restart a and b ran; after it they are listed without a process.
+    const saved = nextRestore(null, BOOT, [s({ sessionId: 'a', bgId: 'a1' }), s({ sessionId: 'b', bgId: 'b1' })], 'm', NOW)
+    let sessions = [s({ sessionId: 'a', bgId: 'a1', pid: null }), s({ sessionId: 'b', bgId: 'b1', pid: null })]
+    const calls: string[] = []
+    // A bare `claude --bg --resume` wakes the same session: same ids, a process again.
+    const resume = async (x: { sessionId: string }) => {
+      calls.push(x.sessionId)
+      sessions = sessions.map((r) => (r.sessionId === x.sessionId ? { ...r, pid: 500 } : r))
+      return { ok: true, message: 'ok' }
+    }
+    const first = nextRestore(saved, BOOT + 86_400_000, sessions, 'm', NOW)
+    expect(await resumeEntries(first.stopped, () => sessions, resume, async () => {})).toEqual({ resumed: 2, failed: [], left: [] })
+    expect(calls).toEqual(['a', 'b'])
+    // MasterDeck quits and starts again (same boot, then even a stale list from the file): nothing to resume.
+    const second = nextRestore(first, BOOT + 86_400_000, sessions, 'm', NOW)
+    expect(second.stopped).toEqual([])
+    expect(await resumeEntries(first.stopped, () => sessions, resume, async () => {})).toEqual({ resumed: 2, failed: [], left: [] })
+    expect(calls).toEqual(['a', 'b'])
+  })
+  it('reads the session list afresh before each decision; skips what runs again by session id or background id; keeps the failed ones', async () => {
+    // The last poll is stale: a runs again under a new session id (same background id), seen only after a refresh.
+    let sessions: Session[] = []
+    let refreshes = 0
+    const refresh = async () => {
+      refreshes++
+      sessions = [s({ sessionId: 'a-new', bgId: 'a1', pid: 9 })]
+    }
+    const calls: string[] = []
+    const got = await resumeEntries([e('a'), e('b'), e('c', null)], () => sessions, async (x) => (calls.push(x.sessionId), x.sessionId === 'b' ? { ok: false, message: 'no such session' } : { ok: true, message: '' }), refresh)
+    expect(calls).toEqual(['b', 'c'])
+    expect(refreshes).toBe(3)
+    expect(got).toEqual({ resumed: 2, failed: ['n-b: no such session'], left: [e('b')] })
   })
 })

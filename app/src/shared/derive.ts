@@ -3,6 +3,16 @@ import type { Issue, MasterState, NeedsItem, Pr, Proposal, Session } from './typ
 
 export const MASTER_NAME = 'master-agent'
 
+/**
+ * Whether the session with this session id or key is the master, by the name the session list has
+ * for it (never by a name a caller passed): only then may a resume exempt it from the reports guard.
+ */
+export function isMasterSession(rows: Pick<Session, 'sessionId' | 'key' | 'bgId' | 'name'>[] | null, id: string, masterName: string): boolean {
+  const m = masterName.trim().toLowerCase()
+  if (!rows || !m || !id) return false
+  return rows.some((x) => (x.sessionId === id || x.key === id || x.bgId === id) && x.name.toLowerCase() === m)
+}
+
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 }

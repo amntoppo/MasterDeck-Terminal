@@ -41,13 +41,21 @@ fixes it, and move the item here to "Recently done".
   until it lifts (accepted simplification, as in PR watch); untagged team PR pages cached
   before a second account was connected are dropped (not kept as the primary's) if the primary's
   first search fails; `me`/assignable users are the primary's only.
-- **P2 · Session accounts across resume and attach.** Verified (Claude Code 2.1.288):
-  `claude attach` of a parked session keeps its account. `claude --bg --resume` with flags starts
-  a copy under a new session id and bg id, and the old session keeps its own saved options; only a
-  resume without flags continues it (MasterDeck always passes `-n`, and `--settings` with two or
-  more accounts, so its resumes are copies). Handled: `resumeAs` records the copy's bg id from the
-  `backgrounded · <id>` line (else `claude attach <id>`), `claim` adds the new session id. Open:
-  whether a copy should be avoided (resume without flags when the saved options already match).
+- **P3 · A "duplicates" hint.** Resumes no longer make copies (see Recently done), but copies made
+  before the fix, or by hand (`claude --bg --resume <id> -n …`), still show as two sessions of one
+  name. They are not cleaned up automatically (MasterDeck never removes a session): the user
+  removes them. Show a hint on sessions that share a name (Sources/Sidebar).
+- **P3 · A copy made by `master spawn` does not inherit the ticket link in the app.** `resumeAs`
+  calls `Sources.noteCopy`; `master spawn` only writes the copy's account and the superseded ids,
+  so the app does not know which session the copy came from. Write the pair (old → copy) to a
+  file the app reads, or parse it from the proposal's note.
+- **P3 · A copy does not carry the old session's model and permission mode.** A resume as another
+  account passes `--settings` and `-n` only; the status line's model is a display name, not
+  always a valid `--model` value. Read the saved options from the bare-resume note or the
+  transcript if this matters.
+- **P3 · Master reports guard, hook input.** `tool_input.to/message/summary` and
+  `agent_id`/`agent_type` follow Claude Code's documented PreToolUse input; not yet checked
+  against a live session's payload. If a field differs the guard fails open.
 - **P2 · Board tab builder folders and Claude Code's trust dialog.** Every new Board tab's
   builder folder (`ticket-builder/tab-<id>/`) shows Claude Code's trust dialog until it is
   accepted, and its pre-approved permissions are ignored until then. Check after a reinstall
@@ -191,6 +199,8 @@ fixes it, and move the item here to "Recently done".
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |
 | Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |
+| Duplicate sessions: every resume cloned the session (`claude --bg --resume <id>` with any flag starts a copy; MasterDeck always passed `-n`, and `--settings` with two accounts, so each app start after a reboot cloned every running session). Resume is bare now (`resumeAs`, `spawn.command`), recorded or not; a copy only for an account the user picked or a rename, refused while the old one runs (fresh `claude agents` read); never `claude rm`: the old side goes to `superseded-sessions.json` and is hidden while stopped; a session woken without `--settings` is marked and shown as gh's active account; the restorer and `master spawn` skip what runs again (by session id or bg id; unknown holds). Closes "Session accounts across resume and attach" | fix/master-reports-only | — |
+| Master reports guard: a PreToolUse hook on `SendMessage` (`hook.sh MasterReport`, installed with the deck hook) denies a report (`#12: done`/blocked/question/answered; `name#12`, `owner/name#12`, after markdown/quote characters) sent to any session but the master; `masterName`/`masterEnabled` read from config.json at run time; the master session (`deck/master-sids`, written at once on start/resume) and subagents are exempt; Settings → Hooks & skills shows it (`HookStatus.masterGuard`) | fix/master-reports-only | — |
 | Sessions never hand a report to another session when master-agent is not running: the reply instruction (assign/CI/review/stale prompts, master SKILL) now says to ask the user instead. Seen when a #440 session messaged two sessions named `masterdeck` | fix/master-reply-only | — |
 | Phone: Board and PRs filter rows fold into a "Filters (n)" button beside the search box; the controls open in a sheet (Reset, Done, Esc/backdrop). `PhoneFilters.tsx`, `activeBoardFilterCount` (boardFilter.ts); desktop DOM unchanged | feat/phone-filters | — |
 | Native PR watch, board moves, /queue hook; skill hooks migrated away (PrWatch: light query per 50 PRs, heavy only when changed; BoardFlow + BoardOps + MasterDeck's own `ticket-links.json`, imported once; Create with Claude hands tickets to MasterDeck; `/queue` through hook.sh with a Stop handshake, `MASTERDECK_QUEUE_DIR`; one-time `migrateLegacyHooks` → `native-hooks.json`; MasterDeck's own self-review gate). Deploy watch and CI-failure messages are deliberate non-goals (Needs you covers failing CI). Final-review fixes: board moves made once (`board-moved.json`), imported links left alone, only own/linked-branch PRs linked; `deck/legacy-sids` for sessions alive at the migration; silent first PR-watch run | 2342f28 … 071b47b, merge f433be5 | plan H |

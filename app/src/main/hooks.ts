@@ -171,9 +171,10 @@ export function hookStatus(settingsPath: string): HookStatus {
       queue: (deckInstalledIn(s) && !foreignQueue) || (submit && drain),
       foreignQueue,
       reviewGate: has(s, "PreToolUse", REVIEW_MARK),
+      masterGuard: has(s, "PreToolUse", DECK_REPORT_MARK),
     };
   } catch {
-    return { queue: false, foreignQueue: false, reviewGate: false };
+    return { queue: false, foreignQueue: false, reviewGate: false, masterGuard: false };
   }
 }
 
@@ -317,11 +318,14 @@ export function installWorkflowHooks(
 const DECK_MARK = "/deck/hook.sh";
 /** Plus PreToolUse on Monitor: hands a monitor to MasterDeck when Settings say so. */
 const DECK_MONITOR_MARK = "/deck/hook.sh\" MonitorCall";
+/** Plus PreToolUse on SendMessage: the master reports guard (a report goes only to the master). */
+const DECK_REPORT_MARK = "/deck/hook.sh\" MasterReport";
 
 function deckInstalledIn(s: Settings): boolean {
   return (
     DECK_EVENTS.every((e) => has(s, e, DECK_MARK)) &&
-    has(s, "PreToolUse", DECK_MONITOR_MARK)
+    has(s, "PreToolUse", DECK_MONITOR_MARK) &&
+    has(s, "PreToolUse", DECK_REPORT_MARK)
   );
 }
 
@@ -359,15 +363,19 @@ export function installDeckHooks(
     const monitorStale =
       has(s, "PreToolUse", DECK_MONITOR_MARK) &&
       !has(s, "PreToolUse", monitorCmd);
+    const reportCmd = cmd("MasterReport");
     if (
       DECK_EVENTS.every((e) => has(s, e, cmd(e))) &&
       has(s, "PreToolUse", monitorCmd) &&
+      has(s, "PreToolUse", reportCmd) &&
       !stale &&
       !monitorStale
     )
       return { ok: true, message: "already installed" };
     remove(s, "PreToolUse", DECK_MONITOR_MARK);
     add(s, "PreToolUse", "Monitor", monitorCmd, DECK_MONITOR_MARK, 15);
+    remove(s, "PreToolUse", DECK_REPORT_MARK);
+    add(s, "PreToolUse", "SendMessage", reportCmd, DECK_REPORT_MARK, 10);
     for (const e of DECK_EVENTS) {
       remove(s, e, DECK_MARK);
       add(
