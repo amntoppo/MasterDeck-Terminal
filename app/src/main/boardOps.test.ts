@@ -264,3 +264,30 @@ describe('an account with no board', () => {
     expect(linked).toEqual(['s1 #12'])
   })
 })
+
+describe('an issue of a selected repository that no board holds', () => {
+  it('links a session to an issue of a selected repository that no board holds (started from the repository view)', async () => {
+    const linked: string[] = []
+    const moves: string[] = []
+    const deps: LinkDeps = {
+      ops: { issueInfo: async () => ({ title: 'Off the board', state: 'OPEN', item: null, project: null, status: '' }), move: async (_t, s) => (moves.push(s), { ok: true, message: 'moved' }) },
+      link: (sid, t) => void linked.push(`${sid} ${t.repo ?? ''}#${t.number}`),
+      branch: async () => '',
+      moves: () => true,
+      mark: () => {},
+      reload: () => {},
+      noteStatus: () => {},
+      boardless: () => false,
+      offBoard: (t) => t.repo === 'acme/api',
+    }
+    expect(await linkTicket(deps, { repo: 'acme/api', number: 7 }, 's1', null)).toEqual({ ok: true, message: 'linked session to api#7 Off the board' })
+    expect(linked).toEqual(['s1 acme/api#7'])
+    expect(moves).toEqual([]) // no card on a board: nothing to move, nothing written to GitHub
+    // A repository that is not selected is refused as before.
+    expect((await linkTicket(deps, { repo: 'acme/other', number: 7 }, 's1', null)).message).toBe('other#7 is not on any selected board')
+    // An issue that is on a board still moves to in-progress: the new rule only matters with no card.
+    const onBoard: LinkDeps = { ...deps, ops: { ...deps.ops, issueInfo: async () => ({ title: 'On it', state: 'OPEN', item: 'ITEM', project: 'acme/1', status: 'To Do' }) } }
+    expect((await linkTicket(onBoard, { repo: 'acme/api', number: 8 }, 's2', null)).ok).toBe(true)
+    expect(moves).toHaveLength(1)
+  })
+})

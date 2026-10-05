@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { assignChoices } from '@shared/boardFilter'
 import { ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
@@ -9,11 +10,15 @@ interface Props {
   onClose: () => void
   /** Assigned: to me opens the Start dialog; to someone else just confirms. */
   onAssigned: (card: BoardCard, login: string) => void
+  /** Start a session for it as it is, without assigning it (nothing is written to GitHub). */
+  onStart: (card: BoardCard) => void
+  /** "Me" on the Board tab it was clicked in: the tab's account with two or more; absent: the primary's login. */
+  me?: string | null
 }
 
-export function AssignPopup({ card, state, onClose, onAssigned }: Props) {
-  const me = state.me
-  const others = state.users.filter((u) => u !== me).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tabMe }: Props) {
+  const me = tabMe === undefined ? state.me : tabMe
+  const others = assignChoices(me, state.me, state.users).filter((u) => u !== me)
   const [login, setLogin] = useState(me ?? others[0] ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,6 +75,17 @@ export function AssignPopup({ card, state, onClose, onAssigned }: Props) {
           <span className="grow">{error && <span className="error">{error}</span>}</span>
           <button className="btn" onClick={onClose} disabled={busy}>
             Cancel
+          </button>
+          <button
+            className="btn"
+            disabled={busy}
+            title="Start a session for this issue as it is: nobody is assigned, nothing is written to GitHub"
+            onClick={() => {
+              onStart(card)
+              onClose()
+            }}
+          >
+            Start a session
           </button>
           <button className="btn primary" onClick={assign} disabled={busy || !login || (card.assignees.length === 1 && card.assignees[0] === login)}>
             {busy ? 'Assigning…' : login === me ? 'Assign to me' : 'Assign'}

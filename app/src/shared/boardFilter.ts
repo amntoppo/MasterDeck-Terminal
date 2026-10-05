@@ -2,6 +2,7 @@ import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
 import { accountForProject, accountForRepo, isMulti } from './accounts'
 import { projectKey, type AppConfig } from './appConfig'
+import type { AssignRequest } from './ipc'
 import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
 
 export const UNASSIGNED = '(unassigned)'
@@ -172,6 +173,16 @@ export function cardAction(c: BoardCard, me: string | null, sessions: Session[])
   return c.prs.length > 0 ? 'pr' : 'assign'
 }
 
+/**
+ * Who the Assign popup offers: me first (the tab's account), then the people who can be assigned.
+ * `users` are the primary issue repo's, read as the primary account: a tab of another account
+ * offers only its own login rather than another organisation's people.
+ */
+export function assignChoices(me: string | null, primaryMe: string | null, users: string[]): string[] {
+  const others = me === primaryMe ? users.filter((u) => u !== me).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) : []
+  return [...(me ? [me] : []), ...others]
+}
+
 const OPEN = new Set(['OPEN', 'DRAFT'])
 
 /** The PR to show first: the newest open one, else the newest. */
@@ -199,6 +210,25 @@ export interface ReviewTarget {
   issue: number
   /** The issue's repo (owner/name); null or missing: the primary issue repo. */
   issueRepo?: string | null
+}
+
+/** What the PR popup's Start review sends: a review session for the card's ticket, in whichever repository that ticket is. */
+export function reviewRequest(
+  card: Pick<BoardCard, 'number' | 'repo'>,
+  pr: { url: string; repo: string; number: number; title: string; author: string },
+  o: { sessions: Session[]; cwd: string; instructions: string },
+): AssignRequest {
+  return {
+    kind: 'PRREVIEW',
+    issue: card.number,
+    repo: card.repo ?? null,
+    name: reviewName(pr.repo, pr.number, o.sessions),
+    cwd: o.cwd,
+    prompt: composeReviewPrompt({ url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, author: pr.author, issue: card.number, issueRepo: card.repo ?? null }, o.instructions),
+    proposalId: null,
+    edited: true,
+    approved: false,
+  }
 }
 
 /** `n`: the ticket's label, #12 or name#12. */

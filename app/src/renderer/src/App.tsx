@@ -144,7 +144,11 @@ export function App() {
   const [assigning, setAssigning] = useState<Issue | null>(null);
   const [linking, setLinking] = useState<Issue | null>(null);
   const [prCard, setPrCard] = useState<BoardCard | null>(null);
-  const [assignCard, setAssignCard] = useState<BoardCard | null>(null);
+  // The card and "me" of the Board tab it was clicked in (the tab's account with two or more).
+  const [assignCard, setAssignCard] = useState<{
+    card: BoardCard;
+    me: string | null;
+  } | null>(null);
   const issueOf = useCallback(
     (card: BoardCard): Issue =>
       state?.issues.find((i) => sameTicket(i, card)) ?? {
@@ -1088,7 +1092,7 @@ export function App() {
           onOpenSession={openSession}
           onStart={(card) => setAssigning(issueOf(card))}
           onPr={setPrCard}
-          onAssign={setAssignCard}
+          onAssign={(card, me) => setAssignCard({ card, me })}
           onSummary={() => setDialog("sprint-summary")}
           onSetup={() => setDialog("setup")}
         />
@@ -1344,6 +1348,7 @@ export function App() {
           state={state}
           onClose={() => setPrCard(null)}
           onStartReview={startSession}
+          onStart={(card) => setAssigning(issueOf(card))}
         />
       )}
       {palette && (
@@ -1448,11 +1453,13 @@ export function App() {
       )}
       {assignCard && (
         <AssignPopup
-          card={assignCard}
+          card={assignCard.card}
+          me={assignCard.me}
           state={state}
           onClose={() => setAssignCard(null)}
+          onStart={(card) => setAssigning(issueOf(card))}
           onAssigned={(card, login) => {
-            if (login === state.me)
+            if (login === assignCard.me)
               setAssigning(issueOf({ ...card, assignees: [login] }));
             else
               flash(

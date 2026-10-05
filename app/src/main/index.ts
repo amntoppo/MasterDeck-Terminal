@@ -52,7 +52,7 @@ import type {
   Session,
   SetupCheck,
 } from "@shared/types";
-import { getConfig } from "@shared/appConfig";
+import { getConfig, repoSelected } from "@shared/appConfig";
 import {
   AccountEnv,
   detectEnv,
@@ -1143,6 +1143,8 @@ async function linkSession(
       reload: () => sources.reloadLinks(),
       noteStatus: (tk, s) => sources.noteStatus(tk, s),
       boardless: (tk) => repoBoardless(tk.repo, getConfig()),
+      // An issue of a selected repository that no board holds (the Board's repository view shows these).
+      offBoard: (tk) => repoSelected(tk.repo, getConfig()),
     },
     t,
     sessionId,

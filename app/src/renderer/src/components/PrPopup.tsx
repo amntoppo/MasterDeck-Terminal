@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { composeReviewPrompt, pickPr, reviewName } from '@shared/boardFilter'
+import { pickPr, reviewRequest } from '@shared/boardFilter'
 import type { AssignRequest } from '@shared/ipc'
 import type { PrSummary } from '@shared/prSummary'
 import type { AppState, BoardCard } from '@shared/types'
@@ -12,11 +12,13 @@ interface Props {
   onClose: () => void
   /** Start is fire-and-forget: the caller switches to the terminal and tracks the spawn. */
   onStartReview: (req: AssignRequest) => void
+  /** Start a session for the issue itself (the Start dialog), whoever it is assigned to. */
+  onStart: (card: BoardCard) => void
 }
 
 const STATE_LABEL: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGED: 'Merged', CLOSED: 'Closed' }
 
-export function PrPopup({ card, state, onClose, onStartReview }: Props) {
+export function PrPopup({ card, state, onClose, onStartReview, onStart }: Props) {
   const [url, setUrl] = useState(() => pickPr(card.prs)?.url ?? card.prs[0]?.url ?? '')
   const [pr, setPr] = useState<PrSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -53,17 +55,8 @@ export function PrPopup({ card, state, onClose, onStartReview }: Props) {
 
   const start = () => {
     if (!pr) return
-    const name = reviewName(pr.repo, pr.number, state.sessions)
-    onStartReview({
-      kind: 'PRREVIEW',
-      issue: card.number,
-      name,
-      cwd: state.masterWorkspace,
-      prompt: composeReviewPrompt({ url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, author: pr.author, issue: card.number }, instructions),
-      proposalId: null,
-      edited: true,
-      approved: false,
-    })
+    // The card's own repository goes along: a ticket outside the primary repo (the repository view shows many).
+    onStartReview(reviewRequest(card, pr, { sessions: state.sessions, cwd: state.masterWorkspace, instructions }))
     onClose()
   }
 
@@ -155,6 +148,18 @@ export function PrPopup({ card, state, onClose, onStartReview }: Props) {
           <button className="btn" onClick={onClose}>
             {reviewing ? 'Cancel' : 'Close'}
           </button>
+          {!reviewing && (
+            <button
+              className="btn"
+              title="Start a session for the issue itself, whoever it is assigned to"
+              onClick={() => {
+                onStart(card)
+                onClose()
+              }}
+            >
+              Start a session
+            </button>
+          )}
           {!reviewing ? (
             <button className="btn primary" disabled={!pr} onClick={() => setReviewing(true)}>
               Review PR

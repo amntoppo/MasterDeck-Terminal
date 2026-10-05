@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, assignChoices, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
 import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -45,6 +45,24 @@ describe('cardAction', () => {
     expect(cardAction(cards[1], ME, [])).toBe('pr')
     expect(cardAction(cards[2], ME, [])).toBe('assign')
     expect(cardAction(cards[3], ME, [])).toBe('start')
+  })
+})
+
+describe('a card that is not mine (also in the repository view)', () => {
+  it('the Assign popup offers the tab\'s account first, and the primary repo\'s people only on the primary\'s tab', () => {
+    expect(assignChoices('alice', 'alice', ['zoe', 'alice', 'Bob'])).toEqual(['alice', 'Bob', 'zoe'])
+    expect(assignChoices('bob-work', 'alice', ['zoe', 'alice'])).toEqual(['bob-work'])
+    expect(assignChoices(null, null, ['zoe'])).toEqual(['zoe'])
+    expect(assignChoices(null, 'alice', ['zoe'])).toEqual([])
+  })
+  it('a PR review is started for the ticket in its own repository', () => {
+    const p = { url: 'https://github.com/acme/api/pull/5', repo: 'api', number: 5, title: 'Fix', author: 'rahul' }
+    const r = reviewRequest({ number: 7, repo: 'acme/api' }, p, { sessions: [], cwd: '/w', instructions: 'be kind' })
+    expect(r).toMatchObject({ kind: 'PRREVIEW', issue: 7, repo: 'acme/api', name: 'review-api-5', cwd: '/w', proposalId: null, edited: true, approved: false })
+    expect(r.prompt).toContain('for acme/api#7')
+    expect(r.prompt).toContain('be kind')
+    // The primary repo's card: no repo in the request, as before.
+    expect(reviewRequest({ number: 7, repo: null }, p, { sessions: [], cwd: '/w', instructions: '' }).repo).toBeNull()
   })
 })
 

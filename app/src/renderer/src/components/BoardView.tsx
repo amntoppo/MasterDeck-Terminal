@@ -85,8 +85,8 @@ interface Props {
   onStart: (card: BoardCard) => void;
   /** Someone else's card with a PR. */
   onPr: (card: BoardCard) => void;
-  /** Someone else's (or nobody's) card without a PR. */
-  onAssign: (card: BoardCard) => void;
+  /** Someone else's (or nobody's) card without a PR; `me`: the tab's account (two or more), else my login. */
+  onAssign: (card: BoardCard, me: string | null) => void;
   onSummary: () => void;
   /** Open Setup (an account with nothing selected, or no board). */
   onSetup: () => void;
@@ -428,7 +428,7 @@ export function BoardView({
       if (s) onOpenSession(s);
     } else if (action === "start") onStart(card);
     else if (action === "pr") onPr(card);
-    else onAssign(card);
+    else onAssign(card, me);
   };
 
   const loading = state.boardLoading || state.githubRefreshing || refreshing;

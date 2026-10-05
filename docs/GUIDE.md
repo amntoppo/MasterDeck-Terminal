@@ -828,7 +828,12 @@ cards is in them.
   ⏸ Stopped (can be resumed), ○ No session. Hover a badge for why.
 - **PR chips:** coloured by state (open green, draft grey, merged purple, closed red). Open PRs also
   show CI ✓ ✗ ● and 💬 unresolved threads. Clicking a chip opens the PR.
-- **Clicking a card:** opens that issue's session in Terminals, or the Assign dialog if it has none.
+- **Clicking a card:** opens that issue's session in Terminals. With no session: your own card opens
+  the Start dialog; someone else's (or nobody's) opens the PR popup when it has a PR, else the Assign
+  popup. Both popups also have **Start a session**: it opens the Start dialog for the issue as it is,
+  without assigning it and without writing anything to GitHub. With two or more accounts, "Me" in the
+  Assign popup is the tab's account, and a tab of another account than the primary offers only that
+  login.
 - **Board moves:** MasterDeck moves the card to In Dev when a session is linked, PR Raised once its
   PR is open and not a draft, Dev Done when all its PRs are merged — the Board moves step of the
   Default workflow; a custom workflow can leave it out. Cards only move forward, and each move is
