@@ -174,7 +174,7 @@ import {
   type SessionWorktree,
   type WorktreeScan,
 } from "@shared/worktrees";
-import { linkedWorktree } from "./worktreeInfo";
+import { linkedWorktree, takesBranchPr } from "./worktreeInfo";
 import type { DeckHooks } from "./deckHooks";
 import {
   answersDecision,
@@ -1734,13 +1734,10 @@ export class Sources {
       const pr = r.code === 0 ? parsePrView(r.stdout) : null;
       if (pr) this.prLive[url] = pr;
     }
-    // master's workspace is shared by every session; its branch's PR belongs to none of them.
-    if (
-      !dir ||
-      !existsSync(dir) ||
-      resolve(dir) === resolve(this.paths.masterWorkspace)
-    )
-      return;
+    // The PR of the folder's branch is the session's only in a linked worktree. A workspace and a
+    // main checkout are shared: a ticket session starts in its repository's checkout and a PR
+    // review stays there, on whatever branch (and open PR) was left checked out.
+    if (!dir || !takesBranchPr(dir, this.paths.masterWorkspace)) return;
     const r = await (this.ghForDir?.(dir) ?? this.gh)(["pr", "view", ...PR_VIEW_ARGS], {
       cwd: dir,
       timeoutMs: 20_000,

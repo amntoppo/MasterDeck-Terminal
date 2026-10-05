@@ -9,7 +9,7 @@ import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
 import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
-import { adoptFresh, folderKind, folderOf, type StartFolder } from "@shared/startFolder";
+import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { deck } from "../deck";
 import { can } from "../web";
@@ -72,12 +72,16 @@ export function AssignDialog({
   const [folder, setFolder] = useState<StartFolder | null>(null);
   const [chosen, setChosen] = useState(false);
   const chosenPath = useRef<string | null>(null);
-  // The system prompt as the last draft wrote it: a new draft replaces it only while it is unedited.
-  const basePrompt = useRef("");
-  const swapPrompt = (next: string) => {
-    const was = basePrompt.current;
-    basePrompt.current = next;
-    setSystem((cur) => (cur === was ? next : cur));
+  // The prompts MasterDeck's drafts wrote: a new draft replaces the system prompt only while it
+  // is one of them (never one the user edited, or one master wrote by hand in its proposal).
+  const generic = useRef<string[]>([]);
+  const learn = (d: DraftAssign) => {
+    generic.current.push(d.prompt, ...(d.genericPrompt ? [d.genericPrompt] : []));
+  };
+  const swapPrompt = (d: DraftAssign) => {
+    const known = [...generic.current];
+    learn(d);
+    setSystem((cur) => swapped(cur, known, d.prompt));
   };
   const choose = async () => {
     const p = await deck().pickFolder(folder?.cwd);
@@ -89,7 +93,7 @@ export function AssignDialog({
     const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
     if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
     setFolder(folderOf(r.draft));
-    swapPrompt(r.draft.prompt);
+    swapPrompt(r.draft);
   };
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
   const past = state.pastSessions[ticketKey(issue.repo, issue.number)] ?? [];
@@ -133,7 +137,8 @@ export function AssignDialog({
       setDraft(d);
       setName(d.name);
       setSystem(d.prompt);
-      basePrompt.current = d.prompt;
+      // A proposal's prompt may be master's own words: only a draft from the CLI is known to be generic.
+      if (d.proposalId === null) learn(d);
       setFolder(folderOf(d));
       setLoading(false);
       setTimeout(() => instructionsRef.current?.focus(), 0);
@@ -156,9 +161,15 @@ export function AssignDialog({
         .draftAssign(ticketOf(issue), issue.title, issue.url)
         .then((r) => {
           if (!alive || !r.ok || chosenPath.current) return;
-          const now = adoptFresh(sp.cwd ?? state.masterWorkspace, r.draft);
+          const was = sp.cwd ?? state.masterWorkspace;
+          const now = adoptFresh(was, r.draft, state.config.workspace || state.masterWorkspace);
           setFolder(now);
-          if (now.cwd !== (sp.cwd ?? state.masterWorkspace)) swapPrompt(r.draft.prompt);
+          // Moved to a checkout: the prompt follows, when it is the generic one. Otherwise the
+          // generic texts are only learnt (for Choose folder… later).
+          if (now.cwd !== was) {
+            if (r.draft.genericPrompt) generic.current.push(r.draft.genericPrompt);
+            swapPrompt(r.draft);
+          } else learn(r.draft);
         });
       return () => {
         alive = false;
@@ -201,12 +212,14 @@ export function AssignDialog({
   const start = () => {
     if (!draft || !nameOk || !promptOk) return;
     const cwd = folder?.cwd || draft.cwd;
-    const unchanged =
-      name === draft.name &&
-      prompt === draft.prompt.trim() &&
-      cwd === draft.cwd &&
-      !model &&
-      !override;
+    // Nothing differs from master's proposal: it is approved as it is. Otherwise a new one, which
+    // keeps the model master named unless one was picked here.
+    const choice = startChoice(
+      draft,
+      { name, prompt, cwd, model, override: !!override },
+      draft.proposalId !== null ? pending?.target.spawn?.model : undefined,
+    );
+    const unchanged = !choice.edited;
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
@@ -219,7 +232,7 @@ export function AssignDialog({
         unchanged &&
         draft.proposalId !== null &&
         draft.proposalId === approved?.id,
-      model: model || undefined,
+      model: choice.model,
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
     });
@@ -549,9 +562,17 @@ function StartFolderLine({
   const kind = folderKind(folder, chosen);
   const dir = <code className="mono">{folder.cwd}</code>;
   return (
-    <div className={`start-folder${kind === "missing" ? " missing" : ""}`}>
+    <div className={`start-folder${kind === "missing" || kind === "missing-partial" ? " missing" : ""}`}>
       <span>
-        {kind === "missing" ? (
+        {kind === "missing-partial" ? (
+          <>
+            No checkout of {folder.checkoutOf} found — only the first{" "}
+            {folder.searched} folders of{" "}
+            <code className="mono">{folder.workspace || folder.cwd}</code> were
+            searched. The session starts in that folder; if the repository is
+            there, choose its folder.
+          </>
+        ) : kind === "missing" ? (
           <>
             No checkout of {folder.checkoutOf} found in{" "}
             <code className="mono">{folder.workspace || folder.cwd}</code>. The

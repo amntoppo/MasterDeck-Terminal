@@ -107,6 +107,11 @@ describe('MasterCli', () => {
     await cli.draftAssign({ repo: 'globex/app', number: 9 }, 't', 'u', '/code/elsewhere')
     expect(f.calls[1].args.slice(-2)).toEqual(['--cwd', '/code/elsewhere'])
   })
+  it('draftAssign carries the generic prompt and a search that was cut short', async () => {
+    const f = fake({ stdout: JSON.stringify({ issue: 9, name: 'n', cwd: '/code', prompt: 'p', genericPrompt: 'g', summary: 's', title: 't', url: 'u', workspace: '/code', found: false, checkoutOf: 'acme/api', partial: true, searched: 2000 }) })
+    const r = await new MasterCli(f.run, '/lib', 'python3').draftAssign({ repo: null, number: 9 })
+    expect(r.ok && [r.draft.genericPrompt, r.draft.partial, r.draft.searched]).toEqual(['g', true, 2000])
+  })
   it('checkout asks where a repository\'s sessions start', async () => {
     const f = fake({ stdout: JSON.stringify({ cwd: '/code/globex/app', workspace: '/code/globex', repo: 'globex/app', found: true }) })
     const cli = new MasterCli(f.run, '/lib', 'python3')

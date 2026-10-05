@@ -372,23 +372,47 @@ workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/
 `gh` directly on Windows).
 
 **Where a ticket's session starts** is decided in one place, `skills/master/lib/master/checkout.py`
-(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`): the workspace of the ticket's account
+(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`, plus `partial` and `searched` when it
+was not found and a limit was reached): the workspace of the ticket's account
 (`config.workspace_for`: the account that lists the repository, else the primary; an account's own
-`workspace`, else the top-level one; `MASTER_WORKSPACE` replaces them all), scanned for a checkout of
-the repository (`scan`: the workspace, its sub-folders, and the sub-folders of those that are not
-checkouts; a `.git` folder whose `origin`, read with `config.origin_repo`, is the repository, without
-case; hidden folders, linked worktrees and links leading out of the workspace are skipped; at most
-`MAX_FOLDERS` = 200 folders; a scan is remembered for 60 s in the process). Found: `cwd` is the
-checkout and the ASSIGN prompt says the folder is the repository; else `cwd` is the workspace and the
-prompt is the old one. Every path goes through it: `rules._assign` (master's proposals and
-`master draft-assign`, which also prints `workspace`, `found`, `checkoutOf` and takes `--cwd` for a
-folder the user chose), `master add` without `--cwd`, `master spawn` for a proposal without a folder,
-and `master checkout <owner/name>` (the app's PR review: `AssignRequest.cwdRepo`, resolved in main by
-`inRepoFolder` in `main/assign.ts`). The app never scans: the Start dialog (`AssignDialog.tsx`,
-`shared/startFolder.ts`) shows the draft's answer, looks a proposal's ticket up again (`adoptFresh`),
-and **Choose folder…** asks for a draft with `--cwd`; main drops a folder sent by a browser
-(`localFolder` in `main/remoteGuards.ts`). Which account the session runs as is not part of this:
+`workspace`, blank counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all).
+First the folder named after the repository (`_named`: one directory read, no scan). Else `scan`:
+the workspace, its sub-folders, and the sub-folders of the plain ones; a `.git` folder whose
+`origin` is the repository, without case. The origin is read from `.git/config` (`_config_origin`,
+no process); `config.origin_repo` (git, with its insteadOf rewrites) is asked only for an origin the
+file does not spell out as a full URL, at most `MAX_GIT_CALLS` = 20 times. Hidden folders and links
+leading out of the workspace are skipped, a linked worktree (`.git` file) is neither picked nor
+looked into, and at most `MAX_FOLDERS` = 2000 folders get a stat. Several checkouts of one
+repository: `_rank` (named after it, then depth, then path length, then name). A scan is remembered
+for 60 s in the process. It reads the filesystem, so `rules.propose` (through `_assign`) is no
+longer a pure function of the snapshot; the tests' `conftest.py` points `MASTER_WORKSPACE` at an
+empty temp folder so no suite scans a real one.
+Found: `cwd` is the checkout and step 1 of the ASSIGN prompt (`rules.assign_prompt`) says so, naming
+the workspace for an issue filed in one repository and built in another; else `cwd` is the workspace
+and the prompt is the text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
+(master's proposals and `master draft-assign`, which also prints `workspace`, `found`, `checkoutOf`,
+`genericPrompt`, and takes `--cwd` for a folder the user chose), `master checkout <owner/name>`, and
+`checkout.default_cwd` for `master add` without `--cwd` and `master spawn` of a proposal without a
+folder: only an ASSIGN or PRREVIEW for an issue number above 0 is looked up; any other kind, issue 0
+and a resume keep `config.workspace()`.
+The app never decides the folder: the Start dialog (`AssignDialog.tsx`, `shared/startFolder.ts`)
+shows the draft's answer; for master's proposal it looks the ticket up again and `adoptFresh` moves
+to a checkout only from a plain workspace; `swapPrompt` replaces a prompt only while it is one of
+the drafts' own texts; `startChoice` approves master's proposal when nothing differs and otherwise
+carries its model (`SpawnTarget.model`). **Choose folder…** asks for a draft with `--cwd`. A PR
+review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
+`master checkout`. For web callers main drops only the `cwd` argument of `draftAssign`
+(`chosenFolder` in `main/remoteGuards.ts`; from the window it must be an absolute, existing folder);
+an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
+window, as `cwd` always was. Which account the session runs as is not part of this:
 `config.account_for_repo` / `defaultAccount` as before.
+Because sessions now sit in main checkouts, two things that used to compare a session's folder with
+the workspace ask instead whether it is a linked worktree (`main/worktreeInfo.ts`): `pollPrs` takes
+the folder's branch PR only then (`takesBranchPr`), and a link records the folder's branch only then
+(`linkSession`). And `Ops.repos()` (Janitor, `removeWorktree`, the + menu, standup, the Workflow
+view, the web's known folders) lists every account's workspace by the resolver's depth rule
+(`main/checkouts.ts` `workspaceRepos`; one account with its repos directly in the workspace gets
+the list it always got).
 
 master's sweep collects the same way (one read per account), so its proposals see every account's issues and PRs; `author_is_me` and the "last comment is mine" thread rule use each account's own login.
 

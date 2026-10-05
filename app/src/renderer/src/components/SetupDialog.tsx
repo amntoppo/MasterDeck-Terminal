@@ -12,7 +12,7 @@ import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
 
 
 const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
@@ -108,7 +108,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const disconnect = (login: string) => {
     const rest = connected.filter((c) => c.login !== login)
     setConnected(rest)
-    if (primaryLogin === login) setPrimaryLogin(rest[0]?.login ?? '')
+    if (primaryLogin === login) makePrimary(rest[0]?.login ?? '', null)
     if (editing === login && rest[0]) switchTo(rest[0].login, login)
     else setSel(({ [login]: _gone, ...others }) => others)
   }
@@ -199,6 +199,14 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const [workspaces, setWorkspaces] = useState<Record<string, string>>(() => workspacesFromConfig(cfg.accounts))
   const [pickingFor, setPickingFor] = useState<string | null>(null)
   const setWorkspaceOf = (login: string, p: string) => setWorkspaces((w) => ({ ...w, [login]: p }))
+  /** Another primary: the Workspace field is the primary's, so the two accounts' folders swap (none is dropped). */
+  const makePrimary = (to: string, from: string | null) => {
+    setPrimaryLogin(to)
+    if (!to) return
+    const next = swapPrimaryWorkspace(workspace, workspaces, from, to)
+    setWorkspace(next.workspace)
+    setWorkspaces(next.workspaces)
+  }
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
   const [notify, setNotify] = useState(state.settings.notifyNeedsYou)
 
@@ -455,7 +463,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                           </label>
                           {c && connected.length > 1 && (
                             <label className="mpick-row">
-                              <input type="radio" name="primary-account" checked={primaryLogin === a.login} onChange={() => setPrimaryLogin(a.login)} /> Primary
+                              <input type="radio" name="primary-account" checked={primaryLogin === a.login} onChange={() => makePrimary(a.login, primaryLogin || null)} /> Primary
                             </label>
                           )}
                         </div>

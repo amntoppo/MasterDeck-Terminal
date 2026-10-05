@@ -13,6 +13,8 @@ export interface StartFolder {
   found?: boolean
   /** owner/name of the ticket's repository. */
   checkoutOf?: string
+  /** Not found, and the search stopped at a limit after this many folders: there may be one further on. */
+  searched?: number
 }
 
 export function folderOf(d: DraftAssign): StartFolder {
@@ -21,29 +23,60 @@ export function folderOf(d: DraftAssign): StartFolder {
     ...(d.workspace ? { workspace: d.workspace } : {}),
     ...(typeof d.found === 'boolean' ? { found: d.found } : {}),
     ...(d.checkoutOf ? { checkoutOf: d.checkoutOf } : {}),
+    ...(d.partial && typeof d.searched === 'number' ? { searched: d.searched } : {}),
   }
 }
 
 /**
  * What to say about the folder: `found` (the repository's checkout), `missing` (no checkout in the
- * workspace: say so, the session still starts there), `chosen` / `chosen-found` (the user's own
+ * workspace: say so, the session still starts there; `missing-partial` when the search was cut
+ * short), `chosen` / `chosen-found` (the user's own
  * pick), `plain` (nothing known: a proposal's folder, an older CLI).
  */
-export type FolderKind = 'found' | 'missing' | 'chosen' | 'chosen-found' | 'plain'
+export type FolderKind = 'found' | 'missing' | 'missing-partial' | 'chosen' | 'chosen-found' | 'plain'
 
 export function folderKind(f: StartFolder, chosen: boolean): FolderKind {
   if (chosen) return f.found && f.checkoutOf ? 'chosen-found' : 'chosen'
   if (!f.checkoutOf || typeof f.found !== 'boolean') return 'plain'
-  return f.found ? 'found' : 'missing'
+  return f.found ? 'found' : f.searched ? 'missing-partial' : 'missing'
 }
+
+const bare = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 
 /**
  * A draft made from master's proposal carries only the proposal's folder; `fresh` is the same ticket
- * looked up now. A checkout that exists now wins (the proposal may be older than the clone, or than
- * this lookup); without one the proposal's folder stays, and is called missing only when it is the
- * workspace that was looked in.
+ * looked up now. A checkout that exists now replaces the proposal's folder only when that folder is
+ * a plain workspace (the one the resolver looked in, or the config's `top` one: the proposal is
+ * older than the clone, or than per-account workspaces). Any other folder was chosen on purpose
+ * (`master add --cwd`) and stays. Without a checkout the proposal's folder stays too, and is called
+ * missing only when it is the workspace that was looked in.
  */
-export function adoptFresh(proposalCwd: string, fresh: DraftAssign): StartFolder {
-  if (fresh.found || fresh.cwd === proposalCwd) return folderOf(fresh)
-  return { cwd: proposalCwd }
+export function adoptFresh(proposalCwd: string, fresh: DraftAssign, top: string): StartFolder {
+  const p = bare(proposalCwd)
+  if (bare(fresh.cwd) === p) return folderOf(fresh)
+  const isWorkspace = (!!fresh.workspace && bare(fresh.workspace) === p) || (!!top && bare(top) === p)
+  return fresh.found && isWorkspace ? folderOf(fresh) : { cwd: proposalCwd }
+}
+
+/**
+ * The system prompt after a new draft arrived (another folder): `next` replaces the current text
+ * only while that is one MasterDeck wrote itself (`known`: the prompts of the drafts so far and
+ * their `genericPrompt`). A prompt the user edited, or one master wrote by hand, stays.
+ */
+export function swapPrompt(current: string, known: string[], next: string): string {
+  return known.includes(current) ? next : current
+}
+
+/**
+ * What Start sends. Nothing differs from the draft: `edited` false, so master's own proposal is
+ * approved as it is (no model: a model makes a new proposal). Anything differs: a new proposal,
+ * which keeps the model master's proposal named unless one was picked in the dialog.
+ */
+export function startChoice(
+  d: DraftAssign,
+  now: { name: string; prompt: string; cwd: string; model: string; override: boolean },
+  proposalModel: string | undefined,
+): { edited: boolean; model: string | undefined } {
+  const unchanged = now.name === d.name && now.prompt === d.prompt.trim() && now.cwd === d.cwd && !now.model && !now.override
+  return unchanged ? { edited: false, model: undefined } : { edited: true, model: now.model || proposalModel || undefined }
 }

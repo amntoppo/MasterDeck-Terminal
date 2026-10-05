@@ -267,15 +267,31 @@ fixes it, and move the item here to "Recently done".
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
   checkout found" and starts in the workspace as before. Approach: when the workspace has a `.git`
   folder, also look at its parent's direct sub-folders.
-- **P3 · An issue tracked in one repository and built in another.** With a tracker repository that
-  is cloned in the workspace, the session starts in the tracker's checkout and the prompt calls it
-  the issue's repository (it does tell the session to say so and ask when the work belongs
-  elsewhere). Approach: a per-repository "code lives in" setting, or look at the issue's linked PRs.
+- **P3 · An issue tracked in one repository and built in another.** With the tracker cloned, the
+  session starts in the tracker's checkout; the prompt tells it to use the other repository under
+  the workspace (the workspace's CLAUDE.md may say which), without asking. Better: a per-repository
+  "code lives in" setting, or the issue's linked PRs, so it starts in the right checkout.
 - **P3 · Picking another account in the Start dialog keeps the folder** of the ticket's own
   account's workspace. Decide whether the picked account's workspace should be looked in instead.
 - **P3 · The scan is remembered per CLI process only** (60 s): each Start dialog and each sweep
-  scans once. If a large workspace makes that slow, keep the map in a file under `master_home()`
+  scans once (a stat per folder, a small file read per checkout; the folder named after the
+  repository is found without a scan). If a large workspace makes that slow, keep the map in a file under `master_home()`
   and re-scan on a miss (`ponytail:` note in `checkout.py`).
+- **P3 · A fork's checkout never matches.** `origin` pointing at `alice/api` (a fork) with
+  `upstream` at `acme/api` is not a checkout of `acme/api` for the resolver. Approach: also read the
+  `upstream` remote, or ask GitHub for the fork's parent once and remember it.
+- **P3 · An SSH alias without a user** (`github-acme:acme/api.git`) is not parsed by the shared
+  origin parser (`config._REMOTE_RE`, the app's `repoFromRemote`), so such a checkout is not found
+  and its sessions get no account from the folder either. Fix both parsers together.
+- **P3 · A PR review's folder follows the PR's repository, its account the card's issue
+  repository** (`cwdRepo` against `defaultAccount`). When they belong to different accounts the
+  session sits in one account's checkout as the other. Decide which one wins.
+- **P3 · A session working on a feature branch in a main checkout** (no worktree, started by hand)
+  no longer gets that branch's PR shown or its branch recorded when it is linked: only PRs it
+  opens itself. That is the price of not misrouting PRs to sessions parked there; if it is missed,
+  let the user mark such a session as owning its checkout's branch.
+- **P3 · `collect.Live.branch_head` still looks for local branches beside the top-level workspace
+  only** (`config.workspace().parent`); another account's workspace falls back to the GitHub API.
 - **P3 · The web app has no Choose folder…** (the native picker is desktop-only, and main drops a
   folder a browser sends). `RepoPicker` plus `knownDirsOnly` could offer the workspace repos there.
 
@@ -382,7 +398,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
-| A workspace per GitHub account, and a ticket's session starts in its repository's checkout: `accounts[].workspace` (Setup → Preferences, one field per other account; the top-level `workspace` stays the primary's), one resolver `skills/master/lib/master/checkout.py` (origin match over the workspace, depth 2, 200 folders, no links out) behind `rules._assign`, `master draft-assign` (`--cwd`, `found`), `master add` / `spawn` without a folder and `master checkout` (PR review, `cwdRepo`); the Start dialog shows the folder, "No checkout of owner/name found in <workspace>", **Choose folder…** and the account | feat/account-workspace | — |
+| A workspace per GitHub account, and a ticket's session starts in its repository's checkout: `accounts[].workspace` (Setup → Preferences, one field per other account; the top-level `workspace` stays the primary's), one resolver `skills/master/lib/master/checkout.py` (origin match over the workspace, depth 2, 200 folders, no links out) behind `rules._assign`, `master draft-assign` (`--cwd`, `found`), `master add` / `spawn` without a folder and `master checkout` (PR review, `cwdRepo`); the Start dialog shows the folder, "No checkout of owner/name found in <workspace>", **Choose folder…** and the account. Review round: the origin is read from `.git/config` (2000 folders, 20 git calls, "only the first N folders were searched"), duplicates ranked, only ASSIGN / PR review of a real issue is looked up, a session in a main checkout no longer takes that branch's PR or branch link (`takesBranchPr`), `Ops.repos()` covers every account's workspace (`main/checkouts.ts`), master's chosen folder, prompt and model survive the Start dialog, Setup swaps workspaces when the primary changes | feat/account-workspace | — |
 | Board repository view (plan K; spec and plan in the backend repo, 2026-10-05): a Board tab with repositories picked in its Repos filter, on an account with a board, shows every issue of them, on a board or not, in Todo / In Dev / PR Raised / Done (`shared/repoView.ts`, `main/repoIssues.ts`, `master repo-issues`), read only while such a tab is on screen, ten repositories of an account per GitHub call and as many calls as needed (at most 1200 cards, 500 KB and 30 repositories in the state, none on screen ever dropped for another; only the Board's Refresh / Retry skips the gh cache; a never-read repository is asked for again every 5 minutes); a picked repository that is never read says why (not selected in Setup, another account's with no board, more than 30 picked, no room) instead of loading; with Select all an unlisted repository is read only under the owner of the account that has it (`repoPickable`, `config.repo_readable`); a chip shows the column of an issue that is also on a board; a session can be started from any card (**Start a session** on the Assign and PR popups) and linked to an issue no board holds (`offBoardOk`); a new ticket from the view goes to the first picked repository with no sprint; the Repos filter shows with one repository in a tab with a board; a tab with no board still only filters and keeps its older defaults; a linked session's PR is a closing reference on the issue, also for an issue no board holds; master is unchanged | the commits of `feat/board-repository-view` (fill in the range once it is merged) | — |
 | Board without a GitHub project (plan J; spec and plan in the backend repo, 2026-10-05): a tab whose account has no board shows its repositories' issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck on every state (`shared/derivedBoard.ts`, `master board` repository read, read-only columns, hint and notes); **Create a GitHub board** makes a real one as that account, on the Mac only (`main/boardCreate.ts`: plan, native confirmation, re-check, columns, links, issues 20 a request, Try again, config last, `sprintless`); empty states say what is empty ("No open issues", "Could not read …", "Nothing selected"); linking a session and New ticket / Create with Claude work without a board; master proposes only that account's own Todo issues | feat/board-without-project (547d483 … 6537700, and the follow-up commit right after it; not merged, not pushed) | — (no protocol change) |
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |

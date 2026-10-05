@@ -84,7 +84,8 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { knownDirsOnly, localFolder, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { inLinkedWorktree } from "./worktreeInfo";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -378,8 +379,15 @@ const sender = new Sender(
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
 );
-const ops = new Ops(run, paths, () => claudeBin, ghRouted, () =>
-  isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+const ops = new Ops(
+  run,
+  paths,
+  () => claudeBin,
+  ghRouted,
+  () =>
+    isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+  // Sessions also start in the other accounts' workspaces: Janitor, Remove and the + menu reach them.
+  () => getConfig().accounts.flatMap((a) => (a.workspace ? [a.workspace] : [])),
 );
 // Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
 const boardFlow = new BoardFlow({
@@ -1151,7 +1159,9 @@ async function linkSession(
     {
       ops: forCard(t.repo, t.number).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
-      branch: (dir) => branchKey(run, dir),
+      // A main checkout's branch is whatever was left checked out there (a new ticket session
+      // starts in one): only a linked worktree's branch is the session's own.
+      branch: async (dir) => (inLinkedWorktree(dir) ? branchKey(run, dir) : ""),
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
       mark: (sid, trigger) => sources.markReached(sid, trigger),
       reload: () => sources.reloadLinks(),
@@ -1695,10 +1705,10 @@ function registerIpc(): void {
     CH.draftAssign,
     (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
       const t = asTicket(issue);
-      // Choosing a folder is the desktop's: a browser's is dropped.
-      return t
-        ? cli.draftAssign(t, title, url, localFolder(isRemote(e), cwd))
-        : { ok: false, message: "bad issue" };
+      if (!t) return { ok: false, message: "bad issue" };
+      // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
+      const dir = chosenFolder(isRemote(e), cwd);
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));

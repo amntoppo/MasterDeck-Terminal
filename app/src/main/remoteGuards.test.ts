@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
-import { remoteSettings, knownDirsOnly, localFolder, MacPanes } from './remoteGuards'
+import { tmpdir } from 'node:os'
+import { remoteSettings, knownDirsOnly, chosenFolder, MacPanes } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
   expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
@@ -12,10 +13,16 @@ it('non-object payload keeps every current setting', () => {
 it('keeps only known dirs, normalising trailing slashes', () => {
   expect(knownDirsOnly(['/etc', '/w/repo/', '/w/other'], ['/w/repo', '/w/other'])).toEqual([resolve('/w/repo'), resolve('/w/other')])
 })
-it('a chosen folder counts only from the Mac\'s own window', () => {
-  expect(localFolder(false, '/code/globex/app')).toBe('/code/globex/app')
-  expect(localFolder(true, '/code/globex/app')).toBeUndefined()
-  for (const bad of [undefined, null, '', 3, ['/x']]) expect(localFolder(false, bad)).toBeUndefined()
+it('a chosen folder counts only from the Mac\'s own window, and must be a folder that is there', () => {
+  expect(chosenFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
+  // A browser's is dropped (not an error: the draft is made without it).
+  expect(chosenFolder(true, tmpdir())).toEqual({ ok: true })
+  expect(chosenFolder(true, 'relative/x')).toEqual({ ok: true })
+  for (const none of [undefined, null, '']) expect(chosenFolder(false, none)).toEqual({ ok: true })
+  expect(chosenFolder(false, 'relative/x')).toEqual({ ok: false, message: 'not a folder on this Mac: relative/x' })
+  expect(chosenFolder(false, `${tmpdir()}/no-such-folder-here`)).toMatchObject({ ok: false })
+  expect(chosenFolder(false, __filename)).toMatchObject({ ok: false })
+  expect(chosenFolder(false, 3)).toEqual({ ok: false, message: 'not a folder on this Mac' })
 })
 
 describe('MacPanes (spec §4 size rule)', () => {

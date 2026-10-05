@@ -86,6 +86,8 @@ export interface SpawnTarget {
   resume?: string;
   /** The GitHub account the session works as (two or more connected). */
   account?: string;
+  /** `claude --model` the proposal names; absent: the default model. */
+  model?: string;
 }
 
 export interface Proposal {
@@ -456,6 +458,11 @@ export interface DraftAssign {
   found?: boolean;
   /** owner/name of the ticket's repository. */
   checkoutOf?: string;
+  /** The prompt as it is without a checkout: a system prompt equal to it (or to `prompt`) is MasterDeck's own text. */
+  genericPrompt?: string;
+  /** Not found, and the search stopped at a limit after `searched` folders. */
+  partial?: boolean;
+  searched?: number;
 }
 
 export interface CliResult {
