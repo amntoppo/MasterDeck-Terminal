@@ -123,7 +123,7 @@ import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { DERIVED_COLUMNS, repoBoardless } from "@shared/derivedBoard";
-import { BoardCreator } from "./boardCreate";
+import { accountGh, BoardCreator } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -330,7 +330,9 @@ const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = ac
 // that account; the confirmation is the Mac's own dialog, built from main's fresh read.
 const boardCreator = new BoardCreator({
   config: getConfig,
-  gh: (login) => forAccount(login).gh,
+  // forAccount answers an unknown login with the primary's runner; here that would create a board
+  // as another account, so a login that is not connected (any more) fails the call instead.
+  gh: accountGh(getConfig, (login) => forAccount(login).gh),
   ghLogins: async () => (await ghAccounts()).accounts,
   confirm: async (message, lines) => {
     if (!win) return false;
@@ -349,12 +351,16 @@ const boardCreator = new BoardCreator({
     sources.loadConfig();
     void sources.refreshGithub(true);
   },
-  // The column the Board shows now becomes the issue's Status on the new board.
-  statusOf: (repo, number) => {
-    const status = latest?.board?.cards.find(
-      (c) => c.derived && sameTicket(c, { repo, number }),
-    )?.status;
-    return DERIVED_COLUMNS.find((c) => c === status) ?? "Todo";
+  // The column the Board shows now becomes the issue's Status on the new board. A copy: once the
+  // board is selected the tab shows the new board, and a Try again must still know these columns.
+  columns: () => {
+    const shown = (latest?.board?.cards ?? [])
+      .filter((c) => c.derived)
+      .map((c) => ({ repo: c.repo, number: c.number, status: c.status }));
+    return (repo, number) => {
+      const status = shown.find((c) => sameTicket(c, { repo, number }))?.status;
+      return DERIVED_COLUMNS.find((c) => c === status) ?? "Todo";
+    };
   },
   // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
   progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),

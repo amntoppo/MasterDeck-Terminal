@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
   addItems, BOARD_ADD_MAX, boardConfigPatch, boardEntry, cleanTitle, confirmLines, CREATE_PROJECT, createStatusField, defaultBoardTitle, gql, issueIdsQuery,
-  lacksProjectScope, LINK_REPO, okId, optionIds, parseField, parsePlan, planQuery, SCOPE_ERROR, scopeFix, setStatuses, STATUS_FIELD, titleTaken, updateStatusField, type BoardPlan,
+  lacksProjectScope, LINK_REPO, okId, optionIds, parseField, parsePlan, planQuery, SCOPE_ERROR, scopeFix, planTotal, setStatuses, STATUS_FIELD, titleTaken, updateStatusField, type BoardPlan,
 } from './boardCreate'
 import type { GhAccount } from './ghAuth'
 
@@ -34,6 +34,15 @@ describe('documents', () => {
     expect(updateStatusField([{ id: 'x', name: 'Backlog' }])).not.toContain('id: "')
     expect(createStatusField()).toContain('createProjectV2Field(input: {projectId: $p, dataType: SINGLE_SELECT, name: "Status", singleSelectOptions: [{name: "Todo"')
   })
+  it('keeps an option that already has the new name (a second run over a renamed field)', () => {
+    const renamed = [{ id: 'o-todo', name: 'Todo' }, { id: 'o-prog', name: 'In Dev' }, { id: 'o-new', name: 'PR Raised' }, { id: 'o-done', name: 'Done' }]
+    expect(updateStatusField(renamed)).toContain('[{id: "o-todo", name: "Todo", color: GRAY, description: ""}, {id: "o-prog", name: "In Dev", color: YELLOW, description: ""}, {id: "o-new", name: "PR Raised", color: BLUE, description: ""}, {id: "o-done", name: "Done", color: GREEN, description: ""}]')
+    // Both the old and the new name are there: the new name's option is the one kept.
+    expect(updateStatusField([{ id: 'o-old', name: 'In Progress' }, { id: 'o-dev', name: 'In Dev' }])).toContain('{id: "o-dev", name: "In Dev"')
+  })
+  it('asks only for the open boards of the owner', () => {
+    expect(planQuery(['acme/tracker'])).toContain('projectsV2(first: 100, query: "is:open") { nodes { number title url closed } }')
+  })
   it('never puts an id it cannot trust into a document', () => {
     expect(okId('PVT_kwDOA-b_c=')).toBe(true)
     for (const bad of ['a"b', 'a\\b', 'a b', '', 'x'.repeat(201), 7, null]) expect(okId(bad)).toBe(false)
@@ -48,8 +57,18 @@ describe('answers', () => {
     const g = gql(JSON.stringify({ data: { a0: { item: { id: 'PVTI_1' } }, a1: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve', path: ['a1'] }, {}] }))
     expect(g.data.a1).toBeNull()
     expect(g.errors).toEqual([{ message: 'Could not resolve', alias: 'a1', type: 'NOT_FOUND' }, { message: 'GitHub error', alias: null, type: null }])
-    expect(gql('gh: not found')).toEqual({ data: {}, errors: [] })
-    expect(gql(JSON.stringify({ data: null }))).toEqual({ data: {}, errors: [] })
+    expect(g.ok).toBe(true) // a partial answer is an answer
+  })
+  it('a call with no data is a failure, never a clean empty answer', () => {
+    const none = [{ message: 'GitHub did not answer', alias: null, type: 'NO_ANSWER' }]
+    expect(gql('gh: not found')).toEqual({ ok: false, data: {}, errors: none })
+    expect(gql('')).toEqual({ ok: false, data: {}, errors: none })
+    expect(gql(JSON.stringify({ data: null }))).toEqual({ ok: false, data: {}, errors: none })
+    expect(gql(JSON.stringify({ data: [] }))).toEqual({ ok: false, data: {}, errors: none })
+    expect(gql('{}')).toEqual({ ok: false, data: {}, errors: none })
+    // GitHub's own reason is kept when it gave one.
+    expect(gql(JSON.stringify({ data: null, errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }] }))).toEqual({ ok: false, data: {}, errors: [{ message: 'API rate limit exceeded', alias: null, type: 'RATE_LIMITED' }] })
+    expect(gql(JSON.stringify({ data: {} }))).toEqual({ ok: true, data: {}, errors: [] })
   })
   it('the plan: owner, repositories with counts, the ones GitHub does not answer for, open boards', () => {
     const out = JSON.stringify({ data: {
@@ -57,10 +76,26 @@ describe('answers', () => {
       r0: { id: 'R_1', nameWithOwner: 'alice/tracker', issues: { totalCount: 26 } }, r1: null,
     } })
     expect(parsePlan(out, ['alice/tracker', 'alice/gone'])).toEqual({
+      ok: true, errors: [], boardsRead: true,
       ownerId: 'U_1', ownerType: 'user', repos: [{ repo: 'alice/tracker', id: 'R_1', open: 26 }], missing: ['alice/gone'],
       existing: [{ number: 3, title: 'Roadmap', url: 'https://github.com/users/alice/projects/3' }],
     })
-    expect(parsePlan('{}', ['acme/tracker'])).toEqual({ ownerId: null, ownerType: 'organization', repos: [], missing: ['acme/tracker'], existing: [] })
+    expect(parsePlan('{}', ['acme/tracker'])).toEqual({ ok: false, errors: [{ message: 'GitHub did not answer', alias: null, type: 'NO_ANSWER' }], boardsRead: false, ownerId: null, ownerType: 'organization', repos: [], missing: ['acme/tracker'], existing: [] })
+  })
+  it('the plan: boards GitHub did not list are not "no boards"', () => {
+    const owner = { __typename: 'Organization', id: 'O_1', login: 'acme' }
+    const r0 = { id: 'R_1', nameWithOwner: 'acme/tracker', issues: { totalCount: 1 } }
+    // A partial error under the owner: the list may be short, so the name check cannot be trusted.
+    const partial = parsePlan(JSON.stringify({ data: { repositoryOwner: { ...owner, projectsV2: null }, r0 }, errors: [{ type: 'INSUFFICIENT_SCOPES', message: 'requires read:project', path: ['repositoryOwner', 'projectsV2'] }] }), ['acme/tracker'])
+    expect(partial).toMatchObject({ ok: true, boardsRead: false, ownerId: 'O_1', existing: [], errors: [{ message: 'requires read:project', alias: 'repositoryOwner', type: 'INSUFFICIENT_SCOPES' }] })
+    expect(parsePlan(JSON.stringify({ data: { repositoryOwner: { ...owner, projectsV2: { nodes: [] } }, r0 }, errors: [{ message: 'timeout', path: ['repositoryOwner', 'projectsV2', 'nodes'] }] }), ['acme/tracker']).boardsRead).toBe(false)
+    expect(parsePlan(JSON.stringify({ data: { repositoryOwner: owner, r0 } }), ['acme/tracker']).boardsRead).toBe(false)
+    // A repository GitHub does not answer for is its own matter: the boards were read.
+    expect(parsePlan(JSON.stringify({ data: { repositoryOwner: { ...owner, projectsV2: { nodes: [] } }, r0, r1: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository', path: ['r1'] }] }), ['acme/tracker', 'acme/gone'])).toMatchObject({ boardsRead: true, missing: ['acme/gone'] })
+  })
+  it('the plan: a count GitHub did not give is unknown, not 0', () => {
+    const out = JSON.stringify({ data: { repositoryOwner: { __typename: 'Organization', id: 'O_1', projectsV2: { nodes: [] } }, r0: { id: 'R_1', issues: null }, r1: { id: 'R_2', issues: { totalCount: 4 } } } })
+    expect(parsePlan(out, ['acme/tracker', 'acme/api']).repos).toEqual([{ repo: 'acme/tracker', id: 'R_1', open: null }, { repo: 'acme/api', id: 'R_2', open: 4 }])
   })
   it('the Status field and its four options', () => {
     const f = parseField({ id: 'F_1', options: [{ id: 'o-todo', name: 'Todo' }, { id: 'o-prog', name: 'In Dev' }, { id: 'o-new', name: 'PR Raised' }, { id: 'o-done', name: 'Done' }, { id: 'bad"', name: 'X' }] })!
@@ -82,6 +117,9 @@ describe('titles', () => {
     expect(cleanTitle('x'.repeat(101))).toBeNull()
     expect(cleanTitle('a\u0007b')).toBeNull()
     expect(cleanTitle(7)).toBeNull()
+    // Characters that reorder or hide text would make the confirmation show another name.
+    for (const c of ['\u202e', '\u202a', '\u2066', '\u2069', '\u200b', '\u200d', '\u200e', '\u200f', '\u2060', '\u061c', '\ufeff', '\u0085', '\u009b']) expect(cleanTitle(`a${c}b`), JSON.stringify(c)).toBeNull()
+    expect(cleanTitle('Tableau été ボード')).toBe('Tableau été ボード')
     const existing = [{ title: 'Roadmap', url: 'u', number: 3 }]
     expect(titleTaken(existing, ' roadmap ')).toEqual(existing[0])
     expect(titleTaken(existing, 'Roadmap 2')).toBeNull()
@@ -109,6 +147,13 @@ describe('config', () => {
     const solo = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [account('alice', 'acme', 'tracker', [], true)] })
     expect((boardConfigPatch(solo, null, entry) as typeof p).accounts[0].projects).toEqual([entry])
   })
+  it('finds the account whatever the case of its login, and writes nothing for one that is not there', () => {
+    const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [account('alice', 'acme', 'tracker', [], true), account('Bob-Work', 'globex', 'app', [])] })
+    const p = boardConfigPatch(c, 'bob-work', entry) as { accounts: { login: string; projects: unknown[] }[] }
+    expect(p.accounts.map((a) => [a.login, a.projects.length])).toEqual([['alice', 0], ['Bob-Work', 1]])
+    // No account took it: null, so the caller reports that nothing was selected.
+    expect(boardConfigPatch(c, 'mallory', entry)).toBeNull()
+  })
   it('the patch for a config with no accounts list', () => {
     expect(boardConfigPatch(parseConfig({ owner: 'acme', issueRepo: 'tracker' }), null, entry)).toEqual({ projects: [entry] })
   })
@@ -127,8 +172,11 @@ describe('the project scope', () => {
   it('scopeFix for the active and for a second account', () => {
     expect(scopeFix('alice', 'alice')).toEqual(['gh auth refresh -h github.com -s project'])
     expect(scopeFix(null, 'alice')).toEqual(['gh auth refresh -h github.com -s project'])
-    expect(scopeFix('bob-work', 'alice')).toEqual(['gh auth switch -u bob-work', 'gh auth refresh -h github.com -s project', 'gh auth switch -u alice'])
-    expect(scopeFix('bob-work', null)).toEqual(['gh auth refresh -h github.com -s project'])
+    expect(scopeFix('bob-work', 'alice')).toEqual(['gh auth switch -h github.com -u bob-work', 'gh auth refresh -h github.com -s project', 'gh auth switch -h github.com -u alice'])
+    expect(scopeFix('Alice', 'alice')).toEqual(['gh auth refresh -h github.com -s project'])
+    // gh's active account is not known: a bare refresh could widen another account's token, so switch first.
+    expect(scopeFix('bob-work', null)).toEqual(['gh auth switch -h github.com -u bob-work', 'gh auth refresh -h github.com -s project'])
+    expect(scopeFix(null, null)).toEqual(['gh auth refresh -h github.com -s project'])
   })
   it("recognises GitHub's scope errors", () => {
     expect(SCOPE_ERROR.test("Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project']")).toBe(true)
@@ -159,5 +207,10 @@ describe('confirmLines', () => {
       'Left out: globex/gone (GitHub did not answer), globex/old (more than 10 repositories)',
     ])
     expect(confirmLines({ ...plan, total: 1 }, 'T')[3]).toBe('1 open issue added to it')
+    // One repository's count is unknown: the total is too.
+    const unknown = { ...plan, total: 3, repos: [{ repo: 'globex/app', id: 'R_1', open: null }, { repo: 'globex/web', id: 'R_2', open: 3 }] }
+    expect(planTotal(unknown)).toBeNull()
+    expect(planTotal(plan)).toBe(26)
+    expect(confirmLines(unknown, 'T')[3]).toBe(`An unknown number of open issues added to it (${BOARD_ADD_MAX} at most)`)
   })
 })
