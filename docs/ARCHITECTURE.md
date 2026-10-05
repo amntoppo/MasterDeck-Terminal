@@ -473,6 +473,7 @@ waits, and writes nothing if accounts appeared meanwhile.
 - GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
   `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
+- Create a GitHub board: `boardCreatePlan(account?)` (a read), `boardCreate({account?, title})`, `boardCreateRetry(account?)` and the event `onBoardCreateProgress` (`board:createProgress`, sent to the Mac's window only). All four are `blocked` in `DECK_ACCESS`, and the handlers refuse a remote caller as well: the confirmation is main's native dialog, and the usual fix (the `project` scope) needs a terminal on the Mac.
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
   distinguishes the two; remote callers skip native dialogs (the web already asked with
@@ -480,7 +481,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   (`knownDirsOnly` for standup), and obey the PTY size rule.
 - `shared/remoteDeck.ts` `DECK_ACCESS` classifies every `DeckApi` member: `remote` (invoke/send
   over the bridge), `event`, `local` (runs in the browser) or `blocked` (account, browser approval,
-  gh accounts and gh login (`ghUser`, `ghAccounts`, `ghOwners`, `onGhLogin`), folder picker, editor,
+  gh accounts and gh login (`ghUser`, `ghAccounts`, `ghOwners`, `onGhLogin`), board creation (`boardCreatePlan`, `boardCreate`, `boardCreateRetry`, `onBoardCreateProgress`), folder picker, editor,
   shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
 

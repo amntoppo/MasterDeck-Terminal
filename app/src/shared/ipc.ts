@@ -1,4 +1,9 @@
 import type { Ticket } from "./ticket";
+import type {
+  BoardCreateResult,
+  BoardPlanResult,
+  BoardProgress,
+} from "./boardCreate";
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { Settings } from "./settings";
@@ -192,6 +197,10 @@ export const CH = {
   tokensByDay: "costs:tokensByDay",
   dismissStopped: "session:dismissStopped",
   boardOpen: "board:open",
+  boardCreatePlan: "board:createPlan",
+  boardCreate: "board:create",
+  boardCreateRetry: "board:createRetry",
+  boardCreateProgress: "board:createProgress",
 } as const;
 
 export interface AssignRequest {
@@ -481,6 +490,13 @@ export interface DeckApi {
     cwd: string | null,
   ): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
+  /** Create a GitHub board (on the Mac only): what would be created for this account (omitted: the only one). Reads GitHub, writes nothing. */
+  boardCreatePlan(account?: string): Promise<BoardPlanResult>;
+  /** Create it, after a confirmation on the Mac; progress arrives through onBoardCreateProgress. */
+  boardCreate(req: { account?: string; title: string }): Promise<BoardCreateResult>;
+  /** Add the issues the last run could not add. */
+  boardCreateRetry(account?: string): Promise<BoardCreateResult>;
+  onBoardCreateProgress(cb: (p: BoardProgress) => void): () => void;
   setFocus(sessionId: string | null): void;
   setVisible(sessionIds: string[]): void;
   openExternal(url: string): void;

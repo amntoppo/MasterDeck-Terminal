@@ -123,6 +123,10 @@ const api: DeckApi = {
   linkSession: (issue, sessionId, cwd) =>
     ipcRenderer.invoke(CH.linkSession, issue, sessionId, cwd),
   setBoardOpen: (open) => ipcRenderer.send(CH.boardOpen, open),
+  boardCreatePlan: (account) => ipcRenderer.invoke(CH.boardCreatePlan, account),
+  boardCreate: (req) => ipcRenderer.invoke(CH.boardCreate, req),
+  boardCreateRetry: (account) => ipcRenderer.invoke(CH.boardCreateRetry, account),
+  onBoardCreateProgress: (cb) => listen(CH.boardCreateProgress, cb),
   setFocus: (id) => ipcRenderer.send(CH.setFocus, id),
   setVisible: (ids) => ipcRenderer.send(CH.setVisible, ids),
   openExternal: (url) => ipcRenderer.send(CH.openExternal, url),

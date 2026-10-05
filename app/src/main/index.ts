@@ -122,7 +122,8 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
-import { repoBoardless } from "@shared/derivedBoard";
+import { DERIVED_COLUMNS, repoBoardless } from "@shared/derivedBoard";
+import { BoardCreator } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -159,7 +160,7 @@ import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
-import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { asTicket, fullRepo, sameTicket, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -324,6 +325,39 @@ const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = ac
   run,
   runEnv: (l) => accountEnv.runEnv(l),
   ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+});
+// "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
+// that account; the confirmation is the Mac's own dialog, built from main's fresh read.
+const boardCreator = new BoardCreator({
+  config: getConfig,
+  gh: (login) => forAccount(login).gh,
+  ghLogins: async () => (await ghAccounts()).accounts,
+  confirm: async (message, lines) => {
+    if (!win) return false;
+    const choice = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Cancel", "Create board"],
+      defaultId: 1,
+      cancelId: 0,
+      message,
+      detail: lines.map((l) => `• ${l}`).join("\n"),
+    });
+    return choice.response === 1;
+  },
+  save: (patch) => cli.configSave(patch),
+  refresh: () => {
+    sources.loadConfig();
+    void sources.refreshGithub(true);
+  },
+  // The column the Board shows now becomes the issue's Status on the new board.
+  statusOf: (repo, number) => {
+    const status = latest?.board?.cards.find(
+      (c) => c.derived && sameTicket(c, { repo, number }),
+    )?.status;
+    return DERIVED_COLUMNS.find((c) => c === status) ?? "Todo";
+  },
+  // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
+  progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),
 });
 const sender = new Sender(
   ptys,
@@ -2507,6 +2541,18 @@ function registerIpc(): void {
       linkSession(issue, sessionId, cwd),
   );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
+  // Create a GitHub board: on the Mac only (DECK_ACCESS blocks them; refused here as well).
+  reg.handle(CH.boardCreatePlan, (e, account: unknown) =>
+    isRemote(e)
+      ? { ok: false, message: "Create the board from MasterDeck on your Mac" }
+      : boardCreator.plan(account),
+  );
+  reg.handle(CH.boardCreate, (e, req: unknown) =>
+    boardCreator.create(req, isRemote(e)),
+  );
+  reg.handle(CH.boardCreateRetry, (e, account: unknown) =>
+    boardCreator.retry(account, isRemote(e)),
+  );
   reg.on(CH.setFocus, (_e, id: string | null) => {
     focused = id;
     sources.setFocus(id);
