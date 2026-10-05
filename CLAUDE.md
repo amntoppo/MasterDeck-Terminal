@@ -267,7 +267,8 @@ buttons; it does not go through macOS window drag regions.
   creates carry `sprintless: true` in the config: their filter drops the sprint part
   (`board.sprintless_query`) and what is mine on them counts as current. GitHub's detection never
   says so: anything that rebuilds a project entry from a detected board must carry the mark over
-  (Setup: `markMade` and `withFound` in `setupAccounts.ts`). Boards without a sprint field that were
+  (Setup: `markMade` and `withFound` in `setupAccounts.ts`), and only while the detected board has
+  no sprint field: once GitHub reports one, the mark is dropped. Boards without a sprint field that were
   picked in Setup are not marked (see TODO).
 - **The shared gh cache treats any GraphQL call with the word `mutation` in an argument as a write**
   (`ghcache.is_read`): never use that word in a read query (a field name, a comment), and every write

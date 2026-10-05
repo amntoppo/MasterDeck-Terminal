@@ -144,3 +144,22 @@ describe('a board MasterDeck created stays sprintless through Setup', () => {
     expect(markMade(globex, [])).toBe(globex)
   })
 })
+
+describe('a created board that got a sprint field on GitHub is no longer sprintless', () => {
+  const made = { ...board, sprintField: '', sprintless: true as const }
+  // GitHub now reports an iteration field on globex/7.
+  const withSprints: DetectAll = { ...globex, owners: [{ ...globex.owners[0], projects: [det({ owner: 'globex', number: 7, title: 'Roadmap', sprintField: 'Sprint' })] }] }
+  it('a chosen board loses the mark and takes the field', () => {
+    const r = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': made } }, withSprints, 'bob-work', {})
+    expect(r.boards['globex/7'].sprintField).toBe('Sprint')
+    expect('sprintless' in r.boards['globex/7']).toBe(false)
+  })
+  it('the detected list is not marked', () => {
+    expect(markMade(withSprints, [made])).toBe(withSprints)
+  })
+  it('still marked while GitHub reports no sprint field', () => {
+    const none: DetectAll = { ...globex, owners: [{ ...globex.owners[0], projects: [det({ owner: 'globex', number: 7, sprintField: '' })] }] }
+    expect(markMade(none, [made]).owners[0].projects[0].sprintless).toBe(true)
+    expect(withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': made } }, none, 'bob-work', {}).boards['globex/7'].sprintless).toBe(true)
+  })
+})

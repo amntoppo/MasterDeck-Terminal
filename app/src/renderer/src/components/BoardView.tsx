@@ -76,6 +76,7 @@ import {
 import { TerminalView } from "./TerminalView";
 import { SessionAccount } from "./AccountBits";
 import type { NewTicket } from "@shared/ipc";
+import { whileBusy } from "@shared/busy";
 
 interface Props {
   state: AppState;
@@ -417,11 +418,8 @@ export function BoardView({
     [b, me, state.users, acct, primary],
   );
 
-  const refresh = async () => {
-    setRefreshing(true);
-    await deck().refresh();
-    setRefreshing(false);
-  };
+  // A refresh that rejects must not leave the tab on "Loading board…".
+  const refresh = () => whileBusy(setRefreshing, () => deck().refresh());
 
   const onCard = (card: BoardCard) => {
     const action = cardAction(card, me, state.sessions);
