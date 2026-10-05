@@ -1164,7 +1164,9 @@ async function linkSession(
       branch: async (dir) => {
         const s = latest?.sessions.find((x) => x.sessionId === sessionId) ?? null;
         const head = await run("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { timeoutMs: 10_000 });
-        return sources.ownsBranch(dir, s, head.stdout.trim() || null, false) ? branchKey(run, dir) : "";
+        // 0: a branch; 1: a detached HEAD; anything else (no repo, a timeout): not known.
+        const now = head.code === 0 ? head.stdout.trim() || undefined : head.code === 1 ? null : undefined;
+        return sources.ownsBranch(dir, s, now, false) ? branchKey(run, dir) : "";
       },
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
       mark: (sid, trigger) => sources.markReached(sid, trigger),

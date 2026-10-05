@@ -566,6 +566,7 @@ function StartFolderLine({
   return (
     <div className={`start-folder${kind === "missing" || kind === "missing-partial" ? " missing" : ""}`}>
       <span>
+        <span className="why">
         {kind === "missing-partial" ? (
           <>
             No checkout of {folder.checkoutOf} found — only the first{" "}
@@ -595,6 +596,7 @@ function StartFolderLine({
         ) : (
           <>Starts in {dir}.</>
         )}
+        </span>
         {account && (
           <>
             {" "}

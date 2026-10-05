@@ -11,7 +11,7 @@ export class ParkedStore {
 
   constructor(private file: string) {}
 
-  get(s: { key: string; name: string }): Parked | null {
+  get(s: { key: string; name: string; cwd: string; startedAt: number }): Parked | null {
     let m: number
     try {
       m = statSync(this.file).mtimeMs

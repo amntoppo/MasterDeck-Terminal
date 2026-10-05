@@ -176,6 +176,9 @@ import {
 } from "@shared/worktrees";
 import { inLinkedWorktree, linkedWorktree } from "./worktreeInfo";
 import { ownsFolderBranch, type Parked } from "@shared/parked";
+
+/** What a parked record is looked up by (a Session has all of it). */
+type ParkedKey = { key: string; name: string; cwd: string; startedAt: number };
 import { expandHome } from "./checkouts";
 import type { DeckHooks } from "./deckHooks";
 import {
@@ -621,10 +624,10 @@ export class Sources {
   }
 
   /** The sessions MasterDeck parked in a checkout (`parked-sessions.json`). */
-  setParked(fn: (s: { key: string; name: string }) => Parked | null): void {
+  setParked(fn: (s: ParkedKey) => Parked | null): void {
     this.parkedOf = fn;
   }
-  private parkedOf: ((s: { key: string; name: string }) => Parked | null) | null =
+  private parkedOf: ((s: ParkedKey) => Parked | null) | null =
     null;
 
   /** master's workspace and every account's own: shared by all sessions. */
@@ -632,7 +635,7 @@ export class Sources {
     return [
       this.paths.masterWorkspace,
       ...getConfig().accounts.flatMap((a) =>
-        a.workspace ? [expandHome(a.workspace)] : [],
+        a.workspace?.trim() ? [expandHome(a.workspace.trim())] : [],
       ),
     ].map((w) => resolve(w));
   }
@@ -643,8 +646,9 @@ export class Sources {
    */
   ownsBranch(
     dir: string,
-    s: { key: string; name: string } | null,
-    branch: string | null,
+    s: ParkedKey | null,
+    /** null: a detached HEAD; undefined: not known (git failed). */
+    branch: string | null | undefined,
     /** False for a ticket link: linking in a workspace records its branch, as it always did. */
     workspacesShared = true,
   ): boolean {
@@ -660,8 +664,8 @@ export class Sources {
   /** The folder whose branch PR the session takes; undefined: none. */
   private branchDir(
     dir: string | undefined,
-    s: { key: string; name: string } | null,
-    branch: string | null,
+    s: ParkedKey | null,
+    branch: string | null | undefined,
   ): string | undefined {
     return dir && this.ownsBranch(dir, s, branch) ? dir : undefined;
   }
@@ -1647,7 +1651,8 @@ export class Sources {
           await this.pollPrs(
             key,
             this.prUrlsFor(id, key),
-            this.branchDir(dir, s ?? null, this.git[id]?.branch ?? null),
+            // No git status for the folder: the branch is not known (never null, which is a detached HEAD).
+            this.branchDir(dir, s ?? null, this.git[id] ? this.git[id].branch : undefined),
           );
         }
       }

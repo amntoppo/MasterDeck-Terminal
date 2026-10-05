@@ -227,8 +227,9 @@ buttons; it does not go through macOS window drag regions.
   records it (`parked-sessions.json`); before giving a session anything that belongs to "the branch
   of its folder" (a PR, a branch link) ask `Sources.ownsBranch` / `ownsFolderBranch`
   (`shared/parked.ts`). A session with no record (started by hand) owns its folder's branch as
-  always. And `rules.propose` reads the filesystem now (`checkout.resolve`): Python tests get an
-  empty temp `MASTER_WORKSPACE` from `conftest.py`.
+  always. And `rules.propose` reads the filesystem now (`checkout.resolve`), and `master spawn` writes
+  under `MASTERDECK_HOME`: the Python tests' `conftest.py` puts HOME and every such folder in a
+  temp sandbox (`test_isolation.py` guards it). Never run a Python test that bypasses it.
 - **Tickets are (repo, number)** (`shared/ticket.ts`, Python `refs.py`). The primary repo (`issueRepo`)
   keeps bare numbers in every record (ledger, babysit-ticket state, snapshot), so older readers still
   work; other repos add a `repo` field. Compare with `ticketKey`/`sameTicket`, never `.number` alone.
@@ -333,8 +334,8 @@ buttons; it does not go through macOS window drag regions.
   review sessions; the Start dialog says where the session starts, says plainly when no checkout was
   found (and when the search was cut short), and has **Choose folder…**. A session MasterDeck parks
   in a main checkout does not take the branch it found there (`parked-sessions.json`), and
-  `Ops.repos()` covers every account's workspace. Checked: the Python suite (412), typecheck,
-  vitest (1357 passed, 3 skipped), the real CLI against a temp config and temp checkouts, and the
+  `Ops.repos()` covers every account's workspace. Checked: the Python suite (416), typecheck,
+  vitest (1360 passed, 3 skipped), the real CLI against a temp config and temp checkouts, and the
   isolated app with a temp HOME (Setup with one and two accounts, save and reopen, switching the
   primary; the Start dialog's found, not-found and cut-short lines; the not-found line at 390 px in
   the web preview). Not checked: the native folder picker behind **Choose folder…**, pressing

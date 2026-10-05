@@ -228,8 +228,11 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
     if park:
         try:
             key = bg_id(out) or f"name:{park['name']}"
+            # `at`: when it started, so a record kept by name is not taken for a later session of that name.
+            rec = {**park, "at": now}
             merge_json(config.masterdeck_home() / "parked-sessions.json",
-                       lambda d: dict(list({**(d if isinstance(d, dict) else {}), key: park}.items())[-PARKED_KEEP:]))
+                       lambda d: dict(list({**(d if isinstance(d, dict) else {}), key: rec}.items())[-PARKED_KEEP:]),
+                       replace_broken=True)
         except OSError:
             pass  # the session then counts as started by hand
     if resume:
@@ -251,17 +254,21 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
     return ledger.transition(led, pid, "sent", now=now, note=out.strip()[:200])
 
 
-def merge_json(path: Path, change) -> None:
+def merge_json(path: Path, change, replace_broken: bool = False) -> None:
     """Read `path`, apply `change`, and replace it atomically (temp file + rename). A missing file is
     created (`change(None)`); one that is there but cannot be read or parsed is left untouched (it may
-    be half-written, or not ours to overwrite). MasterDeck writes the same files the same way."""
+    be half-written, or not ours to overwrite). MasterDeck writes the same files the same way.
+    `replace_broken`: for a file only `master` writes, one that cannot be parsed is started afresh
+    (left alone, it would switch what it records off for good, without a word)."""
     cur = None
     if path.exists():
         try:
             cur = json.loads(path.read_text())
         except (OSError, ValueError) as e:
-            print(f"master: {path.name} is unreadable ({e}); not updated", file=sys.stderr)
-            return
+            if not (replace_broken and isinstance(e, ValueError)):
+                print(f"master: {path.name} is unreadable ({e}); not updated", file=sys.stderr)
+                return
+            print(f"master: {path.name} could not be parsed ({e}); started afresh", file=sys.stderr)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(change(cur)))

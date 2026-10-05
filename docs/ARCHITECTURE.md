@@ -385,8 +385,9 @@ leading out of the workspace are skipped, a linked worktree (`.git` file) is nei
 looked into, and at most `MAX_FOLDERS` = 2000 folders get a stat. Several checkouts of one
 repository: `_rank` (named after it, then depth, then path length, then name). A scan is remembered
 for 60 s in the process. It reads the filesystem, so `rules.propose` (through `_assign`) is no
-longer a pure function of the snapshot; the tests' `conftest.py` points `MASTER_WORKSPACE` at an
-empty temp folder so no suite scans a real one.
+longer a pure function of the snapshot. The tests' `conftest.py` points HOME, `MASTERDECK_HOME`,
+`MASTER_HOME` and `MASTER_WORKSPACE` into one temp sandbox before anything is imported and again
+before every test, and fails a test that leaves a path in the real home (`test_isolation.py`).
 Found: `cwd` is the checkout and step 1 of the ASSIGN prompt (`rules.assign_prompt`) says so, naming
 the workspace for an issue filed in one repository and built in another; else `cwd` is the workspace
 and the prompt is the text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
@@ -409,12 +410,15 @@ window, as `cwd` always was. Which account the session runs as is not part of th
 Because MasterDeck now starts sessions in main checkouts, `master spawn` records each new ASSIGN or
 PRREVIEW session it starts in a folder that is not a workspace (`checkout.parked`, written to
 `$MASTERDECK_HOME/parked-sessions.json`: `{ <bg id, or "name:<session name>"> : {dir, branch,
-review, name} }`, the branch read from `.git/HEAD` before the start, the last 500 kept). The app
+review, name, at} }`, the branch read from `.git/HEAD` before the start, the last 500 kept; a file
+that cannot be parsed is started afresh). The app
 only reads it (`main/parked.ts` `ParkedStore`) and decides with one pure function,
 `ownsFolderBranch` (`shared/parked.ts`): never in a workspace (master's or an account's); a session
-with no record, yes, as always; a parked one not while it is in a main checkout on the parked
-branch, yes once it is in a linked worktree (`inLinkedWorktree`) or on another branch; a review
-never. Two call sites ask it through `Sources.ownsBranch`: `pollDetails` → `pollPrs` (the folder's
+with no record, yes, as always; a review never; a parked one yes in a linked worktree
+(`inLinkedWorktree`), and in a main checkout only inside the folder it was parked in, with a branch
+that is known (undefined = git failed, kept apart from null = detached) and is not the parked one.
+A record kept by name (`parkedFor`) counts only for the session that started in that folder within
+ten minutes of its `at`. Two call sites ask it through `Sources.ownsBranch`: `pollDetails` → `pollPrs` (the folder's
 branch PR, `gh pr view` in the folder) and `linkSession`'s `branch` (the link's `branchKey`; there
 a workspace is not exempt, as before). Sessions started by hand or before this version have no
 record and behave as they did.

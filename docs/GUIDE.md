@@ -104,8 +104,9 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   found there (whatever was left checked out, with its open PR) is not its own. MasterDeck
   remembers that branch ("parked on") and does not give the session its PR, or record it in the
   ticket link, while the session still sits in a main checkout on that same branch. As soon as it
-  works in a git worktree, or the checkout is on another branch (the session switched or made its
-  own), the usual rules apply. A PR review session never takes the folder's branch PR. PRs a
+  works in a git worktree, or that same checkout is on another branch (the session switched or
+  made its own), the usual rules apply. In any other repository's main checkout (the prompt may
+  send it on to one), or while the branch cannot be read, it is given nothing. A PR review session never takes the folder's branch PR. PRs a
   session opens itself count wherever it works. No session takes the branch PR of a workspace
   folder (the primary's or another account's).
 - **Link session…:** links a session that already exists instead. Type its name, background id or

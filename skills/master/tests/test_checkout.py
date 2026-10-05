@@ -518,7 +518,16 @@ class ParkedTest(Base):
     def test_a_ticket_session_started_in_a_checkout_is_recorded_by_its_bg_id(self):
         self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"})
         self.assertEqual(self.parked(), {"4f2a9c1e": {"dir": str(self.api), "branch": "feat/someone-elses", "review": False,
-                                                      "name": "api-7-x"}})
+                                                      "name": "api-7-x", "at": "2026-09-24T10:00:01Z"}})
+
+    def test_a_file_that_cannot_be_parsed_is_replaced_not_left_to_switch_the_record_off(self):
+        self.md.mkdir(parents=True, exist_ok=True)
+        (self.md / "parked-sessions.json").write_text("{ half a rec")
+        self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"})
+        self.assertEqual(list(self.parked()), ["4f2a9c1e"])
+        (self.md / "parked-sessions.json").write_text("[1, 2]")  # valid JSON of the wrong shape
+        self.start("ASSIGN", {"name": "api-8-x", "prompt": "go"}, out="backgrounded · 0badc0de\n", n=8)
+        self.assertEqual(list(self.parked()), ["0badc0de"])
 
     def test_a_review_session_is_marked_and_a_second_start_keeps_the_first(self):
         self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"})

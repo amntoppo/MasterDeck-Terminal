@@ -312,7 +312,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dialog .meta.error { color: var(--red); }
 .dialog .start-folder { display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 12px; margin: 8px 0 2px; }
 .dialog .start-folder > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.dialog .start-folder.missing > span { color: var(--amber); }
+.dialog .start-folder.missing .why { color: var(--amber); }
 .dialog .start-folder .link-btn { flex: none; font-size: 12px; }
 
 /* Board filters */
