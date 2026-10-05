@@ -1,4 +1,5 @@
-import { resolve } from 'node:path'
+import { statSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 
 /**
  * A remote save merges over the full current settings (a malformed payload changes nothing) and never changes
@@ -13,6 +14,23 @@ export function remoteSettings(patch: unknown, current: object): Record<string, 
 export function knownDirsOnly(dirs: string[], known: Iterable<string>): string[] {
   const ok = new Set([...known].map((d) => resolve(d)))
   return dirs.map((d) => resolve(d)).filter((d) => ok.has(d))
+}
+
+/**
+ * The folder a draft is asked for (the Start dialog's Choose folder…). From a browser it is dropped
+ * and the draft is made without it: choosing a folder on the Mac is the desktop's. From the Mac's
+ * own window it must be an absolute path to a folder that is there.
+ */
+export function chosenFolder(remote: boolean, cwd: unknown): { ok: true; cwd?: string } | { ok: false; message: string } {
+  if (remote || cwd === undefined || cwd === null || cwd === '') return { ok: true }
+  if (typeof cwd !== 'string') return { ok: false, message: 'not a folder on this Mac' }
+  let dir = false
+  try {
+    dir = isAbsolute(cwd) && statSync(cwd).isDirectory()
+  } catch {
+    dir = false
+  }
+  return dir ? { ok: true, cwd } : { ok: false, message: `not a folder on this Mac: ${cwd}` }
 }
 
 /**

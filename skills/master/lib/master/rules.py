@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from . import config, join, refs
+from . import checkout, config, join, refs
 
 # {n} is the ticket's label: #12 in the primary repo, name#12 in another.
 REPLY = ("When you are done, blocked or have a question, tell master-agent with SendMessage. First line: "
@@ -52,16 +52,26 @@ def _src(prefix: str, repo: "str | None", n: int) -> str:
     return f"{prefix}:{n}" if refs.stored(repo) is None else f"{prefix}:{refs.ref(repo, n)}"
 
 
-def _assign(i: dict) -> dict:
+def assign_prompt(i: dict, where: "dict | None" = None) -> str:
+    """The first message of a ticket's session. `where` (`checkout.resolve`) with a checkout found:
+    step 1 says the folder is a checkout of the issue's repository; otherwise the text is the one
+    it always was (tests pin it against stored copies)."""
     n = i["number"]
     repo = refs.stored(i.get("repo"))
     lab, full = refs.label(repo, n), refs.ref(repo, n)
-    prompt = (
+    worktree = (f"for {lab} (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), "
+                f"so the main checkout stays clean.\n")
+    return (
         f"You own {full} ({i['title']}). {i['url']}\n\n"
         f"Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to {full}):\n"
-        f"1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git "
-        f"worktree there for {lab} (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), "
-        f"so the main checkout stays clean.\n"
+        # The issue may be filed in one repository (a tracker) and built in another: no question
+        # asked, the session goes to the other repository in the same workspace.
+        + (f"1. Read the issue. This folder is a checkout of {where['repo']}, where the issue is filed. If the work "
+           f"belongs in another repository (the CLAUDE.md in {where['workspace']} may say which), use that repository "
+           f"under {where['workspace']} instead; otherwise work in a git worktree here {worktree}"
+           if where and where["found"] else
+           f"1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git "
+           f"worktree there {worktree}")
         + (f"2. Then stop and ask the user for instructions: tell master-agent "
            f"'{lab}: question — ready for instructions on {lab}: <one-line summary of the issue, the repo and "
            f"the worktree/branch you created>', and ask them the same here. Wait for their answer; they will "
@@ -73,7 +83,16 @@ def _assign(i: dict) -> dict:
         + f"3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.\n\n"
         + (REPLY if config.master_enabled() else REPLY_SOLO).format(n=lab)
     )
-    sp = {"name": spawn_name(i), "cwd": str(config.workspace()), "prompt": prompt}
+
+
+def _assign(i: dict, cwd: "str | None" = None) -> dict:
+    """`cwd`: a folder the user chose (the Start dialog); else `checkout.resolve` picks it. Reads the
+    filesystem (the workspace is looked through for the repository's checkout)."""
+    n = i["number"]
+    repo = refs.stored(i.get("repo"))
+    where = checkout.resolve(repo, cwd)
+    prompt = assign_prompt(i, where)
+    sp = {"name": spawn_name(i), "cwd": where["cwd"], "prompt": prompt}
     acct = config.account_for_repo(repo)  # two or more accounts only
     if acct:
         sp["account"] = acct

@@ -86,6 +86,8 @@ export interface SpawnTarget {
   resume?: string;
   /** The GitHub account the session works as (two or more connected). */
   account?: string;
+  /** `claude --model` the proposal names; absent: the default model. */
+  model?: string;
 }
 
 export interface Proposal {
@@ -450,6 +452,17 @@ export interface DraftAssign {
   url: string;
   /** Set when the draft came from an existing ledger proposal rather than `draft-assign`. */
   proposalId: number | null;
+  /** The workspace `master draft-assign` looked in: the ticket's account's. */
+  workspace?: string;
+  /** `cwd` is a checkout of `checkoutOf`; false: none was found and `cwd` is the workspace (or a folder the user chose that is not one). */
+  found?: boolean;
+  /** owner/name of the ticket's repository. */
+  checkoutOf?: string;
+  /** The prompt as it is without a checkout: a system prompt equal to it (or to `prompt`) is MasterDeck's own text. */
+  genericPrompt?: string;
+  /** Not found, and the search stopped at a limit after `searched` folders. */
+  partial?: boolean;
+  searched?: number;
 }
 
 export interface CliResult {

@@ -117,6 +117,8 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
               prompt: s(spawn.prompt) ?? undefined,
               resume: s(spawn.resume) ?? undefined,
               account: /^[A-Za-z0-9-]{1,39}$/.test(s(spawn.account) ?? '') ? s(spawn.account)! : undefined,
+              // The CLI's MODEL_RE: an alias or a full name, never an option.
+              model: /^[A-Za-z0-9][A-Za-z0-9._[\]-]{0,63}$/.test(s(spawn.model) ?? '') ? s(spawn.model)! : undefined,
             }
           : undefined,
       },

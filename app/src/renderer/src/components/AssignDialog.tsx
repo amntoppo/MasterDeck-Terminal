@@ -9,8 +9,10 @@ import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
 import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
+import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { deck } from "../deck";
+import { can } from "../web";
 
 interface Props {
   issue: Issue;
@@ -65,6 +67,34 @@ export function AssignDialog({
   }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Where the session starts. The master CLI picks it (the repository's checkout under its
+  // account's workspace, else that workspace); Choose folder… replaces it.
+  const [folder, setFolder] = useState<StartFolder | null>(null);
+  const [chosen, setChosen] = useState(false);
+  const chosenPath = useRef<string | null>(null);
+  // The prompts MasterDeck's drafts wrote: a new draft replaces the system prompt only while it
+  // is one of them (never one the user edited, or one master wrote by hand in its proposal).
+  const generic = useRef<string[]>([]);
+  const learn = (d: DraftAssign) => {
+    generic.current.push(d.prompt, ...(d.genericPrompt ? [d.genericPrompt] : []));
+  };
+  const swapPrompt = (d: DraftAssign) => {
+    const known = [...generic.current];
+    learn(d);
+    setSystem((cur) => swapped(cur, known, d.prompt));
+  };
+  const choose = async () => {
+    const p = await deck().pickFolder(folder?.cwd);
+    if (!p) return;
+    chosenPath.current = p;
+    setChosen(true);
+    setFolder((cur) => ({ ...cur, cwd: p, found: undefined }));
+    // The same resolver says whether it is a checkout of the repository, and words the prompt for it.
+    const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
+    if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
+    setFolder(folderOf(r.draft));
+    swapPrompt(r.draft);
+  };
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
   const past = state.pastSessions[ticketKey(issue.repo, issue.number)] ?? [];
   const [resuming, setResuming] = useState<string | null>(null);
@@ -107,6 +137,9 @@ export function AssignDialog({
       setDraft(d);
       setName(d.name);
       setSystem(d.prompt);
+      // A proposal's prompt may be master's own words: only a draft from the CLI is known to be generic.
+      if (d.proposalId === null) learn(d);
+      setFolder(folderOf(d));
       setLoading(false);
       setTimeout(() => instructionsRef.current?.focus(), 0);
     };
@@ -123,7 +156,24 @@ export function AssignDialog({
         url: issue.url,
         proposalId: fromProposal.id,
       });
-      return;
+      // The proposal only has its folder: look the ticket up now, for where it would start today.
+      void deck()
+        .draftAssign(ticketOf(issue), issue.title, issue.url)
+        .then((r) => {
+          if (!alive || !r.ok || chosenPath.current) return;
+          const was = sp.cwd ?? state.masterWorkspace;
+          const now = adoptFresh(was, r.draft, state.config.workspace || state.masterWorkspace);
+          setFolder(now);
+          // Moved to a checkout: the prompt follows, when it is the generic one. Otherwise the
+          // generic texts are only learnt (for Choose folder… later).
+          if (now.cwd !== was) {
+            if (r.draft.genericPrompt) generic.current.push(r.draft.genericPrompt);
+            swapPrompt(r.draft);
+          } else learn(r.draft);
+        });
+      return () => {
+        alive = false;
+      };
     }
     void deck()
       .draftAssign(ticketOf(issue), issue.title, issue.url)
@@ -161,16 +211,20 @@ export function AssignDialog({
 
   const start = () => {
     if (!draft || !nameOk || !promptOk) return;
-    const unchanged =
-      name === draft.name &&
-      prompt === draft.prompt.trim() &&
-      !model &&
-      !override;
+    const cwd = folder?.cwd || draft.cwd;
+    // Nothing differs from master's proposal: it is approved as it is. Otherwise a new one, which
+    // keeps the model master named unless one was picked here.
+    const choice = startChoice(
+      draft,
+      { name, prompt, cwd, model, override: !!override },
+      draft.proposalId !== null ? pending?.target.spawn?.model : undefined,
+    );
+    const unchanged = !choice.edited;
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
       name,
-      cwd: draft.cwd,
+      cwd,
       prompt,
       proposalId: draft.proposalId,
       edited: !unchanged,
@@ -178,7 +232,7 @@ export function AssignDialog({
         unchanged &&
         draft.proposalId !== null &&
         draft.proposalId === approved?.id,
-      model: model || undefined,
+      model: choice.model,
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
     });
@@ -270,6 +324,13 @@ export function AssignDialog({
           <p className="meta">Drafting…</p>
         ) : draft ? (
           <>
+            {/* Near the top: the dialog scrolls on a short window, and "no checkout found" must be seen. */}
+            <StartFolderLine
+              folder={folder ?? { cwd: draft.cwd }}
+              chosen={chosen}
+              account={isMulti(state.config) ? account : null}
+              onChoose={can("pickFolder") ? choose : undefined}
+            />
             <label>Session name</label>
             <input
               value={name}
@@ -440,9 +501,9 @@ export function AssignDialog({
             <div className="meta" style={{ marginTop: 6 }}>
               {instructions.trim() || (useDesc && desc?.trim())
                 ? "Sent after the system prompt; the session follows these instead of stopping to ask."
-                : "Empty: the session sets up, then asks you for instructions."}{" "}
-              Starts in <code className="mono">{draft.cwd}</code>.
+                : "Empty: the session sets up, then asks you for instructions."}
             </div>
+
             <div className="foot">
               <button
                 className="btn"
@@ -481,6 +542,73 @@ export function AssignDialog({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Where the session starts and as whom. No checkout of the ticket's repository in its account's
+ * workspace is said plainly; it never blocks the start. `onChoose` absent (the web app): no picker.
+ */
+function StartFolderLine({
+  folder,
+  chosen,
+  account,
+  onChoose,
+}: {
+  folder: StartFolder;
+  chosen: boolean;
+  account: string | null;
+  onChoose?: () => void;
+}) {
+  const kind = folderKind(folder, chosen);
+  const dir = <code className="mono">{folder.cwd}</code>;
+  return (
+    <div className={`start-folder${kind === "missing" || kind === "missing-partial" ? " missing" : ""}`}>
+      <span>
+        <span className="why">
+        {kind === "missing-partial" ? (
+          <>
+            No checkout of {folder.checkoutOf} found — only the first{" "}
+            {folder.searched} folders of{" "}
+            <code className="mono">{folder.workspace || folder.cwd}</code> were
+            searched. The session starts in that folder; if the repository is
+            there, choose its folder.
+          </>
+        ) : kind === "missing" ? (
+          <>
+            No checkout of {folder.checkoutOf} found in{" "}
+            <code className="mono">{folder.workspace || folder.cwd}</code>. The
+            session starts in that folder and has to find the repository
+            itself.
+          </>
+        ) : kind === "found" ? (
+          <>
+            Starts in {dir}, your checkout of {folder.checkoutOf}.
+          </>
+        ) : kind === "chosen-found" ? (
+          <>
+            Starts in {dir}, the folder you chose (a checkout of{" "}
+            {folder.checkoutOf}).
+          </>
+        ) : kind === "chosen" ? (
+          <>Starts in {dir}, the folder you chose.</>
+        ) : (
+          <>Starts in {dir}.</>
+        )}
+        </span>
+        {account && (
+          <>
+            {" "}
+            Runs as <AccountBadge login={account} />.
+          </>
+        )}
+      </span>
+      {onChoose && (
+        <button className="link-btn" onClick={onChoose}>
+          Choose folder…
+        </button>
+      )}
     </div>
   );
 }

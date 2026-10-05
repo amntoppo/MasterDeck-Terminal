@@ -79,12 +79,13 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
-import { assignNow as assignAs } from "./assign";
+import { assignNow as assignAs, inRepoFolder } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -282,9 +283,11 @@ function settingsFor(
   );
 }
 /** Start a session for an issue (the Start dialog, a browser, a phone): as its account with two or more. */
-function assignNow(
-  req: AssignRequest,
+async function assignNow(
+  given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  // A PR review names its repository, not a folder: the CLI's resolver picks it.
+  const req = await inRepoFolder(cli, given);
   return assignAs(cli, req, {
     settings: (account) =>
       settingsFor(account, async () =>
@@ -376,8 +379,15 @@ const sender = new Sender(
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
 );
-const ops = new Ops(run, paths, () => claudeBin, ghRouted, () =>
-  isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+const ops = new Ops(
+  run,
+  paths,
+  () => claudeBin,
+  ghRouted,
+  () =>
+    isMulti(getConfig()) ? getConfig().accounts.map((a) => a.email).filter(Boolean) : [],
+  // Sessions also start in the other accounts' workspaces: Janitor, Remove and the + menu reach them.
+  () => getConfig().accounts.flatMap((a) => (a.workspace ? [a.workspace] : [])),
 );
 // Board moves for linked sessions whose workflow keeps the `ticket` built-in (no global switch).
 const boardFlow = new BoardFlow({
@@ -1149,7 +1159,15 @@ async function linkSession(
     {
       ops: forCard(t.repo, t.number).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
-      branch: (dir) => branchKey(run, dir),
+      // A session MasterDeck parked in a main checkout is still on the branch it found there:
+      // not its own, so not recorded. Any other session: as always.
+      branch: async (dir) => {
+        const s = latest?.sessions.find((x) => x.sessionId === sessionId) ?? null;
+        const head = await run("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { timeoutMs: 10_000 });
+        // 0: a branch; 1: a detached HEAD; anything else (no repo, a timeout): not known.
+        const now = head.code === 0 ? head.stdout.trim() || undefined : head.code === 1 ? null : undefined;
+        return sources.ownsBranch(dir, s, now, false) ? branchKey(run, dir) : "";
+      },
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
       mark: (sid, trigger) => sources.markReached(sid, trigger),
       reload: () => sources.reloadLinks(),
@@ -1691,11 +1709,12 @@ function registerIpc(): void {
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (_e, issue: unknown, title?: string, url?: string) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
       const t = asTicket(issue);
-      return t
-        ? cli.draftAssign(t, title, url)
-        : { ok: false, message: "bad issue" };
+      if (!t) return { ok: false, message: "bad issue" };
+      // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
+      const dir = chosenFolder(isRemote(e), cwd);
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
@@ -2970,6 +2989,8 @@ app.whenReady().then(async () => {
     console.error(`browser key unreadable; browsers cannot connect: ${String(e)}`);
   }
   sources.setLinker(linkSession);
+  const parked = new ParkedStore(join(paths.home, "parked-sessions.json"));
+  sources.setParked((s) => parked.get(s));
   sources.statuslineInstalled = isInstalled(
     paths.claudeSettings,
     paths.installedTee,

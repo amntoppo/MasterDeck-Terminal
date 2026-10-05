@@ -20,12 +20,42 @@ export interface Connected {
 
 const EMPTY: AccountSel = { repos: [], allRepos: false, primary: '', boards: {}, allBoards: false }
 
-/** Setup's choices as the config's `accounts`: the primary first, each with its main repo first. */
+/** The other accounts' own workspaces as Setup shows them (the primary's is the config's `workspace`). */
+export function workspacesFromConfig(accounts: AccountConfig[]): Record<string, string> {
+  return Object.fromEntries(accounts.filter((a) => !a.primary && a.workspace).map((a) => [a.login, a.workspace as string]))
+}
+
+/**
+ * Another account becomes the primary. The Workspace field is always the primary's, so the two
+ * swap: the new primary's own workspace goes into the field (it keeps the field's when it had
+ * none), and the old primary keeps the folder it used as its own. `from` null: the old primary
+ * was disconnected, nothing of it is kept.
+ */
+export function swapPrimaryWorkspace(
+  workspace: string,
+  workspaces: Record<string, string>,
+  from: string | null,
+  to: string,
+): { workspace: string; workspaces: Record<string, string> } {
+  if (from === to) return { workspace, workspaces }
+  const own = workspaces[to]?.trim() ?? ''
+  const next = Object.fromEntries(Object.entries(workspaces).filter(([l, w]) => l !== to && l !== from && w.trim()))
+  const top = own || workspace
+  if (from && workspace.trim() && workspace.trim() !== top) next[from] = workspace.trim()
+  return { workspace: top, workspaces: next }
+}
+
+/**
+ * Setup's choices as the config's `accounts`: the primary first, each with its main repo first.
+ * `workspaces`: each other account's own workspace (blank: the config's); the primary never
+ * carries one, the config's `workspace` is its.
+ */
 export function accountsFromSetup(
   connected: Connected[],
   primary: string,
   sel: Record<string, AccountSel>,
   ownerType: (login: string, owner: string) => 'organization' | 'user',
+  workspaces: Record<string, string> = {},
 ): AccountConfig[] {
   return [...connected]
     .sort((a, b) => Number(b.login === primary) - Number(a.login === primary))
@@ -45,6 +75,7 @@ export function accountsFromSetup(
         allRepos: s.allRepos,
         projects: Object.values(s.boards),
         allProjects: s.allBoards,
+        ...(c.login !== primary && workspaces[c.login]?.trim() ? { workspace: workspaces[c.login].trim() } : {}),
       }
     })
 }

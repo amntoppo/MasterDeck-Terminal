@@ -32,8 +32,8 @@ const api: DeckApi = {
   onShowInboxItem: (cb) => listen(CH.showInboxItem, cb),
   approve: (id) => ipcRenderer.invoke(CH.approve, id),
   reject: (id) => ipcRenderer.invoke(CH.reject, id),
-  draftAssign: (issue, title, url) =>
-    ipcRenderer.invoke(CH.draftAssign, issue, title, url),
+  draftAssign: (issue, title, url, cwd) =>
+    ipcRenderer.invoke(CH.draftAssign, issue, title, url, cwd),
   setSprint: (sprint) => ipcRenderer.send(CH.setSprint, sprint),
   prSummary: (url) => ipcRenderer.invoke(CH.prSummary, url),
   issueBody: (ticket) => ipcRenderer.invoke(CH.issueBody, ticket),

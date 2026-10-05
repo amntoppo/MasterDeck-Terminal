@@ -47,7 +47,7 @@ part of the app does.
   master-agent spawns the session. The tab opens by itself when the session appears.
 - **Master pane:** if master-agent is a background session, it is attached here. If it runs
   interactively in another terminal, the pane says so (it can't be attached). If there is none,
-  **Start master** runs `claude --bg -n master-agent "/master"` in the configured workspace.
+  **Start master** runs `claude --bg -n master-agent "/master"` in the configured workspace (the primary account's).
 - **Status line hook:** on first launch the app copies `resources/statusline_tee.py` to
   `~/.claude/masterdeck/` and points `statusLine` in `~/.claude/settings.json` at it. The old
   status line is saved and still runs (its output is shown as before). A settings backup goes to
@@ -71,6 +71,44 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
 - **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
+- **Where it starts:** the line under the Account field (near the top, so it is seen on a short window). MasterDeck looks for a checkout of the
+  ticket's repository in the workspace of the ticket's account (Setup → Preferences): the workspace
+  itself, its sub-folders, and one level below the sub-folders that are plain folders (an `acme/`
+  folder of clones). A checkout is a folder with a `.git` folder whose `origin` is that repository
+  (https or SSH, an SSH host alias, any case); linked worktrees are neither picked nor looked into,
+  hidden folders are skipped, and links leading out of the workspace are not followed. With several
+  checkouts of one repository, the folder named after it wins, then the nearest, then the shortest
+  path. Found: "Starts in `<folder>`, your checkout of acme/api." The system prompt then says the
+  folder is a checkout of the repository the issue is filed in, to work in a git worktree there,
+  and, if the work belongs in another repository (a tracker repository that only holds issues), to
+  use that repository under the workspace instead; it asks nothing. Not found: "No checkout of
+  acme/api found in `<workspace>`." The session then starts in the workspace with the prompt it
+  always had, and has to find the repository itself; you can still press Start. A very large
+  workspace is not searched to the end (2000 folders): the line then says "No checkout of acme/api
+  found — only the first 2000 folders of `<workspace>` were searched." **Choose folder…** (on the
+  Mac, not in the web app) picks any other folder for this session; if it is a checkout of the
+  repository the prompt says so. The prompt changes with the folder only while it is MasterDeck's
+  own text: one you edited, or one master wrote for its proposal, is left alone. With two or more
+  accounts the line also says who the session runs as. A ticket with no repository of its own is
+  looked up as the primary repository.
+  For master's proposal the dialog looks the ticket up again: a checkout that exists now replaces
+  the proposal's folder only when that folder is the plain workspace (a folder master chose on
+  purpose stays), and the new proposal keeps the proposal's model; when nothing differs, master's
+  own proposal is approved as it is. master's ASSIGN proposals and a PR's **Start review** (for the
+  PR's repository) pick the folder the same way, and so does `master add` without `--cwd` for an
+  ASSIGN or a PR review of a real issue; a meeting's session and any other kind start in the
+  workspace, as before.
+- **The PR of the folder's branch:** a session working by hand in a repository's main checkout on a
+  feature branch is shown that branch's PR, and linking it records the branch, as always. A ticket
+  or PR review session that MasterDeck itself started in a checkout is different: the branch it
+  found there (whatever was left checked out, with its open PR) is not its own. MasterDeck
+  remembers that branch ("parked on") and does not give the session its PR, or record it in the
+  ticket link, while the session still sits in a main checkout on that same branch. As soon as it
+  works in a git worktree, or that same checkout is on another branch (the session switched or
+  made its own), the usual rules apply. In any other repository's main checkout (the prompt may
+  send it on to one), or while the branch cannot be read, it is given nothing. A PR review session never takes the folder's branch PR. PRs a
+  session opens itself count wherever it works. No session takes the branch PR of a workspace
+  folder (the primary's or another account's).
 - **Link session…:** links a session that already exists instead. Type its name, background id or
   session id (suggestions appear as you type). MasterDeck records the link itself (no
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
@@ -476,7 +514,7 @@ creation.
 
 ## Session hygiene
 
-- **Janitor (🧹):** every worktree under `<repo>/.claude/worktrees`, classed like the worktree-janitor
+- **Janitor (🧹):** every worktree under `<repo>/.claude/worktrees` (the repos of every account's workspace, also one level down in a folder of clones), classed like the worktree-janitor
   skill: SAFE, PUSHED, DIRTY, UNPUSHED, or IN USE (a live session works there). Remove works for SAFE
   and PUSHED; DIRTY and UNPUSHED need the name typed; IN USE can't be removed. Branches are never
   deleted. Parked sessions can be removed too (their transcripts stay).
@@ -729,6 +767,14 @@ is a `gh` login (`gh auth status` lists them).
   `gh auth login --web` in the dialog (gh then makes that login its active one; MasterDeck says so
   and never switches it). Under Repos & boards, an **Account** menu shows each account's own
   repositories and boards; a repository belongs to one account.
+- **A workspace per account** (Setup → Preferences, two or more accounts): under **Workspace**
+  (the primary account's; master and new shells start there) each other account has its own
+  **Workspace for <login>** field with the same **Choose…** button: the folder that account's
+  repositories are cloned in. A session for one of its tickets starts in the ticket's repository's
+  checkout there (see Where it starts, under the Start dialog). Left empty, the account uses the
+  workspace above, as before. With one account there is only the one Workspace field. Making
+  another account the primary swaps the two folders: each account keeps the one it had. The Janitor,
+  the + menu's repos and standup cover every account's workspace.
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
   accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
@@ -871,7 +917,7 @@ cards is in them.
 | Variable | Default | Use |
 |---|---|---|
 | `MASTER_CONFIG` | `~/.claude/master/config.json` | the shared GitHub/board config (Setup writes it) |
-| `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start |
+| `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start (it also replaces every account's own workspace) |
 | `MASTER_HOME` | `~/.claude/master` | ledger location |
 | `MASTERDECK_HOME` | `~/.claude/masterdeck` | stats, hook, backups |
 | `MASTERDECK_ISOLATED` | unset | `1` with `MASTERDECK_HOME`: Claude settings and skills default under that folder instead of `~/.claude` |

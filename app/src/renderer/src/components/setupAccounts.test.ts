@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, swapPrimaryWorkspace, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -21,6 +21,29 @@ describe('setup accounts', () => {
       { login: 'alice', primary: true, name: 'alice', email: 'a@acme.test', owner: 'acme', ownerType: 'organization', issueRepo: 'api', repos: ['acme/api', 'acme/tracker'], allRepos: false, projects: [], allProjects: false },
       { login: 'bob-work', name: 'Bob', email: 'b@globex.test', owner: 'globex', ownerType: 'user', issueRepo: 'app', repos: ['globex/app'], allRepos: true, projects: [board], allProjects: false },
     ])
+  })
+  it('each other account keeps its own workspace; the primary\'s is the config\'s', () => {
+    const connected = [{ login: 'alice', name: 'A', email: '' }, { login: 'bob-work', name: 'B', email: '' }, { login: 'carol', name: 'C', email: '' }]
+    const list = accountsFromSetup(connected, 'alice', sel, () => 'organization', { alice: '/code/ignored', 'bob-work': ' /code/globex ', carol: '  ' })
+    expect(list.map((a) => a.workspace)).toEqual([undefined, '/code/globex', undefined])
+    expect(list.map((a) => 'workspace' in a)).toEqual([false, true, false])
+    // Read back from a saved config, and saved again unchanged.
+    const saved = parseConfig({ accounts: list }).accounts
+    expect(workspacesFromConfig(saved)).toEqual({ 'bob-work': '/code/globex' })
+    expect(accountsFromSetup(connected, 'alice', sel, () => 'organization', workspacesFromConfig(saved)).map((a) => a.workspace)).toEqual([undefined, '/code/globex', undefined])
+  })
+  it('making another account the primary swaps the workspaces, it drops none', () => {
+    // alice (primary) in /code/acme, bob-work in /code/globex: bob-work becomes the primary.
+    expect(swapPrimaryWorkspace('/code/acme', { 'bob-work': '/code/globex' }, 'alice', 'bob-work')).toEqual({ workspace: '/code/globex', workspaces: { alice: '/code/acme' } })
+    // The new primary had none of its own: both keep the one they used.
+    expect(swapPrimaryWorkspace('/code/acme', { carol: '/code/initech' }, 'alice', 'bob-work')).toEqual({ workspace: '/code/acme', workspaces: { carol: '/code/initech' } })
+    expect(swapPrimaryWorkspace('/code/acme', { 'bob-work': '  ' }, 'alice', 'bob-work')).toEqual({ workspace: '/code/acme', workspaces: {} })
+    // The old primary was disconnected (null): nothing of it is kept.
+    expect(swapPrimaryWorkspace('/code/acme', { 'bob-work': '/code/globex' }, null, 'bob-work')).toEqual({ workspace: '/code/globex', workspaces: {} })
+    expect(swapPrimaryWorkspace('/code/acme', { 'bob-work': '/code/globex' }, 'alice', 'alice')).toEqual({ workspace: '/code/acme', workspaces: { 'bob-work': '/code/globex' } })
+    // And back again.
+    const there = swapPrimaryWorkspace('/code/acme', { 'bob-work': '/code/globex' }, 'alice', 'bob-work')
+    expect(swapPrimaryWorkspace(there.workspace, there.workspaces, 'bob-work', 'alice')).toEqual({ workspace: '/code/acme', workspaces: { 'bob-work': '/code/globex' } })
   })
   it('an account with nothing picked yet has no repos', () => {
     expect(accountsFromSetup([{ login: 'carol', name: 'C', email: 'c@initech.test' }], 'carol', {}, () => 'user')[0]).toMatchObject({ owner: '', issueRepo: '', ownerType: 'organization', repos: [], projects: [] })

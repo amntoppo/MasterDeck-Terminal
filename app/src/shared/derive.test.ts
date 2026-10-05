@@ -64,6 +64,16 @@ describe('parseSnapshot / parseLedger', () => {
     })
     expect(l.proposals.map((p) => p.target.spawn?.account)).toEqual(['bob-work', undefined, undefined])
   })
+  it("keeps a spawn's model; anything that is not a model name is dropped", () => {
+    const l = parseLedger({
+      proposals: [
+        { id: 1, target: { spawn: { name: 'fix-12', model: 'opus[1m]' } } },
+        { id: 2, target: { spawn: { name: 'fix-13', model: '--dangerously-skip-permissions' } } },
+        { id: 3, target: { spawn: { name: 'fix-14' } } },
+      ],
+    })
+    expect(l.proposals.map((p) => (p.target.spawn as { model?: string } | undefined)?.model)).toEqual(['opus[1m]', undefined, undefined])
+  })
   it('survives garbage', () => {
     expect(parseSnapshot(null).issues).toEqual([])
     expect(parseLedger('nope').proposals).toEqual([])

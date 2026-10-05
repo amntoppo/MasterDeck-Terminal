@@ -112,9 +112,13 @@ export class MasterCli {
     }
   }
 
-  /** With title and url (a board card), no snapshot lookup is needed. */
-  async draftAssign(t: Ticket, title?: string, url?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
-    const extra = title && url ? ['--title', title, '--url', url] : []
+  /**
+   * With title and url (a board card), no snapshot lookup is needed. The draft's folder is the
+   * ticket's repository's checkout under its account's workspace, else that workspace (the CLI's
+   * `checkout.resolve`); `cwd`: a folder the user chose instead.
+   */
+  async draftAssign(t: Ticket, title?: string, url?: string, cwd?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
+    const extra = [...(title && url ? ['--title', title, '--url', url] : []), ...(cwd ? ['--cwd', cwd] : [])]
     const r = await this.exec(['draft-assign', String(t.number), ...(t.repo ? ['--repo', t.repo] : []), ...extra], undefined, 120_000)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
@@ -122,6 +126,20 @@ export class MasterCli {
       return { ok: true, draft: { ...d, repo: typeof d.repo === 'string' ? d.repo : null, proposalId: null } }
     } catch {
       return { ok: false, message: 'draft-assign printed invalid JSON' }
+    }
+  }
+
+  /** `master checkout <owner/name>`: where a session for that repository starts (its checkout, else its account's workspace). */
+  async checkout(repo: string): Promise<{ ok: true; cwd: string; workspace: string; found: boolean } | { ok: false; message: string }> {
+    if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(repo)) return { ok: false, message: 'not a repository (owner/name)' }
+    const r = await this.exec(['checkout', repo])
+    if (r.code !== 0) return { ok: false, message: message(r) }
+    try {
+      const d = JSON.parse(r.stdout)
+      if (typeof d?.cwd !== 'string' || !d.cwd) return { ok: false, message: 'checkout printed an unexpected shape' }
+      return { ok: true, cwd: d.cwd, workspace: typeof d.workspace === 'string' ? d.workspace : d.cwd, found: d.found === true }
+    } catch {
+      return { ok: false, message: 'checkout printed invalid JSON' }
     }
   }
 

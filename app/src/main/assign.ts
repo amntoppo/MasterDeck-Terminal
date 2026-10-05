@@ -48,6 +48,20 @@ export async function startAssign(cli: AssignCli, req: AssignRequest, now = Date
   return { ok: false, message: s.message, proposalId: id }
 }
 
+/**
+ * A request that names a repository instead of a folder (a PR review): it starts where the CLI's
+ * one resolver says, that repository's checkout, else its account's workspace. The given folder
+ * stays when the CLI cannot say.
+ */
+export async function inRepoFolder(
+  cli: { checkout(repo: string): Promise<{ ok: true; cwd: string } | { ok: false; message: string }> },
+  req: AssignRequest,
+): Promise<AssignRequest> {
+  if (typeof req.cwdRepo !== 'string' || !/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(req.cwdRepo)) return req
+  const r = await cli.checkout(req.cwdRepo)
+  return r.ok ? { ...req, cwd: r.cwd } : req
+}
+
 type SettingsArgs = { ok: true; args: string[]; account: string | null } | { ok: false; message: string }
 
 export interface AssignAccounts {

@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { SessionWorktree } from '@shared/worktrees'
 
@@ -25,5 +25,20 @@ export function linkedWorktree(path: string): SessionWorktree | null {
     return { path, repo: basename(main), branch }
   } catch {
     return null
+  }
+}
+
+/**
+ * Is `dir` inside a linked git worktree: the nearest `.git` above it (or in it) is a file. False
+ * for a main checkout (its `.git` is a folder), a folder in no repository, and a folder that is gone.
+ */
+export function inLinkedWorktree(dir: string): boolean {
+  if (!dir || !existsSync(dir)) return false
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    try {
+      return statSync(join(d, '.git')).isFile()
+    } catch {
+      if (dirname(d) === d) return false
+    }
   }
 }

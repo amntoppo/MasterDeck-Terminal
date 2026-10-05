@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import config, ledger
+from . import checkout, config, ledger
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
@@ -135,6 +135,16 @@ def copy_of(out: str) -> "tuple[str, str] | None":
     return (m.group(1), m.group(2)) if m and m.group(1) != m.group(2) else None
 
 
+PARKED_KEEP = 500  # parked-sessions.json: the oldest records go past this
+_BG = (re.compile(r"^\s*backgrounded\s*·\s*([0-9a-f]{8})\b", re.I | re.M), re.compile(r"^\s*claude attach ([0-9a-f]{8})\b", re.I | re.M))
+
+
+def bg_id(out: str) -> "str | None":
+    """The new session's background id from `claude --bg` output (the app's bgIdFromOutput)."""
+    t = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", out)
+    return next((m.group(1) for m in (rx.search(t) for rx in _BG) if m), None)
+
+
 def running(session_id: str, runner=subprocess.run) -> "bool | None":
     """Whether `claude agents` shows a live process for this session: by its session id, or its
     background id (the first 8 characters of the id it started with; it survives a resume under a
@@ -167,7 +177,10 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         else:
             ledger.transition(led, pid, "held", now=now, note=note)
 
-    cwd = p["target"]["spawn"].get("cwd") or str(config.workspace())
+    sp0 = p["target"]["spawn"]
+    # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
+    cwd = sp0.get("cwd") or (str(config.workspace()) if sp0.get("resume")
+                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo")))
     if not Path(cwd).is_dir():
         note = f"cwd does not exist: {cwd}"
         hold(note)
@@ -184,6 +197,8 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         hold(note)
         raise SpawnError(f"proposal {pid}: {note}")
     resume = p["target"]["spawn"].get("resume")
+    # Before the session exists: the branch its folder is on now is not its own.
+    park = None if resume else checkout.parked(p["kind"], cwd, p["target"]["spawn"].get("name") or "")
     if resume:
         live = running(resume, runner)
         if live:
@@ -210,6 +225,16 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
     out = r.stdout or ""
+    if park:
+        try:
+            key = bg_id(out) or f"name:{park['name']}"
+            # `at`: when it started, so a record kept by name is not taken for a later session of that name.
+            rec = {**park, "at": now}
+            merge_json(config.masterdeck_home() / "parked-sessions.json",
+                       lambda d: dict(list({**(d if isinstance(d, dict) else {}), key: rec}.items())[-PARKED_KEEP:]),
+                       replace_broken=True)
+        except OSError:
+            pass  # the session then counts as started by hand
     if resume:
         c = copy_of(out)
         if c:
@@ -229,17 +254,21 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
     return ledger.transition(led, pid, "sent", now=now, note=out.strip()[:200])
 
 
-def merge_json(path: Path, change) -> None:
+def merge_json(path: Path, change, replace_broken: bool = False) -> None:
     """Read `path`, apply `change`, and replace it atomically (temp file + rename). A missing file is
     created (`change(None)`); one that is there but cannot be read or parsed is left untouched (it may
-    be half-written, or not ours to overwrite). MasterDeck writes the same files the same way."""
+    be half-written, or not ours to overwrite). MasterDeck writes the same files the same way.
+    `replace_broken`: for a file only `master` writes, one that cannot be parsed is started afresh
+    (left alone, it would switch what it records off for good, without a word)."""
     cur = None
     if path.exists():
         try:
             cur = json.loads(path.read_text())
         except (OSError, ValueError) as e:
-            print(f"master: {path.name} is unreadable ({e}); not updated", file=sys.stderr)
-            return
+            if not (replace_broken and isinstance(e, ValueError)):
+                print(f"master: {path.name} is unreadable ({e}); not updated", file=sys.stderr)
+                return
+            print(f"master: {path.name} could not be parsed ({e}); started afresh", file=sys.stderr)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(change(cur)))

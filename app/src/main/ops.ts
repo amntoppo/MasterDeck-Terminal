@@ -8,6 +8,7 @@ import { isSafeBgId } from '@shared/paneCommand'
 import { issueFromBranch, type StandupCommit } from '@shared/standup'
 import type { CliResult } from '@shared/types'
 import type { JanitorRow, Template } from '@shared/ipc'
+import { workspaceRepos } from './checkouts'
 import type { GhRunner } from './ghc'
 import type { Paths } from './paths'
 import type { Runner } from './run'
@@ -57,6 +58,8 @@ export class Ops {
     private gh: GhRunner = (args, { ttl: _ttl, force: _force, ...opts } = {}) => run('gh', args, opts),
     /** Every connected account's commit email (two or more accounts). */
     private emails: () => string[] = () => [],
+    /** The other accounts' own workspaces (two or more accounts). */
+    private workspaces: () => string[] = () => [],
   ) {}
 
   private git(dir: string, args: string[], timeoutMs = 15_000) {
@@ -64,19 +67,12 @@ export class Ops {
   }
 
   /**
-   * Git repos directly under the workspace root: the workspace folder itself, or, when the
-   * workspace is a repo of its own, the folder it sits in (its sibling repos).
+   * The repos MasterDeck looks after: those of the workspace from Setup (directly under it, or its
+   * siblings when it is a repo itself), its checkouts one level further down, and the checkouts
+   * of every other account's workspace (`workspaceRepos`). Sessions are started in all of these.
    */
   repos(): string[] {
-    const ws = this.paths.masterWorkspace
-    const root = existsSync(join(ws, '.git')) ? dirname(ws) : ws
-    try {
-      return readdirSync(root)
-        .map((d) => join(root, d))
-        .filter((d) => existsSync(join(d, '.git')))
-    } catch {
-      return []
-    }
+    return workspaceRepos(this.paths.masterWorkspace, this.workspaces())
   }
 
   /** My commits since `since` in the given dirs (repos or worktrees), deduplicated by sha. */

@@ -33,6 +33,14 @@ const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', 
 const B = { login: 'bob-work', name: 'Bob', email: 'b@globex.test', owner: 'globex', issueRepo: 'app', repos: ['globex/app', 'acme/api'], projects: [{ owner: 'globex', number: 7, title: 'Globex', columns: ['Backlog', 'Shipped'] }] }
 
 describe('accounts', () => {
+  it('an account may carry its own workspace; without one it has none (the config\'s applies)', () => {
+    const c = parseConfig({ workspace: '/code/acme', accounts: [A, { ...B, workspace: '/code/globex' }] })
+    expect(c.workspace).toBe('/code/acme')
+    expect(c.accounts.map((a) => a.workspace)).toEqual([undefined, '/code/globex'])
+    expect('workspace' in c.accounts[0]).toBe(false)
+    expect(parseConfig({ accounts: [A, { ...B, workspace: 5 }, ] }).accounts[1].workspace).toBeUndefined()
+    expect(parseConfig({ accounts: [A, { ...B, workspace: '  ' }] }).accounts[1].workspace).toBeUndefined()
+  })
   it('a config without accounts is one account mode', () => {
     const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] })
     expect(c.accounts).toEqual([])

@@ -226,6 +226,9 @@ export interface AssignRequest {
   workflow?: string;
   /** Another GitHub account than the issue's default (the Start dialog's Account field). */
   account?: string;
+  /** owner/name: main picks the folder (this repository's checkout, else its account's workspace)
+   * and `cwd` is only the fallback. A PR review names its PR's repository. */
+  cwdRepo?: string;
 }
 
 export interface PtyOpenResult {
@@ -266,10 +269,12 @@ export interface DeckApi {
   onShowInboxItem(cb: (id: string) => void): () => void;
   approve(id: number): Promise<CliResult>;
   reject(id: number): Promise<CliResult>;
+  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app). */
   draftAssign(
     issue: Ticket,
     title?: string,
     url?: string,
+    cwd?: string,
   ): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>;
   setSprint(sprint: string): void;
   /** What earlier sessions on a ticket did (their saved summaries), newest first. */
