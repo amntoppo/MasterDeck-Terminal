@@ -1,0 +1,15 @@
+{
+  "taken_at": "2026-09-25T10:00:00Z",
+  "cards": [
+    {"number": 967, "repo": "acme/tracker", "project": null, "title": "Sample task 1", "url": "https://github.com/acme/tracker/issues/967", "status": null, "prs": [], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null, "onBoards": [{"key": "acme/1", "status": "Dev Done"}]},
+    {"number": 2001, "repo": "acme/tracker", "project": null, "title": "Typo on the pricing page", "url": "https://github.com/acme/tracker/issues/2001", "status": null, "prs": [], "assignees": [], "labels": ["docs"], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 2002, "repo": "acme/tracker", "project": null, "title": "Export a report as CSV", "url": "https://github.com/acme/tracker/issues/2002", "status": null, "prs": [{"url": "https://github.com/acme/tracker/pull/2010", "owner": "acme", "repo": "tracker", "number": 2010, "state": "OPEN", "ci": "success", "unresolved": 1}], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 31, "repo": "acme/api", "project": null, "title": "Paginate the invoices endpoint", "url": "https://github.com/acme/api/issues/31", "status": null, "prs": [{"url": "https://github.com/acme/api/pull/40", "owner": "acme", "repo": "api", "number": 40, "state": "DRAFT", "ci": "pending", "unresolved": 0}], "assignees": [], "labels": ["api"], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 32, "repo": "acme/api", "project": null, "title": "Rate limit the login form", "url": "https://github.com/acme/api/issues/32", "status": null, "prs": [{"url": "https://github.com/acme/api/pull/41", "owner": "acme", "repo": "api", "number": 41, "state": "MERGED", "ci": null, "unresolved": 0}], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 33, "repo": "acme/api", "project": null, "title": "Fix the footer link", "url": "https://github.com/acme/api/issues/33", "status": null, "prs": [], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "CLOSED", "closedAt": "2026-09-20T08:00:00Z"}
+  ],
+  "repos": [
+    {"repo": "acme/tracker", "account": null, "ok": true, "total": 3, "shown": 3},
+    {"repo": "acme/api", "account": null, "ok": true, "total": 412, "shown": 300}
+  ]
+}

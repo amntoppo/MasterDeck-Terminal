@@ -37,12 +37,10 @@ function str(v: unknown): string | null {
 
 const CI = new Set(['success', 'failure', 'pending'])
 
-/** Parse `master board` output. Null for anything that isn't a board. */
-export function parseBoard(raw: unknown): Board | null {
-  const r = obj(raw)
-  if (!Array.isArray(r.cards)) return null
+/** The cards of `master board` or `master repo-issues` output; anything that is not a card is left out. */
+export function parseCards(raw: unknown): BoardCard[] {
   const cards: BoardCard[] = []
-  for (const c of arr(r.cards).map(obj)) {
+  for (const c of arr(raw).map(obj)) {
     if (typeof c.number !== 'number') continue
     const prs: BoardPr[] = []
     for (const p of arr(c.prs).map(obj)) {
@@ -73,8 +71,25 @@ export function parseBoard(raw: unknown): Board | null {
       type: str(c.type),
       // An issue of an account with no board: facts only (its column comes from deriveBoard).
       ...(c.derived === true ? { derived: true as const, state: c.state === 'CLOSED' ? ('CLOSED' as const) : ('OPEN' as const), closedAt: str(c.closedAt) } : {}),
+      // Repository view: the boards that hold the issue (never on a card of `master board`).
+      ...(c.derived === true && onBoards(c.onBoards).length ? { onBoards: onBoards(c.onBoards) } : {}),
     })
   }
+  return cards
+}
+
+function onBoards(v: unknown): { key: string; status: string | null }[] {
+  return arr(v)
+    .map(obj)
+    .filter((x) => typeof x.key === 'string' && x.key.length > 0)
+    .map((x) => ({ key: x.key as string, status: str(x.status) }))
+}
+
+/** Parse `master board` output. Null for anything that isn't a board. */
+export function parseBoard(raw: unknown): Board | null {
+  const r = obj(raw)
+  if (!Array.isArray(r.cards)) return null
+  const cards = parseCards(r.cards)
   const columns = arr(r.columns).filter((x): x is string => typeof x === 'string')
   const projects = arr(r.projects)
     .map(obj)
