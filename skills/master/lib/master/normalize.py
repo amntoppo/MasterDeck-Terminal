@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
-from . import config, refs
+from . import board, config, refs
 
 
 def in_current_sprint(sprint: dict | None, today: date) -> bool:
@@ -30,7 +30,8 @@ def _issue(item: dict, today: date, assigned_to_me: bool) -> dict:
         "title": c.get("title") or item.get("title") or "",
         "status": item.get("status"),
         "sprint": sprint["title"] if sprint else None,
-        "current_sprint": in_current_sprint(sprint, today),
+        # A board with no sprint field has no "current sprint": what is mine on it is current.
+        "current_sprint": in_current_sprint(sprint, today) or config.sprintless(item.get("project")),
         "assigned_to_me": assigned_to_me,
         "url": c.get("url"),
     }
@@ -66,6 +67,29 @@ def issues(mine_items: list, ready_items: list, today: date) -> list:
 # a bare "Closes #12" names an issue in the PR's own repo.
 FULL_REF = re.compile(r"(?<![\w/.-])([A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100})#(\d+)")
 BARE_REF = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)", re.IGNORECASE)
+
+
+def repo_issues(items: list, me: "str | None") -> list:
+    """The open issues assigned to me in the repositories of an account with no board, each with
+    the column GitHub alone gives it (board.derived_status). Never "everything open": an issue
+    assigned to someone else, or to nobody, is not mine to start. Done ones are left out, as the
+    board path leaves done statuses out."""
+    out: dict = {}
+    mine = (me or "").lower()
+    for item in items:
+        c = item.get("content") or {}
+        if not mine or not _ours(item) or item.get("state") != "OPEN":
+            continue
+        if mine not in {a.lower() for a in item.get("assignees") or [] if isinstance(a, str)}:
+            continue
+        status = board.derived_status(item)
+        if status == "Done":
+            continue
+        out.setdefault(refs.key(_repo(item), c["number"]), {
+            "number": c["number"], "repo": _repo(item), "project": None,
+            "title": c.get("title") or "", "status": status, "sprint": None,
+            "current_sprint": True, "assigned_to_me": True, "url": c.get("url"), "derived": True})
+    return sorted(out.values(), key=lambda i: (i["repo"] is not None, (i["repo"] or "").lower(), i["number"]))
 
 
 def issue_ref_in(body: str, pr_repo: "str | None") -> "tuple[str | None, int] | None":

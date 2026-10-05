@@ -41,6 +41,12 @@ def spawn_name(issue: dict) -> str:
     return f"{name}-{issue['number']}-{slug}"[:64].rstrip("-")
 
 
+def _statuses(i: dict) -> dict:
+    """What an issue's status means: its board's; an issue from a repository with no board uses
+    MasterDeck's own columns."""
+    return config.DERIVED_STATUSES if i.get("derived") else config.statuses_for(i.get("project"))
+
+
 def _src(prefix: str, repo: "str | None", n: int) -> str:
     """Dedup source: issue:12 in the primary repo (as before), issue:owner/name#12 elsewhere."""
     return f"{prefix}:{n}" if refs.stored(repo) is None else f"{prefix}:{refs.ref(repo, n)}"
@@ -144,7 +150,7 @@ def propose(prev: "dict | None", cur: dict, now_iso: str) -> list:
 
     if base:
         for i in cur["issues"]:
-            if (i["current_sprint"] and i["status"] in set(config.statuses_for(i.get("project"))["assignable"])
+            if (i["current_sprint"] and i["status"] in set(_statuses(i)["assignable"])
                     and join.owner_of(sess, i["number"], i.get("repo")) is None):
                 out.append(_assign(i))
 
@@ -167,7 +173,7 @@ def propose(prev: "dict | None", cur: dict, now_iso: str) -> list:
             i = issues.get(refs.key(s.get("issue_repo"), s["issue"])) if s["issue"] is not None else None
             if i is None:
                 continue
-            st = config.statuses_for(i.get("project"))
+            st = _statuses(i)
             if (s["status"] == "idle" and s.get("idle_since") and i["status"] == st["inProgress"]
                     and now - parse_ts(s["idle_since"]) >= config.STALE_AFTER
                     and s.get("branch_head") and prev_heads.get(s["session_id"]) == s["branch_head"]):

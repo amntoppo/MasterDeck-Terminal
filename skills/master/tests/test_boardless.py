@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 from unittest import mock
 
-from master import board, cli, collect, config
+from master import board, cli, collect, config, normalize, rules, snapshot
 
 NOW = "2026-09-25T10:00:00Z"
 TODAY = date(2026, 9, 25)
@@ -375,6 +375,98 @@ class SprintlessBoardTest(unittest.TestCase):
         with mock.patch.dict(config.CONFIG, {"projects": ps}), mock.patch.object(collect.Live, "project_items", side_effect=items):
             collect.Live().board_sprint("is:issue sprint:@current")
         self.assertEqual(seen, {"b0": "is:issue sprint:@current", "b1": "is:issue"})
+
+
+class SnapshotTest(unittest.TestCase):
+    ITEMS = [ritem(939), ritem(7), ritem(8, assignees=()), ritem(9, assignees=("bob-work",)),
+             ritem(10, "CLOSED", closed="2026-09-20T08:00:00Z"), ritem(11, assignees=("Alice",), prs={PR + "4": "MERGED"}),
+             ritem(12, assignees=("Alice", "bob-work"), prs={PR + "6": "OPEN"})]
+
+    def source(self, fail=()):
+        from tests.test_snapshot import FakeSource
+
+        class Loose(FakeSource):  # me: alice; session s1 is linked to #939
+            def repo_issues(inner, today):
+                return inner._maybe("repo_issues", read(self.ITEMS))
+
+        return Loose(fail)
+
+    def test_only_my_open_issues_with_their_columns(self):
+        with mock.patch.dict(config.CONFIG, NO_BOARD):
+            s = snapshot.build(self.source(), now_iso=NOW, today=TODAY)
+        # 8: nobody's; 9: someone else's; 10: closed; 11: its PR merged (Done). The login's case does not matter.
+        self.assertEqual([(i["number"], i["status"]) for i in s["issues"]], [(7, "Todo"), (12, "PR Raised"), (939, "In Dev")])
+        self.assertTrue(all(i["derived"] and i["current_sprint"] and i["assigned_to_me"] and i["project"] is None
+                            for i in s["issues"]))
+        self.assertTrue(s["sources"]["board"])
+
+    def test_a_failed_read_is_a_missing_board_source(self):
+        with mock.patch.dict(config.CONFIG, NO_BOARD):
+            s = snapshot.build(self.source(fail={"repo_issues"}), now_iso=NOW, today=TODAY)
+        self.assertEqual((s["issues"], s["sources"]["board"]), ([], False))
+        self.assertEqual(s["errors"], [{"source": "board", "message": "repo_issues exploded"}])
+
+    def test_without_my_login_nothing_is_mine(self):
+        with mock.patch.dict(config.CONFIG, NO_BOARD):
+            s = snapshot.build(self.source(fail={"me"}), now_iso=NOW, today=TODAY)
+        self.assertEqual(s["issues"], [])
+
+    def test_with_a_board_the_repos_are_not_read(self):
+        from tests.test_snapshot import FakeSource
+
+        class Never(FakeSource):
+            def repo_issues(self, today):
+                raise AssertionError("an account with a board reads its board")
+
+        s = snapshot.build(Never(), now_iso=NOW, today=TODAY)
+        self.assertEqual([i["number"] for i in s["issues"]], [939])
+        self.assertNotIn("derived", s["issues"][0])
+
+    def test_a_source_from_before_has_no_repo_read(self):
+        from tests.test_snapshot import FakeSource
+        with mock.patch.dict(config.CONFIG, NO_BOARD):
+            s = snapshot.build(FakeSource(), now_iso=NOW, today=TODAY)
+        self.assertEqual((s["issues"], s["sources"]["board"]), ([], True))
+
+
+def loose(n, status="Todo"):
+    from tests.test_rules import issue
+    return dict(issue(n, status), project=None, derived=True, sprint=None)
+
+
+class RulesTest(unittest.TestCase):
+    def test_assign_only_for_todo_without_an_owner(self):
+        from tests.test_rules import kinds, sess, snap
+        cur = snap(issues=[loose(7), loose(8, "In Dev"), loose(9, "PR Raised"), loose(10)], sessions=[sess("ten", 10)])
+        self.assertEqual(kinds(rules.propose(None, cur, NOW)), [("ASSIGN", 7)])
+
+    def test_the_flag_not_the_name_picks_the_statuses(self):
+        from tests.test_rules import snap
+        # The test config's board has no "Todo": the same issue without the flag is not assignable.
+        self.assertNotIn("Todo", config.STATUSES["assignable"])
+        self.assertEqual(rules.propose(None, snap(issues=[dict(loose(7), derived=False)]), NOW), [])
+        self.assertEqual(rules._statuses(loose(7)), config.DERIVED_STATUSES)
+
+    def test_a_stopped_owner_is_resumed(self):
+        from tests.test_rules import kinds, sess, snap
+        cur = snap(issues=[loose(8, "In Dev")], sessions=[sess("gone", 8, status="dead")])
+        self.assertEqual(kinds(rules.propose(None, cur, NOW)), [("ORPHAN", 8)])
+
+
+class SprintlessIssuesTest(unittest.TestCase):
+    def test_mine_are_current_and_unassigned_ready_ones_are_not_offered(self):
+        from tests.helpers import board_item
+        from tests.test_rules import kinds, snap
+        p9 = {"owner": "acme", "ownerType": "organization", "number": 9, "title": "tracker board", "sprintless": True,
+              "sprintField": "", "columns": list(config.DERIVED_COLUMNS), "statuses": dict(config.DERIVED_STATUSES)}
+        mine = dict(board_item(5, "Todo"), project="acme/9")
+        ready = dict(board_item(6, "Todo", assignees=()), project="acme/9")
+        with mock.patch.dict(config.CONFIG, {"projects": [p9]}):
+            got = normalize.issues([mine], [ready], TODAY)
+            self.assertEqual([(i["number"], i["current_sprint"]) for i in got], [(5, True)])
+            self.assertEqual(kinds(rules.propose(None, snap(issues=got), NOW)), [("ASSIGN", 5)])
+        # A board with sprints: an issue outside the current sprint is not current, as before.
+        self.assertFalse(normalize.issues([dict(board_item(5, "In Dev"), project="acme/1")], [], TODAY)[0]["current_sprint"])
 
 
 if __name__ == "__main__":
