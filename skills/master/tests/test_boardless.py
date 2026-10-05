@@ -130,6 +130,13 @@ class LiveRepoIssuesTest(unittest.TestCase):
     VIEW = {"login": "bob-work", "owner": "globex", "ownerType": "organization", "issueRepo": "app",
             "repos": ["globex/app", "globex/gone"], "projects": []}
 
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        p = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.home.name})
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(self.home.cleanup)
+
     def test_one_call_for_every_repo_then_only_the_ones_with_more_pages(self):
         calls = []
 
@@ -174,6 +181,49 @@ class LiveRepoIssuesTest(unittest.TestCase):
         self.assertEqual(seen[0].count("repository("), 10)
         self.assertEqual(got["skipped"], ["globex/r10", "globex/r11"])
 
+    def _gone_runner(self, calls):
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            calls.append(" ".join(cmd))
+            data = {"r0": {"open": {"totalCount": 0, "pageInfo": {}, "nodes": []}, "closed": {"nodes": []}}}
+            if "r1: repository(" in calls[-1]:
+                data["r1"] = None
+            return json.dumps({"data": data})
+        return fake_run
+
+    def test_a_missing_repo_is_left_out_of_the_query_for_an_hour(self):
+        calls = []
+        env = {"GH_TOKEN": "x"}
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), \
+                mock.patch.object(collect.time, "time", return_value=1000.0):
+            first = collect.Live(self.VIEW, env).repo_issues(TODAY)
+        self.assertIn("r1: repository(", calls[0])
+        self.assertEqual(first["missing"], ["globex/gone"])
+        self.assertTrue((Path(self.home.name) / "missing-repos.json").exists())
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), \
+                mock.patch.object(collect.time, "time", return_value=1000.0 + 3599):
+            second = collect.Live(self.VIEW, env).repo_issues(TODAY)
+        self.assertNotIn("globex/gone", calls[1])
+        self.assertEqual(calls[1].count("repository("), 1)
+        self.assertEqual((second["missing"], second["repos"]), (["globex/gone"], ["globex/app", "globex/gone"]))
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), \
+                mock.patch.object(collect.time, "time", return_value=1000.0 + 3601):
+            collect.Live(self.VIEW, env).repo_issues(TODAY)
+        self.assertEqual(calls[2].count("repository("), 2)  # an hour later: tried again
+
+    def test_when_every_repo_is_remembered_missing_nothing_is_sent(self):
+        (Path(self.home.name) / "missing-repos.json").write_text(json.dumps({"bob-work": {"globex/app": 1000, "globex/gone": 1000}}))
+        with mock.patch.object(collect, "_run", side_effect=AssertionError("no call")), \
+                mock.patch.object(collect.time, "time", return_value=1001.0):
+            got = collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        self.assertEqual((got["items"], got["missing"]), ([], ["globex/app", "globex/gone"]))
+
+    def test_the_only_repo_gone_is_missing_not_an_error(self):
+        view = dict(self.VIEW, repos=["globex/gone"], issueRepo="gone")
+        gone = json.dumps({"data": {"r0": None}, "errors": [{"type": "NOT_FOUND"}]})
+        with mock.patch.object(collect, "_run", return_value=gone):
+            got = collect.Live(view, {}).repo_issues(TODAY)
+        self.assertEqual((got["items"], got["missing"]), ([], ["globex/gone"]))
+
     def test_an_account_gh_has_no_token_for_fails_with_the_reason(self):
         with self.assertRaisesRegex(RuntimeError, "not logged in to bob-work"):
             collect.Live(self.VIEW, None, "gh is not logged in to bob-work").repo_issues(TODAY)
@@ -189,6 +239,9 @@ class RunPartialTest(unittest.TestCase):
                 self.assertIsNone(json.loads(collect._run(["gh", "api", "graphql"], partial=True))["data"]["r1"])
                 with self.assertRaisesRegex(RuntimeError, "Could not resolve"):
                     collect._run(["gh", "api", "graphql"])  # every other read keeps failing on exit 1
+            allgone = json.dumps({"data": {"r0": None}, "errors": [{"type": "NOT_FOUND"}]}).encode()
+            with mock.patch.object(ghcache, "run", return_value=(1, allgone, b"gh: Could not resolve to a Repository")):
+                self.assertIsNone(json.loads(collect._run(["gh", "api", "graphql"], partial=True))["data"]["r0"])
             with mock.patch.object(ghcache, "run", return_value=(1, none, b"gh: API rate limit exceeded")):
                 with self.assertRaisesRegex(RuntimeError, "rate limit"):
                     collect._run(["gh", "api", "graphql"], partial=True)  # no data at all is still an error
@@ -238,6 +291,22 @@ class BoardCommandTest(unittest.TestCase):
         with mock.patch.object(collect.Fixtures, "pr_details", side_effect=AssertionError("no PR is open: no read")):
             code, _b = self.run_board(read([ritem(1), ritem(3, "CLOSED", closed="2026-09-20T08:00:00Z", prs={PR + "4": "MERGED"})]))
         self.assertEqual(code, 0)
+
+    def test_mine_keeps_only_issues_assigned_to_the_account(self):
+        fx = self.fx
+        (fx / "me.txt").write_text("alice")
+        (fx / "repo_issues.json").write_text(json.dumps(read([ritem(1), ritem(2, assignees=("carol",)), ritem(3, assignees=())])))
+        (fx / "board_prs.json").write_text("{}")
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, NO_BOARD), redirect_stdout(buf):
+            cli.main(["board", "--fixtures", str(fx), "--now", NOW, "--mine"])
+        self.assertEqual([c["number"] for c in json.loads(buf.getvalue())["cards"]], [1])
+
+    def test_a_failing_pr_read_is_noted_not_hidden(self):
+        with mock.patch.object(collect.Fixtures, "pr_details", side_effect=RuntimeError("HTTP 401: Bad credentials")):
+            _code, b = self.run_board(read([ritem(2, prs={PR + "5": "DRAFT"})]))
+        self.assertEqual(len(b["cards"]), 1)
+        self.assertEqual(b["notes"], ["Pull request details not read: HTTP 401: Bad credentials"])
 
     def test_a_config_with_a_board_never_reads_repo_issues(self):
         with mock.patch.object(collect.Fixtures, "repo_issues", side_effect=AssertionError("it has a board")):

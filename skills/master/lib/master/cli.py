@@ -315,30 +315,38 @@ def _repo_cards(src, args) -> "tuple[list, dict, dict]":
     """An account with no board: its repositories' issues as board items, the details of their
     PRs, and what was read (for the Board's note)."""
     got = src.repo_issues(_today(args))
+    if args.mine:  # the sprint filter has no meaning without a board; "mine" does
+        me = ((getattr(src, "cfg", None) or {}).get("login") or src.me()).lower()
+        got = dict(got, items=[it for it in got["items"] if me in [a.lower() for a in it.get("assignees") or []]])
     items, shown = board.trim_repo_issues(got["items"], board.done_since(_today(args)))
     details = {u: {"state": st, "ci": None, "unresolved": 0}
                for it in items for u, st in (it.get("pr states") or {}).items()}
+    note = None
     live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
     if live:
         try:
             details.update(src.pr_details(live))
-        except Exception:  # the states are known already; CI and threads come with the next refresh
-            pass
+        except Exception as e:  # the states are known already; say CI and threads are missing
+            note = f"Pull request details not read: {str(e).strip() or type(e).__name__}"
     part = {"repos": got["repos"], "total": got["total"], "shown": shown,
             "skipped": got["skipped"], "missing": got["missing"]}
+    if note:
+        part["note"] = note
     return items, details, part
 
 
 def cmd_board(args) -> int:
     srcs = _sources(args)
     logins = [a["login"] for a in config.accounts()] if len(srcs) > 1 else [None]
-    items, details, errors, derived = [], {}, [], []
+    items, details, errors, derived, notes = [], {}, [], [], []
     for login, src in zip(logins, srcs):
         try:
             if config.boardless(getattr(src, "cfg", None)):
                 # No board on this account (or at all): its repositories' issues stand in.
                 got, more, part = _repo_cards(src, args)
                 details.update(more)
+                if "note" in part:
+                    notes.append(part.pop("note"))
                 derived.append(dict(part, account=login))
             else:
                 got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
@@ -354,6 +362,8 @@ def cmd_board(args) -> int:
         out["errors"] = errors
     if derived:
         out["derived"] = derived
+    if notes:
+        out["notes"] = notes
     print(json.dumps(out))
     return 0
 

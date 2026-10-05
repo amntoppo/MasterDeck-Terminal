@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
+import time
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -67,10 +69,53 @@ def _has_data(out: str) -> bool:
     """A GraphQL answer that still carries data: gh exits 1 on a partial error (one repository of
     several is gone) but prints what it got."""
     try:
-        data = json.loads(out).get("data")
+        got = json.loads(out)
+        data = got.get("data")
     except (ValueError, AttributeError):
         return False
-    return isinstance(data, dict) and any(v is not None for v in data.values())
+    if not isinstance(data, dict):
+        return False
+    if any(v is not None for v in data.values()):
+        return True
+    # Every repository gone: GitHub says so with NOT_FOUND errors and nothing else.
+    errs = got.get("errors")
+    return bool(data) and isinstance(errs, list) and bool(errs) and all(
+        isinstance(e, dict) and e.get("type") == "NOT_FOUND" for e in errs)
+
+
+MISSING_TTL = 3600  # seconds a repository GitHub answered nothing for stays out of the query
+
+
+def _missing_file() -> Path:
+    return config.masterdeck_home() / "missing-repos.json"
+
+
+def _load_missing(key: str) -> dict:
+    try:
+        got = json.loads(_missing_file().read_text()).get(key)
+        return {r: t for r, t in got.items() if isinstance(t, (int, float))} if isinstance(got, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _save_missing(key: str, repos: dict) -> None:
+    """Remember the repositories that came back null. A partial answer makes gh exit 1 and the
+    cache stores only exit 0, so without this a stale repository would defeat the cache."""
+    try:
+        path = _missing_file()
+        try:
+            allm = json.loads(path.read_text())
+            allm = allm if isinstance(allm, dict) else {}
+        except (OSError, ValueError):
+            allm = {}
+        allm[key] = repos
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".missing-")
+        with os.fdopen(fd, "w") as f:
+            json.dump(allm, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # only an optimisation
 
 
 def _run(cmd: list, timeout: int = 120, env: "dict | None" = None, partial: bool = False) -> str:
@@ -195,8 +240,11 @@ class Live:
         ticked = config.repos(self.cfg)
         repos = ticked[:config.DERIVED_MAX_REPOS]
         since = board.done_since(today)
-        pending = {f"r{i}": (r, None) for i, r in enumerate(repos)}
-        items, total, missing, first = [], 0, [], True
+        key, now = (self.cfg or {}).get("login") or "", time.time()
+        known = {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
+        pending = {f"r{i}": (r, None) for i, r in enumerate(repos) if r not in known}
+        items, total, missing, first = [], 0, [r for r in repos if r in known], True
+        found = {}
         for _ in range(3):
             if not pending:
                 break
@@ -212,12 +260,15 @@ class Live:
                     total += count
                     if not isinstance(data.get(alias), dict):
                         missing.append(repo)
+                        found[repo] = now
                 items += got
                 if cursor and sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS:
                     pending[alias] = (repo, cursor)
                 else:
                     del pending[alias]
             first = False
+        if found or known != _load_missing(key):
+            _save_missing(key, {**known, **found})
         return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing}
 
     def sprints(self) -> list:
