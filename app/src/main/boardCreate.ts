@@ -5,9 +5,10 @@ import {
   lacksProjectScope, LINK_REPO, NO_ANSWER, okId, optionIds, parseField, parsePlan, planQuery, planTotal, SCOPE_ERROR, scopeFix, setStatuses, STATUS_FIELD, titleTaken, updateStatusField,
   type BoardCreateResult, type BoardPlanResult, type BoardProgress,
 } from '@shared/boardCreate'
-import { boardless, boardsOf, reposOf, type DerivedColumn } from '@shared/derivedBoard'
+import { boardless, boardsOf, DERIVED_COLUMNS, reposOf, type DerivedColumn } from '@shared/derivedBoard'
 import type { GhAccount } from '@shared/ghAuth'
-import type { CliResult } from '@shared/types'
+import { sameTicket } from '@shared/ticket'
+import type { Board, CliResult } from '@shared/types'
 import { ghErrorText, ghHasData, type GhRunner } from './ghc'
 import type { RunResult } from './run'
 
@@ -39,11 +40,12 @@ export interface CreatorDeps {
   /** Reload the config and refresh from GitHub. */
   refresh: () => void
   /**
-   * The Board as it is now, as a lookup: the column it shows for an issue, which becomes the
-   * issue's Status. Asked once per board, before the board is selected: after that the tab shows
-   * the new board, and every issue not on it yet would read as Todo.
+   * The account's Board as it is now, as a lookup: the column it shows for an issue, which becomes
+   * the issue's Status (`columnsOf`). Null when no Board is loaded for the account: a run would
+   * then write Todo for every issue, so it is refused. Asked once per board, before anything is
+   * written: once the board is selected the tab shows it, and no issue has a derived column.
    */
-  columns: () => (repo: string, number: number) => DerivedColumn
+  columns: (login: string | null) => ((repo: string, number: number) => DerivedColumn) | null
   progress: (p: BoardProgress) => void
   /** The pause between batches (tests pass a no-op). */
   wait?: (ms: number) => Promise<void>
@@ -58,8 +60,25 @@ export function accountGh(config: () => AppConfig, of: (login: string | null) =>
   return (login) => async (args, opts) => {
     const c = config()
     const known = isMulti(c) ? login !== null && c.accounts.some((a) => a.login === login) : login === null
-    if (!known) return { code: 1, stdout: '', stderr: login === null ? 'no GitHub account was named' : `GitHub account ${login} is not connected` }
+    if (!known) return notSent(login === null ? 'no GitHub account was named' : `GitHub account ${login} is not connected`)
     return of(login)(args, opts)
+  }
+}
+
+/** A call that was refused here and never left the Mac. In the shape of a GraphQL refusal, so it reads as "GitHub has nothing of this", not as an answer that got lost. */
+const notSent = (message: string): RunResult => ({ code: 1, stdout: JSON.stringify({ errors: [{ type: 'NOT_SENT', message }] }), stderr: message })
+
+/**
+ * `CreatorDeps.columns` for the app: the columns of the account's derived cards on the state's
+ * board (a copy). Null when the board holds no read of that account's repository issues (nothing
+ * loaded yet, or the last read failed). An issue that is not a card (past the card limit) is Todo.
+ */
+export function columnsOf(board: Board | null | undefined, login: string | null): ((repo: string, number: number) => DerivedColumn) | null {
+  if (!board?.derived?.some((d) => (d.account ?? null) === login)) return null
+  const shown = board.cards.filter((c) => c.derived).map((c) => ({ repo: c.repo, number: c.number, status: c.status }))
+  return (repo, number) => {
+    const status = shown.find((c) => sameTicket(c, { repo, number }))?.status
+    return DERIVED_COLUMNS.find((c) => c === status) ?? 'Todo'
   }
 }
 
@@ -109,6 +128,8 @@ interface Job {
   issues: IssueRef[]
   /** Repositories whose open issues could not be read (all of them, until the first read). */
   unread: string[]
+  /** Repositories not linked to the board yet (all of them, until the first try). */
+  unlinked: { repo: string; id: string }[]
   /** Issue ids that are on the board with their Status dealt with. */
   done: Set<string>
 }
@@ -180,7 +201,7 @@ export class BoardCreator {
     if (!p.repos.length) return { ok: false, message: `GitHub did not answer for ${repos.join(', ')}` }
     return {
       ok: true, account: login, owner, ownerType: p.ownerType, ownerId: p.ownerId, title: defaultBoardTitle(acct?.issueRepo || c.issueRepo),
-      repos: p.repos, missing: p.missing, skipped: ticked.slice(repos.length), total: p.repos.reduce((n, x) => n + (x.open ?? 0), 0), existing: p.existing,
+      repos: p.repos, missing: p.missing, skipped: ticked.slice(repos.length), total: p.repos.reduce((n, x) => n + (x.open ?? 0), 0), existing: p.existing, moreBoards: p.moreBoards,
     }
   }
 
@@ -197,7 +218,7 @@ export class BoardCreator {
   }
 
   /** Everything before the first write: the plan, the name, the confirmation, then the same checks again. Nothing here throws. */
-  private async checked(req: unknown): Promise<{ plan: Plan; title: string } | Failure> {
+  private async checked(req: unknown): Promise<{ plan: Plan; title: string; columnOf: Job['columnOf'] } | Failure> {
     const x = o(req)
     const title = cleanTitle(x.title)
     if (!title) return { ok: false, message: 'give the board a name (up to 100 characters)' }
@@ -220,7 +241,15 @@ export class BoardCreator {
       if (!now.ok) return { ...now, message: `Nothing was created: ${now.message}` }
       const same = now.account === plan.account && now.owner === plan.owner && now.ownerId === plan.ownerId && now.repos.map((r) => r.id).join() === plan.repos.map((r) => r.id).join()
       if (!same) return { ok: false, message: 'Nothing was created: the account or its repositories changed while you were confirming. Try again.' }
-      return taken(now) ?? { plan, title }
+      // One account: the calls go out as gh's active login, the one the confirmation named.
+      if (plan.account === null && this.active !== as) return { ok: false, message: `gh's active account changed${this.active ? ` to ${this.active}` : ''}; nothing was created` }
+      const dupNow = taken(now)
+      if (dupNow) return dupNow
+      // The columns, now: without a loaded Board every issue would get Todo, and after the first
+      // write it would be too late to say so.
+      const columnOf = this.d.columns(plan.account)
+      if (!columnOf) return { ok: false, message: 'Open the Board tab and wait for it to load, then try again. Nothing was created.' }
+      return { plan, title, columnOf }
     } catch (e) {
       return { ok: false, message: `Nothing was created: ${thrown(e)}` }
     }
@@ -229,7 +258,7 @@ export class BoardCreator {
   private async run(req: unknown): Promise<BoardCreateResult> {
     const ready = await this.checked(req)
     if ('ok' in ready) return ready
-    const { plan, title } = ready
+    const { plan, title, columnOf } = ready
 
     const gh = this.d.gh(plan.account)
     this.say('Creating the project…')
@@ -247,15 +276,15 @@ export class BoardCreator {
     const number = proj.number
     if (!okId(projectId) || typeof number !== 'number') {
       const f = this.fail(made, plan.account)
-      // GitHub answered with its reason: nothing was made.
-      return answer.ok && answer.errors.length ? f : { ...f, ...maybe(f.message) }
+      // GitHub gave its reason (with or without data), or the call was never sent: nothing was made.
+      return answer.errors.some((e) => e.type !== 'NO_ANSWER') ? f : { ...f, ...maybe(f.message) }
     }
     const url = typeof proj.url === 'string' ? proj.url : ''
 
     // From here the project exists. Whatever happens, the result names it.
     const held: { job: Job | null } = { job: null }
     try {
-      return await this.fill(gh, plan, title, { id: projectId, number, url }, held)
+      return await this.fill(gh, plan, title, columnOf, { id: projectId, number, url }, held)
     } catch (e) {
       return this.stopped(held.job, url, e)
     }
@@ -270,7 +299,7 @@ export class BoardCreator {
     return { ok: false, url, ...(job ? { retry: true } : {}), message: `The board was created${at(url)} but MasterDeck stopped before it was finished: ${thrown(e)}. ${job ? 'Try again to finish it.' : 'Delete it on GitHub, or pick it in Setup → Repos & boards.'}` }
   }
 
-  private async fill(gh: GhRunner, plan: Plan, title: string, board: { id: string; number: number; url: string }, held: { job: Job | null }): Promise<BoardCreateResult> {
+  private async fill(gh: GhRunner, plan: Plan, title: string, columnOf: Job['columnOf'], board: { id: string; number: number; url: string }, held: { job: Job | null }): Promise<BoardCreateResult> {
     const { url } = board
     this.say('Setting its columns…')
     const field = await this.columns(gh, board.id)
@@ -281,29 +310,30 @@ export class BoardCreator {
       account: plan.account, projectId: board.id, fieldId: field.id, options: field.options, url, title,
       entry: boardEntry({ owner: plan.owner, ownerType: plan.ownerType, number: board.number, id: board.id, title, fieldId: field.id, options: field.options }),
       selected: false,
-      // Now, while the tab still shows the repositories' issues: a retry would find the new board there.
-      columnOf: this.d.columns(),
+      columnOf,
       open: new Map(plan.repos.map((r) => [r.repo, r.open])),
       expected: total === null ? null : Math.min(total, BOARD_ADD_MAX),
       issues: [],
       unread: plan.repos.map((r) => r.repo),
+      unlinked: plan.repos.map((r) => ({ repo: r.repo, id: r.id })),
       done: new Set(),
     }
     // The board has its columns: from here a failure can be finished by Try again.
     held.job = job
-
-    const warnings: string[] = []
-    for (const [i, r] of plan.repos.entries()) {
-      this.say(`Linking ${r.repo}…`, i, plan.repos.length)
-      const l = await gh(graphql(LINK_REPO, { p: board.id, r: r.id }), { timeoutMs: 60_000 })
-      // Not fatal: the board works without the link (GitHub only uses it to list the board under the repository).
-      if (!o(gql(l.stdout).data.linkProjectV2ToRepository).repository) warnings.push(`${r.repo} could not be linked to the board`)
-    }
-    return this.work(gh, job, warnings)
+    return this.work(gh, job)
   }
 
-  /** Read what is unread, add what is read, select the board: a first run after its links, and every Try again. */
-  private async work(gh: GhRunner, job: Job, warnings: string[]): Promise<BoardCreateResult> {
+  /** Link what is not linked, read what is unread, add what is read, select the board: a first run, and every Try again. */
+  private async work(gh: GhRunner, job: Job): Promise<BoardCreateResult> {
+    const warnings: string[] = []
+    const todo = job.unlinked
+    for (const [i, r] of todo.entries()) {
+      this.say(`Linking ${r.repo}…`, i, todo.length)
+      const l = await gh(graphql(LINK_REPO, { p: job.projectId, r: r.id }), { timeoutMs: 60_000 })
+      // Not fatal: the board works without the link (GitHub only uses it to list the board under the repository).
+      if (o(gql(l.stdout).data.linkProjectV2ToRepository).repository) job.unlinked = job.unlinked.filter((x) => x !== r)
+      else warnings.push(`${r.repo} could not be linked to the board`)
+    }
     if (job.unread.length) {
       this.say('Reading the open issues…')
       if (await this.read(gh, job)) warnings.push(`Only the first ${BOARD_ADD_MAX} open issues were added`)
@@ -440,8 +470,9 @@ export class BoardCreator {
     if (!job.selected) {
       this.say('Selecting the board in MasterDeck…')
       const patch = boardConfigPatch(this.d.config(), job.account, job.entry)
-      // No account took the board: nothing would be written, so it is not "selected".
-      const saved = patch ? await this.d.save(patch) : { ok: false, message: `${job.account ?? 'the GitHub account'} is no longer a connected account` }
+      // The account has it already (picked in Setup meanwhile): nothing to write. No account took
+      // the board: nothing would be written, so it is not "selected".
+      const saved = patch === 'selected' ? { ok: true, message: '' } : patch ? await this.d.save(patch) : { ok: false, message: `${job.account ?? 'the GitHub account'} is no longer a connected account` }
       if (!saved.ok) {
         this.pending.set(key, job)
         return {
@@ -467,7 +498,7 @@ export class BoardCreator {
     return { ok: true, url: job.url, title: job.title, added: a.added, total, failed, left: a.left.length, unset: a.unset, unread: [...job.unread], warnings: notes, message }
   }
 
-  /** Finish the board the last run for this account left unfinished: read what was unread, add what was not added (each with the column it had), select the board if that failed. */
+  /** Finish the board the last run for this account left unfinished: read what was unread, add what was not added (each with the column it had), select the board if that failed, link the repositories that are not linked. */
   async retry(account: unknown, remote: boolean): Promise<BoardCreateResult> {
     if (remote) return { ok: false, message: ON_MAC }
     if (this.running) return { ok: false, message: BUSY }
@@ -476,7 +507,7 @@ export class BoardCreator {
     if (login === undefined || !job) return { ok: false, message: 'nothing left to add' }
     this.running = true
     try {
-      return await this.work(this.d.gh(login), job, [])
+      return await this.work(this.d.gh(login), job)
     } catch (e) {
       return this.stopped(job, job.url, e)
     } finally {

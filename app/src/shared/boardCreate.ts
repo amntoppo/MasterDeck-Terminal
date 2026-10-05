@@ -48,6 +48,8 @@ export interface BoardPlan {
   total: number
   /** The owner's open boards: a new one may not take the name of one. */
   existing: { title: string; url: string; number: number }[]
+  /** The owner has more open boards than `existing` holds: a name is only checked against these. */
+  moreBoards?: boolean
 }
 export type BoardPlanResult = ({ ok: true } & BoardPlan) | { ok: false; message: string; fix?: string[] }
 
@@ -147,7 +149,7 @@ export function planQuery(repos: string[]): string {
     const [owner, name] = r.split('/')
     return `r${i}: repository(owner: ${q(owner)}, name: ${q(name ?? '')}) { id nameWithOwner issues(states: OPEN) { totalCount } }`
   })
-  return `query($login: String!) { repositoryOwner(login: $login) { __typename id login ... on ProjectV2Owner { projectsV2(first: 100, query: "is:open") { nodes { number title url closed } } } } ${parts.join(' ')} }`
+  return `query($login: String!) { repositoryOwner(login: $login) { __typename id login ... on ProjectV2Owner { projectsV2(first: 100, query: "is:open") { pageInfo { hasNextPage } nodes { number title url closed } } } } ${parts.join(' ')} }`
 }
 
 export interface ParsedPlan {
@@ -157,6 +159,8 @@ export interface ParsedPlan {
   errors: GqlError[]
   /** The owner's boards came whole: without that, `existing` proves nothing about a name. */
   boardsRead: boolean
+  /** There are more open boards than this one page. */
+  moreBoards: boolean
   ownerId: string | null
   ownerType: 'organization' | 'user'
   repos: PlanRepo[]
@@ -180,7 +184,7 @@ export function parsePlan(stdout: string, repos: string[]): ParsedPlan {
     .filter((p) => p.closed !== true && typeof p.title === 'string' && typeof p.number === 'number')
     .map((p) => ({ number: p.number as number, title: p.title as string, url: typeof p.url === 'string' ? p.url : '' }))
   const boardsRead = ok && Array.isArray(o(owner.projectsV2).nodes) && !errors.some((e) => e.alias === 'repositoryOwner')
-  return { ok, errors, boardsRead, ownerId: okId(owner.id) ? owner.id : null, ownerType: owner.__typename === 'User' ? 'user' : 'organization', repos: got, missing, existing }
+  return { ok, errors, boardsRead, moreBoards: o(o(owner.projectsV2).pageInfo).hasNextPage === true, ownerId: okId(owner.id) ? owner.id : null, ownerType: owner.__typename === 'User' ? 'user' : 'organization', repos: got, missing, existing }
 }
 
 /** The open issues a run would add; null when GitHub left out a repository's count. */
@@ -284,13 +288,17 @@ export function boardEntry(b: { owner: string; ownerType: 'organization' | 'user
  * What `master config save` gets: the board added to its account (`login` null: the only one),
  * every other account as it is. A config from before accounts: the top-level list. Null when no
  * account has that login (GitHub logins differ in case only by spelling): nothing would be
- * written, and the caller must not say the board was selected.
+ * written, and the caller must not say the board was selected. 'selected' when the account has
+ * this board already (same project id, or same owner and number: picked in Setup after a run that
+ * could not select it): a second entry would show it twice.
  */
-export function boardConfigPatch(c: AppConfig, login: string | null, entry: ProjectConfig): Record<string, unknown> | null {
-  if (!c.accounts.length) return login === null ? { projects: [...c.projects, entry] } : null
+export function boardConfigPatch(c: AppConfig, login: string | null, entry: ProjectConfig): Record<string, unknown> | null | 'selected' {
+  const has = (list: ProjectConfig[]) => list.some((p) => (!!p.id && p.id === entry.id) || (p.number === entry.number && p.owner.toLowerCase() === entry.owner.toLowerCase()))
+  if (!c.accounts.length) return login !== null ? null : has(c.projects) ? 'selected' : { projects: [...c.projects, entry] }
   const who = (login ?? primaryLogin(c) ?? '').toLowerCase()
   const at = c.accounts.findIndex((a) => a.login.toLowerCase() === who)
   if (at < 0) return null
+  if (has(c.accounts[at].projects)) return 'selected'
   return { accounts: c.accounts.map((a, i) => (i === at ? { ...a, projects: [...a.projects, entry] } : a)) }
 }
 
@@ -336,5 +344,6 @@ export function confirmLines(p: BoardPlan, title: string): string[] {
         : `${total} open ${total === 1 ? 'issue' : 'issues'} added to it`,
     `The board selected for ${p.account ?? p.owner} in MasterDeck`,
     ...(left.length ? [`Left out: ${left.join(', ')}`] : []),
+    ...(p.moreBoards ? [`The name could not be checked against all of ${p.owner}'s boards`] : []),
   ]
 }

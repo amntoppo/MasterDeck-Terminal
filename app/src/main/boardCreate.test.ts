@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig, type AppConfig } from '@shared/appConfig'
 import type { DerivedColumn } from '@shared/derivedBoard'
 import type { GhAccount } from '@shared/ghAuth'
-import { accountGh, BoardCreator, type CreatorDeps } from './boardCreate'
+import type { Board, BoardCard } from '@shared/types'
+import { accountGh, BoardCreator, columnsOf, type CreatorDeps } from './boardCreate'
 import type { GhRunner } from './ghc'
 import type { RunResult } from './run'
 
@@ -56,6 +57,7 @@ interface World {
   /** The open-issue count the plan gives (null: GitHub leaves it out). */
   planCount?: number | null
   boards?: unknown[] | null
+  moreBoards?: boolean
   ownerId?: string
   addFail?: number[]
   rateAt?: number
@@ -90,7 +92,7 @@ function github(w: World = {}) {
     if (doc.includes('repositoryOwner(')) {
       const repos = [...doc.matchAll(/r(\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\)/g)]
       return {
-        repositoryOwner: { __typename: 'Organization', id: w.ownerId ?? 'O_1', login: 'globex', projectsV2: w.boards === null ? null : { nodes: w.boards ?? [ROADMAP] } },
+        repositoryOwner: { __typename: 'Organization', id: w.ownerId ?? 'O_1', login: 'globex', projectsV2: w.boards === null ? null : { pageInfo: { hasNextPage: w.moreBoards === true }, nodes: w.boards ?? [ROADMAP] } },
         ...Object.fromEntries(repos.map((m) => [`r${m[1]}`, { id: `R_${Number(m[1]) + 1}`, nameWithOwner: `${m[2]}/${m[3]}`, issues: w.planCount === null ? null : { totalCount: w.planCount ?? open(m[3]) } }])),
       }
     }
@@ -160,6 +162,7 @@ function make(cfg: AppConfig | (() => AppConfig), answer: (doc: string, vars: Va
     save: async (patch) => (seen.saved.push(patch), { ok: true, message: 'saved' }),
     refresh: () => void seen.refreshed++,
     columns: () => (seen.snapshots++, (_repo, n) => (n === 2 ? 'In Dev' : 'Todo')),
+    // (the account is passed; these tests have one Board)
     progress: (p) => void seen.progress.push(p.text),
     wait: async () => {},
     ...over,
@@ -174,7 +177,7 @@ describe('plan', () => {
     const t = make(two, github({ issues: 26 }))
     expect(await t.creator.plan('bob-work')).toEqual({
       ok: true, account: 'bob-work', owner: 'globex', ownerType: 'organization', ownerId: 'O_1', title: 'app board',
-      repos: [{ repo: 'globex/app', id: 'R_1', open: 26 }], missing: [], skipped: [], total: 26,
+      repos: [{ repo: 'globex/app', id: 'R_1', open: 26 }], missing: [], skipped: [], total: 26, moreBoards: false,
       existing: [{ number: 3, title: 'Roadmap', url: 'https://github.com/orgs/globex/projects/3' }],
     })
     expect(t.calls.map((c) => c.vars.login)).toEqual(['globex'])
@@ -387,6 +390,36 @@ describe('create', () => {
   })
 })
 
+describe('the columns come from the Board, read before anything is written', () => {
+  it('no Board loaded for the account: refused, nothing is created', async () => {
+    const asked: (string | null)[] = []
+    const t = make(two, github(), { columns: (login) => (asked.push(login), null) })
+    expect(await t.creator.create(BOB, false)).toEqual({ ok: false, message: 'Open the Board tab and wait for it to load, then try again. Nothing was created.' })
+    expect(kinds(t.calls)).toEqual(CHECKS)
+    expect(asked).toEqual(['bob-work'])
+    expect(t.seen.saved).toEqual([])
+  })
+  it('the snapshot is taken after the confirmation and before the project is made', async () => {
+    const at: string[][] = []
+    const t = make(two, github(), { columns: () => (at.push(kinds(t.calls)), () => 'Todo') })
+    expect(await t.creator.create(BOB, false)).toMatchObject({ ok: true })
+    expect(at).toEqual([CHECKS])
+    expect(t.seen.asked).toHaveLength(1)
+  })
+  it('columnsOf: the derived cards of the account, or null when its issues were not read', () => {
+    const card = (repo: string, number: number, status: string, derived = true): BoardCard => ({ repo, number, status, derived }) as unknown as BoardCard
+    const board = (derived: Board['derived'], cards: BoardCard[]): Board => ({ takenAt: null, sprint: null, columns: [], cards, derived })
+    const b = board([{ account: 'bob-work', repos: ['globex/app'], total: 2, shown: 2, skipped: [], missing: [] }], [card('globex/app', 1, 'PR Raised'), card('globex/app', 2, 'In Dev'), card('globex/app', 3, 'Blocked'), card('acme/tracker', 1, 'In Dev', false)])
+    const of = columnsOf(b, 'bob-work')!
+    expect([of('globex/app', 1), of('Globex/App', 2), of('globex/app', 3), of('globex/app', 9), of('acme/tracker', 1)]).toEqual(['PR Raised', 'In Dev', 'Todo', 'Todo', 'Todo'])
+    expect(columnsOf(null, 'bob-work')).toBeNull() // nothing loaded yet
+    expect(columnsOf(b, 'alice')).toBeNull() // alice's issues are not what was read
+    expect(columnsOf(board(undefined, []), null)).toBeNull() // the last read failed, or is from before
+    // One account: its part has no login. No open issue is still a loaded Board.
+    expect(columnsOf(board([{ account: null, repos: ['acme/tracker'], total: 0, shown: 0, skipped: [], missing: [] }], []), null)!('acme/tracker', 1)).toBe('Todo')
+  })
+})
+
 describe('Try again', () => {
   it('keeps the column each issue had when the board was made', async () => {
     const w: World = { issues: 45, addFail: [22, 23] }
@@ -530,6 +563,28 @@ describe('between the confirmation and the first write', () => {
     expect(await repos.creator.create(BOB, false)).toMatchObject({ ok: false, message: 'Nothing was created: the account or its repositories changed while you were confirming. Try again.' })
     expect(kinds(repos.calls)).toEqual(CHECKS)
   })
+  it("one account: gh's active login is the account, so a switch while confirming is refused", async () => {
+    let active = 'alice'
+    const logins = async (): Promise<GhAccount[]> => LOGINS.map((a) => ({ ...a, active: a.login === active }))
+    const t = make(one, github(), { ghLogins: logins, confirm: async (message) => (t.seen.asked.push({ message, lines: [] }), (active = 'bob-work'), true) })
+    expect(await t.creator.create({ title: 'T' }, false)).toEqual({ ok: false, message: "gh's active account changed to bob-work; nothing was created" })
+    expect(t.seen.asked[0].message).toBe('Create a GitHub board as alice?')
+    expect(kinds(t.calls)).toEqual(CHECKS)
+    // gh no longer names one at all.
+    active = 'alice'
+    const gone = make(one, github(), { ghLogins: logins, confirm: async () => ((active = ''), true) })
+    expect(await gone.creator.create({ title: 'T' }, false)).toEqual({ ok: false, message: "gh's active account changed; nothing was created" })
+    // Two or more accounts: every call carries the account's own token, gh's active login plays no part.
+    active = 'alice'
+    const multi = make(two, github(), { ghLogins: logins, confirm: async () => ((active = 'bob-work'), true) })
+    expect(await multi.creator.create(BOB, false)).toMatchObject({ ok: true })
+  })
+  it('more open boards than the plan read: the confirmation says the name check is not complete', async () => {
+    const t = make(two, github({ moreBoards: true }))
+    expect(await t.creator.plan('bob-work')).toMatchObject({ ok: true, moreBoards: true })
+    expect(await t.creator.create(BOB, false)).toMatchObject({ ok: true })
+    expect(t.seen.asked[0].lines.at(-1)).toBe("The name could not be checked against all of globex's boards")
+  })
   it('a confirmation that throws creates nothing and frees the next run', async () => {
     let boom = true
     const t = make(two, github(), {
@@ -559,11 +614,11 @@ describe('accountGh: the runner of a connected account, or an error', () => {
   })
   it('never falls back to another account', async () => {
     const i = inner()
-    expect(await accountGh(() => two, i.of)('mallory')(['api', 'graphql'])).toEqual({ code: 1, stdout: '', stderr: 'GitHub account mallory is not connected' })
+    expect(await accountGh(() => two, i.of)('mallory')(['api', 'graphql'])).toMatchObject({ code: 1, stderr: 'GitHub account mallory is not connected' })
     expect(await accountGh(() => two, i.of)('Bob-Work')(['api', 'graphql'])).toMatchObject({ code: 1 }) // the config's spelling only
-    expect(await accountGh(() => two, i.of)(null)(['api', 'graphql'])).toEqual({ code: 1, stdout: '', stderr: 'no GitHub account was named' })
+    expect(await accountGh(() => two, i.of)(null)(['api', 'graphql'])).toMatchObject({ code: 1, stderr: 'no GitHub account was named' })
     // One account: only "the only one".
-    expect(await accountGh(() => one, i.of)('bob-work')(['api', 'graphql'])).toEqual({ code: 1, stdout: '', stderr: 'GitHub account bob-work is not connected' })
+    expect(await accountGh(() => one, i.of)('bob-work')(['api', 'graphql'])).toMatchObject({ code: 1, stderr: 'GitHub account bob-work is not connected' })
     expect(i.used).toEqual([])
   })
   it('checks on every call: an account disconnected in the middle of a run stops there', async () => {
@@ -637,8 +692,37 @@ describe('once the project exists, its address is never lost', () => {
     expect(await t.creator.create(BOB, false)).toMatchObject({ ok: false, url: URL7, retry: true })
     const before = t.calls.length
     expect(await t.creator.retry('bob-work', false)).toMatchObject({ ok: true, added: 2, total: 2, unread: [] })
-    expect(kinds(t.calls.slice(before))).toEqual(['ids', 'add', 'status'])
+    expect(kinds(t.calls.slice(before))).toEqual(['link', 'ids', 'add', 'status']) // the link that threw is made now
     expect(t.seen.saved).toHaveLength(1)
+  })
+  it('Try again links the repositories that could not be linked, and only those', async () => {
+    const w: World = { count: { app: 3, web: 0 }, addFail: [2] }
+    const world = github(w)
+    let refuse = true
+    const t = make(wide, (doc, vars) => (refuse && doc.includes('linkProjectV2ToRepository(') && vars.r === 'R_2' ? bad({ linkProjectV2ToRepository: null }, 'not allowed') : world(doc, vars)))
+    expect(await t.creator.create(BOB, false)).toMatchObject({ ok: true, failed: ['app#2'], warnings: ['globex/web could not be linked to the board'] })
+    // Still refused: the warning again.
+    let before = t.calls.length
+    expect(await t.creator.retry('bob-work', false)).toMatchObject({ ok: true, failed: ['app#2'], warnings: ['globex/web could not be linked to the board'] })
+    expect(t.calls.slice(before).filter((c) => c.doc.includes('linkProjectV2ToRepository(')).map((c) => c.vars.r)).toEqual(['R_2'])
+    refuse = false
+    w.addFail = []
+    before = t.calls.length
+    expect(await t.creator.retry('bob-work', false)).toMatchObject({ ok: true, added: 1, warnings: [] })
+    expect(kinds(t.calls.slice(before))).toEqual(['link', 'add', 'status'])
+  })
+  it('a board the user picked in Setup after a failed save is not saved a second time', async () => {
+    let cfg = two
+    let refuse = true
+    let saves = 0
+    const t = make(() => cfg, github(), { save: async () => (refuse ? { ok: false, message: 'accounts must be a list' } : (saves++, { ok: true, message: 'saved' })) })
+    expect(await t.creator.create(BOB, false)).toMatchObject({ ok: false, url: URL7, retry: true })
+    cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [ALICE, account('bob-work', 'globex', 'app', [{ owner: 'globex', number: 7, title: 'B' }])] })
+    refuse = false
+    expect(await t.creator.retry('bob-work', false)).toMatchObject({ ok: true, url: URL7, added: 0 })
+    expect(saves).toBe(0)
+    expect(t.seen.refreshed).toBe(1)
+    expect(await t.creator.retry('bob-work', false)).toEqual({ ok: false, message: 'nothing left to add' })
   })
   it('a refresh that throws after the board was selected', async () => {
     let broken = true
@@ -683,6 +767,14 @@ describe('once the project exists, its address is never lost', () => {
     expect(await garbage.creator.create(BOB, false)).toEqual({ ok: false, message: `GitHub did not answer (gh exited 0).${MAYBE}` })
     const thrown = make(two, github({ createThrows: true }))
     expect(await thrown.creator.create(BOB, false)).toEqual({ ok: false, message: `spawn gh ENOENT.${MAYBE}` })
+    // GitHub said no (even with no data at all), or the call was never sent: nothing can exist.
+    const refused = make(two, github({ createAnswer: bad(null, 'Resource not accessible by personal access token', 'FORBIDDEN') }))
+    expect(await refused.creator.create(BOB, false)).toEqual({ ok: false, message: 'gh: Resource not accessible by personal access token' })
+    const limited = make(two, github({ createAnswer: bad(null, 'API rate limit exceeded', 'RATE_LIMITED') }))
+    expect(await limited.creator.create(BOB, false)).toEqual({ ok: false, message: 'gh: API rate limit exceeded' })
+    const unsent = await accountGh(() => one, () => async () => TIMEOUT)('bob-work')(['api', 'graphql'])
+    const stopped = make(two, github({ createAnswer: unsent }))
+    expect(await stopped.creator.create(BOB, false)).toEqual({ ok: false, message: 'GitHub account bob-work is not connected' })
     for (const t of [timeout, garbage, thrown]) {
       expect(kinds(t.calls)).toEqual([...CHECKS, 'create'])
       expect(t.seen.saved).toEqual([])

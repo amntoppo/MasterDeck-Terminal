@@ -122,8 +122,8 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
-import { DERIVED_COLUMNS, repoBoardless } from "@shared/derivedBoard";
-import { accountGh, BoardCreator } from "./boardCreate";
+import { repoBoardless } from "@shared/derivedBoard";
+import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -160,7 +160,7 @@ import type { WorkflowDraft } from "@shared/ipc";
 import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
-import { asTicket, fullRepo, sameTicket, ticketRef } from "@shared/ticket";
+import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -351,17 +351,9 @@ const boardCreator = new BoardCreator({
     sources.loadConfig();
     void sources.refreshGithub(true);
   },
-  // The column the Board shows now becomes the issue's Status on the new board. A copy: once the
-  // board is selected the tab shows the new board, and a Try again must still know these columns.
-  columns: () => {
-    const shown = (latest?.board?.cards ?? [])
-      .filter((c) => c.derived)
-      .map((c) => ({ repo: c.repo, number: c.number, status: c.status }));
-    return (repo, number) => {
-      const status = shown.find((c) => sameTicket(c, { repo, number }))?.status;
-      return DERIVED_COLUMNS.find((c) => c === status) ?? "Todo";
-    };
-  },
+  // The column the Board shows now becomes the issue's Status on the new board; null (the run is
+  // refused) while the account's issues are not loaded.
+  columns: (login) => columnsOf(latest?.board, login),
   // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
   progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),
 });

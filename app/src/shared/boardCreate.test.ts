@@ -41,7 +41,7 @@ describe('documents', () => {
     expect(updateStatusField([{ id: 'o-old', name: 'In Progress' }, { id: 'o-dev', name: 'In Dev' }])).toContain('{id: "o-dev", name: "In Dev"')
   })
   it('asks only for the open boards of the owner', () => {
-    expect(planQuery(['acme/tracker'])).toContain('projectsV2(first: 100, query: "is:open") { nodes { number title url closed } }')
+    expect(planQuery(['acme/tracker'])).toContain('projectsV2(first: 100, query: "is:open") { pageInfo { hasNextPage } nodes { number title url closed } }')
   })
   it('never puts an id it cannot trust into a document', () => {
     expect(okId('PVT_kwDOA-b_c=')).toBe(true)
@@ -76,11 +76,16 @@ describe('answers', () => {
       r0: { id: 'R_1', nameWithOwner: 'alice/tracker', issues: { totalCount: 26 } }, r1: null,
     } })
     expect(parsePlan(out, ['alice/tracker', 'alice/gone'])).toEqual({
-      ok: true, errors: [], boardsRead: true,
+      ok: true, errors: [], boardsRead: true, moreBoards: false,
       ownerId: 'U_1', ownerType: 'user', repos: [{ repo: 'alice/tracker', id: 'R_1', open: 26 }], missing: ['alice/gone'],
       existing: [{ number: 3, title: 'Roadmap', url: 'https://github.com/users/alice/projects/3' }],
     })
-    expect(parsePlan('{}', ['acme/tracker'])).toEqual({ ok: false, errors: [{ message: 'GitHub did not answer', alias: null, type: 'NO_ANSWER' }], boardsRead: false, ownerId: null, ownerType: 'organization', repos: [], missing: ['acme/tracker'], existing: [] })
+    expect(parsePlan('{}', ['acme/tracker'])).toEqual({ ok: false, errors: [{ message: 'GitHub did not answer', alias: null, type: 'NO_ANSWER' }], boardsRead: false, moreBoards: false, ownerId: null, ownerType: 'organization', repos: [], missing: ['acme/tracker'], existing: [] })
+  })
+  it('the plan: an owner with more open boards than one page says so', () => {
+    const owner = (more: unknown) => JSON.stringify({ data: { repositoryOwner: { __typename: 'Organization', id: 'O_1', projectsV2: { pageInfo: { hasNextPage: more }, nodes: [] } }, r0: { id: 'R_1', issues: { totalCount: 1 } } } })
+    expect(parsePlan(owner(true), ['acme/tracker'])).toMatchObject({ boardsRead: true, moreBoards: true })
+    expect(parsePlan(owner(false), ['acme/tracker']).moreBoards).toBe(false)
   })
   it('the plan: boards GitHub did not list are not "no boards"', () => {
     const owner = { __typename: 'Organization', id: 'O_1', login: 'acme' }
@@ -154,6 +159,16 @@ describe('config', () => {
     // No account took it: null, so the caller reports that nothing was selected.
     expect(boardConfigPatch(c, 'mallory', entry)).toBeNull()
   })
+  it('a board the account already has is not added a second time', () => {
+    const picked = { owner: 'Globex', number: 7, title: 'app board' } // chosen in Setup after a run that could not select it
+    const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [account('alice', 'acme', 'tracker', [], true), account('bob-work', 'globex', 'app', [picked])] })
+    expect(boardConfigPatch(c, 'bob-work', entry)).toBe('selected')
+    // Another account having it does not select it for this one.
+    expect(boardConfigPatch(c, 'alice', entry)).toMatchObject({ accounts: [{ login: 'alice', projects: [entry] }, { login: 'bob-work' }] })
+    const byId = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [account('alice', 'acme', 'tracker', [{ owner: 'renamed', number: 1, id: 'PVT_1', title: 'x' }], true)] })
+    expect(boardConfigPatch(byId, null, entry)).toBe('selected')
+    expect(boardConfigPatch(parseConfig({ owner: 'acme', issueRepo: 'tracker', projects: [{ owner: 'globex', number: 7, title: 'x' }] }), null, entry)).toBe('selected')
+  })
   it('the patch for a config with no accounts list', () => {
     expect(boardConfigPatch(parseConfig({ owner: 'acme', issueRepo: 'tracker' }), null, entry)).toEqual({ projects: [entry] })
   })
@@ -207,6 +222,9 @@ describe('confirmLines', () => {
       'Left out: globex/gone (GitHub did not answer), globex/old (more than 10 repositories)',
     ])
     expect(confirmLines({ ...plan, total: 1 }, 'T')[3]).toBe('1 open issue added to it')
+    // More boards than were read: the name check is not complete, and the person is told before confirming.
+    expect(confirmLines({ ...plan, moreBoards: true }, 'T').at(-1)).toBe("The name could not be checked against all of globex's boards")
+    expect(confirmLines({ ...plan, moreBoards: false }, 'T')).toHaveLength(5)
     // One repository's count is unknown: the total is too.
     const unknown = { ...plan, total: 3, repos: [{ repo: 'globex/app', id: 'R_1', open: null }, { repo: 'globex/web', id: 'R_2', open: 3 }] }
     expect(planTotal(unknown)).toBeNull()
