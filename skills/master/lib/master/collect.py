@@ -230,15 +230,24 @@ class Live:
                                   for i, p in enumerate(ps)])
         return [it for i in range(len(ps)) for it in got[f"b{i}"]]
 
-    def repo_issues(self, today: date) -> dict:
+    def repo_issues(self, today: date, only: "list | None" = None, boards: bool = False) -> dict:
         """The issues of this account's ticked repositories, for an account with no board: open
-        ones and the ones closed lately. {"items", "total" (open issues GitHub counts), "repos"
-        (read), "skipped" (past DERIVED_MAX_REPOS), "missing" (GitHub answered nothing for), "unread"
-        ({repo: GraphQL error type} of the missing ones not remembered: asked again next call)}.
+        ones and the ones closed lately. {"items", "total" (open issues GitHub counts), "totals"
+        (the same per repository), "repos" (read), "skipped" (past DERIVED_MAX_REPOS), "missing"
+        (GitHub answered nothing for), "unread" ({repo: GraphQL error type} of the missing ones not
+        remembered: asked again next call), "boards_unread" (why the boards were not read, or None)}.
         One GraphQL call for every repository; up to two more for repositories with further
-        pages, while fewer than DERIVED_MAX_CARDS open issues were read."""
+        pages, while fewer than DERIVED_MAX_CARDS open issues were read.
+        `only` (the repository view): just these repositories, each up to DERIVED_MAX_CARDS open
+        issues. `boards`: also which selected boards hold each issue (only asked when this account
+        has a board, so its token is known to read projects)."""
         from . import board
         ticked = config.repos(self.cfg)
+        if only is not None:
+            listed = {r.lower(): r for r in ticked}
+            ticked = [listed.get(r.lower(), r) for r in dict.fromkeys(only)]
+        fields = board.status_fields() if boards and config.projects(self.cfg) else []
+        boards_unread = None
         repos = ticked[:config.DERIVED_MAX_REPOS]
         since = board.done_since(today)
         key, now = (self.cfg or {}).get("login") or "", time.time()
@@ -248,15 +257,21 @@ class Live:
         known = {} if forced else {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
         pending = {f"r{i}": (r, None) for i, r in enumerate(repos) if r not in known}
         items, total, missing, first = [], 0, [r for r in repos if r in known], True
-        found, unread = {}, {}
-        for _ in range(3):
-            if not pending:
-                break
-            query, variables = board.repo_issues_query([(a, r, c, first) for a, (r, c) in pending.items()], since)
+        found, unread, totals, rounds = {}, {}, {}, 0
+        while pending and rounds < 3:
+            query, variables = board.repo_issues_query([(a, r, c, first) for a, (r, c) in pending.items()], since, fields)
             args = ["gh", "api", "graphql", "-f", f"query={query}"]
             for k, v in variables.items():
                 args += ["-f", f"{k}={v}"]
             answer = json.loads(self._gh(args, partial=True))
+            refused = [e.get("type") or "unknown" for e in answer.get("errors") or []
+                       if isinstance(e, dict) and "projectItems" in (e.get("path") or [])]
+            if fields and refused:
+                # The boards could not be read (a token without the project scope): an error there
+                # empties the issue it is on. The issues matter more: the same round, without them.
+                fields, boards_unread = [], refused[0]
+                continue
+            rounds += 1
             data = answer.get("data") or {}
             # Only GitHub saying NOT_FOUND for that alias is remembered; a null from a rate limit,
             # a forbidden or a timeout must not hide a healthy repository for an hour.
@@ -264,9 +279,10 @@ class Live:
                     if isinstance(e, dict) and isinstance(e.get("path"), list) and e["path"]}
             for alias in list(pending):
                 repo, _cursor = pending[alias]
-                got, cursor, count = board.repo_issues_page(data, alias, repo)
+                got, cursor, count = board.repo_issues_page(data, alias, repo, fields)
                 if first:
                     total += count
+                    totals[repo] = count
                     if not isinstance(data.get(alias), dict):
                         missing.append(repo)
                         if gone.get(alias) == "NOT_FOUND":
@@ -274,15 +290,16 @@ class Live:
                         else:
                             unread[repo] = gone.get(alias) or "unknown"
                 items += got
-                if cursor and sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS:
+                # Three rounds of 100 are the limit for one repository; the account-wide one is for the board read.
+                if cursor and (only is not None or sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS):
                     pending[alias] = (repo, cursor)
                 else:
                     del pending[alias]
             first = False
         if found or known != _load_missing(key):
             _save_missing(key, {**known, **found})
-        return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing,
-                "unread": unread}
+        return {"items": items, "total": total, "totals": totals, "repos": repos, "skipped": ticked[len(repos):],
+                "missing": missing, "unread": unread, "boards_unread": boards_unread}
 
     def sprints(self) -> list:
         from . import board
@@ -365,7 +382,15 @@ class Fixtures:
     def board_ready(self) -> list: return self._json("board_ready.json")
     def board_mine_ready(self) -> "tuple[list, list]": return self.board_mine(), self.board_ready()
     def board_sprint(self, query: str = "") -> list: return self._json("board_sprint.json")
-    def repo_issues(self, today=None) -> dict: return self._json("repo_issues.json")
+
+    def repo_issues(self, today=None, only: "list | None" = None, boards: bool = False) -> dict:
+        got = self._json("repo_issues.json")
+        if only is None:
+            return got
+        want = {r.lower() for r in only}
+        keep = [it for it in got["items"] if str((it.get("content") or {}).get("repository") or "").lower() in want]
+        return dict(got, items=keep, repos=list(only))
+
     def sprints(self) -> list: return self._json("sprints.json")
     def pr_details(self, urls: list) -> dict: return self._json("board_prs.json")
     def prs_mine(self) -> list: return self._json("prs_mine.json")
