@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
 import { parseBoard } from './board'
-import { boardEmpty, boardless, boardsOf, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
+import { boardDeriver, boardEmpty, boardless, boardsOf, boardWanted, columnsWithDerived, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
 import type { PastSession } from './pastSessions'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -141,10 +141,84 @@ describe('derivedNotes', () => {
   it('notes say what is not shown', () => {
     const part = { account: 'bob-work', repos: ['globex/app'], total: 412, shown: 300, skipped: ['globex/old'], missing: ['globex/gone'] }
     const b = board([], { derived: [{ account: 'alice', repos: [], total: 0, shown: 0, skipped: [], missing: [] }, part] })
-    expect(derivedNotes(b, 'bob-work')).toEqual(['Showing the first 300 of 412 open issues.', 'Not read (more than 1 repository): old.', 'GitHub did not answer for gone.'])
+    expect(derivedNotes(b, 'bob-work')).toEqual(['Showing the first 300 of 412 open issues.', 'Not read (more than 1 repository): old.', 'Not found: globex/gone'])
     expect(derivedNotes(b, 'alice')).toEqual([])
     expect(derivedNotes(board([], { derived: [{ ...part, account: null, total: 300, skipped: [], missing: [] }] }), null)).toEqual([])
     expect(derivedNotes(board([]), null)).toEqual([])
     expect(derivedNotes(null, null)).toEqual([])
+  })
+})
+
+describe('what the read says went wrong', () => {
+  const part = { account: 'bob-work', repos: ['globex/app', 'globex/api', 'globex/gone'], total: 3, shown: 3, skipped: [], missing: ['globex/api', 'globex/gone'] }
+  it('a repository GitHub could not read says why; one GitHub does not know is not found', () => {
+    const b = board([], { derived: [{ ...part, notes: ['globex/api not read: RATE_LIMITED', 'Pull request details not read: HTTP 401'] }] })
+    expect(derivedNotes(b, 'bob-work')).toEqual(['Not found: globex/gone', 'globex/api not read: RATE_LIMITED', 'Pull request details not read: HTTP 401'])
+  })
+  it('another account\'s notes stay in its own tab', () => {
+    const b = board([], { derived: [{ ...part, notes: ['globex/api not read: RATE_LIMITED'] }, { ...part, account: 'carol', missing: [] }] })
+    expect(derivedNotes(b, 'carol')).toEqual([])
+  })
+})
+
+describe('boardWanted', () => {
+  it('nothing to read when no board and no repository is selected', () => {
+    expect(boardWanted(one)).toBe(true) // repositories only: their issues
+    expect(boardWanted(boarded)).toBe(true)
+    expect(boardWanted(two)).toBe(true)
+    expect(boardWanted(parseConfig({}))).toBe(false) // before Setup
+    expect(boardWanted(parseConfig({ configured: true, config: {} }))).toBe(false) // set up, nothing ticked
+    expect(boardWanted(parseConfig({ configured: true, config: { accounts: [acct('alice', 'acme', '', [], true), acct('carol', 'initech', '', [])] } }))).toBe(false)
+  })
+})
+
+describe('boardDeriver', () => {
+  const real = card({ number: 1, derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })
+  it('gives the same board back while nothing changed', () => {
+    const derive = boardDeriver()
+    const b = board([real, card({ number: 2 })])
+    const first = derive(b, ctx())
+    expect(first!.cards.map((c) => c.status)).toEqual(['In Dev', 'Todo'])
+    expect(derive(b, ctx({ now: NOW + 3000 }))).toBe(first)
+  })
+  it('a new board when a card changes column, leaves, or the read is new', () => {
+    const derive = boardDeriver()
+    const b = board([card({ number: 12 }), card({ number: 3, state: 'CLOSED', closedAt: '2026-09-20T08:00:00Z' })])
+    const first = derive(b, ctx())!
+    const linked = derive(b, ctx({ sessions: [sess()] }))!
+    expect(linked).not.toBe(first)
+    expect(linked.cards[0].status).toBe('In Dev')
+    expect(derive(b, ctx({ sessions: [sess()] }))).toBe(linked)
+    const later = derive(b, ctx({ sessions: [sess()], now: Date.parse('2026-10-20T00:00:00Z') }))!
+    expect(later.cards.map((c) => c.number)).toEqual([12]) // closed more than 14 days ago now
+    const again = board([...b.cards])
+    expect(derive(again, ctx({ sessions: [sess()] }))).not.toBe(linked)
+  })
+  it('sees a card changed in place (an assign shows at once)', () => {
+    const derive = boardDeriver()
+    const b = board([card({ number: 2 })])
+    const first = derive(b, ctx())!
+    b.cards[0].assignees = ['alice']
+    const next = derive(b, ctx())!
+    expect(next).not.toBe(first)
+    expect(next.cards[0].assignees).toEqual(['alice'])
+  })
+  it('a board with no derived card stays the same object', () => {
+    const derive = boardDeriver()
+    const b = board([real])
+    expect(derive(b, ctx())).toBe(b)
+    expect(derive(null, ctx())).toBeNull()
+  })
+})
+
+describe('columnsWithDerived', () => {
+  const real = card({ number: 1, derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })
+  it('a board with no derived card keeps its columns (the same array)', () => {
+    const b = board([real])
+    expect(columnsWithDerived(b)).toBe(b.columns)
+  })
+  it('adds MasterDeck\'s columns after the board\'s; alone when every card is derived', () => {
+    expect(columnsWithDerived(board([real, card({ status: 'Todo' })]))).toEqual(['To Do', 'In Dev', 'Todo', 'PR Raised', 'Done'])
+    expect(columnsWithDerived(board([card({ status: 'Todo' })]))).toEqual(['Todo', 'In Dev', 'PR Raised', 'Done'])
   })
 })

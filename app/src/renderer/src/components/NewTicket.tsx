@@ -71,6 +71,19 @@ export function ticketDefaults(state: AppState, ctx: TicketContext): NewTicket {
   };
 }
 
+/** What Create sends. An account with no board: no board step (no project, status or sprint). */
+export function ticketRequest(
+  t: NewTicket,
+  noBoard: boolean,
+  account: string | null,
+): NewTicket {
+  return {
+    ...t,
+    ...(noBoard ? { project: "", status: "", sprint: "" } : {}),
+    account: account ?? undefined,
+  };
+}
+
 /** Several values from a list: chips, and "Add…" for the rest. */
 function MultiPick({
   value,
@@ -209,6 +222,8 @@ export function NewTicketDialog({
   const repoList = acc ? acc.repos : state.config.repos;
   const handoff = claudeHandoff(multi, account, ctx.account);
   const boards = acc ? acc.projects : state.config.projects;
+  // No board for this account: the issue is created with no board step.
+  const noBoard = boards.length === 0;
   const board = boards.find((p) => `${p.owner}/${p.number}` === t.project);
   const columns = board?.columns ?? state.config.columns;
   // People: the repo's assignable ones, and anyone on the board, the chosen ones first.
@@ -237,7 +252,7 @@ export function NewTicketDialog({
     if (!t.title.trim() || !t.repo || busy) return;
     setBusy(true);
     setMsg(null);
-    const r = await deck().ticketCreate({ ...t, account: account ?? undefined });
+    const r = await deck().ticketCreate(ticketRequest(t, noBoard, account));
     setBusy(false);
     setMsg({ text: r.message, ok: r.ok, url: r.url });
   };
@@ -251,10 +266,14 @@ export function NewTicketDialog({
       <div className="dialog new-ticket" role="dialog" aria-label="New ticket">
         <h3>
           New ticket
-          <span className="muted small">
-            in <b>{t.status}</b>
-            {board ? ` · ${board.title}` : ""}
-          </span>
+          {noBoard ? (
+            <span className="muted small">no board</span>
+          ) : (
+            <span className="muted small">
+              in <b>{t.status}</b>
+              {board ? ` · ${board.title}` : ""}
+            </span>
+          )}
         </h3>
         {done ? (
           <div className="nt-done">
@@ -367,20 +386,22 @@ export function NewTicketDialog({
                   ))}
                 </select>
               </div>
-              <div>
-                <label>Status</label>
-                <select
-                  className="fsel full"
-                  value={t.status}
-                  onChange={(e) => set({ status: e.target.value })}
-                >
-                  {columns.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!noBoard && (
+                <div>
+                  <label>Status</label>
+                  <select
+                    className="fsel full"
+                    value={t.status}
+                    onChange={(e) => set({ status: e.target.value })}
+                  >
+                    {columns.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {boards.length > 1 && (
                 <div>
                   <label>Board</label>
@@ -411,26 +432,28 @@ export function NewTicketDialog({
                   </select>
                 </div>
               )}
-              <div>
-                <label>Sprint</label>
-                <select
-                  className="fsel full"
-                  value={t.sprint}
-                  onChange={(e) => set({ sprint: e.target.value })}
-                >
-                  <option value="@current">
-                    Current sprint{current ? ` (${current.title})` : ""}
-                  </option>
-                  {state.sprints
-                    .filter((s) => !s.completed && s.title !== current?.title)
-                    .map((s) => (
-                      <option key={s.id} value={s.title}>
-                        {s.title}
-                      </option>
-                    ))}
-                  <option value="">No sprint</option>
-                </select>
-              </div>
+              {!noBoard && (
+                <div>
+                  <label>Sprint</label>
+                  <select
+                    className="fsel full"
+                    value={t.sprint}
+                    onChange={(e) => set({ sprint: e.target.value })}
+                  >
+                    <option value="@current">
+                      Current sprint{current ? ` (${current.title})` : ""}
+                    </option>
+                    {state.sprints
+                      .filter((s) => !s.completed && s.title !== current?.title)
+                      .map((s) => (
+                        <option key={s.id} value={s.title}>
+                          {s.title}
+                        </option>
+                      ))}
+                    <option value="">No sprint</option>
+                  </select>
+                </div>
+              )}
               <div>
                 <label>Milestone</label>
                 <select

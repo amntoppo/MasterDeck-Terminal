@@ -34,6 +34,11 @@ export function boardless(login: string | null | undefined, c: AppConfig): boole
   return c.configured && reposOf(login, c).length > 0 && boardsOf(login, c).length === 0
 }
 
+/** Is there anything for `master board` to read? Set up but with no board and no repository ticked (on any account): nothing, so it is not called. */
+export function boardWanted(c: AppConfig): boolean {
+  return c.configured && (c.projects.length > 0 || c.repos.length > 0)
+}
+
 /** Is this repository's account one with no board? `repo` null: the primary issue repo. */
 export function repoBoardless(repo: string | null | undefined, c: AppConfig): boolean {
   return boardless(isMulti(c) ? accountForRepo(repo, c) : null, c)
@@ -90,6 +95,35 @@ export function deriveBoard(b: Board | null, ctx: DeriveCtx): Board | null {
   return { ...b, cards }
 }
 
+const sameCard = (a: BoardCard, b: BoardCard): boolean => {
+  if (a === b) return true
+  const ka = Object.keys(a) as (keyof BoardCard)[]
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k])
+}
+
+/**
+ * deriveBoard that hands back the board it made last time while nothing changed (the same read,
+ * every card in the same column), so a state build every few seconds does not make the Board
+ * filter and lay out again. Cards are compared field by field: an assign changes one in place.
+ */
+export function boardDeriver(): (b: Board | null, ctx: DeriveCtx) => Board | null {
+  let last: { from: Board; to: Board } | null = null
+  return (b, ctx) => {
+    const next = deriveBoard(b, ctx)
+    if (!b || !next || next === b) return next
+    if (last && last.from === b && last.to.cards.length === next.cards.length && next.cards.every((c, i) => sameCard(c, last!.to.cards[i]))) return last.to
+    last = { from: b, to: next }
+    return next
+  }
+}
+
+/** The board's columns, and MasterDeck's own after them when it holds issues of an account with no board (for a reader that only gets columns and cards). */
+export function columnsWithDerived(b: Board): string[] {
+  if (!b.cards.some((c) => c.derived)) return b.columns
+  if (b.cards.every((c) => c.derived)) return [...DERIVED_COLUMNS]
+  return [...b.columns, ...DERIVED_COLUMNS.filter((c) => !b.columns.includes(c))]
+}
+
 /** The sprint board proper (Summary, burndown): derived cards are not part of any sprint. */
 export function withoutDerived(b: Board): Board {
   return b.cards.some((c) => c.derived) ? { ...b, cards: b.cards.filter((c) => !c.derived) } : b
@@ -124,6 +158,10 @@ export function derivedNotes(b: Board | null, login: string | null): string[] {
   const out: string[] = []
   if (part.shown < part.total) out.push(`Showing the first ${part.shown} of ${part.total} open issues.`)
   if (part.skipped.length) out.push(`Not read (more than ${part.repos.length} ${part.repos.length === 1 ? 'repository' : 'repositories'}): ${names(part.skipped)}.`)
-  if (part.missing.length) out.push(`GitHub did not answer for ${names(part.missing)}.`)
-  return out
+  // A repository GitHub does not know (renamed, deleted, no access). One it could not read this
+  // time has its own line below, with the reason.
+  const notes = part.notes ?? []
+  const gone = part.missing.filter((r) => !notes.some((n) => n.startsWith(`${r} not read:`)))
+  if (gone.length) out.push(`Not found: ${gone.join(', ')}`)
+  return [...out, ...notes]
 }

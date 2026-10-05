@@ -1,6 +1,7 @@
 import type { InboxEntry } from './inbox'
 import type { RemoteCard, RemoteInboxEntry, RemoteSession, RemoteSnapshot } from './remote'
 import { jobName } from './schedules'
+import { columnsWithDerived } from './derivedBoard'
 import { fullRepo } from './ticket'
 import type { AppState } from './types'
 
@@ -89,7 +90,7 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
       history: s.inbox.history.slice(0, HISTORY_KEEP).map(inboxEntry),
     },
     menus: Object.fromEntries(Object.entries(s.menus ?? {}).filter(([k]) => menuKeys.has(k))),
-    board: s.board ? { columns: s.board.columns, sprint: s.board.sprint, cards } : null,
+    board: s.board ? { columns: columnsWithDerived(s.board), sprint: s.board.sprint, cards } : null,
     proposals: s.proposals
       .filter((p) => p.status === 'proposed' || p.status === 'approved')
       .map((p) => ({ id: p.id, kind: p.kind, issue: p.issue, repo: p.repo ?? null, status: p.status, summary: p.summary })),

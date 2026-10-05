@@ -185,7 +185,11 @@ import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
-import { deriveBoard, withoutDerived } from "@shared/derivedBoard";
+import {
+  boardDeriver,
+  boardWanted,
+  withoutDerived,
+} from "@shared/derivedBoard";
 import type { Runner } from "./run";
 
 const AGENTS_MS = 3_000;
@@ -318,6 +322,8 @@ export class Sources {
   private links = new Map<string, LinkInfo>();
   /** PRs recorded for each ticket's sessions, by ticketKey: what puts a board-less issue in PR Raised or Done. */
   private linkPrs: Record<string, string[]> = {};
+  /** Gives the board of the last state build back while no card changed column. */
+  private derive = boardDeriver();
   private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
@@ -1207,6 +1213,9 @@ export class Sources {
 
   async refreshBoard(force = false): Promise<{ ok: boolean; message: string }> {
     if (this.boardRunning) return { ok: true, message: "already refreshing" };
+    // No board and no repository selected: nothing to ask `master board` for.
+    if (!process.env.MASTERDECK_BOARD_FIXTURE && !boardWanted(this.config))
+      return { ok: true, message: "nothing selected" };
     const sprint = this.selectedSprint;
     if (!process.env.MASTERDECK_BOARD_FIXTURE && this.githubPaused()) {
       this.boardError = this.errors.github ?? "GitHub calls paused";
@@ -2215,8 +2224,9 @@ export class Sources {
       skills: this.skills,
       hooks: this.hooks,
       // Cards of an account with no board get their column here, from what MasterDeck knows now.
-      // (A board without such cards comes back as the same object.)
-      board: deriveBoard(this.boards[this.selectedSprint] ?? null, {
+      // (A board without such cards comes back as the same object; one with them, as the object of
+      // the build before while no card changed column.)
+      board: this.derive(this.boards[this.selectedSprint] ?? null, {
         sessions,
         past: this.past,
         linkPrs: this.linkPrs,

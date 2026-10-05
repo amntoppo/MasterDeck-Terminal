@@ -319,6 +319,7 @@ class BoardCommandTest(unittest.TestCase):
         code, b = self.run_board(dict(read([ritem(1)]), missing=["acme/api"], unread={"acme/api": "RATE_LIMITED"}))
         self.assertEqual((code, b["notes"]), (0, ["acme/api not read: RATE_LIMITED"]))
         self.assertEqual(b["derived"][0]["missing"], ["acme/api"])
+        self.assertEqual(b["derived"][0]["notes"], ["acme/api not read: RATE_LIMITED"])  # on its account's part: the Board shows it in that tab
 
     def test_no_pr_read_without_an_open_pr(self):
         with mock.patch.object(collect.Fixtures, "pr_details", side_effect=AssertionError("no PR is open: no read")):
@@ -340,6 +341,7 @@ class BoardCommandTest(unittest.TestCase):
             _code, b = self.run_board(read([ritem(2, prs={PR + "5": "DRAFT"})]))
         self.assertEqual(len(b["cards"]), 1)
         self.assertEqual(b["notes"], ["Pull request details not read: HTTP 401: Bad credentials"])
+        self.assertEqual(b["derived"][0]["notes"], ["Pull request details not read: HTTP 401: Bad credentials"])
 
     def test_a_config_with_a_board_never_reads_repo_issues(self):
         with mock.patch.object(collect.Fixtures, "repo_issues", side_effect=AssertionError("it has a board")):

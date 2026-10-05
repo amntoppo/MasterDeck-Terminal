@@ -367,6 +367,8 @@ export interface DerivedPart {
   /** Ticked repositories past the limit, and ones GitHub answered nothing for. */
   skipped: string[];
   missing: string[];
+  /** What the read could not do, as `master board` says it ("acme/api not read: RATE_LIMITED"). */
+  notes?: string[];
 }
 
 export interface Board {

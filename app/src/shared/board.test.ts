@@ -34,6 +34,11 @@ describe('parseBoard', () => {
     expect(b.cards.map((c) => [c.derived, c.state, c.closedAt])).toEqual([[true, 'CLOSED', '2026-09-20T08:00:00Z'], [true, 'OPEN', null], [undefined, undefined, undefined]])
     expect(b.derived).toEqual([{ account: 'bob-work', repos: ['globex/app'], total: 26, shown: 26, skipped: [], missing: ['globex/gone'] }])
     expect('derived' in parseBoard({ cards: [] })!).toBe(false)
+    // What the read could not do: per account; from a master CLI that only prints them at the top, for the one account there is.
+    const part = { repos: ['globex/app'], total: 1, shown: 1, skipped: [], missing: [] }
+    expect(parseBoard({ cards: [], derived: [{ ...part, account: 'bob-work', notes: ['globex/api not read: RATE_LIMITED', 7] }, { ...part, account: 'carol' }], notes: ['globex/api not read: RATE_LIMITED'] })!.derived!.map((d) => d.notes)).toEqual([['globex/api not read: RATE_LIMITED'], undefined])
+    expect(parseBoard({ cards: [], derived: [{ ...part, account: null }], notes: ['Pull request details not read: HTTP 401'] })!.derived![0].notes).toEqual(['Pull request details not read: HTTP 401'])
+    expect('notes' in parseBoard({ cards: [], derived: [{ ...part, account: null }] })!.derived![0]).toBe(false)
     expect('derived' in parseBoard({ cards: [{ number: 1 }] })!.cards[0]).toBe(false)
   })
 })

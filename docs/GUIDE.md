@@ -441,7 +441,8 @@ creation.
   column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
   the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
   board with its status and sprint. Changing a card's status from the Board is also done by
-  MasterDeck.
+  MasterDeck. In a tab with no GitHub board the + is on Todo only and the ticket is created without
+  a board step (no status, board or sprint).
 - **Create with Claude:** from that dialog, a Claude session opens on the right of the Board (only
   there; it keeps running while you look at another view, and its edge drags to resize). It knows
   the boards, columns, sprints, repos and people, and where the + was clicked (its folder,
@@ -811,6 +812,9 @@ cards is in them.
   in another; two repos' `#12` never mix (sessions, costs, statuses, links, babysit-ticket and master
   all keep the repo). A card moves only within its own board's columns.
 - **Several accounts:** with two or more GitHub accounts each tab shows one account (its badge says which): its boards, columns and sprint, and **Mine** means that account's login. The first select in the filter row changes a tab's account; connecting another account adds a Mine tab for it once; + adds a tab on the same account.
+- **No GitHub board:** an account with repositories but no project board selected in Setup still has a Board. Its tab shows the open issues of the repositories ticked for it (and the ones closed in the last 14 days), in four columns MasterDeck works out itself; nothing is stored on GitHub: **Todo** (open, no session), **In Dev** (a session is linked to it, running or stopped, or its PR is a draft), **PR Raised** (a linked PR is open and ready), **Done** (closed, or its PR merged). With several PRs, one still open keeps it in PR Raised; a PR closed without merging counts for nothing. A line at the top says so: "This account has no GitHub board. Columns are worked out by MasterDeck." Cards cannot be dragged and columns cannot be reordered there, and there is no sprint picker or Summary; everything else works (open the session, Start, the PR, Assign, Resume, the filters, also on a phone). It reads the first 10 repositories, 300 open issues and 50 closed ones, and says under that line what it left out, one line each: "Showing the first 300 of 412 open issues.", "Not found: acme/old-site" (a repository GitHub no longer knows: renamed, deleted or no access; the others still show), "acme/api not read: RATE_LIMITED" (not read this time; asked again on the next refresh), "Pull request details not read: …" (the cards show, without CI and review threads). master only proposes issues assigned to that account.
+- **Create a GitHub board** (on the Mac; the link in that line): makes a GitHub project under the account's owner with the columns Todo, In Dev, PR Raised, Done, links the ticked repositories, adds their open issues (each in the column the Board showed) and selects the board for the account, so the tab switches to it. You name it (default `<repository> board`); a confirmation lists what will be created before anything is written. The account's token needs the `project` scope; without it the dialog shows the commands (see "Adding a scope to a second account"). An issue GitHub refuses, or a rate limit, is reported with **Try again**. A board made this way has no sprints: its tab shows all its issues and has no sprint picker. MasterDeck never deletes a project: if a run stops half-way, the dialog names the project and what to do with it. From the web app or a phone the line says "Create one from MasterDeck on your Mac."
+- **Empty tabs** say why: "No issues match" (the filters hide them all), "No open issues" (an account with no board whose repositories have none; with **Open Setup** and, on the Mac, **Create a GitHub board**), or "Nothing selected" (no repositories or boards picked for the account; **Open Setup**; MasterDeck then asks GitHub for no board at all).
 - **Tabs:** it starts with **Mine** (your issues, selected) and **Everyone**. **+** adds a tab; each tab has its own name (double-click to rename) and filters, over the
   same fetched board. **Repos** and **Boards** filters (with **Select all**) pick what a tab shows; with
   some boards picked, only their columns show. Tabs and their filters are remembered.
@@ -831,7 +835,7 @@ cards is in them.
   Links copied in from babysit-ticket are left alone until a session links that ticket again. A session master
   spawned for an issue is linked by MasterDeck, and a link made from MasterDeck still runs the
   workflow's "When a session is linked" steps (sent to the session once its turn is over).
-- **Data:** `master board` (2 GitHub calls), refreshed together with the issues: at startup, every
+- **Data:** `master board` (2 GitHub calls; for an account with no board one call for its repositories' issues, and one more only when a linked PR is open), refreshed together with the issues: at startup, every
   hour, and on **Refresh**. "refreshed 15 minutes ago" beside the button shows the last refresh. The
   board is cached with the issues, so it shows immediately on the next start.
 

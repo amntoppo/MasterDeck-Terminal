@@ -82,10 +82,13 @@ export function parseBoard(raw: unknown): Board | null {
     .map((p) => ({ key: p.key as string, title: str(p.title) ?? (p.key as string), columns: arr(p.columns).filter((x): x is string => typeof x === 'string') }))
   const list = (v: unknown) => arr(v).filter((x): x is string => typeof x === 'string')
   const count = (v: unknown) => (typeof v === 'number' && v >= 0 ? v : 0)
-  const derived = arr(r.derived)
+  const parts = arr(r.derived)
     .map(obj)
     .filter((d) => Array.isArray(d.repos))
-    .map((d) => ({ account: str(d.account), repos: list(d.repos), total: count(d.total), shown: count(d.shown), skipped: list(d.skipped), missing: list(d.missing) }))
+  // What a read could not do: on its account's part. A master CLI that only prints them at the
+  // top: they are the one part's when there is one (with several they cannot be told apart).
+  const notesOf = (d: Record<string, unknown>) => (list(d.notes).length ? list(d.notes) : parts.length === 1 ? list(r.notes) : [])
+  const derived = parts.map((d) => ({ account: str(d.account), repos: list(d.repos), total: count(d.total), shown: count(d.shown), skipped: list(d.skipped), missing: list(d.missing), ...(notesOf(d).length ? { notes: notesOf(d) } : {}) }))
   return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards, projects, ...(derived.length ? { derived } : {}) }
 }
 

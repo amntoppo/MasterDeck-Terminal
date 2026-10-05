@@ -1258,3 +1258,8 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .create-board pre { margin: 6px 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; white-space: pre-wrap; user-select: text; }
 .create-board ul { margin: 8px 0; padding-left: 18px; font-size: 13px; }
 .create-board a { display: block; margin: 4px 0; overflow-wrap: anywhere; }
+
+/* The Board of an account with no GitHub board: the line under the tabs, then one line for each thing the read left out */
+.board-hint { display: flex; align-items: center; gap: 2px 10px; flex-wrap: wrap; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; color: var(--muted); }
+.board-hint .link-btn { font-size: 12px; }
+.board-hint .board-note { flex-basis: 100%; overflow-wrap: anywhere; }

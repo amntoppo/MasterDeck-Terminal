@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, claudeHandoff, ticketDefaults } from "./NewTicket";
+import { boardFor, claudeHandoff, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -152,5 +152,17 @@ describe("Create with Claude from the dialog", () => {
       label: "Create with Claude as @alice",
       blocked: "Create with Claude runs on this tab's account; switch to a @bob-work tab to use it",
     });
+  });
+});
+
+describe("a ticket for an account with no board", () => {
+  const t = { repo: "Org/Main", title: "T", body: "B", project: "Org/1", status: "Todo", assignees: ["alice"], labels: ["bug"], milestone: "", sprint: "@current", sprintField: "Sprint" };
+  it("sends no board step", () => {
+    expect(ticketRequest(t, true, null)).toEqual({ ...t, project: "", status: "", sprint: "", account: undefined });
+    expect(ticketRequest(t, true, "bob-work")).toMatchObject({ repo: "Org/Main", title: "T", assignees: ["alice"], project: "", status: "", sprint: "", account: "bob-work" });
+  });
+  it("with a board it is what the dialog always sent", () => {
+    expect(ticketRequest(t, false, "alice")).toEqual({ ...t, account: "alice" });
+    expect(ticketRequest(t, false, null)).toEqual({ ...t, account: undefined });
   });
 });

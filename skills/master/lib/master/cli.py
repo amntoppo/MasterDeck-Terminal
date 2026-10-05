@@ -321,21 +321,21 @@ def _repo_cards(src, args) -> "tuple[list, dict, dict]":
     items, shown = board.trim_repo_issues(got["items"], board.done_since(_today(args)))
     details = {u: {"state": st, "ci": None, "unresolved": 0}
                for it in items for u, st in (it.get("pr states") or {}).items()}
-    note = None
     why = got.get("unread") or {}  # asked again next time: say why this time
-    if why:
-        note = "; ".join(f"{r} not read: {w}" for r, w in why.items())
+    lines = [f"{r} not read: {w}" for r, w in why.items()]
     live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
     if live:
         try:
             details.update(src.pr_details(live))
         except Exception as e:  # the states are known already; say CI and threads are missing
-            more = f"Pull request details not read: {str(e).strip() or type(e).__name__}"
-            note = f"{note}; {more}" if note else more
+            lines.append(f"Pull request details not read: {str(e).strip() or type(e).__name__}")
     part = {"repos": got["repos"], "total": got["total"], "shown": shown,
             "skipped": got["skipped"], "missing": got["missing"]}
-    if note:
-        part["note"] = note
+    if lines:
+        # "notes": one line each, on this account's part (the Board shows them in its tab);
+        # "note": the same in one line, for the top-level list.
+        part["notes"] = lines
+        part["note"] = "; ".join(lines)
     return items, details, part
 
 
