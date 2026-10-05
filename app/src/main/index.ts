@@ -1254,7 +1254,8 @@ async function pumpTicketRequests(): Promise<void> {
     const cfg = getConfig();
     for (const dir of ticketDirs(paths.home, isMulti(cfg)))
       await pumpTicketDir(dir, (p, picked) =>
-        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create(p),
+        // `account`: the tab's, so a tab without a board never puts a ticket on another account's.
+        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create({ ...p, account: picked }),
       );
   } finally {
     ticketPumping = false;
@@ -1824,6 +1825,7 @@ function registerIpc(): void {
       sprint: str(o.sprint, 200) || undefined,
       sprintField: str(o.sprintField, 100) || undefined,
       dryRun: o.dryRun === true,
+      account: str(o.account, 100) || null,
     });
     if (!res.ok)
       return {
@@ -1904,7 +1906,16 @@ function registerIpc(): void {
     ];
     writeFileSync(
       join(dir, "CLAUDE.md"),
-      ticketContext(cfg, latest?.sprints ?? [], people, latest?.me ?? null),
+      // The tab's account: one with no board gets only its own repositories, and no board.
+      ticketContext(
+        cfg,
+        latest?.sprints ?? [],
+        people,
+        latest?.me ?? null,
+        typeof (ctx as { account?: unknown } | null)?.account === "string"
+          ? (ctx as { account: string }).account
+          : null,
+      ),
     );
     writeFileSync(
       join(dir, "context.json"),

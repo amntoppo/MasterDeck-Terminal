@@ -223,6 +223,24 @@ describe('an account with no board', () => {
     expect(await new BoardOps(gh, () => two).create({ repo: 'acme/tracker', title: 'T', body: '', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1' })
     expect(await new BoardOps(gh, () => two).create({ repo: 'globex/app', project: 'acme/1', status: 'Todo', title: 'T', body: '', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1', status: 'Todo' })
   })
+  it("a ticket made as an account with no board never lands on another account's board", async () => {
+    // Create with Claude on bob-work's tab (no board), told to file it in alice's repo: no --project given.
+    const { gh, calls } = fakeGh([[/issue create/, 'https://github.com/acme/tracker/issues/8\n']])
+    expect(await new BoardOps(gh, () => two).create({ repo: 'acme/tracker', title: 'T', body: '', status: 'Todo', sprint: '@current', account: 'bob-work' })).toEqual({ ok: true, url: 'https://github.com/acme/tracker/issues/8', number: 8, project: '', status: '', sprint: '' })
+    expect(calls.some((c) => c.includes('item-add'))).toBe(false)
+    // A board named outright is not its own: refused before anything is created.
+    const before = calls.length
+    expect(await new BoardOps(gh, () => two).create({ repo: 'globex/app', project: 'acme/1', status: 'Todo', title: 'T', body: '', account: 'bob-work' })).toEqual({ ok: false, error: 'create: acme/1 is not a board of bob-work, which has no GitHub board' })
+    expect(await new BoardOps(gh, () => two).create({ repo: 'globex/app', project: 'acme/1', title: 'T', body: '', account: 'bob-work', dryRun: true })).toMatchObject({ ok: false })
+    expect(calls.length).toBe(before)
+    // An account with a board: as before, with or without the account named.
+    expect(await new BoardOps(gh, () => two).create({ repo: 'acme/tracker', title: 'T', body: '', account: 'alice', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1' })
+    expect(await new BoardOps(gh, () => two).create({ repo: 'globex/app', project: 'acme/1', status: 'Todo', title: 'T', body: '', account: 'alice', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1', status: 'Todo' })
+    // One account (no accounts list): the name is ignored, the first board is the default as ever.
+    expect(await new BoardOps(gh, () => cfg).create({ title: 'T', body: '', account: 'bob-work', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1' })
+    // A login that is not connected says nothing about boards: the repo decides, as before.
+    expect(await new BoardOps(gh, () => two).create({ repo: 'acme/tracker', title: 'T', body: '', account: 'mallory', dryRun: true })).toMatchObject({ ok: true, project: 'acme/1' })
+  })
   it('links a session to an issue that has no card to move', async () => {
     const linked: string[] = []
     const moves: string[] = []

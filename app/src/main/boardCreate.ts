@@ -110,6 +110,8 @@ interface IssueRef {
 /** A created board and what is still to do for it. */
 interface Job {
   account: string | null
+  /** One account: gh's active login when the board was confirmed (null: gh named none). Every later call must go out as it. */
+  as: string | null
   projectId: string
   fieldId: string
   options: Record<DerivedColumn, string>
@@ -218,7 +220,7 @@ export class BoardCreator {
   }
 
   /** Everything before the first write: the plan, the name, the confirmation, then the same checks again. Nothing here throws. */
-  private async checked(req: unknown): Promise<{ plan: Plan; title: string; columnOf: Job['columnOf'] } | Failure> {
+  private async checked(req: unknown): Promise<{ plan: Plan; title: string; columnOf: Job['columnOf']; as: string | null } | Failure> {
     const x = o(req)
     const title = cleanTitle(x.title)
     if (!title) return { ok: false, message: 'give the board a name (up to 100 characters)' }
@@ -249,7 +251,7 @@ export class BoardCreator {
       // write it would be too late to say so.
       const columnOf = this.d.columns(plan.account)
       if (!columnOf) return { ok: false, message: 'Open the Board tab and wait for it to load, then try again. Nothing was created.' }
-      return { plan, title, columnOf }
+      return { plan, title, columnOf, as: as ?? null }
     } catch (e) {
       return { ok: false, message: `Nothing was created: ${thrown(e)}` }
     }
@@ -258,7 +260,7 @@ export class BoardCreator {
   private async run(req: unknown): Promise<BoardCreateResult> {
     const ready = await this.checked(req)
     if ('ok' in ready) return ready
-    const { plan, title, columnOf } = ready
+    const { plan, title, columnOf, as } = ready
 
     const gh = this.d.gh(plan.account)
     this.say('Creating the project…')
@@ -284,7 +286,7 @@ export class BoardCreator {
     // From here the project exists. Whatever happens, the result names it.
     const held: { job: Job | null } = { job: null }
     try {
-      return await this.fill(gh, plan, title, columnOf, { id: projectId, number, url }, held)
+      return await this.fill(gh, plan, title, columnOf, as, { id: projectId, number, url }, held)
     } catch (e) {
       return this.stopped(held.job, url, e)
     }
@@ -299,7 +301,7 @@ export class BoardCreator {
     return { ok: false, url, ...(job ? { retry: true } : {}), message: `The board was created${at(url)} but MasterDeck stopped before it was finished: ${thrown(e)}. ${job ? 'Try again to finish it.' : 'Delete it on GitHub, or pick it in Setup → Repos & boards.'}` }
   }
 
-  private async fill(gh: GhRunner, plan: Plan, title: string, columnOf: Job['columnOf'], board: { id: string; number: number; url: string }, held: { job: Job | null }): Promise<BoardCreateResult> {
+  private async fill(gh: GhRunner, plan: Plan, title: string, columnOf: Job['columnOf'], as: string | null, board: { id: string; number: number; url: string }, held: { job: Job | null }): Promise<BoardCreateResult> {
     const { url } = board
     this.say('Setting its columns…')
     const field = await this.columns(gh, board.id)
@@ -307,7 +309,7 @@ export class BoardCreator {
 
     const total = planTotal(plan)
     const job: Job = {
-      account: plan.account, projectId: board.id, fieldId: field.id, options: field.options, url, title,
+      account: plan.account, as, projectId: board.id, fieldId: field.id, options: field.options, url, title,
       entry: boardEntry({ owner: plan.owner, ownerType: plan.ownerType, number: board.number, id: board.id, title, fieldId: field.id, options: field.options }),
       selected: false,
       columnOf,
@@ -507,6 +509,13 @@ export class BoardCreator {
     if (login === undefined || !job) return { ok: false, message: 'nothing left to add' }
     this.running = true
     try {
+      // One account: the calls go out as gh's active login. Another one now (gh auth switch since
+      // the board was made) would add to the board with a token nobody confirmed: nothing is sent.
+      if (job.account === null) {
+        const active = (await this.d.ghLogins()).find((a) => a.active)?.login ?? null
+        if (active !== job.as)
+          return { ok: false, url: job.url, retry: true, message: `gh's active account changed${active ? ` to ${active}` : ''}; nothing was added.${job.as ? ` Switch gh back to ${job.as} (gh auth switch --user ${job.as}), then try again.` : ''}` }
+      }
       return await this.work(this.d.gh(login), job)
     } catch (e) {
       return this.stopped(job, job.url, e)

@@ -1,7 +1,8 @@
 import { readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { getConfig, projectKey, statusesFor, statusRank, type AppConfig, type ProjectConfig } from '@shared/appConfig'
-import { repoBoardless } from '@shared/derivedBoard'
+import { isMulti } from '@shared/accounts'
+import { boardless, repoBoardless } from '@shared/derivedBoard'
 import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
@@ -33,6 +34,8 @@ export interface CreateOpts {
   sprint?: string
   sprintField?: string
   dryRun?: boolean
+  /** The account creating it, when one was picked (a Board tab's, the dialog's). With two or more accounts and no board of its own, the ticket goes on no board. */
+  account?: string | null
 }
 
 export type CreateResult =
@@ -130,7 +133,12 @@ export class BoardOps {
     if (!c.title.trim()) return { ok: false, error: 'create: --title is required' }
     // The repo's account has no board and none was named: no board step. Never another account's
     // first board, and a status or sprint that came along (MasterDeck's own columns) is dropped.
-    const noBoard = !c.project && repoBoardless(repo, cfg)
+    // Nor when the account creating it (a tab without a board) has none, whatever repository it
+    // names; a board named outright is then another account's, and is refused before anything is made.
+    const by = c.account && isMulti(cfg) ? cfg.accounts.find((a) => a.login === c.account)?.login : undefined
+    const loose = !!by && boardless(by, cfg)
+    if (loose && c.project) return { ok: false, error: `create: ${c.project} is not a board of ${by}, which has no GitHub board` }
+    const noBoard = !c.project && (loose || repoBoardless(repo, cfg))
     const project = noBoard ? '' : c.project || (cfg.projects[0] ? projectKey(cfg.projects[0]) : '')
     const p = project ? this.board(project) : null
     if (project && !p) return { ok: false, error: `create: ${project} is not a configured board` }

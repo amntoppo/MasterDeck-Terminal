@@ -5,7 +5,9 @@
  * board, the tab's filters, the sprint shown). It creates tickets with ./create-ticket.sh (MasterDeck
  * creates the ticket; same flags as before) and logs each one so the Board refreshes.
  */
+import { isMulti } from "./accounts";
 import type { AppConfig } from "./appConfig";
+import { boardless, reposOf } from "./derivedBoard";
 import type { Sprint } from "./types";
 
 export const TICKET_BUILDER_NAME = "md-ticket-builder";
@@ -41,8 +43,12 @@ export function ticketContext(
   sprints: Sprint[],
   people: string[],
   me: string | null,
+  /** The Board tab's account. With two or more accounts and no board of its own: only its repositories, and no board (never another account's). */
+  account?: string | null,
 ): string {
-  const boards = cfg.projects
+  const loose = !!account && isMulti(cfg) && cfg.accounts.some((a) => a.login === account) && boardless(account, cfg);
+  const repos = loose ? reposOf(account, cfg) : cfg.repos;
+  const boards = (loose ? [] : cfg.projects)
     .map(
       (p) =>
         `- \`${p.owner}/${p.number}\` (${p.title}): columns, in order: ${p.columns.map((c) => `\`${c}\``).join(", ")}. Sprint field: \`${p.sprintField || "Sprint"}\`.`,
@@ -56,7 +62,7 @@ export function ticketContext(
         )
         .join("\n")
     : "- (none)";
-  const primary = cfg.repos[0] ?? `${cfg.owner}/${cfg.issueRepo}`;
+  const primary = repos[0] ?? `${cfg.owner}/${cfg.issueRepo}`;
   return `# MasterDeck: tickets for the board
 
 You write and create GitHub issues ("tickets") on the team's project board, from what the user
@@ -108,7 +114,7 @@ asks. The user sees this conversation next to MasterDeck's Board, and clicked **
 
 Boards:
 
-${boards || "- (none configured)"}
+${boards || (loose ? `- (none: \`${account}\` has no GitHub board; create without \`--project\`, \`--status\` and \`--sprint\`)` : "- (none configured)")}
 
 Open sprints:
 
@@ -116,7 +122,7 @@ ${sprintList}
 
 Repos (owner/name; the first is the default):
 
-${cfg.repos.map((r) => `- \`${r}\``).join("\n") || `- \`${primary}\``}
+${repos.map((r) => `- \`${r}\``).join("\n") || `- \`${primary}\``}
 
 People on the board (for assignees):${me ? ` you are talking to \`${me}\`.` : ""}
 

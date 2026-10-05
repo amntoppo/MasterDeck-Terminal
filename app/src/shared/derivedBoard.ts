@@ -158,22 +158,33 @@ export function unreadRepos(b: Board | null, login: string | null, c: AppConfig)
   if (!b || !boardless(login, c)) return null
   const part = partOf(b, login)
   if (!part) return reposOf(login, c)
-  if (part.missing.length) return part.missing
-  return part.notes?.length ? part.repos : null
+  // Only a repository that gave no issues counts. A note about pull request details (CI, review
+  // threads) is about cards that were read: with none, the tab still has "no open issues".
+  return part.missing.length ? part.missing : null
 }
 
-export type BoardEmpty = 'cards' | 'filtered' | 'no-issues' | 'not-read' | 'nothing-selected'
+/**
+ * The first read of an account with no board is under way: a board is on screen (another
+ * account's, read earlier) but nothing of this account has arrived. The tab is loading; "could
+ * not read" is only said once a read ended without its part. An account read before keeps what
+ * it shows while it is read again.
+ */
+export function awaitingRead(b: Board | null, login: string | null, c: AppConfig, loading: boolean): boolean {
+  return loading && !!b && boardless(login, c) && !partOf(b, login)
+}
+
+export type BoardEmpty = 'cards' | 'filtered' | 'no-issues' | 'not-read' | 'loading' | 'nothing-selected'
 
 /**
  * Why a tab shows no card: the filters hide them (also a board's empty sprint, as before), its
- * repositories have no open issue, they could not be read (`unread`, from unreadRepos), or
- * nothing is selected for its account.
+ * repositories have no open issue, they could not be read (`unread`, from unreadRepos) or are
+ * being read for the first time (`loading`, from awaitingRead), or nothing is selected for its account.
  */
-export function boardEmpty(o: { login: string | null; total: number; shown: number; unread?: string[] | null }, c: AppConfig): BoardEmpty {
+export function boardEmpty(o: { login: string | null; total: number; shown: number; unread?: string[] | null; loading?: boolean }, c: AppConfig): BoardEmpty {
   if (o.shown > 0) return 'cards'
   if (boardsOf(o.login, c).length === 0) {
     if (reposOf(o.login, c).length === 0) return 'nothing-selected'
-    if (o.total === 0) return o.unread?.length ? 'not-read' : 'no-issues'
+    if (o.total === 0) return o.unread?.length ? (o.loading ? 'loading' : 'not-read') : 'no-issues'
   }
   return 'filtered'
 }

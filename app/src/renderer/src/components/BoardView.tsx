@@ -38,6 +38,7 @@ import {
   type FilterState,
 } from "@shared/boardFilter";
 import {
+  awaitingRead,
   boardEmpty,
   boardless,
   boardsOf,
@@ -458,6 +459,8 @@ export function BoardView({
             total: b.cards.length,
             shown: shown.cards.length,
             unread,
+            // Its first read is still under way: loading, not "could not read".
+            loading: awaitingRead(state.board, acct, cfg, loading),
           },
           cfg,
         )
@@ -950,7 +953,7 @@ export function BoardView({
               Open Setup
             </button>
           </div>
-        ) : !b || !shown ? (
+        ) : !b || !shown || empty === "loading" ? (
           <div className="welcome">
             {loading ? (
               <div>Loading board…</div>

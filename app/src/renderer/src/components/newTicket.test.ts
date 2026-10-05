@@ -178,6 +178,30 @@ describe("Create with Claude from the dialog", () => {
     expect(claudePrompt("Todo", undefined)).toBeUndefined();
     expect(claudePrompt("Todo", { title: " ", body: "" } as never)).toBeUndefined();
   });
+  it("a tab whose account has no board: only that account's repos, and no board to fall back on", () => {
+    const acct = (login: string, owner: string, repos: string[], projects: unknown[], primary = false) => ({
+      login, name: login, email: `${login}@example.test`, owner, ownerType: "organization", issueRepo: repos[0].split("/")[1], repos, projects, ...(primary ? { primary: true } : {}),
+    });
+    const two = parseConfig({
+      owner: "acme", issueRepo: "tracker",
+      accounts: [acct("alice", "acme", ["acme/tracker", "acme/api"], [{ owner: "acme", number: 1, title: "Delivery", columns: ["Todo"] }], true), acct("bob-work", "globex", ["globex/app", "globex/web"], [])],
+    });
+    const loose = ticketContext(two, [], [], "bob-work", "bob-work");
+    const repoList = (md: string) => md.split("Repos (owner/name; the first is the default):")[1].split("People on the board")[0];
+    expect(repoList(loose)).toBe("\n\n- `globex/app`\n- `globex/web`\n\n");
+    expect(loose).toContain("(default: `globex/app`)");
+    expect(loose).not.toContain("acme/");
+    expect(loose).toContain("- (none: `bob-work` has no GitHub board; create without `--project`, `--status` and `--sprint`)");
+    // A tab whose account has a board, and no account at all: every word as before.
+    const all = ticketContext(two, [], [], "alice");
+    expect(ticketContext(two, [], [], "alice", "alice")).toBe(all);
+    expect(repoList(all)).toContain("- `globex/app`");
+    expect(all).toContain("- `acme/1` (Delivery)");
+    // One account (no accounts list) with no board: the account is not a tab's, nothing changes.
+    const bare = parseConfig({ owner: "acme", issueRepo: "tracker" });
+    expect(ticketContext(bare, [], [], null, "alice")).toBe(ticketContext(bare, [], [], null));
+    expect(ticketContext(two, [], [], null, "mallory")).toBe(ticketContext(two, [], [], null));
+  });
   it("the brief says what an empty status means", () => {
     expect(ticketContext(cfg as never, [], [], null)).toContain("An empty `status` and `project`: this account has no GitHub board");
   });

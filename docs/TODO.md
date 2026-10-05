@@ -96,7 +96,9 @@ fixes it, and move the item here to "Recently done".
   mutations were checked by schema introspection only. Run it once on a throwaway repository and
   confirm: the default Status field is there and its options keep their ids, 20 aliased
   `addProjectV2ItemById` per request pass GitHub's secondary limits, a repository of another owner
-  links, adding an issue twice is harmless. Where: `main/boardCreate.ts`; the spec's §9
+  links, adding an issue twice is harmless, and whether `projectsV2(query: "is:open")` lists a board
+  created seconds earlier (the duplicate-name check after a timed-out create relies on it: if the
+  search lags, a second Create of the same name is not refused). Where: `main/boardCreate.ts`; the spec's §9
   (backend repo, `docs/superpowers/specs/2026-10-05-board-without-a-github-project-design.md`).
 - **P3 · Existing boards without a sprint field show nothing under "Current sprint".** Only boards
   MasterDeck creates are marked `sprintless`. Approach: let Setup write the marker when the detected
@@ -112,6 +114,17 @@ fixes it, and move the item here to "Recently done".
 - **P3 · Create a GitHub board from the web app / phone** is blocked by design; revisit if asked
   (needs a confirmation flow that does not rely on the Mac's dialog, and a way to fix a missing scope
   remotely).
+- **P3 · The first sweep after the upgrade can raise many ASSIGN proposals** for a user with no
+  board and many old open issues assigned to them: every one in Todo with no session is proposed, and
+  there is no cap (spec A4 leaves it so). Approach: cap the ASSIGN proposals per sweep for derived
+  issues (newest first), or propose only issues updated in the last N days. Where: `rules.propose`,
+  `normalize.repo_issues`.
+- **P3 · A repository that answers null with anything but NOT_FOUND is asked again on every sweep.**
+  A partial answer makes gh exit 1, the shared cache stores only exit 0, and only `NOT_FOUND` is
+  remembered (`missing-repos.json`), so a repository that keeps answering e.g. `FORBIDDEN` (SAML,
+  access removed without a rename) means the whole repository query is sent again each time, for
+  every repository of the account. Approach: remember such a repository for a few minutes (a short
+  TTL beside the hour for NOT_FOUND), still naming it in `unread`. Where: `collect.Live.repo_issues`.
 - **P3 · Board without a GitHub project: review leftovers (small).**
   - Board creation (`main/boardCreate.ts`): an account error from `makeGhRunner` on the create call
     ("not ready yet", "needs to log in again": never sent, empty stdout, `ghc.ts`) still gets the
@@ -120,12 +133,16 @@ fixes it, and move the item here to "Recently done".
     the column they had at the last read; a repository link that keeps failing does not by itself
     keep the job pending (it is retried only when Try again runs for another reason), and no test
     covers a run whose only leftover is an unlinked repository; Try again after the account was
-    disconnected answers "nothing left to add"; a status request that failed after GitHub applied it
+    disconnected answers "nothing left to add"; with one account Try again is refused while gh's
+    active login is not the one that confirmed (it must be switched back by hand; a job made while
+    gh named no active login can only be retried in that same state); a status request that failed after GitHub applied it
     is sent again on Try again and overwrites a move made on GitHub in between (one batch); the
     duplicate-name check reads the owner's first 100 open boards (the confirmation says so).
   - Board tab (`BoardView.tsx`, `shared/derivedBoard.ts`): "Could not read <repositories>"
     (`'not-read'`) shows only when the tab has no card at all; with cards from other repositories
-    only the note line says it. `boardDeriver` keeps the board's identity stable but still builds
+    only the note line says it. An account whose whole read failed (no part at all) shows "Loading
+    board…" again during each later refresh, then "Could not read" (`awaitingRead` cannot tell a
+    first read from a read after a failure). `boardDeriver` keeps the board's identity stable but still builds
     the derived objects on every state build. `columnsWithDerived` (remote snapshot): a board with
     both kinds of cards whose own columns share a name with MasterDeck's, and a board with no cards,
     are untested edges. A "Nothing selected" tab still shows the sprint picker and Summary (it is
@@ -134,6 +151,11 @@ fixes it, and move the item here to "Recently done".
     renders `BoardView` or covers `Sources.refreshBoard`'s gate (helpers only). The spec says
     "N open issues; the filters hide all of them"; the tab says "N issues" (the count includes
     recently closed ones).
+  - Create with Claude in a tab without a board: the CLAUDE.md lists only the tab account's
+    repositories, but the "People on the board" list and the open sprints still come from every
+    account, and a `--repo` of another account is not refused (the issue is created there, on no
+    board). A tab whose account has a board still falls back to the config's first board (the
+    primary's) when `--project` is left out, as before.
   - Version skew: a `master` CLI from before this change prints no `derived` parts (the tab then
     reads "Could not read" until both are updated), and one that prints only the top-level `notes`
     cannot attribute them with two accounts without a board. Say so in the release notes.
@@ -142,7 +164,9 @@ fixes it, and move the item here to "Recently done".
     `missing-repos.json` is read and written without a lock; closed issues are the 50 most recently
     updated since the 14-day cut (not strictly the 50 most recently closed); only the first 5 linked
     PRs of an issue are read, so an open sixth is not seen; `derived.total` counts every open issue
-    also under `--mine`; the 300-issue cap applies before the assigned-to-me filter; the snapshot's
+    also under `--mine`; an issue that is on another account's board is taken off this
+    account's `total` / `shown` only when it was among the issues read (past the 300 it still
+    counts); the 300-issue cap applies before the assigned-to-me filter; the snapshot's
     repository read runs even when the login is unknown, and the snapshot drops `missing` / `unread`.
   - Linking and tickets (`boardOps.ts`, `boardFlow.ts`): `setStatus` refuses by the repository's
     account even when the issue sits on another account's board; tests missing for "linkPr still

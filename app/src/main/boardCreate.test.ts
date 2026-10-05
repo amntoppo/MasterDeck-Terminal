@@ -421,6 +421,30 @@ describe('the columns come from the Board, read before anything is written', () 
 })
 
 describe('Try again', () => {
+  it("one account: refused when gh's active login is no longer the one that confirmed", async () => {
+    let active = 'alice'
+    const logins = async (): Promise<GhAccount[]> => LOGINS.map((x) => ({ ...x, active: x.login === active }))
+    const w: World = { issues: 45, rateAt: 2 }
+    const t = make(one, github(w), { ghLogins: logins })
+    expect(await t.creator.create({ title: 'T' }, false)).toMatchObject({ ok: true, added: 20, left: 25 })
+    w.rateAt = undefined
+    const sent = t.calls.length
+    active = 'bob-work'
+    expect(await t.creator.retry(undefined, false)).toEqual({ ok: false, url: URL7, retry: true, message: "gh's active account changed to bob-work; nothing was added. Switch gh back to alice (gh auth switch --user alice), then try again." })
+    active = ''
+    expect(await t.creator.retry(undefined, false)).toMatchObject({ ok: false, retry: true, message: "gh's active account changed; nothing was added. Switch gh back to alice (gh auth switch --user alice), then try again." })
+    expect(t.calls.length).toBe(sent) // nothing was sent as the other login
+    // Back to the login that confirmed: the rest is added.
+    active = 'alice'
+    expect(await t.creator.retry(undefined, false)).toMatchObject({ ok: true, added: 25, left: 0 })
+    // Two or more accounts: each call carries the account's own token; gh's active login plays no part.
+    const w2: World = { issues: 45, rateAt: 2 }
+    const multi = make(two, github(w2), { ghLogins: logins })
+    expect(await multi.creator.create(BOB, false)).toMatchObject({ ok: true, added: 20, left: 25 })
+    w2.rateAt = undefined
+    active = 'bob-work'
+    expect(await multi.creator.retry('bob-work', false)).toMatchObject({ ok: true, added: 25 })
+  })
   it('keeps the column each issue had when the board was made', async () => {
     const w: World = { issues: 45, addFail: [22, 23] }
     let board: (n: number) => DerivedColumn = (n) => (n === 22 ? 'PR Raised' : n === 23 ? 'In Dev' : 'Todo')

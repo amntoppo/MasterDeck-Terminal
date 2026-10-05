@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
 import { parseBoard } from './board'
-import { boardDeriver, boardEmpty, boardless, boardsOf, boardToShow, boardWanted, canMove, columnsWithDerived, unreadRepos, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
+import { awaitingRead, boardDeriver, boardEmpty, boardless, boardsOf, boardToShow, boardWanted, canMove, columnsWithDerived, unreadRepos, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
 import type { PastSession } from './pastSessions'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -229,11 +229,36 @@ describe('a tab whose repositories were not read', () => {
     expect(unreadRepos(board([], { derived: [part] }), 'bob-work', two)).toBeNull() // read, and empty
     expect(unreadRepos(board([], { derived: [{ ...part, missing: ['globex/app'] }] }), 'bob-work', two)).toEqual(['globex/app']) // renamed or deleted
     expect(unreadRepos(board([], { derived: [{ ...part, missing: ['globex/app'], notes: ['globex/app not read: RATE_LIMITED'] }] }), 'bob-work', two)).toEqual(['globex/app'])
-    expect(unreadRepos(board([], { derived: [{ ...part, notes: ['Pull request details not read: HTTP 401'] }] }), 'bob-work', two)).toEqual(['globex/app'])
+    expect(unreadRepos(board([], { derived: [{ ...part, notes: ['Pull request details not read: HTTP 401'] }] }), 'bob-work', two)).toBeNull() // the issues were read: CI and threads are all that is missing
     expect(unreadRepos(board([], { derived: [{ ...part, account: 'alice', missing: ['x/y'] }] }), 'bob-work', two)).toEqual(['globex/app']) // no read of this account at all
     expect(unreadRepos(board([]), null, one)).toEqual(['acme/tracker'])
     expect(unreadRepos(board([]), null, boarded)).toBeNull() // a board: not this read
     expect(unreadRepos(null, 'bob-work', two)).toBeNull() // nothing loaded yet
+  })
+  it('a note about pull request details alone leaves an empty tab "no open issues"', () => {
+    const prOnly = board([], { derived: [{ ...part, notes: ['Pull request details not read: HTTP 502'] }] })
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread: unreadRepos(prOnly, 'bob-work', two) }, two)).toBe('no-issues')
+    // Beside a repository that was not read, the unread one is what is named.
+    const both = board([], { derived: [{ ...part, repos: ['globex/app', 'globex/api'], missing: ['globex/api'], notes: ['globex/api not read: FORBIDDEN', 'Pull request details not read: HTTP 502'] }] })
+    expect(unreadRepos(both, 'bob-work', two)).toEqual(['globex/api'])
+  })
+  it('while the first read of the account is in flight, the tab is loading, not unread', () => {
+    const cached = board([card()]) // the other account's board, read earlier; nothing of bob-work yet
+    expect(awaitingRead(cached, 'bob-work', two, true)).toBe(true)
+    expect(awaitingRead(cached, 'bob-work', two, false)).toBe(false) // the read ended without its part: could not read
+    expect(awaitingRead(board([], { derived: [{ ...part, missing: ['globex/app'] }] }), 'bob-work', two, true)).toBe(false) // read before, and missing: Retry shows "Refreshing…"
+    expect(awaitingRead(cached, 'alice', two, true)).toBe(false) // a board: not this read
+    expect(awaitingRead(board([]), null, one, true)).toBe(true)
+    expect(awaitingRead(null, 'bob-work', two, true)).toBe(false) // no board at all: "Loading board…" as before
+    const unread = unreadRepos(cached, 'bob-work', two)
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread, loading: true }, two)).toBe('loading')
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread, loading: false }, two)).toBe('not-read')
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread }, two)).toBe('not-read')
+    // Loading changes nothing else.
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread: null, loading: true }, two)).toBe('no-issues')
+    expect(boardEmpty({ login: 'bob-work', total: 3, shown: 0, unread, loading: true }, two)).toBe('filtered')
+    expect(boardEmpty({ login: 'carol', total: 0, shown: 0, unread: null, loading: true }, two)).toBe('nothing-selected')
+    expect(boardEmpty({ login: null, total: 0, shown: 0, unread: ['x/y'], loading: true }, boarded)).toBe('filtered')
   })
   it('each empty state', () => {
     expect(boardEmpty({ login: 'carol', total: 0, shown: 0, unread: null }, two)).toBe('nothing-selected')

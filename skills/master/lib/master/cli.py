@@ -364,6 +364,12 @@ def cmd_board(args) -> int:
     out = board.build(items, details, _now(args))
     if errors:
         out["errors"] = errors
+    # An issue another account's board holds is that board's card: this account's tab does not
+    # show it, so its counts leave it out ("Showing the first N of M" stays about cards of the tab).
+    held = board.on_boards(items) if derived else set()
+    for part in derived if held else []:
+        gone = board.shadowed_open([it for it in items if it.get("account") == part["account"]], held)
+        part["total"], part["shown"] = max(0, part["total"] - gone), max(0, part["shown"] - gone)
     if derived:
         out["derived"] = derived
     if notes:

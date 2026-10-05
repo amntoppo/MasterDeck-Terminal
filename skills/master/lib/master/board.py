@@ -312,9 +312,31 @@ def linked_prs(items: list) -> list:
     return [u for it in items for u in (it.get("linked pull requests") or []) if isinstance(u, str)]
 
 
+def _issue_key(it: dict) -> "tuple | None":
+    """(repo, number) of a board item that is an issue; None for anything else."""
+    c = it.get("content") or {}
+    if c.get("type") != "Issue" or not isinstance(c.get("number"), int):
+        return None
+    repo = c.get("repository") if isinstance(c.get("repository"), str) else None
+    return ((repo or config.primary_repo()).lower(), c["number"])
+
+
+def on_boards(items: list) -> set:
+    """The issues among `items` that a project board holds. One of them that is also in a ticked
+    repository of an account with no board is the board's card, whichever account was read first:
+    as a derived card it would lose its status, its place on the board's tab and its moves."""
+    return {k for k in (_issue_key(it) for it in items if it.get("derived") is not True) if k}
+
+
+def shadowed_open(items: list, held: set) -> int:
+    """How many open repository issues of `items` show on a board instead (`held`, from on_boards)."""
+    return sum(1 for it in items if it.get("derived") is True and it.get("state") != "CLOSED" and _issue_key(it) in held)
+
+
 def build(items: list, pr_details: dict, now_iso: str) -> dict:
     cards, statuses, sprint = [], [], None
     seen = set()
+    held = on_boards(items)
     for it in items:
         c = it.get("content") or {}
         if c.get("type") != "Issue" or not isinstance(c.get("number"), int):
@@ -324,7 +346,8 @@ def build(items: list, pr_details: dict, now_iso: str) -> dict:
             continue
         # The same issue on two boards is one card (the first board's status).
         k = ((repo or config.primary_repo()).lower(), c["number"])
-        if k in seen:
+        # On a board and in a board-less account's repository: the board's card, in any order.
+        if k in seen or (it.get("derived") is True and k in held):
             continue
         seen.add(k)
         status = it.get("status")

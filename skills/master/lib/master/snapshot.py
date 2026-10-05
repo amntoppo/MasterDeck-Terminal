@@ -85,10 +85,13 @@ def merge(parts: list) -> dict:
     first = parts[0][1]
     issues, prs, errors = [], [], []
     seen_i, seen_p = set(), set()
+    # An issue on one account's board and in a ticked repository of an account with no board is
+    # the board's (its status, its account), whichever part comes first.
+    held = {refs.key(i.get("repo"), i["number"]) for _, s in parts for i in s["issues"] if not i.get("derived")}
     for login, s in parts:
         for i in s["issues"]:
             k = refs.key(i.get("repo"), i["number"])
-            if k not in seen_i:
+            if k not in seen_i and not (i.get("derived") and k in held):
                 seen_i.add(k)
                 issues.append(dict(i, account=login))
         for p in s["prs"]:

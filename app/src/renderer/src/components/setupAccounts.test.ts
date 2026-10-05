@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, boardTakenBy, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -113,5 +113,34 @@ describe('Look again keeps what changed while it read', () => {
     const r = withFound(now, globex, 'bob-work', {})
     expect(r.repos).toEqual(['globex/app'])
     expect(r.boards['globex/7'].statuses.ready).toBe('Mine')
+  })
+})
+
+describe('a board MasterDeck created stays sprintless through Setup', () => {
+  // As the config keeps it (boardEntry): no sprint field. GitHub's detection never says so.
+  const made = { ...board, sprintField: '', sprintless: true as const }
+  it('chosen boards keep the mark when GitHub answers', () => {
+    const r = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': made } }, globex, 'bob-work', {})
+    expect(r.boards['globex/7']).toMatchObject({ title: 'Roadmap', sprintless: true })
+    const all = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': made }, allBoards: true }, globex, 'bob-work', {})
+    expect(all.boards['globex/7'].sprintless).toBe(true)
+    // What Save writes for the account.
+    const list = accountsFromSetup([{ login: 'bob-work', name: 'Bob', email: 'b@globex.test' }], 'bob-work', { 'bob-work': r }, () => 'organization')
+    expect(list[0].projects[0].sprintless).toBe(true)
+  })
+  it('a board that never had it does not get it', () => {
+    const r = withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': board } }, globex, 'bob-work', {})
+    expect('sprintless' in r.boards['globex/7']).toBe(false)
+  })
+  it('what GitHub lists is marked from the saved config, so unticking and ticking again keeps it', () => {
+    const d = markMade(globex, [made])
+    expect(d.owners[0].projects[0]).toMatchObject({ title: 'Roadmap', sprintless: true })
+    expect(d.owners[0].repos).toBe(globex.owners[0].repos)
+    // Unticked on screen, then Select all, or a first pick: the board comes from the list.
+    expect(withFound({ ...EMPTY, repos: ['globex/app'], allBoards: true }, d, 'bob-work', {}).boards['globex/7'].sprintless).toBe(true)
+    expect(withFound(EMPTY, d, 'bob-work', {}).boards['globex/7'].sprintless).toBe(true)
+    // Nothing saved is marked: the answer as it came.
+    expect(markMade(globex, [board])).toBe(globex)
+    expect(markMade(globex, [])).toBe(globex)
   })
 })

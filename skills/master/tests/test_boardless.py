@@ -214,6 +214,38 @@ class LiveRepoIssuesTest(unittest.TestCase):
             collect.Live(self.VIEW, env).repo_issues(TODAY)
         self.assertEqual(calls[2].count("repository("), 2)  # an hour later: tried again
 
+    def test_a_forced_read_asks_again_and_records_afresh(self):
+        # Board Refresh / Retry (GHC_FORCE=1): a repository that was NOT_FOUND a minute ago is asked again.
+        saved = Path(self.home.name) / "missing-repos.json"
+        calls = []
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), \
+                mock.patch.object(collect.time, "time", return_value=1000.0):
+            collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), \
+                mock.patch.object(collect.time, "time", return_value=1060.0), mock.patch.dict(os.environ, {"GHC_FORCE": "1"}):
+            again = collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        self.assertEqual(calls[1].count("repository("), 2)
+        self.assertEqual(again["missing"], ["globex/gone"])  # still gone: said once, not twice
+        self.assertEqual(json.loads(saved.read_text()), {"bob-work": {"globex/gone": 1060.0}})  # remembered from now
+        # It answers again (renamed back, access given): a forced read forgets it.
+
+        def back(cmd, timeout=120, env=None, partial=False):
+            calls.append(" ".join(cmd))
+            return json.dumps({"data": {a: {"open": {"totalCount": 0, "pageInfo": {}, "nodes": []}, "closed": {"nodes": []}} for a in ("r0", "r1")}})
+
+        with mock.patch.object(collect, "_run", side_effect=back), mock.patch.object(collect.time, "time", return_value=1120.0), \
+                mock.patch.dict(os.environ, {"GHC_FORCE": "1"}):
+            got = collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        self.assertEqual((calls[2].count("repository("), got["missing"]), (2, []))
+        self.assertEqual(json.loads(saved.read_text()), {"bob-work": {}})
+        # Not forced: the memory holds, as before.
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), mock.patch.object(collect.time, "time", return_value=1130.0):
+            collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), mock.patch.object(collect.time, "time", return_value=1140.0), \
+                mock.patch.dict(os.environ, {"GHC_FORCE": "0"}):
+            collect.Live(self.VIEW, {}).repo_issues(TODAY)
+        self.assertEqual(calls[4].count("repository("), 1)
+
     def test_only_a_not_found_repo_is_remembered(self):
         # A null alias with another error (rate limit, forbidden, SAML), another alias's error, or none
         # is a flaky answer: listed for this run, not saved, asked again next time.
@@ -390,6 +422,100 @@ class MixedAccountsTest(unittest.TestCase):
         self.assertEqual([(c["number"], c["account"], c.get("derived")) for c in b["cards"]],
                          [(939, "alice", None), (3, "bob-work", True)])
         self.assertEqual([d["account"] for d in b["derived"]], ["bob-work"])
+
+
+class SameIssueOnABoardAndInARepoTest(unittest.TestCase):
+    """One account has acme/tracker ticked and no board; the other's board holds acme/tracker#939.
+    The board's card wins, whichever account is read first."""
+
+    def accounts(self, loose_first):
+        from tests.test_accounts import A, B
+        loose = dict(A, projects=[])  # alice: acme/tracker ticked, no board
+        boarded = dict(B, repos=["globex/app"])  # bob-work: board globex/7
+        return [loose, boarded] if loose_first else [dict(boarded, primary=True), {k: v for k, v in loose.items() if k != "primary"}]
+
+    def run_board(self, loose_first, loose_items, total=None):
+        from tests.helpers import board_item
+        on_board = dict(board_item(939, "In Dev", "2026-09-21"), project="globex/7")
+        on_board["content"]["repository"] = "acme/tracker"
+
+        class Boarded:
+            def board_sprint(self, q):
+                return [on_board]
+
+            def pr_details(self, urls):
+                return {}
+
+        class Loose:
+            def __init__(self, view):
+                self.cfg = view
+
+            def repo_issues(self, today):
+                return read(loose_items, total)
+
+            def pr_details(self, urls):
+                return {}
+
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, {"accounts": self.accounts(loose_first)}), \
+                mock.patch.object(collect.Live, "for_account",
+                                  side_effect=lambda v, runner=None: Loose(v) if v["login"] == "alice" else Boarded()), \
+                redirect_stdout(buf):
+            self.assertEqual(cli.main(["board"]), 0)
+        return json.loads(buf.getvalue())
+
+    def test_the_boards_card_wins_in_either_order(self):
+        for loose_first in (True, False):
+            b = self.run_board(loose_first, [ritem(939), ritem(7)])
+            cards = {c["number"]: c for c in b["cards"]}
+            self.assertEqual(sorted(cards), [7, 939], loose_first)
+            self.assertEqual((cards[939]["account"], cards[939]["project"], cards[939]["status"], cards[939].get("derived")),
+                             ("bob-work", "globex/7", "In Dev", None), loose_first)
+            self.assertEqual((cards[7]["account"], cards[7].get("derived")), ("alice", True))
+            self.assertIn("In Dev", b["columns"])
+
+    def test_the_part_counts_only_what_its_tab_shows(self):
+        # #939 shows on bob-work's board, so alice's tab has one open issue of the two GitHub counts:
+        # "Showing the first 2 of 2" would be a card the tab cannot show, "1 of 2" a cut that is none.
+        for loose_first in (True, False):
+            part = self.run_board(loose_first, [ritem(939), ritem(7), ritem(10, "CLOSED", closed="2026-09-20T08:00:00Z")], total=2)["derived"][0]
+            self.assertEqual((part["account"], part["total"], part["shown"]), ("alice", 1, 1), loose_first)
+        # A cut stays a cut: 412 open on GitHub, 2 read, one of them on the other board.
+        part = self.run_board(True, [ritem(939), ritem(7)], total=412)["derived"][0]
+        self.assertEqual((part["total"], part["shown"]), (411, 1))
+        # A closed issue on the board was never counted as open.
+        part = self.run_board(True, [ritem(939, "CLOSED", closed="2026-09-20T08:00:00Z"), ritem(7)], total=1)["derived"][0]
+        self.assertEqual((part["total"], part["shown"]), (1, 1))
+
+    def test_build_alone_in_either_order(self):
+        from tests.helpers import board_item
+        real = dict(board_item(939, "In Dev"), project="globex/7", account="bob-work")
+        loose = dict(ritem(939), account="alice")
+        with mock.patch.dict(config.CONFIG, {"accounts": self.accounts(True)}):
+            for items in ([loose, real], [real, loose]):
+                cards = board.build(items, {}, NOW)["cards"]
+                self.assertEqual([(c["number"], c["project"], c["status"], c["account"], "derived" in c) for c in cards],
+                                 [(939, "globex/7", "In Dev", "bob-work", False)])
+            # Two accounts without a board holding the same issue: still one card, the first.
+            twice = board.build([loose, dict(ritem(939), account="bob-work")], {}, NOW)["cards"]
+            self.assertEqual([(c["number"], c["account"]) for c in twice], [(939, "alice")])
+
+    def test_snapshot_merge_in_either_order(self):
+        real = {"number": 939, "repo": "acme/tracker", "status": "In Dev", "project": "globex/7"}
+        loose = {"number": 939, "repo": "acme/tracker", "status": "Todo", "project": None, "derived": True}
+        other = {"number": 7, "repo": "acme/tracker", "status": "Todo", "project": None, "derived": True}
+
+        def part(issues):
+            return {"taken_at": NOW, "issues": issues, "prs": [], "sessions": [], "errors": [],
+                    "sources": {k: True for k in snapshot.SOURCES}}
+
+        for parts in ([("alice", part([loose, other])), ("bob-work", part([real]))],
+                      [("bob-work", part([real])), ("alice", part([loose, other]))]):
+            got = {i["number"]: i for i in snapshot.merge(parts)["issues"]}
+            self.assertEqual(sorted(got), [7, 939])
+            self.assertEqual((got[939]["account"], got[939]["project"], got[939]["status"], got[939].get("derived")),
+                             ("bob-work", "globex/7", "In Dev", None))
+            self.assertEqual(got[7]["account"], "alice")
 
 
 class SprintlessBoardTest(unittest.TestCase):

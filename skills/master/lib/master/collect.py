@@ -242,7 +242,10 @@ class Live:
         repos = ticked[:config.DERIVED_MAX_REPOS]
         since = board.done_since(today)
         key, now = (self.cfg or {}).get("login") or "", time.time()
-        known = {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
+        # A forced read (the Board's Refresh or Retry: GHC_FORCE=1) asks for every repository again;
+        # one still NOT_FOUND is remembered from now, one that answers is forgotten.
+        forced = os.environ.get("GHC_FORCE") == "1"
+        known = {} if forced else {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
         pending = {f"r{i}": (r, None) for i, r in enumerate(repos) if r not in known}
         items, total, missing, first = [], 0, [r for r in repos if r in known], True
         found, unread = {}, {}

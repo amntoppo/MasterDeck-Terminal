@@ -145,7 +145,7 @@ web tabs keep working.
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
 | PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
-| Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
+| Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
@@ -260,11 +260,15 @@ buttons; it does not go through macOS window drag regions.
   repository issues as cards with `derived: true` and no status; `Sources.build()` gives them a column
   on every state (`deriveBoard`). Anything that reads `state.board` sees those columns but must not
   write them: `setStatus`, BoardFlow's moves and drags do nothing for a card with no `project`
-  (`canMove` in the renderer, the `setStatus` handler in main).
+  (`canMove` in the renderer, the `setStatus` handler in main). An issue that is on one account's
+  board and in a ticked repository of an account with no board is always the board's card
+  (`board.on_boards`, in `board.build` and `snapshot.merge`), whichever account is read first.
 - **A project board with no sprint field matches nothing under `sprint:@current`.** Boards MasterDeck
   creates carry `sprintless: true` in the config: their filter drops the sprint part
-  (`board.sprintless_query`) and what is mine on them counts as current. Boards without a sprint
-  field that were picked in Setup are not marked (see TODO).
+  (`board.sprintless_query`) and what is mine on them counts as current. GitHub's detection never
+  says so: anything that rebuilds a project entry from a detected board must carry the mark over
+  (Setup: `markMade` and `withFound` in `setupAccounts.ts`). Boards without a sprint field that were
+  picked in Setup are not marked (see TODO).
 - **The shared gh cache treats any GraphQL call with the word `mutation` in an argument as a write**
   (`ghcache.is_read`): never use that word in a read query (a field name, a comment), and every write
   document must contain it. Board creation passes variables with `-f` (raw strings), never `-F`.
