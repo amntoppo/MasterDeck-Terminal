@@ -51,14 +51,18 @@ export function ticketDefaults(state: AppState, ctx: TicketContext): NewTicket {
     state.config.repos[0] ??
     `${state.config.owner}/${state.config.issueRepo}`;
   const me = ctx.account ?? state.me;
-  const only = ctx.filters.repos.length === 1 ? ctx.filters.repos[0] : "";
+  // The tab's Repos filter (the repository view): the first picked repository that is one of the account's.
+  const picked =
+    ctx.filters.repos.find(
+      (r) =>
+        !acc || acc.repos.some((x) => x.toLowerCase() === r.toLowerCase()),
+    ) ?? "";
   const people = ctx.filters.assignees.filter((a) => a !== UNASSIGNED);
   const board = (acc ? acc.projects : state.config.projects).find(
     (p) => `${p.owner}/${p.number}` === ctx.project,
   );
   return {
-    // A single-repo filter only counts when it is one of the account's repos.
-    repo: only && (!acc || acc.repos.includes(only)) ? only : primary,
+    repo: picked || primary,
     title: "",
     body: "",
     project: ctx.project,

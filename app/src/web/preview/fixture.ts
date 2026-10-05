@@ -162,6 +162,25 @@ export function fixtureState(noBoard = false): AppState {
     },
     boardError: null,
     boardLoading: false,
+    // The repository view (pick api or web in the Board's Repos filter): every issue of the
+    // repository, on the board or not, in MasterDeck's columns.
+    repoView: {
+      cards: [
+        loose(125, 'Dark mode for settings', 'Todo', { onBoards: [{ key: 'acme/1', status: 'Todo' }] }),
+        loose(140, 'Docs: describe the export format', 'Todo', { assignees: [] }),
+        loose(118, 'Export invoices as CSV', 'In Dev', { onBoards: [{ key: 'acme/1', status: 'In Progress' }] }),
+        loose(104, 'Onboarding checklist', 'Done'),
+        loose(31, 'Paginate the invoices endpoint', 'Todo', { repo: 'acme/api', assignees: [] }),
+        loose(28, 'Rate-limit the public API', 'PR Raised', {
+          repo: 'acme/api',
+          prs: [{ url: 'https://github.com/acme/api/pull/40', repo: 'api', number: 40, state: 'OPEN', ci: 'pending', unresolved: 0 }],
+        }),
+      ],
+      repos: [
+        { repo: 'acme/web', account: null, ok: true, total: 3, shown: 3, takenAt: now - 3 * min },
+        { repo: 'acme/api', account: null, ok: true, total: 412, shown: 300, takenAt: now - 3 * min },
+      ],
+    },
     githubRefreshedAt: now - 3 * min,
     githubRefreshing: false,
     sprints: [{ id: 's14', title: 'Sprint 14', startDate: new Date(now - 4 * 86400_000).toISOString().slice(0, 10), duration: 14, completed: false }],

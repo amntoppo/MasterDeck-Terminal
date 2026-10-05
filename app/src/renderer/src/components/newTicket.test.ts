@@ -122,6 +122,34 @@ describe("new ticket", () => {
   });
 });
 
+describe("a new ticket from the repository view", () => {
+  const ctx = (repos: string[]) => ({ status: "Todo", project: "Org/1", filters: { ...defaultFilters("aman"), repos }, sprint: "@current", tab: "Mine" });
+  it("is created in the picked repository; with several picked, the first", () => {
+    expect(ticketDefaults(state, ctx(["Org/app"])).repo).toBe("Org/app");
+    expect(ticketDefaults(state, ctx(["Org/app", "Org/Main"])).repo).toBe("Org/app");
+    expect(ticketDefaults(state, ctx([])).repo).toBe("Org/Main"); // nothing picked: the primary, as before
+  });
+  it("still goes on the board, in the column and sprint the context names", () => {
+    expect(ticketDefaults(state, ctx(["Org/app"]))).toMatchObject({ project: "Org/1", status: "Todo", sprint: "@current", sprintField: "Sprint" });
+    expect(ticketRequest(ticketDefaults(state, ctx(["Org/app"])), false, null)).toMatchObject({ repo: "Org/app", project: "Org/1", status: "Todo" });
+  });
+  it("with two or more accounts, only a repository of the tab's account counts", () => {
+    const two = {
+      ...state,
+      me: "alice",
+      config: parseConfig({
+        accounts: [
+          { login: "alice", primary: true, owner: "acme", issueRepo: "tracker", repos: ["acme/tracker", "acme/api"], projects: [{ owner: "acme", number: 1, columns: ["Todo", "In Dev"] }] },
+          { login: "bob-work", owner: "globex", issueRepo: "app", repos: ["globex/app"], projects: [] },
+        ],
+      }),
+    } as unknown as AppState;
+    const of = (repos: string[]) => ticketDefaults(two, { ...ctx(repos), project: "acme/1", account: "alice" }).repo;
+    expect(of(["globex/app", "ACME/api"])).toBe("ACME/api");
+    expect(of(["globex/app"])).toBe("acme/tracker");
+  });
+});
+
 describe("new ticket per account", () => {
   const two = {
     ...state,

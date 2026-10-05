@@ -657,12 +657,19 @@ export function BoardView({
     [state.board, acct, cfg],
   );
   const repos = repoChoices(acct, cfg, boardRepos, f.repos);
+  // Where a new ticket of the repository view goes on the board: the tab's first board, in its "ready" column.
+  const readyCol = tabBoards[0]?.statuses.ready ?? cfg.statuses.ready;
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
     // No board: the ticket gets no status (the column is MasterDeck's, not GitHub's) and no board.
-    status: fallback ? "" : col,
-    project: fallback ? "" : boardFor(state, col, f, acct ?? undefined),
+    // The repository view: its columns are MasterDeck's too, so the ticket takes the board's "ready" column.
+    status: fallback ? "" : repoMode ? readyCol : col,
+    project: fallback
+      ? ""
+      : repoMode
+        ? boardFor(state, readyCol, { ...f, projects: [] }, acct ?? undefined)
+        : boardFor(state, col, f, acct ?? undefined),
     filters: f,
     // No board: no sprint to put the ticket in.
     sprint: fallback ? "none" : state.selectedSprint,
@@ -1189,12 +1196,12 @@ export function BoardView({
                     <strong>{col}</strong>
                     <span className="count">{cards.length}</span>
                     <span style={{ flex: 1 }} />
-                    {(!worked || (fallback && col === "Todo")) && (
+                    {(!worked || col === "Todo") && (
                       <button
                         className="col-add"
                         onClick={() => setTicketCtx(ctxFor(col))}
-                        title={`New ticket in ${col}`}
-                        aria-label={`New ticket in ${col}`}
+                        title={`New ticket in ${repoMode ? repoNames[0] : col}`}
+                        aria-label={`New ticket in ${repoMode ? repoNames[0] : col}`}
                       >
                         +
                       </button>

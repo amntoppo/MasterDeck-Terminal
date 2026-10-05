@@ -438,13 +438,15 @@ creation.
 - **New ticket (+ on a column):** each column's header has a **+**. It opens a dialog for an issue
   that lands in that column: title, description (Markdown), repository, account (two or more GitHub accounts), status, board (with
   several), sprint, milestone, assignees and labels. Defaults come from where you clicked: the
-  column, the board, the tab's filters (people, labels, milestone, a single repo) and the sprint
+  column, the board, the tab's filters (people, labels, milestone, the first picked repo) and the sprint
   the Board shows. **Create ticket** does it in MasterDeck (no skill needed): the issue, added to the
   board with its status and sprint. Changing a card's status from the Board is also done by
   MasterDeck. In a tab with no GitHub board the + is on Todo only and the ticket is created without
   a board step (no status, board or sprint); Create with Claude there is told the same, is given only
   that account's repositories, and never puts the ticket on another account's board (naming one is
-  refused).
+  refused). In a repository view the + is on Todo only too: the dialog opens with the first picked
+  repository, and the ticket goes on the tab's board in its "ready" column (change either in the
+  dialog).
 - **Create with Claude:** from that dialog, a Claude session opens on the right of the Board (only
   there; it keeps running while you look at another view, and its edge drags to resize). It knows
   the boards, columns, sprints, repos and people, and where the + was clicked (its folder,
@@ -659,6 +661,8 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
 - **Board and PRs filters:** the filter row is one **Filters (n)** button (n = filters changed from
   the tab's defaults) next to the search box. Tap it for every filter (and, on PRs, the sort) in a
   sheet; **Reset** puts the filters back (search is kept), **Done**, Esc or a tap outside closes it.
+  Picking a repository there turns the tab into a repository view (see Board View); **Reset** or
+  **Back to board** returns to the board.
 - **Sign out** is on the Settings screen (bottom right).
 - Terminal size: as on any browser, the Mac's size wins while the Mac shows that terminal; a
   terminal the Mac isn't showing takes the phone's width (about 45 columns).

@@ -75,7 +75,11 @@ describe('a tab with repositories picked (its account has a board)', () => {
     expect(html).not.toContain('draggable="true"')
     expect(html.match(/draggable="false"/g)).toHaveLength(6)
     expect(html).not.toContain('Hold to move this column')
-    expect(html).not.toContain('col-add') // no + in this view yet
+  })
+  it('the + is on Todo only and names the repository the ticket goes to', () => {
+    const html = render({ repos: ['acme/api', 'acme/tracker'] })
+    expect(html.match(/class="col-add"/g)).toHaveLength(1)
+    expect(html).toContain('title="New ticket in api"')
   })
   it('only the picked repositories', () => {
     const html = render({ repos: ['acme/api'] })

@@ -567,7 +567,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   (Reset keeps search, Done, Esc/backdrop close). All phone CSS is in `src/web/web.css` under `.app.phone`; when not phone, every shared
   component renders the same DOM as before.
 - Dev preview (web): `npm run dev:web`, then `/?preview` mounts App on a stub `window.deck` with a
-  fixture AppState and fake terminal output (`src/web/preview/`), `/?preview=noboard` the same account with no GitHub board (derived cards and read notes), `/?preview=gate` the sign-in card.
+  fixture AppState and fake terminal output (`src/web/preview/`), `/?preview=noboard` the same account with no GitHub board (derived cards and read notes); the fixture also carries `repoView` data for `acme/web` and `acme/api` (pick one in the Board's Repos filter), `/?preview=gate` the sign-in card.
   `main.tsx` imports it only under `import.meta.env.DEV`, so `build:web` leaves it out (check:
   `grep -l "nothing was sent" out/web/assets/*` finds nothing).
 

@@ -10,7 +10,8 @@ It runs on macOS and Windows.
 - **Your GitHub.** A Kanban board of your sprint from GitHub Projects, and every PR in your org
   with filters. You can assign tickets, start sessions for them and review PRs. No GitHub project?
   The Board shows your repositories' issues in Todo / In Dev / PR Raised / Done, worked out by
-  MasterDeck, and **Create a GitHub board** makes a real one from them.
+  MasterDeck, and **Create a GitHub board** makes a real one from them. Pick a repository in the
+  Board's Repos filter to see all of its issues, on the board or not, and start sessions for them.
 - **Several GitHub accounts.** Work for more than one organization with different `gh` logins:
   connect them in Setup, and each session, Board tab and PR tab works as one account (its own
   token and commit identity, shown as `@login`). One account behaves as before. MasterDeck never
