@@ -18,7 +18,7 @@ import {
   visibleColumns,
 } from "@shared/board";
 import { createPortal } from "react-dom";
-import { usePhone } from "../web";
+import { can, usePhone } from "../web";
 import { PhoneFilters } from "./PhoneFilters";
 import type { PastSession } from "@shared/pastSessions";
 import {
@@ -27,7 +27,6 @@ import {
   cardAction,
   defaultFilters,
   filterOptions,
-  boardForAccount,
   parseSavedTabs,
   sprintsForAccount,
   tabAccount,
@@ -38,6 +37,19 @@ import {
   type BoardTab,
   type FilterState,
 } from "@shared/boardFilter";
+import {
+  awaitingRead,
+  boardEmpty,
+  boardless,
+  boardsOf,
+  canMove,
+  DERIVED_COLUMNS,
+  derivedNotes,
+  reposOf,
+  tabBoard,
+  unreadRepos,
+} from "@shared/derivedBoard";
+import { CreateBoardDialog } from "./CreateBoardDialog";
 import { ticketSpend } from "@shared/costs";
 import { sessionForIssue } from "@shared/derive";
 import {
@@ -56,6 +68,7 @@ import type {
 import { deck, load, save, useNow } from "../deck";
 import {
   boardFor,
+  claudePrompt,
   ClaudeMark,
   NewTicketDialog,
   type TicketContext,
@@ -63,6 +76,7 @@ import {
 import { TerminalView } from "./TerminalView";
 import { SessionAccount } from "./AccountBits";
 import type { NewTicket } from "@shared/ipc";
+import { whileBusy } from "@shared/busy";
 
 interface Props {
   state: AppState;
@@ -74,6 +88,8 @@ interface Props {
   /** Someone else's (or nobody's) card without a PR. */
   onAssign: (card: BoardCard) => void;
   onSummary: () => void;
+  /** Open Setup (an account with nothing selected, or no board). */
+  onSetup: () => void;
 }
 
 const BADGE_ICON: Record<Badge["kind"], string> = {
@@ -135,7 +151,16 @@ const GROUP_COLOR: Record<StatusGroup, string> = {
   other: "var(--purple)",
 };
 
-function columnColor(col: string): string {
+/** MasterDeck's own columns (an account with no board). */
+const DERIVED_COLOR: Record<string, string> = {
+  Todo: "var(--grey)",
+  "In Dev": "var(--amber)",
+  "PR Raised": "var(--amber)",
+  Done: "var(--green)",
+};
+
+function columnColor(col: string, derived = false): string {
+  if (derived) return DERIVED_COLOR[col] ?? "var(--grey)";
   const s = getConfig().statuses;
   if (col === s.ready) return "var(--accent)";
   if (col === s.devDone) return "#f28b50";
@@ -169,6 +194,7 @@ export function BoardView({
   onPr,
   onAssign,
   onSummary,
+  onSetup,
 }: Props) {
   const now = useNow(15_000);
   const [refreshing, setRefreshing] = useState(false);
@@ -198,6 +224,7 @@ export function BoardView({
   );
   useEffect(() => save("ticketPanelW", panelW), [panelW]);
   const [created, setCreated] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   // Column order: long-press a column's heading, then drag it; saved for every tab.
   const [colOrder, setColOrder] = useState<string[]>(() =>
     load<string[]>(COL_ORDER_KEY, []),
@@ -218,6 +245,8 @@ export function BoardView({
   const spend = useMemo(() => ticketSpend(state.costBook), [state.costBook]);
 
   const doMove = async (card: BoardCard, to: string) => {
+    // An issue of an account with no board has no status on GitHub: nothing to write.
+    if (!canMove(card, fallback)) return;
     const k = ticketKey(card.repo, card.number);
     const lab = ticketLabel(card.repo, card.number);
     setMoving((m) => ({ ...m, [k]: to }));
@@ -241,7 +270,12 @@ export function BoardView({
     // Only statuses MasterDeck can set on the card's own board (a column GitHub added later, or
     // another board's column, would fail as "unknown status").
     const cols = projectByKey(card?.project)?.columns ?? state.config.columns;
-    if (!card || !cols.includes(col) || (moving[k] ?? card.status) === col)
+    if (
+      !card ||
+      !canMove(card, fallback) ||
+      !cols.includes(col) ||
+      (moving[k] ?? card.status) === col
+    )
       return;
     const back =
       statusRank(col, undefined, card.project) <
@@ -277,6 +311,13 @@ export function BoardView({
   const primary = primaryLogin(cfg);
   const acct = multi ? (tabAccount(tab, logins) ?? primary) : null;
   const me = acct ?? state.me;
+  // The tab's account has repositories but no GitHub board: its issues in MasterDeck's own
+  // columns, read-only (shared/derivedBoard.ts). With a board everything below is as before.
+  const fallback = boardless(acct, cfg);
+  // No sprint picker where there are no sprints: no board, or only boards MasterDeck created.
+  const tabBoards = boardsOf(acct, cfg);
+  const noSprints =
+    fallback || (tabBoards.length > 0 && tabBoards.every((p) => p.sprintless));
   // Create with Claude: one session for the Board with one account; one per tab (as its account) with several.
   const claudeKey = multi ? tab.id : "";
   const claude = claudes[claudeKey] ?? null;
@@ -346,7 +387,7 @@ export function BoardView({
     );
 
   const rawBoard = useMemo(
-    () => (state.board && acct ? boardForAccount(state.board, acct, cfg) : state.board),
+    () => tabBoard(state.board, acct, cfg),
     [state.board, acct, cfg],
   );
   const b = useMemo(
@@ -363,7 +404,12 @@ export function BoardView({
         : rawBoard,
     [rawBoard, moving],
   );
-  const shown = useMemo(() => (b ? applyFilters(b, f) : null), [b, f]);
+  const shown = useMemo(
+    () =>
+      // No board: a Boards filter left from when the account had one would hide every issue.
+      b ? applyFilters(b, fallback && f.projects.length ? { ...f, projects: [] } : f) : null,
+    [b, f, fallback],
+  );
   const options = useMemo(
     () =>
       b
@@ -372,11 +418,8 @@ export function BoardView({
     [b, me, state.users, acct, primary],
   );
 
-  const refresh = async () => {
-    setRefreshing(true);
-    await deck().refresh();
-    setRefreshing(false);
-  };
+  // A refresh that rejects must not leave the tab on "Loading board…".
+  const refresh = () => whileBusy(setRefreshing, () => deck().refresh());
 
   const onCard = (card: BoardCard) => {
     const action = cardAction(card, me, state.sessions);
@@ -393,14 +436,37 @@ export function BoardView({
   const current = sprints.find(
     (s) => !s.completed && inSprint(s.startDate, s.duration, now),
   );
-  const columns = shown
-    ? orderColumns(
-        visibleColumns(shown, f.projects).filter(
-          (c) => !f.hiddenColumns.includes(c),
-        ),
-        colOrder,
-      )
-    : [];
+  // Every column the tab can show: without a board, MasterDeck's four in their fixed order.
+  const allColumns: string[] = !shown
+    ? []
+    : fallback
+      ? [...DERIVED_COLUMNS]
+      : visibleColumns(shown, f.projects);
+  const unhidden = allColumns.filter((c) => !f.hiddenColumns.includes(c));
+  const columns = fallback ? unhidden : orderColumns(unhidden, colOrder);
+  // Why the tab shows no card, when it shows none. Nothing selected for its account: also before
+  // any board was read (none is asked for then).
+  const tabRepoList = reposOf(acct, cfg);
+  // The repositories the read did not get: "no open issues" is not said of them.
+  const unread = unreadRepos(state.board, acct, cfg);
+  const empty =
+    b && shown
+      ? boardEmpty(
+          {
+            login: acct,
+            total: b.cards.length,
+            shown: shown.cards.length,
+            unread,
+            // Its first read is still under way: loading, not "could not read".
+            loading: awaitingRead(state.board, acct, cfg, loading),
+          },
+          cfg,
+        )
+      : tabBoards.length === 0 && tabRepoList.length === 0
+        ? "nothing-selected"
+        : null;
+  const hintNotes = derivedNotes(state.board, acct);
+  const tabRepos = tabRepoList.map((r) => r.split("/")[1] ?? r);
   shownCols.current = columns;
   // A card dragged near the board's left or right edge scrolls it sideways, and near the top or
   // bottom of a column scrolls that column. Native drags send no pointer moves, so the position
@@ -534,21 +600,25 @@ export function BoardView({
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", esc, true);
   };
-  const boards = b?.projects?.length
-    ? b.projects
-    : state.config.projects.map((p) => ({
-        key: `${p.owner}/${p.number}`,
-        title: p.title,
-        columns: p.columns,
-      }));
+  const boards = fallback
+    ? []
+    : b?.projects?.length
+      ? b.projects
+      : state.config.projects.map((p) => ({
+          key: `${p.owner}/${p.number}`,
+          title: p.title,
+          columns: p.columns,
+        }));
   const repos = repoOptions(b, acct ? (cfg.accounts.find((a) => a.login === acct)?.repos ?? []) : state.config.repos);
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
-    status: col,
-    project: boardFor(state, col, f, acct ?? undefined),
+    // No board: the ticket gets no status (the column is MasterDeck's, not GitHub's) and no board.
+    status: fallback ? "" : col,
+    project: fallback ? "" : boardFor(state, col, f, acct ?? undefined),
     filters: f,
-    sprint: state.selectedSprint,
+    // No board: no sprint to put the ticket in.
+    sprint: fallback ? "none" : state.selectedSprint,
     tab: tab.name,
     account: acct ?? undefined,
     ...(multi ? { tabId: tab.id } : {}),
@@ -568,13 +638,7 @@ export function BoardView({
     });
     if (!r.ok) return setMoveMsg(r.message);
     setTicketCtx(null);
-    const typed = draft && (draft.title.trim() || draft.body.trim());
-    const prompt = typed
-      ? `Write this ticket for ${ctx.status}: ${draft!.title.trim()}${draft!.body.trim() ? `. ${draft!.body.trim()}` : ""} (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.`.replace(
-          /\s*\n+\s*/g,
-          " ",
-        )
-      : undefined;
+    const prompt = claudePrompt(ctx.status, draft);
     if (claude && !restart) {
       setClaude({ ...claude, ctx });
       if (prompt) {
@@ -729,23 +793,10 @@ export function BoardView({
     <MultiPick
       label="Columns"
       all="All columns"
-      values={
-        shown
-          ? visibleColumns(shown, f.projects).filter(
-              (c) => !f.hiddenColumns.includes(c),
-            )
-          : []
-      }
-      options={(shown ? visibleColumns(shown, f.projects) : []).map(
-        (c) => ({ value: c, label: c }),
-      )}
+      values={unhidden}
+      options={allColumns.map((c) => ({ value: c, label: c }))}
       onChange={(vis) =>
-        set({
-          hiddenColumns: (shown
-            ? visibleColumns(shown, f.projects)
-            : []
-          ).filter((c) => !vis.includes(c)),
-        })
+        set({ hiddenColumns: allColumns.filter((c) => !vis.includes(c)) })
       }
       invertAll
     />
@@ -771,29 +822,31 @@ export function BoardView({
       >
         <header className="board-head">
           <h2>Board</h2>
-          <select
-            className="sprint-pick"
-            value={state.selectedSprint}
-            onChange={(e) => deck().setSprint(e.target.value)}
-            title="Sprint"
-          >
-            <option value="@current">
-              Current sprint{current ? ` (${current.title})` : ""}
-            </option>
-            {sprints
-              .filter((s) => s.title !== current?.title)
-              .map((s) => (
-                <option key={s.id} value={s.title}>
-                  {s.title} · {s.startDate}
-                  {s.completed
-                    ? ""
-                    : new Date(s.startDate).getTime() > now
-                      ? " (upcoming)"
-                      : ""}
-                </option>
-              ))}
-            <option value="none">No sprint</option>
-          </select>
+          {!noSprints && (
+            <select
+              className="sprint-pick"
+              value={state.selectedSprint}
+              onChange={(e) => deck().setSprint(e.target.value)}
+              title="Sprint"
+            >
+              <option value="@current">
+                Current sprint{current ? ` (${current.title})` : ""}
+              </option>
+              {sprints
+                .filter((s) => s.title !== current?.title)
+                .map((s) => (
+                  <option key={s.id} value={s.title}>
+                    {s.title} · {s.startDate}
+                    {s.completed
+                      ? ""
+                      : new Date(s.startDate).getTime() > now
+                        ? " (upcoming)"
+                        : ""}
+                  </option>
+                ))}
+              <option value="none">No sprint</option>
+            </select>
+          )}
           <span className="muted">
             {b && shown
               ? `${shown.cards.length} of ${b.cards.length} issues`
@@ -808,13 +861,15 @@ export function BoardView({
           )}
           <span style={{ flex: 1 }} />
           {moveMsg && <span className="muted">{moveMsg}</span>}
-          <button
-            className="btn"
-            onClick={onSummary}
-            title="Done, in progress, blocked and burndown"
-          >
-            Summary
-          </button>
+          {!fallback && (
+            <button
+              className="btn"
+              onClick={onSummary}
+              title="Done, in progress, blocked and burndown"
+            >
+              Summary
+            </button>
+          )}
           <span
             className="muted"
             title={
@@ -842,6 +897,26 @@ export function BoardView({
           onRename={renameTab}
           addTitle="Another board tab, with its own repos, boards and filters"
         />
+        {fallback && (
+          <div className="board-hint">
+            <span>
+              This account has no GitHub board. Columns are worked out by
+              MasterDeck.
+            </span>
+            {can("boardCreate") ? (
+              <button className="link-btn" onClick={() => setCreating(true)}>
+                Create a GitHub board
+              </button>
+            ) : (
+              <span>Create one from MasterDeck on your Mac.</span>
+            )}
+            {hintNotes.map((n, i) => (
+              <div key={i} className="board-note">
+                {n}
+              </div>
+            ))}
+          </div>
+        )}
 
         {phone ? (
           <PhoneFilters
@@ -868,7 +943,15 @@ export function BoardView({
           </div>
         )}
 
-        {!b || !shown ? (
+        {empty === "nothing-selected" ? (
+          <div className="welcome">
+            <h2>Nothing selected{acct ? ` for ${acct}` : ""}</h2>
+            <div>Pick its repositories and boards in Setup.</div>
+            <button className="btn primary" onClick={onSetup}>
+              Open Setup
+            </button>
+          </div>
+        ) : !b || !shown || empty === "loading" ? (
           <div className="welcome">
             {loading ? (
               <div>Loading board…</div>
@@ -882,13 +965,66 @@ export function BoardView({
               </>
             )}
           </div>
-        ) : shown.cards.length === 0 ? (
+        ) : empty === "not-read" ? (
+          <div className="welcome">
+            <h2>
+              Could not read{" "}
+              {(unread ?? []).map((r) => r.split("/")[1] ?? r).join(", ")}
+            </h2>
+            <div>
+              {state.boardError ??
+                (hintNotes.length
+                  ? "The lines above say why."
+                  : "GitHub gave no issues for it.")}
+            </div>
+            <div className="form-buttons">
+              <button className="btn" onClick={onSetup}>
+                Open Setup
+              </button>
+              <button
+                className="btn primary"
+                onClick={refresh}
+                disabled={loading}
+              >
+                {loading ? "Refreshing…" : "Retry"}
+              </button>
+            </div>
+          </div>
+        ) : empty === "no-issues" ? (
+          <div className="welcome">
+            <h2>No open issues</h2>
+            <div>
+              {acct ?? "This account"} has no GitHub board, and{" "}
+              {tabRepos.join(", ")} {tabRepos.length === 1 ? "has" : "have"} no
+              open issues.
+            </div>
+            <div className="form-buttons">
+              <button className="btn" onClick={onSetup}>
+                Open Setup
+              </button>
+              {can("boardCreate") && (
+                <button
+                  className="btn primary"
+                  onClick={() => setCreating(true)}
+                >
+                  Create a GitHub board
+                </button>
+              )}
+            </div>
+          </div>
+        ) : empty === "filtered" ? (
           <div className="welcome">
             <h2>No issues match</h2>
-            <div>
-              {b.cards.length} issues in this sprint; the filters hide all of
-              them.
-            </div>
+            {fallback ? (
+              <div>
+                {b.cards.length} issues; the filters hide all of them.
+              </div>
+            ) : (
+              <div>
+                {b.cards.length} issues in this sprint; the filters hide all of
+                them.
+              </div>
+            )}
             <button
               className="btn"
               onClick={() =>
@@ -907,34 +1043,44 @@ export function BoardView({
                   key={col}
                   className={`board-col ${dragOver === col ? "drop" : ""} ${colDrag?.col === col ? "lifted" : ""}`}
                   onDragOver={(e) => {
-                    if (!e.dataTransfer.types.includes("text/masterdeck-card"))
+                    // No board: the columns are worked out, nothing can be dropped on them.
+                    if (
+                      fallback ||
+                      !e.dataTransfer.types.includes("text/masterdeck-card")
+                    )
                       return;
                     e.preventDefault();
                     setDragOver(col);
                   }}
                   onDragLeave={() => setDragOver((d) => (d === col ? null : d))}
-                  onDrop={(e) => drop(col, e)}
+                  onDrop={(e) => {
+                    if (!fallback) drop(col, e);
+                  }}
                 >
                   <div
                     className="board-col-head"
-                    onPointerDown={(e) => pressColumn(e, col)}
-                    title="Hold to move this column"
+                    onPointerDown={
+                      fallback ? undefined : (e) => pressColumn(e, col)
+                    }
+                    title={fallback ? undefined : "Hold to move this column"}
                   >
                     <span
                       className="ring"
-                      style={{ borderColor: columnColor(col) }}
+                      style={{ borderColor: columnColor(col, fallback) }}
                     />
                     <strong>{col}</strong>
                     <span className="count">{cards.length}</span>
                     <span style={{ flex: 1 }} />
-                    <button
-                      className="col-add"
-                      onClick={() => setTicketCtx(ctxFor(col))}
-                      title={`New ticket in ${col}`}
-                      aria-label={`New ticket in ${col}`}
-                    >
-                      +
-                    </button>
+                    {(!fallback || col === "Todo") && (
+                      <button
+                        className="col-add"
+                        onClick={() => setTicketCtx(ctxFor(col))}
+                        title={`New ticket in ${col}`}
+                        aria-label={`New ticket in ${col}`}
+                      >
+                        +
+                      </button>
+                    )}
                   </div>
                   <div className="board-col-body">
                     {cards.map((c) => (
@@ -946,6 +1092,7 @@ export function BoardView({
                         now={now}
                         spend={spend[ticketKey(c.repo, c.number)] ?? 0}
                         moving={!!moving[ticketKey(c.repo, c.number)]}
+                        readOnly={!canMove(c, fallback)}
                         onClick={() => onCard(c)}
                       />
                     ))}
@@ -1002,6 +1149,14 @@ export function BoardView({
           onWithClaude={(ctx, draft) => void openClaude(ctx, draft)}
         />
       )}
+      {creating && (
+        // Keyed by account: another tab's account never sees this one's plan or result.
+        <CreateBoardDialog
+          key={acct ?? ""}
+          account={acct}
+          onClose={() => setCreating(false)}
+        />
+      )}
       {claude && (
         <>
           <div
@@ -1025,7 +1180,7 @@ export function BoardView({
                 className="muted small"
                 title="Where new tickets go; + on another column changes it"
               >
-                {claude.ctx.status}
+                {claude.ctx.status || "no board"}
                 {claude.ctx.tab ? ` · ${claude.ctx.tab}` : ""}
                 {claude.ctx.sprint && claude.ctx.sprint !== "none"
                   ? ` · ${claude.ctx.sprint === "@current" ? "current sprint" : claude.ctx.sprint}`
@@ -1103,6 +1258,7 @@ function Card({
   now,
   spend,
   moving,
+  readOnly,
   onClick,
 }: {
   card: BoardCard;
@@ -1111,6 +1267,8 @@ function Card({
   now: number;
   spend: number;
   moving: boolean;
+  /** An issue of an account with no board: it cannot be dragged to another column. */
+  readOnly: boolean;
   onClick: () => void;
 }) {
   const t = ticketOf(card);
@@ -1136,7 +1294,7 @@ function Card({
       className={`bcard ${mine ? "mine" : ""} ${moving ? "moving" : ""}`}
       role="button"
       tabIndex={0}
-      draggable
+      draggable={!readOnly}
       onDragStart={(e) => {
         e.dataTransfer.setData(
           "text/masterdeck-card",

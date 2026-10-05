@@ -71,6 +71,8 @@ export function parseBoard(raw: unknown): Board | null {
       labels: strs(c.labels),
       milestone: str(c.milestone),
       type: str(c.type),
+      // An issue of an account with no board: facts only (its column comes from deriveBoard).
+      ...(c.derived === true ? { derived: true as const, state: c.state === 'CLOSED' ? ('CLOSED' as const) : ('OPEN' as const), closedAt: str(c.closedAt) } : {}),
     })
   }
   const columns = arr(r.columns).filter((x): x is string => typeof x === 'string')
@@ -78,7 +80,16 @@ export function parseBoard(raw: unknown): Board | null {
     .map(obj)
     .filter((p) => typeof p.key === 'string')
     .map((p) => ({ key: p.key as string, title: str(p.title) ?? (p.key as string), columns: arr(p.columns).filter((x): x is string => typeof x === 'string') }))
-  return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards, projects }
+  const list = (v: unknown) => arr(v).filter((x): x is string => typeof x === 'string')
+  const count = (v: unknown) => (typeof v === 'number' && v >= 0 ? v : 0)
+  const parts = arr(r.derived)
+    .map(obj)
+    .filter((d) => Array.isArray(d.repos))
+  // What a read could not do: on its account's part. A master CLI that only prints them at the
+  // top: they are the one part's when there is one (with several they cannot be told apart).
+  const notesOf = (d: Record<string, unknown>) => (list(d.notes).length ? list(d.notes) : parts.length === 1 ? list(r.notes) : [])
+  const derived = parts.map((d) => ({ account: str(d.account), repos: list(d.repos), total: count(d.total), shown: count(d.shown), skipped: list(d.skipped), missing: list(d.missing), ...(notesOf(d).length ? { notes: notesOf(d) } : {}) }))
+  return { takenAt: str(r.taken_at), sprint: str(r.sprint), columns: columns.length ? columns : alwaysColumns(), cards, projects, ...(derived.length ? { derived } : {}) }
 }
 
 /** Always the five workflow columns (of the boards shown: `projects`, empty for all); any other

@@ -12,7 +12,7 @@ import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, boardTakenBy, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
 
 
 const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
@@ -179,7 +179,8 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     setLoads((n) => n - 1)
     const shown = login === editingRef.current
     if (!r.ok) return shown ? setMsg(r.message) : undefined
-    const d = parseDetectAll(r.data)
+    // Boards MasterDeck created keep their mark (no sprint field): GitHub's answer does not carry it.
+    const d = markMade(parseDetectAll(r.data), cfg.projects)
     setFoundBy((cur) => ({ ...cur, [login]: d }))
     if (!shown) {
       // Switched to another account meanwhile: these choices wait in `sel` (its errors are not shown).

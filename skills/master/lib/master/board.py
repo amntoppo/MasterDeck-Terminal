@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, timedelta
 
 from . import config
 
@@ -76,6 +77,125 @@ _SPRINT_VALUE = "sprint: fieldValueByName(name: %s) { ... on ProjectV2ItemFieldI
 
 def _q(s: str) -> str:
     return json.dumps(s)
+
+
+_SPRINT_TERM = re.compile(r'\s*(?:sprint:(?:@current|"[^"]*")|no:sprint)')
+
+
+def sprintless_query(query: str) -> str:
+    """The same item filter for a board with no sprint field. There `sprint:@current` matches
+    nothing (checked on GitHub), so the sprint part is dropped."""
+    return _SPRINT_TERM.sub("", query).strip()
+
+
+# --- an account with no board: its repositories' issues ----------------------------------------
+
+_REPO_ISSUE = ("number title url state closedAt updatedAt "
+               "assignees(first: 10) { nodes { login } } "
+               "labels(first: 10) { nodes { name } } "
+               "milestone { title } issueType { name } "
+               "closedByPullRequestsReferences(first: 5, includeClosedPrs: true) { nodes { url state isDraft } }")
+_BY_UPDATED = "orderBy: {field: UPDATED_AT, direction: DESC}"
+
+
+def done_since(today: date) -> str:
+    """Before this, a closed issue is too old for the Done column. A whole day, so the board and
+    the snapshot send the same call on the same day and the shared cache answers one of them."""
+    return (today - timedelta(days=config.DERIVED_DONE_DAYS)).isoformat() + "T00:00:00Z"
+
+
+def repo_issues_query(reqs: list, since: str) -> "tuple[str, dict]":
+    """One GraphQL query for the issues of several repositories: reqs is [(alias, "owner/name",
+    cursor, first)]. Open issues come 100 a page (`cursor`: the next page); with `first` (the
+    first round) also the 50 most recently updated closed ones since `since`. Returns the query
+    and its variables."""
+    decl, variables, parts = [], {}, []
+    if any(first for _, _, _, first in reqs):
+        decl.append("$since: DateTime!")  # only when used: an unused variable is a GraphQL error
+        variables["since"] = since
+    for alias, repo, cursor, first in reqs:
+        owner, name = repo.split("/", 1)
+        decl.append(f"$c_{alias}: String")
+        if cursor:
+            variables[f"c_{alias}"] = cursor
+        closed = (f"closed: issues(states: CLOSED, first: 50, {_BY_UPDATED}, filterBy: {{since: $since}}) "
+                  f"{{ nodes {{ {_REPO_ISSUE} }} }}") if first else ""
+        parts.append(f"{alias}: repository(owner: {_q(owner)}, name: {_q(name)}) {{ "
+                     f"open: issues(states: OPEN, first: 100, after: $c_{alias}, {_BY_UPDATED}) "
+                     f"{{ totalCount pageInfo {{ hasNextPage endCursor }} nodes {{ {_REPO_ISSUE} }} }} {closed} }}")
+    return f"query({', '.join(decl)}) {{ {' '.join(parts)} }}", variables
+
+
+def _pr_state(node: dict) -> "str | None":
+    return "DRAFT" if node.get("state") == "OPEN" and node.get("isDraft") else node.get("state")
+
+
+def repo_issues_page(data: dict, alias: str, repo: str) -> "tuple[list, str | None, int]":
+    """One repository's issues from the query's answer, in the item shape `build` reads (plus
+    `state`, `closed_at`, `updated_at`, `pr states` and `derived`), the cursor of the next page
+    of open ones, and GitHub's count of open issues."""
+    node = (data or {}).get(alias)
+    if not isinstance(node, dict):
+        return [], None, 0
+    out = []
+    for part in ("open", "closed"):
+        for n in (node.get(part) or {}).get("nodes") or []:
+            if not isinstance(n, dict) or not isinstance(n.get("number"), int):
+                continue
+            ms = n.get("milestone")
+            prs = [x for x in (n.get("closedByPullRequestsReferences") or {}).get("nodes") or []
+                   if isinstance(x, dict) and isinstance(x.get("url"), str)]
+            out.append({
+                "content": {"type": "Issue", "number": n["number"], "title": n.get("title") or "",
+                            "url": n.get("url") or "", "repository": repo},
+                "status": None, "sprint": None,
+                "assignees": [a["login"] for a in (n.get("assignees") or {}).get("nodes") or [] if a and a.get("login")],
+                "labels": [x["name"] for x in (n.get("labels") or {}).get("nodes") or [] if x and x.get("name")],
+                "milestone": {"title": ms["title"]} if isinstance(ms, dict) and ms.get("title") else None,
+                "issue type": (n.get("issueType") or {}).get("name"),
+                "linked pull requests": [x["url"] for x in prs],
+                "pr states": {x["url"]: _pr_state(x) for x in prs},
+                "state": "CLOSED" if n.get("state") == "CLOSED" else "OPEN",
+                "closed_at": n.get("closedAt"), "updated_at": n.get("updatedAt") or "",
+                "derived": True,
+            })
+    conn = node.get("open") or {}
+    page = conn.get("pageInfo") or {}
+    return out, (page.get("endCursor") if page.get("hasNextPage") else None), int(conn.get("totalCount") or 0)
+
+
+def derived_status(item: dict) -> str:
+    """The column of an issue from a repository with no board, from what GitHub says alone (the
+    caller adds sessions): closed is Done; else a PR open and ready is PR Raised, a draft is In
+    Dev, a merged one is Done; else Todo. A PR closed without merging counts for nothing."""
+    if item.get("state") == "CLOSED":
+        return "Done"
+    states = set((item.get("pr states") or {}).values())
+    for state, column in (("OPEN", "PR Raised"), ("DRAFT", "In Dev"), ("MERGED", "Done")):
+        if state in states:
+            return column
+    return "Todo"
+
+
+def trim_repo_issues(items: list, since: str) -> "tuple[list, int]":
+    """What the Board shows of an account's repository issues: the open ones, most recently
+    updated first (DERIVED_MAX_CARDS at most), then the ones closed since `since`, most recently
+    closed first (DERIVED_MAX_DONE at most). Returns them and how many open ones are in it."""
+    seen, opened, closed = set(), [], []
+    for it in items:
+        c = it.get("content") or {}
+        k = (str(c.get("repository") or "").lower(), c.get("number"))
+        if k in seen:
+            continue
+        seen.add(k)
+        if it.get("state") != "CLOSED":
+            opened.append(it)
+        elif (it.get("closed_at") or "") >= since:
+            closed.append(it)
+    opened.sort(key=lambda it: it.get("updated_at") or "", reverse=True)
+    closed.sort(key=lambda it: it.get("closed_at") or "", reverse=True)
+    opened = opened[:config.DERIVED_MAX_CARDS]
+    return opened + closed[:config.DERIVED_MAX_DONE], len(opened)
 
 
 def items_query(reqs: list) -> "tuple[str, dict]":
@@ -192,9 +312,31 @@ def linked_prs(items: list) -> list:
     return [u for it in items for u in (it.get("linked pull requests") or []) if isinstance(u, str)]
 
 
+def _issue_key(it: dict) -> "tuple | None":
+    """(repo, number) of a board item that is an issue; None for anything else."""
+    c = it.get("content") or {}
+    if c.get("type") != "Issue" or not isinstance(c.get("number"), int):
+        return None
+    repo = c.get("repository") if isinstance(c.get("repository"), str) else None
+    return ((repo or config.primary_repo()).lower(), c["number"])
+
+
+def on_boards(items: list) -> set:
+    """The issues among `items` that a project board holds. One of them that is also in a ticked
+    repository of an account with no board is the board's card, whichever account was read first:
+    as a derived card it would lose its status, its place on the board's tab and its moves."""
+    return {k for k in (_issue_key(it) for it in items if it.get("derived") is not True) if k}
+
+
+def shadowed_open(items: list, held: set) -> int:
+    """How many open repository issues of `items` show on a board instead (`held`, from on_boards)."""
+    return sum(1 for it in items if it.get("derived") is True and it.get("state") != "CLOSED" and _issue_key(it) in held)
+
+
 def build(items: list, pr_details: dict, now_iso: str) -> dict:
     cards, statuses, sprint = [], [], None
     seen = set()
+    held = on_boards(items)
     for it in items:
         c = it.get("content") or {}
         if c.get("type") != "Issue" or not isinstance(c.get("number"), int):
@@ -204,7 +346,8 @@ def build(items: list, pr_details: dict, now_iso: str) -> dict:
             continue
         # The same issue on two boards is one card (the first board's status).
         k = ((repo or config.primary_repo()).lower(), c["number"])
-        if k in seen:
+        # On a board and in a board-less account's repository: the board's card, in any order.
+        if k in seen or (it.get("derived") is True and k in held):
             continue
         seen.add(k)
         status = it.get("status")
@@ -228,7 +371,11 @@ def build(items: list, pr_details: dict, now_iso: str) -> dict:
                       "milestone": ms if isinstance(ms, str) else (ms or {}).get("title") if isinstance(ms, dict) else None,
                       "type": it.get("issue type") if isinstance(it.get("issue type"), str) else None,
                       # The account whose read found it (two or more connected); absent with one.
-                      **({"account": it["account"]} if isinstance(it.get("account"), str) else {})})
+                      **({"account": it["account"]} if isinstance(it.get("account"), str) else {}),
+                      # An issue of an account with no board: facts only; MasterDeck works out its column.
+                      **({"derived": True, "state": "CLOSED" if it.get("state") == "CLOSED" else "OPEN",
+                          "closedAt": it.get("closed_at") if isinstance(it.get("closed_at"), str) else None}
+                         if it.get("derived") is True else {})})
     base = [c for p in config.projects() for c in p["columns"]] or list(config.BOARD_COLUMNS)
     base = list(dict.fromkeys(base))
     columns = base + [s for s in statuses if s not in base]

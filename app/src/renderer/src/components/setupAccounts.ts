@@ -92,6 +92,20 @@ export function switchSel(
 }
 
 /**
+ * GitHub's answer with the boards MasterDeck created marked as the saved config has them
+ * (`sprintless`: detection cannot tell). Every board picked from the list then carries the mark,
+ * also one unticked and ticked again. A board GitHub now reports a sprint field on is not marked.
+ * Nothing to mark: the answer itself.
+ */
+export function markMade(d: DetectAll, saved: ProjectConfig[]): DetectAll {
+  const made = new Set(saved.filter((p) => p.sprintless).map((p) => projectKey(p).toLowerCase()))
+  // Only while GitHub reports no sprint field on it: one added since gives the board its sprints back.
+  const still = (p: ProjectConfig) => !p.sprintField && made.has(projectKey(p).toLowerCase())
+  if (!d.owners.some((o) => o.projects.some(still))) return d
+  return { ...d, owners: d.owners.map((o) => ({ ...o, projects: o.projects.map((p) => (still(p) ? { ...p, sprintless: true as const } : p)) })) }
+}
+
+/**
  * One account's choices once GitHub answered for it: chosen boards take GitHub's current title,
  * ids and columns (keeping what their statuses mean); "Select all" takes everything there is now;
  * a first pick starts from the repo with the most open issues and its owner's only board. Repos
@@ -103,7 +117,9 @@ export function withFound(s: AccountSel, d: DetectAll, login: string, sel: Recor
   const everyBoard = d.owners.flatMap((o) => o.projects).filter((p) => !boardTakenBy(projectKey(p), login, sel))
   const fresh = (p: ProjectConfig): ProjectConfig => {
     const had = s.boards[projectKey(p)]
-    return had ? { ...p, statuses: had.statuses } : p
+    // GitHub's answer never says a board is one MasterDeck made (no sprint field): the choice does.
+    // A sprint field GitHub now reports on it ends that: the board has sprints again.
+    return had ? { ...p, statuses: had.statuses, ...(had.sprintless && !p.sprintField ? { sprintless: true as const } : {}) } : p
   }
   const out: AccountSel = {
     ...s,

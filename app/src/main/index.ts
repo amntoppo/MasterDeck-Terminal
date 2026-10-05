@@ -122,6 +122,8 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
+import { repoBoardless } from "@shared/derivedBoard";
+import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -323,6 +325,37 @@ const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = ac
   run,
   runEnv: (l) => accountEnv.runEnv(l),
   ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+});
+// "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
+// that account; the confirmation is the Mac's own dialog, built from main's fresh read.
+const boardCreator = new BoardCreator({
+  config: getConfig,
+  // forAccount answers an unknown login with the primary's runner; here that would create a board
+  // as another account, so a login that is not connected (any more) fails the call instead.
+  gh: accountGh(getConfig, (login) => forAccount(login).gh),
+  ghLogins: async () => (await ghAccounts()).accounts,
+  confirm: async (message, lines) => {
+    if (!win) return false;
+    const choice = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Cancel", "Create board"],
+      defaultId: 1,
+      cancelId: 0,
+      message,
+      detail: lines.map((l) => `• ${l}`).join("\n"),
+    });
+    return choice.response === 1;
+  },
+  save: (patch) => cli.configSave(patch),
+  refresh: () => {
+    sources.loadConfig();
+    void sources.refreshGithub(true);
+  },
+  // The column the Board shows now becomes the issue's Status on the new board; null (the run is
+  // refused) while the account's issues are not loaded.
+  columns: (login) => columnsOf(latest?.board, login),
+  // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
+  progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),
 });
 const sender = new Sender(
   ptys,
@@ -1109,6 +1142,7 @@ async function linkSession(
       mark: (sid, trigger) => sources.markReached(sid, trigger),
       reload: () => sources.reloadLinks(),
       noteStatus: (tk, s) => sources.noteStatus(tk, s),
+      boardless: (tk) => repoBoardless(tk.repo, getConfig()),
     },
     t,
     sessionId,
@@ -1220,7 +1254,8 @@ async function pumpTicketRequests(): Promise<void> {
     const cfg = getConfig();
     for (const dir of ticketDirs(paths.home, isMulti(cfg)))
       await pumpTicketDir(dir, (p, picked) =>
-        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create(p),
+        // `account`: the tab's, so a tab without a board never puts a ticket on another account's.
+        forAccount(ticketAccount(picked, p.repo || null, getConfig())).ops.create({ ...p, account: picked }),
       );
   } finally {
     ticketPumping = false;
@@ -1698,6 +1733,9 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
+    // No board on its account: the columns are MasterDeck's own, there is nothing to write.
+    if (repoBoardless(t.repo, getConfig()))
+      return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
     const r = await forRepo(t.repo).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
@@ -1787,6 +1825,7 @@ function registerIpc(): void {
       sprint: str(o.sprint, 200) || undefined,
       sprintField: str(o.sprintField, 100) || undefined,
       dryRun: o.dryRun === true,
+      account: str(o.account, 100) || null,
     });
     if (!res.ok)
       return {
@@ -1867,7 +1906,16 @@ function registerIpc(): void {
     ];
     writeFileSync(
       join(dir, "CLAUDE.md"),
-      ticketContext(cfg, latest?.sprints ?? [], people, latest?.me ?? null),
+      // The tab's account: one with no board gets only its own repositories, and no board.
+      ticketContext(
+        cfg,
+        latest?.sprints ?? [],
+        people,
+        latest?.me ?? null,
+        typeof (ctx as { account?: unknown } | null)?.account === "string"
+          ? (ctx as { account: string }).account
+          : null,
+      ),
     );
     writeFileSync(
       join(dir, "context.json"),
@@ -2502,6 +2550,18 @@ function registerIpc(): void {
       linkSession(issue, sessionId, cwd),
   );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
+  // Create a GitHub board: on the Mac only (DECK_ACCESS blocks them; refused here as well).
+  reg.handle(CH.boardCreatePlan, (e, account: unknown) =>
+    isRemote(e)
+      ? { ok: false, message: "Create the board from MasterDeck on your Mac" }
+      : boardCreator.plan(account),
+  );
+  reg.handle(CH.boardCreate, (e, req: unknown) =>
+    boardCreator.create(req, isRemote(e)),
+  );
+  reg.handle(CH.boardCreateRetry, (e, account: unknown) =>
+    boardCreator.retry(account, isRemote(e)),
+  );
   reg.on(CH.setFocus, (_e, id: string | null) => {
     focused = id;
     sources.setFocus(id);

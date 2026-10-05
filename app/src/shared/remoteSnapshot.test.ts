@@ -113,6 +113,12 @@ describe('fitSnapshot', () => {
     expect(JSON.parse(r.json)).toEqual(snap)
   })
 
+  it('issues of an account with no board keep a column the snapshot names', () => {
+    const loose: BoardCard = { ...card(2), project: null, status: 'PR Raised', derived: true, state: 'OPEN', closedAt: null }
+    const r = toRemoteSnapshot(state({ board: { takenAt: null, sprint: null, columns: ['Todo', 'Shipped'], cards: [card(1), loose] } }), 'v')
+    expect(r.board!.columns).toEqual(['Todo', 'Shipped', 'In Dev', 'PR Raised', 'Done'])
+    expect(r.board!.cards[1]).toEqual({ number: 2, repo: 'o/r', project: null, title: loose.title, url: loose.url, status: 'PR Raised', assignees: [], labels: [], prUrls: [] })
+  })
   it('trims history, then cards, then the board, never sessions or the open inbox (Review Focus 5)', () => {
     const cards = Array.from({ length: 5000 }, (_, i) => card(i))
     const s = state({

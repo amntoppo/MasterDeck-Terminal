@@ -112,6 +112,7 @@ html.phone .setup-body { min-height: 0; }
 /* Board and PRs: the filter row is a "Filters (n)" button + search (PhoneFilters); the controls
    open in a sheet, one per row, with multi-pick lists inline instead of dropdowns. */
 .app.phone .phone-filters { flex-wrap: nowrap; padding: 8px 12px; }
+.app.phone .board-hint { padding-left: 12px; padding-right: 12px; }
 .app.phone .phone-filters > .btn { flex: none; }
 .app.phone .phone-filters > .btn.active { border-color: var(--accent); background: var(--accent-soft); }
 .app.phone .phone-filters .search { flex: 1; min-width: 0; width: auto; }

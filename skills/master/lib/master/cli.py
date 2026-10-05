@@ -311,14 +311,50 @@ def cmd_draft_assign(args) -> int:
     return 0
 
 
+def _repo_cards(src, args) -> "tuple[list, dict, dict]":
+    """An account with no board: its repositories' issues as board items, the details of their
+    PRs, and what was read (for the Board's note)."""
+    got = src.repo_issues(_today(args))
+    if args.mine:  # the sprint filter has no meaning without a board; "mine" does
+        me = ((getattr(src, "cfg", None) or {}).get("login") or src.me()).lower()
+        got = dict(got, items=[it for it in got["items"] if me in [a.lower() for a in it.get("assignees") or []]])
+    items, shown = board.trim_repo_issues(got["items"], board.done_since(_today(args)))
+    details = {u: {"state": st, "ci": None, "unresolved": 0}
+               for it in items for u, st in (it.get("pr states") or {}).items()}
+    why = got.get("unread") or {}  # asked again next time: say why this time
+    lines = [f"{r} not read: {w}" for r, w in why.items()]
+    live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
+    if live:
+        try:
+            details.update(src.pr_details(live))
+        except Exception as e:  # the states are known already; say CI and threads are missing
+            lines.append(f"Pull request details not read: {str(e).strip() or type(e).__name__}")
+    part = {"repos": got["repos"], "total": got["total"], "shown": shown,
+            "skipped": got["skipped"], "missing": got["missing"]}
+    if lines:
+        # "notes": one line each, on this account's part (the Board shows them in its tab);
+        # "note": the same in one line, for the top-level list.
+        part["notes"] = lines
+        part["note"] = "; ".join(lines)
+    return items, details, part
+
+
 def cmd_board(args) -> int:
     srcs = _sources(args)
     logins = [a["login"] for a in config.accounts()] if len(srcs) > 1 else [None]
-    items, details, errors = [], {}, []
+    items, details, errors, derived, notes = [], {}, [], [], []
     for login, src in zip(logins, srcs):
         try:
-            got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
-            details.update(src.pr_details(board.linked_prs(got)))
+            if config.boardless(getattr(src, "cfg", None)):
+                # No board on this account (or at all): its repositories' issues stand in.
+                got, more, part = _repo_cards(src, args)
+                details.update(more)
+                if "note" in part:
+                    notes.append(part.pop("note"))
+                derived.append(dict(part, account=login))
+            else:
+                got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
+                details.update(src.pr_details(board.linked_prs(got)))
             items += [dict(it, account=login) for it in got] if login else got
         except Exception as e:  # gh missing, network, rate limit, an account to log in again: say what gh said
             errors.append(str(e).strip() or type(e).__name__)
@@ -328,6 +364,16 @@ def cmd_board(args) -> int:
     out = board.build(items, details, _now(args))
     if errors:
         out["errors"] = errors
+    # An issue another account's board holds is that board's card: this account's tab does not
+    # show it, so its counts leave it out ("Showing the first N of M" stays about cards of the tab).
+    held = board.on_boards(items) if derived else set()
+    for part in derived if held else []:
+        gone = board.shadowed_open([it for it in items if it.get("account") == part["account"]], held)
+        part["total"], part["shown"] = max(0, part["total"] - gone), max(0, part["shown"] - gone)
+    if derived:
+        out["derived"] = derived
+    if notes:
+        out["notes"] = notes
     print(json.dumps(out))
     return 0
 

@@ -10,8 +10,8 @@ GitHub writes in tests**, **never type into the user's real sessions**.
   the daily machine.
 - `cd app && npm install` — `postinstall` runs `electron-builder install-app-deps` (node-pty for
   Electron). `npm run dev` for hot reload (bundles `../skills`).
-- Checks before a commit: `npm run typecheck`, `npm test` (~760 tests, ~30 s), and for skill
-  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~226 tests).
+- Checks before a commit: `npm run typecheck`, `npm test` (~1180 tests, ~35 s), and for skill
+  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~315 tests).
 - Backend checkout next to this repo (`~/Documents/masterdeck-backend`) so the protocol
   drift test runs.
 
@@ -107,6 +107,12 @@ npx electron . --remote-debugging-port=9333
 - Native dialogs: with `--inspect=127.0.0.1:9334` you can stub `dialog.*` / `shell.openExternal`
   in main for the run.
 - The isolated app still lists the user's real sessions: never Reply, Stop or answer their items.
+- The Board without GitHub: `MASTERDECK_BOARD_FIXTURE=<json>` with a `config.json` under
+  `$MASTER_HOME`. `app/test/fixtures/board.json` goes with a config that has a board;
+  `app/test/fixtures/board-derived.json` with one that has repositories and no board
+  (`"repos": ["acme/tracker"], "project": 0, "projects": []`): the hint, the four columns, no drag.
+  Never press **Create a GitHub board** in such a run: its read and its native dialog use the
+  machine's real gh account, and the dialog is the last stop before a real write.
 - Before/after: record `shasum -a 256 ~/.claude/settings.json`; it must not change. Afterwards
   kill electron/wrangler/vite, check ports 8787/9333/9334/5175 are free, delete `$E2E` (that path
   only).

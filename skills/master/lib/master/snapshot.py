@@ -40,6 +40,10 @@ def build(src, *, now_iso: str, today: date, master_name: str = config.MASTER_NA
     # Both lists, every board, in one round of GitHub calls.
     both = getattr(src, "board_mine_ready", None) or (lambda: (src.board_mine(), src.board_ready()))
     mine, ready = guard("board", both, ([], [])) if has_board else ([], [])
+    # No board on this account (or at all): the issues assigned to me in its repositories stand
+    # in. The same read as `master board` makes, so the shared cache answers one of the two.
+    repo_read = getattr(src, "repo_issues", None) if has_repo and not has_board else None
+    loose = guard("board", lambda: repo_read(today)["items"], []) if repo_read else []
     prs_mine = guard("prs", src.prs_mine, []) if has_repo else []
     prs_review = guard("prs", src.prs_review, []) if has_repo else []
     agents = guard("agents", src.agents, []) if with_sessions else []
@@ -57,9 +61,15 @@ def build(src, *, now_iso: str, today: date, master_name: str = config.MASTER_NA
             s["branch_head"] = guard("branches", lambda b=s["branch"]: src.branch_head(b), None)
     sources.pop("branches", None)
 
+    issues = normalize.issues(mine, ready, today) + normalize.repo_issues(loose, me)
+    for i in issues:
+        # GitHub alone says Todo; a session that owns the issue is what puts it In Dev.
+        if i.get("derived") and i["status"] == "Todo" and join.owner_of(sessions, i["number"], i.get("repo")):
+            i["status"] = "In Dev"
+
     return {
         "taken_at": now_iso,
-        "issues": normalize.issues(mine, ready, today),
+        "issues": issues,
         "prs": normalize.prs(prs_mine, prs_review, me),
         "sessions": sessions,
         "errors": errors,
@@ -75,10 +85,13 @@ def merge(parts: list) -> dict:
     first = parts[0][1]
     issues, prs, errors = [], [], []
     seen_i, seen_p = set(), set()
+    # An issue on one account's board and in a ticked repository of an account with no board is
+    # the board's (its status, its account), whichever part comes first.
+    held = {refs.key(i.get("repo"), i["number"]) for _, s in parts for i in s["issues"] if not i.get("derived")}
     for login, s in parts:
         for i in s["issues"]:
             k = refs.key(i.get("repo"), i["number"])
-            if k not in seen_i:
+            if k not in seen_i and not (i.get("derived") and k in held):
                 seen_i.add(k)
                 issues.append(dict(i, account=login))
         for p in s["prs"]:

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
-import { boardTarget, emptyLinks, importLinks, linkInfoMap, parseLinkFile, prOnBranch, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
+import { boardTarget, emptyLinks, importLinks, linkInfoMap, parseLinkFile, prOnBranch, ticketPrMap, ticketPrs, ticketSessions, withLink, withPr } from './ticketLinks'
 
 setConfig(parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/web'] }))
 const A = '11111111-1111-4111-8111-111111111111'
@@ -62,6 +62,15 @@ describe('ticket links', () => {
   it('skips adopted links like Sources did', () => {
     const f = parseLinkFile({ sessions: { [A]: { issue: 12, title: '', branch: '', linked_at: '', prs: [], adopted: true } }, branches: {} })
     expect(linkInfoMap(f).size).toBe(0)
+  })
+  it('lists the PRs recorded for each ticket, adopted links left out', () => {
+    const pr = (n: number) => `https://github.com/acme/web/pull/${n}`
+    let f = withLink(emptyLinks(), A, { repo: null, number: 12 }, 't', '', new Date(0))
+    f = withPr(withPr(f, A, pr(3)), A, pr(4))
+    f = withPr(withLink(f, B, { repo: null, number: 12 }, 't', '', new Date(0)), B, pr(4))
+    expect(ticketPrMap(f)).toEqual({ 'acme/tracker#12': [pr(3), pr(4)] })
+    expect(ticketPrMap({ ...f, sessions: { [A]: { ...f.sessions[A], adopted: true } } })).toEqual({})
+    expect(ticketPrMap(emptyLinks())).toEqual({})
   })
 })
 

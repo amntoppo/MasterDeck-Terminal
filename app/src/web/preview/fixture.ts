@@ -1,6 +1,6 @@
 // DEV ONLY (npm run dev:web, ?preview): a made-up AppState for looking at the web app without a Mac.
 // Fictional org `acme`; nothing here comes from a real machine.
-import { DEFAULT_CONFIG } from '@shared/appConfig'
+import { DEFAULT_CONFIG, parseConfig } from '@shared/appConfig'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { InboxEntry } from '@shared/inbox'
 import type { AppState, Session } from '@shared/types'
@@ -93,9 +93,16 @@ const stats = (cost: number, ctx: number) => ({
   updatedAt: now - min,
 })
 
-export function fixtureState(): AppState {
+/** An issue of an account with no board, already in the column MasterDeck worked out. */
+const loose = (number: number, title: string, status: string, extra: Record<string, unknown> = {}) =>
+  card(number, title, status, { project: null, derived: true as const, state: status === 'Done' ? ('CLOSED' as const) : ('OPEN' as const), closedAt: status === 'Done' ? new Date(now - 2 * 86400_000).toISOString() : null, ...extra })
+
+/** `noBoard` (?preview=noboard): the same account with repositories but no GitHub board. */
+export function fixtureState(noBoard = false): AppState {
   const master = SESSIONS.find((s) => s.name === 'master-agent')!
-  return {
+  // The board of the account, as `master config show` would give it (project 1).
+  const boards = parseConfig({ config: { owner: 'acme', issueRepo: 'web', project: 1 } }).projects
+  const state: AppState = {
     sessions: SESSIONS,
     issues: [
       { number: 112, repo: null, project: 'acme/1', title: 'Login redirects to a blank page', url: 'https://github.com/acme/web/issues/112', status: 'In Progress', currentSprint: true, assignedToMe: true },
@@ -184,6 +191,7 @@ export function fixtureState(): AppState {
       project: 1,
       workspace: '/Users/dev/acme',
       repos: ['acme/web', 'acme/api'],
+      projects: boards,
     },
     skills: [],
     hooks: { queue: true, foreignQueue: false, reviewGate: true, masterGuard: true },
@@ -195,6 +203,30 @@ export function fixtureState(): AppState {
     menus: {},
     prStage: {},
     manualStatus: {},
+  }
+  if (!noBoard) return state
+  return {
+    ...state,
+    issues: state.issues.map((i) => ({ ...i, project: null })),
+    config: { ...state.config, project: 0, projects: [] },
+    sprints: [],
+    selectedSprint: '@current',
+    board: {
+      takenAt: new Date(now - 3 * min).toISOString(),
+      sprint: null,
+      columns: state.config.columns,
+      projects: [],
+      cards: [
+        loose(125, 'Dark mode for settings', 'Todo'),
+        loose(127, 'Rate-limit the public API', 'Todo', { assignees: [] }),
+        loose(118, 'Export invoices as CSV', 'In Dev'),
+        loose(112, 'Login redirects to a blank page', 'PR Raised', {
+          prs: [{ url: 'https://github.com/acme/web/pull/131', repo: 'web', number: 131, state: 'OPEN', ci: 'success', unresolved: 2 }],
+        }),
+        loose(104, 'Onboarding checklist', 'Done'),
+      ],
+      derived: [{ account: null, repos: ['acme/web', 'acme/api', 'acme/old-site'], total: 412, shown: 300, skipped: [], missing: ['acme/api', 'acme/old-site'], notes: ['acme/api not read: RATE_LIMITED'] }],
+    },
   }
 }
 

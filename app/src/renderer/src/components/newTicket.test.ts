@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, claudeHandoff, ticketDefaults } from "./NewTicket";
+import { boardFor, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -152,5 +152,57 @@ describe("Create with Claude from the dialog", () => {
       label: "Create with Claude as @alice",
       blocked: "Create with Claude runs on this tab's account; switch to a @bob-work tab to use it",
     });
+  });
+});
+
+describe("a ticket for an account with no board", () => {
+  const t = { repo: "Org/Main", title: "T", body: "B", project: "Org/1", status: "Todo", assignees: ["alice"], labels: ["bug"], milestone: "", sprint: "@current", sprintField: "Sprint" };
+  it("sends no board step", () => {
+    expect(ticketRequest(t, true, null)).toEqual({ ...t, project: "", status: "", sprint: "", account: undefined });
+    expect(ticketRequest(t, true, "bob-work")).toMatchObject({ repo: "Org/Main", title: "T", assignees: ["alice"], project: "", status: "", sprint: "", account: "bob-work" });
+  });
+  it("with a board it is what the dialog always sent", () => {
+    expect(ticketRequest(t, false, "alice")).toEqual({ ...t, account: "alice" });
+    expect(ticketRequest(t, false, null)).toEqual({ ...t, account: undefined });
+  });
+});
+
+describe("Create with Claude from the dialog", () => {
+  const d = { title: " Fix login ", body: "Steps:\n1. open" } as never;
+  it("names the column; without a board it names none", () => {
+    expect(claudePrompt("In Dev", d)).toBe("Write this ticket for In Dev: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+    expect(claudePrompt("", d)).toBe("Write this ticket: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+    expect(claudePrompt("Todo", { title: "T", body: " " } as never)).toBe("Write this ticket for Todo: T (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+  });
+  it("nothing typed: no prompt", () => {
+    expect(claudePrompt("Todo", undefined)).toBeUndefined();
+    expect(claudePrompt("Todo", { title: " ", body: "" } as never)).toBeUndefined();
+  });
+  it("a tab whose account has no board: only that account's repos, and no board to fall back on", () => {
+    const acct = (login: string, owner: string, repos: string[], projects: unknown[], primary = false) => ({
+      login, name: login, email: `${login}@example.test`, owner, ownerType: "organization", issueRepo: repos[0].split("/")[1], repos, projects, ...(primary ? { primary: true } : {}),
+    });
+    const two = parseConfig({
+      owner: "acme", issueRepo: "tracker",
+      accounts: [acct("alice", "acme", ["acme/tracker", "acme/api"], [{ owner: "acme", number: 1, title: "Delivery", columns: ["Todo"] }], true), acct("bob-work", "globex", ["globex/app", "globex/web"], [])],
+    });
+    const loose = ticketContext(two, [], [], "bob-work", "bob-work");
+    const repoList = (md: string) => md.split("Repos (owner/name; the first is the default):")[1].split("People on the board")[0];
+    expect(repoList(loose)).toBe("\n\n- `globex/app`\n- `globex/web`\n\n");
+    expect(loose).toContain("(default: `globex/app`)");
+    expect(loose).not.toContain("acme/");
+    expect(loose).toContain("- (none: `bob-work` has no GitHub board; create without `--project`, `--status` and `--sprint`)");
+    // A tab whose account has a board, and no account at all: every word as before.
+    const all = ticketContext(two, [], [], "alice");
+    expect(ticketContext(two, [], [], "alice", "alice")).toBe(all);
+    expect(repoList(all)).toContain("- `globex/app`");
+    expect(all).toContain("- `acme/1` (Delivery)");
+    // One account (no accounts list) with no board: the account is not a tab's, nothing changes.
+    const bare = parseConfig({ owner: "acme", issueRepo: "tracker" });
+    expect(ticketContext(bare, [], [], null, "alice")).toBe(ticketContext(bare, [], [], null));
+    expect(ticketContext(two, [], [], null, "mallory")).toBe(ticketContext(two, [], [], null));
+  });
+  it("the brief says what an empty status means", () => {
+    expect(ticketContext(cfg as never, [], [], null)).toContain("An empty `status` and `project`: this account has no GitHub board");
   });
 });

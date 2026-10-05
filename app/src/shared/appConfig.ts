@@ -30,6 +30,8 @@ export interface ProjectConfig {
   columns: string[]
   statuses: StatusMap
   sprintField: string
+  /** A board MasterDeck created: it has no sprint field, so the sprint picker does not apply to it. */
+  sprintless?: true
 }
 
 /**
@@ -175,6 +177,7 @@ function parseProject(p: Obj, owner: string): ProjectConfig {
     columns: strs(p.columns, []),
     statuses: parseStatuses(p.statuses),
     sprintField: str(p.sprintField, ''),
+    ...(p.sprintless === true ? { sprintless: true as const } : {}),
   }
 }
 

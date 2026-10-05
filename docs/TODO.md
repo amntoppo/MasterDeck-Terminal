@@ -1,4 +1,4 @@
-# TODO (as of 2026-10-03)
+# TODO (as of 2026-10-05)
 
 Open work, grouped and roughly prioritized (P1 first). Each item: context, where in the code, and
 a suggested approach. Nothing here is started. The older design note for Codex/Copilot support is
@@ -92,6 +92,91 @@ fixes it, and move the item here to "Recently done".
   Board tab gets `ticket-builder/tab-<id>/`; closing the tab leaves it (so reopening continues).
   Main doesn't know which tabs exist (they live in the renderer's storage), so nothing sweeps them.
   Approach: the renderer reports its tab ids, and `tab-*` folders of no tab untouched for 7 days go.
+- **P2 · First real run of "Create a GitHub board".** Everything is tested against a fake gh; the
+  mutations were checked by schema introspection only. Run it once on a throwaway repository and
+  confirm: the default Status field is there and its options keep their ids, 20 aliased
+  `addProjectV2ItemById` per request pass GitHub's secondary limits, a repository of another owner
+  links, adding an issue twice is harmless, and whether `projectsV2(query: "is:open")` lists a board
+  created seconds earlier (the duplicate-name check after a timed-out create relies on it: if the
+  search lags, a second Create of the same name is not refused). Where: `main/boardCreate.ts`; the spec's §9
+  (backend repo, `docs/superpowers/specs/2026-10-05-board-without-a-github-project-design.md`).
+- **P3 · Existing boards without a sprint field show nothing under "Current sprint".** Only boards
+  MasterDeck creates are marked `sprintless`. Approach: let Setup write the marker when the detected
+  board has no iteration field (`setup._board_of` knows), after the user agrees: it changes what such
+  a board shows (everything, on every sprint choice).
+- **P3 · What a board-creation run could not add is kept in memory only** (`BoardCreator.pending`):
+  after a restart, Try again is gone and the issues must be added on GitHub. Approach: a small file
+  under `MASTERDECK_HOME`, or an "Add missing issues" action that lists a board's repositories' open
+  issues that are not on it.
+- **P3 · Accounts with more than 10 repositories or 300 open issues and no board** see a cut-off
+  Board (it says so). Approach: page further on demand, or filter by assignee in the query for the
+  Mine tab.
+- **P3 · Create a GitHub board from the web app / phone** is blocked by design; revisit if asked
+  (needs a confirmation flow that does not rely on the Mac's dialog, and a way to fix a missing scope
+  remotely).
+- **P3 · The first sweep after the upgrade can raise many ASSIGN proposals** for a user with no
+  board and many old open issues assigned to them: every one in Todo with no session is proposed, and
+  there is no cap (spec A4 leaves it so). Approach: cap the ASSIGN proposals per sweep for derived
+  issues (newest first), or propose only issues updated in the last N days. Where: `rules.propose`,
+  `normalize.repo_issues`.
+- **P3 · A repository that answers null with anything but NOT_FOUND is asked again on every sweep.**
+  A partial answer makes gh exit 1, the shared cache stores only exit 0, and only `NOT_FOUND` is
+  remembered (`missing-repos.json`), so a repository that keeps answering e.g. `FORBIDDEN` (SAML,
+  access removed without a rename) means the whole repository query is sent again each time, for
+  every repository of the account. Approach: remember such a repository for a few minutes (a short
+  TTL beside the hour for NOT_FOUND), still naming it in `unread`. Where: `collect.Live.repo_issues`.
+- **P3 · Board without a GitHub project: review leftovers (small).**
+  - Board creation (`main/boardCreate.ts`): an account error from `makeGhRunner` on the create call
+    ("not ready yet", "needs to log in again": never sent, empty stdout, `ghc.ts`) still gets the
+    "may have been created" suffix (only `accountGh`'s refusal is marked `NOT_SENT`); `columnsOf`
+    refuses a Board that is not loaded but cannot tell a stale one (an old cache), so issues may get
+    the column they had at the last read; a repository link that keeps failing does not by itself
+    keep the job pending (it is retried only when Try again runs for another reason), and no test
+    covers a run whose only leftover is an unlinked repository; Try again after the account was
+    disconnected answers "nothing left to add"; with one account Try again is refused while gh's
+    active login is not the one that confirmed (it must be switched back by hand; a job made while
+    gh named no active login can only be retried in that same state); a status request that failed after GitHub applied it
+    is sent again on Try again and overwrites a move made on GitHub in between (one batch); the
+    duplicate-name check reads the owner's first 100 open boards (the confirmation says so).
+  - Board tab (`BoardView.tsx`, `shared/derivedBoard.ts`): "Could not read <repositories>"
+    (`'not-read'`) shows only when the tab has no card at all; with cards from other repositories
+    only the note line says it. An account whose whole read failed (no part at all) shows "Loading
+    board…" again during each later refresh, then "Could not read" (`awaitingRead` cannot tell a
+    first read from a read after a failure). `boardDeriver` keeps the board's identity stable but still builds
+    the derived objects on every state build. `columnsWithDerived` (remote snapshot): a board with
+    both kinds of cards whose own columns share a name with MasterDeck's, and a board with no cards,
+    are untested edges. A "Nothing selected" tab still shows the sprint picker and Summary (it is
+    not in fallback mode: no repositories). An unconfigured app reads as "Nothing selected" in
+    `boardEmpty` (the Board shows Setup's welcome instead; check the web app and phone). No test
+    renders `BoardView` or covers `Sources.refreshBoard`'s gate (helpers only). The spec says
+    "N open issues; the filters hide all of them"; the tab says "N issues" (the count includes
+    recently closed ones).
+  - Create with Claude in a tab without a board: the CLAUDE.md lists only the tab account's
+    repositories, but the "People on the board" list and the open sprints still come from every
+    account, and a `--repo` of another account is not refused (the issue is created there, on no
+    board). A tab whose account has a board still falls back to the config's first board (the
+    primary's) when `--project` is left out, as before.
+  - The account a ticket is created as is matched by exact case in `BoardOps.create`
+    (`CreateOpts.account`) and `ticketContext`: a login spelled in another case is treated as not
+    connected, so the no-board rules do not apply to it (the repository's account still decides).
+    An account with no repositories and no board is not "boardless" (`boardless` needs repositories),
+    so a ticket created as it without `--project` still falls back to `cfg.projects[0]`.
+  - Version skew: a `master` CLI from before this change prints no `derived` parts (the tab then
+    reads "Could not read" until both are updated), and one that prints only the top-level `notes`
+    cannot attribute them with two accounts without a board. Say so in the release notes.
+  - `master board` / `master snapshot` (`collect.py`, `board.py`, `normalize.py`): `missing` is
+    recorded from the first page round only (a null on a later page is not marked);
+    `missing-repos.json` is read and written without a lock; closed issues are the 50 most recently
+    updated since the 14-day cut (not strictly the 50 most recently closed); only the first 5 linked
+    PRs of an issue are read, so an open sixth is not seen; `derived.total` counts every open issue
+    also under `--mine`; an issue that is on another account's board is taken off this
+    account's `total` / `shown` only when it was among the issues read (past the 300 it still
+    counts); the 300-issue cap applies before the assigned-to-me filter; the snapshot's
+    repository read runs even when the login is unknown, and the snapshot drops `missing` / `unread`.
+  - Linking and tickets (`boardOps.ts`, `boardFlow.ts`): `setStatus` refuses by the repository's
+    account even when the issue sits on another account's board; tests missing for "linkPr still
+    runs for a ticket without a board", a ticket with no card, and New ticket with a picked account
+    that is not the repository's.
 
 ## Remote / web
 
@@ -196,6 +281,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Board without a GitHub project (plan J; spec and plan in the backend repo, 2026-10-05): a tab whose account has no board shows its repositories' issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck on every state (`shared/derivedBoard.ts`, `master board` repository read, read-only columns, hint and notes); **Create a GitHub board** makes a real one as that account, on the Mac only (`main/boardCreate.ts`: plan, native confirmation, re-check, columns, links, issues 20 a request, Try again, config last, `sprintless`); empty states say what is empty ("No open issues", "Could not read …", "Nothing selected"); linking a session and New ticket / Create with Claude work without a board; master proposes only that account's own Todo issues | feat/board-without-project (547d483 … 6537700, and the follow-up commit right after it; not merged, not pushed) | — (no protocol change) |
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |
 | Several GitHub accounts: a Create with Claude session per Board tab as the tab's account (`main/ticketDirs.ts`), and `as @login` at the top of every session (`accountLabel`, `SessionAccount`) | feat/multi-gh-accounts (Task 16b) | — |

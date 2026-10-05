@@ -1,4 +1,5 @@
-// DEV ONLY: `npm run dev:web`, then open /?preview (the app on a stub deck) or /?preview=gate (the sign-in card).
+// DEV ONLY: `npm run dev:web`, then open /?preview (the app on a stub deck), /?preview=noboard (an account with no
+// GitHub board) or /?preview=gate (the sign-in card).
 // main.tsx imports this only under import.meta.env.DEV, so `npm run build:web` leaves it out.
 import type { Root } from 'react-dom/client'
 import { DECK_ACCESS } from '@shared/remoteDeck'
@@ -11,8 +12,8 @@ import { fakeScreen, fixtureState } from './fixture'
 type Fn = (...a: never[]) => unknown
 
 /** `window.deck` with fixture answers: same blocked/local split as the real RemoteDeck, nothing leaves the page. */
-function previewDeck(): DeckApi {
-  const state: AppState = fixtureState()
+function previewDeck(noBoard: boolean): DeckApi {
+  const state: AppState = fixtureState(noBoard)
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
   let seq = 1
@@ -85,7 +86,7 @@ export function mountPreview(root: Root, which: string): void {
     )
     return
   }
-  window.deck = previewDeck()
+  window.deck = previewDeck(which === 'noboard')
   root.render(
     <>
       <App />

@@ -144,6 +144,8 @@ def _project(p: dict, cfg: dict) -> "dict | None":
         "columns": list(p.get("columns") or []),
         "statuses": _merge(DEFAULTS["statuses"], p.get("statuses") or {}),
         "sprintField": p.get("sprintField") if isinstance(p.get("sprintField"), str) else "Sprint",
+        # A board MasterDeck created: no sprint field. Only present when set, so older boards read as before.
+        **({"sprintless": True} if p.get("sprintless") is True else {}),
     }
 
 
@@ -227,6 +229,32 @@ def is_multi(cfg: "dict | None" = None) -> bool:
     """Multi-account mode: two or more connected accounts. The one place to ask; with one account
     everything behaves as before."""
     return len(accounts(cfg)) >= 2
+
+
+# An account (with one account: the whole config) that has repositories but no project board. The
+# Board then shows its repositories' issues in these columns, which MasterDeck works out itself
+# and stores nowhere on GitHub.
+DERIVED_COLUMNS = ["Todo", "In Dev", "PR Raised", "Done"]
+DERIVED_STATUSES: dict = {
+    "ready": "Todo", "inProgress": "In Dev", "prRaised": "PR Raised", "devDone": "Done",
+    "blocked": [], "done": ["Done"], "finished": ["Done"], "assignable": ["Todo"],
+    "resumable": ["In Dev", "PR Raised"], "rank": {},
+}
+DERIVED_DONE_DAYS = 14    # a closed issue stays in Done this long
+DERIVED_MAX_CARDS = 300   # open issues shown per account
+DERIVED_MAX_DONE = 50     # closed issues shown per account
+DERIVED_MAX_REPOS = 10    # repositories read per account (one GraphQL query covers them)
+
+
+def boardless(cfg: "dict | None" = None) -> bool:
+    """Repositories but no project board: one account's view, or the whole config."""
+    return bool(repos(cfg)) and not projects(cfg)
+
+
+def sprintless(key: "str | None") -> bool:
+    """A board with no sprint field that MasterDeck created: the sprint filter does not apply to it."""
+    p = project_by_key(key)
+    return bool(p and p.get("sprintless"))
 
 
 def masterdeck_home() -> Path:

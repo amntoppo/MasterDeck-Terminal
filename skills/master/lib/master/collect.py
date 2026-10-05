@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
+import time
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
@@ -62,18 +65,73 @@ def account_token(login: str, runner=subprocess.run) -> "str | None":
     return tok if r.returncode == 0 and tok else None
 
 
-def _run(cmd: list, timeout: int = 120, env: "dict | None" = None) -> str:
-    """`env`: one account's GH_TOKEN and GHC_ACCOUNT (None: the inherited environment, as before)."""
+def _has_data(out: str) -> bool:
+    """A GraphQL answer that still carries data: gh exits 1 on a partial error (one repository of
+    several is gone) but prints what it got."""
+    try:
+        got = json.loads(out)
+        data = got.get("data")
+    except (ValueError, AttributeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if any(v is not None for v in data.values()):
+        return True
+    # Every repository gone: GitHub says so with NOT_FOUND errors and nothing else.
+    errs = got.get("errors")
+    return bool(data) and isinstance(errs, list) and bool(errs) and all(
+        isinstance(e, dict) and e.get("type") == "NOT_FOUND" for e in errs)
+
+
+MISSING_TTL = 3600  # seconds a repository GitHub answered nothing for stays out of the query
+
+
+def _missing_file() -> Path:
+    return config.masterdeck_home() / "missing-repos.json"
+
+
+def _load_missing(key: str) -> dict:
+    try:
+        got = json.loads(_missing_file().read_text()).get(key)
+        return {r: t for r, t in got.items() if isinstance(t, (int, float))} if isinstance(got, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _save_missing(key: str, repos: dict) -> None:
+    """Remember the repositories that came back null. A partial answer makes gh exit 1 and the
+    cache stores only exit 0, so without this a stale repository would defeat the cache."""
+    try:
+        path = _missing_file()
+        try:
+            allm = json.loads(path.read_text())
+            allm = allm if isinstance(allm, dict) else {}
+        except (OSError, ValueError):
+            allm = {}
+        allm[key] = repos
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".missing-")
+        with os.fdopen(fd, "w") as f:
+            json.dump(allm, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # only an optimisation
+
+
+def _run(cmd: list, timeout: int = 120, env: "dict | None" = None, partial: bool = False) -> str:
+    """`env`: one account's GH_TOKEN and GHC_ACCOUNT (None: the inherited environment, as before).
+    `partial`: a GraphQL answer that carries data is returned even when gh exits 1."""
     if cmd and cmd[0] == "gh" and os.environ.get("MASTER_NO_GH_CACHE") != "1":
         # Every GitHub read goes through the cache shared with the babysit skills and MasterDeck.
         from . import ghcache
         code, out, err = ghcache.run(cmd[1:], ttl=_gh_ttl(cmd), env=env)
-        if code != 0:
-            raise RuntimeError((err.decode(errors="replace") or out.decode(errors="replace") or f"exit {code}").strip())
-        return out.decode(errors="replace")
+        text = out.decode(errors="replace")
+        if code != 0 and not (partial and _has_data(text)):
+            raise RuntimeError((err.decode(errors="replace") or text or f"exit {code}").strip())
+        return text
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                        env={**os.environ, **env} if env else None)
-    if r.returncode != 0:
+    if r.returncode != 0 and not (partial and _has_data(r.stdout)):
         raise RuntimeError((r.stderr or r.stdout or f"exit {r.returncode}").strip())
     return r.stdout
 
@@ -115,10 +173,10 @@ class Live:
             return cls(view, None, f"gh is not logged in to {view['login']}")
         return cls(view, {"GH_TOKEN": tok, "GHC_ACCOUNT": view["login"]})
 
-    def _gh(self, cmd: list) -> str:
+    def _gh(self, cmd: list, partial: bool = False) -> str:
         if self.error:
             raise RuntimeError(self.error)
-        return _run(cmd, env=self.env)
+        return _run(cmd, env=self.env, partial=True) if partial else _run(cmd, env=self.env)
 
     def me(self) -> str:
         return self._gh(["gh", "api", "user", "--jq", ".login"]).strip()
@@ -165,9 +223,66 @@ class Live:
         return self.board_mine_ready()[1]
 
     def board_sprint(self, query: str = config.BOARD_SPRINT_QUERY) -> list:
+        from . import board
         ps = config.projects(self.cfg)
-        got = self.project_items([(f"b{i}", p, query) for i, p in enumerate(ps)])
+        # A board with no sprint field (MasterDeck made it): the sprint part would match nothing.
+        got = self.project_items([(f"b{i}", p, board.sprintless_query(query) if p.get("sprintless") else query)
+                                  for i, p in enumerate(ps)])
         return [it for i in range(len(ps)) for it in got[f"b{i}"]]
+
+    def repo_issues(self, today: date) -> dict:
+        """The issues of this account's ticked repositories, for an account with no board: open
+        ones and the ones closed lately. {"items", "total" (open issues GitHub counts), "repos"
+        (read), "skipped" (past DERIVED_MAX_REPOS), "missing" (GitHub answered nothing for), "unread"
+        ({repo: GraphQL error type} of the missing ones not remembered: asked again next call)}.
+        One GraphQL call for every repository; up to two more for repositories with further
+        pages, while fewer than DERIVED_MAX_CARDS open issues were read."""
+        from . import board
+        ticked = config.repos(self.cfg)
+        repos = ticked[:config.DERIVED_MAX_REPOS]
+        since = board.done_since(today)
+        key, now = (self.cfg or {}).get("login") or "", time.time()
+        # A forced read (the Board's Refresh or Retry: GHC_FORCE=1) asks for every repository again;
+        # one still NOT_FOUND is remembered from now, one that answers is forgotten.
+        forced = os.environ.get("GHC_FORCE") == "1"
+        known = {} if forced else {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
+        pending = {f"r{i}": (r, None) for i, r in enumerate(repos) if r not in known}
+        items, total, missing, first = [], 0, [r for r in repos if r in known], True
+        found, unread = {}, {}
+        for _ in range(3):
+            if not pending:
+                break
+            query, variables = board.repo_issues_query([(a, r, c, first) for a, (r, c) in pending.items()], since)
+            args = ["gh", "api", "graphql", "-f", f"query={query}"]
+            for k, v in variables.items():
+                args += ["-f", f"{k}={v}"]
+            answer = json.loads(self._gh(args, partial=True))
+            data = answer.get("data") or {}
+            # Only GitHub saying NOT_FOUND for that alias is remembered; a null from a rate limit,
+            # a forbidden or a timeout must not hide a healthy repository for an hour.
+            gone = {e["path"][0]: e.get("type") for e in answer.get("errors") or []
+                    if isinstance(e, dict) and isinstance(e.get("path"), list) and e["path"]}
+            for alias in list(pending):
+                repo, _cursor = pending[alias]
+                got, cursor, count = board.repo_issues_page(data, alias, repo)
+                if first:
+                    total += count
+                    if not isinstance(data.get(alias), dict):
+                        missing.append(repo)
+                        if gone.get(alias) == "NOT_FOUND":
+                            found[repo] = now
+                        else:
+                            unread[repo] = gone.get(alias) or "unknown"
+                items += got
+                if cursor and sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS:
+                    pending[alias] = (repo, cursor)
+                else:
+                    del pending[alias]
+            first = False
+        if found or known != _load_missing(key):
+            _save_missing(key, {**known, **found})
+        return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing,
+                "unread": unread}
 
     def sprints(self) -> list:
         from . import board
@@ -250,6 +365,7 @@ class Fixtures:
     def board_ready(self) -> list: return self._json("board_ready.json")
     def board_mine_ready(self) -> "tuple[list, list]": return self.board_mine(), self.board_ready()
     def board_sprint(self, query: str = "") -> list: return self._json("board_sprint.json")
+    def repo_issues(self, today=None) -> dict: return self._json("repo_issues.json")
     def sprints(self) -> list: return self._json("sprints.json")
     def pr_details(self, urls: list) -> dict: return self._json("board_prs.json")
     def prs_mine(self) -> list: return self._json("prs_mine.json")

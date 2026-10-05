@@ -1090,6 +1090,7 @@ export function App() {
           onPr={setPrCard}
           onAssign={setAssignCard}
           onSummary={() => setDialog("sprint-summary")}
+          onSetup={() => setDialog("setup")}
         />
       )}
       {view === "prs" &&

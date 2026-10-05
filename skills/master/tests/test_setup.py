@@ -41,6 +41,28 @@ class SaveAndShellTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 setup.save({"owner": "bad owner!"}, p)
 
+    def test_save_keeps_a_board_masterdeck_made_sprintless(self):
+        made = {"owner": "globex", "ownerType": "organization", "number": 7, "id": "PVT_7", "title": "App board",
+                "columns": ["Todo", "In Dev", "PR Raised", "Done"], "sprintField": "", "sprintless": True}
+        acct = {"login": "bob-work", "primary": True, "name": "Bob", "email": "b@globex.test", "owner": "globex",
+                "ownerType": "organization", "issueRepo": "app", "repos": ["globex/app"], "projects": [made]}
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.json"
+            for patch in ({"accounts": [acct]}, {"workspace": "/tmp/w"}, {"accounts": [dict(acct, name="Bob B")]}):
+                cfg = setup.save(patch, p)
+                self.assertTrue(cfg["accounts"][0]["projects"][0]["sprintless"], patch)
+                self.assertTrue(cfg["projects"][0]["sprintless"], patch)  # the mirrored top-level list
+                self.assertTrue(json.loads(p.read_text())["projects"][0]["sprintless"])
+                self.assertTrue(config.projects(cfg)[0]["sprintless"])
+            # A config from before accounts: the top-level list alone.
+            q = Path(d) / "old.json"
+            setup.save({"owner": "globex", "issueRepo": "app", "projects": [made]}, q)
+            cfg = setup.save({"masterEnabled": False}, q)
+            self.assertTrue(cfg["projects"][0]["sprintless"])
+            self.assertEqual(cfg["sprintField"], "")
+            # Other boards never get the mark.
+            self.assertNotIn("sprintless", config.projects({"owner": "acme", "projects": [{"number": 1}]})[0])
+
     @unittest.skipIf(sys.platform == "win32", "bash on Windows runners is WSL")
     def test_shell_output_evaluates_in_bash(self):
         cfg = config._merge(config.DEFAULTS, {"owner": "acme", "issueRepo": "tracker", "project": 3,
