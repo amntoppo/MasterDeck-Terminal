@@ -7,15 +7,16 @@ const acct = (login: string, owner: string, repos: string[], more: Record<string
 const two = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker', 'acme/api'], { primary: true, projects: [BOARD] }), acct('bob-work', 'globex', ['globex/app'])] })
 const legacy = parseConfig({ owner: 'acme', issueRepo: 'tracker', project: 1 })
 
-function make(cfg = two, reply: (repo: string) => string[] | null | Promise<string[] | null> = (r) => [`dev-of-${r.split('/')[1]}`, 'zoe']) {
+function make(cfg = two, reply: (repo: string) => string[] | null | Promise<string[] | null> = (r) => [`dev-of-${r.split('/')[1]}`, 'zoe'], onBoard: string[] = []) {
   const calls: string[] = []
-  const t = { now: 1_000_000, cfg }
+  const t = { now: 1_000_000, cfg, onBoard }
   const store = new AssignableUsers({
     read: async (repo) => {
       calls.push(repo)
       return reply(repo)
     },
     config: () => t.cfg,
+    boardRepos: () => t.onBoard,
     now: () => t.now,
   })
   return { store, calls, t }
@@ -71,6 +72,22 @@ describe('AssignableUsers (who can be assigned in a repository, read when the As
     const none = make(parseConfig({}))
     expect(await none.store.get(null)).toMatchObject({ ok: false })
     expect(none.calls).toEqual([])
+  })
+  it('a repository Setup does not tick is read when a card of the loaded board is in it, as the board spells it', async () => {
+    const { store, calls, t } = make(two, undefined, ['acme/tracker', 'Partner/Portal'])
+    expect(await store.get('partner/portal')).toEqual({ ok: true, users: ['dev-of-Portal', 'zoe'] })
+    expect(calls).toEqual(['Partner/Portal'])
+    expect(await store.get('partner/other')).toEqual({ ok: false, message: 'partner/other is not selected in Setup.' }) // neither selected nor on the board
+    expect(await store.get('evil/secret')).toMatchObject({ ok: false })
+    expect(calls).toEqual(['Partner/Portal'])
+    // The board no longer holds it: a name from a client alone is not enough, not even from memory.
+    t.onBoard = ['acme/tracker']
+    expect(await store.get('Partner/Portal')).toMatchObject({ ok: false })
+    expect(calls).toEqual(['Partner/Portal'])
+    // What the board says is not trusted as a name either.
+    t.onBoard = ['not a repo', '../x', 'acme/..']
+    for (const bad of t.onBoard) expect(await store.get(bad)).toMatchObject({ ok: false })
+    expect(calls).toEqual(['Partner/Portal'])
   })
   it('remembers a bounded number of repositories: the one read longest ago goes', async () => {
     const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })

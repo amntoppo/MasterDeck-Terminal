@@ -1,6 +1,6 @@
 import type { AppConfig } from '@shared/appConfig'
 import { primaryRepo } from '@shared/appConfig'
-import { offBoardOk, repoKey } from '@shared/repoView'
+import { offBoardOk, repoKey, validRepoName } from '@shared/repoView'
 
 /** How long a repository's assignable users are kept. */
 export const ASSIGN_USERS_TTL_MS = 3_600_000
@@ -13,14 +13,16 @@ export interface AssignUsersDeps {
   /** GitHub's assignable users of `repo` (owner/name), read as that repository's account; null when the read failed. */
   read: (repo: string) => Promise<string[] | null>
   config: () => AppConfig
+  /** The repositories (owner/name) of the cards on the board main has loaded, as GitHub's board names them. */
+  boardRepos?: () => string[]
   now?: () => number
 }
 
 /**
  * Who can be assigned an issue of a repository: what the Assign popup offers. Read when a popup
  * opens, as the account the repository belongs to, kept an hour per repository; two popups asking
- * at once share one read. Only a repository the config selects is read (the web may ask too), and
- * a failed read is not kept.
+ * at once share one read. Only a repository the config selects, or one a card of the loaded board
+ * is in, is read (the web may ask too), and a failed read is not kept.
  */
 export class AssignableUsers {
   private kept = new Map<string, { users: string[]; at: number }>()
@@ -33,8 +35,11 @@ export class AssignableUsers {
     const c = this.deps.config()
     const asked = raw === null || raw === undefined || raw === '' ? primaryRepo(c) : raw
     if (typeof asked !== 'string' || !asked) return Promise.resolve({ ok: false, message: 'No repository to read.' })
-    if (!offBoardOk(asked, c)) return Promise.resolve({ ok: false, message: `${asked.slice(0, 140)} is not selected in Setup.` })
-    const repo = c.repos.find((r) => repoKey(r) === repoKey(asked)) ?? asked
+    // Selected in Setup; or a card of the loaded board is in it (a board can hold issues of a repository
+    // Setup does not tick): the name is then the board's, from GitHub, not the client's.
+    const onBoard = (this.deps.boardRepos?.() ?? []).find((r) => validRepoName(r) && repoKey(r) === repoKey(asked))
+    if (!offBoardOk(asked, c) && !onBoard) return Promise.resolve({ ok: false, message: `${asked.slice(0, 140)} is not selected in Setup.` })
+    const repo = c.repos.find((r) => repoKey(r) === repoKey(asked)) ?? onBoard ?? asked
     const key = repoKey(repo)
     const now = (this.deps.now ?? Date.now)()
     const had = this.kept.get(key)

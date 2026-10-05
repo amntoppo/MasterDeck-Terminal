@@ -1030,9 +1030,9 @@ export function BoardView({
               <button
                 className="btn primary"
                 onClick={() => {
-                  // A repository MasterDeck had no room for is asked for again; the rest is read again.
-                  deck().boardRepos(f.repos);
-                  void refresh();
+                  // The forced read first (it skips the caches, also the CLI's memory of "Not found");
+                  // then a repository MasterDeck had no room for is asked for again.
+                  void Promise.resolve(refresh()).finally(() => deck().boardRepos(f.repos));
                 }}
                 disabled={loading}
               >

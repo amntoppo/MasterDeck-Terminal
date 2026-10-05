@@ -6,7 +6,7 @@ import { parseBoard, parseCards } from './board'
 import {
   applyRead, boardChips, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pruneEntries, repoChoices, repoViewBoard, repoViewDeriver,
   repoViewEmpty, repoViewOn, offBoardOk, reposFilterPick, withMoving, repoViewStatus, repoViewTitle, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_MAX_CARDS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS, type RepoEntries,
-  admitRepo, askPlan, pauseText, repoAskEvery, repoPickable, repoRefusal, reposFilterOffered, REPO_VIEW_ASK_MS, REPO_VIEW_MAX_BYTES, REPO_VIEW_MAX_QUEUED,
+  admitRepo, askPlan, pauseText, repoAskEvery, REPO_VIEW_HELD_MS, repoPickable, repoRefusal, reposFilterOffered, REPO_VIEW_ASK_MS, REPO_VIEW_MAX_BYTES, REPO_VIEW_MAX_QUEUED,
 } from './repoView'
 import type { DeriveCtx } from './derivedBoard'
 import type { BoardCard, RepoView, Session } from './types'
@@ -432,7 +432,7 @@ describe('why a picked repository is not read (one rule for the ask and for the 
     expect(askPlan(['acme/r1', 'ACME/R1', 'acme/r1'], many)).toEqual({ repos: ['acme/r1'], refused: [] }) // the same one twice is no refusal
   })
   it('refused by MasterDeck when asked (too many waiting, or shown): the part says why, and the tab asks again', () => {
-    const note = 'acme/api not read: MasterDeck already shows 30 repositories.'
+    const note = 'acme/api not read: MasterDeck already shows 30 repositories in open tabs. It makes room about 25 minutes after a tab stops showing one.'
     const st = repoViewStatus({ cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note, takenAt: null }] }, ['acme/api'], boarded)
     expect(st).toEqual({ loading: false, failed: ['acme/api'], retry: true, notes: [note] })
   })
@@ -450,7 +450,11 @@ describe('taking in a repository MasterDeck holds nothing of', () => {
     expect(admitRepo('acme/api', { held: REPO_VIEW_MAX_ENTRIES, idle: ['acme/old', 'acme/older'], queued: 0 })).toEqual({ ok: true, evict: 'acme/old' })
   })
   it('full of repositories on screen: refused, and it says so', () => {
-    expect(admitRepo('acme/api', { held: REPO_VIEW_MAX_ENTRIES, idle: [], queued: 0 })).toEqual({ ok: false, reason: `acme/api not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` })
+    expect(admitRepo('acme/api', { held: REPO_VIEW_MAX_ENTRIES, idle: [], queued: 0 })).toEqual({ ok: false, reason: `acme/api not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories in open tabs. It makes room about 25 minutes after a tab stops showing one.` })
+    // A tab asks every 20 minutes: a repository is held a little longer than that, and published and refreshed for an hour.
+    expect(REPO_VIEW_HELD_MS).toBeGreaterThan(REPO_VIEW_ASK_MS)
+    expect(REPO_VIEW_HELD_MS).toBeLessThan(REPO_VIEW_LIVE_MS)
+    expect(REPO_VIEW_HELD_MS).toBe(25 * 60_000)
   })
   it('too many first reads waiting: refused whatever room there is', () => {
     expect(admitRepo('acme/api', { held: 3, idle: [], queued: REPO_VIEW_MAX_QUEUED })).toEqual({ ok: false, reason: `acme/api not read: ${REPO_VIEW_MAX_QUEUED} repositories are already waiting for their first read. It is asked again in a few minutes.` })

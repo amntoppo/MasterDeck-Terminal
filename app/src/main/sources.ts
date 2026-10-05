@@ -1086,6 +1086,21 @@ export class Sources {
     this.repoIssues.ask(repos);
   }
 
+  /**
+   * The repositories (owner/name, each once) of the cards on the boards loaded so far, any sprint.
+   * A board can hold issues of a repository Setup does not tick: the Assign popup may read who can
+   * be assigned there, because the name comes from GitHub's board, not from whoever asks.
+   */
+  boardRepos(): string[] {
+    const out = new Map<string, string>();
+    for (const b of Object.values(this.boards))
+      for (const c of b.cards) {
+        // A card with no repository is of the primary issue repo, which the config selects anyway.
+        if (c.repo && !out.has(c.repo.toLowerCase())) out.set(c.repo.toLowerCase(), c.repo);
+      }
+    return [...out.values()];
+  }
+
   /** Show another sprint: from the cache at once, fetched when never seen before. */
   setSprint(sprint: string): void {
     if (!sprint || sprint === this.selectedSprint) return;

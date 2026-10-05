@@ -330,8 +330,10 @@ const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = ac
 });
 // The Assign popup's people: who can be assigned in the card's repository, read as that repository's account.
 const assignableUsers = new AssignableUsers({
+  // The same account `assignIssue` assigns a card of that repository as.
   read: (repo) => forRepo(repo).github.assignableUsers(false, repo),
   config: getConfig,
+  boardRepos: () => sources.boardRepos(),
 });
 // "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
 // that account; the confirmation is the Mac's own dialog, built from main's fresh read.

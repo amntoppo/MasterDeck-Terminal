@@ -161,7 +161,7 @@ describe('a picked repository that is never read', () => {
     expect(html).toContain('globex/app is a repository of bob-work, an account with no board: its issues are on that account&#x27;s tab.')
     expect(html).toContain('Back to board')
     // Refused by MasterDeck when asked: the same, with its reason.
-    const note = 'acme/api not read: MasterDeck already shows 30 repositories. Go back to the board in a tab that shows others.'
+    const note = 'acme/api not read: MasterDeck already shows 30 repositories in open tabs. It makes room about 25 minutes after a tab stops showing one.'
     const full = render({ repos: ['acme/api'], repoView: { cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note, takenAt: null }] } })
     expect(full).toContain('Could not read api')
     expect(full).toContain(note)

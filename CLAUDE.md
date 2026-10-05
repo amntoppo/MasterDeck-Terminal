@@ -278,7 +278,7 @@ buttons; it does not go through macOS window drag regions.
   must go through `viewOf`'s budget.
   What is never read and what the tab says about it come from one rule, `askPlan` (`cleanRepos` and
   `repoViewStatus` both use it): a new reason to drop a repository goes there, or the tab shows
-  "Loading issues…" for ever. `RepoIssues` never drops a repository that is on screen; a new one
+  "Loading issues…" for ever. `RepoIssues` never drops a repository a tab still shows (asked within 25 minutes, `REPO_VIEW_HELD_MS`; published and refreshed for an hour, `REPO_VIEW_LIVE_MS`); a new one
   that finds no room is refused with a note (`admitRepo`).
   `master repo-issues` is the one place that cuts a long list into reads of ten per account.
   Only the Board's own Refresh / Retry forces the read past the gh cache (`refreshGithub(force,
@@ -322,7 +322,7 @@ buttons; it does not go through macOS window drag regions.
   can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on
   branch `feat/board-repository-view` (on `main` 7f971c4: 10 commits, the docs commit, and the
   final review's fixes), not merged, not pushed, not installed. Checked there: typecheck, vitest
-  (1302 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
+  (1306 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
   suites alone checked), the Board's markup for tabs with no repository picked (identical to `main`,
   also the live DOM and a screenshot of the isolated app against `main`'s), the isolated app with
   `MASTERDECK_BOARD_FIXTURE` and `MASTERDECK_REPO_FIXTURE` (the view, its notes, the loading, empty,

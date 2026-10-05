@@ -18,7 +18,14 @@ export const REPO_VIEW_MAX_ASK = 30
 export const REPO_VIEW_STALE_MS = 3_600_000
 /** A repository counts as on screen (the hourly refresh and Refresh read it) this long after it was last asked for. */
 export const REPO_VIEW_LIVE_MS = 3_600_000
-/** Most repositories MasterDeck keeps entries for; past that, the one asked for longest ago goes. */
+/**
+ * A repository counts as shown by a tab (never dropped to make room for another) this long after
+ * it was last asked for: a little more than REPO_VIEW_ASK_MS, so a tab that is still there has
+ * asked again. Shorter than REPO_VIEW_LIVE_MS on purpose: that one says how long a repository is
+ * published and refreshed, this one how long it blocks a newcomer once MasterDeck is full.
+ */
+export const REPO_VIEW_HELD_MS = 25 * 60_000
+/** Most repositories MasterDeck keeps entries for; past that, the one asked for longest ago that no tab shows goes. */
 export const REPO_VIEW_MAX_ENTRIES = 30
 /** A repository never read (its first read failed: offline, rate limit) is tried again after this, not after an hour. */
 export const REPO_VIEW_RETRY_MS = 300_000
@@ -38,6 +45,8 @@ export const REPO_VIEW_ASK_MS = 20 * 60_000
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
 /** owner/name as GitHub spells it: an owner never starts with a dash, and a name is never "." or "..". */
 const validRepo = (s: string) => REPO.test(s) && !['.', '..'].includes(s.split('/')[1])
+/** Is this owner/name as GitHub spells one? */
+export const validRepoName = (s: unknown): s is string => typeof s === 'string' && validRepo(s)
 const short = (repo: string) => repo.split('/')[1] ?? repo
 export const repoKey = (repo: string) => repo.toLowerCase()
 
@@ -145,7 +154,7 @@ export type Admit = { ok: true; evict?: string } | { ok: false; reason: string }
 
 /**
  * May a repository MasterDeck holds nothing of be taken in? `held`: how many it holds; `idle`: the
- * keys of those that are off screen (not asked for within REPO_VIEW_LIVE_MS, not being read), the
+ * keys of those no tab shows any more (not asked for within REPO_VIEW_HELD_MS, not being read), the
  * longest unasked first; `queued`: first reads that wait or run. One on screen is never pushed out
  * (two tabs with different repositories would otherwise read each other's away for ever), and
  * first reads cannot pile up: the newcomer is refused with a reason the tab shows.
@@ -154,7 +163,7 @@ export function admitRepo(repo: string, o: { held: number; idle: string[]; queue
   if (o.queued >= REPO_VIEW_MAX_QUEUED) return { ok: false, reason: `${repo} not read: ${REPO_VIEW_MAX_QUEUED} repositories are already waiting for their first read. It is asked again in a few minutes.` }
   if (o.held < REPO_VIEW_MAX_ENTRIES) return { ok: true }
   if (o.idle.length) return { ok: true, evict: o.idle[0] }
-  return { ok: false, reason: `${repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` }
+  return { ok: false, reason: `${repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories in open tabs. It makes room about 25 minutes after a tab stops showing one.` }
 }
 
 /**

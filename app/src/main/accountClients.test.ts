@@ -106,7 +106,10 @@ describe('accountClients', () => {
     await s.c.forRepo('globex/app').github.assignableUsers(false, 'globex/app')
     await s.c.forRepo('acme/web').github.assignableUsers(false, 'acme/web')
     await s.c.forRepo(null).github.assign({ repo: null, number: 7 }, 'zoe', [])
-    expect(s.as()).toEqual(['bob-work', 'bob-work', 'alice', 'alice'])
+    // A repository no account lists (a card of a board can be in one): assigned and read as the primary, alike.
+    await s.c.forRepo('partner/portal').github.assign({ repo: 'partner/portal', number: 7 }, 'zoe', [])
+    await s.c.forRepo('partner/portal').github.assignableUsers(false, 'partner/portal')
+    expect(s.as()).toEqual(['bob-work', 'bob-work', 'alice', 'alice', 'alice', 'alice'])
     expect(s.calls[0].args.join(' ')).toContain('repos/globex/app/issues/7/assignees')
     expect(s.calls[1].args.join(' ')).toContain('repos/globex/app/assignees')
   })

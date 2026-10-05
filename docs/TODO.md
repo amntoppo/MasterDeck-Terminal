@@ -223,11 +223,12 @@ fixes it, and move the item here to "Recently done".
   change. The web app has it.
 - **P3 · An archived project item still shows as a chip** in the repository view (`projectItems`
   returns archived items). Approach: read `isArchived` and leave those out.
-- **P3 · The Assign popup of a card in a repository Setup does not select offers "Me" alone.** A
-  board can hold issues of a repository that is not ticked (with Select all on another account, or
-  another owner's repository on the board): `AssignableUsers.get` refuses it ("… is not selected in
-  Setup."), as every read asked for by name does. Approach: also accept the repository of a card
-  the loaded board holds.
+- **P3 · A whole-run CLI timeout discards chunks that already succeeded.** `master repo-issues`
+  reads ten repositories of an account per GitHub call inside one process (30 repositories: three
+  calls, up to six minutes); when the app's timeout ends the run, the repositories already read are
+  lost with it, and other repository reads and Refresh wait behind it (one read at a time).
+  Approach: print each chunk as a line when it is done and let `RepoIssues` apply them as they come,
+  or have the app send one CLI call per ten.
 - **P3 · The per-repository Assign list was not seen in the app or against GitHub** (suites only):
   the loading line, the error line, and `gh api repos/<o>/<r>/assignees` as a second account.
 - **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens

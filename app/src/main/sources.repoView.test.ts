@@ -65,6 +65,13 @@ describe('Sources and the repository view', () => {
     await src.refreshGithub(true, true) // the Refresh / Retry button
     expect(refresh.mock.calls.map((c) => c[0])).toEqual([false, false, true])
   })
+  it('names the repositories of the cards on the boards it has loaded (for the Assign popup), each once', () => {
+    const { src, priv } = make()
+    expect(src.boardRepos()).toEqual([])
+    const card = (repo: string | null) => ({ number: 1, repo, project: 'acme/1', title: 't', url: '', status: 'To Do', prs: [], assignees: [], labels: [], milestone: null, type: null })
+    priv.boards = { '@current': { takenAt: 1, sprint: null, columns: [], cards: [card('partner/portal'), card('Partner/Portal'), card('acme/api')] }, 'Sprint 2': { takenAt: 1, sprint: null, columns: [], cards: [card('acme/web')] } }
+    expect(src.boardRepos()).toEqual(['partner/portal', 'acme/api', 'acme/web'])
+  })
   it('a rate-limited repository note starts the pause', () => {
     for (const t of ['acme/api not read: RATE_LIMITED', 'gh: API rate limit exceeded', 'secondary rate limit', 'abuse detection mechanism']) expect(RATE_LIMITED.test(t)).toBe(true)
     expect(RATE_LIMITED.test('Not found: acme/old')).toBe(false)

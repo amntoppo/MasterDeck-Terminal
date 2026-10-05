@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from '@shared/appConfig'
-import { repoViewStatus, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_MAX_QUEUED, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS } from '@shared/repoView'
+import { repoViewStatus, REPO_VIEW_HELD_MS, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_MAX_QUEUED, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS } from '@shared/repoView'
 import { RepoIssues } from './repoIssues'
 import { RATE_LIMITED } from './sources'
 
@@ -215,7 +215,7 @@ describe('RepoIssues: untrusted asks are bounded', () => {
   it('with Select all, an owner the config does not name is never read', async () => {
     const { store, calls } = make({ cfg: all })
     store.ask(['evil/secret', 'acme/web'])
-    await store.refresh(true)
+    await store.refresh()
     expect(calls.map((c) => c.repos)).toEqual([['acme/web']]) // the refresh joined the ask's read
   })
   it('keeps at most so many repositories: one off screen, asked for longest ago, makes room', async () => {
@@ -246,7 +246,7 @@ describe('RepoIssues: "Select all" on one account, a second account without', ()
   it('another owner\'s unlisted repository, and names that are logins, never reach the read', async () => {
     const { store, calls } = make({ cfg: mixed })
     store.ask(['acme/new', 'globex/secret', 'alice/diary', 'bob-work/notes', 'globex/app'])
-    await store.refresh(true)
+    await store.refresh()
     expect(calls.map((c) => c.repos)).toEqual([['acme/new', 'globex/app']])
     expect(store.view()?.repos.map((p) => p.repo)).toEqual(['acme/new', 'globex/app'])
   })
@@ -259,9 +259,11 @@ describe('RepoIssues: several tabs, more repositories than it keeps', () => {
     const { store, calls, t } = make({ cfg: forty })
     const a = names(0, 20)
     const b = names(20, 20)
+    let lastA = 0
     for (let round = 0; round < 6; round++) {
       t.now += 60_000
       store.ask(a)
+      lastA = t.now
       await settle()
       t.now += 60_000
       store.ask(b)
@@ -274,16 +276,24 @@ describe('RepoIssues: several tabs, more repositories than it keeps', () => {
     expect(parts.filter((p) => p.ok).map((p) => p.repo).sort()).toEqual([...a, ...b.slice(0, 10)].sort())
     const out = parts.filter((p) => !p.ok)
     expect(out.map((p) => p.repo)).toEqual(b.slice(10))
-    for (const p of out) expect(p).toEqual({ repo: p.repo, account: null, ok: false, total: 0, shown: 0, takenAt: null, note: `${p.repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` })
+    for (const p of out) expect(p).toEqual({ repo: p.repo, account: null, ok: false, total: 0, shown: 0, takenAt: null, note: `${p.repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories in open tabs. It makes room about 25 minutes after a tab stops showing one.` })
     // The second tab says so instead of loading for ever, and goes on asking.
     const st = repoViewStatus(store.view(), b, forty)
     expect(st).toMatchObject({ loading: false, failed: b.slice(10), retry: true })
-    // The first tab goes back to the board: an hour later its repositories make room.
-    t.now += REPO_VIEW_LIVE_MS
+    // The first tab goes back to the board and stops asking; the second goes on asking every 5 minutes.
+    for (let i = 0; i < 4; i++) {
+      t.now += 5 * 60_000
+      store.ask(b)
+      await settle()
+    }
+    expect(repoViewStatus(store.view(), b, forty).failed).toEqual(b.slice(10)) // 21 minutes: a tab that asks every 20 may still be there
+    t.now += 5 * 60_000
+    expect(t.now - 60_000 - REPO_VIEW_HELD_MS).toBeGreaterThanOrEqual(lastA) // 26 minutes after the first tab's last ask
     store.ask(b)
     await settle()
+    expect(t.now - lastA).toBeLessThan(REPO_VIEW_LIVE_MS) // well within the hour
     expect(repoViewStatus(store.view(), b, forty)).toMatchObject({ loading: false, failed: [] })
-    expect(store.view()!.repos.map((p) => p.repo).sort()).toEqual([...b].sort())
+    expect(store.view()!.repos.filter((p) => p.ok).map((p) => p.repo)).toEqual(expect.arrayContaining(b))
     expect(Object.keys(store.dump() ?? {})).toHaveLength(REPO_VIEW_MAX_ENTRIES)
   })
   it('first reads cannot pile up: past the most that may wait, a new repository is refused with a reason, and nothing more is queued', async () => {
@@ -355,6 +365,59 @@ describe('RepoIssues: several tabs, more repositories than it keeps', () => {
   })
 })
 
+describe('RepoIssues: Retry and Refresh read past the caches', () => {
+  it('a forced refresh does not settle for an unforced read that runs: the repository is read again, forced', async () => {
+    let release = () => {}
+    const gates: Promise<void>[] = [new Promise<void>((r) => (release = r))]
+    const calls: { repos: string[]; force: boolean }[] = []
+    const store = new RepoIssues({
+      read: async (repos, force) => {
+        calls.push({ repos, force })
+        await (gates.shift() ?? Promise.resolve())
+        // Unforced, the CLI answers from its one-hour memory of a repository it did not find.
+        return { ok: true, data: force ? answer(repos) : { taken_at: 'x', cards: [], repos: repos.map((r) => ({ repo: r, account: null, ok: false, total: 0, shown: 0, note: `Not found: ${r}` })) } }
+      },
+      config: () => boarded,
+      paused: () => false,
+      changed: () => {},
+      now: () => 1_000_000,
+    })
+    store.ask(['acme/api']) // the tab's own ask: unforced, running
+    await tick()
+    const retry = store.refresh(true) // Retry while it runs
+    expect(store.view()?.repos[0]).toMatchObject({ loading: true })
+    release()
+    expect(await retry).toEqual({ ok: true, message: 'refreshed' })
+    expect(calls).toEqual([{ repos: ['acme/api'], force: false }, { repos: ['acme/api'], force: true }])
+    expect(store.view()?.repos[0]).toMatchObject({ repo: 'acme/api', ok: true })
+    expect(store.view()?.repos[0]).not.toHaveProperty('loading')
+  })
+  it('an unforced refresh, and a second forced one, still join the read that runs', async () => {
+    let release = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const calls: boolean[] = []
+    const store = new RepoIssues({
+      read: async (repos, force) => {
+        calls.push(force)
+        await gate
+        return { ok: true, data: answer(repos) }
+      },
+      config: () => boarded,
+      paused: () => false,
+      changed: () => {},
+      now: () => 1_000_000,
+    })
+    store.ask(['acme/api'])
+    await tick()
+    const plain = store.refresh()
+    const forced = store.refresh(true)
+    const again = store.refresh(true)
+    release()
+    await Promise.all([plain, forced, again])
+    expect(calls).toEqual([false, true]) // one forced read for both forced requests
+  })
+})
+
 describe('RepoIssues: the pause hears what gh said, not a repository\'s name', () => {
   it('"Not found: acme/rate-limiter" starts no pause; a rate limit on it does', async () => {
     const limiter = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/rate-limiter'], projects: [BOARD] })
@@ -406,7 +469,7 @@ describe('RepoIssues: failing, concurrent and half-written', () => {
       config: () => boarded, paused: () => false, changed: () => {}, now: () => 1_000_000,
     })
     slow.ask(['acme/api'])
-    const joined = slow.refresh(true) // while the first runs
+    const joined = slow.refresh() // while the first runs (the hourly refresh; a forced one reads again: below)
     slow.ask(['acme/tracker']) // another repository: its own read, queued behind
     await tick()
     expect(calls).toHaveLength(1)

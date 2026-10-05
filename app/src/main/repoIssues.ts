@@ -1,5 +1,5 @@
 import type { AppConfig } from '@shared/appConfig'
-import { admitRepo, applyRead, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pauseText, pruneEntries, repoKey, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, type RepoEntries } from '@shared/repoView'
+import { admitRepo, applyRead, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pauseText, pruneEntries, repoKey, trimEntries, viewOf, withAssignee, REPO_VIEW_HELD_MS, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, type RepoEntries } from '@shared/repoView'
 import type { Ticket } from '@shared/ticket'
 import type { RepoView } from '@shared/types'
 
@@ -23,8 +23,8 @@ type Outcome = { ok: boolean; message: string }
  * asks (`ask`); what was read stays (and is cached) until the repository is unticked in Setup.
  * A repository is read again by an ask once it is an hour old, and by every GitHub refresh while
  * a tab showing it asked within the last hour. One read at a time. It keeps at most
- * REPO_VIEW_MAX_ENTRIES repositories and never drops one that is on screen: a new one that finds
- * no room is refused, and the view says why.
+ * REPO_VIEW_MAX_ENTRIES repositories and never drops one a tab still shows (asked for within
+ * REPO_VIEW_HELD_MS): a new one that finds no room is refused, and the view says why.
  */
 export class RepoIssues {
   private entries: RepoEntries = {}
@@ -32,6 +32,8 @@ export class RepoIssues {
   /** Key → repository of the reads that run or wait; one read at most per repository (a second ask joins it). */
   private loading = new Map<string, string>()
   private inflight = new Map<string, Promise<Outcome>>()
+  /** The reads among them that skip the caches. */
+  private forced = new WeakSet<Promise<Outcome>>()
   /** Key → a repository asked for and not taken in (no room, too many first reads waiting), with why and when. The latest asked last. */
   private refused = new Map<string, { repo: string; note: string; at: number }>()
   private chain: Promise<unknown> = Promise.resolve()
@@ -62,9 +64,15 @@ export class RepoIssues {
     return new Set(Object.entries(this.asked).filter(([, a]) => now - a.at < REPO_VIEW_LIVE_MS).map(([k]) => k))
   }
 
-  /** At most REPO_VIEW_MAX_ENTRIES repositories (entries and asks both): the one asked for longest ago goes, never one on screen or being read. */
+  /** The keys a tab still shows: asked for within REPO_VIEW_HELD_MS (a tab asks every 20 minutes). These are never dropped for another. */
+  private shown(): Set<string> {
+    const now = this.now()
+    return new Set(Object.entries(this.asked).filter(([, a]) => now - a.at < REPO_VIEW_HELD_MS).map(([k]) => k))
+  }
+
+  /** At most REPO_VIEW_MAX_ENTRIES repositories (entries and asks both): the one asked for longest ago goes, never one a tab still shows or one being read. */
   private cap(): void {
-    const keep = new Set([...this.loading.keys(), ...this.live()])
+    const keep = new Set([...this.loading.keys(), ...this.shown()])
     this.set(trimEntries(this.entries, this.asked, keep))
     const keys = Object.keys(this.asked)
     if (keys.length > REPO_VIEW_MAX_ENTRIES) {
@@ -112,8 +120,8 @@ export class RepoIssues {
       const k = repoKey(r)
       const held = this.held()
       if (!held.has(k)) {
-        const live = this.live()
-        const idle = [...held].filter((x) => !live.has(x) && !this.loading.has(x)).sort((a, b) => (this.asked[a]?.at ?? -1) - (this.asked[b]?.at ?? -1))
+        const shown = this.shown()
+        const idle = [...held].filter((x) => !shown.has(x) && !this.loading.has(x)).sort((a, b) => (this.asked[a]?.at ?? -1) - (this.asked[b]?.at ?? -1))
         const got = admitRepo(r, { held: held.size, idle, queued })
         if (!got.ok) {
           told = this.refuse(k, r, got.reason, now) || told
@@ -151,13 +159,18 @@ export class RepoIssues {
     return this.read(repos, force)
   }
 
-  /** Reads these repositories; one that is already being read (or waits for it) is joined, not read twice. */
+  /**
+   * Reads these repositories; one that is already being read (or waits for it) is joined, not read
+   * twice. But a forced read (Refresh, Retry) never settles for an unforced one that runs: that one
+   * answers from the caches (the CLI remembers "Not found" for an hour), so the repository is read
+   * again after it, forced.
+   */
   private read(repos: string[], force: boolean): Promise<Outcome> {
     const joined: Promise<Outcome>[] = []
     const fresh: string[] = []
     for (const r of repos) {
       const running = this.inflight.get(repoKey(r))
-      if (!running) fresh.push(r)
+      if (!running || (force && !this.forced.has(running))) fresh.push(r)
       else if (!joined.includes(running)) joined.push(running)
     }
     const all = [...joined]
@@ -175,6 +188,8 @@ export class RepoIssues {
         const got = r.ok ? parseRepoIssues(r.data) : null
         const error = r.ok ? (got ? null : 'repo-issues printed an unexpected shape') : r.message
         for (const repo of fresh) {
+          // Not when a forced read of it was queued behind this one: it is still being read.
+          if (this.inflight.get(repoKey(repo)) !== own) continue
           this.loading.delete(repoKey(repo))
           this.inflight.delete(repoKey(repo))
         }
@@ -188,7 +203,8 @@ export class RepoIssues {
         this.deps.changed(true)
         return { ok: !error, message: error ?? 'refreshed' }
       }
-      const own = this.chain.then(run, run)
+      const own: Promise<Outcome> = this.chain.then(run, run)
+      if (force) this.forced.add(own)
       this.chain = own
       for (const r of fresh) this.inflight.set(repoKey(r), own)
       all.push(own)
