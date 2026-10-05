@@ -446,7 +446,8 @@ def cmd_repo_issues(args) -> int:
                             "total": max(shown, int((got.get("totals") or {}).get(r) or 0))}
         more, pr_note = _pr_facts(src, kept)
         details.update(more)
-        notes = [n for n in (pr_note, f"Board columns not read: {got['boards_unread']}" if got.get("boards_unread") else None) if n]
+        notes = [n for n in (pr_note, (f"Board columns only partly read (later pages): {got['boards_unread']}" if got.get("boards_partial")
+                         else f"Board columns not read: {got['boards_unread']}") if got.get("boards_unread") else None) if n]
         for r in repos:
             if notes and parts[r]["ok"]:
                 parts[r]["note"] = "; ".join(notes)[:300]

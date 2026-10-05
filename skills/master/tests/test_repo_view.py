@@ -6,6 +6,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from datetime import date
@@ -314,25 +315,191 @@ class AccountsTest(unittest.TestCase):
 
 
 class MasterUnchangedTest(unittest.TestCase):
-    """The repository view is the Board's: master's snapshot and proposals never see it."""
+    """The repository view is the Board's: master's snapshot, `master board` for an account with a
+    board, and the proposal rules never see it."""
 
-    def test_an_account_with_a_board_still_reads_only_its_board(self):
+    def test_on_boards_is_handed_on_only_for_a_derived_item(self):
+        # Pins the `derived is True` gate in board.build: remove it and the second card gets onBoards.
+        held = [{"key": "acme/1", "status": "In QA"}]
+        loose = dict(ritem(1, held=held), derived=False)
+        real = {"content": {"type": "Issue", "number": 5, "title": "T", "url": "", "repository": "acme/tracker"},
+                "status": "In Dev", "on boards": held}
+        cards = board.build([ritem(2, held=held), loose, real], {}, NOW)["cards"]
+        self.assertEqual([("onBoards" in c) for c in cards], [True, False, False])
+
+    def test_master_board_for_an_account_with_a_board_never_has_on_boards_or_derived(self):
+        from tests.helpers import board_item
+        with tempfile.TemporaryDirectory() as d:
+            fx = Path(d)
+            held = [{"key": "acme/1", "status": "In QA"}]
+            (fx / "board_sprint.json").write_text(json.dumps([dict(board_item(939, "In Dev", "2026-09-21"), project="acme/1", **{"on boards": held})]))
+            (fx / "board_prs.json").write_text("{}")
+            (fx / "repo_issues.json").write_text(json.dumps(
+                {"items": [ritem(1, held=held)], "total": 1, "repos": ["acme/tracker"], "skipped": [], "missing": []}))
+            buf = io.StringIO()
+            with mock.patch.dict(config.CONFIG, TWO_REPOS), redirect_stdout(buf):
+                self.assertEqual(cli.main(["board", "--fixtures", d, "--now", NOW]), 0)
+        cards = json.loads(buf.getvalue())["cards"]
+        self.assertEqual([c["number"] for c in cards], [939])  # the repository read is not asked
+        self.assertTrue(all("onBoards" not in c and "derived" not in c for c in cards))
+
+    def test_snapshot_build_for_an_account_with_a_board_reads_only_its_board(self):
+        """Pins snapshot.build: with a board it never calls repo_issues (that read is for an account
+        with no board, and the repository view's `only`/`boards` arguments are not master's)."""
         from tests.test_snapshot import FakeSource
 
         class Never(FakeSource):
             def repo_issues(self, today, only=None, boards=False):
                 raise AssertionError("master never reads repository issues for an account with a board")
 
-        s = snapshot.build(Never(), now_iso=NOW, today=TODAY)
+        with mock.patch.dict(config.CONFIG, TWO_REPOS):
+            s = snapshot.build(Never(), now_iso=NOW, today=TODAY)
         self.assertEqual([i["number"] for i in s["issues"]], [939])
 
     def test_a_session_on_an_issue_no_board_holds_gets_no_proposal(self):
-        from tests.test_rules import sess, snap
-        # Started from the repository view: linked to #77, which the snapshot (the board) does not list.
-        cur = snap(issues=[], sessions=[sess("off-board", 77, status="dead"), sess("idle-one", 78)])
+        from tests.test_rules import issue, sess, snap
+        # Started from the repository view: session linked to #77, which the snapshot lists only as
+        # an off-board issue (no status, no sprint). With a status it would be proposed.
+        off = dict(issue(77, status=None, current=False), sprint=None)
+        cur = snap(issues=[off], sessions=[sess("off-board", 77, status="dead"), sess("idle-one", 78)])
         self.assertEqual(rules.propose(None, cur, NOW), [])
+        control = snap(issues=[issue(77, status="In Dev")], sessions=[sess("off-board", 77, status="dead")])
+        self.assertNotEqual(rules.propose(None, control, NOW), [])
 
-    def test_master_board_cards_never_carry_on_boards(self):
-        from tests.helpers import board_item
-        items = [dict(board_item(939, "In Dev", "2026-09-21"), project="acme/1")]
-        self.assertTrue(all("onBoards" not in c and "derived" not in c for c in board.build(items, {}, NOW)["cards"]))
+
+class MissingMemoryTest(unittest.TestCase):
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        for p in (mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.home.name}),):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(self.home.cleanup)
+
+    def live(self, answers, only, cfg=TWO_REPOS, live=None, force=False, boards=False):
+        calls = []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            calls.append(" ".join(cmd))
+            return json.dumps(answers[min(len(calls), len(answers)) - 1])
+
+        env = {"GHC_FORCE": "1"} if force else {}
+        with mock.patch.dict(config.CONFIG, cfg), mock.patch.dict(os.environ, env), \
+                mock.patch.object(collect, "_run", side_effect=fake_run):
+            return (live or collect.Live()).repo_issues(TODAY, only=only, boards=boards), calls
+
+    def remembered(self, key=""):
+        return set(collect._load_missing(key))
+
+    GONE = {"data": {"r0": None}, "errors": [{"type": "NOT_FOUND", "path": ["r0"]}]}
+    LIMITED = {"data": {"r0": None}, "errors": [{"type": "RATE_LIMITED", "path": ["r0"]}]}
+    FINE = {"data": {"r0": {"open": conn([node(1)]), "closed": {"nodes": []}}}}
+
+    def test_not_found_is_reported_and_remembered_rate_limit_is_not(self):
+        got, _ = self.live([self.GONE], ["acme/api"])
+        self.assertEqual((got["missing"], got["unread"], self.remembered()), (["acme/api"], {}, {"acme/api"}))
+        # Remembered: the next read does not ask for it again, and still says it is missing.
+        got, calls = self.live([self.FINE], ["acme/api"])
+        self.assertEqual((calls, got["missing"]), ([], ["acme/api"]))
+        got, _ = self.live([self.LIMITED], ["acme/tracker"])
+        self.assertEqual((got["missing"], got["unread"]), (["acme/tracker"], {"acme/tracker": "RATE_LIMITED"}))
+        self.assertEqual(self.remembered(), {"acme/api"})  # the rate-limited one is not remembered
+
+    def test_a_forced_read_keeps_the_memory_of_repositories_it_did_not_ask(self):
+        collect._save_missing("", {"acme/api": time.time(), "acme/tracker": time.time()})
+        self.live([self.FINE], ["acme/tracker"], force=True)  # tracker answers now: forgotten
+        self.assertEqual(self.remembered(), {"acme/api"})
+        self.live([self.GONE], ["acme/tracker"], force=True)  # asked and gone again: remembered
+        self.assertEqual(self.remembered(), {"acme/api", "acme/tracker"})
+        self.live([self.FINE], ["acme/api"], force=True)  # api answers now: forgotten, tracker kept
+        self.assertEqual(self.remembered(), {"acme/tracker"})
+
+    def test_only_is_normalised_before_it_is_de_duplicated(self):
+        got, calls = self.live([self.FINE], ["acme/api", "ACME/api", "acme/api"])
+        self.assertEqual((got["repos"], calls[0].count("repository(")), (["acme/api"], 1))
+
+
+class AccountBoardsTest(unittest.TestCase):
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        p = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.home.name})
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(self.home.cleanup)
+
+    def test_a_query_and_a_card_carry_only_the_reading_accounts_boards(self):
+        from tests.test_accounts import A, B
+        seen = []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            seen.append(" ".join(cmd))
+            held = [("acme", 1, {"s0": "In Dev"}), ("globex", 7, {"s0": "Todo"})]
+            return json.dumps({"data": {"r0": {"open": conn([node(1, held=held)]), "closed": {"nodes": []}}}})
+
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, B]}), mock.patch.object(collect, "_run", side_effect=fake_run):
+            views = {v["login"]: v for v in config.accounts()}
+            got = collect.Live(views["alice"]).repo_issues(TODAY, only=["acme/tracker"], boards=True)
+            self.assertEqual(seen[0].count("fieldValueByName"), 2)  # open and closed, one status field: no alias of bob-work's
+            self.assertEqual(seen[0].count("s1:"), 0)
+            self.assertEqual(got["items"][0]["on boards"], [{"key": "acme/1", "status": "In Dev"}])  # not globex/7
+
+    def test_legacy_single_account_config_is_unchanged(self):
+        self.assertEqual(board.status_fields(), ["Status"])
+        self.assertEqual(board.status_fields(None), board.status_fields(config.CONFIG))
+
+
+class LaterPageRefusalTest(unittest.TestCase):
+    def test_a_board_part_refused_after_the_first_page_is_said_to_be_partly_read(self):
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        page1 = {"data": {"r0": {"open": conn([node(i) for i in range(100)], total=150, cursor="A1"), "closed": {"nodes": []}}}}
+        refused = {"data": {"r0": {"open": conn([None], total=150), "closed": {"nodes": []}}},
+                   "errors": [{"type": "INSUFFICIENT_SCOPES", "path": ["r0", "open", "nodes", 0, "projectItems"]}]}
+        page2 = {"data": {"r0": {"open": conn([node(200 + i) for i in range(50)], total=150), "closed": {"nodes": []}}}}
+        answers, calls = [page1, refused, page2], []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            calls.append(" ".join(cmd))
+            return json.dumps(answers[len(calls) - 1])
+
+        with mock.patch.dict(os.environ, {"MASTERDECK_HOME": home.name}), mock.patch.dict(config.CONFIG, TWO_REPOS), \
+                mock.patch.object(collect, "_run", side_effect=fake_run):
+            got = collect.Live().repo_issues(TODAY, only=["acme/tracker"], boards=True)
+        self.assertEqual((len(got["items"]), got["boards_unread"], got["boards_partial"]), (150, "INSUFFICIENT_SCOPES", True))
+
+
+class CommandThroughRealSourceTest(unittest.TestCase):
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        p = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.home.name})
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(self.home.cleanup)
+
+    def test_a_legacy_single_account_config_reads_through_the_real_source(self):
+        asked = []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            asked.append(" ".join(cmd))
+            return json.dumps({"data": {"r0": {"open": conn([node(1, held=[("acme", 1, {"s0": "In QA"})])], total=1),
+                                               "closed": {"nodes": []}}}})
+
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, TWO_REPOS), mock.patch.object(collect, "_run", side_effect=fake_run), redirect_stdout(buf):
+            self.assertEqual(cli.main(["repo-issues", "--repos", "acme/tracker", "--now", NOW]), 0)
+        b = json.loads(buf.getvalue())
+        self.assertIn("projectItems", asked[0])
+        self.assertEqual([(c["number"], c["onBoards"]) for c in b["cards"]], [(1, [{"key": "acme/1", "status": "In QA"}])])
+        self.assertEqual([(p["repo"], p["ok"], p["account"]) for p in b["repos"]], [("acme/tracker", True, None)])
+
+    def test_the_note_says_board_columns_were_only_partly_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = Path(d)
+            (fx / "repo_issues.json").write_text(json.dumps(
+                {"items": [ritem(1)], "total": 1, "totals": {}, "repos": [], "skipped": [], "missing": [], "unread": {},
+                 "boards_unread": "INSUFFICIENT_SCOPES", "boards_partial": True}))
+            (fx / "board_prs.json").write_text("{}")
+            buf = io.StringIO()
+            with mock.patch.dict(config.CONFIG, TWO_REPOS), redirect_stdout(buf):
+                cli.main(["repo-issues", "--repos", "acme/tracker", "--fixtures", d, "--now", NOW])
+        self.assertEqual(json.loads(buf.getvalue())["repos"][0]["note"],
+                         "Board columns only partly read (later pages): INSUFFICIENT_SCOPES")

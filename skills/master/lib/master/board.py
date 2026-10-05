@@ -98,10 +98,11 @@ _REPO_ISSUE = ("number title url state closedAt updatedAt "
 _BY_UPDATED = "orderBy: {field: UPDATED_AT, direction: DESC}"
 
 
-def status_fields() -> list:
-    """The status field name of every selected board, each once: what the repository view asks
-    GitHub for, to say which column an issue is in on a board."""
-    return list(dict.fromkeys(p["statusField"] for p in config.projects()))
+def status_fields(cfg: "dict | None" = None) -> list:
+    """The status field name of every selected board of one account's view (None: the whole
+    config), each once: what the repository view asks GitHub for, to say which column an issue is
+    in on a board."""
+    return list(dict.fromkeys(p["statusField"] for p in config.projects(cfg)))
 
 
 def _boards_part(fields: list) -> str:
@@ -147,10 +148,10 @@ def _pr_state(node: dict) -> "str | None":
     return "DRAFT" if node.get("state") == "OPEN" and node.get("isDraft") else node.get("state")
 
 
-def _held_on(n: dict, fields: list) -> list:
+def _held_on(n: dict, fields: list, cfg: "dict | None" = None) -> list:
     """[{key, status}] for each selected board that holds the issue (a board not selected in
     Setup is left out: nothing the user knows by name)."""
-    known = {config.project_key(p).lower(): p for p in config.projects()}
+    known = {config.project_key(p).lower(): p for p in config.projects(cfg)}
     out = []
     for it in (n.get("projectItems") or {}).get("nodes") or []:
         pr = (it or {}).get("project") or {}
@@ -162,7 +163,8 @@ def _held_on(n: dict, fields: list) -> list:
     return out
 
 
-def repo_issues_page(data: dict, alias: str, repo: str, fields: "list | None" = None) -> "tuple[list, str | None, int]":
+def repo_issues_page(data: dict, alias: str, repo: str, fields: "list | None" = None,
+                     cfg: "dict | None" = None) -> "tuple[list, str | None, int]":
     """One repository's issues from the query's answer, in the item shape `build` reads (plus
     `state`, `closed_at`, `updated_at`, `pr states` and `derived`; with `fields`, `on boards` for
     an issue a selected board holds), the cursor of the next page of open ones, and GitHub's
@@ -192,7 +194,7 @@ def repo_issues_page(data: dict, alias: str, repo: str, fields: "list | None" = 
                 "closed_at": n.get("closedAt"), "updated_at": n.get("updatedAt") or "",
                 "derived": True,
             })
-            held = _held_on(n, fields) if fields else []
+            held = _held_on(n, fields, cfg) if fields else []
             if held:
                 out[-1]["on boards"] = held
     conn = node.get("open") or {}

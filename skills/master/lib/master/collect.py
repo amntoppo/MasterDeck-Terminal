@@ -245,9 +245,9 @@ class Live:
         ticked = config.repos(self.cfg)
         if only is not None:
             listed = {r.lower(): r for r in ticked}
-            ticked = [listed.get(r.lower(), r) for r in dict.fromkeys(only)]
-        fields = board.status_fields() if boards and config.projects(self.cfg) else []
-        boards_unread = None
+            ticked = list({r.lower(): listed.get(r.lower(), r) for r in only}.values())
+        fields = board.status_fields(self.cfg) if boards and config.projects(self.cfg) else []
+        boards_unread, boards_partial = None, False
         repos = ticked[:config.DERIVED_MAX_REPOS]
         since = board.done_since(today)
         key, now = (self.cfg or {}).get("login") or "", time.time()
@@ -269,7 +269,7 @@ class Live:
             if fields and refused:
                 # The boards could not be read (a token without the project scope): an error there
                 # empties the issue it is on. The issues matter more: the same round, without them.
-                fields, boards_unread = [], refused[0]
+                fields, boards_unread, boards_partial = [], refused[0], rounds > 0
                 continue
             rounds += 1
             data = answer.get("data") or {}
@@ -279,7 +279,7 @@ class Live:
                     if isinstance(e, dict) and isinstance(e.get("path"), list) and e["path"]}
             for alias in list(pending):
                 repo, _cursor = pending[alias]
-                got, cursor, count = board.repo_issues_page(data, alias, repo, fields)
+                got, cursor, count = board.repo_issues_page(data, alias, repo, fields, self.cfg)
                 if first:
                     total += count
                     totals[repo] = count
@@ -296,10 +296,16 @@ class Live:
                 else:
                     del pending[alias]
             first = False
-        if found or known != _load_missing(key):
-            _save_missing(key, {**known, **found})
+        # Keep what is remembered of repositories this read did not ask about (a forced read of one
+        # repository must not make the others look healthy); the asked ones are what this read learned.
+        disk = _load_missing(key)
+        asked = set(repos)
+        kept = {r: t for r, t in disk.items() if now - t < MISSING_TTL and (r not in asked or r in known)}
+        if found or kept != disk:
+            _save_missing(key, {**kept, **found})
         return {"items": items, "total": total, "totals": totals, "repos": repos, "skipped": ticked[len(repos):],
-                "missing": missing, "unread": unread, "boards_unread": boards_unread}
+                "missing": missing, "unread": unread, "boards_unread": boards_unread,
+                "boards_partial": boards_partial}
 
     def sprints(self) -> list:
         from . import board
