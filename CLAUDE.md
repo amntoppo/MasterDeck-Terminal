@@ -153,6 +153,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
+| Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `localFolder` in `main/remoteGuards.ts`; Setup: `workspacesFromConfig` / `accountsFromSetup` in `setupAccounts.ts` |
 | GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts` (also resume: `resumeAs`), `main/superseded.ts` + `shared/superseded.ts` (the old side of a copy, hidden), `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
@@ -190,7 +191,7 @@ there. Isolate with:
 | `MASTERDECK_ISOLATED=1` | with `MASTERDECK_HOME`: settings default to `<home>/claude-settings.json`, skills to `<home>/skills` (use for every isolated test launch) |
 | `MASTERDECK_SKILLS_DIR` | `~/.claude/skills` |
 | `MASTER_HOME` | `~/.claude/master` (config.json, ledger) — empty folder = first-run Setup |
-| `MASTER_WORKSPACE` | the config's workspace (keeps Janitor/standup on a temp repo) |
+| `MASTER_WORKSPACE` | the config's workspace, and every account's own (keeps Janitor/standup on a temp repo) |
 | `MASTERDECK_USER_DATA` | Electron user data (window state, localStorage) |
 | `MASTERDECK_REMOTE_URL` | backend address (https, or `http://localhost:<port>`; anything else silently falls back to dev.masterdeck.dev) |
 | `MASTERDECK_NO_SKILLS=1`, `MASTERDECK_NO_HOOK=1` | skip installing skills / the status line and deck hooks |
@@ -317,6 +318,16 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-05)
 
+- A workspace per GitHub account, and sessions that start in the ticket's repository's checkout, are
+  on branch `feat/account-workspace` (off `main` d2bb03e), not merged, not pushed, not installed.
+  `accounts[].workspace` (optional; the top-level `workspace` is the primary's), one resolver in the
+  master CLI (`checkout.py`) used by master's ASSIGN proposals, the Start dialog's draft, `master
+  add` / `master spawn` without a folder and PR review sessions; the Start dialog says where the
+  session starts, says plainly when no checkout was found, and has **Choose folder…**. Checked:
+  the Python suite (396), typecheck, vitest (1331 passed, 3 skipped), and the real CLI against a
+  temp config and temp checkouts. Not checked: the dialogs in a running app (Setup's per-account
+  rows and the Start dialog's line were never seen on screen), anything that starts a session. Open
+  points are in TODO ("Where a session starts").
 - Plan K (Board repository view: picking repositories in a Board tab's Repos filter shows all their
   issues, on a board or not, in MasterDeck's columns, with sessions started from a click; a session
   can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on

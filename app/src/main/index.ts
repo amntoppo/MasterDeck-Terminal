@@ -79,12 +79,12 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
-import { assignNow as assignAs } from "./assign";
+import { assignNow as assignAs, inRepoFolder } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { knownDirsOnly, localFolder, MacPanes, remoteSettings } from "./remoteGuards";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -282,9 +282,11 @@ function settingsFor(
   );
 }
 /** Start a session for an issue (the Start dialog, a browser, a phone): as its account with two or more. */
-function assignNow(
-  req: AssignRequest,
+async function assignNow(
+  given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  // A PR review names its repository, not a folder: the CLI's resolver picks it.
+  const req = await inRepoFolder(cli, given);
   return assignAs(cli, req, {
     settings: (account) =>
       settingsFor(account, async () =>
@@ -1691,10 +1693,11 @@ function registerIpc(): void {
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (_e, issue: unknown, title?: string, url?: string) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
       const t = asTicket(issue);
+      // Choosing a folder is the desktop's: a browser's is dropped.
       return t
-        ? cli.draftAssign(t, title, url)
+        ? cli.draftAssign(t, title, url, localFolder(isRemote(e), cwd))
         : { ok: false, message: "bad issue" };
     },
   );

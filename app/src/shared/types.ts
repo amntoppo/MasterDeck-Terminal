@@ -450,6 +450,12 @@ export interface DraftAssign {
   url: string;
   /** Set when the draft came from an existing ledger proposal rather than `draft-assign`. */
   proposalId: number | null;
+  /** The workspace `master draft-assign` looked in: the ticket's account's. */
+  workspace?: string;
+  /** `cwd` is a checkout of `checkoutOf`; false: none was found and `cwd` is the workspace (or a folder the user chose that is not one). */
+  found?: boolean;
+  /** owner/name of the ticket's repository. */
+  checkoutOf?: string;
 }
 
 export interface CliResult {

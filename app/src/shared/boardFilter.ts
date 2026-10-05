@@ -225,6 +225,11 @@ export interface ReviewTarget {
   issueRepo?: string | null
 }
 
+function prRepoOf(url: string): string | null {
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})\/pull\/\d+/.exec(url)
+  return m ? `${m[1]}/${m[2]}` : null
+}
+
 /** What the PR popup's Start review sends: a review session for the card's ticket, in whichever repository that ticket is. */
 export function reviewRequest(
   card: Pick<BoardCard, 'number' | 'repo'>,
@@ -236,7 +241,9 @@ export function reviewRequest(
     issue: card.number,
     repo: card.repo ?? null,
     name: reviewName(pr.repo, pr.number, o.sessions),
+    // Main starts it in the PR's repository's checkout when there is one; this folder otherwise.
     cwd: o.cwd,
+    ...(prRepoOf(pr.url) ? { cwdRepo: prRepoOf(pr.url) as string } : {}),
     prompt: composeReviewPrompt({ url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, author: pr.author, issue: card.number, issueRepo: card.repo ?? null }, o.instructions),
     proposalId: null,
     edited: true,

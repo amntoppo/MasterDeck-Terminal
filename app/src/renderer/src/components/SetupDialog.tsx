@@ -12,7 +12,7 @@ import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, type AccountSel, type Connected } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
 
 
 const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
@@ -195,6 +195,10 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   // Step 5.
   // A fresh install starts from the folder master would use anyway.
   const [workspace, setWorkspace] = useState(cfg.workspace || state.masterWorkspace || '')
+  // Two or more accounts: each other account's own workspace (blank: the one above). Which row's web picker is open.
+  const [workspaces, setWorkspaces] = useState<Record<string, string>>(() => workspacesFromConfig(cfg.accounts))
+  const [pickingFor, setPickingFor] = useState<string | null>(null)
+  const setWorkspaceOf = (login: string, p: string) => setWorkspaces((w) => ({ ...w, [login]: p }))
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
   const [notify, setNotify] = useState(state.settings.notifyNeedsYou)
 
@@ -260,7 +264,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
       (foundBy[login] ?? (login === key ? found : null))?.owners.find((o) => o.login === owner)?.type ??
       cfg.accounts.find((a) => a.login === login)?.ownerType ??
       (owner === cfg.owner ? cfg.ownerType : 'organization')
-    const list = accountsFromSetup(connected, primaryLogin, all, ownerType)
+    const list = accountsFromSetup(connected, primaryLogin, all, ownerType, workspaces)
     if (!list.length) return setMsg('Go back and connect a GitHub account.')
     if (!list[0].issueRepo) return setMsg(`Go back and pick at least one repository for ${list[0].login}.`)
     if (list.some((a) => !a.email.includes('@'))) return setMsg('Each connected account needs an email for its commits.')
@@ -661,6 +665,33 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               </button>
             </div>
             {picking && <RepoPicker start={workspace} onDone={(p) => { setPicking(false); if (p) setWorkspace(p) }} />}
+            {connected.length > 1 &&
+              connected
+                .filter((c) => c.login !== primaryLogin)
+                .map((c) => (
+                  <div key={c.login}>
+                    <label>
+                      Workspace for {c.login} (where its repositories are cloned; a session for one of its tickets starts in that
+                      repository's folder there. Empty: the workspace above)
+                    </label>
+                    <div className="row-inputs">
+                      <input value={workspaces[c.login] ?? ''} placeholder={workspace || '~/code'} onChange={(e) => setWorkspaceOf(c.login, e.target.value)} />
+                      <button
+                        className="btn"
+                        onClick={async () => {
+                          if (!can('pickFolder')) return setPickingFor(c.login)
+                          const p = await deck().pickFolder(workspaces[c.login] || workspace)
+                          if (p) setWorkspaceOf(c.login, p)
+                        }}
+                      >
+                        Choose…
+                      </button>
+                    </div>
+                    {pickingFor === c.login && (
+                      <RepoPicker start={workspaces[c.login] || workspace} onDone={(p) => { setPickingFor(null); if (p) setWorkspaceOf(c.login, p) }} />
+                    )}
+                  </div>
+                ))}
 
             <label>Master agent</label>
             <label className="mpick-row">

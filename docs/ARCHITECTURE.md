@@ -371,6 +371,25 @@ ASSIGN proposal and spawns. `startMaster()` runs `claude --bg -n master-agent "/
 workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/.claude/gh-cache`;
 `gh` directly on Windows).
 
+**Where a ticket's session starts** is decided in one place, `skills/master/lib/master/checkout.py`
+(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`): the workspace of the ticket's account
+(`config.workspace_for`: the account that lists the repository, else the primary; an account's own
+`workspace`, else the top-level one; `MASTER_WORKSPACE` replaces them all), scanned for a checkout of
+the repository (`scan`: the workspace, its sub-folders, and the sub-folders of those that are not
+checkouts; a `.git` folder whose `origin`, read with `config.origin_repo`, is the repository, without
+case; hidden folders, linked worktrees and links leading out of the workspace are skipped; at most
+`MAX_FOLDERS` = 200 folders; a scan is remembered for 60 s in the process). Found: `cwd` is the
+checkout and the ASSIGN prompt says the folder is the repository; else `cwd` is the workspace and the
+prompt is the old one. Every path goes through it: `rules._assign` (master's proposals and
+`master draft-assign`, which also prints `workspace`, `found`, `checkoutOf` and takes `--cwd` for a
+folder the user chose), `master add` without `--cwd`, `master spawn` for a proposal without a folder,
+and `master checkout <owner/name>` (the app's PR review: `AssignRequest.cwdRepo`, resolved in main by
+`inRepoFolder` in `main/assign.ts`). The app never scans: the Start dialog (`AssignDialog.tsx`,
+`shared/startFolder.ts`) shows the draft's answer, looks a proposal's ticket up again (`adoptFresh`),
+and **Choose folder…** asks for a draft with `--cwd`; main drops a folder sent by a browser
+(`localFolder` in `main/remoteGuards.ts`). Which account the session runs as is not part of this:
+`config.account_for_repo` / `defaultAccount` as before.
+
 master's sweep collects the same way (one read per account), so its proposals see every account's issues and PRs; `author_is_me` and the "last comment is mine" thread rule use each account's own login.
 
 With two or more accounts, master's ASSIGN proposals carry `target.spawn.account` (the issue repo's account, `config.account_for_repo`); `master spawn` adds `--settings` for it and holds the proposal (with the reason) when the account's settings file is missing, never starting it as gh's active account; a proposal without an account (older, or `master add` without `--account`) spawns as its repo's account, else the primary's, and that account is written to the proposal (so the app attributes the session to it). ORPHAN resumes name the account the session was recorded as in `session-accounts.json` (`config.session_account`, a connected login only); unrecorded, `spawn.default_account` follows the app's `sessionAccount`: the session's own spawn proposal (same name), its folder's `origin` (`config.origin_repo` + `match_repo`), then the issue repo's account, else the primary. `spawn.command` holds a proposal whose account is not connected (case-insensitive) even when a file for it lingers. With one account `master spawn` passes no `--settings`, even for a target naming an account. The app's starts (`CH.assign`, remote `startAssign`) go through `assignNow` (`main/assign.ts`, wrapped in `index.ts`): the chosen account, else the issue's (`defaultAccount`), refused when it needs to log in again; master's proposal is reused only when it already names that account, otherwise (none: it would start as gh's active account; another; or the Start dialog's Account field changed) a new proposal carries it (`master add --account`). The account is recorded with `SessionAccounts.expect`. With one account any `account` in the request is dropped.

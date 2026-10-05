@@ -55,6 +55,9 @@ export interface AccountConfig {
   allRepos?: boolean
   projects: ProjectConfig[]
   allProjects?: boolean
+  /** Where this account's checkouts live: a session for one of its tickets starts in its
+   * repository's checkout there. Absent: the config's `workspace` (the primary's is always that one). */
+  workspace?: string
 }
 
 export interface AppConfig {
@@ -221,6 +224,7 @@ function parseAccounts(v: unknown): AccountConfig[] {
       allRepos: a.allRepos === true,
       projects: (Array.isArray(a.projects) ? a.projects : []).map(obj).filter((p) => isProject(p, owner)).map((p) => parseProject(p, owner)),
       allProjects: a.allProjects === true,
+      ...(typeof a.workspace === 'string' && a.workspace.trim() ? { workspace: a.workspace } : {}),
     })
   }
   return out

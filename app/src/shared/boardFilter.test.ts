@@ -91,6 +91,9 @@ describe('a card that is not mine (also in the repository view)', () => {
     const r = reviewRequest({ number: 7, repo: 'acme/api' }, p, { sessions: [], cwd: '/w', instructions: 'be kind' })
     expect(r).toMatchObject({ kind: 'PRREVIEW', issue: 7, repo: 'acme/api', name: 'review-api-5', cwd: '/w', proposalId: null, edited: true, approved: false })
     expect(r.prompt).toContain('for acme/api#7')
+    // The PR's own repository: main starts the session in its checkout (the folder here is the fallback).
+    expect(r.cwdRepo).toBe('acme/api')
+    expect(reviewRequest({ number: 7, repo: 'acme/tracker' }, { ...p, url: 'https://github.com/Globex/app/pull/5' }, { sessions: [], cwd: '/w', instructions: '' }).cwdRepo).toBe('Globex/app')
     expect(r.prompt).toContain('be kind')
     // The primary repo's card: no repo in the request, as before.
     expect(reviewRequest({ number: 7, repo: null }, p, { sessions: [], cwd: '/w', instructions: '' }).repo).toBeNull()

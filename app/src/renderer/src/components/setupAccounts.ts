@@ -20,12 +20,22 @@ export interface Connected {
 
 const EMPTY: AccountSel = { repos: [], allRepos: false, primary: '', boards: {}, allBoards: false }
 
-/** Setup's choices as the config's `accounts`: the primary first, each with its main repo first. */
+/** The other accounts' own workspaces as Setup shows them (the primary's is the config's `workspace`). */
+export function workspacesFromConfig(accounts: AccountConfig[]): Record<string, string> {
+  return Object.fromEntries(accounts.filter((a) => !a.primary && a.workspace).map((a) => [a.login, a.workspace as string]))
+}
+
+/**
+ * Setup's choices as the config's `accounts`: the primary first, each with its main repo first.
+ * `workspaces`: each other account's own workspace (blank: the config's); the primary never
+ * carries one, the config's `workspace` is its.
+ */
 export function accountsFromSetup(
   connected: Connected[],
   primary: string,
   sel: Record<string, AccountSel>,
   ownerType: (login: string, owner: string) => 'organization' | 'user',
+  workspaces: Record<string, string> = {},
 ): AccountConfig[] {
   return [...connected]
     .sort((a, b) => Number(b.login === primary) - Number(a.login === primary))
@@ -45,6 +55,7 @@ export function accountsFromSetup(
         allRepos: s.allRepos,
         projects: Object.values(s.boards),
         allProjects: s.allBoards,
+        ...(c.login !== primary && workspaces[c.login]?.trim() ? { workspace: workspaces[c.login].trim() } : {}),
       }
     })
 }

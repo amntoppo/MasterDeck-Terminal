@@ -47,7 +47,7 @@ part of the app does.
   master-agent spawns the session. The tab opens by itself when the session appears.
 - **Master pane:** if master-agent is a background session, it is attached here. If it runs
   interactively in another terminal, the pane says so (it can't be attached). If there is none,
-  **Start master** runs `claude --bg -n master-agent "/master"` in the configured workspace.
+  **Start master** runs `claude --bg -n master-agent "/master"` in the configured workspace (the primary account's).
 - **Status line hook:** on first launch the app copies `resources/statusline_tee.py` to
   `~/.claude/masterdeck/` and points `statusLine` in `~/.claude/settings.json` at it. The old
   status line is saved and still runs (its output is shown as before). A settings backup goes to
@@ -71,6 +71,21 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
 - **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
+- **Where it starts:** the line under your instructions. MasterDeck looks for a checkout of the
+  ticket's repository in the workspace of the ticket's account (Setup → Preferences): the workspace
+  itself, its sub-folders, and one level below the sub-folders that are not checkouts themselves (an
+  `acme/` folder of clones). A checkout is a folder with a `.git` folder whose `origin` is that
+  repository (https or SSH, an SSH host alias, any case); linked worktrees and hidden folders are
+  not looked at, links leading out of the workspace are not followed, and at most 200 folders are
+  looked at. Found: "Starts in `<folder>`, your checkout of acme/api." and the system prompt tells
+  the session that this folder is the repository (it still works in a git worktree for the ticket).
+  Not found: "No checkout of acme/api found in `<workspace>`." The session then starts in the
+  workspace, as before, and has to find the repository itself; you can still press Start. **Choose
+  folder…** (on the Mac, not in the web app) picks any other folder for this session; if it is a
+  checkout of the repository the prompt says so. With two or more accounts the line also says who
+  the session runs as. A ticket in the primary repository with no repository of its own is looked
+  up as the primary repository. master's own ASSIGN proposals, `master add` without `--cwd` and a
+  PR's **Start review** (for the PR's repository) pick the folder the same way.
 - **Link session…:** links a session that already exists instead. Type its name, background id or
   session id (suggestions appear as you type). MasterDeck records the link itself (no
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
@@ -729,6 +744,12 @@ is a `gh` login (`gh auth status` lists them).
   `gh auth login --web` in the dialog (gh then makes that login its active one; MasterDeck says so
   and never switches it). Under Repos & boards, an **Account** menu shows each account's own
   repositories and boards; a repository belongs to one account.
+- **A workspace per account** (Setup → Preferences, two or more accounts): under **Workspace**
+  (the primary account's; master and new shells start there) each other account has its own
+  **Workspace for <login>** field with the same **Choose…** button: the folder that account's
+  repositories are cloned in. A session for one of its tickets starts in the ticket's repository's
+  checkout there (see Where it starts, under the Start dialog). Left empty, the account uses the
+  workspace above, as before. With one account there is only the one Workspace field.
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
   accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
@@ -871,7 +892,7 @@ cards is in them.
 | Variable | Default | Use |
 |---|---|---|
 | `MASTER_CONFIG` | `~/.claude/master/config.json` | the shared GitHub/board config (Setup writes it) |
-| `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start |
+| `MASTER_WORKSPACE` | the config's `workspace` | where master and new sessions start (it also replaces every account's own workspace) |
 | `MASTER_HOME` | `~/.claude/master` | ledger location |
 | `MASTERDECK_HOME` | `~/.claude/masterdeck` | stats, hook, backups |
 | `MASTERDECK_ISOLATED` | unset | `1` with `MASTERDECK_HOME`: Claude settings and skills default under that folder instead of `~/.claude` |

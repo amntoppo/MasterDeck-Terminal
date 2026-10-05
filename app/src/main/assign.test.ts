@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AssignRequest } from '@shared/ipc'
-import { assignNow, startAssign, type AssignCli } from './assign'
+import { assignNow, inRepoFolder, startAssign, type AssignCli } from './assign'
 
 function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
   const calls: string[] = []
@@ -112,5 +112,23 @@ describe('assignNow', () => {
     const bad = { ...m.acc, settings: async () => ({ ok: false as const, message: 'GitHub account bob-work needs to log in again' }) }
     expect(await assignNow(f.cli, req({ account: 'bob-work' }), bad, 0)).toEqual({ ok: false, message: 'GitHub account bob-work needs to log in again' })
     expect(f.calls).toEqual([])
+  })
+})
+
+describe('inRepoFolder', () => {
+  const at = (r: unknown) => ({ checkout: async (repo: string) => (asked.push(repo), r as never) })
+  let asked: string[] = []
+  it('a request that names a repository starts where the CLI says: its checkout, else its account\'s workspace', async () => {
+    asked = []
+    const r = await inRepoFolder(at({ ok: true, cwd: '/code/globex/app', workspace: '/code/globex', found: true }), req({ kind: 'PRREVIEW', cwdRepo: 'globex/app' }))
+    expect([r.cwd, asked]).toEqual(['/code/globex/app', ['globex/app']])
+    expect((await inRepoFolder(at({ ok: true, cwd: '/code/globex', workspace: '/code/globex', found: false }), req({ cwdRepo: 'globex/app' }))).cwd).toBe('/code/globex')
+  })
+  it('keeps the given folder when the CLI cannot say, and never asks without a repository', async () => {
+    asked = []
+    expect((await inRepoFolder(at({ ok: false, message: 'x' }), req({ cwdRepo: 'globex/app' }))).cwd).toBe('/w')
+    expect((await inRepoFolder(at({ ok: true, cwd: '/x', workspace: '/x', found: true }), req({}))).cwd).toBe('/w')
+    expect((await inRepoFolder(at({ ok: true, cwd: '/x', workspace: '/x', found: true }), req({ cwdRepo: 'not a repo' }))).cwd).toBe('/w')
+    expect(asked).toEqual(['globex/app'])
   })
 })

@@ -310,6 +310,10 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .dialog .suggest { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 3px; margin-top: 4px; }
 .dialog .meta.error { color: var(--red); }
+.dialog .start-folder { display: flex; align-items: baseline; gap: 10px; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.dialog .start-folder > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dialog .start-folder.missing > span { color: var(--amber); }
+.dialog .start-folder .link-btn { flex: none; font-size: 12px; }
 
 /* Board filters */
 .sprint-pick, .fsel { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }

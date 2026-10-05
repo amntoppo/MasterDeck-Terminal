@@ -15,6 +15,11 @@ export function knownDirsOnly(dirs: string[], known: Iterable<string>): string[]
   return dirs.map((d) => resolve(d)).filter((d) => ok.has(d))
 }
 
+/** A folder the user chose in the native picker: only the Mac's own window has one (the web app cannot choose a folder on the Mac). */
+export function localFolder(remote: boolean, cwd: unknown): string | undefined {
+  return !remote && typeof cwd === 'string' && cwd ? cwd : undefined
+}
+
 /**
  * Spec §4 size rule: one size per PTY; while the Mac's window shows a pane its size wins, otherwise the latest
  * browser size applies. The window reports a shown pane with cols > 0 (ptyOpen/ptyResize) and a hidden one with 0.

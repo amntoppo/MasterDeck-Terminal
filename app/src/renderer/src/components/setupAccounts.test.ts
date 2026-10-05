@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -21,6 +21,16 @@ describe('setup accounts', () => {
       { login: 'alice', primary: true, name: 'alice', email: 'a@acme.test', owner: 'acme', ownerType: 'organization', issueRepo: 'api', repos: ['acme/api', 'acme/tracker'], allRepos: false, projects: [], allProjects: false },
       { login: 'bob-work', name: 'Bob', email: 'b@globex.test', owner: 'globex', ownerType: 'user', issueRepo: 'app', repos: ['globex/app'], allRepos: true, projects: [board], allProjects: false },
     ])
+  })
+  it('each other account keeps its own workspace; the primary\'s is the config\'s', () => {
+    const connected = [{ login: 'alice', name: 'A', email: '' }, { login: 'bob-work', name: 'B', email: '' }, { login: 'carol', name: 'C', email: '' }]
+    const list = accountsFromSetup(connected, 'alice', sel, () => 'organization', { alice: '/code/ignored', 'bob-work': ' /code/globex ', carol: '  ' })
+    expect(list.map((a) => a.workspace)).toEqual([undefined, '/code/globex', undefined])
+    expect(list.map((a) => 'workspace' in a)).toEqual([false, true, false])
+    // Read back from a saved config, and saved again unchanged.
+    const saved = parseConfig({ accounts: list }).accounts
+    expect(workspacesFromConfig(saved)).toEqual({ 'bob-work': '/code/globex' })
+    expect(accountsFromSetup(connected, 'alice', sel, () => 'organization', workspacesFromConfig(saved)).map((a) => a.workspace)).toEqual([undefined, '/code/globex', undefined])
   })
   it('an account with nothing picked yet has no repos', () => {
     expect(accountsFromSetup([{ login: 'carol', name: 'C', email: 'c@initech.test' }], 'carol', {}, () => 'user')[0]).toMatchObject({ owner: '', issueRepo: '', ownerType: 'organization', repos: [], projects: [] })
