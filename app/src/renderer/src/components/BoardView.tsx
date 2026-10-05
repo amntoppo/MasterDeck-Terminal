@@ -32,7 +32,6 @@ import {
   tabAccount,
   withAccountTabs,
   normalizeFilters,
-  repoOptions,
   UNASSIGNED,
   type BoardTab,
   type FilterState,
@@ -49,6 +48,16 @@ import {
   tabBoard,
   unreadRepos,
 } from "@shared/derivedBoard";
+import {
+  boardChips,
+  REPO_VIEW_ASK_MS,
+  repoChoices,
+  repoViewBoard,
+  repoViewEmpty,
+  repoViewOn,
+  repoViewStatus,
+  repoViewTitle,
+} from "@shared/repoView";
 import { CreateBoardDialog } from "./CreateBoardDialog";
 import { ticketSpend } from "@shared/costs";
 import { sessionForIssue } from "@shared/derive";
@@ -246,7 +255,7 @@ export function BoardView({
 
   const doMove = async (card: BoardCard, to: string) => {
     // An issue of an account with no board has no status on GitHub: nothing to write.
-    if (!canMove(card, fallback)) return;
+    if (!canMove(card, worked)) return;
     const k = ticketKey(card.repo, card.number);
     const lab = ticketLabel(card.repo, card.number);
     setMoving((m) => ({ ...m, [k]: to }));
@@ -272,7 +281,7 @@ export function BoardView({
     const cols = projectByKey(card?.project)?.columns ?? state.config.columns;
     if (
       !card ||
-      !canMove(card, fallback) ||
+      !canMove(card, worked) ||
       !cols.includes(col) ||
       (moving[k] ?? card.status) === col
     )
@@ -314,10 +323,15 @@ export function BoardView({
   // The tab's account has repositories but no GitHub board: its issues in MasterDeck's own
   // columns, read-only (shared/derivedBoard.ts). With a board everything below is as before.
   const fallback = boardless(acct, cfg);
-  // No sprint picker where there are no sprints: no board, or only boards MasterDeck created.
+  // Repositories picked in a tab whose account has a board: the repository view. Every issue of
+  // those repositories, on a board or not, in MasterDeck's columns (shared/repoView.ts).
+  const repoMode = repoViewOn(acct, cfg, tab.filters.repos);
+  // MasterDeck's own four columns, either way: nothing is dragged, reordered or summarised.
+  const worked = fallback || repoMode;
+  // No sprint picker where there are no sprints: no board, the repository view, or only boards MasterDeck created.
   const tabBoards = boardsOf(acct, cfg);
   const noSprints =
-    fallback || (tabBoards.length > 0 && tabBoards.every((p) => p.sprintless));
+    worked || (tabBoards.length > 0 && tabBoards.every((p) => p.sprintless));
   // Create with Claude: one session for the Board with one account; one per tab (as its account) with several.
   const claudeKey = multi ? tab.id : "";
   const claude = claudes[claudeKey] ?? null;
@@ -358,6 +372,13 @@ export function BoardView({
       ts.map((t) => (t.id === tab.id ? { ...t, filters: next } : t)),
     );
   const set = (patch: Partial<FilterState>) => setFilters({ ...f, ...patch });
+  const reposKey = f.repos.join("\n");
+  // Tell main which repositories are on screen. It reads the ones it does not hold (or holds for
+  // over an hour) and keeps them in its refreshes while a tab goes on asking: again every 20 minutes.
+  const askTick = Math.floor(now / REPO_VIEW_ASK_MS);
+  useEffect(() => {
+    if (repoMode) deck().boardRepos(f.repos);
+  }, [repoMode, reposKey, askTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const addTab = () => {
     const id = `board-${Date.now().toString(36)}`;
     setTabs([
@@ -387,8 +408,11 @@ export function BoardView({
     );
 
   const rawBoard = useMemo(
-    () => tabBoard(state.board, acct, cfg),
-    [state.board, acct, cfg],
+    () =>
+      repoMode
+        ? repoViewBoard(state.repoView, f.repos)
+        : tabBoard(state.board, acct, cfg),
+    [state.board, state.repoView, acct, cfg, repoMode, reposKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const b = useMemo(
     () =>
@@ -406,9 +430,9 @@ export function BoardView({
   );
   const shown = useMemo(
     () =>
-      // No board: a Boards filter left from when the account had one would hide every issue.
-      b ? applyFilters(b, fallback && f.projects.length ? { ...f, projects: [] } : f) : null,
-    [b, f, fallback],
+      // No board, or the repository view (its cards are on no board): a Boards filter would hide every issue.
+      b ? applyFilters(b, worked && f.projects.length ? { ...f, projects: [] } : f) : null,
+    [b, f, worked],
   );
   const options = useMemo(
     () =>
@@ -439,18 +463,32 @@ export function BoardView({
   // Every column the tab can show: without a board, MasterDeck's four in their fixed order.
   const allColumns: string[] = !shown
     ? []
-    : fallback
+    : worked
       ? [...DERIVED_COLUMNS]
       : visibleColumns(shown, f.projects);
   const unhidden = allColumns.filter((c) => !f.hiddenColumns.includes(c));
-  const columns = fallback ? unhidden : orderColumns(unhidden, colOrder);
+  const columns = worked ? unhidden : orderColumns(unhidden, colOrder);
   // Why the tab shows no card, when it shows none. Nothing selected for its account: also before
   // any board was read (none is asked for then).
   const tabRepoList = reposOf(acct, cfg);
   // The repositories the read did not get: "no open issues" is not said of them.
   const unread = unreadRepos(state.board, acct, cfg);
-  const empty =
-    b && shown
+  // The repository view has its own reasons for an empty tab (still loading, a repository not read).
+  const repoStatus = useMemo(
+    () => repoViewStatus(state.repoView, f.repos, cfg),
+    [state.repoView, reposKey, cfg], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const repoEmpty =
+    repoMode && b && shown
+      ? repoViewEmpty(
+          { cards: b.cards.length, shown: shown.cards.length },
+          repoStatus,
+        )
+      : null;
+  const repoNames = f.repos.map((r) => r.split("/")[1] ?? r);
+  const empty = repoMode
+    ? null
+    : b && shown
       ? boardEmpty(
           {
             login: acct,
@@ -600,7 +638,7 @@ export function BoardView({
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", esc, true);
   };
-  const boards = fallback
+  const boards = worked
     ? []
     : b?.projects?.length
       ? b.projects
@@ -609,7 +647,16 @@ export function BoardView({
           title: p.title,
           columns: p.columns,
         }));
-  const repos = repoOptions(b, acct ? (cfg.accounts.find((a) => a.login === acct)?.repos ?? []) : state.config.repos);
+  // The Repos filter offers the account's ticked repositories (also ones with no card on the
+  // board), then any other its board's cards name.
+  const boardRepos = useMemo(
+    () =>
+      (tabBoard(state.board, acct, cfg)?.cards ?? []).map((c) =>
+        fullRepo(c.repo),
+      ),
+    [state.board, acct, cfg],
+  );
+  const repos = repoChoices(acct, cfg, boardRepos, f.repos);
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
@@ -711,7 +758,7 @@ export function BoardView({
         ))}
       </select>
     )}
-    {repos.length > 1 && (
+    {repos.length > 0 && (
       <MultiPick
         label="Repos"
         all="All repos"
@@ -720,10 +767,14 @@ export function BoardView({
           value: r,
           label: r.split("/")[1] ?? r,
         }))}
-        onChange={(v) =>
-          set({ repos: v.length === repos.length ? [] : v })
-        }
-        quick={[{ label: "Select all", values: [] }]}
+        // With a board, picking repositories (even all of them) is the repository view; none is the board.
+        onChange={(v) => set({ repos: v })}
+        quick={[
+          {
+            label: fallback ? "All repos" : "The board (no repository)",
+            values: [],
+          },
+        ]}
       />
     )}
     {boards.length > 1 && (
@@ -861,7 +912,7 @@ export function BoardView({
           )}
           <span style={{ flex: 1 }} />
           {moveMsg && <span className="muted">{moveMsg}</span>}
-          {!fallback && (
+          {!worked && (
             <button
               className="btn"
               onClick={onSummary}
@@ -918,6 +969,20 @@ export function BoardView({
           </div>
         )}
 
+        {repoMode && (
+          <div className="board-hint repo-view">
+            <span>{repoViewTitle(f.repos)} — not the board.</span>
+            <button className="link-btn" onClick={() => set({ repos: [] })}>
+              Back to board
+            </button>
+            {repoStatus.notes.map((n, i) => (
+              <div key={i} className="board-note">
+                {n}
+              </div>
+            ))}
+          </div>
+        )}
+
         {phone ? (
           <PhoneFilters
             count={activeBoardFilterCount({ ...f, search: "" }, me)}
@@ -943,7 +1008,60 @@ export function BoardView({
           </div>
         )}
 
-        {empty === "nothing-selected" ? (
+        {repoEmpty === "loading" ? (
+          <div className="welcome">
+            <div>Loading issues…</div>
+          </div>
+        ) : repoEmpty === "not-read" ? (
+          <div className="welcome">
+            <h2>Could not read {repoStatus.failed.map((r) => r.split("/")[1] ?? r).join(", ")}</h2>
+            <div>The lines above say why.</div>
+            <div className="form-buttons">
+              <button className="btn" onClick={() => set({ repos: [] })}>
+                Back to board
+              </button>
+              <button
+                className="btn primary"
+                onClick={refresh}
+                disabled={loading}
+              >
+                {loading ? "Refreshing…" : "Retry"}
+              </button>
+            </div>
+          </div>
+        ) : repoEmpty === "no-issues" ? (
+          <div className="welcome">
+            <h2>No open issues</h2>
+            <div>
+              {repoNames.join(", ")} {repoNames.length === 1 ? "has" : "have"}{" "}
+              no open issues, and none closed in the last 14 days.
+            </div>
+            <button className="btn" onClick={() => set({ repos: [] })}>
+              Back to board
+            </button>
+          </div>
+        ) : repoEmpty === "filtered" ? (
+          <div className="welcome">
+            <h2>No issues match</h2>
+            <div>
+              {b?.cards.length ?? 0} issues in {repoNames.join(", ")}; the
+              filters hide all of them.
+            </div>
+            <button
+              className="btn"
+              onClick={() =>
+                // Everyone's, in the same repositories: clearing them would leave the repository view.
+                setFilters({
+                  ...defaultFilters(me),
+                  assignees: [],
+                  repos: f.repos,
+                })
+              }
+            >
+              Show everyone's issues
+            </button>
+          </div>
+        ) : empty === "nothing-selected" ? (
           <div className="welcome">
             <h2>Nothing selected{acct ? ` for ${acct}` : ""}</h2>
             <div>Pick its repositories and boards in Setup.</div>
@@ -1043,9 +1161,9 @@ export function BoardView({
                   key={col}
                   className={`board-col ${dragOver === col ? "drop" : ""} ${colDrag?.col === col ? "lifted" : ""}`}
                   onDragOver={(e) => {
-                    // No board: the columns are worked out, nothing can be dropped on them.
+                    // No board, or the repository view: the columns are worked out, nothing can be dropped on them.
                     if (
-                      fallback ||
+                      worked ||
                       !e.dataTransfer.types.includes("text/masterdeck-card")
                     )
                       return;
@@ -1054,24 +1172,24 @@ export function BoardView({
                   }}
                   onDragLeave={() => setDragOver((d) => (d === col ? null : d))}
                   onDrop={(e) => {
-                    if (!fallback) drop(col, e);
+                    if (!worked) drop(col, e);
                   }}
                 >
                   <div
                     className="board-col-head"
                     onPointerDown={
-                      fallback ? undefined : (e) => pressColumn(e, col)
+                      worked ? undefined : (e) => pressColumn(e, col)
                     }
-                    title={fallback ? undefined : "Hold to move this column"}
+                    title={worked ? undefined : "Hold to move this column"}
                   >
                     <span
                       className="ring"
-                      style={{ borderColor: columnColor(col, fallback) }}
+                      style={{ borderColor: columnColor(col, worked) }}
                     />
                     <strong>{col}</strong>
                     <span className="count">{cards.length}</span>
                     <span style={{ flex: 1 }} />
-                    {(!fallback || col === "Todo") && (
+                    {(!worked || (fallback && col === "Todo")) && (
                       <button
                         className="col-add"
                         onClick={() => setTicketCtx(ctxFor(col))}
@@ -1092,7 +1210,7 @@ export function BoardView({
                         now={now}
                         spend={spend[ticketKey(c.repo, c.number)] ?? 0}
                         moving={!!moving[ticketKey(c.repo, c.number)]}
-                        readOnly={!canMove(c, fallback)}
+                        readOnly={!canMove(c, worked)}
                         onClick={() => onCard(c)}
                       />
                     ))}
@@ -1288,6 +1406,8 @@ function Card({
         )
       : null;
   const action = cardAction(card, me, state.sessions);
+  // Repository view: the selected boards that hold this issue, and its column on each.
+  const chips = boardChips(card, state.config);
   const stats = s ? state.stats[s.sessionId] : undefined;
   return (
     <div
@@ -1334,8 +1454,13 @@ function Card({
         )}
       </div>
       <div className="bcard-title">{card.title}</div>
-      {(card.labels.length > 0 || card.type) && (
+      {(card.labels.length > 0 || card.type || chips.length > 0) && (
         <div className="bcard-labels">
+          {chips.map((ch) => (
+            <span key={ch.key} className="lbl on-board" title={ch.title}>
+              ▦ {ch.text}
+            </span>
+          ))}
           {card.type && <span className="lbl type">{card.type}</span>}
           {card.labels.map((l) => (
             <span key={l} className="lbl">
