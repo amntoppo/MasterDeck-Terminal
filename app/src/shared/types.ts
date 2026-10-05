@@ -338,6 +338,11 @@ export interface BoardCard {
   labels: string[];
   milestone: string | null;
   type: string | null;
+  /** An issue of an account with no GitHub board: MasterDeck works out its column (shared/derivedBoard.ts). */
+  derived?: true;
+  /** Derived cards only: the issue's state on GitHub, and when it was closed. */
+  state?: "OPEN" | "CLOSED";
+  closedAt?: string | null;
 }
 
 export interface Sprint {
@@ -350,6 +355,20 @@ export interface Sprint {
   projects?: string[];
 }
 
+/** What `master board` read for an account with no board (its repositories' issues). */
+export interface DerivedPart {
+  /** The account; null with one account. */
+  account: string | null;
+  /** The repositories read. */
+  repos: string[];
+  /** Open issues GitHub counts in them, and how many of those are cards. */
+  total: number;
+  shown: number;
+  /** Ticked repositories past the limit, and ones GitHub answered nothing for. */
+  skipped: string[];
+  missing: string[];
+}
+
 export interface Board {
   takenAt: string | null;
   sprint: string | null;
@@ -357,6 +376,8 @@ export interface Board {
   cards: BoardCard[];
   /** Each board in it, with its own columns (a view of some boards shows theirs). */
   projects?: { key: string; title: string; columns: string[] }[];
+  /** One entry per account with no board whose repository issues are among the cards. */
+  derived?: DerivedPart[];
 }
 
 export type BadgeKind =

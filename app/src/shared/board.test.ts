@@ -26,6 +26,16 @@ describe('parseBoard', () => {
     expect(b.cards[0].prs).toEqual([{ url: 'u2', repo: '', number: 2, state: null, ci: null, unresolved: 0 }])
     expect(b.cards[0]).toMatchObject({ assignees: [], labels: [], milestone: null, type: null })
   })
+  it('reads the cards of an account with no board, and only then adds the new fields', () => {
+    const b = parseBoard({
+      cards: [{ number: 3, repo: 'globex/app', status: null, derived: true, state: 'CLOSED', closedAt: '2026-09-20T08:00:00Z' }, { number: 4, derived: true }, { number: 5, state: 'CLOSED' }],
+      derived: [{ account: 'bob-work', repos: ['globex/app'], total: 26, shown: 26, skipped: [], missing: ['globex/gone'] }, 'junk'],
+    })!
+    expect(b.cards.map((c) => [c.derived, c.state, c.closedAt])).toEqual([[true, 'CLOSED', '2026-09-20T08:00:00Z'], [true, 'OPEN', null], [undefined, undefined, undefined]])
+    expect(b.derived).toEqual([{ account: 'bob-work', repos: ['globex/app'], total: 26, shown: 26, skipped: [], missing: ['globex/gone'] }])
+    expect('derived' in parseBoard({ cards: [] })!).toBe(false)
+    expect('derived' in parseBoard({ cards: [{ number: 1 }] })!.cards[0]).toBe(false)
+  })
 })
 
 describe('visibleColumns', () => {

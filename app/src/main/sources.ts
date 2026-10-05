@@ -184,7 +184,8 @@ import {
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
-import { linkInfoMap } from "@shared/ticketLinks";
+import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
+import { deriveBoard, withoutDerived } from "@shared/derivedBoard";
 import type { Runner } from "./run";
 
 const AGENTS_MS = 3_000;
@@ -315,6 +316,8 @@ export class Sources {
   private costDirty = false;
   /** MasterDeck's ticket links (sessionId → issue and when). */
   private links = new Map<string, LinkInfo>();
+  /** PRs recorded for each ticket's sessions, by ticketKey: what puts a board-less issue in PR Raised or Done. */
+  private linkPrs: Record<string, string[]> = {};
   private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
@@ -1113,7 +1116,8 @@ export class Sources {
       const skip = Promise.resolve({ ok: true, message: "not set up" });
       const [s, b] = await Promise.all([
         settle(this.refreshSnapshot(force)),
-        settle(gh && this.config.project ? this.refreshBoard(force) : skip),
+        // Also without a project board: the Board then shows the repositories' issues.
+        settle(gh ? this.refreshBoard(force) : skip),
         settle(gh ? this.refreshPeople(force) : skip),
         settle(gh ? this.refreshTeamPrs(0, force) : skip),
       ]);
@@ -1230,15 +1234,18 @@ export class Sources {
         const partial = r.ok ? (r.data as { errors?: unknown })?.errors : null;
         this.boardError =
           Array.isArray(partial) && partial.length ? partial.join("; ") : null;
-        if (b.sprint)
+        if (b.sprint) {
+          // The sprint's own cards: repository issues of an account with no board are in no sprint.
+          const sprintBoard = withoutDerived(b);
           this.boardHistory[b.sprint] = addBurnPoint(
             this.boardHistory[b.sprint] ?? [],
             {
               date: dayOf(Date.now()),
-              total: b.cards.length,
-              done: summarize(b).counts.done,
+              total: sprintBoard.cards.length,
+              done: summarize(sprintBoard).counts.done,
             },
           );
+        }
         this.saveGithubCache();
       } else {
         // Keep the last good board on screen; say why it didn't update.
@@ -1324,7 +1331,9 @@ export class Sources {
 
   /** Re-read MasterDeck's ticket links. Called every agents poll and right after a link. */
   reloadLinks(): void {
-    this.links = linkInfoMap(this.linkStore.read());
+    const file = this.linkStore.read();
+    this.links = linkInfoMap(file);
+    this.linkPrs = ticketPrMap(file);
     this.emit();
   }
 
@@ -2205,7 +2214,15 @@ export class Sources {
       config: this.config,
       skills: this.skills,
       hooks: this.hooks,
-      board: this.boards[this.selectedSprint] ?? null,
+      // Cards of an account with no board get their column here, from what MasterDeck knows now.
+      // (A board without such cards comes back as the same object.)
+      board: deriveBoard(this.boards[this.selectedSprint] ?? null, {
+        sessions,
+        past: this.past,
+        linkPrs: this.linkPrs,
+        prLive: this.prLive,
+        now,
+      }),
       sprints: this.sprints,
       selectedSprint: this.selectedSprint,
       users: this.users,

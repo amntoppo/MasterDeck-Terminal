@@ -1,0 +1,14 @@
+{
+  "taken_at": "2026-09-25T10:00:00Z",
+  "sprint": null,
+  "columns": ["Todo", "In Progress", "In Review", "Done"],
+  "cards": [
+    {"number": 1, "repo": "acme/tracker", "project": null, "title": "Search is slow on large boards", "url": "https://github.com/acme/tracker/issues/1", "status": null, "prs": [], "assignees": ["alice"], "labels": ["bug"], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 2, "repo": "acme/tracker", "project": null, "title": "Export a board as CSV", "url": "https://github.com/acme/tracker/issues/2", "status": null, "prs": [{"url": "https://github.com/acme/tracker/pull/20", "owner": "acme", "repo": "tracker", "number": 20, "state": "OPEN", "ci": "success", "unresolved": 1}], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 3, "repo": "acme/tracker", "project": null, "title": "Dark mode for the settings page", "url": "https://github.com/acme/tracker/issues/3", "status": null, "prs": [{"url": "https://github.com/acme/tracker/pull/30", "owner": "acme", "repo": "tracker", "number": 30, "state": "DRAFT", "ci": "pending", "unresolved": 0}], "assignees": [], "labels": ["ui"], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 4, "repo": "acme/tracker", "project": null, "title": "Rate limit the login form", "url": "https://github.com/acme/tracker/issues/4", "status": null, "prs": [{"url": "https://github.com/acme/tracker/pull/40", "owner": "acme", "repo": "tracker", "number": 40, "state": "MERGED", "ci": null, "unresolved": 0}], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "OPEN", "closedAt": null},
+    {"number": 5, "repo": "acme/tracker", "project": null, "title": "Fix the footer link", "url": "https://github.com/acme/tracker/issues/5", "status": null, "prs": [], "assignees": ["alice"], "labels": [], "milestone": null, "type": null, "derived": true, "state": "CLOSED", "closedAt": "2026-09-20T08:00:00Z"}
+  ],
+  "projects": [],
+  "derived": [{"account": null, "repos": ["acme/tracker"], "total": 4, "shown": 4, "skipped": [], "missing": []}]
+}

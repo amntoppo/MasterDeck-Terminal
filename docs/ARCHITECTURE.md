@@ -432,6 +432,10 @@ the `Sender` path watches use), touches the hook's own once markers
 and vice versa), and logs the run (`logRun(sid, 'linked', ids)`) for Details. An ended session's
 entry is dropped.
 
+### Board without a GitHub project (`shared/derivedBoard.ts`)
+
+`boardless(login, cfg)` is the one check: the account (two or more: the tab's; one: the whole config) has repositories and no board; `repoBoardless(repo, cfg)` asks it for a repository's account. For such an account `master board` delivers its repositories' issues as cards with `derived: true`, `state`, `closedAt` and no status. `Sources.refreshGithub` therefore runs the board read whenever GitHub is set up (not only when a project is configured), keeps those facts in `boards[…]` / `cache.json`, and `Sources.build()` passes the board through `deriveBoard`, which sets each derived card's status from what MasterDeck knows at that moment (`derivedStatus`, first match wins): closed → Done (only if closed in the last 14 days, else the card is dropped); a PR open and ready → PR Raised; a draft → In Dev; a merged PR → Done; a linked session, live (`sessionForIssue`) or stopped (`pastSessions`) → In Dev; else Todo. PR states come from the card's linked PRs and the PRs recorded for the ticket's sessions (`ticketPrMap` over `ticket-links.json`, kept in `Sources.linkPrs`), with `prLive` winning when MasterDeck follows the PR; a PR closed without merging, or of unknown state, counts for nothing. A board with no derived card comes back as the same object. `tabBoard` gives a Board tab its cards (an account with a board: exactly `boardForAccount`; without: its derived cards and the fixed columns `DERIVED_COLUMNS`), `boardEmpty` says why a tab has no card, `derivedNotes` what the read left out, `withoutDerived` keeps these cards out of the sprint Summary and the burndown.
+
 ### GitHub accounts (`main/accountEnv.ts`)
 
 With two or more connected accounts (`isMulti`), `AccountEnv` keeps each account's token in memory
@@ -535,7 +539,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Field | Producer |
 |---|---|
 | `sessions`, `master`, `lastActivity`, `asks`, `menus`, `prStage`, `manualStatus`, `hookInfo` | `Sources` (agents poll, transcripts, deck hook, `session-status.json`) |
-| `issues`, `prs`, `proposals`, `lastSnapshotAt`, `board*`, `sprints`, `selectedSprint`, `users`, `me`, `boardHistory`, `githubRefreshedAt/ing` | `master snapshot` / `master board` / ledger (`refreshGithub`, `readLedger`), cached in `cache.json` |
+| `issues`, `prs`, `proposals`, `lastSnapshotAt`, `board*`, `sprints`, `selectedSprint`, `users`, `me`, `boardHistory`, `githubRefreshedAt/ing` | `master snapshot` / `master board` / ledger (`refreshGithub`, `readLedger`), cached in `cache.json`; `board` passes `deriveBoard` (columns of cards from an account with no board) |
 | `teamPrs`, `teamPrsAt`, `teamPrsLoading`, `teamPrsError` | `refreshTeamPrs` |
 | `inbox` | `Inbox.view()` over `collectItems` |
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |

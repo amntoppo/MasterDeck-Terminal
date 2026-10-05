@@ -96,6 +96,17 @@ export function ticketPrs(f: LinkFile, t: Ticket): string[] {
   return [...new Set(ticketSessions(f, t).flatMap((sid) => f.sessions[sid].prs))]
 }
 
+/** The PRs MasterDeck recorded for each ticket's sessions (adopted links left out), by ticketKey. */
+export function ticketPrMap(f: LinkFile): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const e of Object.values(f.sessions)) {
+    if (e.adopted || !e.prs.length) continue
+    const k = ticketKey(e.repo ?? null, e.issue)
+    out[k] = [...new Set([...(out[k] ?? []), ...e.prs])]
+  }
+  return out
+}
+
 /** The PR's repo and head branch are the link's branch key (`Owner/repo@branch`; the repo in any case). */
 export function prOnBranch(url: string, headRef: string | null | undefined, branch: string): boolean {
   const m = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+$/.exec(url)

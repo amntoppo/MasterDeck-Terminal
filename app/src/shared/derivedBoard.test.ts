@@ -1,0 +1,150 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { parseConfig, setConfig } from './appConfig'
+import { parseBoard } from './board'
+import { boardEmpty, boardless, boardsOf, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
+import type { PastSession } from './pastSessions'
+import type { Board, BoardCard, BoardPr, Session } from './types'
+
+const NOW = Date.parse('2026-09-25T10:00:00Z')
+const PR = 'https://github.com/acme/tracker/pull/'
+const KEY = 'acme/tracker#12'
+const BOARD = { owner: 'acme', number: 1, title: 'Delivery', columns: ['To Do', 'In Dev'] }
+const acct = (login: string, owner: string, repo: string, projects: unknown[], primary = false) => ({
+  login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repo,
+  repos: repo ? [`${owner}/${repo}`] : [], projects, ...(primary ? { primary: true } : {}),
+})
+const one = parseConfig({ owner: 'acme', issueRepo: 'tracker' })
+const boarded = parseConfig({ owner: 'acme', issueRepo: 'tracker', projects: [BOARD] })
+const two = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', 'tracker', [BOARD], true), acct('bob-work', 'globex', 'app', []), acct('carol', 'initech', '', [])] })
+// ticketKey and storedRepo read the global config: acme/tracker is the primary repo.
+setConfig(one)
+
+const pr = (n: number, state: string | null): BoardPr => ({ url: PR + n, repo: 'tracker', number: n, state, ci: null, unresolved: 0 })
+const card = (p: Partial<BoardCard> = {}): BoardCard => ({ number: 12, repo: null, project: null, title: 'T', url: '', status: null, prs: [], assignees: [], labels: [], milestone: null, type: null, derived: true, state: 'OPEN', closedAt: null, ...p })
+const sess = (p: Partial<Session> = {}): Session => ({ key: 'k', sessionId: 's', name: 'fix-12', kind: 'background', bgId: 'k', pid: 1, cwd: '/', state: 'idle', rawState: 'idle', startedAt: 1, issue: 12, ...p })
+const ctx = (p: Partial<DeriveCtx> = {}): DeriveCtx => ({ sessions: [], past: {}, linkPrs: {}, prLive: {}, now: NOW, ...p })
+const board = (cards: BoardCard[], p: Partial<Board> = {}): Board => ({ takenAt: null, sprint: null, columns: ['To Do', 'In Dev'], cards, ...p })
+
+describe('derivedStatus', () => {
+  it('no session and no PR is Todo, assigned or not', () => {
+    expect(derivedStatus(card({ assignees: ['alice'] }), ctx())).toBe('Todo')
+    expect(derivedStatus(card(), ctx())).toBe('Todo')
+  })
+  it('a linked session, live or stopped, is In Dev; a done session, the master or another ticket is not', () => {
+    expect(derivedStatus(card(), ctx({ sessions: [sess()] }))).toBe('In Dev')
+    expect(derivedStatus(card(), ctx({ sessions: [sess({ issue: 13 }), sess({ key: 'k2', sessionId: 's2' })] }))).toBe('In Dev')
+    expect(derivedStatus(card(), ctx({ past: { [KEY]: [{ name: 'fix-12' } as PastSession] } }))).toBe('In Dev')
+    expect(derivedStatus(card(), ctx({ sessions: [sess({ state: 'done' })] }))).toBe('Todo')
+    expect(derivedStatus(card(), ctx({ sessions: [sess({ name: 'master-agent' })] }))).toBe('Todo')
+    expect(derivedStatus(card(), ctx({ sessions: [sess({ issue: 13 })] }))).toBe('Todo')
+    expect(derivedStatus(card(), ctx({ sessions: [sess({ issueRepo: 'acme/web' })] }))).toBe('Todo') // #12 of another repo
+  })
+  it('PR states decide before sessions, in a fixed order', () => {
+    const st = (prs: BoardPr[], c: Partial<DeriveCtx> = {}) => derivedStatus(card({ prs }), ctx(c))
+    expect(st([pr(1, 'OPEN')])).toBe('PR Raised')
+    expect(st([pr(1, 'MERGED'), pr(2, 'OPEN')])).toBe('PR Raised') // merged + open: not done
+    expect(st([pr(1, 'DRAFT')])).toBe('In Dev') // a draft is work in progress, session or not
+    expect(st([pr(1, 'MERGED'), pr(2, 'DRAFT')])).toBe('In Dev')
+    expect(st([pr(1, 'MERGED'), pr(2, 'CLOSED')])).toBe('Done')
+    expect(st([pr(1, 'MERGED')], { sessions: [sess()] })).toBe('Done')
+    expect(st([pr(1, 'CLOSED')])).toBe('Todo') // closed without merging counts for nothing
+    expect(st([pr(1, 'CLOSED')], { sessions: [sess()] })).toBe('In Dev')
+    expect(st([pr(1, null)])).toBe('Todo') // a state GitHub did not give
+  })
+  it('a closed issue is Done whatever else is true', () => {
+    expect(derivedStatus(card({ state: 'CLOSED', prs: [pr(1, 'OPEN')] }), ctx({ sessions: [sess()] }))).toBe('Done')
+  })
+  it('a followed PR is fresher than the card, and PRs MasterDeck recorded for the ticket count', () => {
+    expect(derivedStatus(card({ prs: [pr(1, 'OPEN')] }), ctx({ prLive: { [PR + 1]: { state: 'MERGED', isDraft: false } } }))).toBe('Done')
+    expect(derivedStatus(card(), ctx({ linkPrs: { [KEY]: [PR + 7] }, prLive: { [PR + 7]: { state: 'OPEN', isDraft: false } } }))).toBe('PR Raised')
+    expect(derivedStatus(card(), ctx({ linkPrs: { [KEY]: [PR + 7] }, prLive: { [PR + 7]: { state: 'OPEN', isDraft: true } } }))).toBe('In Dev')
+    expect(derivedStatus(card(), ctx({ linkPrs: { [KEY]: [PR + 7] } }))).toBe('Todo') // recorded but not followed: unknown
+    expect(derivedStatus(card(), ctx({ linkPrs: { 'acme/tracker#13': [PR + 7] }, prLive: { [PR + 7]: { state: 'OPEN', isDraft: false } } }))).toBe('Todo')
+  })
+})
+
+describe('deriveBoard', () => {
+  it('a board with no derived card is the same object', () => {
+    const b = board([card({ derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })])
+    expect(deriveBoard(b, ctx())).toBe(b)
+    expect(deriveBoard(null, ctx())).toBeNull()
+    expect(withoutDerived(b)).toBe(b)
+  })
+  it('sets the columns, leaves board cards alone, and drops issues closed more than 14 days ago', () => {
+    const real = card({ number: 1, derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })
+    const b = board([real, card({ number: 2 }), card({ number: 3, state: 'CLOSED', closedAt: '2026-09-20T08:00:00Z' }), card({ number: 4, state: 'CLOSED', closedAt: '2026-09-01T08:00:00Z' }), card({ number: 5, state: 'CLOSED', closedAt: null })])
+    const d = deriveBoard(b, ctx())!
+    expect(d.cards.map((c) => [c.number, c.status])).toEqual([[1, 'In Dev'], [2, 'Todo'], [3, 'Done']])
+    expect(d.cards[0]).toBe(real)
+    expect(b.cards[1].status).toBeNull() // the stored board keeps the facts
+    expect(withoutDerived(d).cards.map((c) => c.number)).toEqual([1])
+  })
+  it('reads what master board prints', () => {
+    const raw = JSON.parse(readFileSync(resolve(__dirname, '../../test/fixtures/board-derived.json'), 'utf8'))
+    const d = deriveBoard(parseBoard(raw), ctx())!
+    expect(d.cards.map((c) => c.status)).toEqual(['Todo', 'PR Raised', 'In Dev', 'Done', 'Done'])
+    expect(deriveBoard(parseBoard(raw), ctx({ now: Date.parse('2026-10-20T00:00:00Z') }))!.cards.map((c) => c.number)).toEqual([1, 2, 3, 4])
+  })
+})
+
+describe('boardless', () => {
+  it('one account: the whole config', () => {
+    expect(boardless(null, one)).toBe(true)
+    expect(boardless(null, boarded)).toBe(false)
+    expect(boardless(null, parseConfig({}))).toBe(false) // before Setup there is nothing to show
+    expect(boardsOf(null, boarded)).toHaveLength(1)
+  })
+  it('two or more: each account on its own', () => {
+    expect(boardless('alice', two)).toBe(false)
+    expect(boardless('bob-work', two)).toBe(true)
+    expect(boardless('carol', two)).toBe(false) // no repositories either: nothing to read
+    expect(repoBoardless('globex/app', two)).toBe(true)
+    expect(repoBoardless('GLOBEX/APP', two)).toBe(true)
+    expect(repoBoardless(null, two)).toBe(false) // the primary repo is alice's
+    expect(repoBoardless(null, one)).toBe(true)
+  })
+})
+
+describe('tabBoard', () => {
+  const real = card({ number: 1, derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })
+  const loose = card({ number: 3, repo: 'globex/app', status: 'Todo' })
+  it('an account with a board gets its board as before', () => {
+    const b = board([real])
+    expect(tabBoard(b, null, boarded)).toBe(b)
+    expect(tabBoard(null, null, boarded)).toBeNull()
+    expect(tabBoard(board([real, loose]), 'alice', two)!.cards.map((c) => c.number)).toEqual([1])
+  })
+  it('an account without one gets its repository issues in the four columns', () => {
+    const t = tabBoard(board([real, loose], { projects: [{ key: 'acme/1', title: 'Delivery', columns: ['To Do', 'In Dev'] }] }), 'bob-work', two)!
+    expect(t.cards.map((c) => c.number)).toEqual([3])
+    expect(t.columns).toEqual([...DERIVED_COLUMNS])
+    expect(t.projects).toEqual([])
+    expect(tabBoard(board([card()]), null, one)!.columns).toEqual(['Todo', 'In Dev', 'PR Raised', 'Done'])
+  })
+})
+
+describe('boardEmpty', () => {
+  it('says what is empty', () => {
+    expect(boardEmpty({ login: null, total: 3, shown: 2 }, one)).toBe('cards')
+    expect(boardEmpty({ login: null, total: 3, shown: 0 }, boarded)).toBe('filtered')
+    expect(boardEmpty({ login: null, total: 0, shown: 0 }, boarded)).toBe('filtered') // a board, an empty sprint: as before
+    expect(boardEmpty({ login: 'bob-work', total: 3, shown: 0 }, two)).toBe('filtered')
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0 }, two)).toBe('no-issues')
+    expect(boardEmpty({ login: null, total: 0, shown: 0 }, one)).toBe('no-issues')
+    expect(boardEmpty({ login: 'carol', total: 0, shown: 0 }, two)).toBe('nothing-selected')
+  })
+})
+
+describe('derivedNotes', () => {
+  it('notes say what is not shown', () => {
+    const part = { account: 'bob-work', repos: ['globex/app'], total: 412, shown: 300, skipped: ['globex/old'], missing: ['globex/gone'] }
+    const b = board([], { derived: [{ account: 'alice', repos: [], total: 0, shown: 0, skipped: [], missing: [] }, part] })
+    expect(derivedNotes(b, 'bob-work')).toEqual(['Showing the first 300 of 412 open issues.', 'Not read (more than 1 repository): old.', 'GitHub did not answer for gone.'])
+    expect(derivedNotes(b, 'alice')).toEqual([])
+    expect(derivedNotes(board([], { derived: [{ ...part, account: null, total: 300, skipped: [], missing: [] }] }), null)).toEqual([])
+    expect(derivedNotes(board([]), null)).toEqual([])
+    expect(derivedNotes(null, null)).toEqual([])
+  })
+})

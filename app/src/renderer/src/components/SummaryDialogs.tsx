@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ticketKey, ticketOf } from '@shared/ticket'
 import { cardBadge } from '@shared/board'
+import { withoutDerived } from '@shared/derivedBoard'
 import { burndown, summarize, summaryMarkdown } from '@shared/sprintSummary'
 import { pointsText, rangeFor, standupPoints, type StandupCommit, type StandupRange } from '@shared/standup'
 import type { AppState } from '@shared/types'
@@ -32,7 +33,8 @@ function Copy({ text, label = 'Copy as Markdown' }: { text: string; label?: stri
 
 export function SprintSummaryDialog({ state, onClose }: { state: AppState; onClose: () => void }) {
   useEsc(onClose)
-  const b = state.board
+  // The sprint board proper: repository issues of an account with no board are in no sprint.
+  const b = useMemo(() => (state.board ? withoutDerived(state.board) : null), [state.board])
   const s = useMemo(() => (b ? summarize(b, (c) => cardBadge(ticketOf(c), state.sessions, state.proposals, [], state.prStage, state.manualStatus).kind) : null), [b, state.sessions, state.proposals, state.prStage])
   const sprint = state.sprints.find((x) => x.title === b?.sprint)
   const series = sprint ? burndown(state.boardHistory[sprint.title] ?? [], sprint.startDate, sprint.duration) : []
