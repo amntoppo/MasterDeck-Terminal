@@ -145,6 +145,8 @@ web tabs keep working.
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
 | PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
+| Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
+| Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
@@ -253,6 +255,22 @@ buttons; it does not go through macOS window drag regions.
   remote sends are never relayed through master-agent (`sendMasterUp(true, …)` is false).
 - **Claude Code's TUI runs on the alternate screen** (`?1049h`) with mouse/focus/bracketed-paste
   modes; instant typing only observes there until it has seen 3 exact echoes.
+- **A Board tab without a GitHub board is derived, not stored.** `boardless(login, cfg)` (TS) /
+  `config.boardless(view)` (Python) is the one check. `master board` sends such an account's
+  repository issues as cards with `derived: true` and no status; `Sources.build()` gives them a column
+  on every state (`deriveBoard`). Anything that reads `state.board` sees those columns but must not
+  write them: `setStatus`, BoardFlow's moves and drags do nothing for a card with no `project`
+  (`canMove` in the renderer, the `setStatus` handler in main).
+- **A project board with no sprint field matches nothing under `sprint:@current`.** Boards MasterDeck
+  creates carry `sprintless: true` in the config: their filter drops the sprint part
+  (`board.sprintless_query`) and what is mine on them counts as current. Boards without a sprint
+  field that were picked in Setup are not marked (see TODO).
+- **The shared gh cache treats any GraphQL call with the word `mutation` in an argument as a write**
+  (`ghcache.is_read`): never use that word in a read query (a field name, a comment), and every write
+  document must contain it. Board creation passes variables with `-f` (raw strings), never `-F`.
+- **Board creation is never run by a test or an agent.** `main/boardCreate.test.ts` uses a fake gh;
+  the isolated app must not press **Create a GitHub board** (its plan read and native dialog run as
+  the machine's real gh account). The first real run is the user's.
 
 ## Style
 
@@ -262,8 +280,16 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-03)
+## Current state and next steps (2026-10-05)
 
+- Plan J (Board without a GitHub project: repository issues in derived columns, Create a GitHub board,
+  clearer empty states, linking and New ticket without a board, master proposals for such an account)
+  is on branch `feat/board-without-project` (13 commits on `main` 6b5e39c plus the docs commit), not
+  merged, not pushed, not installed. Checked there: typecheck, vitest, the Python suite, and the
+  isolated app with board fixtures (no board: hint, four columns, no drag, empty states, New ticket
+  dry run; with a board: same DOM as `main`). Board creation was tested with a fake gh only: the first
+  real run is the user's, on a throwaway account or repository (the spec's §9 lists what schema
+  introspection could not prove). Spec and plan: backend repo, `docs/superpowers/` (2026-10-05).
 - `main` is pushed and released as **v0.7.1** (2026-10-03; CI builds the DMGs/EXE; v0.7.0 had no Windows build). Installed
   locally. In this release: snapshot patches + volatile hold (0b6d8ed), web state
   patches (75aafa1), the remote indicator (ce27e5d), instant typing (merge bacb8d6), plan H (merge

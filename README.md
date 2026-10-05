@@ -8,7 +8,9 @@ It runs on macOS and Windows.
 - **Needs you.** Sessions waiting on a prompt, questions, failing CI, idle work, context and budget
   warnings. Each item has a one-click action.
 - **Your GitHub.** A Kanban board of your sprint from GitHub Projects, and every PR in your org
-  with filters. You can assign tickets, start sessions for them and review PRs.
+  with filters. You can assign tickets, start sessions for them and review PRs. No GitHub project?
+  The Board shows your repositories' issues in Todo / In Dev / PR Raised / Done, worked out by
+  MasterDeck, and **Create a GitHub board** makes a real one from them.
 - **Several GitHub accounts.** Work for more than one organization with different `gh` logins:
   connect them in Setup, and each session, Board tab and PR tab works as one account (its own
   token and commit identity, shown as `@login`). One account behaves as before. MasterDeck never
@@ -93,7 +95,8 @@ Or build it yourself (see [Develop](#develop)).
       **Select all** for either), and pick the primary repository (a plain `#12` means an issue there).
       MasterDeck reads each board's statuses and guesses what each means (ready, in progress, PR raised,
       done); adjust the guesses per board if they are wrong. No board: you still get issues, PRs and
-      sessions. Settings → Set up MasterDeck shows the same step. With two or more accounts, an
+      sessions, and the Board shows the ticked repositories' issues in columns MasterDeck works out
+      (see [Board View](docs/GUIDE.md#board-view)). Settings → Set up MasterDeck shows the same step. With two or more accounts, an
       **Account** menu picks whose repositories and boards you are choosing; a repository can be under
       one account only (others show it as "in <login>").
    4. **Preferences.** The folder master and new shells start in (where your repos are), whether to
@@ -130,7 +133,7 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `owner`, `ownerType` | GitHub organization or user that owns your repos and board |
 | `issueRepo` | The primary repository: a plain issue number (`#12`) means an issue there |
 | `repos`, `allRepos` | Every selected repository (`owner/name`, primary first); `allRepos: true` after "Select all" |
-| `projects`, `allProjects` | Every selected board, each with its own `statusField`, `statusFieldId`, `statusOptions`, `columns`, `statuses` and `sprintField` |
+| `projects`, `allProjects` | Every selected board, each with its own `statusField`, `statusFieldId`, `statusOptions`, `columns`, `statuses` and `sprintField`. A board MasterDeck created for you also has `"sprintless": true` (it has no sprint field). An account with repositories and no board needs no entry: its Board shows the repositories' issues |
 | `project`, `projectId`, `statusFieldId`, `statusOptions` | The first board (kept for older readers); `0` = no board |
 | `columns` | The board's statuses, in order |
 | `statuses.ready` / `inProgress` / `prRaised` / `devDone` | The status for new work, work in progress, a PR opened, and PRs merged |
