@@ -50,8 +50,9 @@ import {
 } from "@shared/derivedBoard";
 import {
   boardChips,
-  REPO_VIEW_ASK_MS,
+  repoAskEvery,
   repoChoices,
+  reposFilterOffered,
   repoViewBoard,
   repoViewEmpty,
   repoViewOn,
@@ -377,9 +378,15 @@ export function BoardView({
     );
   const set = (patch: Partial<FilterState>) => setFilters({ ...f, ...patch });
   const reposKey = f.repos.join("\n");
+  // The repository view has its own reasons for an empty tab (still loading, a repository not read).
+  const repoStatus = useMemo(
+    () => repoViewStatus(state.repoView, f.repos, cfg),
+    [state.repoView, reposKey, cfg], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   // Tell main which repositories are on screen. It reads the ones it does not hold (or holds for
-  // over an hour) and keeps them in its refreshes while a tab goes on asking: again every 20 minutes.
-  const askTick = Math.floor(now / REPO_VIEW_ASK_MS);
+  // over an hour) and keeps them in its refreshes while a tab goes on asking: again every 20
+  // minutes, and every 5 while a picked repository was never read (a failed first read, no room).
+  const askTick = Math.floor(now / repoAskEvery(repoStatus));
   useEffect(() => {
     if (repoMode) deck().boardRepos(f.repos);
   }, [repoMode, reposKey, askTick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -467,11 +474,6 @@ export function BoardView({
   const tabRepoList = reposOf(acct, cfg);
   // The repositories the read did not get: "no open issues" is not said of them.
   const unread = unreadRepos(state.board, acct, cfg);
-  // The repository view has its own reasons for an empty tab (still loading, a repository not read).
-  const repoStatus = useMemo(
-    () => repoViewStatus(state.repoView, f.repos, cfg),
-    [state.repoView, reposKey, cfg], // eslint-disable-line react-hooks/exhaustive-deps
-  );
   const repoEmpty =
     repoMode && b && shown
       ? repoViewEmpty(
@@ -760,7 +762,7 @@ export function BoardView({
         ))}
       </select>
     )}
-    {repos.length > 0 && (
+    {reposFilterOffered(repos.length, fallback) && (
       <MultiPick
         label="Repos"
         all="All repos"
@@ -1026,7 +1028,11 @@ export function BoardView({
               </button>
               <button
                 className="btn primary"
-                onClick={refresh}
+                onClick={() => {
+                  // A repository MasterDeck had no room for is asked for again; the rest is read again.
+                  deck().boardRepos(f.repos);
+                  void refresh();
+                }}
                 disabled={loading}
               >
                 {loading ? "Refreshing…" : "Retry"}

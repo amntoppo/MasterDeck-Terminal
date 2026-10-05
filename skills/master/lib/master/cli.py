@@ -415,43 +415,59 @@ def cmd_repo_issues(args) -> int:
         if name in order:
             continue
         order.append(name)
-        if not config.repo_allowed(name):
+        # Stricter than repo_allowed: the names come from outside (a Board tab, also in a paired browser).
+        if not config.repo_readable(name):
             parts[name] = bad(name, None, f"{name} is not selected in Setup")
             continue
         groups.setdefault(None if args.fixtures else config.account_for_repo(name), []).append(name)
     since = board.done_since(_today(args))
     items, details = [], {}
+
+    def why(e):  # gh missing, network, rate limit, an account to log in again: say what gh said
+        return str(e).strip() or type(e).__name__
+
     for login, repos in groups.items():
         try:
             src = _repo_source(args, login)
-            got = src.repo_issues(_today(args), only=repos, boards=True)
-        except Exception as e:  # gh missing, network, rate limit, an account to log in again: say what gh said
+        except Exception as e:
             for r in repos:
-                parts[r] = bad(r, login, f"{r} not read: {str(e).strip() or type(e).__name__}")
+                parts[r] = bad(r, login, f"{r} not read: {why(e)}")
             continue
-        by_repo: dict = {}
-        for it in got["items"]:
-            by_repo.setdefault(str((it.get("content") or {}).get("repository") or "").lower(), []).append(it)
-        unread, kept = got.get("unread") or {}, []
-        for r in repos:
-            if r in (got.get("skipped") or []):
-                parts[r] = bad(r, login, f"{r} not read: more than {config.DERIVED_MAX_REPOS} repositories at once")
-            elif r in (got.get("missing") or []):
-                parts[r] = bad(r, login, f"{r} not read: {unread[r]}" if r in unread else f"Not found: {r}")
-            else:
-                # The Board's limits (open, then closed lately), for each repository on its own.
-                mine, shown = board.trim_repo_issues(by_repo.get(r.lower(), []), since)
-                kept += mine
-                parts[r] = {"repo": r, "account": login, "ok": True, "shown": shown,
-                            "total": max(shown, int((got.get("totals") or {}).get(r) or 0))}
-        more, pr_note = _pr_facts(src, kept)
-        details.update(more)
-        notes = [n for n in (pr_note, (f"Board columns only partly read (later pages): {got['boards_unread']}" if got.get("boards_partial")
-                         else f"Board columns not read: {got['boards_unread']}") if got.get("boards_unread") else None) if n]
-        for r in repos:
-            if notes and parts[r]["ok"]:
-                parts[r]["note"] = "; ".join(notes)[:300]
-        items += [dict(it, account=login) for it in kept] if login else kept
+        # One read takes DERIVED_MAX_REPOS repositories of an account: more are read in turn, so
+        # none is left out ("skipped") however many a tab picked.
+        step = config.DERIVED_MAX_REPOS
+        for at in range(0, len(repos), step):
+            chunk = repos[at:at + step]
+            try:
+                got = src.repo_issues(_today(args), only=chunk, boards=True)
+            except Exception as e:
+                # The rest of this account is not asked: the same failure (a rate limit) would only repeat.
+                for r in repos[at:]:
+                    parts[r] = bad(r, login, f"{r} not read: {why(e)}")
+                break
+            by_repo: dict = {}
+            for it in got["items"]:
+                by_repo.setdefault(str((it.get("content") or {}).get("repository") or "").lower(), []).append(it)
+            unread, kept = got.get("unread") or {}, []
+            for r in chunk:
+                if r in (got.get("skipped") or []):
+                    parts[r] = bad(r, login, f"{r} not read: more than {config.DERIVED_MAX_REPOS} repositories at once")
+                elif r in (got.get("missing") or []):
+                    parts[r] = bad(r, login, f"{r} not read: {unread[r]}" if r in unread else f"Not found: {r}")
+                else:
+                    # The Board's limits (open, then closed lately), for each repository on its own.
+                    mine, shown = board.trim_repo_issues(by_repo.get(r.lower(), []), since)
+                    kept += mine
+                    parts[r] = {"repo": r, "account": login, "ok": True, "shown": shown,
+                                "total": max(shown, int((got.get("totals") or {}).get(r) or 0))}
+            more, pr_note = _pr_facts(src, kept)
+            details.update(more)
+            notes = [n for n in (pr_note, (f"Board columns only partly read (later pages): {got['boards_unread']}" if got.get("boards_partial")
+                             else f"Board columns not read: {got['boards_unread']}") if got.get("boards_unread") else None) if n]
+            for r in chunk:
+                if notes and parts[r]["ok"]:
+                    parts[r]["note"] = "; ".join(notes)[:300]
+            items += [dict(it, account=login) for it in kept] if login else kept
     print(json.dumps({"taken_at": _now(args), "cards": board.build(items, details, _now(args))["cards"],
                       "repos": [parts[r] for r in order]}))
     return 0

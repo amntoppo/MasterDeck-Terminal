@@ -126,6 +126,23 @@ def repo_allowed(repo: "str | None", cfg: "dict | None" = None) -> bool:
     return repo.lower() in {r.lower() for r in repos(cfg)}
 
 
+def repo_readable(repo: "str | None", cfg: "dict | None" = None) -> bool:
+    """May `master repo-issues` read this repository? Stricter than repo_allowed, because the name
+    comes from outside (a Board tab, also one in a paired browser): a repository listed under any
+    account, or, not listed, one whose owner is the owner of an account that itself has "Select
+    all" (no accounts: the config's owner with its "Select all"). Another account's "Select all"
+    never opens this account's owner, and a login is no owner (the app's repoPickable)."""
+    cfg = cfg or CONFIG
+    if not repo or not re.fullmatch(REPO_RE, repo):
+        return False
+    if repo.lower() in {r.lower() for r in repos(cfg)}:
+        return True
+    owner = repo.split("/", 1)[0].lower()
+    if cfg.get("accounts"):
+        return any(v["allRepos"] and v["owner"].lower() == owner for v in accounts(cfg))
+    return cfg.get("allRepos") is True and str(cfg.get("owner") or "").lower() == owner
+
+
 def _project(p: dict, cfg: dict) -> "dict | None":
     if not isinstance(p, dict) or not isinstance(p.get("number"), int) or p["number"] <= 0:
         return None

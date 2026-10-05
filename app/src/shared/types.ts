@@ -392,6 +392,8 @@ export interface RepoPart {
   takenAt: number | null;
   /** A read of it is running. */
   loading?: true;
+  /** The state carries only the first of its cards (the view's card and size budget); `note` says how many. */
+  cut?: true;
 }
 
 /** Repository view: the issues of every repository read so far, each in its column (shared/repoView.ts). */

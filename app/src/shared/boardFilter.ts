@@ -1,6 +1,6 @@
 import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
-import { accountForProject, accountForRepo, isMulti } from './accounts'
+import { accountForProject, accountForRepo, isMulti, primaryLogin } from './accounts'
 import { projectKey, type AppConfig } from './appConfig'
 import type { AssignRequest } from './ipc'
 import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
@@ -148,18 +148,6 @@ export function applyFilters(b: Board, f: FilterState): Board {
   return { ...b, cards, columns }
 }
 
-/** The repos to offer in a board filter: the selected ones and any seen on cards. */
-export function repoOptions(b: Board | null, selected: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of [...selected, ...(b?.cards ?? []).map((c) => fullRepo(c.repo))])
-    if (r && !seen.has(r.toLowerCase())) {
-      seen.add(r.toLowerCase())
-      out.push(r)
-    }
-  return out
-}
-
 export type CardAction = 'session' | 'start' | 'pr' | 'assign'
 
 /**
@@ -173,9 +161,14 @@ export function cardAction(c: BoardCard, me: string | null, sessions: Session[])
   return c.prs.length > 0 ? 'pr' : 'assign'
 }
 
-/** The primary account's login: the one read from GitHub, else (not read yet) the config's primary account. */
-export function primaryLogin(me: string | null, c: AppConfig): string | null {
-  return me ?? c.accounts.find((a) => a.primary)?.login ?? null
+/** "Me" as the primary account: the login read from GitHub, else (not read yet) the config's primary account (`primaryLogin`). */
+export function primaryMe(me: string | null, c: AppConfig): string | null {
+  return me ?? primaryLogin(c)
+}
+
+/** The tooltip of "Start a session" on the Assign popup: the issue stays as it is, assigned or not. */
+export function startSessionTitle(assignees: string[]): string {
+  return `Start a session for this issue as it is: ${assignees.length ? `it stays assigned to ${assignees.join(', ')}` : 'nobody is assigned'}, and nothing is written to GitHub`
 }
 
 /**

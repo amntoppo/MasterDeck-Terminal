@@ -143,6 +143,30 @@ describe('a tab of an account with no board', () => {
     expect(html).not.toContain('not the board')
     expect(columns(html)).toEqual(['Todo', 'In Dev', 'PR Raised', 'Done'])
   })
+  it('with exactly one repository there is no Repos filter, as before; with two there is', () => {
+    const one = parseConfig({ owner: 'acme', issueRepo: 'web' })
+    const html = render({ config: one, state: { ...fixtureState(true), board: null } })
+    expect(html).not.toContain('All repos ▾')
+    expect(render({ config: loose, state: { ...fixtureState(true), board: null } })).toContain('All repos ▾')
+  })
+})
+
+describe('a picked repository that is never read', () => {
+  it('says why and offers Retry and the way back, instead of loading for ever', () => {
+    const acct = (login: string, owner: string, repos: string[], projects: unknown[], primary = false) => ({ login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repos[0].split('/')[1], repos, projects, ...(primary ? { primary: true } : {}) })
+    const two = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker', 'acme/api'], [BOARD], true), acct('bob-work', 'globex', ['globex/app'], [])] })
+    const html = render({ config: two, repos: ['globex/app'], repoView: null })
+    expect(html).not.toContain('Loading issues…')
+    expect(html).toContain('Could not read app')
+    expect(html).toContain('globex/app is a repository of bob-work, an account with no board: its issues are on that account&#x27;s tab.')
+    expect(html).toContain('Back to board')
+    // Refused by MasterDeck when asked: the same, with its reason.
+    const note = 'acme/api not read: MasterDeck already shows 30 repositories. Go back to the board in a tab that shows others.'
+    const full = render({ repos: ['acme/api'], repoView: { cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note, takenAt: null }] } })
+    expect(full).toContain('Could not read api')
+    expect(full).toContain(note)
+    expect(full).toContain('>Retry<')
+  })
 })
 
 describe('the popups name the ticket with its repository', () => {
@@ -156,5 +180,13 @@ describe('the popups name the ticket with its repository', () => {
     expect(a).toContain('aria-label="Assign api#7"')
     const p = renderToStaticMarkup(createElement(PrPopup, { card, state: fixtureState(), onClose: noop, onStartReview: noop, onStart: noop }))
     expect(p).toContain('api#7 Fix it')
+  })
+  it('Start a session on the Assign popup says who stays assigned', async () => {
+    const { AssignPopup } = await import('./AssignPopup')
+    const noop = () => {}
+    const popup = (assignees: string[]) => renderToStaticMarkup(createElement(AssignPopup, { card: { number: 7, repo: 'acme/api', title: 'Fix it', url: 'u', status: 'Todo', assignees, prs: [], labels: [] } as never, state: fixtureState(), onClose: noop, onAssigned: noop, onStart: noop }))
+    expect(popup([])).toContain('nobody is assigned, and nothing is written to GitHub')
+    expect(popup(['bob-work'])).toContain('it stays assigned to bob-work, and nothing is written to GitHub')
+    expect(popup(['bob-work'])).not.toContain('nobody is assigned')
   })
 })

@@ -1,4 +1,5 @@
-import { primaryRepo, projectByKey, repoSelected, type AppConfig } from './appConfig'
+import { accountForRepo } from './accounts'
+import { primaryRepo, projectByKey, type AppConfig } from './appConfig'
 import { parseCards } from './board'
 import { boardDeriver, boardsOf, DERIVED_COLUMNS, repoBoardless, reposOf, type DeriveCtx } from './derivedBoard'
 import { fullRepo, sameTicket, ticketKey, type Ticket } from './ticket'
@@ -21,11 +22,16 @@ export const REPO_VIEW_LIVE_MS = 3_600_000
 export const REPO_VIEW_MAX_ENTRIES = 30
 /** A repository never read (its first read failed: offline, rate limit) is tried again after this, not after an hour. */
 export const REPO_VIEW_RETRY_MS = 300_000
-/**
- * Most cards the state carries across every repository of the view. The web bridge drops a frame
- * over 1.4 MB, which would lose the web's whole state: about 450 bytes a card keeps this near 550 KB.
- */
+/** Most first reads that may wait or run at once: a browser cannot queue reads without limit. */
+export const REPO_VIEW_MAX_QUEUED = 30
+/** Most cards the state carries across every repository of the view. */
 export const REPO_VIEW_MAX_CARDS = 1200
+/**
+ * Most bytes (UTF-8, as JSON) the view takes in the state, cards and parts together. The web bridge
+ * drops a state whose JSON passes about 1.05 MB, which would lose the web's whole state: cards
+ * differ a lot in size (five PRs, ten labels), so a count alone does not bound it.
+ */
+export const REPO_VIEW_MAX_BYTES = 500_000
 /** A tab in repository view asks again this often, so its repositories stay "on screen". */
 export const REPO_VIEW_ASK_MS = 20 * 60_000
 
@@ -47,20 +53,24 @@ export function repoChoices(login: string | null | undefined, c: AppConfig, seen
   return out
 }
 
-/** The owners the config names: the legacy one, and each account's owner and login. */
-function ownersOf(c: AppConfig): Set<string> {
-  return new Set([c.owner, ...c.accounts.flatMap((a) => [a.owner, a.login])].filter(Boolean).map((o) => o.toLowerCase()))
-}
-
 /**
- * Does the config select this repository? Well-formed, and listed in Setup; with "Select all" every
- * name counts as selected, so there its owner must be one the config names (an ask or a link can
- * come from a paired browser: it must not reach other people's repositories).
+ * Does the config select this repository? Well-formed, and listed in Setup under any account; or,
+ * not listed, its owner is the owner of an account that itself has "Select all" (no accounts: the
+ * config's owner, with its "Select all"). One account's "Select all" never opens another account's
+ * owner, and a login is no owner: an ask or a link can come from a paired browser, and must not
+ * reach other people's repositories (the CLI's config.repo_readable).
  */
 export function repoPickable(repo: string, c: AppConfig): boolean {
-  if (!validRepo(repo) || !repoSelected(repo, c)) return false
-  if (!c.allRepos || c.repos.some((r) => repoKey(r) === repoKey(repo))) return true
-  return ownersOf(c).has(repo.split('/')[0].toLowerCase())
+  if (!validRepo(repo)) return false
+  if (c.repos.some((r) => repoKey(r) === repoKey(repo))) return true
+  const owner = repo.split('/')[0].toLowerCase()
+  if (c.accounts.length) return c.accounts.some((a) => a.allRepos === true && a.owner.toLowerCase() === owner)
+  return c.allRepos && c.owner.toLowerCase() === owner
+}
+
+/** Is the Repos filter offered? With a board from one repository on (picking it is the repository view); with no board from two, as before. */
+export function reposFilterOffered(options: number, noBoard: boolean): boolean {
+  return options > (noBoard ? 1 : 0)
 }
 
 /**
@@ -85,24 +95,80 @@ export function withMoving(board: Board | null, moving: Record<string, string>, 
 }
 
 /**
- * The repositories an ask may read: well-formed, selected in Setup, of an account with a board; each
- * once, as Setup spells it. With "Select all" every name counts as selected, so there the owner must
- * be one the config names (the ask can come from a paired browser: it must not read other people's repositories).
+ * Why MasterDeck never reads this repository for a repository view, or null when it may: it is not
+ * selected in Setup (`repoPickable`), or it is a repository of an account with no board (its issues
+ * come with that account's own tab). The one rule for what an ask reads and what a tab says.
  */
-export function cleanRepos(v: unknown, c: AppConfig): string[] {
-  if (!Array.isArray(v) || !c.configured) return []
-  const out: string[] = []
-  for (const x of v) {
-    if (typeof x !== 'string' || !repoPickable(x, c) || repoBoardless(x, c)) continue
-    const name = c.repos.find((r) => repoKey(r) === repoKey(x)) ?? x
-    if (!out.some((r) => repoKey(r) === repoKey(name))) out.push(name)
-    if (out.length === REPO_VIEW_MAX_ASK) break
+export function repoRefusal(repo: string, c: AppConfig): string | null {
+  if (!repoPickable(repo, c)) return `${repo} is not selected in Setup.`
+  if (repoBoardless(repo, c)) {
+    const login = c.accounts.length >= 2 ? accountForRepo(repo, c) : null
+    return login ? `${repo} is a repository of ${login}, an account with no board: its issues are on that account's tab.` : `${repo} not read: there is no board, so the Board shows its issues already.`
   }
-  return out
+  return null
+}
+
+/** A list of repositories from a tab: the ones to read (each once, as Setup spells it), and the ones not read, each with why. */
+export interface AskPlan {
+  repos: string[]
+  refused: { repo: string; reason: string }[]
+}
+
+/** The most names of one ask that are looked at: the list can come from a paired browser. */
+const ASK_LOOKED_AT = 200
+
+/**
+ * What an ask may read (`repoRefusal`, and at most REPO_VIEW_MAX_ASK), and why the rest is not
+ * read. Used by main for the ask and by the tab for what it says, so a picked repository that is
+ * never read shows its reason instead of loading for ever.
+ */
+export function askPlan(v: unknown, c: AppConfig): AskPlan {
+  const plan: AskPlan = { repos: [], refused: [] }
+  if (!Array.isArray(v) || !c.configured) return plan
+  const seen = new Set<string>()
+  for (const x of v.slice(0, ASK_LOOKED_AT)) {
+    if (typeof x !== 'string' || seen.has(repoKey(x))) continue
+    seen.add(repoKey(x))
+    const reason = repoRefusal(x, c) ?? (plan.repos.length >= REPO_VIEW_MAX_ASK ? `${x} not read: more than ${REPO_VIEW_MAX_ASK} repositories picked.` : null)
+    if (reason) plan.refused.push({ repo: x, reason })
+    else plan.repos.push(c.repos.find((r) => repoKey(r) === repoKey(x)) ?? x)
+  }
+  return plan
+}
+
+/** The repositories an ask may read (`askPlan`). */
+export function cleanRepos(v: unknown, c: AppConfig): string[] {
+  return askPlan(v, c).repos
+}
+
+export type Admit = { ok: true; evict?: string } | { ok: false; reason: string }
+
+/**
+ * May a repository MasterDeck holds nothing of be taken in? `held`: how many it holds; `idle`: the
+ * keys of those that are off screen (not asked for within REPO_VIEW_LIVE_MS, not being read), the
+ * longest unasked first; `queued`: first reads that wait or run. One on screen is never pushed out
+ * (two tabs with different repositories would otherwise read each other's away for ever), and
+ * first reads cannot pile up: the newcomer is refused with a reason the tab shows.
+ */
+export function admitRepo(repo: string, o: { held: number; idle: string[]; queued: number }): Admit {
+  if (o.queued >= REPO_VIEW_MAX_QUEUED) return { ok: false, reason: `${repo} not read: ${REPO_VIEW_MAX_QUEUED} repositories are already waiting for their first read. It is asked again in a few minutes.` }
+  if (o.held < REPO_VIEW_MAX_ENTRIES) return { ok: true }
+  if (o.idle.length) return { ok: true, evict: o.idle[0] }
+  return { ok: false, reason: `${repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` }
+}
+
+/**
+ * The part of a failed repository's note that may start the pause of GitHub reads: what gh said
+ * after "<repo> not read: ". Never the repository's name ("Not found: acme/rate-limiter" names no
+ * rate limit), so null for every other note.
+ */
+export function pauseText(part: { repo: string; note?: string }): string | null {
+  const lead = `${part.repo} not read: `
+  return part.note?.startsWith(lead) ? part.note.slice(lead.length) : null
 }
 
 /** What MasterDeck holds of one repository. */
-export interface RepoEntry extends Omit<RepoPart, 'loading'> {
+export interface RepoEntry extends Omit<RepoPart, 'loading' | 'cut'> {
   cards: BoardCard[]
   /** When GitHub was last asked for it, answered or not (epoch ms). */
   triedAt: number
@@ -114,6 +180,9 @@ export interface RepoRead {
   cards: BoardCard[]
 }
 
+/** The longest note kept of a part (the CLI cuts its own at this too): the parts are in every state push. */
+const NOTE_MAX = 300
+
 /** Parse `master repo-issues` output. Null for anything else. */
 export function parseRepoIssues(raw: unknown): RepoRead | null {
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
@@ -123,7 +192,7 @@ export function parseRepoIssues(raw: unknown): RepoRead | null {
   for (const p of r.repos) {
     const o = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>
     if (typeof o.repo !== 'string' || !validRepo(o.repo)) continue
-    parts.push({ repo: o.repo, account: typeof o.account === 'string' ? o.account : null, ok: o.ok === true, total: count(o.total), shown: count(o.shown), ...(typeof o.note === 'string' && o.note ? { note: o.note } : {}) })
+    parts.push({ repo: o.repo, account: typeof o.account === 'string' ? o.account : null, ok: o.ok === true, total: count(o.total), shown: count(o.shown), ...(typeof o.note === 'string' && o.note ? { note: o.note.slice(0, NOTE_MAX) } : {}) })
   }
   return { parts, cards: parseCards(r.cards) }
 }
@@ -189,7 +258,7 @@ export function liveRepos(asked: Record<string, { repo: string; at: number }>, n
 
 /** Without the repositories that are no longer selected in Setup, or whose account lost its board. The same object when nothing goes. */
 export function pruneEntries(entries: RepoEntries, c: AppConfig): RepoEntries {
-  const keep = Object.entries(entries).filter(([, e]) => repoSelected(e.repo, c) && !repoBoardless(e.repo, c))
+  const keep = Object.entries(entries).filter(([, e]) => repoRefusal(e.repo, c) === null)
   return keep.length === Object.keys(entries).length ? entries : Object.fromEntries(keep)
 }
 
@@ -213,7 +282,7 @@ export function loadEntries(raw: unknown): RepoEntries {
       ok: o.ok === true,
       total: count(o.total),
       shown: count(o.shown),
-      ...(typeof o.note === 'string' && o.note ? { note: o.note } : {}),
+      ...(typeof o.note === 'string' && o.note ? { note: o.note.slice(0, NOTE_MAX) } : {}),
       takenAt: o.takenAt,
       triedAt: o.takenAt,
       cards: parseCards(o.cards),
@@ -235,31 +304,81 @@ export function withAssignee(entries: RepoEntries, t: Ticket, login: string): Re
   return hit ? out : entries
 }
 
-/** What each repository may show when all their cards do not fit `max`: small ones whole, the rest an equal share. Only the cut ones are listed. */
-function cardShares(entries: RepoEntries, max: number): Map<string, number> {
-  const sizes = Object.entries(entries).map(([k, e]) => [k, e.cards.length] as const).sort((a, b) => a[1] - b[1])
-  let left = max
+/** What each of `sizes` (key → how much it wants) gets when they do not all fit `max`: small ones whole, the rest an equal share. Only the cut ones are listed. */
+function shares(sizes: (readonly [string, number])[], max: number): Map<string, number> {
+  const sorted = [...sizes].sort((a, b) => a[1] - b[1])
+  let left = Math.max(0, max)
   const cut = new Map<string, number>()
-  sizes.forEach(([k, n], i) => {
-    const share = Math.floor(left / (sizes.length - i))
+  sorted.forEach(([k, n], i) => {
+    const share = Math.floor(left / (sorted.length - i))
     if (n > share) cut.set(k, share)
     left -= Math.min(n, share)
   })
   return cut
 }
 
-/** The state's repository view, before the columns: undefined while nothing was ever asked for. `loading`: key → repository of the reads that run. */
-export function viewOf(entries: RepoEntries, loading: ReadonlyMap<string, string>, maxCards = REPO_VIEW_MAX_CARDS): RepoView | undefined {
+const utf8 = new TextEncoder()
+const bytesOf = (v: unknown) => utf8.encode(JSON.stringify(v)).length
+/** Per card on top of its JSON: the comma, and the column name the state writes over `status: null`. */
+const CARD_SLACK = 16
+/** Per part on top of its JSON: the comma, `loading` and `cut`, and the line that says it was cut. */
+const PART_SLACK = 160
+
+/**
+ * How many cards each repository may show so that the view fits both budgets: `maxCards` cards and
+ * `maxBytes` of JSON (`partsBytes` of it are the parts). Small repositories whole, the rest an
+ * equal share, first of cards, then of bytes. Only the cut ones are listed.
+ */
+function fitCards(entries: RepoEntries, maxCards: number, maxBytes: number, partsBytes: number): Map<string, number> {
+  const cut = shares(Object.entries(entries).map(([k, e]) => [k, e.cards.length] as const), maxCards)
+  // Each repository's cards so far, as running byte totals: sums[n] is what its first n cards take.
+  const sums = new Map<string, number[]>()
+  for (const [k, e] of Object.entries(entries)) {
+    const run = [0]
+    for (const card of e.cards.slice(0, cut.get(k) ?? e.cards.length)) run.push(run[run.length - 1] + bytesOf(card) + CARD_SLACK)
+    sums.set(k, run)
+  }
+  const byBytes = shares([...sums].map(([k, run]) => [k, run[run.length - 1]] as const), maxBytes - partsBytes - 64)
+  for (const [k, share] of byBytes) {
+    const run = sums.get(k)!
+    let n = run.length - 1
+    while (n > 0 && run[n] > share) n--
+    cut.set(k, n)
+  }
+  return cut
+}
+
+/**
+ * The state's repository view, before the columns: undefined while nothing was ever asked for.
+ * `loading`: key → repository of the reads that run. `refused`: repositories asked for and not
+ * taken in, each with why (a part that was never read). At most `maxCards` cards and `maxBytes`
+ * of JSON: a repository that is cut says so in its note.
+ */
+export function viewOf(
+  entries: RepoEntries,
+  loading: ReadonlyMap<string, string>,
+  o: { maxCards?: number; maxBytes?: number; refused?: ReadonlyMap<string, { repo: string; note: string }> } = {},
+): RepoView | undefined {
+  const refused = [...(o.refused ?? [])].filter(([k]) => !entries[k] && !loading.has(k))
   const keys = [...new Set([...Object.keys(entries), ...loading.keys()])]
-  if (!keys.length) return undefined
-  const share = cardShares(entries, maxCards)
-  const repos: RepoPart[] = keys.map((k) => {
+  if (!keys.length && !refused.length) return undefined
+  const parts = new Map<string, RepoPart>(
+    keys.map((k) => {
+      const e = entries[k]
+      const part: RepoPart = e
+        ? { repo: e.repo, account: e.account, ok: e.ok, total: e.total, shown: e.shown, ...(e.note ? { note: e.note } : {}), takenAt: e.takenAt }
+        : { repo: loading.get(k) ?? k, account: null, ok: false, total: 0, shown: 0, takenAt: null }
+      return [k, part]
+    }),
+  )
+  for (const [k, r] of refused) parts.set(k, { repo: r.repo, account: null, ok: false, total: 0, shown: 0, note: r.note, takenAt: null })
+  const partsBytes = [...parts.values()].reduce((n, p) => n + bytesOf(p) + PART_SLACK, 0)
+  const share = fitCards(entries, o.maxCards ?? REPO_VIEW_MAX_CARDS, o.maxBytes ?? REPO_VIEW_MAX_BYTES, partsBytes)
+  const repos: RepoPart[] = [...parts].map(([k, part]) => {
     const e = entries[k]
-    const part: RepoPart = e
-      ? { repo: e.repo, account: e.account, ok: e.ok, total: e.total, shown: e.shown, ...(e.note ? { note: e.note } : {}), takenAt: e.takenAt }
-      : { repo: loading.get(k) ?? k, account: null, ok: false, total: 0, shown: 0, takenAt: null }
     const cut = share.get(k)
-    const shown = cut !== undefined && e ? { ...part, note: [e.note, `Showing the first ${cut} of ${e.cards.length} issues.`].filter(Boolean).join(' ') } : part
+    const shown: RepoPart =
+      cut !== undefined && e ? { ...part, note: [e.note, `${short(e.repo)}: showing the first ${cut} of the ${e.cards.length} issues read, to keep the view small.`].filter(Boolean).join(' '), cut: true } : part
     return loading.has(k) ? { ...shown, loading: true as const } : shown
   })
   return { cards: Object.entries(entries).flatMap(([k, e]) => (share.has(k) ? e.cards.slice(0, share.get(k)) : e.cards)), repos }
@@ -294,19 +413,29 @@ export interface RepoStatus {
   loading: boolean
   /** Picked repositories that were never read: there is nothing of them on screen. */
   failed: string[]
+  /** One of `failed` could be read by a new ask (its read failed, or MasterDeck had no room for it): the tab asks sooner. */
+  retry: boolean
   /** What to say under the heading, one line each. */
   notes: string[]
 }
 
-/** Where the picked repositories stand: still loading, not read, and what the reads left out. */
+/**
+ * Where the picked repositories stand: still loading, not read, and what the reads left out. A
+ * repository main never reads (`askPlan`: unticked in Setup, another account's with no board,
+ * past the most one tab may pick) is failed with its reason, never loading.
+ */
 export function repoViewStatus(v: RepoView | undefined, repos: string[], c: AppConfig): RepoStatus {
-  const st: RepoStatus = { loading: false, failed: [], notes: [] }
+  const st: RepoStatus = { loading: false, failed: [], retry: false, notes: [] }
+  const never = new Map(askPlan(repos, c).refused.map((r) => [repoKey(r.repo), r.reason]))
   const loading: string[] = []
+  const seen = new Set<string>()
   for (const r of repos) {
-    if (!repoSelected(r, c)) {
-      // A tab saved before the repository was unticked: it is never read.
+    if (seen.has(repoKey(r))) continue
+    seen.add(repoKey(r))
+    const why = never.get(repoKey(r))
+    if (why) {
       st.failed.push(r)
-      st.notes.push(`${r} is not selected in Setup.`)
+      st.notes.push(why)
       continue
     }
     const p = v?.repos.find((x) => repoKey(x.repo) === repoKey(r))
@@ -315,12 +444,21 @@ export function repoViewStatus(v: RepoView | undefined, repos: string[], c: AppC
       loading.push(short(r))
       continue
     }
-    if (p.takenAt === null) st.failed.push(r)
-    if (p.shown < p.total) st.notes.push(`${short(r)}: showing the first ${p.shown} of ${p.total} open issues.`)
+    if (p.takenAt === null) {
+      st.failed.push(r)
+      st.retry = true
+    }
+    // A cut part's own note says how many show: GitHub's count beside it would contradict it.
+    if (!p.cut && p.shown < p.total) st.notes.push(`${short(r)}: showing the first ${p.shown} of ${p.total} open issues.`)
     if (p.note) st.notes.push(p.note)
   }
   if (loading.length) st.notes.push(`Loading ${loading.join(', ')}…`)
   return st
+}
+
+/** How often a tab in repository view asks: sooner while a picked repository was never read and a new ask could read it. */
+export function repoAskEvery(st: RepoStatus): number {
+  return st.retry ? REPO_VIEW_RETRY_MS : REPO_VIEW_ASK_MS
 }
 
 export type RepoEmpty = 'cards' | 'filtered' | 'loading' | 'not-read' | 'no-issues'

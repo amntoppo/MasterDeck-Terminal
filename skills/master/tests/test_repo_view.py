@@ -98,7 +98,7 @@ class QueryTest(unittest.TestCase):
         self.assertNotIn("onBoards", board.build([real], {}, NOW)["cards"][0])
 
 
-class LiveOnlyTest(unittest.TestCase):
+class LiveBase(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.TemporaryDirectory()
         p = mock.patch.dict(os.environ, {"MASTERDECK_HOME": self.home.name})
@@ -117,6 +117,8 @@ class LiveOnlyTest(unittest.TestCase):
             got = collect.Live().repo_issues(TODAY, only=only, boards=boards)
         return got, calls
 
+
+class LiveOnlyTest(LiveBase):
     def test_only_the_asked_repositories_are_read_in_their_configured_spelling(self):
         got, calls = self.run_live([{"data": {"r0": {"open": conn([node(1)], total=7), "closed": {"nodes": []}}}}], ["ACME/API"])
         self.assertEqual(len(calls), 1)
@@ -503,3 +505,184 @@ class CommandThroughRealSourceTest(unittest.TestCase):
                 cli.main(["repo-issues", "--repos", "acme/tracker", "--fixtures", d, "--now", NOW])
         self.assertEqual(json.loads(buf.getvalue())["repos"][0]["note"],
                          "Board columns only partly read (later pages): INSUFFICIENT_SCOPES")
+
+
+ALICE_ALL = {"login": "alice", "primary": True, "name": "Alice", "email": "a@acme.test", "owner": "acme",
+             "ownerType": "organization", "issueRepo": "tracker", "repos": ["acme/tracker"], "allRepos": True,
+             "projects": [BOARDS[0]]}
+BOB_LISTED = {"login": "bob-work", "name": "Bob", "email": "b@globex.test", "owner": "globex", "ownerType": "organization",
+              "issueRepo": "app", "repos": ["globex/app"],
+              "projects": [{"owner": "globex", "ownerType": "organization", "number": 7, "title": "Globex", "columns": ["Todo"]}]}
+
+
+class FakeAccounts(unittest.TestCase):
+    """`master repo-issues` with two accounts whose sources only record what they were asked."""
+
+    def run_cmd(self, repos, accounts, fail=None):
+        seen = {a["login"]: [] for a in accounts}
+
+        def for_account(view, runner=None):
+            login = view["login"]
+
+            class Src:
+                def repo_issues(self, today, only=None, boards=False):
+                    seen[login].append(list(only))
+                    if fail and fail(login, len(seen[login])):
+                        raise RuntimeError("gh: something broke")
+                    return {"items": [ritem(1, repo=r) for r in only], "total": 0, "totals": {}, "repos": list(only),
+                            "skipped": only[config.DERIVED_MAX_REPOS:], "missing": [], "unread": {}}
+
+                def pr_details(self, urls):
+                    return {}
+            return Src()
+
+        buf = io.StringIO()
+        with mock.patch.dict(config.CONFIG, {"accounts": accounts}), \
+                mock.patch.object(collect.Live, "for_account", side_effect=for_account), redirect_stdout(buf):
+            code = cli.main(["repo-issues", "--repos", ",".join(repos), "--now", NOW])
+        return code, json.loads(buf.getvalue()), seen
+
+
+class ManyRepositoriesTest(FakeAccounts):
+    """More than ten repositories of one account: read ten at a time, none left out."""
+
+    def accounts(self, n_a, n_b=1):
+        a = dict(ALICE_ALL, allRepos=False, repos=[f"acme/r{i}" for i in range(n_a)], issueRepo="r0")
+        b = dict(BOB_LISTED, repos=[f"globex/g{i}" for i in range(n_b)], issueRepo="g0")
+        return [a, b]
+
+    def test_twelve_repositories_of_one_account_are_two_reads_and_all_show(self):
+        repos = [f"acme/r{i}" for i in range(12)]
+        code, b, seen = self.run_cmd(repos, self.accounts(12))
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["alice"], [repos[:10], repos[10:]])
+        self.assertEqual([(p["repo"], p["ok"], p.get("note")) for p in b["repos"]], [(r, True, None) for r in repos])
+        self.assertEqual(sorted(c["repo"] for c in b["cards"]), sorted(repos))
+
+    def test_twenty_five_are_three_reads(self):
+        repos = [f"acme/r{i}" for i in range(25)]
+        _, b, seen = self.run_cmd(repos, self.accounts(25))
+        self.assertEqual([len(x) for x in seen["alice"]], [10, 10, 5])
+        self.assertTrue(all(p["ok"] for p in b["repos"]))
+        self.assertEqual(len(b["cards"]), 25)
+
+    def test_two_accounts_are_cut_each_on_its_own(self):
+        a, g = [f"acme/r{i}" for i in range(12)], [f"globex/g{i}" for i in range(11)]
+        mixed = [x for pair in zip(a, g) for x in pair] + [a[11]]
+        _, b, seen = self.run_cmd(mixed, self.accounts(12, 11))
+        self.assertEqual(([len(x) for x in seen["alice"]], [len(x) for x in seen["bob-work"]]), ([10, 2], [10, 1]))
+        self.assertEqual([p["repo"] for p in b["repos"]], mixed)  # in the order asked
+        self.assertTrue(all(p["ok"] and "more than" not in (p.get("note") or "") for p in b["repos"]))
+        self.assertEqual({p["account"] for p in b["repos"] if p["repo"].startswith("globex/")}, {"bob-work"})
+
+    def test_a_read_that_fails_ends_that_accounts_reads_and_keeps_what_was_read(self):
+        repos = [f"acme/r{i}" for i in range(25)]
+        _, b, seen = self.run_cmd(repos + ["globex/g0"], self.accounts(25), fail=lambda login, n: login == "alice" and n == 2)
+        self.assertEqual(len(seen["alice"]), 2)  # the third ten is not asked: the same failure would only repeat
+        self.assertEqual([p["ok"] for p in b["repos"]], [True] * 10 + [False] * 15 + [True])
+        self.assertEqual(b["repos"][10]["note"], "acme/r10 not read: gh: something broke")
+        self.assertEqual(b["repos"][24]["note"], "acme/r24 not read: gh: something broke")
+
+    def test_through_the_real_source_no_call_names_more_than_ten(self):
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        repos = [f"acme/r{i}" for i in range(12)]
+        calls = []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            text = " ".join(cmd)
+            calls.append(text.count("repository("))
+            return json.dumps({"data": {f"r{i}": {"open": conn([node(1)], total=1), "closed": {"nodes": []}}
+                                        for i in range(calls[-1])}})
+
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"MASTERDECK_HOME": home.name}), \
+                mock.patch.dict(config.CONFIG, {"repos": repos, "projects": BOARDS}), \
+                mock.patch.object(collect, "_run", side_effect=fake_run), redirect_stdout(buf):
+            self.assertEqual(cli.main(["repo-issues", "--repos", ",".join(repos), "--now", NOW]), 0)
+        b = json.loads(buf.getvalue())
+        self.assertEqual(calls, [10, 2])
+        self.assertEqual([(p["repo"], p["ok"]) for p in b["repos"]], [(r, True) for r in repos])
+        self.assertEqual(len(b["cards"]), 12)
+
+
+class SelectAllOwnerTest(FakeAccounts):
+    """"Select all" on one account opens that account's owner, not every name on GitHub."""
+
+    def test_an_unlisted_repository_counts_only_under_the_owner_of_an_account_with_select_all(self):
+        cfg = {"accounts": [ALICE_ALL, BOB_LISTED]}
+        for repo, want in (("acme/tracker", True), ("acme/anything", True), ("ACME/Anything", True), ("globex/app", True),
+                           ("globex/secret", False), ("alice/diary", False), ("bob-work/notes", False), (None, False), ("", False)):
+            self.assertEqual(config.repo_readable(repo, cfg), want, repo)
+            if repo:
+                self.assertTrue(config.repo_allowed(repo, cfg))  # what master counts as a ticket of ours is unchanged
+
+    def test_legacy_select_all_is_the_configs_owner(self):
+        cfg = {"owner": "acme", "issueRepo": "tracker", "repos": ["globex/listed"], "allRepos": True}
+        self.assertEqual([config.repo_readable(r, cfg) for r in ("acme/x", "acme/tracker", "globex/listed", "globex/x")],
+                         [True, True, True, False])
+        plain = dict(cfg, allRepos=False)
+        self.assertEqual([config.repo_readable(r, plain) for r in ("acme/x", "acme/tracker", "globex/listed")], [False, True, True])
+
+    def test_the_command_reads_none_of_the_others_with_the_primarys_token(self):
+        asked = ["acme/new", "globex/secret", "alice/diary", "bob-work/notes", "globex/app"]
+        code, b, seen = self.run_cmd(asked, [ALICE_ALL, BOB_LISTED])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, {"alice": [["acme/new"]], "bob-work": [["globex/app"]]})
+        self.assertEqual([(p["repo"], p["ok"], p.get("note")) for p in b["repos"]],
+                         [("acme/new", True, None), ("globex/secret", False, "globex/secret is not selected in Setup"),
+                          ("alice/diary", False, "alice/diary is not selected in Setup"),
+                          ("bob-work/notes", False, "bob-work/notes is not selected in Setup"), ("globex/app", True, None)])
+        self.assertEqual(sorted(c["repo"] for c in b["cards"]), ["acme/new", "globex/app"])
+
+
+class BoardsRefusedShapesTest(LiveBase):
+    PLAIN = {"data": {"r0": {"open": conn([node(1)], total=1), "closed": {"nodes": []}}}}
+
+    def test_an_insufficient_scopes_error_with_no_project_path_is_a_refusal_too(self):
+        refused = {"data": {"r0": None},
+                   "errors": [{"type": "INSUFFICIENT_SCOPES", "message": "Your token has not been granted the required scopes"}]}
+        got, calls = self.run_live([refused, self.PLAIN], ["acme/api"])
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("projectItems", calls[1])
+        self.assertEqual(([i["content"]["number"] for i in got["items"]], got["boards_unread"], got["missing"]),
+                         ([1], "INSUFFICIENT_SCOPES", []))
+
+    def test_a_message_that_names_the_project_scope_is_a_refusal_whatever_its_type(self):
+        refused = {"data": {"r0": None},
+                   "errors": [{"message": "The 'projectItems' field requires one of the following scopes: ['read:project']"}]}
+        got, calls = self.run_live([refused, self.PLAIN], ["acme/api"])
+        self.assertEqual((len(calls), got["boards_unread"], len(got["items"])), (2, "unknown", 1))
+
+    def test_a_repository_named_like_the_field_is_no_refusal(self):
+        gone = {"data": {"r0": None}, "errors": [{"type": "NOT_FOUND", "path": ["r0"],
+                                                  "message": "Could not resolve to a Repository with the name 'acme/projectItems'."}]}
+        got, calls = self.run_live([gone], ["acme/projectItems"], cfg={"repos": ["acme/tracker", "acme/projectItems"], "projects": BOARDS})
+        self.assertEqual((len(calls), got["boards_unread"], got["missing"]), (1, None, ["acme/projectItems"]))
+
+    def run_raising(self, texts, boards=True):
+        calls = []
+
+        def fake_run(cmd, timeout=120, env=None, partial=False):
+            calls.append(" ".join(cmd))
+            if len(calls) <= len(texts):
+                raise RuntimeError(texts[len(calls) - 1])
+            return json.dumps(self.PLAIN)
+
+        with mock.patch.dict(config.CONFIG, TWO_REPOS), mock.patch.object(collect, "_run", side_effect=fake_run):
+            return collect.Live().repo_issues(TODAY, only=["acme/api"], boards=boards), calls
+
+    def test_gh_failing_with_no_data_over_the_project_scope_is_read_again_without_the_boards(self):
+        text = ("gh: Your token has not been granted the required scopes to execute this query. The 'projectItems' field "
+                "requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.")
+        got, calls = self.run_raising([text])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("projectItems", calls[0])
+        self.assertNotIn("projectItems", calls[1])
+        self.assertEqual(([i["content"]["number"] for i in got["items"]], got["boards_unread"]), ([1], "INSUFFICIENT_SCOPES"))
+
+    def test_any_other_failure_still_fails_and_so_does_a_second_refusal(self):
+        with self.assertRaisesRegex(RuntimeError, "rate limit"):
+            self.run_raising(["gh: API rate limit exceeded"])
+        with self.assertRaisesRegex(RuntimeError, "read:project"):
+            self.run_raising(["needs read:project", "needs read:project"])

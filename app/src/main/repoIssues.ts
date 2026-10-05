@@ -1,5 +1,5 @@
 import type { AppConfig } from '@shared/appConfig'
-import { applyRead, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pruneEntries, repoKey, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, type RepoEntries } from '@shared/repoView'
+import { admitRepo, applyRead, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pauseText, pruneEntries, repoKey, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, type RepoEntries } from '@shared/repoView'
 import type { Ticket } from '@shared/ticket'
 import type { RepoView } from '@shared/types'
 
@@ -22,7 +22,9 @@ type Outcome = { ok: boolean; message: string }
  * The issues behind the Board's repository view, per repository. Nothing is read until a tab
  * asks (`ask`); what was read stays (and is cached) until the repository is unticked in Setup.
  * A repository is read again by an ask once it is an hour old, and by every GitHub refresh while
- * a tab showing it asked within the last hour. One read at a time.
+ * a tab showing it asked within the last hour. One read at a time. It keeps at most
+ * REPO_VIEW_MAX_ENTRIES repositories and never drops one that is on screen: a new one that finds
+ * no room is refused, and the view says why.
  */
 export class RepoIssues {
   private entries: RepoEntries = {}
@@ -30,6 +32,8 @@ export class RepoIssues {
   /** Key → repository of the reads that run or wait; one read at most per repository (a second ask joins it). */
   private loading = new Map<string, string>()
   private inflight = new Map<string, Promise<Outcome>>()
+  /** Key → a repository asked for and not taken in (no room, too many first reads waiting), with why and when. The latest asked last. */
+  private refused = new Map<string, { repo: string; note: string; at: number }>()
   private chain: Promise<unknown> = Promise.resolve()
   private out: RepoView | undefined
   private sig = ''
@@ -58,9 +62,9 @@ export class RepoIssues {
     return new Set(Object.entries(this.asked).filter(([, a]) => now - a.at < REPO_VIEW_LIVE_MS).map(([k]) => k))
   }
 
-  /** At most REPO_VIEW_MAX_ENTRIES repositories (entries and asks both): the one asked for longest ago goes, never one being read. */
+  /** At most REPO_VIEW_MAX_ENTRIES repositories (entries and asks both): the one asked for longest ago goes, never one on screen or being read. */
   private cap(): void {
-    const keep = new Set(this.loading.keys())
+    const keep = new Set([...this.loading.keys(), ...this.live()])
     this.set(trimEntries(this.entries, this.asked, keep))
     const keys = Object.keys(this.asked)
     if (keys.length > REPO_VIEW_MAX_ENTRIES) {
@@ -72,14 +76,61 @@ export class RepoIssues {
     }
   }
 
+  /** The keys MasterDeck holds something of: read, asked for, or being read. */
+  private held(): Set<string> {
+    return new Set([...Object.keys(this.entries), ...Object.keys(this.asked), ...this.loading.keys()])
+  }
+
+  /** Forgets a repository that is off screen, to make room for another. */
+  private drop(key: string): void {
+    if (this.entries[key]) {
+      const { [key]: _gone, ...rest } = this.entries
+      this.set(rest)
+    }
+    delete this.asked[key]
+  }
+
+  /** Notes that a repository was asked for and not taken in. True when the view changes by it. */
+  private refuse(key: string, repo: string, note: string, at: number): boolean {
+    const was = this.refused.get(key)
+    this.refused.delete(key)
+    this.refused.set(key, { repo, note, at })
+    // The refusals are bounded too: the one asked for longest ago goes.
+    while (this.refused.size > REPO_VIEW_MAX_ENTRIES) this.refused.delete(this.refused.keys().next().value!)
+    return was?.note !== note
+  }
+
   /** A Board tab shows these repositories (from the renderer or the web: untrusted input). */
   ask(raw: unknown): void {
     const repos = cleanRepos(raw, this.deps.config())
     const now = this.now()
-    for (const r of repos) this.asked[repoKey(r)] = { repo: r, at: now }
-    this.cap()
-    // Cut by the cap just now: not asked for any more.
-    const need = needRead(this.entries, repos, now).filter((r) => !this.inflight.has(repoKey(r)) && this.asked[repoKey(r)])
+    const taken: string[] = []
+    // First reads that wait or run, with the ones this ask adds.
+    let queued = [...this.loading.keys()].filter((k) => this.entries[k]?.takenAt == null).length
+    let told = false
+    for (const r of repos) {
+      const k = repoKey(r)
+      const held = this.held()
+      if (!held.has(k)) {
+        const live = this.live()
+        const idle = [...held].filter((x) => !live.has(x) && !this.loading.has(x)).sort((a, b) => (this.asked[a]?.at ?? -1) - (this.asked[b]?.at ?? -1))
+        const got = admitRepo(r, { held: held.size, idle, queued })
+        if (!got.ok) {
+          told = this.refuse(k, r, got.reason, now) || told
+          continue
+        }
+        if (got.evict) this.drop(got.evict)
+        queued++
+      }
+      if (this.refused.delete(k)) told = true
+      this.asked[k] = { repo: r, at: now }
+      taken.push(r)
+    }
+    if (told) {
+      this.stale = true
+      this.deps.changed(false)
+    }
+    const need = needRead(this.entries, taken, now).filter((r) => !this.inflight.has(repoKey(r)))
     if (!need.length) return
     if (this.deps.paused()) {
       // Nothing to show for a repository never read: say why. Tried at 0, so the next ask after the pause reads it.
@@ -131,8 +182,9 @@ export class RepoIssues {
         // A repository unticked while it was read does not come back.
         this.set(this.pruned(applyRead(this.entries, fresh, got, error, this.now())))
         this.cap()
-        // A rate limit, in the whole read or in one repository's note, pauses GitHub reads as any other does.
-        for (const text of [error, ...(got?.parts.filter((p) => !p.ok).map((p) => p.note) ?? [])]) if (text) this.deps.paused(text)
+        // A rate limit, in the whole read or in what gh said of one repository, pauses GitHub reads as any other
+        // does. Never a repository's name: "Not found: acme/rate-limiter" names no rate limit (`pauseText`).
+        for (const text of [error, ...(got?.parts.filter((p) => !p.ok).map(pauseText) ?? [])]) if (text) this.deps.paused(text)
         this.deps.changed(true)
         return { ok: !error, message: error ?? 'refreshed' }
       }
@@ -146,15 +198,18 @@ export class RepoIssues {
 
   /**
    * For the state: the same object until something changes. Only the repositories on screen (asked
-   * for within the last hour, or being read): the rest stays in the cache, out of every state push.
-   * Undefined while nothing is.
+   * for within the last hour, or being read), and the ones asked for and refused: the rest stays in
+   * the cache, out of every state push. Undefined while nothing is.
    */
   view(): RepoView | undefined {
     const live = this.live()
-    const sig = [...live, '|', ...this.loading.keys()].join(',')
+    const now = this.now()
+    // A refusal shows for as long as a repository does after its last ask.
+    const refused = new Map([...this.refused].filter(([, r]) => now - r.at < REPO_VIEW_LIVE_MS))
+    const sig = [...live, '|', ...this.loading.keys(), '|', ...refused.keys()].join(',')
     if (this.stale || sig !== this.sig) {
       const shown = Object.fromEntries(Object.entries(this.entries).filter(([k]) => live.has(k) || this.loading.has(k)))
-      this.out = viewOf(shown, this.loading)
+      this.out = viewOf(shown, this.loading, { refused })
       this.sig = sig
       this.stale = false
     }
@@ -172,6 +227,11 @@ export class RepoIssues {
     if (!c.configured) return
     this.set(pruneEntries(this.entries, c))
     for (const k of Object.keys(this.asked)) if (!cleanRepos([this.asked[k].repo], c).length) delete this.asked[k]
+    for (const [k, r] of this.refused) {
+      if (cleanRepos([r.repo], c).length) continue
+      this.refused.delete(k)
+      this.stale = true
+    }
   }
 
   /** From cache.json at launch. */

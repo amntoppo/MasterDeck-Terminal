@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from '@shared/appConfig'
-import { REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS } from '@shared/repoView'
+import { repoViewStatus, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_MAX_QUEUED, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS } from '@shared/repoView'
 import { RepoIssues } from './repoIssues'
+import { RATE_LIMITED } from './sources'
 
 const BOARD = { owner: 'acme', number: 1, title: 'Delivery', columns: ['To Do', 'In QA'] }
 const boarded = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [BOARD] })
@@ -12,6 +13,10 @@ const card = (n: number, repo: string) => ({ number: n, repo, project: null, tit
 const answer = (repos: string[], n = 7) => ({ taken_at: 'x', cards: repos.map((r) => card(n, r)), repos: repos.map((r) => ({ repo: r, account: null, ok: true, total: 1, shown: 1 })) })
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
+/** Lets the reads an ask started end (no refresh: that would read again). */
+const settle = async () => {
+  for (let i = 0; i < 3; i++) await tick()
+}
 
 function make(o: { cfg?: ReturnType<typeof parseConfig>; reply?: (repos: string[]) => { ok: true; data: unknown } | { ok: false; message: string } } = {}) {
   const calls: { repos: string[]; force: boolean }[] = []
@@ -121,7 +126,7 @@ describe('RepoIssues', () => {
     store.ask(['acme/api', 'acme/tracker'])
     expect(await store.refresh()).toEqual({ ok: true, message: 'refreshed' })
     expect(store.view()?.repos.map((p) => [p.repo, p.ok, p.takenAt !== null])).toEqual([['acme/api', true, true], ['acme/tracker', false, false]])
-    expect(notes).toContain('acme/tracker not read: gh: API rate limit exceeded')
+    expect(notes).toEqual(['gh: API rate limit exceeded']) // what gh said, without the repository's name
   })
   it('an answer of the wrong shape, or a read that throws, is a failure, not a crash', async () => {
     const a = make({ reply: () => ({ ok: true, data: { nope: 1 } }) })
@@ -201,7 +206,7 @@ describe('RepoIssues: what the state carries', () => {
     await store.refresh()
     const v = store.view()!
     expect(v.cards.length).toBeLessThan(2000)
-    expect(v.repos[0]).toMatchObject({ total: 2000, shown: 2000, note: `Showing the first ${v.cards.length} of 2000 issues.` })
+    expect(v.repos[0]).toMatchObject({ total: 2000, shown: 2000, cut: true, note: `api: showing the first ${v.cards.length} of the 2000 issues read, to keep the view small.` })
   })
 })
 
@@ -213,17 +218,159 @@ describe('RepoIssues: untrusted asks are bounded', () => {
     await store.refresh(true)
     expect(calls.map((c) => c.repos)).toEqual([['acme/web']]) // the refresh joined the ask's read
   })
-  it('keeps at most so many repositories: the one asked for longest ago goes', async () => {
+  it('keeps at most so many repositories: one off screen, asked for longest ago, makes room', async () => {
     const { store, t } = make({ cfg: all })
-    for (let i = 0; i < REPO_VIEW_MAX_ENTRIES + 5; i++) {
+    for (let i = 0; i < REPO_VIEW_MAX_ENTRIES; i++) {
+      t.now += 1
+      store.ask([`acme/r${i}`])
+      await store.refresh()
+    }
+    t.now += REPO_VIEW_LIVE_MS // every tab that showed them is gone
+    for (let i = REPO_VIEW_MAX_ENTRIES; i < REPO_VIEW_MAX_ENTRIES + 5; i++) {
       t.now += 1
       store.ask([`acme/r${i}`])
       await store.refresh()
     }
     const kept = Object.keys(store.dump() ?? {})
     expect(kept).toHaveLength(REPO_VIEW_MAX_ENTRIES)
-    expect(kept).not.toContain('acme/r0')
+    for (let i = 0; i < 5; i++) expect(kept).not.toContain(`acme/r${i}`)
+    expect(kept).toContain('acme/r5')
     expect(kept).toContain(`acme/r${REPO_VIEW_MAX_ENTRIES + 4}`)
+  })
+})
+
+describe('RepoIssues: "Select all" on one account, a second account without', () => {
+  const GLOBEX = { owner: 'globex', number: 7, title: 'Globex', columns: ['Todo'] }
+  const acct = (login: string, owner: string, repos: string[], projects: unknown[], more: Record<string, unknown> = {}) => ({ login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repos[0].split('/')[1], repos, projects, ...more })
+  const mixed = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [BOARD], { primary: true, allRepos: true }), acct('bob-work', 'globex', ['globex/app'], [GLOBEX])] })
+  it('another owner\'s unlisted repository, and names that are logins, never reach the read', async () => {
+    const { store, calls } = make({ cfg: mixed })
+    store.ask(['acme/new', 'globex/secret', 'alice/diary', 'bob-work/notes', 'globex/app'])
+    await store.refresh(true)
+    expect(calls.map((c) => c.repos)).toEqual([['acme/new', 'globex/app']])
+    expect(store.view()?.repos.map((p) => p.repo)).toEqual(['acme/new', 'globex/app'])
+  })
+})
+
+describe('RepoIssues: several tabs, more repositories than it keeps', () => {
+  const names = (from: number, n: number) => Array.from({ length: n }, (_, i) => `acme/r${from + i}`)
+  const forty = parseConfig({ owner: 'acme', issueRepo: 'r0', repos: names(0, 40), projects: [BOARD] })
+  it('two tabs with 20 different repositories each: nothing on screen is pushed out, nothing is read twice, the rest says why', async () => {
+    const { store, calls, t } = make({ cfg: forty })
+    const a = names(0, 20)
+    const b = names(20, 20)
+    for (let round = 0; round < 6; round++) {
+      t.now += 60_000
+      store.ask(a)
+      await settle()
+      t.now += 60_000
+      store.ask(b)
+      await settle()
+    }
+    const read = calls.flatMap((c) => c.repos)
+    expect(new Set(read).size).toBe(read.length) // an ask never read a repository a second time
+    expect(read.sort()).toEqual([...a, ...b.slice(0, 10)].sort())
+    const parts = store.view()!.repos
+    expect(parts.filter((p) => p.ok).map((p) => p.repo).sort()).toEqual([...a, ...b.slice(0, 10)].sort())
+    const out = parts.filter((p) => !p.ok)
+    expect(out.map((p) => p.repo)).toEqual(b.slice(10))
+    for (const p of out) expect(p).toEqual({ repo: p.repo, account: null, ok: false, total: 0, shown: 0, takenAt: null, note: `${p.repo} not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` })
+    // The second tab says so instead of loading for ever, and goes on asking.
+    const st = repoViewStatus(store.view(), b, forty)
+    expect(st).toMatchObject({ loading: false, failed: b.slice(10), retry: true })
+    // The first tab goes back to the board: an hour later its repositories make room.
+    t.now += REPO_VIEW_LIVE_MS
+    store.ask(b)
+    await settle()
+    expect(repoViewStatus(store.view(), b, forty)).toMatchObject({ loading: false, failed: [] })
+    expect(store.view()!.repos.map((p) => p.repo).sort()).toEqual([...b].sort())
+    expect(Object.keys(store.dump() ?? {})).toHaveLength(REPO_VIEW_MAX_ENTRIES)
+  })
+  it('first reads cannot pile up: past the most that may wait, a new repository is refused with a reason, and nothing more is queued', async () => {
+    const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })
+    let release = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const calls: string[][] = []
+    const t = { now: 1_000_000 }
+    const store = new RepoIssues({
+      read: async (repos) => {
+        calls.push(repos)
+        await gate
+        return { ok: true, data: answer(repos) }
+      },
+      config: () => all,
+      paused: () => false,
+      changed: () => {},
+      now: () => t.now,
+    })
+    // A browser asks for ever new names, ten at a time.
+    for (let i = 0; i < 20; i++) store.ask(names(i * 10, 10))
+    await tick()
+    const parts = store.view()!.repos
+    expect(parts.filter((p) => p.loading)).toHaveLength(REPO_VIEW_MAX_QUEUED)
+    const refused = parts.filter((p) => !p.loading)
+    expect(refused.length).toBeGreaterThan(0)
+    expect(refused.length).toBeLessThanOrEqual(REPO_VIEW_MAX_ENTRIES) // and the refusals themselves are bounded
+    for (const p of refused) expect(p.note).toBe(`${p.repo} not read: ${REPO_VIEW_MAX_QUEUED} repositories are already waiting for their first read. It is asked again in a few minutes.`)
+    release()
+    await store.refresh()
+    expect(calls.flat()).toHaveLength(REPO_VIEW_MAX_QUEUED)
+    expect(calls.flat()).toEqual(names(0, REPO_VIEW_MAX_QUEUED))
+  })
+  it('a refused repository is taken in by a later ask once there is room, and its refusal goes', async () => {
+    const { store, t } = make({ cfg: forty })
+    store.ask(names(0, 30))
+    await store.refresh()
+    store.ask(['acme/r35'])
+    const no = store.view()!.repos.find((p) => p.repo === 'acme/r35')!
+    expect(no).toMatchObject({ ok: false, takenAt: null })
+    expect(no.note).toContain('MasterDeck already shows')
+    expect(no).not.toHaveProperty('loading')
+    t.now += REPO_VIEW_LIVE_MS
+    store.ask(['acme/r35'])
+    await store.refresh()
+    expect(store.view()!.repos).toMatchObject([{ repo: 'acme/r35', ok: true }])
+  })
+  it('a refusal is forgotten an hour after its last ask, and when Setup no longer selects the repository', async () => {
+    const { store, t } = make({ cfg: forty })
+    store.ask(names(0, 30))
+    await settle()
+    t.now += 10
+    store.ask(['acme/r35'])
+    expect(store.view()!.repos.map((p) => p.repo)).toContain('acme/r35')
+    t.now += REPO_VIEW_LIVE_MS - 10 // the thirty are off screen now; the refusal was asked for 10 ms later
+    store.ask(['acme/r1'])
+    expect(store.view()!.repos.map((p) => p.repo)).toEqual(['acme/r1', 'acme/r35'])
+    t.now += 10
+    expect(store.view()!.repos.map((p) => p.repo)).toEqual(['acme/r1'])
+    const again = make({ cfg: forty })
+    again.store.ask(names(0, 30))
+    await settle()
+    again.store.ask(['acme/r35'])
+    expect(again.store.view()!.repos.map((p) => p.repo)).toContain('acme/r35')
+    again.t.cfg = parseConfig({ owner: 'acme', issueRepo: 'r0', repos: names(0, 30), projects: [BOARD] })
+    again.store.prune()
+    expect(again.store.view()!.repos.map((p) => p.repo)).not.toContain('acme/r35')
+    expect(again.store.view()!.repos).toHaveLength(30)
+  })
+})
+
+describe('RepoIssues: the pause hears what gh said, not a repository\'s name', () => {
+  it('"Not found: acme/rate-limiter" starts no pause; a rate limit on it does', async () => {
+    const limiter = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/rate-limiter'], projects: [BOARD] })
+    let note = 'Not found: acme/rate-limiter'
+    const { store, notes } = make({ cfg: limiter, reply: () => ({ ok: true, data: { taken_at: 'x', cards: [], repos: [{ repo: 'acme/rate-limiter', account: null, ok: false, total: 0, shown: 0, note }] } }) })
+    store.ask(['acme/rate-limiter'])
+    await store.refresh()
+    expect(notes).toEqual([])
+    expect(notes.some((n) => RATE_LIMITED.test(n))).toBe(false)
+    note = 'acme/rate-limiter not read: NOT_FOUND'
+    await store.refresh(true)
+    expect(notes).toEqual(['NOT_FOUND'])
+    expect(RATE_LIMITED.test(notes[0])).toBe(false)
+    note = 'acme/rate-limiter not read: RATE_LIMITED'
+    await store.refresh(true)
+    expect(RATE_LIMITED.test(notes[1])).toBe(true)
   })
 })
 
@@ -249,7 +396,7 @@ describe('RepoIssues: failing, concurrent and half-written', () => {
     const { store, notes } = make({ reply: () => ({ ok: true, data: { taken_at: 'x', cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note: 'acme/api not read: RATE_LIMITED' }] } }) })
     store.ask(['acme/api'])
     await store.refresh()
-    expect(notes).toContain('acme/api not read: RATE_LIMITED')
+    expect(notes).toEqual(['RATE_LIMITED'])
   })
   it('a refresh joins the read that runs; loading lasts until it ends; an overlapping read of another repository is its own', async () => {
     const release: (() => void)[] = []

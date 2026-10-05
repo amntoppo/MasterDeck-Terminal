@@ -69,7 +69,7 @@ cd app
 npm install          # postinstall runs electron-builder install-app-deps (node-pty for Electron)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.node.json + tsconfig.web.json; must be clean
-npm test             # vitest: ~1260 tests in ~125 files (~40 s); predictiveEcho alone ~30 s
+npm test             # vitest: ~1290 tests in ~125 files (~40 s); predictiveEcho alone ~30 s
 npm run build        # electron-vite build → out/
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
 npm run dev:web      # web app dev server (MD_API=http://localhost:8787 for a local backend)
@@ -146,7 +146,7 @@ web tabs keep working.
 | PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
-| Board repository view | `shared/repoView.ts` (`repoViewOn`, `cleanRepos`, `repoPickable`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
+| Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
@@ -271,14 +271,24 @@ buttons; it does not go through macOS window drag regions.
   Summary) and `fallback` alone answers "has the account no board" (the hint, Create a GitHub board, a
   ticket with no board step): use the right one. Its cards are `derived`, so every guard against
   writing a derived card's status covers them. master never sees these issues. The state carries
-  only the repositories on screen (asked within the hour), at most 1200 cards and 30 repositories:
-  anything that publishes more can push the web bridge's frame over its limit and drop the whole state.
+  only the repositories on screen (asked within the hour), at most 1200 cards, 500 KB of JSON
+  (`viewOf`: `REPO_VIEW_MAX_BYTES`) and 30 repositories. That bounds the view's share, not the
+  state: the web bridge drops a whole state over about 1.05 MB of JSON, so anything new in the view
+  must go through `viewOf`'s budget.
+  What is never read and what the tab says about it come from one rule, `askPlan` (`cleanRepos` and
+  `repoViewStatus` both use it): a new reason to drop a repository goes there, or the tab shows
+  "Loading issues…" for ever. `RepoIssues` never drops a repository that is on screen; a new one
+  that finds no room is refused with a note (`admitRepo`).
+  `master repo-issues` is the one place that cuts a long list into reads of ten per account.
   Only the Board's own Refresh / Retry forces the read past the gh cache (`refreshGithub(force,
   repoForce)`); the refresh after a ticket or an assign does not.
 - **A session can be linked to an issue no board holds** when its repository is selected in Setup
-  (`LinkDeps.offBoard`, decided by `offBoardOk`: listed in Setup, or under Select all an owner the
-  config names). A linked ticket need not have a card: anything that wants its status must look for
-  `card.project` first, as `BoardFlow.move` does.
+  (`LinkDeps.offBoard`, decided by `offBoardOk`: listed in Setup, or, unlisted, a repository of the
+  owner of an account that itself has Select all; the CLI's `config.repo_readable` is the same rule,
+  and `repo_allowed` is the looser one for what GitHub returned). A linked ticket need not have a
+  card: anything that wants its status must look for `card.project` first, as `BoardFlow.move` does.
+  The session's PR is added to the issue as a closing reference (`linkPr`): merging it closes the
+  issue, also one no board holds.
 - **The isolated app rewrites `$MASTER_HOME/config.json` into the accounts form on first start**
   (with the machine's gh login). To change the repositories of a second run, edit
   `accounts[].repos` too, or start from a fresh `$MASTER_HOME`.
@@ -309,16 +319,18 @@ buttons; it does not go through macOS window drag regions.
 - Plan K (Board repository view: picking repositories in a Board tab's Repos filter shows all their
   issues, on a board or not, in MasterDeck's columns, with sessions started from a click; a session
   can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on
-  branch `feat/board-repository-view` (10 commits on `main` 7f971c4 plus the docs commit), not
-  merged, not pushed, not installed. Checked there: typecheck, vitest (1263 passed, 3 skipped), the
-  Python suite (348), the Board's markup for tabs with no repository picked (identical to `main`,
+  branch `feat/board-repository-view` (on `main` 7f971c4: 10 commits, the docs commit, and the
+  final review's fixes), not merged, not pushed, not installed. Checked there: typecheck, vitest
+  (1291 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
+  suites alone checked), the Board's markup for tabs with no repository picked (identical to `main`,
   also the live DOM and a screenshot of the isolated app against `main`'s), the isolated app with
   `MASTERDECK_BOARD_FIXTURE` and `MASTERDECK_REPO_FIXTURE` (the view, its notes, the loading, empty,
   not-read and not-selected states, the popups' **Start a session**, New ticket preset to the
   repository with no sprint, Back to board; a tab with no board only filters), and the phone layout
   at 390x844 on `/?preview`. Not checked: anything against GitHub (`master repo-issues` ran with
   fake runners only: the first real read is the user's, TODO has what to look at), starting a
-  session or creating a ticket from the view, the PR popup at phone width. A saved tab that already
+  session or creating a ticket from the view, the PR popup at phone width, the cost of the read in
+  GraphQL points. A saved tab that already
   had repositories picked opens as a repository view after the update. Deploy the web app only after
   the desktop release that has it. Spec and plan: backend repo, `docs/superpowers/` (2026-10-05).
 - Plan J (Board without a GitHub project: repository issues in derived columns, Create a GitHub board,

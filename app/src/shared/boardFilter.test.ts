@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, assignChoices, primaryLogin, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, assignChoices, primaryMe, startSessionTitle, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, reviewName, UNASSIGNED } from './boardFilter'
 import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -62,10 +62,15 @@ describe('a card that is not mine (also in the repository view)', () => {
       { login: 'alice', primary: true, owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'], projects: [] },
       { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [] },
     ] })
-    expect(primaryLogin(null, c)).toBe('alice') // no login read yet: the config's primary
-    expect(primaryLogin('alice', c)).toBe('alice')
-    expect(primaryLogin(null, parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
-    expect(assignChoices('alice', primaryLogin(null, c), ['zoe'])).toEqual(['alice', 'zoe'])
+    expect(primaryMe(null, c)).toBe('alice') // no login read yet: the config's primary
+    expect(primaryMe('alice', c)).toBe('alice')
+    expect(primaryMe(null, parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
+    expect(assignChoices('alice', primaryMe(null, c), ['zoe'])).toEqual(['alice', 'zoe'])
+  })
+  it('Start a session says what stays as it is: who is assigned, and that nothing is written', () => {
+    expect(startSessionTitle([])).toBe('Start a session for this issue as it is: nobody is assigned, and nothing is written to GitHub')
+    expect(startSessionTitle(['bob-work'])).toBe('Start a session for this issue as it is: it stays assigned to bob-work, and nothing is written to GitHub')
+    expect(startSessionTitle(['bob-work', 'zoe'])).toBe('Start a session for this issue as it is: it stays assigned to bob-work, zoe, and nothing is written to GitHub')
   })
   it('a PR review is started for the ticket in its own repository', () => {
     const p = { url: 'https://github.com/acme/api/pull/5', repo: 'api', number: 5, title: 'Fix', author: 'rahul' }
@@ -134,10 +139,6 @@ describe('repos and boards', () => {
   it('a board filter shows only those boards columns', () => {
     expect(applyFilters(b, { ...f, projects: ['acme/2'] }).columns).toEqual(['Backlog', 'Doing'])
     expect(applyFilters(b, f).columns).toEqual(b.columns)
-  })
-
-  it('offers the selected repos and those on cards, once each', () => {
-    expect(repoOptions(b, ['acme/tracker', 'ACME/API'])).toEqual(['acme/tracker', 'ACME/API', 'acme/web'])
   })
 
   it('older saved filters get the new fields', () => {

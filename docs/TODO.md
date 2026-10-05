@@ -179,12 +179,17 @@ fixes it, and move the item here to "Recently done".
     that is not the repository's.
 
 - **P2 · BoardFlow autoLink marks `linkTried` before the attempt.** A transient `issueInfo` failure means the session is never linked (no retry); more visible now that off-board issues link (`offBoard`). Where: `main/boardFlow.ts` autoLink. Approach: set `linkTried` only after a definitive answer (linked, or refused as not selected), keep it unset on a read failure.
-- **P2 · First real use of the Board's repository view.** `master repo-issues` was tested with fake
-  runners only. On a real repository confirm: GitHub accepts the combined query (`projectItems`
-  inside the repository-issues query) and what it costs (the shared cache's log shows the points
-  left), the chip matches the card's column on the board, and, if a token without the `project`
-  scope is at hand, the view still shows its issues with the note "Board columns not read: …". Where:
-  `collect.Live.repo_issues`, `board._boards_part`, spec §12.
+- **P2 · First real use of the Board's repository view: its GraphQL cost is unproven.** `master
+  repo-issues` was tested with fake runners only. On a real repository confirm: GitHub accepts the
+  combined query (`projectItems` inside the repository-issues query) and what it costs (the shared
+  cache's log shows the points left; the spec's 6 to 7 points per repository is an estimate, and a
+  tab with more than ten repositories of one account now makes one call per ten, one after the
+  other, inside one CLI run that has two minutes per ten), the chip matches the card's column on the
+  board, and, if a token without the `project` scope is at hand, the view still shows its issues
+  with the note "Board columns not read: …" (the refusal is recognised by an error on a
+  `projectItems` path, by type `INSUFFICIENT_SCOPES`, by a message naming `projectItems` or
+  `read:project`, and when gh fails with no data over one of those: none of the four shapes was seen
+  live). Where: `collect.Live.repo_issues`, `collect._boards_refusal`, `board._boards_part`, spec §12.
 - **P2 · Deploy the web app only after the desktop release that has the repository view.** A desktop
   from before has no `board:repos` handler: a web tab with repositories picked (a saved one counts)
   sits on "Loading issues…" for ever. Approach: in `BoardView`, when an asked repository has no part
@@ -194,8 +199,21 @@ fixes it, and move the item here to "Recently done".
   shows up when the gh cache lets the next read through (an assign shows at once: `noteAssigned`).
   Approach: after a write, force a read of that one repository (`RepoIssues.refresh` with a list).
 - **P3 · A big repository view is cut, and slow before the cut.** The state carries at most 1200
-  cards across the picked repositories ("Showing the first N of M issues.") and 30 repositories.
+  cards and 500 KB of JSON across the repositories on screen ("api: showing the first N of the M
+  issues read, to keep the view small.") and 30 repositories.
   Approach: render a column's cards on scroll, or page the read, then raise the limits.
+- **P3 · Only the repository view's share of the state is size-budgeted.** The web bridge drops a
+  state whose JSON passes about 1.05 MB (`browserBridge.ts` `tooBig`); `viewOf` keeps the view under
+  500 KB, but the board, sessions and PR lists have no budget, so a very large board beside a full
+  view can still lose the web its state (the desktop is not affected). Approach: measure the whole
+  state in `Sources.build` and shrink the view's budget by what the rest takes, or say so in the web app.
+- **P3 · A refusal can fall out of what MasterDeck remembers.** It keeps the 30 latest refusals
+  (a repository it had no room for). A tab whose refusal was pushed out by 30 newer ones shows
+  "Loading api…" for that repository until its next ask (at most 20 minutes) instead of the reason.
+  Needs more than 60 distinct repositories asked for within the hour. Approach: answer `boardRepos`
+  with the plan instead of fire-and-forget.
+- **P3 · The repository view does not say when MasterDeck on the Mac is older than the web page**
+  (see "Deploy the web app only after…" above): the same "Loading issues…" for ever.
 - **P3 · A no-board account's repositories past the first ten cannot be seen by picking one.** Picking
   filters what `master board` read (the first ten). Approach: let `cleanRepos` accept a repository of
   a no-board account that its `derived` part lists as `skipped`.
@@ -205,12 +223,17 @@ fixes it, and move the item here to "Recently done".
   change. The web app has it.
 - **P3 · An archived project item still shows as a chip** in the repository view (`projectItems`
   returns archived items). Approach: read `isArchived` and leave those out.
-- **P3 · Small things seen in the isolated app (plan K, Task 8).** **Start a session** on the Assign
-  popup always carries the tooltip "…nobody is assigned…", also when someone else is (the popup's own
-  line says "Replaces alice"); a card in Done whose PR is merged still shows the **Review PR** badge;
-  the phone preview has no card that opens the PR popup, so its fit at 390 px was not seen (add one
-  to `web/preview/fixture.ts`); two test files use real-looking first names as logins
-  (`newTicket.test.ts`, `boardFilter.test.ts`, from before this plan): rename to `alice` / `bob-work`.
+- **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens
+  the PR popup, so its fit at 390 px (with the new **Start a session** button) was not seen. Approach:
+  add such a card to `web/preview/fixture.ts` and look at `/?preview` at 390x844.
+- **P3 · Small things seen in the isolated app (plan K, Task 8).** A card in Done whose PR is merged
+  still shows the **Review PR** badge; two test files use real-looking first names as logins in
+  lines from before this plan (`newTicket.test.ts`, `boardFilter.test.ts`): rename to `alice` /
+  `bob-work`.
+- **P3 · The final fixes of plan K were checked by the two test suites only**, not in the isolated
+  app: reads of more than ten repositories, the stricter Select all rule, the reasons a picked
+  repository is not read, the 5-minute ask, the size budget, the Assign popup's tooltip. Approach:
+  one isolated run with `MASTERDECK_REPO_FIXTURE` and a tab that picks an unticked repository.
 
 ## Remote / web
 
@@ -315,7 +338,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
-| Board repository view (plan K; spec and plan in the backend repo, 2026-10-05): a Board tab with repositories picked in its Repos filter, on an account with a board, shows every issue of them, on a board or not, in Todo / In Dev / PR Raised / Done (`shared/repoView.ts`, `main/repoIssues.ts`, `master repo-issues`), read only while such a tab is on screen (at most 1200 cards and 30 repositories in the state; only the Board's Refresh / Retry skips the gh cache; a never-read repository is retried after 5 minutes); a chip shows the column of an issue that is also on a board; a session can be started from any card (**Start a session** on the Assign and PR popups) and linked to an issue no board holds (`offBoardOk`); a new ticket from the view goes to the first picked repository with no sprint; the Repos filter shows with one repository; a tab with no board still only filters; master is unchanged | the commits of `feat/board-repository-view` (fill in the range once it is merged) | — |
+| Board repository view (plan K; spec and plan in the backend repo, 2026-10-05): a Board tab with repositories picked in its Repos filter, on an account with a board, shows every issue of them, on a board or not, in Todo / In Dev / PR Raised / Done (`shared/repoView.ts`, `main/repoIssues.ts`, `master repo-issues`), read only while such a tab is on screen, ten repositories of an account per GitHub call and as many calls as needed (at most 1200 cards, 500 KB and 30 repositories in the state, none on screen ever dropped for another; only the Board's Refresh / Retry skips the gh cache; a never-read repository is asked for again every 5 minutes); a picked repository that is never read says why (not selected in Setup, another account's with no board, more than 30 picked, no room) instead of loading; with Select all an unlisted repository is read only under the owner of the account that has it (`repoPickable`, `config.repo_readable`); a chip shows the column of an issue that is also on a board; a session can be started from any card (**Start a session** on the Assign and PR popups) and linked to an issue no board holds (`offBoardOk`); a new ticket from the view goes to the first picked repository with no sprint; the Repos filter shows with one repository in a tab with a board; a tab with no board still only filters and keeps its older defaults; a linked session's PR is a closing reference on the issue, also for an issue no board holds; master is unchanged | the commits of `feat/board-repository-view` (fill in the range once it is merged) | — |
 | Board without a GitHub project (plan J; spec and plan in the backend repo, 2026-10-05): a tab whose account has no board shows its repositories' issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck on every state (`shared/derivedBoard.ts`, `master board` repository read, read-only columns, hint and notes); **Create a GitHub board** makes a real one as that account, on the Mac only (`main/boardCreate.ts`: plan, native confirmation, re-check, columns, links, issues 20 a request, Try again, config last, `sprintless`); empty states say what is empty ("No open issues", "Could not read …", "Nothing selected"); linking a session and New ticket / Create with Claude work without a board; master proposes only that account's own Todo issues | feat/board-without-project (547d483 … 6537700, and the follow-up commit right after it; not merged, not pushed) | — (no protocol change) |
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |

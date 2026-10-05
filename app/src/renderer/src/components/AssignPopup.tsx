@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { assignChoices, primaryLogin } from '@shared/boardFilter'
+import { assignChoices, primaryMe, startSessionTitle } from '@shared/boardFilter'
 import { ticketLabel, ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
@@ -18,7 +18,7 @@ interface Props {
 
 export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tabMe }: Props) {
   const me = tabMe === undefined ? state.me : tabMe
-  const others = assignChoices(me, primaryLogin(state.me, state.config), state.users).filter((u) => u.toLowerCase() !== me?.toLowerCase())
+  const others = assignChoices(me, primaryMe(state.me, state.config), state.users).filter((u) => u.toLowerCase() !== me?.toLowerCase())
   const [login, setLogin] = useState(me ?? others[0] ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -79,7 +79,7 @@ export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tab
           <button
             className="btn"
             disabled={busy}
-            title="Start a session for this issue as it is: nobody is assigned, nothing is written to GitHub"
+            title={startSessionTitle(card.assignees)}
             onClick={() => {
               onStart(card)
               onClose()

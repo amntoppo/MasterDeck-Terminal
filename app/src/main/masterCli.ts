@@ -84,9 +84,13 @@ export class MasterCli {
     }
   }
 
-  /** `master repo-issues`: every issue of these repositories (the Board's repository view), each read as its own account. */
+  /**
+   * `master repo-issues`: every issue of these repositories (the Board's repository view), each read
+   * as its own account. The CLI reads ten repositories of an account at a time, one after the
+   * other: two minutes for each started ten.
+   */
   async repoIssues(repos: string[], force = false): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
-    const r = await this.exec(['repo-issues', '--repos', repos.join(',')], undefined, 120_000, force)
+    const r = await this.exec(['repo-issues', '--repos', repos.join(',')], undefined, 120_000 * Math.max(1, Math.ceil(repos.length / 10)), force)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       return { ok: true, data: JSON.parse(r.stdout) }

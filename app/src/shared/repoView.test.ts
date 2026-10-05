@@ -6,6 +6,7 @@ import { parseBoard, parseCards } from './board'
 import {
   applyRead, boardChips, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pruneEntries, repoChoices, repoViewBoard, repoViewDeriver,
   repoViewEmpty, repoViewOn, offBoardOk, reposFilterPick, withMoving, repoViewStatus, repoViewTitle, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_MAX_CARDS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS, type RepoEntries,
+  admitRepo, askPlan, pauseText, repoAskEvery, repoPickable, repoRefusal, reposFilterOffered, REPO_VIEW_ASK_MS, REPO_VIEW_MAX_BYTES, REPO_VIEW_MAX_QUEUED,
 } from './repoView'
 import type { DeriveCtx } from './derivedBoard'
 import type { BoardCard, RepoView, Session } from './types'
@@ -66,7 +67,7 @@ describe('cleanRepos (what an ask may read)', () => {
 describe('cleanRepos with "Select all" (anyone may ask, so the owner is checked)', () => {
   const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })
   const multi = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [{ ...acct('alice', 'acme', ['acme/tracker'], [BOARD], true), allRepos: true }, acct('bob-work', 'globex', ['globex/app'], [])] })
-  it('only repositories of an owner the config names', () => {
+  it('only repositories of the owner that has Select all', () => {
     expect(cleanRepos(['acme/web', 'ACME/Docs', 'evil/secret', 'globex/app'], all)).toEqual(['acme/web', 'ACME/Docs'])
     expect(cleanRepos(['acme/web', 'globex/app', 'evil/secret'], multi)).toEqual(['acme/web'])
   })
@@ -198,28 +199,71 @@ describe('the view stays small enough for the web bridge', () => {
   const fat = (n: number, repo: string) => raw(n, repo, { title: `Issue ${n} ${'t'.repeat(110)}`, labels: ['bug', 'backend', 'p1'], assignees: ['alice', 'bob-work'], prs: [{ url: `https://github.com/${repo}/pull/${n}`, owner: 'acme', repo: repo.split('/')[1], number: n, state: 'OPEN', ci: 'success', unresolved: 2 }], onBoards: [{ key: 'acme/1', status: 'In QA' }] })
   const names = Array.from({ length: 10 }, (_, i) => `acme/r${i}`)
   const big = applyRead({}, names, read(names.flatMap((r) => Array.from({ length: 350 }, (_, i) => fat(i + 1, r))), names.map((r) => part(r, { total: 350, shown: 350 }))), null, NOW)
-  it('10 repositories of 350 issues: the JSON is far under the frame limit, every repository keeps a share, and says so', () => {
-    const v = viewOf(big, new Map())!
-    expect(v.cards.length).toBeLessThanOrEqual(REPO_VIEW_MAX_CARDS)
-    expect(JSON.stringify(v).length).toBeLessThan(700_000)
+  it('10 repositories of 350 issues: cut to the card cap and to the byte budget, every repository keeps an equal share, and says so', () => {
+    const capped = viewOf(big, new Map(), { maxBytes: 50_000_000 })! // the card cap alone
+    expect(capped.cards).toHaveLength(REPO_VIEW_MAX_CARDS)
+    for (const p of capped.repos) expect(p.note).toBe(`${p.repo.split('/')[1]}: showing the first ${REPO_VIEW_MAX_CARDS / 10} of the 350 issues read, to keep the view small.`)
+    const v = viewOf(big, new Map())! // these cards are about 570 bytes each: the byte budget cuts further
+    expect(Buffer.byteLength(JSON.stringify(v))).toBeLessThanOrEqual(REPO_VIEW_MAX_BYTES)
+    const each = v.cards.filter((c) => c.repo === 'acme/r0').length
+    expect(each).toBeGreaterThan(60)
+    expect(each).toBeLessThan(REPO_VIEW_MAX_CARDS / 10)
     for (const p of v.repos) {
       expect(p).toMatchObject({ total: 350, shown: 350 }) // the counts stay what GitHub said
-      expect(p.note).toBe(`Showing the first ${REPO_VIEW_MAX_CARDS / 10} of 350 issues.`)
-      expect(v.cards.filter((c) => c.repo === p.repo).length).toBe(REPO_VIEW_MAX_CARDS / 10)
+      expect(p.note).toBe(`${p.repo.split('/')[1]}: showing the first ${each} of the 350 issues read, to keep the view small.`)
+      expect(p.cut).toBe(true)
+      expect(v.cards.filter((c) => c.repo === p.repo).length).toBe(each)
     }
   })
   it('a small repository keeps all its cards; the others share what is left; nothing is cut within budget', () => {
     const mixed: RepoEntries = { ...big, 'acme/r0': { ...big['acme/r0'], cards: big['acme/r0'].cards.slice(0, 10) } }
-    const v = viewOf(mixed, new Map(), 100)!
+    const v = viewOf(mixed, new Map(), { maxCards: 100 })!
     expect(v.cards.filter((c) => c.repo === 'acme/r0')).toHaveLength(10)
     expect(v.cards).toHaveLength(100)
     expect(v.repos.find((p) => p.repo === 'acme/r0')!.note).toBeUndefined()
-    expect(v.repos.find((p) => p.repo === 'acme/r1')!.note).toMatch(/^Showing the first 10 of 350 issues\.$/)
-    const whole = viewOf(big, new Map(), 5000)!
+    expect(v.repos.find((p) => p.repo === 'acme/r1')!.note).toBe('r1: showing the first 10 of the 350 issues read, to keep the view small.')
+    const whole = viewOf(big, new Map(), { maxCards: 5000, maxBytes: 50_000_000 })!
     expect(whole.cards).toHaveLength(3500)
-    expect(whole.repos.some((p) => p.note)).toBe(false)
-    const withNote = viewOf({ 'acme/r1': { ...big['acme/r1'], note: 'Pull request details not read: x' } }, new Map(), 20)!
-    expect(withNote.repos[0].note).toBe('Pull request details not read: x Showing the first 20 of 350 issues.')
+    expect(whole.repos.some((p) => p.note || p.cut)).toBe(false)
+    const withNote = viewOf({ 'acme/r1': { ...big['acme/r1'], note: 'Pull request details not read: x' } }, new Map(), { maxCards: 20 })!
+    expect(withNote.repos[0].note).toBe('Pull request details not read: x r1: showing the first 20 of the 350 issues read, to keep the view small.')
+  })
+  it('a cut repository says so once: the line names it, and no second line counts its open issues differently', () => {
+    const cfg = parseConfig({ owner: 'acme', issueRepo: 'r0', repos: names, projects: [BOARD] })
+    const some = applyRead({}, ['acme/r1'], read(Array.from({ length: 300 }, (_, i) => fat(i + 1, 'acme/r1')), [part('acme/r1', { total: 412, shown: 300 })]), null, NOW)
+    const cut = repoViewStatus(viewOf(some, new Map(), { maxCards: 50 }), ['acme/r1'], cfg)
+    expect(cut.notes).toEqual(['r1: showing the first 50 of the 300 issues read, to keep the view small.'])
+    // Not cut: GitHub's own count is what is said.
+    expect(repoViewStatus(viewOf(some, new Map()), ['acme/r1'], cfg).notes).toEqual(['r1: showing the first 300 of 412 open issues.'])
+  })
+  it('heavy cards (5 PRs, 10 labels, long titles in any script): the view is cut by size too, under the byte budget', () => {
+    const heavy = (n: number, repo: string) =>
+      raw(n, repo, {
+        title: `Issue ${n} ${'長い題名'.repeat(30)}`,
+        labels: Array.from({ length: 10 }, (_, i) => `label-number-${i}-of-a-long-kind`),
+        assignees: Array.from({ length: 10 }, (_, i) => `person-${i}-with-a-long-login`),
+        prs: Array.from({ length: 5 }, (_, i) => ({ url: `https://github.com/${repo}/pull/${n * 10 + i}`, owner: 'acme', repo: repo.split('/')[1], number: n * 10 + i, state: 'OPEN', ci: 'success', unresolved: 2 })),
+        onBoards: [{ key: 'acme/1', status: 'In QA' }, { key: 'acme/2', status: 'Backlog' }],
+      })
+    const fatView = applyRead({}, names, read(names.flatMap((r) => Array.from({ length: 120 }, (_, i) => heavy(i + 1, r))), names.map((r) => part(r, { total: 120, shown: 120 }))), null, NOW)
+    const bytes = (x: unknown) => Buffer.byteLength(JSON.stringify(x))
+    expect(Object.values(fatView).reduce((n, e) => n + e.cards.length, 0)).toBe(REPO_VIEW_MAX_CARDS) // within the card cap: only the size cuts
+    expect(bytes(Object.values(fatView).flatMap((e) => e.cards))).toBeGreaterThan(2 * REPO_VIEW_MAX_BYTES)
+    const v = viewOf(fatView, new Map())!
+    expect(bytes(v)).toBeLessThanOrEqual(REPO_VIEW_MAX_BYTES)
+    expect(bytes(v)).toBeGreaterThan(REPO_VIEW_MAX_BYTES * 0.8) // and it does not cut far more than it must
+    for (const p of v.repos) {
+      const n = v.cards.filter((c) => c.repo === p.repo).length
+      expect(n).toBeGreaterThan(0)
+      expect(p).toMatchObject({ cut: true, note: `${p.repo.split('/')[1]}: showing the first ${n} of the 120 issues read, to keep the view small.` })
+    }
+    // With its columns (what the state carries) it is still under the budget.
+    expect(bytes(repoViewDeriver()(v, ctx()))).toBeLessThanOrEqual(REPO_VIEW_MAX_BYTES)
+    // A small repository beside fat ones keeps everything.
+    const beside = viewOf({ ...fatView, 'acme/r0': { ...fatView['acme/r0'], cards: fatView['acme/r0'].cards.slice(0, 3) } }, new Map())!
+    expect(beside.cards.filter((c) => c.repo === 'acme/r0')).toHaveLength(3)
+    expect(beside.repos.find((p) => p.repo === 'acme/r0')).not.toHaveProperty('cut')
+    expect(bytes(beside)).toBeLessThanOrEqual(REPO_VIEW_MAX_BYTES)
   })
 })
 
@@ -243,16 +287,16 @@ describe('what a tab shows', () => {
     expect(repoViewBoard(undefined, ['acme/api']).cards).toEqual([])
   })
   it('says what is loading, what was never read and what the reads left out', () => {
-    expect(repoViewStatus(v, ['acme/api'], cfg)).toEqual({ loading: false, failed: [], notes: ['api: showing the first 300 of 412 open issues.'] })
-    expect(repoViewStatus(v, ['acme/tracker'], cfg)).toEqual({ loading: false, failed: [], notes: ['acme/tracker not read: RATE_LIMITED'] }) // older cards still show
-    expect(repoViewStatus(v, ['acme/web'], cfg)).toEqual({ loading: false, failed: ['acme/web'], notes: ['Not found: acme/web'] })
-    expect(repoViewStatus(v, ['acme/slow', 'acme/new'], cfg)).toEqual({ loading: true, failed: [], notes: ['Loading slow, new…'] }) // running, and asked a moment ago
+    expect(repoViewStatus(v, ['acme/api'], cfg)).toEqual({ loading: false, failed: [], retry: false, notes: ['api: showing the first 300 of 412 open issues.'] })
+    expect(repoViewStatus(v, ['acme/tracker'], cfg)).toEqual({ loading: false, failed: [], retry: false, notes: ['acme/tracker not read: RATE_LIMITED'] }) // older cards still show
+    expect(repoViewStatus(v, ['acme/web'], cfg)).toEqual({ loading: false, failed: ['acme/web'], retry: true, notes: ['Not found: acme/web'] })
+    expect(repoViewStatus(v, ['acme/slow', 'acme/new'], cfg)).toEqual({ loading: true, failed: [], retry: false, notes: ['Loading slow, new…'] }) // running, and asked a moment ago
     expect(repoViewStatus(undefined, ['acme/api'], cfg).loading).toBe(true)
     // A saved tab naming a repository that was unticked since: never read, and said so (not "loading" for ever).
-    expect(repoViewStatus(v, ['acme/gone'], cfg)).toEqual({ loading: false, failed: ['acme/gone'], notes: ['acme/gone is not selected in Setup.'] })
+    expect(repoViewStatus(v, ['acme/gone'], cfg)).toEqual({ loading: false, failed: ['acme/gone'], retry: false, notes: ['acme/gone is not selected in Setup.'] })
   })
   it('an empty tab says why', () => {
-    const st = (p: Partial<ReturnType<typeof repoViewStatus>> = {}) => ({ loading: false, failed: [], notes: [], ...p })
+    const st = (p: Partial<ReturnType<typeof repoViewStatus>> = {}) => ({ loading: false, failed: [], retry: false, notes: [], ...p })
     expect(repoViewEmpty({ cards: 3, shown: 2 }, st())).toBe('cards')
     expect(repoViewEmpty({ cards: 3, shown: 0 }, st({ loading: true }))).toBe('filtered')
     expect(repoViewEmpty({ cards: 0, shown: 0 }, st({ loading: true, failed: ['acme/web'] }))).toBe('loading')
@@ -296,7 +340,7 @@ describe('an issue that links with no card on a board (offBoardOk)', () => {
     expect(offBoardOk('acme/other', sel)).toBe(false)
     expect(offBoardOk('evil/api', sel)).toBe(false)
   })
-  it('with Select all only an owner the config names counts', () => {
+  it('with Select all only the owner that has it counts', () => {
     expect(offBoardOk('acme/anything', all)).toBe(true)
     expect(offBoardOk('globex/anything', all)).toBe(false)
     expect(offBoardOk('not a repo', all)).toBe(false)
@@ -333,5 +377,111 @@ describe('a move in flight', () => {
   it('relabels the card on the board, but not in the repository view', () => {
     expect(withMoving(board as never, { 'acme/tracker#7': 'Done' }, false)!.cards[0].status).toBe('Done')
     expect(withMoving(board as never, { 'acme/tracker#7': 'Done' }, true)).toBe(board)
+  })
+})
+
+// alice (the primary) has "Select all" for acme; bob-work lists one repository of globex and has not.
+const GLOBEX = { owner: 'globex', number: 7, title: 'Globex', columns: ['Todo'] }
+const mixedAll = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [{ ...acct('alice', 'acme', ['acme/tracker'], [BOARD], true), allRepos: true }, acct('bob-work', 'globex', ['globex/app'], [GLOBEX])] })
+
+describe('"Select all" opens only the owner of the account that has it', () => {
+  it('an unlisted repository of another account\'s owner, or named after a login, is refused', () => {
+    expect(['acme/new', 'ACME/New', 'acme/tracker', 'globex/app'].map((r) => repoPickable(r, mixedAll))).toEqual([true, true, true, true])
+    expect(['globex/secret', 'alice/diary', 'bob-work/notes', 'evil/x'].map((r) => repoPickable(r, mixedAll))).toEqual([false, false, false, false])
+    expect(cleanRepos(['acme/new', 'globex/secret', 'alice/diary', 'bob-work/notes', 'globex/app'], mixedAll)).toEqual(['acme/new', 'globex/app'])
+  })
+  it('the same for a session link to an issue no board holds', () => {
+    expect(['acme/new', 'globex/app'].map((r) => offBoardOk(r, mixedAll))).toEqual([true, true])
+    expect(['globex/secret', 'alice/diary', 'bob-work/notes'].map((r) => offBoardOk(r, mixedAll))).toEqual([false, false, false])
+  })
+  it('the other way round, and without accounts', () => {
+    const bobAll = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [BOARD], true), { ...acct('bob-work', 'globex', ['globex/app'], [GLOBEX]), allRepos: true }] })
+    expect(['globex/secret', 'acme/new', 'bob-work/notes'].map((r) => repoPickable(r, bobAll))).toEqual([true, false, false])
+    const old = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, repos: ['globex/listed'], projects: [BOARD] })
+    expect(['acme/new', 'globex/listed', 'globex/other'].map((r) => repoPickable(r, old))).toEqual([true, true, false])
+  })
+})
+
+describe('why a picked repository is not read (one rule for the ask and for the tab)', () => {
+  const noBoard = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker', 'acme/api'], [BOARD], true), acct('bob-work', 'globex', ['globex/app'], [])] })
+  const many = parseConfig({ owner: 'acme', issueRepo: 'r0', repos: Array.from({ length: 40 }, (_, i) => `acme/r${i}`), projects: [BOARD] })
+  it('not selected in Setup', () => {
+    expect(repoRefusal('acme/gone', boarded)).toBe('acme/gone is not selected in Setup.')
+    expect(repoRefusal('globex/secret', mixedAll)).toBe('globex/secret is not selected in Setup.')
+    expect(repoRefusal('acme/api', boarded)).toBeNull()
+    expect(askPlan(['acme/api', 'acme/gone'], boarded)).toEqual({ repos: ['acme/api'], refused: [{ repo: 'acme/gone', reason: 'acme/gone is not selected in Setup.' }] })
+    expect(repoViewStatus(undefined, ['acme/gone'], boarded)).toEqual({ loading: false, failed: ['acme/gone'], retry: false, notes: ['acme/gone is not selected in Setup.'] })
+  })
+  it('a repository of an account with no board, picked in another account\'s tab', () => {
+    const why = 'globex/app is a repository of bob-work, an account with no board: its issues are on that account\'s tab.'
+    expect(repoRefusal('globex/app', noBoard)).toBe(why)
+    expect(cleanRepos(['globex/app', 'acme/api'], noBoard)).toEqual(['acme/api'])
+    const st = repoViewStatus({ cards: [], repos: [{ repo: 'acme/api', account: 'alice', ok: true, total: 0, shown: 0, takenAt: NOW }] }, ['acme/api', 'globex/app'], noBoard)
+    expect(st).toEqual({ loading: false, failed: ['globex/app'], retry: false, notes: [why] })
+    expect(repoViewEmpty({ cards: 0, shown: 0 }, repoViewStatus(undefined, ['globex/app'], noBoard))).toBe('not-read') // never "Loading issues…"
+  })
+  it('more than the most one tab may pick', () => {
+    const plan = askPlan(many.repos, many)
+    expect(plan.repos).toEqual(many.repos.slice(0, REPO_VIEW_MAX_ASK))
+    expect(plan.refused).toHaveLength(10)
+    expect(plan.refused[0]).toEqual({ repo: 'acme/r30', reason: `acme/r30 not read: more than ${REPO_VIEW_MAX_ASK} repositories picked.` })
+    const st = repoViewStatus({ cards: [], repos: many.repos.slice(0, 30).map((r) => ({ repo: r, account: null, ok: true, total: 0, shown: 0, takenAt: NOW })) }, many.repos, many)
+    expect(st.loading).toBe(false)
+    expect(st.failed).toEqual(many.repos.slice(30))
+    expect(st.notes).toContain(`acme/r39 not read: more than ${REPO_VIEW_MAX_ASK} repositories picked.`)
+    expect(askPlan(['acme/r1', 'ACME/R1', 'acme/r1'], many)).toEqual({ repos: ['acme/r1'], refused: [] }) // the same one twice is no refusal
+  })
+  it('refused by MasterDeck when asked (too many waiting, or shown): the part says why, and the tab asks again', () => {
+    const note = 'acme/api not read: MasterDeck already shows 30 repositories.'
+    const st = repoViewStatus({ cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note, takenAt: null }] }, ['acme/api'], boarded)
+    expect(st).toEqual({ loading: false, failed: ['acme/api'], retry: true, notes: [note] })
+  })
+  it('anything that is no list, or a config not set up, asks for nothing', () => {
+    expect(askPlan('acme/api', boarded)).toEqual({ repos: [], refused: [] })
+    expect(askPlan(['acme/api'], parseConfig({}))).toEqual({ repos: [], refused: [] })
+    expect(askPlan([7, null, 'acme/api'], boarded).repos).toEqual(['acme/api'])
+    expect(askPlan(Array.from({ length: 5000 }, (_, i) => `evil/r${i}`), boarded).refused.length).toBeLessThanOrEqual(200) // a huge list from a browser is not walked to its end
+  })
+})
+
+describe('taking in a repository MasterDeck holds nothing of', () => {
+  it('room left: taken; full: the one asked for longest ago goes, if any is off screen', () => {
+    expect(admitRepo('acme/api', { held: 3, idle: [], queued: 0 })).toEqual({ ok: true })
+    expect(admitRepo('acme/api', { held: REPO_VIEW_MAX_ENTRIES, idle: ['acme/old', 'acme/older'], queued: 0 })).toEqual({ ok: true, evict: 'acme/old' })
+  })
+  it('full of repositories on screen: refused, and it says so', () => {
+    expect(admitRepo('acme/api', { held: REPO_VIEW_MAX_ENTRIES, idle: [], queued: 0 })).toEqual({ ok: false, reason: `acme/api not read: MasterDeck already shows ${REPO_VIEW_MAX_ENTRIES} repositories. Go back to the board in a tab that shows others.` })
+  })
+  it('too many first reads waiting: refused whatever room there is', () => {
+    expect(admitRepo('acme/api', { held: 3, idle: [], queued: REPO_VIEW_MAX_QUEUED })).toEqual({ ok: false, reason: `acme/api not read: ${REPO_VIEW_MAX_QUEUED} repositories are already waiting for their first read. It is asked again in a few minutes.` })
+    expect(admitRepo('acme/api', { held: 3, idle: [], queued: REPO_VIEW_MAX_QUEUED - 1 })).toEqual({ ok: true })
+  })
+})
+
+describe('what of a failed read may start the pause of GitHub reads', () => {
+  it('only what gh said, never the repository\'s name', () => {
+    expect(pauseText({ repo: 'acme/api', note: 'acme/api not read: RATE_LIMITED' })).toBe('RATE_LIMITED')
+    expect(pauseText({ repo: 'acme/rate-limiter', note: 'acme/rate-limiter not read: gh: API rate limit exceeded' })).toBe('gh: API rate limit exceeded')
+    expect(pauseText({ repo: 'acme/rate-limiter', note: 'Not found: acme/rate-limiter' })).toBeNull()
+    expect(pauseText({ repo: 'acme/rate-limiter', note: 'acme/rate-limiter not read: NOT_FOUND' })).toBe('NOT_FOUND')
+    expect(pauseText({ repo: 'acme/rate-limit', note: 'acme/rate-limit is not selected in Setup' })).toBeNull()
+    expect(pauseText({ repo: 'acme/api' })).toBeNull()
+  })
+})
+
+describe('how often a tab asks', () => {
+  const st = (p: Partial<ReturnType<typeof repoViewStatus>> = {}) => ({ loading: false, failed: [], retry: false, notes: [], ...p })
+  it('every 20 minutes; every 5 while a picked repository was never read and a new ask could read it', () => {
+    expect(repoAskEvery(st())).toBe(REPO_VIEW_ASK_MS)
+    expect(repoAskEvery(st({ failed: ['acme/api'], retry: true }))).toBe(REPO_VIEW_RETRY_MS)
+    expect(repoAskEvery(st({ failed: ['acme/gone'] }))).toBe(REPO_VIEW_ASK_MS) // not selected in Setup: asking again changes nothing
+    expect(REPO_VIEW_RETRY_MS).toBe(300_000)
+  })
+})
+
+describe('when the Repos filter is offered', () => {
+  it('with a board from one repository on (picking it is the repository view); with no board from two, as before', () => {
+    expect([0, 1, 2].map((n) => reposFilterOffered(n, false))).toEqual([false, true, true])
+    expect([0, 1, 2].map((n) => reposFilterOffered(n, true))).toEqual([false, false, true])
   })
 })

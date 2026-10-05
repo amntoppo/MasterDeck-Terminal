@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -116,6 +117,24 @@ def _save_missing(key: str, repos: dict) -> None:
         os.replace(tmp, path)
     except OSError:
         pass  # only an optimisation
+
+
+# How GitHub words a refusal of the boards part of the repository read (`projectItems`).
+_BOARDS_REFUSED = re.compile(r"INSUFFICIENT_SCOPES|projectItems|read:project")
+
+
+def _boards_refusal(errors) -> "str | None":
+    """Why GitHub refused the boards part of a repository read (the error's type), or None. A
+    refusal is an error on a `projectItems` path, one of type INSUFFICIENT_SCOPES, or one whose
+    message names `projectItems` or the project scope. NOT_FOUND is never one: its message quotes
+    the repository's name, which may hold any of those words."""
+    for e in errors or []:
+        if not isinstance(e, dict) or e.get("type") == "NOT_FOUND":
+            continue
+        if "projectItems" in (e.get("path") or []) or e.get("type") == "INSUFFICIENT_SCOPES" \
+                or _BOARDS_REFUSED.search(str(e.get("message") or "")):
+            return e.get("type") or "unknown"
+    return None
 
 
 def _run(cmd: list, timeout: int = 120, env: "dict | None" = None, partial: bool = False) -> str:
@@ -263,13 +282,18 @@ class Live:
             args = ["gh", "api", "graphql", "-f", f"query={query}"]
             for k, v in variables.items():
                 args += ["-f", f"{k}={v}"]
-            answer = json.loads(self._gh(args, partial=True))
-            refused = [e.get("type") or "unknown" for e in answer.get("errors") or []
-                       if isinstance(e, dict) and "projectItems" in (e.get("path") or [])]
+            try:
+                answer = json.loads(self._gh(args, partial=True))
+            except RuntimeError as e:
+                # GitHub can refuse the whole query over the boards part (no data at all, so gh fails).
+                if not fields or not _BOARDS_REFUSED.search(str(e)):
+                    raise
+                answer = {"errors": [{"type": "INSUFFICIENT_SCOPES", "message": str(e)}]}
+            refused = _boards_refusal(answer.get("errors"))
             if fields and refused:
                 # The boards could not be read (a token without the project scope): an error there
                 # empties the issue it is on. The issues matter more: the same round, without them.
-                fields, boards_unread, boards_partial = [], refused[0], rounds > 0
+                fields, boards_unread, boards_partial = [], refused, rounds > 0
                 continue
             rounds += 1
             data = answer.get("data") or {}
