@@ -2151,9 +2151,9 @@ function registerIpc(): void {
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
   reg.handle(CH.refresh, async () => {
     await refreshAccounts();
-    return sources.refreshGithub(true);
+    return sources.refreshGithub(true, true);
   });
-  reg.handle(CH.boardRefresh, () => sources.refreshGithub(true));
+  reg.handle(CH.boardRefresh, () => sources.refreshGithub(true, true));
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
   reg.handle(CH.ghAccounts, () => ghAccounts());

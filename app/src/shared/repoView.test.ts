@@ -5,7 +5,7 @@ import { parseConfig, setConfig } from './appConfig'
 import { parseBoard, parseCards } from './board'
 import {
   applyRead, boardChips, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pruneEntries, repoChoices, repoViewBoard, repoViewDeriver,
-  repoViewEmpty, repoViewOn, repoViewStatus, repoViewTitle, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_STALE_MS, type RepoEntries,
+  repoViewEmpty, repoViewOn, repoViewStatus, repoViewTitle, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_MAX_CARDS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS, type RepoEntries,
 } from './repoView'
 import type { DeriveCtx } from './derivedBoard'
 import type { BoardCard, RepoView, Session } from './types'
@@ -63,6 +63,19 @@ describe('cleanRepos (what an ask may read)', () => {
   })
 })
 
+describe('cleanRepos with "Select all" (anyone may ask, so the owner is checked)', () => {
+  const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })
+  const multi = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [{ ...acct('alice', 'acme', ['acme/tracker'], [BOARD], true), allRepos: true }, acct('bob-work', 'globex', ['globex/app'], [])] })
+  it('only repositories of an owner the config names', () => {
+    expect(cleanRepos(['acme/web', 'ACME/Docs', 'evil/secret', 'globex/app'], all)).toEqual(['acme/web', 'ACME/Docs'])
+    expect(cleanRepos(['acme/web', 'globex/app', 'evil/secret'], multi)).toEqual(['acme/web'])
+  })
+  it('refuses names that are no repository', () => {
+    expect(cleanRepos(['-acme/api', 'acme/.', 'acme/..', 'acme/.github', '-/x'], all)).toEqual(['acme/.github'])
+    expect(parseRepoIssues(answer([], [part('-acme/api'), part('acme/..'), part('acme/.')]))!.parts).toEqual([])
+  })
+})
+
 describe('parsing', () => {
   it('reads parts and cards, with the boards that hold an issue', () => {
     const r = read([raw(7, 'acme/api', { onBoards: [{ key: 'acme/1', status: 'In QA' }, { key: 'acme/1' }, { nope: 1 }] }), raw(1, 'acme/tracker'), { junk: true }],
@@ -108,6 +121,24 @@ describe('reads', () => {
     expect(needRead({}, ['acme/api'], NOW)).toEqual(['acme/api'])
     expect(needRead(first, ['ACME/API', 'acme/tracker'], NOW + REPO_VIEW_STALE_MS - 1)).toEqual([])
     expect(needRead(first, ['acme/api', 'acme/web'], NOW + REPO_VIEW_STALE_MS)).toEqual(['acme/api', 'acme/web'])
+  })
+  it('a repository never read is tried again after five minutes, not an hour; a trial from the future counts as none', () => {
+    const failed = applyRead({}, ['acme/web'], null, 'offline', NOW)
+    expect(needRead(failed, ['acme/web'], NOW + REPO_VIEW_RETRY_MS - 1)).toEqual([])
+    expect(needRead(failed, ['acme/web'], NOW + REPO_VIEW_RETRY_MS)).toEqual(['acme/web'])
+    expect(needRead(failed, ['acme/web'], NOW - 1)).toEqual(['acme/web']) // triedAt after now: a corrupt cache or a clock set back
+    expect(needRead(first, ['acme/api'], NOW - 1)).toEqual(['acme/api'])
+    const onceRead = applyRead(first, ['acme/api'], null, 'offline', NOW + 10) // read before: the hour still holds
+    expect(needRead(onceRead, ['acme/api'], NOW + 10 + REPO_VIEW_RETRY_MS)).toEqual([])
+  })
+  it('keeps at most so many repositories, the longest unasked going first, never one in use', () => {
+    const many: RepoEntries = {}
+    for (let i = 0; i < 5; i++) many[`acme/r${i}`] = { ...first['acme/api'], repo: `acme/r${i}` }
+    const asked = Object.fromEntries([1, 2, 3, 4].map((i) => [`acme/r${i}`, { repo: `acme/r${i}`, at: i }])) // r0 never asked: the oldest
+    expect(trimEntries(many, asked, new Set(), 5)).toBe(many)
+    expect(Object.keys(trimEntries(many, asked, new Set(), 3))).toEqual(['acme/r2', 'acme/r3', 'acme/r4'])
+    expect(Object.keys(trimEntries(many, asked, new Set(['acme/r0']), 3))).toEqual(['acme/r0', 'acme/r3', 'acme/r4'])
+    expect(REPO_VIEW_MAX_ENTRIES).toBe(30)
   })
   it('a repository stays on screen for an hour after its last ask', () => {
     const asked = { 'acme/api': { repo: 'acme/api', at: NOW }, 'acme/tracker': { repo: 'acme/tracker', at: NOW - REPO_VIEW_LIVE_MS } }
@@ -160,6 +191,35 @@ describe('the view in the state', () => {
     expect(derive(undefined, ctx())).toBeUndefined()
     const empty: RepoView = { cards: [], repos: [] }
     expect(derive(empty, ctx())).toBe(derive(empty, ctx()))
+  })
+})
+
+describe('the view stays small enough for the web bridge', () => {
+  const fat = (n: number, repo: string) => raw(n, repo, { title: `Issue ${n} ${'t'.repeat(110)}`, labels: ['bug', 'backend', 'p1'], assignees: ['alice', 'bob-work'], prs: [{ url: `https://github.com/${repo}/pull/${n}`, owner: 'acme', repo: repo.split('/')[1], number: n, state: 'OPEN', ci: 'success', unresolved: 2 }], onBoards: [{ key: 'acme/1', status: 'In QA' }] })
+  const names = Array.from({ length: 10 }, (_, i) => `acme/r${i}`)
+  const big = applyRead({}, names, read(names.flatMap((r) => Array.from({ length: 350 }, (_, i) => fat(i + 1, r))), names.map((r) => part(r, { total: 350, shown: 350 }))), null, NOW)
+  it('10 repositories of 350 issues: the JSON is far under the frame limit, every repository keeps a share, and says so', () => {
+    const v = viewOf(big, new Map())!
+    expect(v.cards.length).toBeLessThanOrEqual(REPO_VIEW_MAX_CARDS)
+    expect(JSON.stringify(v).length).toBeLessThan(700_000)
+    for (const p of v.repos) {
+      expect(p).toMatchObject({ total: 350, shown: 350 }) // the counts stay what GitHub said
+      expect(p.note).toBe(`Showing the first ${REPO_VIEW_MAX_CARDS / 10} of 350 issues.`)
+      expect(v.cards.filter((c) => c.repo === p.repo).length).toBe(REPO_VIEW_MAX_CARDS / 10)
+    }
+  })
+  it('a small repository keeps all its cards; the others share what is left; nothing is cut within budget', () => {
+    const mixed: RepoEntries = { ...big, 'acme/r0': { ...big['acme/r0'], cards: big['acme/r0'].cards.slice(0, 10) } }
+    const v = viewOf(mixed, new Map(), 100)!
+    expect(v.cards.filter((c) => c.repo === 'acme/r0')).toHaveLength(10)
+    expect(v.cards).toHaveLength(100)
+    expect(v.repos.find((p) => p.repo === 'acme/r0')!.note).toBeUndefined()
+    expect(v.repos.find((p) => p.repo === 'acme/r1')!.note).toMatch(/^Showing the first 10 of 350 issues\.$/)
+    const whole = viewOf(big, new Map(), 5000)!
+    expect(whole.cards).toHaveLength(3500)
+    expect(whole.repos.some((p) => p.note)).toBe(false)
+    const withNote = viewOf({ 'acme/r1': { ...big['acme/r1'], note: 'Pull request details not read: x' } }, new Map(), 20)!
+    expect(withNote.repos[0].note).toBe('Pull request details not read: x Showing the first 20 of 350 issues.')
   })
 })
 

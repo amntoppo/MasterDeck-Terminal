@@ -208,7 +208,8 @@ const GH_BACKGROUND_MS = 600_000;
 /** Sessions with an open PR, open in a tab or not: their comments, for the Ready-for-Review timer. */
 const REVIEW_MS = 120_000;
 const RATE_LIMIT_PAUSE_MS = 600_000;
-const RATE_LIMITED = /rate limit|secondary rate|abuse detection/i;
+/** gh's own words, and the repository view's note ("acme/api not read: RATE_LIMITED"). */
+export const RATE_LIMITED = /rate[ _-]?limit|secondary rate|abuse detection/i;
 
 function writeJsonAtomic(path: string, data: unknown): void {
   try {
@@ -1136,6 +1137,8 @@ export class Sources {
   /** Issues/PRs (snapshot) and the sprint board together; then the cache is saved. `force` (the Refresh button) skips the shared gh cache. */
   async refreshGithub(
     force = false,
+    /** The user pressed the Board's Refresh/Retry: the repository view re-reads past the gh cache too. Not after a ticket, an assign or a Setup refresh. */
+    repoForce = false,
   ): Promise<{ ok: boolean; message: string }> {
     if (this.githubRefreshing)
       return { ok: true, message: "already refreshing" };
@@ -1156,7 +1159,7 @@ export class Sources {
         settle(gh ? this.refreshTeamPrs(0, force) : skip),
         // The repository view: only the repositories a tab asked for in the last hour; none, no call.
         // Its failures show in the view itself, not in this result.
-        settle(gh ? this.repoIssues.refresh(force) : skip),
+        settle(gh ? this.repoIssues.refresh(repoForce) : skip),
       ]);
       if (s.ok || b.ok) this.githubRefreshedAt = Date.now();
       this.saveGithubCache();

@@ -17,10 +17,21 @@ export const REPO_VIEW_MAX_ASK = 30
 export const REPO_VIEW_STALE_MS = 3_600_000
 /** A repository counts as on screen (the hourly refresh and Refresh read it) this long after it was last asked for. */
 export const REPO_VIEW_LIVE_MS = 3_600_000
+/** Most repositories MasterDeck keeps entries for; past that, the one asked for longest ago goes. */
+export const REPO_VIEW_MAX_ENTRIES = 30
+/** A repository never read (its first read failed: offline, rate limit) is tried again after this, not after an hour. */
+export const REPO_VIEW_RETRY_MS = 300_000
+/**
+ * Most cards the state carries across every repository of the view. The web bridge drops a frame
+ * over 1.4 MB, which would lose the web's whole state: about 450 bytes a card keeps this near 550 KB.
+ */
+export const REPO_VIEW_MAX_CARDS = 1200
 /** A tab in repository view asks again this often, so its repositories stay "on screen". */
 export const REPO_VIEW_ASK_MS = 20 * 60_000
 
-const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
+/** owner/name as GitHub spells it: an owner never starts with a dash, and a name is never "." or "..". */
+const validRepo = (s: string) => REPO.test(s) && !['.', '..'].includes(s.split('/')[1])
 const short = (repo: string) => repo.split('/')[1] ?? repo
 export const repoKey = (repo: string) => repo.toLowerCase()
 
@@ -36,12 +47,23 @@ export function repoChoices(login: string | null | undefined, c: AppConfig, seen
   return out
 }
 
-/** The repositories an ask may read: well-formed, selected in Setup, of an account with a board; each once, as Setup spells it. */
+/** The owners the config names: the legacy one, and each account's owner and login. */
+function ownersOf(c: AppConfig): Set<string> {
+  return new Set([c.owner, ...c.accounts.flatMap((a) => [a.owner, a.login])].filter(Boolean).map((o) => o.toLowerCase()))
+}
+
+/**
+ * The repositories an ask may read: well-formed, selected in Setup, of an account with a board; each
+ * once, as Setup spells it. With "Select all" every name counts as selected, so there the owner must
+ * be one the config names (the ask can come from a paired browser: it must not read other people's repositories).
+ */
 export function cleanRepos(v: unknown, c: AppConfig): string[] {
   if (!Array.isArray(v) || !c.configured) return []
   const out: string[] = []
+  const owners = c.allRepos ? ownersOf(c) : null
   for (const x of v) {
-    if (typeof x !== 'string' || !REPO.test(x) || !repoSelected(x, c) || repoBoardless(x, c)) continue
+    if (typeof x !== 'string' || !validRepo(x) || !repoSelected(x, c) || repoBoardless(x, c)) continue
+    if (owners && !c.repos.some((r) => repoKey(r) === repoKey(x)) && !owners.has(x.split('/')[0].toLowerCase())) continue
     const name = c.repos.find((r) => repoKey(r) === repoKey(x)) ?? x
     if (!out.some((r) => repoKey(r) === repoKey(name))) out.push(name)
     if (out.length === REPO_VIEW_MAX_ASK) break
@@ -70,7 +92,7 @@ export function parseRepoIssues(raw: unknown): RepoRead | null {
   const parts: RepoRead['parts'] = []
   for (const p of r.repos) {
     const o = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>
-    if (typeof o.repo !== 'string' || !REPO.test(o.repo)) continue
+    if (typeof o.repo !== 'string' || !validRepo(o.repo)) continue
     parts.push({ repo: o.repo, account: typeof o.account === 'string' ? o.account : null, ok: o.ok === true, total: count(o.total), shown: count(o.shown), ...(typeof o.note === 'string' && o.note ? { note: o.note } : {}) })
   }
   return { parts, cards: parseCards(r.cards) }
@@ -80,8 +102,22 @@ export function parseRepoIssues(raw: unknown): RepoRead | null {
 export function needRead(entries: RepoEntries, repos: string[], now: number): string[] {
   return repos.filter((r) => {
     const e = entries[repoKey(r)]
-    return !e || now - e.triedAt >= REPO_VIEW_STALE_MS
+    if (!e || e.triedAt > now) return true // a trial from the future (a corrupt cache, a clock set back) counts as none
+    return now - e.triedAt >= (e.takenAt === null ? REPO_VIEW_RETRY_MS : REPO_VIEW_STALE_MS)
   })
+}
+
+/** At most `max` entries: the ones asked for longest ago go first (never asked: first of all); `keep` never goes. The same object when nothing goes. */
+export function trimEntries(entries: RepoEntries, asked: Record<string, { at: number }>, keep: ReadonlySet<string>, max = REPO_VIEW_MAX_ENTRIES): RepoEntries {
+  const keys = Object.keys(entries)
+  if (keys.length <= max) return entries
+  const drop = new Set(
+    keys
+      .filter((k) => !keep.has(k))
+      .sort((a, b) => (asked[a]?.at ?? -1) - (asked[b]?.at ?? -1))
+      .slice(0, keys.length - max),
+  )
+  return Object.fromEntries(keys.filter((k) => !drop.has(k)).map((k) => [k, entries[k]]))
 }
 
 /**
@@ -140,7 +176,7 @@ export function loadEntries(raw: unknown): RepoEntries {
   const count = (v: unknown) => (typeof v === 'number' && v >= 0 ? v : 0)
   for (const v of Object.values(raw as Record<string, unknown>)) {
     const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
-    if (typeof o.repo !== 'string' || !REPO.test(o.repo) || typeof o.takenAt !== 'number') continue
+    if (typeof o.repo !== 'string' || !validRepo(o.repo) || typeof o.takenAt !== 'number') continue
     out[repoKey(o.repo)] = {
       repo: o.repo,
       account: typeof o.account === 'string' ? o.account : null,
@@ -169,18 +205,34 @@ export function withAssignee(entries: RepoEntries, t: Ticket, login: string): Re
   return hit ? out : entries
 }
 
+/** What each repository may show when all their cards do not fit `max`: small ones whole, the rest an equal share. Only the cut ones are listed. */
+function cardShares(entries: RepoEntries, max: number): Map<string, number> {
+  const sizes = Object.entries(entries).map(([k, e]) => [k, e.cards.length] as const).sort((a, b) => a[1] - b[1])
+  let left = max
+  const cut = new Map<string, number>()
+  sizes.forEach(([k, n], i) => {
+    const share = Math.floor(left / (sizes.length - i))
+    if (n > share) cut.set(k, share)
+    left -= Math.min(n, share)
+  })
+  return cut
+}
+
 /** The state's repository view, before the columns: undefined while nothing was ever asked for. `loading`: key → repository of the reads that run. */
-export function viewOf(entries: RepoEntries, loading: ReadonlyMap<string, string>): RepoView | undefined {
+export function viewOf(entries: RepoEntries, loading: ReadonlyMap<string, string>, maxCards = REPO_VIEW_MAX_CARDS): RepoView | undefined {
   const keys = [...new Set([...Object.keys(entries), ...loading.keys()])]
   if (!keys.length) return undefined
+  const share = cardShares(entries, maxCards)
   const repos: RepoPart[] = keys.map((k) => {
     const e = entries[k]
     const part: RepoPart = e
       ? { repo: e.repo, account: e.account, ok: e.ok, total: e.total, shown: e.shown, ...(e.note ? { note: e.note } : {}), takenAt: e.takenAt }
       : { repo: loading.get(k) ?? k, account: null, ok: false, total: 0, shown: 0, takenAt: null }
-    return loading.has(k) ? { ...part, loading: true as const } : part
+    const cut = share.get(k)
+    const shown = cut !== undefined && e ? { ...part, note: [e.note, `Showing the first ${cut} of ${e.cards.length} issues.`].filter(Boolean).join(' ') } : part
+    return loading.has(k) ? { ...shown, loading: true as const } : shown
   })
-  return { cards: Object.values(entries).flatMap((e) => e.cards), repos }
+  return { cards: Object.entries(entries).flatMap(([k, e]) => (share.has(k) ? e.cards.slice(0, share.get(k)) : e.cards)), repos }
 }
 
 /**
