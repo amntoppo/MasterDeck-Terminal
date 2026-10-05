@@ -179,6 +179,38 @@ fixes it, and move the item here to "Recently done".
     that is not the repository's.
 
 - **P2 · BoardFlow autoLink marks `linkTried` before the attempt.** A transient `issueInfo` failure means the session is never linked (no retry); more visible now that off-board issues link (`offBoard`). Where: `main/boardFlow.ts` autoLink. Approach: set `linkTried` only after a definitive answer (linked, or refused as not selected), keep it unset on a read failure.
+- **P2 · First real use of the Board's repository view.** `master repo-issues` was tested with fake
+  runners only. On a real repository confirm: GitHub accepts the combined query (`projectItems`
+  inside the repository-issues query) and what it costs (the shared cache's log shows the points
+  left), the chip matches the card's column on the board, and, if a token without the `project`
+  scope is at hand, the view still shows its issues with the note "Board columns not read: …". Where:
+  `collect.Live.repo_issues`, `board._boards_part`, spec §12.
+- **P2 · Deploy the web app only after the desktop release that has the repository view.** A desktop
+  from before has no `board:repos` handler: a web tab with repositories picked (a saved one counts)
+  sits on "Loading issues…" for ever. Approach: in `BoardView`, when an asked repository has no part
+  after some seconds, say "Update MasterDeck on your Mac to see a repository's issues".
+- **P3 · The refresh after a ticket or an assign does not re-read the repository it touched.** Only
+  the Board's own Refresh / Retry forces the repository read; a ticket created from a repository view
+  shows up when the gh cache lets the next read through (an assign shows at once: `noteAssigned`).
+  Approach: after a write, force a read of that one repository (`RepoIssues.refresh` with a list).
+- **P3 · A big repository view is cut, and slow before the cut.** The state carries at most 1200
+  cards across the picked repositories ("Showing the first N of M issues.") and 30 repositories.
+  Approach: render a column's cards on scroll, or page the read, then raise the limits.
+- **P3 · A no-board account's repositories past the first ten cannot be seen by picking one.** Picking
+  filters what `master board` read (the first ten). Approach: let `cleanRepos` accept a repository of
+  a no-board account that its `derived` part lists as `skipped`.
+- **P3 · `/babysit-ticket`'s `tt.sh link` refuses an issue no board holds**; MasterDeck links it
+  (Start, Link session…). Approach: the same rule in `tt.sh` (the repository is selected in Setup).
+- **P3 · The repository view is not in the phone API's snapshot** (`toRemoteSnapshot`): a protocol
+  change. The web app has it.
+- **P3 · An archived project item still shows as a chip** in the repository view (`projectItems`
+  returns archived items). Approach: read `isArchived` and leave those out.
+- **P3 · Small things seen in the isolated app (plan K, Task 8).** **Start a session** on the Assign
+  popup always carries the tooltip "…nobody is assigned…", also when someone else is (the popup's own
+  line says "Replaces alice"); a card in Done whose PR is merged still shows the **Review PR** badge;
+  the phone preview has no card that opens the PR popup, so its fit at 390 px was not seen (add one
+  to `web/preview/fixture.ts`); two test files use real-looking first names as logins
+  (`newTicket.test.ts`, `boardFilter.test.ts`, from before this plan): rename to `alice` / `bob-work`.
 
 ## Remote / web
 
@@ -283,6 +315,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Board repository view (plan K; spec and plan in the backend repo, 2026-10-05): a Board tab with repositories picked in its Repos filter, on an account with a board, shows every issue of them, on a board or not, in Todo / In Dev / PR Raised / Done (`shared/repoView.ts`, `main/repoIssues.ts`, `master repo-issues`), read only while such a tab is on screen (at most 1200 cards and 30 repositories in the state; only the Board's Refresh / Retry skips the gh cache; a never-read repository is retried after 5 minutes); a chip shows the column of an issue that is also on a board; a session can be started from any card (**Start a session** on the Assign and PR popups) and linked to an issue no board holds (`offBoardOk`); a new ticket from the view goes to the first picked repository with no sprint; the Repos filter shows with one repository; a tab with no board still only filters; master is unchanged | the commits of `feat/board-repository-view` (fill in the range once it is merged) | — |
 | Board without a GitHub project (plan J; spec and plan in the backend repo, 2026-10-05): a tab whose account has no board shows its repositories' issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck on every state (`shared/derivedBoard.ts`, `master board` repository read, read-only columns, hint and notes); **Create a GitHub board** makes a real one as that account, on the Mac only (`main/boardCreate.ts`: plan, native confirmation, re-check, columns, links, issues 20 a request, Try again, config last, `sprintless`); empty states say what is empty ("No open issues", "Could not read …", "Nothing selected"); linking a session and New ticket / Create with Claude work without a board; master proposes only that account's own Todo issues | feat/board-without-project (547d483 … 6537700, and the follow-up commit right after it; not merged, not pushed) | — (no protocol change) |
 | Several GitHub accounts (plan I; spec and plan in the backend repo, 2026-10-03): `config.accounts` + migration, `AccountEnv` token and settings file per account, sessions start/resume as an account (`session-accounts.json`), master spawns as the issue's account, per-account ghcache and calls (`accountClients`), per-account polling, account badges, Board/PRs tab per account, New ticket per account, `session.start.account` | feat/multi-gh-accounts, 6ba4cc0 … 394203a (not merged, not pushed) | feat/session-start-account (not pushed) |
 | Several GitHub accounts, final review fixes: `GHC_ACCOUNT` in each account's settings env (ghcache keys a bare `GH_TOKEN` on its hash); Needs-you notices when gh's active account is not the primary and when master-agent was not started as the primary; `master spawn` holds an account that is not connected; ticket builder refuses while accounts load; ORPHAN default as the app's; ghc pause per mode; Setup scopes of every account | feat/multi-gh-accounts | — |
