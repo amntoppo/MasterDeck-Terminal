@@ -81,6 +81,9 @@ describe('Sources and the repository view', () => {
     expect(src.boardOf('partner/portal')).toBe('acme/1')
     expect(src.boardOf('old/gone', 1)).toBeNull()
     expect(src.boardOf(null, 4)).toBeNull()
+    const before = src.boardStamp()
+    priv.boards = { '@current': { ...priv.boards['@current'], takenAt: '2026-09-25T11:00:00Z' } }
+    expect(src.boardStamp()).not.toBe(before) // a board read landed
   })
   it('a rate-limited repository note starts the pause', () => {
     for (const t of ['acme/api not read: RATE_LIMITED', 'gh: API rate limit exceeded', 'secondary rate limit', 'abuse detection mechanism']) expect(RATE_LIMITED.test(t)).toBe(true)

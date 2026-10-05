@@ -124,7 +124,7 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
-import { repoBoardless } from "@shared/derivedBoard";
+import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
@@ -336,6 +336,7 @@ const assignableUsers = new AssignableUsers({
   read: (repo) => forCard(repo).github.assignableUsers(false, repo),
   config: getConfig,
   boardRepos: () => sources.boardRepos(),
+  boardStamp: () => sources.boardStamp(),
 });
 // "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
 // that account; the confirmation is the Mac's own dialog, built from main's fresh read.
@@ -1747,7 +1748,8 @@ function registerIpc(): void {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
     // No board on its account: the columns are MasterDeck's own, there is nothing to write.
-    if (repoBoardless(t.repo, getConfig()))
+    // Asked of the account the write below goes out as (`accountForCard`), never just of the repository's.
+    if (cardBoardless(t.repo, sources.boardOf(t.repo, t.number), getConfig()))
       return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
     const r = await forCard(t.repo, t.number).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);

@@ -9,7 +9,7 @@ const legacy = parseConfig({ owner: 'acme', issueRepo: 'tracker', project: 1 })
 
 function make(cfg = two, reply: (repo: string) => string[] | null | Promise<string[] | null> = (r) => [`dev-of-${r.split('/')[1]}`, 'zoe'], onBoard: string[] = []) {
   const calls: string[] = []
-  const t = { now: 1_000_000, cfg, onBoard }
+  const t = { now: 1_000_000, cfg, onBoard, stamp: 1 }
   const store = new AssignableUsers({
     read: async (repo) => {
       calls.push(repo)
@@ -17,6 +17,7 @@ function make(cfg = two, reply: (repo: string) => string[] | null | Promise<stri
     },
     config: () => t.cfg,
     boardRepos: () => t.onBoard,
+    boardStamp: () => t.stamp,
     now: () => t.now,
   })
   return { store, calls, t }
@@ -94,6 +95,22 @@ describe('AssignableUsers (who can be assigned in a repository, read when the As
     t.onBoard = ['not a repo', '../x', 'acme/..']
     for (const bad of t.onBoard) expect(await store.get(bad)).toMatchObject({ ok: false })
     expect(calls).toEqual(['Partner/Portal'])
+  })
+  it('a failure is forgotten at once when the config changes or a board read lands', async () => {
+    let fail = true
+    const { store, calls, t } = make(two, () => (fail ? null : ['zoe']))
+    await store.get('acme/api')
+    await store.get('acme/api')
+    expect(calls).toHaveLength(1)
+    t.stamp = 2 // a board refresh landed (the card may be routed to another account now)
+    await store.get('acme/api')
+    expect(calls).toHaveLength(2)
+    await store.get('acme/api')
+    expect(calls).toHaveLength(2)
+    t.cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker', 'acme/api'], { primary: true, projects: [BOARD] }), acct('bob-work', 'globex', ['globex/app'])] }) // Setup saved
+    fail = false
+    expect(await store.get('acme/api')).toEqual({ ok: true, users: ['zoe'] })
+    expect(calls).toHaveLength(3)
   })
   it('the primary issue repo is always read, also when no account lists it', async () => {
     const odd = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/api'], { primary: true, issueRepo: 'api' })] })

@@ -55,15 +55,16 @@ export function accountClients(d: AccountClientsDeps) {
   /** Repo-scoped calls: the repo's account, else the primary. */
   const forRepo = (repo: string | null | undefined): Clients => forAccount(accountForRepo(repo, d.config()))
   /**
-   * A card's calls: its repository's account; for a repository no account lists, the account whose
-   * loaded board holds the card (`boardOf`), so a private repository on another account's board is
-   * not asked for with the primary's token; else the primary.
+   * A card's calls (`accountForCard`): its repository's account; for a repository no account lists,
+   * the account with that owner, else the account whose loaded board holds the card (`boardOf`),
+   * so a private repository on another account's board is not asked for with the primary's token;
+   * else the primary. `cardAccount` is that login (null with one account).
    */
-  const forCard = (repo: string | null | undefined, number?: number): Clients => {
+  const cardAccount = (repo: string | null | undefined, number?: number): string | null => {
     const cfg = d.config()
-    if (!isMulti(cfg)) return d.base
-    return forAccount(accountForCard(repo, d.boardOf?.(repo, number) ?? null, cfg))
+    return isMulti(cfg) ? accountForCard(repo, d.boardOf?.(repo, number) ?? null, cfg) : null
   }
+  const forCard = (repo: string | null | undefined, number?: number): Clients => forAccount(cardAccount(repo, number))
   /**
    * Picks the account from the call itself: `-R`/`--repo owner/name`, a whole PR or issue URL, or a
    * `repos/<owner>/<repo>/…` API path (`repoOfArgs`). Anything else (`api user`, search) names no
@@ -83,5 +84,5 @@ export function accountClients(d: AccountClientsDeps) {
     move: (t: Ticket, target: string, o?: { force?: boolean }) => forCard(t.repo, t.number).ops.move(t, target, o),
     linkPr: (t: Ticket, url: string) => forCard(t.repo, t.number).ops.linkPr(t, url),
   }
-  return { forAccount, forRepo, forCard, ghRouted, ghDirect, boardOps }
+  return { forAccount, forRepo, forCard, cardAccount, ghRouted, ghDirect, boardOps }
 }

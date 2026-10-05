@@ -17,6 +17,8 @@ export interface AssignUsersDeps {
   config: () => AppConfig
   /** The repositories (owner/name) of the cards on the board main has loaded, as GitHub's board names them. */
   boardRepos?: () => string[]
+  /** Changes whenever a board read lands. */
+  boardStamp?: () => unknown
   now?: () => number
 }
 
@@ -30,6 +32,8 @@ export class AssignableUsers {
   private kept = new Map<string, { users: string[]; at: number }>()
   private inflight = new Map<string, Promise<AssignUsersResult>>()
   private failed = new Map<string, { message: string; at: number }>()
+  /** The config and board read the failures were seen under: a change of either forgets them (the card may be routed to another account now). */
+  private seen: { cfg: unknown; stamp: unknown } = { cfg: null, stamp: null }
 
   constructor(private deps: AssignUsersDeps) {}
 
@@ -49,6 +53,11 @@ export class AssignableUsers {
     const now = (this.deps.now ?? Date.now)()
     const had = this.kept.get(key)
     if (had && now - had.at < ASSIGN_USERS_TTL_MS && now >= had.at) return Promise.resolve({ ok: true, users: had.users })
+    const stamp = this.deps.boardStamp?.()
+    if (this.seen.cfg !== c || this.seen.stamp !== stamp) {
+      this.failed.clear()
+      this.seen = { cfg: c, stamp }
+    }
     const bad = this.failed.get(key)
     if (bad && now - bad.at < ASSIGN_USERS_FAILED_MS && now >= bad.at) return Promise.resolve({ ok: false, message: bad.message })
     const running = this.inflight.get(key)

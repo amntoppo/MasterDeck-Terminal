@@ -261,10 +261,24 @@ describe('the account a card\'s calls go out as', () => {
   const cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [{ owner: 'acme', number: 1, columns: ['Todo'] }], true), acct('bob-work', 'globex', ['globex/app'], [{ owner: 'globex', number: 7, columns: ['Todo'] }])] })
   it('the account that lists the repository; else the account whose board holds the card; else the primary', () => {
     expect(accountForCard('globex/app', 'acme/1', cfg)).toBe('bob-work') // listed: the board does not matter
-    expect(accountForCard('globex/infra', 'globex/7', cfg)).toBe('bob-work') // listed nowhere, on bob-work's board
-    expect(accountForCard('globex/infra', null, cfg)).toBe('alice') // on no loaded board
-    expect(accountForCard('globex/infra', 'other/9', cfg)).toBe('alice') // a board no account selects
+    expect(accountForCard('partner/portal', 'globex/7', cfg)).toBe('bob-work') // listed nowhere, on bob-work's board
+    expect(accountForCard('partner/portal', null, cfg)).toBe('alice') // on no loaded board
+    expect(accountForCard('partner/portal', 'other/9', cfg)).toBe('alice') // a board no account selects
     expect(accountForCard(null, 'globex/7', cfg)).toBe('alice') // no repository: the primary issue repo
+  })
+  it('before the board: an account whose owner is the repository\'s owner (it is the one with rights there)', () => {
+    // acme/infra is ticked nowhere; alice's owner is acme; bob-work's board holds the card.
+    expect(accountForCard('acme/infra', 'globex/7', cfg)).toBe('alice')
+    expect(accountForCard('ACME/Infra', 'globex/7', cfg)).toBe('alice')
+    // globex/infra: bob-work's owner is globex, so the owner already says bob-work, board or not.
+    expect(accountForCard('globex/infra', null, cfg)).toBe('bob-work')
+    expect(accountForCard('globex/infra', 'acme/1', cfg)).toBe('bob-work')
+    // An owner no account has: the board decides, then the primary.
+    expect(accountForCard('partner/portal', 'globex/7', cfg)).toBe('bob-work')
+    expect(accountForCard('partner/portal', null, cfg)).toBe('alice')
+    // Two accounts with the same owner: the first in the config.
+    const twins = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true), acct('carol', 'globex', ['globex/web'], []), acct('bob-work', 'globex', ['globex/app'], [])] })
+    expect(accountForCard('globex/infra', null, twins)).toBe('carol')
   })
   it('one account, or none: as before', () => {
     expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true)] }))).toBe('alice')

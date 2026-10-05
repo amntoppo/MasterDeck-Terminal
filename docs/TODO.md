@@ -229,6 +229,15 @@ fixes it, and move the item here to "Recently done".
   lost with it, and other repository reads and Refresh wait behind it (one read at a time).
   Approach: print each chunk as a line when it is done and let `RepoIssues` apply them as they come,
   or have the app send one CLI call per ten.
+- **P3 · Three gaps in which account a card's calls go out as** (`accountForCard`, `forCard`).
+  (1) A status move is routed by the card's account, not by the project's owner: a repository
+  listed by account A whose card sits only on B's board is moved with A's token, which fails when A
+  cannot write B's project. (2) `Sources.boardOf` without a number (the assignable-users read, a
+  PR's summary) guesses by repository: the first loaded card of that repository decides the board.
+  (3) `BoardFlow` drops the project it already knows: a my-issues card outside the loaded sprint, in
+  a repository no account lists or owns, is not found by `boardOf` and routes to the primary.
+  Approach: carry the card's `project` in the ticket through `move`/`linkPr`/`setStatus` and route
+  project writes by `accountForProject`.
 - **P3 · A session for a card of a repository no account lists starts as the primary account.**
   MasterDeck's own calls for such a card go out as the account whose board holds it (`forCard`);
   a session started from it (Start, a PR review) still takes its account from the repository alone

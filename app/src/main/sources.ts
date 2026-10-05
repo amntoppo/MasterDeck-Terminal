@@ -1100,6 +1100,11 @@ export class Sources {
     return [...out.values()];
   }
 
+  /** Changes whenever a board read lands (every loaded board's `takenAt`). */
+  boardStamp(): string {
+    return Object.entries(this.boards).map(([k, b]) => `${k}=${b.takenAt ?? ""}`).join("|");
+  }
+
   /**
    * The cards of the loaded boards that name a repository and sit on a board Setup still selects
    * (a board removed in Setup can linger in memory and in the cache: its cards do not count). A

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
 import { parseBoard } from './board'
-import { awaitingRead, boardDeriver, boardEmpty, boardless, boardsOf, boardToShow, boardWanted, canMove, columnsWithDerived, unreadRepos, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
+import { awaitingRead, boardDeriver, boardEmpty, boardless, boardsOf, boardToShow, boardWanted, canMove, columnsWithDerived, unreadRepos, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx, cardBoardless } from './derivedBoard'
 import type { PastSession } from './pastSessions'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -289,5 +289,22 @@ describe('canMove', () => {
     expect(canMove(card(), true)).toBe(false)
     expect(canMove(real, true)).toBe(false)
     expect(canMove(undefined, false)).toBe(false)
+  })
+})
+
+describe('has the account of this card a board (the gate before a status is written)', () => {
+  const acct = (login: string, owner: string, repos: string[], projects: unknown[], primary = false) => ({ login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repos[0].split('/')[1], repos, projects, ...(primary ? { primary: true } : {}) })
+  // The primary has no board; bob-work has one, and it holds a card of a repository nobody lists.
+  const cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true), acct('bob-work', 'globex', ['globex/app'], [{ owner: 'globex', number: 7, columns: ['Todo'] }])] })
+  it('is asked of the account the card\'s calls go out as, not of the primary', () => {
+    expect(cardBoardless('partner/portal', 'globex/7', cfg)).toBe(false) // on bob-work's board: there is a status to write
+    expect(repoBoardless('partner/portal', cfg)).toBe(true) // by repository alone it was the primary, which has none
+    expect(cardBoardless('partner/portal', null, cfg)).toBe(true) // on no board: the primary
+    expect(cardBoardless('acme/tracker', 'globex/7', cfg)).toBe(true) // alice's own repository
+    expect(cardBoardless('globex/app', null, cfg)).toBe(false)
+  })
+  it('one account: the config as a whole, as before', () => {
+    expect(cardBoardless('x/y', null, parseConfig({ owner: 'acme', issueRepo: 'tracker', project: 1 }))).toBe(false)
+    expect(cardBoardless('x/y', 'acme/1', parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBe(true)
   })
 })
