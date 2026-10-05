@@ -1,4 +1,9 @@
-## What's new in 0.8.0
+## What's new in 0.8.1
+
+- **Windows build.** 0.8.0 shipped without the Windows installer (two tests assumed macOS); 0.8.1
+  has both. Nothing else changed.
+
+## In 0.8.0
 
 - **Several GitHub accounts.** Connect more than one account in Setup. Each session runs as the
   account you pick (commits, pushes and PRs are that account's), the Board and PRs get a tab per

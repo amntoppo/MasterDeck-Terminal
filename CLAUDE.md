@@ -326,7 +326,7 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-06)
 
-- **Where things stand:** `main` is pushed and released as **v0.8.0** (2026-10-06): several GitHub
+- **Where things stand:** `main` is pushed and released as **v0.8.1** (2026-10-06; v0.8.0 had no Windows build): several GitHub
   accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the
   Board's repository view with assignable users per repository (plan K, merge e75ec9c) and a
   workspace per account (merge 660c726). Installed locally; the web app is redeployed from this

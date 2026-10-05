@@ -255,6 +255,19 @@ fixes it, and move the item here to "Recently done".
   repository is not read, the 5-minute ask, the size budget, the Assign popup's tooltip. Approach:
   one isolated run with `MASTERDECK_REPO_FIXTURE` and a tab that picks an unticked repository.
 
+## Create a GitHub board: first real run (2026-10-06)
+
+- **P2 · The first batch of issues reported "Added 0 of 26".** The first real run (one account's
+  board, one repository, 26 open issues) created the project, its four columns, the repository link
+  and the config entry correctly, then answered `ok` with "Added 0 of 26 issues" and 26 left. The
+  same `addProjectV2ItemById` batch of 20 sent by hand a minute later was accepted whole, and the
+  board's item count lagged for about half a minute (7, then 20, then 26; every item came up as
+  Todo). So right after `createProjectV2` GitHub answers the first add batch with errors, or in
+  part, and item counts are eventually consistent. To do: log what GitHub answered for a batch that
+  is not `answered`; count the aliases that did succeed in a partial answer; retry a failed batch
+  once after a pause before giving up; do not report `ok` with the board selected while nothing was
+  added (the tab then shows an empty board until Try again). Not reproduced in a test yet.
+
 ## Where a session starts (2026-10-05)
 
 - **P2 · Start a session from it once.** Seen in the isolated app (2026-10-05): Setup's rows, the

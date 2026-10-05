@@ -334,12 +334,12 @@ class AssignTest(Base):
         a = rules._assign(issue(7, "globex/app"))
         sp = a["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.other / "app"), "bob-work"))
-        want = (PROMPTS / "assign_main_other_repo.txt").read_text().replace(MAIN_STEP_1.format(lab="app#7"), (
+        want = (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8").replace(MAIN_STEP_1.format(lab="app#7"), (
             f"1. Read the issue. This folder is a checkout of globex/app, where the issue is filed. If the work belongs in "
             f"another repository (the CLAUDE.md in {self.other} may say which), use that repository under {self.other} "
             f"instead; otherwise work in a git worktree here for app#7 (use Claude Code's worktree support / EnterWorktree, "
             f"branch named after the ticket), so the main checkout stays clean.\n"))
-        self.assertNotEqual(want, (PROMPTS / "assign_main_other_repo.txt").read_text())
+        self.assertNotEqual(want, (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8"))
         self.assertEqual(sp["prompt"], want)  # only step 1 differs, and it asks nothing
         self.assertEqual(a["message"], sp["prompt"])
 
@@ -348,7 +348,7 @@ class AssignTest(Base):
         a = rules._assign(issue(7, "globex/app"))
         sp = a["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.other), "bob-work"))
-        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main_other_repo.txt").read_text())
+        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8"))
         # The primary repo's ticket: alice's workspace, and alice.
         sp = rules._assign(issue(42))["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.ws), "alice"))
@@ -375,17 +375,17 @@ class LegacyTest(Base):
         sp = rules._assign(issue(42))["target"]["spawn"]
         self.assertEqual(sp["cwd"], str(self.ws))
         self.assertNotIn("account", sp)
-        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main.txt").read_text())
+        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main.txt").read_text(encoding="utf-8"))
         self.assertEqual(rules._assign(issue(7, "globex/app"))["target"]["spawn"]["prompt"],
-                         (PROMPTS / "assign_main_other_repo.txt").read_text())
+                         (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8"))
 
     def test_without_a_master_agent_too(self):
         self.cfg(masterEnabled=False)
-        self.assertEqual(rules._assign(issue(42))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main_solo.txt").read_text())
+        self.assertEqual(rules._assign(issue(42))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main_solo.txt").read_text(encoding="utf-8"))
 
     def test_a_chosen_folder_that_is_no_checkout_keeps_the_prompt(self):
         self.cfg()
-        self.assertEqual(rules._assign(issue(42), str(self.tmp))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main.txt").read_text())
+        self.assertEqual(rules._assign(issue(42), str(self.tmp))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main.txt").read_text(encoding="utf-8"))
 
 
 class CliTest(Base):
@@ -422,7 +422,7 @@ class CliTest(Base):
         d = self.draft("--cwd", str(self.other / "app"))
         self.assertEqual((d["cwd"], d["found"]), (str(self.other / "app"), True))
         self.assertIn("This folder is a checkout of globex/app, where the issue is filed", d["prompt"])
-        self.assertEqual(d["genericPrompt"], (PROMPTS / "assign_main_other_repo.txt").read_text().replace("Fix upload retry", "T"))
+        self.assertEqual(d["genericPrompt"], (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8").replace("Fix upload retry", "T"))
 
     def test_checkout_prints_the_folder_of_a_repository(self):
         code, out = self.run_cli("checkout", "Globex/App")

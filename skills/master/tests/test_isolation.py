@@ -24,7 +24,7 @@ class IsolationTest(unittest.TestCase):
                         ("master_home", config.master_home()), ("workspace", config.workspace()),
                         ("ledger", ledger.ledger_path() if hasattr(ledger, "ledger_path") else config.master_home())):
             self.assertTrue(inside(p, root), f"{what} is {p}, not under the test sandbox {root}")
-            self.assertFalse(inside(p, conftest.REAL_HOME), what)
+            self.assertFalse(conftest._in_real_home(p), what)
 
     def test_without_the_variables_the_defaults_are_still_in_the_sandbox(self):
         saved = {k: os.environ.pop(k, None) for k in ("MASTERDECK_HOME", "MASTER_HOME")}

@@ -41,9 +41,14 @@ for _d in ("home", "workspace"):
 os.environ.update(_ENV)
 
 
+def _under(p: str, root: str) -> bool:
+    return p == root or p.startswith(root + os.sep)
+
+
 def _in_real_home(p) -> bool:
+    # The sandbox itself can sit inside the real home (on Windows the temp folder does): that is fine.
     p = os.path.realpath(str(p))
-    return p == REAL_HOME or p.startswith(REAL_HOME + os.sep)
+    return _under(p, REAL_HOME) and not _under(p, SANDBOX)
 
 
 @pytest.fixture(autouse=True)
