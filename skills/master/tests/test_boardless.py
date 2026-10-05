@@ -40,9 +40,13 @@ def ritem(n, state="OPEN", closed=None, updated="2026-09-25T09:00:00Z", assignee
             "pr states": dict(prs), "state": state, "closed_at": closed, "updated_at": updated, "derived": True}
 
 
+def NOT_FOUND(alias, kind="NOT_FOUND"):
+    return {"type": kind, "path": [alias], "message": "Could not resolve to a Repository"}
+
+
 def read(items, total=None):
     return {"items": items, "total": len(items) if total is None else total, "repos": ["acme/tracker"],
-            "skipped": [], "missing": []}
+            "skipped": [], "missing": [], "unread": {}}
 
 
 class ConfigTest(unittest.TestCase):
@@ -146,7 +150,7 @@ class LiveRepoIssuesTest(unittest.TestCase):
                 return json.dumps({"data": {"r0": {"open": {"totalCount": 101, "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
                                                                 "nodes": [node(1)]},
                                                        "closed": {"nodes": [node(9, "CLOSED", closed="2026-09-24T10:00:00Z")]}},
-                                            "r1": None}})
+                                            "r1": None}, "errors": [NOT_FOUND("r1")]})
             return json.dumps({"data": {"r0": {"open": {"totalCount": 101, "pageInfo": {"hasNextPage": False}, "nodes": [node(2)]}}}})
 
         env = {"GH_TOKEN": "x", "GHC_ACCOUNT": "bob-work"}
@@ -187,7 +191,7 @@ class LiveRepoIssuesTest(unittest.TestCase):
             data = {"r0": {"open": {"totalCount": 0, "pageInfo": {}, "nodes": []}, "closed": {"nodes": []}}}
             if "r1: repository(" in calls[-1]:
                 data["r1"] = None
-            return json.dumps({"data": data})
+            return json.dumps({"data": data, "errors": [NOT_FOUND("r1")]} if data.get("r1", 1) is None else {"data": data})
         return fake_run
 
     def test_a_missing_repo_is_left_out_of_the_query_for_an_hour(self):
@@ -210,6 +214,30 @@ class LiveRepoIssuesTest(unittest.TestCase):
             collect.Live(self.VIEW, env).repo_issues(TODAY)
         self.assertEqual(calls[2].count("repository("), 2)  # an hour later: tried again
 
+    def test_only_a_not_found_repo_is_remembered(self):
+        # A null alias with another error (rate limit, forbidden, SAML), another alias's error, or none
+        # is a flaky answer: listed for this run, not saved, asked again next time.
+        saved = Path(self.home.name) / "missing-repos.json"
+        for errors, why in (([NOT_FOUND("r1", "RATE_LIMITED")], "RATE_LIMITED"), ([NOT_FOUND("r0")], "unknown"), ([], "unknown")):
+            calls = []
+
+            def fake_run(cmd, timeout=120, env=None, partial=False):
+                calls.append(" ".join(cmd))
+                return json.dumps({"data": {"r0": {"open": {"totalCount": 0, "pageInfo": {}, "nodes": []}, "closed": {"nodes": []}},
+                                            "r1": None}, "errors": errors})
+
+            with mock.patch.object(collect, "_run", side_effect=fake_run), mock.patch.object(collect.time, "time", return_value=1000.0):
+                got = collect.Live(self.VIEW, {}).repo_issues(TODAY)
+                again = collect.Live(self.VIEW, {}).repo_issues(TODAY)
+            self.assertEqual((got["missing"], got["unread"]), (["globex/gone"], {"globex/gone": why}))
+            self.assertFalse(saved.exists(), errors)
+            self.assertEqual(calls[1].count("repository("), 2, "asked again on the next call")
+            self.assertEqual(again["missing"], ["globex/gone"])
+        calls = []  # NOT_FOUND on its own alias: remembered, and not "unread"
+        with mock.patch.object(collect, "_run", side_effect=self._gone_runner(calls)), mock.patch.object(collect.time, "time", return_value=1000.0):
+            self.assertEqual(collect.Live(self.VIEW, {}).repo_issues(TODAY)["unread"], {})
+        self.assertTrue(saved.exists())
+
     def test_when_every_repo_is_remembered_missing_nothing_is_sent(self):
         (Path(self.home.name) / "missing-repos.json").write_text(json.dumps({"bob-work": {"globex/app": 1000, "globex/gone": 1000}}))
         with mock.patch.object(collect, "_run", side_effect=AssertionError("no call")), \
@@ -219,7 +247,7 @@ class LiveRepoIssuesTest(unittest.TestCase):
 
     def test_the_only_repo_gone_is_missing_not_an_error(self):
         view = dict(self.VIEW, repos=["globex/gone"], issueRepo="gone")
-        gone = json.dumps({"data": {"r0": None}, "errors": [{"type": "NOT_FOUND"}]})
+        gone = json.dumps({"data": {"r0": None}, "errors": [NOT_FOUND("r0")]})
         with mock.patch.object(collect, "_run", return_value=gone):
             got = collect.Live(view, {}).repo_issues(TODAY)
         self.assertEqual((got["items"], got["missing"]), ([], ["globex/gone"]))
@@ -286,6 +314,11 @@ class BoardCommandTest(unittest.TestCase):
         with mock.patch.object(collect.Fixtures, "pr_details", side_effect=RuntimeError("boom")):
             code, b = self.run_board(read([ritem(2, prs={PR + "5": "DRAFT"})]))
         self.assertEqual((code, b["cards"][0]["prs"][0]["state"], b["cards"][0]["prs"][0]["ci"]), (0, "DRAFT", None))
+
+    def test_an_unread_repo_says_why(self):
+        code, b = self.run_board(dict(read([ritem(1)]), missing=["acme/api"], unread={"acme/api": "RATE_LIMITED"}))
+        self.assertEqual((code, b["notes"]), (0, ["acme/api not read: RATE_LIMITED"]))
+        self.assertEqual(b["derived"][0]["missing"], ["acme/api"])
 
     def test_no_pr_read_without_an_open_pr(self):
         with mock.patch.object(collect.Fixtures, "pr_details", side_effect=AssertionError("no PR is open: no read")):

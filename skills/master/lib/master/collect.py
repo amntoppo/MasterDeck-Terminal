@@ -233,7 +233,8 @@ class Live:
     def repo_issues(self, today: date) -> dict:
         """The issues of this account's ticked repositories, for an account with no board: open
         ones and the ones closed lately. {"items", "total" (open issues GitHub counts), "repos"
-        (read), "skipped" (past DERIVED_MAX_REPOS), "missing" (GitHub answered nothing for)}.
+        (read), "skipped" (past DERIVED_MAX_REPOS), "missing" (GitHub answered nothing for), "unread"
+        ({repo: GraphQL error type} of the missing ones not remembered: asked again next call)}.
         One GraphQL call for every repository; up to two more for repositories with further
         pages, while fewer than DERIVED_MAX_CARDS open issues were read."""
         from . import board
@@ -244,7 +245,7 @@ class Live:
         known = {r: t for r, t in _load_missing(key).items() if now - t < MISSING_TTL}
         pending = {f"r{i}": (r, None) for i, r in enumerate(repos) if r not in known}
         items, total, missing, first = [], 0, [r for r in repos if r in known], True
-        found = {}
+        found, unread = {}, {}
         for _ in range(3):
             if not pending:
                 break
@@ -252,7 +253,12 @@ class Live:
             args = ["gh", "api", "graphql", "-f", f"query={query}"]
             for k, v in variables.items():
                 args += ["-f", f"{k}={v}"]
-            data = json.loads(self._gh(args, partial=True)).get("data") or {}
+            answer = json.loads(self._gh(args, partial=True))
+            data = answer.get("data") or {}
+            # Only GitHub saying NOT_FOUND for that alias is remembered; a null from a rate limit,
+            # a forbidden or a timeout must not hide a healthy repository for an hour.
+            gone = {e["path"][0]: e.get("type") for e in answer.get("errors") or []
+                    if isinstance(e, dict) and isinstance(e.get("path"), list) and e["path"]}
             for alias in list(pending):
                 repo, _cursor = pending[alias]
                 got, cursor, count = board.repo_issues_page(data, alias, repo)
@@ -260,7 +266,10 @@ class Live:
                     total += count
                     if not isinstance(data.get(alias), dict):
                         missing.append(repo)
-                        found[repo] = now
+                        if gone.get(alias) == "NOT_FOUND":
+                            found[repo] = now
+                        else:
+                            unread[repo] = gone.get(alias) or "unknown"
                 items += got
                 if cursor and sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS:
                     pending[alias] = (repo, cursor)
@@ -269,7 +278,8 @@ class Live:
             first = False
         if found or known != _load_missing(key):
             _save_missing(key, {**known, **found})
-        return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing}
+        return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing,
+                "unread": unread}
 
     def sprints(self) -> list:
         from . import board
