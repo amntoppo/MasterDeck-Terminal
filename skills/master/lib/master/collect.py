@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
@@ -62,18 +63,30 @@ def account_token(login: str, runner=subprocess.run) -> "str | None":
     return tok if r.returncode == 0 and tok else None
 
 
-def _run(cmd: list, timeout: int = 120, env: "dict | None" = None) -> str:
-    """`env`: one account's GH_TOKEN and GHC_ACCOUNT (None: the inherited environment, as before)."""
+def _has_data(out: str) -> bool:
+    """A GraphQL answer that still carries data: gh exits 1 on a partial error (one repository of
+    several is gone) but prints what it got."""
+    try:
+        data = json.loads(out).get("data")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(data, dict) and any(v is not None for v in data.values())
+
+
+def _run(cmd: list, timeout: int = 120, env: "dict | None" = None, partial: bool = False) -> str:
+    """`env`: one account's GH_TOKEN and GHC_ACCOUNT (None: the inherited environment, as before).
+    `partial`: a GraphQL answer that carries data is returned even when gh exits 1."""
     if cmd and cmd[0] == "gh" and os.environ.get("MASTER_NO_GH_CACHE") != "1":
         # Every GitHub read goes through the cache shared with the babysit skills and MasterDeck.
         from . import ghcache
         code, out, err = ghcache.run(cmd[1:], ttl=_gh_ttl(cmd), env=env)
-        if code != 0:
-            raise RuntimeError((err.decode(errors="replace") or out.decode(errors="replace") or f"exit {code}").strip())
-        return out.decode(errors="replace")
+        text = out.decode(errors="replace")
+        if code != 0 and not (partial and _has_data(text)):
+            raise RuntimeError((err.decode(errors="replace") or text or f"exit {code}").strip())
+        return text
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                        env={**os.environ, **env} if env else None)
-    if r.returncode != 0:
+    if r.returncode != 0 and not (partial and _has_data(r.stdout)):
         raise RuntimeError((r.stderr or r.stdout or f"exit {r.returncode}").strip())
     return r.stdout
 
@@ -115,10 +128,10 @@ class Live:
             return cls(view, None, f"gh is not logged in to {view['login']}")
         return cls(view, {"GH_TOKEN": tok, "GHC_ACCOUNT": view["login"]})
 
-    def _gh(self, cmd: list) -> str:
+    def _gh(self, cmd: list, partial: bool = False) -> str:
         if self.error:
             raise RuntimeError(self.error)
-        return _run(cmd, env=self.env)
+        return _run(cmd, env=self.env, partial=True) if partial else _run(cmd, env=self.env)
 
     def me(self) -> str:
         return self._gh(["gh", "api", "user", "--jq", ".login"]).strip()
@@ -165,9 +178,47 @@ class Live:
         return self.board_mine_ready()[1]
 
     def board_sprint(self, query: str = config.BOARD_SPRINT_QUERY) -> list:
+        from . import board
         ps = config.projects(self.cfg)
-        got = self.project_items([(f"b{i}", p, query) for i, p in enumerate(ps)])
+        # A board with no sprint field (MasterDeck made it): the sprint part would match nothing.
+        got = self.project_items([(f"b{i}", p, board.sprintless_query(query) if p.get("sprintless") else query)
+                                  for i, p in enumerate(ps)])
         return [it for i in range(len(ps)) for it in got[f"b{i}"]]
+
+    def repo_issues(self, today: date) -> dict:
+        """The issues of this account's ticked repositories, for an account with no board: open
+        ones and the ones closed lately. {"items", "total" (open issues GitHub counts), "repos"
+        (read), "skipped" (past DERIVED_MAX_REPOS), "missing" (GitHub answered nothing for)}.
+        One GraphQL call for every repository; up to two more for repositories with further
+        pages, while fewer than DERIVED_MAX_CARDS open issues were read."""
+        from . import board
+        ticked = config.repos(self.cfg)
+        repos = ticked[:config.DERIVED_MAX_REPOS]
+        since = board.done_since(today)
+        pending = {f"r{i}": (r, None) for i, r in enumerate(repos)}
+        items, total, missing, first = [], 0, [], True
+        for _ in range(3):
+            if not pending:
+                break
+            query, variables = board.repo_issues_query([(a, r, c, first) for a, (r, c) in pending.items()], since)
+            args = ["gh", "api", "graphql", "-f", f"query={query}"]
+            for k, v in variables.items():
+                args += ["-f", f"{k}={v}"]
+            data = json.loads(self._gh(args, partial=True)).get("data") or {}
+            for alias in list(pending):
+                repo, _cursor = pending[alias]
+                got, cursor, count = board.repo_issues_page(data, alias, repo)
+                if first:
+                    total += count
+                    if not isinstance(data.get(alias), dict):
+                        missing.append(repo)
+                items += got
+                if cursor and sum(1 for it in items if it["state"] == "OPEN") < config.DERIVED_MAX_CARDS:
+                    pending[alias] = (repo, cursor)
+                else:
+                    del pending[alias]
+            first = False
+        return {"items": items, "total": total, "repos": repos, "skipped": ticked[len(repos):], "missing": missing}
 
     def sprints(self) -> list:
         from . import board
@@ -250,6 +301,7 @@ class Fixtures:
     def board_ready(self) -> list: return self._json("board_ready.json")
     def board_mine_ready(self) -> "tuple[list, list]": return self.board_mine(), self.board_ready()
     def board_sprint(self, query: str = "") -> list: return self._json("board_sprint.json")
+    def repo_issues(self, today=None) -> dict: return self._json("repo_issues.json")
     def sprints(self) -> list: return self._json("sprints.json")
     def pr_details(self, urls: list) -> dict: return self._json("board_prs.json")
     def prs_mine(self) -> list: return self._json("prs_mine.json")

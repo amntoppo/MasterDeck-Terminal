@@ -311,14 +311,38 @@ def cmd_draft_assign(args) -> int:
     return 0
 
 
+def _repo_cards(src, args) -> "tuple[list, dict, dict]":
+    """An account with no board: its repositories' issues as board items, the details of their
+    PRs, and what was read (for the Board's note)."""
+    got = src.repo_issues(_today(args))
+    items, shown = board.trim_repo_issues(got["items"], board.done_since(_today(args)))
+    details = {u: {"state": st, "ci": None, "unresolved": 0}
+               for it in items for u, st in (it.get("pr states") or {}).items()}
+    live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
+    if live:
+        try:
+            details.update(src.pr_details(live))
+        except Exception:  # the states are known already; CI and threads come with the next refresh
+            pass
+    part = {"repos": got["repos"], "total": got["total"], "shown": shown,
+            "skipped": got["skipped"], "missing": got["missing"]}
+    return items, details, part
+
+
 def cmd_board(args) -> int:
     srcs = _sources(args)
     logins = [a["login"] for a in config.accounts()] if len(srcs) > 1 else [None]
-    items, details, errors = [], {}, []
+    items, details, errors, derived = [], {}, [], []
     for login, src in zip(logins, srcs):
         try:
-            got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
-            details.update(src.pr_details(board.linked_prs(got)))
+            if config.boardless(getattr(src, "cfg", None)):
+                # No board on this account (or at all): its repositories' issues stand in.
+                got, more, part = _repo_cards(src, args)
+                details.update(more)
+                derived.append(dict(part, account=login))
+            else:
+                got = src.board_sprint(board.sprint_query(args.sprint, mine=args.mine))
+                details.update(src.pr_details(board.linked_prs(got)))
             items += [dict(it, account=login) for it in got] if login else got
         except Exception as e:  # gh missing, network, rate limit, an account to log in again: say what gh said
             errors.append(str(e).strip() or type(e).__name__)
@@ -328,6 +352,8 @@ def cmd_board(args) -> int:
     out = board.build(items, details, _now(args))
     if errors:
         out["errors"] = errors
+    if derived:
+        out["derived"] = derived
     print(json.dumps(out))
     return 0
 
