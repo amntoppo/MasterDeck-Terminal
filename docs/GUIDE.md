@@ -817,8 +817,8 @@ account flag: `git commit`, `git push`, `gh pr create`. The session's environmen
 | `GIT_AUTHOR_NAME` / `_EMAIL`, `GIT_COMMITTER_NAME` / `_EMAIL` | The name and email from Setup, so commits are authored as this account. |
 | `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n` | Git settings for this session only: `user.name`, `user.email`; the github.com credential helper cleared (so a password in your Mac's keychain is not used) and set to `gh auth git-credential` (which answers with `GH_TOKEN`); `url.https://github.com/.insteadOf` for `git@github.com:`, `ssh://git@github.com/` and each ssh alias, so SSH remotes push over HTTPS as this account. |
 
-So with `alice` as the primary and active `gh` account, a session started as `amntoppo` still
-commits, pushes and opens PRs as `amntoppo`. To check in any session: `gh api user --jq .login` and
+So with `alice` as the primary and active `gh` account, a session started as `bob-work` still
+commits, pushes and opens PRs as `bob-work`. To check in any session: `gh api user --jq .login` and
 `git config user.email`. The account needs access to the repo: without it the push or PR fails with a
 permission error; nothing falls back to the primary. Shell tabs and your own terminal do not get
 these variables: they use your global git setup and `gh`'s active account.

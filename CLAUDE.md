@@ -326,15 +326,15 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-06)
 
-- **Where things stand:** several GitHub accounts (plan I, merge 6a83862), the Board without a GitHub
-  project (plan J, merge 7f971c4), the Board's repository view with assignable users per repository
-  (plan K, merge d2bb03e) and a workspace per account (merge 3da6a48) are all merged to local `main`
-  and installed locally. None of it is pushed or released (`main` is ahead of `origin/main`; the last
-  release is v0.7.1) and the web app is not redeployed. Their feature branches are deleted. Nothing
-  in them has run against GitHub or started a real session yet: the first real use is the live test.
-  Next: push and release when the user asks, then deploy the web app (after the desktop release).
+- **Where things stand:** `main` is pushed and released as **v0.8.0** (2026-10-06): several GitHub
+  accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the
+  Board's repository view with assignable users per repository (plan K, merge e75ec9c) and a
+  workspace per account (merge 660c726). Installed locally; the web app is redeployed from this
+  `main`. The backend's `session.start.account` is merged and deployed (backend PR #10); specs and
+  plans are on backend `master` (PR #11). The bullets below say what was checked for each feature
+  before the release; where they say "not pushed", that was true then.
 - A workspace per GitHub account, and sessions that start in the ticket's repository's checkout, are
-  merged to `main` (3da6a48), installed locally, not pushed. `accounts[].workspace` (optional; the top-level `workspace` is
+  merged to `main` (660c726), installed locally, not pushed. `accounts[].workspace` (optional; the top-level `workspace` is
   the primary's), one resolver in the master CLI (`checkout.py`) used by master's ASSIGN proposals,
   the Start dialog's draft, `master add` / `master spawn` for ticket work without a folder and PR
   review sessions; the Start dialog says where the session starts, says plainly when no checkout was
@@ -348,7 +348,7 @@ buttons; it does not go through macOS window drag regions.
   Start, anything that starts a session. Open points are in TODO ("Where a session starts").
 - Plan K (Board repository view: picking repositories in a Board tab's Repos filter shows all their
   issues, on a board or not, in MasterDeck's columns, with sessions started from a click; a session
-  can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is merged to `main` (d2bb03e), installed locally, not pushed. Checked on its branch: typecheck, vitest
+  can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is merged to `main` (e75ec9c), installed locally, not pushed. Checked on its branch: typecheck, vitest
   (1317 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
   suites alone checked), the Board's markup for tabs with no repository picked (identical to `main`,
   also the live DOM and a screenshot of the isolated app against `main`'s), the isolated app with
@@ -363,7 +363,7 @@ buttons; it does not go through macOS window drag regions.
   the desktop release that has it. Spec and plan: backend repo, `docs/superpowers/` (2026-10-05).
 - Plan J (Board without a GitHub project: repository issues in derived columns, Create a GitHub board,
   clearer empty states, linking and New ticket without a board, master proposals for such an account)
-  is merged to `main` (7f971c4), installed locally, not pushed. Checked on its branch: typecheck, vitest, the Python suite, and the
+  is merged to `main` (7714ec8), installed locally, not pushed. Checked on its branch: typecheck, vitest, the Python suite, and the
   isolated app with board fixtures (no board: hint, four columns, no drag, empty states, New ticket
   dry run; with a board: same DOM as `main`). Board creation was tested with a fake gh only: the first
   real run is the user's, on a throwaway account or repository (the spec's §9 lists what schema
@@ -378,9 +378,8 @@ buttons; it does not go through macOS window drag regions.
   is deployed to app.masterdeck.dev.
 - Several GitHub accounts (plan I) and the master-reply fix are merged into `main` locally (merges 6a83862,
   592dc54; not pushed, installed locally 2026-10-03). The real config was migrated (one account, primary).
-  The backend's optional `session.start.account` is on backend branch `feat/session-start-account`
-  (worktree `~/Documents/masterdeck-backend-proto`), not merged or deployed; until it merges, run the
-  drift test with `MASTERDECK_BACKEND=~/Documents/masterdeck-backend-proto`.
+  The backend's optional `session.start.account` is merged to backend `master` and deployed (PR #10);
+  the drift test runs against the backend checkout next to this repo again.
 - Backend `master` = `3af02f3` (PR #8, docs only), deployed code is PR #5 (`fccbfee`).
 - Next: whatever the user picks from [docs/TODO.md](docs/TODO.md). Top of the list: decide on
   pushing/releasing, fix or accept the broken backend CI deploy, re-measure web-bridge upload with

@@ -1,4 +1,21 @@
-## What's new in 0.7.1
+## What's new in 0.8.0
+
+- **Several GitHub accounts.** Connect more than one account in Setup. Each session runs as the
+  account you pick (commits, pushes and PRs are that account's), the Board and PRs get a tab per
+  account, and each account can have its own workspace folder.
+- **Board without a GitHub project.** An account with repositories and no project board gets a Board
+  from its issues, in Todo / In Dev / PR Raised / Done. **Create a GitHub board** makes a real one.
+- **Repository view.** Pick repositories in a Board tab's Repos filter to see every issue of them,
+  on a board or not, and start or open a session from any card.
+- **Assign to the right people.** The Assign popup lists who can be assigned in the card's own
+  repository, read as the account that owns it.
+- **Sessions start in the right folder.** A ticket's session starts in your checkout of its
+  repository when there is one; the Start dialog says where, and lets you choose a folder when
+  there is none.
+- **Reports reach only master.** A session's `#N: done|blocked|question` report can no longer land
+  in another session, and resuming a session no longer makes a copy of it.
+
+## In 0.7.1
 
 - **Windows build.** 0.7.0 shipped without the Windows installer (tests that assumed macOS failed on
   the Windows runner); 0.7.1 has both.
