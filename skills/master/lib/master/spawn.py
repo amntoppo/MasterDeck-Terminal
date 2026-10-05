@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import config, ledger
+from . import checkout, config, ledger
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
@@ -167,7 +167,7 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         else:
             ledger.transition(led, pid, "held", now=now, note=note)
 
-    cwd = p["target"]["spawn"].get("cwd") or str(config.workspace())
+    cwd = p["target"]["spawn"].get("cwd") or checkout.resolve(p.get("repo"))["cwd"]
     if not Path(cwd).is_dir():
         note = f"cwd does not exist: {cwd}"
         hold(note)

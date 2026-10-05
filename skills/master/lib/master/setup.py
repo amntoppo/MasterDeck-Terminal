@@ -216,6 +216,8 @@ def _validate(cfg: dict) -> "str | None":
             return f"accounts: {a['login']}'s repos must be a list of owner/name"
         if not isinstance(a.get("email", ""), str) or not isinstance(a.get("name", ""), str):
             return f"accounts: {a['login']}'s name and email must be text"
+        if not isinstance(a.get("workspace", ""), str):
+            return f"accounts: {a['login']}'s workspace must be a folder path"
     return None
 
 
@@ -230,6 +232,8 @@ def _mirror(cfg: dict) -> dict:
                            for a in cfg["accounts"] if isinstance(a, dict)]
         cfg.update(owner=p["owner"], ownerType=p["ownerType"], issueRepo=p["issueRepo"], repos=p["repos"],
                    allRepos=p["allRepos"], projects=p["projects"], allProjects=p["allProjects"])
+        if p["workspace"]:  # the primary's own workspace is the config's
+            cfg["workspace"] = p["workspace"]
         if not p["projects"]:  # no board on the primary: the top level mirrors that, not the previous board
             cfg.update({k: copy.deepcopy(config.DEFAULTS[k]) for k in
                         ("project", "projectId", "statusFieldId", "statusOptions", "columns", "statuses", "sprintField")})
@@ -249,7 +253,14 @@ def _mirror(cfg: dict) -> dict:
 
 def save(patch: dict, path: "Path | None" = None) -> dict:
     path = path or config.config_path()
-    cfg = _mirror(config._merge(config.load(path), patch))
+    cfg = config._merge(config.load(path), patch)
+    if isinstance(patch.get("workspace"), str) and "accounts" not in patch:
+        # The config's workspace is the primary account's: one that carries its own follows the
+        # patch (the mirror below would undo it otherwise).
+        for a in cfg.get("accounts") or []:
+            if isinstance(a, dict) and a.get("primary") is True and a.get("workspace"):
+                a["workspace"] = patch["workspace"]
+    cfg = _mirror(cfg)
     err = _validate(cfg)
     if err:
         raise ValueError(err)

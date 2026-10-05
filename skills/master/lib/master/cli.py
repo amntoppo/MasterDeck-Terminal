@@ -9,7 +9,7 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import board, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn
+from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn
 
 WRITE_CMDS = {"add", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
 
@@ -161,7 +161,8 @@ def cmd_add(args) -> int:
     if args.session:
         target = {"session": args.session}
     else:
-        sp = {"name": args.spawn_name, "cwd": args.cwd or str(config.workspace()), "prompt": args.prompt}
+        add_repo = refs.stored(args.repo) if args.repo else refs.parse(args.issue)[0]
+        sp = {"name": args.spawn_name, "cwd": args.cwd or checkout.resolve(add_repo)["cwd"], "prompt": args.prompt}
         if args.model:
             sp["model"] = args.model
         if args.account:
@@ -304,10 +305,22 @@ def cmd_draft_assign(args) -> int:
         if issue is None:
             print(f"issue {refs.label(repo, n).lstrip('#')} not found")
             return 1
-    a = rules._assign(issue)
+    a = rules._assign(issue, args.cwd)
     sp = a["target"]["spawn"]
+    where = checkout.resolve(repo, args.cwd)  # the one _assign used (a scan is remembered)
     print(json.dumps({"issue": a["issue"], "repo": a["repo"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
-                      "summary": a["summary"], "title": issue["title"], "url": issue["url"]}))
+                      "summary": a["summary"], "title": issue["title"], "url": issue["url"],
+                      # For the Start dialog: where it looked, for which repository, and whether it found it.
+                      "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"]}))
+    return 0
+
+
+def cmd_checkout(args) -> int:
+    """Where a session for this repository starts (the app's PR review sessions): JSON."""
+    if not re.fullmatch(config.REPO_RE, args.repo):
+        print(f"not a repository (owner/name): {args.repo}")
+        return 2
+    print(json.dumps(checkout.resolve(args.repo)))
     return 0
 
 
@@ -599,7 +612,12 @@ def parser() -> argparse.ArgumentParser:
     da.add_argument("--live", action="store_true")
     da.add_argument("--title")
     da.add_argument("--url")
+    da.add_argument("--cwd", help="a folder the user chose; omitted: the repository's checkout, else its account's workspace")
     da.set_defaults(fn=cmd_draft_assign)
+
+    co = sub.add_parser("checkout")
+    co.add_argument("repo", help="owner/name")
+    co.set_defaults(fn=cmd_checkout)
 
     return ap
 

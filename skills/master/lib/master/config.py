@@ -215,7 +215,9 @@ def account_view(a: dict) -> dict:
             "repos": [r for r in a.get("repos") or [] if isinstance(r, str) and re.fullmatch(REPO_RE, r)],
             "allRepos": a.get("allRepos") is True,
             "projects": [p for p in a.get("projects") or [] if isinstance(p, dict)],
-            "allProjects": a.get("allProjects") is True}
+            "allProjects": a.get("allProjects") is True,
+            # Where this account's checkouts live; "" = the config's workspace.
+            "workspace": a["workspace"] if isinstance(a.get("workspace"), str) else ""}
 
 
 def accounts(cfg: "dict | None" = None) -> list:
@@ -378,6 +380,18 @@ BOARD_SPRINT_QUERY: str = CONFIG["sprintQuery"]
 
 def workspace() -> Path:
     return Path(os.path.expanduser(os.environ.get("MASTER_WORKSPACE") or CONFIG["workspace"]))
+
+
+def workspace_for(repo: "str | None", cfg: "dict | None" = None) -> Path:
+    """The workspace of the account a ticket in `repo` belongs to (None = the primary issue repo):
+    the account that lists the repo, else the primary; an account without one of its own, and a
+    config without accounts, use the config's workspace. MASTER_WORKSPACE overrides them all."""
+    cfg = cfg or CONFIG
+    views = accounts(cfg)
+    login = match_repo(repo, cfg)
+    view = next((v for v in views if v["login"] == login), views[0] if views else None)
+    own = view["workspace"] if view else ""
+    return Path(os.path.expanduser(os.environ.get("MASTER_WORKSPACE") or own or cfg["workspace"]))
 
 
 def master_enabled() -> bool:

@@ -100,7 +100,7 @@ Or build it yourself (see [Develop](#develop)).
       (see [Board View](docs/GUIDE.md#board-view)). Settings → Set up MasterDeck shows the same step. With two or more accounts, an
       **Account** menu picks whose repositories and boards you are choosing; a repository can be under
       one account only (others show it as "in <login>").
-   4. **Preferences.** The folder master and new shells start in (where your repos are), whether to
+   4. **Preferences.** The folder master and new shells start in (where your repos are; with two or more GitHub accounts, also a folder for each other account's repos), whether to
       use a master-agent, and notifications for new Needs-you items.
 
    Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub accounts,
@@ -141,10 +141,10 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `statuses.done` / `finished` / `assignable` / `resumable` / `blocked` | Status sets: not new work; hidden from pick lists; master may assign; a session may resume; blocked |
 | `statuses.rank` | Optional order for "forward only" moves; by default the column order |
 | `sprintField`, `sprintQuery` | The board's iteration field and the filter for "my current sprint" |
-| `workspace` | Folder where master and new sessions start |
+| `workspace` | Folder where master and new shells start, and where your repositories are cloned: a session for a ticket starts in the checkout of the ticket's repository found there (the folder itself, its sub-folders, or one level below those; matched by the checkout's `origin`), else in this folder |
 | `masterName` | Name of the master session (default `master-agent`) |
 | `masterEnabled` | `false` runs MasterDeck without a master-agent (Setup → Master agent) |
-| `accounts` | Connected GitHub accounts (Setup → GitHub accounts): each `login`, `name`/`email` for its commits, `primary` (exactly one), and its own `owner`, `issueRepo`, `repos`, `projects`. The top-level fields above are the primary account's. A repo belongs to one account |
+| `accounts` | Connected GitHub accounts (Setup → GitHub accounts): each `login`, `name`/`email` for its commits, `primary` (exactly one), and its own `owner`, `issueRepo`, `repos`, `projects`. The top-level fields above are the primary account's. A repo belongs to one account. Any other account may carry its own `workspace` (where its repositories are cloned); without one it uses the top-level `workspace` |
 
 </details>
 
