@@ -17,10 +17,16 @@ const GH_ACTIVE = '*gh-active*'
  * `master spawn` adds the copies it starts to the same file: it is read again when it changed, and
  * a write keeps the entries it does not know.
  */
+const stamp = (file: string): string => {
+  const st = statSync(file)
+  return `${st.mtimeMs}:${st.size}`
+}
+
 export class SessionAccounts {
   private ids = new Map<string, string>()
   private pending = new Map<string, { login: string; at: number }>()
-  private mtime = -1
+  /** The file as last read or written: mtime and size (two writes can share a timestamp, on Windows above all). */
+  private mtime = ''
 
   constructor(private file: string) {
     this.sync()
@@ -28,9 +34,9 @@ export class SessionAccounts {
 
   /** Take in what the file holds that this run does not (ids written by `master spawn`). */
   private sync(): void {
-    let m: number
+    let m: string
     try {
-      m = statSync(this.file).mtimeMs
+      m = stamp(this.file)
     } catch {
       return // none yet
     }
@@ -76,7 +82,7 @@ export class SessionAccounts {
       mkdirSync(dirname(this.file), { recursive: true })
       writeFileSync(`${this.file}.tmp`, JSON.stringify(Object.fromEntries(this.ids)))
       renameSync(`${this.file}.tmp`, this.file)
-      this.mtime = statSync(this.file).mtimeMs
+      this.mtime = stamp(this.file)
     } catch (e) {
       console.error(`session accounts: ${String(e)}`)
     }

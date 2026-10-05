@@ -1,7 +1,8 @@
-## What's new in 0.8.1
+## What's new in 0.8.2
 
-- **Windows build.** 0.8.0 shipped without the Windows installer (two tests assumed macOS); 0.8.1
-  has both. Nothing else changed.
+- **Windows build.** 0.8.0 and 0.8.1 shipped without the Windows installer; 0.8.2 has both. A
+  session's account written by master in the same instant as the app's own write is no longer
+  missed.
 
 ## In 0.8.0
 

@@ -7,14 +7,15 @@ import { parkedFor, parseParked, type Parked } from '@shared/parked'
  */
 export class ParkedStore {
   private all: Record<string, Parked> = {}
-  private mtime = -1
+  private mtime = ''
 
   constructor(private file: string) {}
 
   get(s: { key: string; name: string; cwd: string; startedAt: number }): Parked | null {
-    let m: number
+    let m: string
     try {
-      m = statSync(this.file).mtimeMs
+      const st = statSync(this.file)
+      m = `${st.mtimeMs}:${st.size}` // size too: two writes can share a timestamp
     } catch {
       return null
     }

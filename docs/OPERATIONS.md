@@ -43,7 +43,7 @@ open /Applications/MasterDeck.app
 
 ## Release
 
-Only when the user asks. Last release: v0.8.1 (2026-10-06; v0.8.0 had no Windows build).
+Only when the user asks. Last release: v0.8.2 (2026-10-06; v0.8.0 and v0.8.1 had no Windows build).
 
 ```bash
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock
