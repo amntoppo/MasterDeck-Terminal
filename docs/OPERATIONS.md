@@ -113,6 +113,11 @@ npx electron . --remote-debugging-port=9333
   (`"repos": ["acme/tracker"], "project": 0, "projects": []`): the hint, the four columns, no drag.
   Never press **Create a GitHub board** in such a run: its read and its native dialog use the
   machine's real gh account, and the dialog is the last stop before a real write.
+- The Board's repository view without GitHub: add `MASTERDECK_REPO_FIXTURE=<json>`
+  (`app/test/fixtures/repo-issues.json`: issues of `acme/tracker` and `acme/api`) to a run whose
+  config has a board and both repositories (`"repos": ["acme/tracker", "acme/api"]`). Pick a
+  repository in a tab's Repos filter, or call `window.deck.boardRepos(["acme/api"])` and read
+  `repoView` from `window.deck.getState()`.
 - Before/after: record `shasum -a 256 ~/.claude/settings.json`; it must not change. Afterwards
   kill electron/wrangler/vite, check ports 8787/9333/9334/5175 are free, delete `$E2E` (that path
   only).

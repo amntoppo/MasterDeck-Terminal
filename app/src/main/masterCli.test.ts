@@ -74,6 +74,16 @@ describe('MasterCli', () => {
     await cli.board()
     expect(f.calls.map((c) => c.opts?.env?.GHC_FORCE)).toEqual(['1', '1', undefined])
   })
+  it('repoIssues runs master repo-issues for the named repositories, forced or not', async () => {
+    const f = fake({ stdout: JSON.stringify({ cards: [], repos: [] }) })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    expect(await cli.repoIssues(['acme/api', 'acme/web'])).toEqual({ ok: true, data: { cards: [], repos: [] } })
+    await cli.repoIssues(['acme/api'], true)
+    expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'repo-issues', '--repos', 'acme/api,acme/web'])
+    expect(f.calls.map((c) => c.opts?.env?.GHC_FORCE)).toEqual([undefined, '1'])
+    expect(await new MasterCli(fake({ stdout: 'nope' }).run, '/lib', 'python3').repoIssues(['acme/api'])).toEqual({ ok: false, message: 'repo-issues printed invalid JSON' })
+    expect(await new MasterCli(fake({ code: 2, stdout: '--repos takes owner/name, comma separated' }).run, '/lib', 'python3').repoIssues(['x'])).toEqual({ ok: false, message: '--repos takes owner/name, comma separated' })
+  })
   it('board runs master board and parses its JSON', async () => {
     const f = fake({ stdout: JSON.stringify({ cards: [], columns: [] }) })
     const r = await new MasterCli(f.run, '/lib', 'python3').board()

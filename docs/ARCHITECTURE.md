@@ -447,6 +447,8 @@ The Board tab (`BoardView.tsx`): `fallback = boardless(tabAccount, cfg)` is the 
 
 A Board tab whose Repos filter names repositories, and whose account has a board, shows every issue of those repositories instead of the board: `repoViewOn(login, cfg, repos)` is the one check (an account with no board is not one: its tab already shows these issues, and picking a repository filters them). The issues never enter `AppState.board`; they live in `AppState.repoView = { cards, repos: RepoPart[] }`, absent until a tab asks. `shared/repoView.ts` is the pure part: `cleanRepos` (what an ask may read: `owner/name`, selected in Setup, of an account with a board, at most 30), `parseRepoIssues` (the answer of `master repo-issues`), `needRead` / `applyRead` / `liveRepos` / `pruneEntries` / `dumpEntries` / `loadEntries` / `withAssignee` over the per-repository entries (a failed read keeps the cards of the read before and records the reason), `viewOf` (entries to view), `repoViewDeriver` (every card's column through `boardDeriver`, the same object back while nothing changed), and what a tab needs: `repoViewBoard` (the picked repositories' cards, `DERIVED_COLUMNS`, no boards), `repoViewStatus` / `repoViewEmpty` (loading, not read, no issues, filtered), `repoViewTitle`, `repoChoices` (the Repos filter's options) and `boardChips` (a card's `onBoards` as chips). `parseCards` (`shared/board.ts`) is shared with `parseBoard`; a parsed card parses to itself, which is what the cache relies on. `BoardCard.onBoards` is read only on a derived card, and `master board` never prints it.
 
+`RepoIssues` (`main/repoIssues.ts`, one per `Sources`) holds the entries. `ask(repos)` (from `deck.boardRepos`, renderer or web: untrusted, so it goes through `cleanRepos`) marks each repository as asked now and reads the ones never read or read over an hour ago (`REPO_VIEW_STALE_MS`); `refresh(force)` (from `Sources.refreshGithub`, so hourly and on Refresh) reads the ones asked for within the last hour (`REPO_VIEW_LIVE_MS`) and makes no call when there are none; a tab in repository view asks again every 20 minutes (`REPO_VIEW_ASK_MS`) to stay in that set. One read at a time (`master repo-issues` through `MasterCli.repoIssues`, `GHC_FORCE=1` when forced); while GitHub is paused nothing is read and a repository never read says so; a failed read's text goes through `Sources.githubPaused` like any other. `Sources.build()` puts `repoViewDeriver(view, ctx)` in the state as `repoView`; `saveGithubCache` writes `dumpEntries` as `cache.json`'s `repoIssues` and `start()` loads it; `loadConfig` prunes repositories no longer selected; `noteAssigned` updates a card at once. A failed repository read is not part of `refreshGithub`'s result or `boardError`: it shows in the view's own notes. `MASTERDECK_REPO_FIXTURE=<json>` replaces the CLI call (test aid, as `MASTERDECK_BOARD_FIXTURE` for the board).
+
 ### Create a GitHub board (`main/boardCreate.ts`, `shared/boardCreate.ts`)
 
 `BoardCreator` turns an account's fallback board into a real Projects (v2) board. Every call goes out as the account through `accountGh(config, forAccount)`: it checks on each call that the login is still connected (two or more accounts: a login of the config; one: none) and fails the call otherwise, because `forAccount` alone answers an unknown login with the primary's runner. Variables go to `gh api graphql` with `-f` (raw strings), never `-F`.
@@ -490,7 +492,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   `inbox:act`, `account:signIn`, `browser:decide`) and `DeckApi` (the `window.deck` interface).
 - `preload/index.ts` implements `DeckApi` with `ipcRenderer.invoke` (request/response),
   `ipcRenderer.send` (fire-and-forget: `setSprint`, `ptyWrite`, `ptyResize`, `ptyClose`,
-  `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`) and `listen()` for events
+  `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`, `boardRepos`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
   `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
   `onGhLogin(login)`: open a gh-login tab for that account).
@@ -498,6 +500,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
 - Create a GitHub board: `boardCreatePlan(account?)` (a read), `boardCreate({account?, title})`, `boardCreateRetry(account?)` and the event `onBoardCreateProgress` (`board:createProgress`, sent to the Mac's window only). All four are `blocked` in `DECK_ACCESS`, and the handlers refuse a remote caller as well: the confirmation is main's native dialog, and the usual fix (the `project` scope) needs a terminal on the Mac.
+- Repository view: `boardRepos(repos)` (`board:repos`, fire-and-forget, `remote` in `DECK_ACCESS`: it is a read, and main checks the list with `cleanRepos`).
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
   distinguishes the two; remote callers skip native dialogs (the web already asked with
@@ -570,6 +573,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 |---|---|
 | `sessions`, `master`, `lastActivity`, `asks`, `menus`, `prStage`, `manualStatus`, `hookInfo` | `Sources` (agents poll, transcripts, deck hook, `session-status.json`) |
 | `issues`, `prs`, `proposals`, `lastSnapshotAt`, `board*`, `sprints`, `selectedSprint`, `users`, `me`, `boardHistory`, `githubRefreshedAt/ing` | `master snapshot` / `master board` / ledger (`refreshGithub`, `readLedger`), cached in `cache.json`; `board` passes `deriveBoard` (columns of cards from an account with no board) |
+| `repoView` | `RepoIssues.view()` through `repoViewDeriver` (`master repo-issues`, only after a Board tab asked with `boardRepos`), cached in `cache.json` (`repoIssues`) |
 | `teamPrs`, `teamPrsAt`, `teamPrsLoading`, `teamPrsError` | `refreshTeamPrs` |
 | `inbox` | `Inbox.view()` over `collectItems` |
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
@@ -591,7 +595,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | File / folder | What |
 |---|---|
 | `settings.json` | `Settings` |
-| `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs |
+| `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs, the repository view's issues (`repoIssues`) |
 | `costs.json`, `tokens.json`, `stats/` | cost book, token index, status line output per session |
 | `statusline_tee.py` | installed status line tee (settings.json points here) |
 | `inbox.json`, `inbox-events.jsonl` | Needs you state and event log |

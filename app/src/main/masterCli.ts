@@ -84,6 +84,17 @@ export class MasterCli {
     }
   }
 
+  /** `master repo-issues`: every issue of these repositories (the Board's repository view), each read as its own account. */
+  async repoIssues(repos: string[], force = false): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+    const r = await this.exec(['repo-issues', '--repos', repos.join(',')], undefined, 120_000, force)
+    if (r.code !== 0) return { ok: false, message: message(r) }
+    try {
+      return { ok: true, data: JSON.parse(r.stdout) }
+    } catch {
+      return { ok: false, message: 'repo-issues printed invalid JSON' }
+    }
+  }
+
   /** `master sprints`: every sprint of the project, newest first. */
   async sprints(force = false): Promise<{ ok: true; sprints: Sprint[] } | { ok: false; message: string }> {
     const r = await this.exec(['sprints'], undefined, 60_000, force)

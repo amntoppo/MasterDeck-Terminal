@@ -9,6 +9,8 @@ export interface GithubCache {
   board?: unknown
   /** Raw `master board --sprint` output by sprint key. */
   boards?: Record<string, unknown>
+  /** The Board's repository view: what was read of each repository (shared/repoView.ts dumpEntries). */
+  repoIssues?: Record<string, unknown>
   sprints?: unknown[]
   users?: unknown[]
   me?: string

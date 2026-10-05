@@ -193,7 +193,7 @@ there. Isolate with:
 | `MASTERDECK_REMOTE_URL` | backend address (https, or `http://localhost:<port>`; anything else silently falls back to dev.masterdeck.dev) |
 | `MASTERDECK_NO_SKILLS=1`, `MASTERDECK_NO_HOOK=1` | skip installing skills / the status line and deck hooks |
 | `MASTERDECK_SETUP_MISSING=jq,claude` | Setup's tools step reports these as missing (the install flow) |
-| `MASTERDECK_TEST_NO_ATTACH=1`, `MASTERDECK_BOARD_FIXTURE=<json>` | refuse `claude attach`; use a fixture board |
+| `MASTERDECK_TEST_NO_ATTACH=1`, `MASTERDECK_BOARD_FIXTURE=<json>`, `MASTERDECK_REPO_FIXTURE=<json>` | refuse `claude attach`; use a fixture board; use a fixture answer for the Board's repository view |
 
 Note: an isolated app still lists the user's real sessions (`claude agents`, `~/.claude/projects`).
 Look, don't touch.

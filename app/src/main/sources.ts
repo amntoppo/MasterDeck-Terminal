@@ -145,6 +145,8 @@ import {
 import { sessionScreen } from "./screen";
 import { TokenIndex } from "./tokens";
 import { loadCache, saveCache } from "./cache";
+import { RepoIssues } from "./repoIssues";
+import { repoViewDeriver } from "@shared/repoView";
 import { ghErrorText, type GhRunner } from "./ghc";
 import { GitHub } from "./github";
 import {
@@ -325,6 +327,21 @@ export class Sources {
   private linkPrs: Record<string, string[]> = {};
   /** Gives the board of the last state build back while no card changed column. */
   private derive = boardDeriver();
+  /** The Board's repository view: issues of the repositories a tab picked, read only when asked for. */
+  private repoIssues = new RepoIssues({
+    // Test aid: MASTERDECK_REPO_FIXTURE=<json> replaces the GitHub call (as MASTERDECK_BOARD_FIXTURE does for the board).
+    read: async (repos, force) =>
+      process.env.MASTERDECK_REPO_FIXTURE
+        ? { ok: true, data: JSON.parse(readFileSync(process.env.MASTERDECK_REPO_FIXTURE, "utf8")) }
+        : this.cli.repoIssues(repos, force),
+    config: () => this.config,
+    paused: (output) => !process.env.MASTERDECK_REPO_FIXTURE && this.githubPaused(output),
+    changed: (read) => {
+      if (read) this.saveGithubCache();
+      this.emit();
+    },
+  });
+  private deriveRepo = repoViewDeriver();
   private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
@@ -915,6 +932,8 @@ export class Sources {
     setConfig(cfg);
     if (!process.env.MASTER_WORKSPACE && cfg.workspace)
       this.paths.masterWorkspace = cfg.workspace;
+    // Repositories unticked since (or an account whose board went) leave the repository view.
+    this.repoIssues.prune();
     this.emit();
     // Just set up: fetch GitHub now rather than waiting for the hourly refresh.
     if (cfg.configured && !was && this.started) void this.refreshGithub();
@@ -994,6 +1013,7 @@ export class Sources {
         this.rawBoards[k] = raw;
       }
     }
+    this.repoIssues.load(cache.repoIssues);
     if (Array.isArray(cache.sprints)) this.sprints = cache.sprints as Sprint[];
     if (cache.boardHistory && typeof cache.boardHistory === "object")
       for (const [k, v] of Object.entries(cache.boardHistory))
@@ -1056,7 +1076,13 @@ export class Sources {
   noteAssigned(t: Ticket, login: string): void {
     for (const b of Object.values(this.boards))
       for (const c of b.cards) if (sameTicket(c, t)) c.assignees = [login];
+    this.repoIssues.noteAssigned(t, login);
     this.emit();
+  }
+
+  /** A Board tab in repository view shows these repositories: read the ones not held yet, or held for over an hour. */
+  askRepos(repos: unknown): void {
+    this.repoIssues.ask(repos);
   }
 
   /** Show another sprint: from the cache at once, fetched when never seen before. */
@@ -1073,6 +1099,7 @@ export class Sources {
     saveCache(this.cachePath, {
       snapshot: this.rawSnapshot ?? undefined,
       boards: this.rawBoards,
+      repoIssues: this.repoIssues.dump(),
       sprints: this.sprints,
       users: this.users,
       me: this.me ?? undefined,
@@ -1127,6 +1154,9 @@ export class Sources {
         settle(gh ? this.refreshBoard(force) : skip),
         settle(gh ? this.refreshPeople(force) : skip),
         settle(gh ? this.refreshTeamPrs(0, force) : skip),
+        // The repository view: only the repositories a tab asked for in the last hour; none, no call.
+        // Its failures show in the view itself, not in this result.
+        settle(gh ? this.repoIssues.refresh(force) : skip),
       ]);
       if (s.ok || b.ok) this.githubRefreshedAt = Date.now();
       this.saveGithubCache();
@@ -2250,6 +2280,14 @@ export class Sources {
           now,
         },
       ),
+      // The repository view's cards get their columns the same way; absent until a tab asks.
+      repoView: this.deriveRepo(this.repoIssues.view(), {
+        sessions,
+        past: this.past,
+        linkPrs: this.linkPrs,
+        prLive: this.prLive,
+        now,
+      }),
       sprints: this.sprints,
       selectedSprint: this.selectedSprint,
       users: this.users,

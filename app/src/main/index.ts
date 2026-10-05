@@ -2550,6 +2550,8 @@ function registerIpc(): void {
       linkSession(issue, sessionId, cwd),
   );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
+  // The repository view asks for its repositories (also from the web: a read; the list is checked in RepoIssues.ask).
+  reg.on(CH.boardRepos, (_e, repos: unknown) => sources.askRepos(repos));
   // Create a GitHub board: on the Mac only (DECK_ACCESS blocks them; refused here as well).
   reg.handle(CH.boardCreatePlan, (e, account: unknown) =>
     isRemote(e)

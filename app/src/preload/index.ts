@@ -123,6 +123,7 @@ const api: DeckApi = {
   linkSession: (issue, sessionId, cwd) =>
     ipcRenderer.invoke(CH.linkSession, issue, sessionId, cwd),
   setBoardOpen: (open) => ipcRenderer.send(CH.boardOpen, open),
+  boardRepos: (repos) => ipcRenderer.send(CH.boardRepos, repos),
   boardCreatePlan: (account) => ipcRenderer.invoke(CH.boardCreatePlan, account),
   boardCreate: (req) => ipcRenderer.invoke(CH.boardCreate, req),
   boardCreateRetry: (account) => ipcRenderer.invoke(CH.boardCreateRetry, account),

@@ -197,6 +197,7 @@ export const CH = {
   tokensByDay: "costs:tokensByDay",
   dismissStopped: "session:dismissStopped",
   boardOpen: "board:open",
+  boardRepos: "board:repos",
   boardCreatePlan: "board:createPlan",
   boardCreate: "board:create",
   boardCreateRetry: "board:createRetry",
@@ -490,6 +491,8 @@ export interface DeckApi {
     cwd: string | null,
   ): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
+  /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
+  boardRepos(repos: string[]): void;
   /** Create a GitHub board (on the Mac only): what would be created for this account (omitted: the only one). Reads GitHub, writes nothing. */
   boardCreatePlan(account?: string): Promise<BoardPlanResult>;
   /** Create it, after a confirmation on the Mac; progress arrives through onBoardCreateProgress. */
