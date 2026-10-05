@@ -285,4 +285,19 @@ describe('BoardFlow final review', () => {
     await new BoardFlow(s.deps).tick(state({ sessionPrs: { [SID]: [PR, PR7, PR8] }, prLive } as never), 0)
     expect(s.prLinks).toEqual([PR, PR7])
   })
+  it('a ticket of an account with no board is never moved, read or retried', async () => {
+    const base = withPr(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', '', new Date(0)), SID, PR)
+    const s = setup(base, { [PR]: { state: 'MERGED', isDraft: false } })
+    let reads = 0
+    const inner = s.deps.prStates
+    s.deps.prStates = async (urls) => (reads++, inner(urls))
+    const flow = new BoardFlow(s.deps)
+    // Its card has no board (project null): there is nothing to move, whatever its PRs say.
+    const derived = { cards: [{ number: 12, repo: null, project: null, derived: true, state: 'OPEN', status: 'Done' }] } as never
+    await flow.tick(state({ board: derived }), 0)
+    await flow.tick(state({ board: derived }), 31_000)
+    await flow.tick(state({ board: derived }), 31 * 60_000)
+    expect(s.moves).toEqual([])
+    expect(reads).toBe(0)
+  })
 })

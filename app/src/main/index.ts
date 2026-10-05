@@ -122,6 +122,7 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
+import { repoBoardless } from "@shared/derivedBoard";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -1109,6 +1110,7 @@ async function linkSession(
       mark: (sid, trigger) => sources.markReached(sid, trigger),
       reload: () => sources.reloadLinks(),
       noteStatus: (tk, s) => sources.noteStatus(tk, s),
+      boardless: (tk) => repoBoardless(tk.repo, getConfig()),
     },
     t,
     sessionId,
@@ -1698,6 +1700,9 @@ function registerIpc(): void {
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
+    // No board on its account: the columns are MasterDeck's own, there is nothing to write.
+    if (repoBoardless(t.repo, getConfig()))
+      return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
     const r = await forRepo(t.repo).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;

@@ -1,6 +1,7 @@
 import { readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { getConfig, projectKey, statusesFor, statusRank, type AppConfig, type ProjectConfig } from '@shared/appConfig'
+import { repoBoardless } from '@shared/derivedBoard'
 import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
@@ -127,13 +128,17 @@ export class BoardOps {
     const repo = c.repo || fullRepo(null)
     if (!REPO.test(repo)) return { ok: false, error: `create: bad --repo '${repo}' (owner/name)` }
     if (!c.title.trim()) return { ok: false, error: 'create: --title is required' }
-    const project = c.project || (cfg.projects[0] ? projectKey(cfg.projects[0]) : '')
+    // The repo's account has no board and none was named: no board step. Never another account's
+    // first board, and a status or sprint that came along (MasterDeck's own columns) is dropped.
+    const noBoard = !c.project && repoBoardless(repo, cfg)
+    const project = noBoard ? '' : c.project || (cfg.projects[0] ? projectKey(cfg.projects[0]) : '')
     const p = project ? this.board(project) : null
     if (project && !p) return { ok: false, error: `create: ${project} is not a configured board` }
-    const opt = c.status ? p?.statusOptions[c.status] : undefined
-    if (c.status && !p) return { ok: false, error: 'create: no board to set the status on' }
-    if (c.status && !opt) return { ok: false, error: `create: unknown status '${c.status}' on board ${project}` }
-    if (c.dryRun) return { ok: true, dryRun: true, project, status: c.status ?? '', sprint: c.sprint ?? '' }
+    const want = noBoard ? undefined : c.status
+    const opt = want ? p?.statusOptions[want] : undefined
+    if (want && !p) return { ok: false, error: 'create: no board to set the status on' }
+    if (want && !opt) return { ok: false, error: `create: unknown status '${want}' on board ${project}` }
+    if (c.dryRun) return { ok: true, dryRun: true, project, status: want ?? '', sprint: noBoard ? '' : (c.sprint ?? '') }
     const args = ['issue', 'create', '-R', repo, '--title', c.title, '--body', c.body]
     for (const a of c.assignees ?? []) if (a) args.push('--assignee', a)
     for (const l of c.labels ?? []) args.push('--label', l)
@@ -200,6 +205,8 @@ export interface LinkDeps {
   mark: (sessionId: string, trigger: 'linked') => void
   reload: () => void
   noteStatus: (t: Ticket, status: string) => void
+  /** The ticket's account has no GitHub board: it is linked all the same; there is no card to move. */
+  boardless?: (t: Ticket) => boolean
 }
 
 /**
@@ -211,7 +218,7 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
   const label = ticketLabel(t.repo, t.number)
   const info = await d.ops.issueInfo(t)
   if (!info) return { ok: false, message: `could not read ${label}` }
-  if (!info.item) return { ok: false, message: `${label} is not on any selected board` }
+  if (!info.item && !d.boardless?.(t)) return { ok: false, message: `${label} is not on any selected board` }
   try {
     d.link(sessionId, t, info.title, cwd ? await d.branch(cwd) : '')
   } catch (e) {
@@ -221,7 +228,7 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
   d.reload()
   d.mark(sessionId, 'linked')
   let moved = ''
-  if (d.moves(sessionId)) {
+  if (info.item && d.moves(sessionId)) {
     const target = statusesFor(info.project).inProgress
     const m = await d.ops.move(t, target)
     moved = `; ${m.message}`

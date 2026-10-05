@@ -381,6 +381,7 @@ the first configured board holding the issue; reads skip the cache), forward-onl
 session's `linked` stage (`Sources.markReached`), and moves the ticket to In Dev when
 `WorkflowStore.builtinsFor(session)` has `ticket`. There is no global switch for board moves.
 A successful `linkSession` also queues `LinkedSteps` (below).
+For an account with no board (`repoBoardless`): `linkTicket` links the session all the same (`LinkDeps.boardless`; no card, so no move), `create` without a named board makes the issue only (it never falls back to another account's first board, and drops a status or sprint that came along), and the `setStatus` handler refuses without a GitHub call. `BoardFlow` links such a ticket's session and its PRs under the issue's Development box as usual, and `move` skips the ticket before any read because its card has no `project`: no move, no error, nothing retried (pinned in `boardFlow.test.ts`).
 
 ### Which account a call uses (`main/accountClients.ts`)
 
