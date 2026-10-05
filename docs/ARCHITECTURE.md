@@ -406,13 +406,22 @@ review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/
 an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
 window, as `cwd` always was. Which account the session runs as is not part of this:
 `config.account_for_repo` / `defaultAccount` as before.
-Because sessions now sit in main checkouts, two things that used to compare a session's folder with
-the workspace ask instead whether it is a linked worktree (`main/worktreeInfo.ts`): `pollPrs` takes
-the folder's branch PR only then (`takesBranchPr`), and a link records the folder's branch only then
-(`linkSession`). And `Ops.repos()` (Janitor, `removeWorktree`, the + menu, standup, the Workflow
-view, the web's known folders) lists every account's workspace by the resolver's depth rule
-(`main/checkouts.ts` `workspaceRepos`; one account with its repos directly in the workspace gets
-the list it always got).
+Because MasterDeck now starts sessions in main checkouts, `master spawn` records each new ASSIGN or
+PRREVIEW session it starts in a folder that is not a workspace (`checkout.parked`, written to
+`$MASTERDECK_HOME/parked-sessions.json`: `{ <bg id, or "name:<session name>"> : {dir, branch,
+review, name} }`, the branch read from `.git/HEAD` before the start, the last 500 kept). The app
+only reads it (`main/parked.ts` `ParkedStore`) and decides with one pure function,
+`ownsFolderBranch` (`shared/parked.ts`): never in a workspace (master's or an account's); a session
+with no record, yes, as always; a parked one not while it is in a main checkout on the parked
+branch, yes once it is in a linked worktree (`inLinkedWorktree`) or on another branch; a review
+never. Two call sites ask it through `Sources.ownsBranch`: `pollDetails` → `pollPrs` (the folder's
+branch PR, `gh pr view` in the folder) and `linkSession`'s `branch` (the link's `branchKey`; there
+a workspace is not exempt, as before). Sessions started by hand or before this version have no
+record and behave as they did.
+`Ops.repos()` (Janitor, `removeWorktree`, the + menu, standup, the Workflow view, the web's known
+folders) lists every account's workspace by the resolver's depth rule (`main/checkouts.ts`
+`workspaceRepos`; one account with its repos directly in the workspace gets the list it always
+got).
 
 master's sweep collects the same way (one read per account), so its proposals see every account's issues and PRs; `author_is_me` and the "last comment is mine" thread rule use each account's own login.
 

@@ -174,7 +174,9 @@ import {
   type SessionWorktree,
   type WorktreeScan,
 } from "@shared/worktrees";
-import { linkedWorktree, takesBranchPr } from "./worktreeInfo";
+import { inLinkedWorktree, linkedWorktree } from "./worktreeInfo";
+import { ownsFolderBranch, type Parked } from "@shared/parked";
+import { expandHome } from "./checkouts";
 import type { DeckHooks } from "./deckHooks";
 import {
   answersDecision,
@@ -616,6 +618,52 @@ export class Sources {
 
   private withIssues(sessions: Session[]): Session[] {
     return attachIssues(sessions, this.issueOf());
+  }
+
+  /** The sessions MasterDeck parked in a checkout (`parked-sessions.json`). */
+  setParked(fn: (s: { key: string; name: string }) => Parked | null): void {
+    this.parkedOf = fn;
+  }
+  private parkedOf: ((s: { key: string; name: string }) => Parked | null) | null =
+    null;
+
+  /** master's workspace and every account's own: shared by all sessions. */
+  workspaces(): string[] {
+    return [
+      this.paths.masterWorkspace,
+      ...getConfig().accounts.flatMap((a) =>
+        a.workspace ? [expandHome(a.workspace)] : [],
+      ),
+    ].map((w) => resolve(w));
+  }
+
+  /**
+   * Does the branch of this folder belong to the session (`ownsFolderBranch`)? Not in a
+   * workspace, and not for a session MasterDeck parked in a main checkout on that branch.
+   */
+  ownsBranch(
+    dir: string,
+    s: { key: string; name: string } | null,
+    branch: string | null,
+    /** False for a ticket link: linking in a workspace records its branch, as it always did. */
+    workspacesShared = true,
+  ): boolean {
+    return ownsFolderBranch({
+      dir: resolve(dir),
+      workspaces: workspacesShared ? this.workspaces() : [],
+      linked: inLinkedWorktree(dir),
+      branch,
+      parked: s ? (this.parkedOf?.(s) ?? null) : null,
+    });
+  }
+
+  /** The folder whose branch PR the session takes; undefined: none. */
+  private branchDir(
+    dir: string | undefined,
+    s: { key: string; name: string } | null,
+    branch: string | null,
+  ): string | undefined {
+    return dir && this.ownsBranch(dir, s, branch) ? dir : undefined;
   }
 
   /** How to link a session to an issue (babysit-ticket); used to carry links across a resume. */
@@ -1596,7 +1644,11 @@ export class Sources {
           !this.githubPaused()
         ) {
           this.prFetchedAt[id] = now;
-          await this.pollPrs(key, this.prUrlsFor(id, key), dir);
+          await this.pollPrs(
+            key,
+            this.prUrlsFor(id, key),
+            this.branchDir(dir, s ?? null, this.git[id]?.branch ?? null),
+          );
         }
       }
       this.emit();
@@ -1734,10 +1786,8 @@ export class Sources {
       const pr = r.code === 0 ? parsePrView(r.stdout) : null;
       if (pr) this.prLive[url] = pr;
     }
-    // The PR of the folder's branch is the session's only in a linked worktree. A workspace and a
-    // main checkout are shared: a ticket session starts in its repository's checkout and a PR
-    // review stays there, on whatever branch (and open PR) was left checked out.
-    if (!dir || !takesBranchPr(dir, this.paths.masterWorkspace)) return;
+    // The caller passes no folder when its branch is not the session's (`branchDir`).
+    if (!dir || !existsSync(dir)) return;
     const r = await (this.ghForDir?.(dir) ?? this.gh)(["pr", "view", ...PR_VIEW_ARGS], {
       cwd: dir,
       timeoutMs: 20_000,

@@ -324,6 +324,13 @@ export function AssignDialog({
           <p className="meta">Drafting…</p>
         ) : draft ? (
           <>
+            {/* Near the top: the dialog scrolls on a short window, and "no checkout found" must be seen. */}
+            <StartFolderLine
+              folder={folder ?? { cwd: draft.cwd }}
+              chosen={chosen}
+              account={isMulti(state.config) ? account : null}
+              onChoose={can("pickFolder") ? choose : undefined}
+            />
             <label>Session name</label>
             <input
               value={name}
@@ -496,12 +503,7 @@ export function AssignDialog({
                 ? "Sent after the system prompt; the session follows these instead of stopping to ask."
                 : "Empty: the session sets up, then asks you for instructions."}
             </div>
-            <StartFolderLine
-              folder={folder ?? { cwd: draft.cwd }}
-              chosen={chosen}
-              account={isMulti(state.config) ? account : null}
-              onChoose={can("pickFolder") ? choose : undefined}
-            />
+
             <div className="foot">
               <button
                 className="btn"

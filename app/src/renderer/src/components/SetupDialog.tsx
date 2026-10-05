@@ -679,8 +679,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                 .map((c) => (
                   <div key={c.login}>
                     <label>
-                      Workspace for {c.login} (where its repositories are cloned; a session for one of its tickets starts in that
-                      repository's folder there. Empty: the workspace above)
+                      Workspace for {c.login} (its repos are cloned here; empty: the workspace above)
                     </label>
                     <div className="row-inputs">
                       <input value={workspaces[c.login] ?? ''} placeholder={workspace || '~/code'} onChange={(e) => setWorkspaceOf(c.login, e.target.value)} />

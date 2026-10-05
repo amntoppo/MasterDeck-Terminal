@@ -153,7 +153,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
-| Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); a session's own branch only in a linked worktree: `takesBranchPr` / `inLinkedWorktree` in `main/worktreeInfo.ts`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
+| Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); whether a folder's branch is the session's: `ownsFolderBranch` in `shared/parked.ts`, `main/parked.ts` (`parked-sessions.json`, written by `master spawn`: `checkout.parked`), `Sources.ownsBranch`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
 | GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts` (also resume: `resumeAs`), `main/superseded.ts` + `shared/superseded.ts` (the old side of a copy, hidden), `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
@@ -222,12 +222,13 @@ buttons; it does not go through macOS window drag regions.
   session (`claude rm` deletes its worktree too): the old side of a copy is listed in
   `superseded-sessions.json` (`main/superseded.ts`) and hidden while it does not run.
 - **Shell scripts run under macOS bash 3.2**: write `${var}` before non-ASCII text (`"$chip…"` breaks).
-- **A session's folder is often a repository's main checkout** (a ticket session starts in its
-  repository's checkout; a PR review stays there). The branch checked out there is not the
-  session's: ask `inLinkedWorktree` / `takesBranchPr` (`main/worktreeInfo.ts`) before giving a
-  session anything that belongs to "the branch of its folder" (a PR, a branch link). And
-  `rules.propose` reads the filesystem now (`checkout.resolve`): Python tests get an empty temp
-  `MASTER_WORKSPACE` from `conftest.py`.
+- **A ticket session MasterDeck starts sits in its repository's main checkout** until it makes its
+  worktree (a PR review stays there), on whatever branch was left checked out. `master spawn`
+  records it (`parked-sessions.json`); before giving a session anything that belongs to "the branch
+  of its folder" (a PR, a branch link) ask `Sources.ownsBranch` / `ownsFolderBranch`
+  (`shared/parked.ts`). A session with no record (started by hand) owns its folder's branch as
+  always. And `rules.propose` reads the filesystem now (`checkout.resolve`): Python tests get an
+  empty temp `MASTER_WORKSPACE` from `conftest.py`.
 - **Tickets are (repo, number)** (`shared/ticket.ts`, Python `refs.py`). The primary repo (`issueRepo`)
   keeps bare numbers in every record (ledger, babysit-ticket state, snapshot), so older readers still
   work; other repos add a `repo` field. Compare with `ticketKey`/`sameTicket`, never `.number` alone.
@@ -330,13 +331,14 @@ buttons; it does not go through macOS window drag regions.
   the primary's), one resolver in the master CLI (`checkout.py`) used by master's ASSIGN proposals,
   the Start dialog's draft, `master add` / `master spawn` for ticket work without a folder and PR
   review sessions; the Start dialog says where the session starts, says plainly when no checkout was
-  found (and when the search was cut short), and has **Choose folder…**. Since sessions now sit in
-  main checkouts: the folder's branch PR and branch link only for a session in a linked worktree,
-  and `Ops.repos()` covers every account's workspace. Checked: the Python suite (406), typecheck,
-  vitest (1352 passed, 3 skipped), and the real CLI against a temp config and temp checkouts. Not
-  checked: the dialogs in a running app (Setup's per-account rows and the Start dialog's line were
-  never seen on screen), anything that starts a session. Open points are in TODO ("Where a session
-  starts").
+  found (and when the search was cut short), and has **Choose folder…**. A session MasterDeck parks
+  in a main checkout does not take the branch it found there (`parked-sessions.json`), and
+  `Ops.repos()` covers every account's workspace. Checked: the Python suite (412), typecheck,
+  vitest (1357 passed, 3 skipped), the real CLI against a temp config and temp checkouts, and the
+  isolated app with a temp HOME (Setup with one and two accounts, save and reopen, switching the
+  primary; the Start dialog's found, not-found and cut-short lines; the not-found line at 390 px in
+  the web preview). Not checked: the native folder picker behind **Choose folder…**, pressing
+  Start, anything that starts a session. Open points are in TODO ("Where a session starts").
 - Plan K (Board repository view: picking repositories in a Board tab's Repos filter shows all their
   issues, on a board or not, in MasterDeck's columns, with sessions started from a click; a session
   can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on

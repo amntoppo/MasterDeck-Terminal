@@ -71,7 +71,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
   error with **Retry**, which spawns the same (now held) proposal again.
 - **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
-- **Where it starts:** the line under your instructions. MasterDeck looks for a checkout of the
+- **Where it starts:** the line under the Account field (near the top, so it is seen on a short window). MasterDeck looks for a checkout of the
   ticket's repository in the workspace of the ticket's account (Setup → Preferences): the workspace
   itself, its sub-folders, and one level below the sub-folders that are plain folders (an `acme/`
   folder of clones). A checkout is a folder with a `.git` folder whose `origin` is that repository
@@ -98,10 +98,16 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   PR's repository) pick the folder the same way, and so does `master add` without `--cwd` for an
   ASSIGN or a PR review of a real issue; a meeting's session and any other kind start in the
   workspace, as before.
-- **The PR of the folder's branch:** a session parked in a repository's main checkout (a new ticket
-  session before it makes its worktree, a PR review) is not given the PR of whatever branch is
-  checked out there, and linking it does not record that branch: only a session working in a linked
-  git worktree gets its branch's PR. PRs a session opens itself count wherever it works.
+- **The PR of the folder's branch:** a session working by hand in a repository's main checkout on a
+  feature branch is shown that branch's PR, and linking it records the branch, as always. A ticket
+  or PR review session that MasterDeck itself started in a checkout is different: the branch it
+  found there (whatever was left checked out, with its open PR) is not its own. MasterDeck
+  remembers that branch ("parked on") and does not give the session its PR, or record it in the
+  ticket link, while the session still sits in a main checkout on that same branch. As soon as it
+  works in a git worktree, or the checkout is on another branch (the session switched or made its
+  own), the usual rules apply. A PR review session never takes the folder's branch PR. PRs a
+  session opens itself count wherever it works. No session takes the branch PR of a workspace
+  folder (the primary's or another account's).
 - **Link session…:** links a session that already exists instead. Type its name, background id or
   session id (suggestions appear as you type). MasterDeck records the link itself (no
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
@@ -897,7 +903,7 @@ cards is in them.
   PR is open and not a draft, Dev Done when all its PRs are merged — the Board moves step of the
   Default workflow; a custom workflow can leave it out. Cards only move forward, and each move is
   made once: a card you move back stays there. Only PRs the session opened, or ones on its linked
-  branch, count for its ticket (the PR of whatever branch its folder is on is shown, not linked; and shown only for a session in a linked worktree, never for one sitting in a main checkout).
+  branch, count for its ticket (the PR of whatever branch its folder is on is shown, not linked).
   Links copied in from babysit-ticket are left alone until a session links that ticket again. A session master
   spawned for an issue is linked by MasterDeck, and a link made from MasterDeck still runs the
   workflow's "When a session is linked" steps (sent to the session once its turn is over).

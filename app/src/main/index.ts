@@ -85,7 +85,7 @@ import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
 import { chosenFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
-import { inLinkedWorktree } from "./worktreeInfo";
+import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
@@ -1159,9 +1159,13 @@ async function linkSession(
     {
       ops: forCard(t.repo, t.number).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
-      // A main checkout's branch is whatever was left checked out there (a new ticket session
-      // starts in one): only a linked worktree's branch is the session's own.
-      branch: async (dir) => (inLinkedWorktree(dir) ? branchKey(run, dir) : ""),
+      // A session MasterDeck parked in a main checkout is still on the branch it found there:
+      // not its own, so not recorded. Any other session: as always.
+      branch: async (dir) => {
+        const s = latest?.sessions.find((x) => x.sessionId === sessionId) ?? null;
+        const head = await run("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { timeoutMs: 10_000 });
+        return sources.ownsBranch(dir, s, head.stdout.trim() || null, false) ? branchKey(run, dir) : "";
+      },
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
       mark: (sid, trigger) => sources.markReached(sid, trigger),
       reload: () => sources.reloadLinks(),
@@ -2983,6 +2987,8 @@ app.whenReady().then(async () => {
     console.error(`browser key unreadable; browsers cannot connect: ${String(e)}`);
   }
   sources.setLinker(linkSession);
+  const parked = new ParkedStore(join(paths.home, "parked-sessions.json"));
+  sources.setParked((s) => parked.get(s));
   sources.statuslineInstalled = isInstalled(
     paths.claudeSettings,
     paths.installedTee,

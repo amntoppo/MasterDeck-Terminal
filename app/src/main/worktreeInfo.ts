@@ -42,13 +42,3 @@ export function inLinkedWorktree(dir: string): boolean {
     }
   }
 }
-
-/**
- * May a session in `dir` be given the PR of the branch that folder is on? Only when it works in a
- * linked worktree: that branch is its own. A main checkout is shared: a new ticket session sits
- * there until it makes its worktree, a PR review session stays there, and the branch (with its
- * open PR) is whatever someone left checked out. The same goes for a workspace, master's included.
- */
-export function takesBranchPr(dir: string | undefined | null, masterWorkspace: string): boolean {
-  return !!dir && resolve(dir) !== resolve(masterWorkspace) && inLinkedWorktree(dir)
-}

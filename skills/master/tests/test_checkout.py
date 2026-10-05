@@ -483,5 +483,76 @@ class CliTest(Base):
                          str(self.ws))
 
 
+class ParkedTest(Base):
+    """A ticket session MasterDeck starts in a checkout (not a workspace) is recorded as parked on the
+    branch that checkout was on: the app then does not hand it that branch's PR."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg()
+        self.md = self.tmp / "home" / "md"
+        env = mock.patch.dict(os.environ, {"MASTERDECK_HOME": str(self.md)})
+        env.start()
+        self.addCleanup(env.stop)
+        self.api = clone(self.ws / "api", "git@github.com:acme/api.git")
+        subprocess.run(["git", "-C", str(self.api), "symbolic-ref", "HEAD", "refs/heads/feat/someone-elses"], check=True)
+
+    def start(self, kind, target, out="backgrounded · 4f2a9c1e\n", n=7):
+        led = ledger.empty()
+        p = ledger.add(led, kind=kind, issue=n, repo="acme/api", source=f"f:{kind}:{n}:{target.get('name')}",
+                       target={"spawn": target}, message="m", summary="s", now="2026-09-24T10:00:00Z")
+        ledger.transition(led, p["id"], "approved", now="2026-09-24T10:00:00Z")
+        spawn.spawn(led, p["id"], now="2026-09-24T10:00:01Z", runner=FakeRunner(out=out))
+
+    def parked(self):
+        f = self.md / "parked-sessions.json"
+        return json.loads(f.read_text()) if f.exists() else {}
+
+    def test_branch_of_reads_head_without_git(self):
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("git was run")):
+            self.assertEqual(checkout.branch_of(str(self.api)), "feat/someone-elses")
+            self.assertEqual(checkout.branch_of(str(self.ws)), "")
+        (self.api / ".git" / "HEAD").write_text("0123456789abcdef0123456789abcdef01234567\n")  # detached
+        self.assertEqual(checkout.branch_of(str(self.api)), "")
+
+    def test_a_ticket_session_started_in_a_checkout_is_recorded_by_its_bg_id(self):
+        self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"})
+        self.assertEqual(self.parked(), {"4f2a9c1e": {"dir": str(self.api), "branch": "feat/someone-elses", "review": False,
+                                                      "name": "api-7-x"}})
+
+    def test_a_review_session_is_marked_and_a_second_start_keeps_the_first(self):
+        self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"})
+        self.start("PRREVIEW", {"name": "review-api-5", "prompt": "go", "cwd": str(self.api)}, out="claude attach 0badc0de\n")
+        got = self.parked()
+        self.assertEqual(sorted(got), ["0badc0de", "4f2a9c1e"])
+        self.assertTrue(got["0badc0de"]["review"])
+
+    def test_no_bg_id_in_the_output_falls_back_to_the_name(self):
+        self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"}, out="started\n")
+        self.assertEqual(list(self.parked()), ["name:api-7-x"])
+
+    def test_nothing_is_recorded_for_a_workspace_another_kind_or_a_resume(self):
+        self.start("ASSIGN", {"name": "a", "prompt": "go", "cwd": str(self.ws)})          # the workspace
+        self.start("MEETING", {"name": "b", "prompt": "go", "cwd": str(self.api)})        # not ticket work
+        self.start("ORPHAN", {"name": "c", "cwd": str(self.api), "resume": "4f2a9c1e-1234-4abc-9def-0123456789ab"}, out="[]")
+        other = self.tmp / "globex"
+        other.mkdir()
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, dict(B, workspace=str(other))]}):
+            (self.md / "accounts").mkdir(parents=True)
+            for login in ("alice", "bob-work"):
+                (self.md / "accounts" / f"{login}.settings.json").write_text("{}")
+            self.start("ASSIGN", {"name": "d", "prompt": "go", "cwd": str(other)})         # another account's workspace
+        self.assertEqual(self.parked(), {})
+
+    def test_a_failed_start_records_nothing(self):
+        led = ledger.empty()
+        p = ledger.add(led, kind="ASSIGN", issue=7, repo="acme/api", source="f:x", target={"spawn": {"name": "x", "prompt": "go"}},
+                       message="m", summary="s", now="2026-09-24T10:00:00Z")
+        ledger.transition(led, p["id"], "approved", now="2026-09-24T10:00:00Z")
+        with self.assertRaises(spawn.SpawnError):
+            spawn.spawn(led, p["id"], now="2026-09-24T10:00:01Z", runner=FakeRunner(code=1, err="boom"))
+        self.assertEqual(self.parked(), {})
+
+
 if __name__ == "__main__":
     unittest.main()

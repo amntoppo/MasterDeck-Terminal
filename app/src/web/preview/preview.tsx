@@ -45,6 +45,11 @@ function previewDeck(noBoard: boolean): DeckApi {
     ticketRepoMeta: () => ({ labels: [], milestones: [], assignees: [] }),
     issueBody: () => ({ ok: true, body: 'Steps to reproduce: sign in from a fresh browser.' }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
+    // The Start dialog: a draft with no checkout found, so its folder line shows at phone width.
+    draftAssign: (t: { number: number; repo: string | null }, title?: string, url?: string) => ({
+      ok: true,
+      draft: { issue: t.number, repo: t.repo, name: `${t.number}-preview`, cwd: '/Users/dev/acme', prompt: `You own #${t.number} (${title ?? ''}). ${url ?? ''}`, summary: '', title: title ?? '', url: url ?? '', proposalId: null, workspace: '/Users/dev/acme', found: false, checkoutOf: t.repo ?? 'acme/web' },
+    }),
   }
   const local: Record<string, unknown> = {
     platform: 'web',

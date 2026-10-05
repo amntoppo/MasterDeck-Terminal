@@ -199,3 +199,31 @@ def default_cwd(kind: str, issue, repo: "str | None") -> str:
     if kind in TICKET_KINDS and isinstance(issue, int) and issue > 0:
         return resolve(repo)["cwd"]
     return str(config.workspace())
+
+
+def branch_of(d: str) -> str:
+    """The branch a main checkout is on, read from `.git/HEAD` (no process); "" for a detached
+    HEAD, a linked worktree or a folder that is no checkout."""
+    try:
+        head = Path(d, ".git", "HEAD").read_text().strip()
+    except OSError:
+        return ""
+    return head[len("ref: refs/heads/"):] if head.startswith("ref: refs/heads/") else ""
+
+
+def is_workspace(d: str, cfg: "dict | None" = None) -> bool:
+    """Is `d` the config's workspace or an account's own?"""
+    all_ws = [config.workspace()] + [Path(os.path.expanduser(v["workspace"])) for v in config.accounts(cfg) if v["workspace"]]
+    real = os.path.realpath(d)
+    return any(os.path.realpath(str(w)) == real for w in all_ws)
+
+
+def parked(kind: str, cwd: str, name: str) -> "dict | None":
+    """What to remember of a ticket session about to start in `cwd`: a folder that is not a
+    workspace, most often the repository's main checkout, on whatever branch was left checked
+    out there. That branch (and its open PR) is not the session's; MasterDeck reads this record
+    (`parked-sessions.json`) and keeps the two apart until the session has its own worktree or
+    branch. None: nothing to remember (not ticket work, or a workspace)."""
+    if kind not in TICKET_KINDS or is_workspace(cwd):
+        return None
+    return {"dir": cwd, "branch": branch_of(cwd), "review": kind == "PRREVIEW", "name": name}
