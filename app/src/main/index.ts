@@ -321,17 +321,19 @@ const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
 // Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
-const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+const { forAccount, forRepo, forCard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
   config: getConfig,
   base: { gh, github, ops: boardOps },
   run,
   runEnv: (l) => accountEnv.runEnv(l),
   ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+  // A card of a repository no account lists goes out as the account whose board holds it.
+  boardOf: (repo, number) => sources.boardOf(repo, number),
 });
 // The Assign popup's people: who can be assigned in the card's repository, read as that repository's account.
 const assignableUsers = new AssignableUsers({
-  // The same account `assignIssue` assigns a card of that repository as.
-  read: (repo) => forRepo(repo).github.assignableUsers(false, repo),
+  // The same account `assignIssue` assigns a card of that repository as (`forCard`).
+  read: (repo) => forCard(repo).github.assignableUsers(false, repo),
   config: getConfig,
   boardRepos: () => sources.boardRepos(),
 });
@@ -1144,7 +1146,7 @@ async function linkSession(
     return { ok: false, message: "bad session id" };
   const r = await linkTicket(
     {
-      ops: forRepo(t.repo).ops,
+      ops: forCard(t.repo, t.number).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
       branch: (dir) => branchKey(run, dir),
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
@@ -1747,7 +1749,7 @@ function registerIpc(): void {
     // No board on its account: the columns are MasterDeck's own, there is nothing to write.
     if (repoBoardless(t.repo, getConfig()))
       return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
-    const r = await forRepo(t.repo).ops.setStatus(t, status);
+    const r = await forCard(t.repo, t.number).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -2118,7 +2120,8 @@ function registerIpc(): void {
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
-    forRepo(prRepo(String(url))).github.prSummary(url),
+    // A PR of a repository no account lists: as the account whose board holds a card of that repository.
+    forCard(prRepo(String(url))).github.prSummary(url),
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -2133,7 +2136,7 @@ function registerIpc(): void {
   reg.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
     return t
-      ? forRepo(t.repo).github.issueBody(t)
+      ? forCard(t.repo, t.number).github.issueBody(t)
       : { ok: false, message: "bad ticket" };
   });
   // The Assign popup's people: the card's repository's, read as that repository's account (also
@@ -2144,7 +2147,7 @@ function registerIpc(): void {
     async (_e, issue: unknown, login: string, current: string[]) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      const r = await forRepo(t.repo).github.assign(t, login, current);
+      const r = await forCard(t.repo, t.number).github.assign(t, login, current);
       if (r.ok) sources.noteAssigned(t, login);
       return r;
     },

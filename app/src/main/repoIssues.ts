@@ -179,6 +179,20 @@ export class RepoIssues {
       this.stale = true
       this.deps.changed(false)
       const run = async (): Promise<Outcome> => {
+        // Queued behind a read that started the rate-limit pause (a forced re-read, another tab's
+        // ask): it must not go out during the pause. What is on screen, and its note, stay.
+        if (this.deps.paused()) {
+          for (const repo of fresh) {
+            if (this.inflight.get(repoKey(repo)) !== own) continue
+            this.loading.delete(repoKey(repo))
+            this.inflight.delete(repoKey(repo))
+          }
+          const never = fresh.filter((r) => !this.entries[repoKey(r)])
+          if (never.length) this.set(applyRead(this.entries, never, null, 'GitHub calls are paused', 0))
+          this.stale = true
+          this.deps.changed(false)
+          return { ok: false, message: 'GitHub calls paused' }
+        }
         let r: ReadResult
         try {
           r = await this.deps.read(fresh, force)

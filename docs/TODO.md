@@ -229,6 +229,11 @@ fixes it, and move the item here to "Recently done".
   lost with it, and other repository reads and Refresh wait behind it (one read at a time).
   Approach: print each chunk as a line when it is done and let `RepoIssues` apply them as they come,
   or have the app send one CLI call per ten.
+- **P3 · A session for a card of a repository no account lists starts as the primary account.**
+  MasterDeck's own calls for such a card go out as the account whose board holds it (`forCard`);
+  a session started from it (Start, a PR review) still takes its account from the repository alone
+  (`defaultAccount`: `matchRepo`, else the primary), so it may not be able to read a private
+  repository on another account's board. Approach: pass the card's board into `defaultAccount`.
 - **P3 · The per-repository Assign list was not seen in the app or against GitHub** (suites only):
   the loading line, the error line, and `gh api repos/<o>/<r>/assignees` as a second account.
 - **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens

@@ -1,4 +1,4 @@
-import { accountForRepo, isMulti, primaryLogin, repoOfArgs } from '@shared/accounts'
+import { accountForRepo, isMulti, primaryLogin, repoOfArgs, accountForCard } from '@shared/accounts'
 import type { AppConfig } from '@shared/appConfig'
 import type { Ticket } from '@shared/ticket'
 import type { AccountRunEnv } from './accountEnv'
@@ -23,6 +23,8 @@ export interface AccountClientsDeps {
   runEnv: (login: string) => AccountRunEnv
   /** makeGhRunner with that account's env on every call. */
   ghFor: (account: () => AccountRunEnv) => GhRunner
+  /** The key of the selected board whose loaded cards hold this issue (or, with no number, an issue of this repository); null when none does. */
+  boardOf?: (repo: string | null | undefined, number?: number) => string | null
 }
 
 /**
@@ -53,6 +55,16 @@ export function accountClients(d: AccountClientsDeps) {
   /** Repo-scoped calls: the repo's account, else the primary. */
   const forRepo = (repo: string | null | undefined): Clients => forAccount(accountForRepo(repo, d.config()))
   /**
+   * A card's calls: its repository's account; for a repository no account lists, the account whose
+   * loaded board holds the card (`boardOf`), so a private repository on another account's board is
+   * not asked for with the primary's token; else the primary.
+   */
+  const forCard = (repo: string | null | undefined, number?: number): Clients => {
+    const cfg = d.config()
+    if (!isMulti(cfg)) return d.base
+    return forAccount(accountForCard(repo, d.boardOf?.(repo, number) ?? null, cfg))
+  }
+  /**
    * Picks the account from the call itself: `-R`/`--repo owner/name`, a whole PR or issue URL, or a
    * `repos/<owner>/<repo>/…` API path (`repoOfArgs`). Anything else (`api user`, search) names no
    * repo and goes as the primary.
@@ -68,8 +80,8 @@ export function accountClients(d: AccountClientsDeps) {
   }
   /** BoardFlow's automatic moves and PR links, each as its ticket's repo's account. */
   const boardOps: Pick<BoardOps, 'move' | 'linkPr'> = {
-    move: (t: Ticket, target: string, o?: { force?: boolean }) => forRepo(t.repo).ops.move(t, target, o),
-    linkPr: (t: Ticket, url: string) => forRepo(t.repo).ops.linkPr(t, url),
+    move: (t: Ticket, target: string, o?: { force?: boolean }) => forCard(t.repo, t.number).ops.move(t, target, o),
+    linkPr: (t: Ticket, url: string) => forCard(t.repo, t.number).ops.linkPr(t, url),
   }
-  return { forAccount, forRepo, ghRouted, ghDirect, boardOps }
+  return { forAccount, forRepo, forCard, ghRouted, ghDirect, boardOps }
 }

@@ -99,6 +99,7 @@ import {
 import type {
   AppState,
   Board,
+  BoardCard,
   CliResult,
   Sprint,
   GitInfo,
@@ -116,6 +117,7 @@ import {
   DEFAULT_CONFIG,
   getConfig,
   parseConfig,
+  projectByKey,
   setConfig,
   type AppConfig,
 } from "@shared/appConfig";
@@ -1093,12 +1095,31 @@ export class Sources {
    */
   boardRepos(): string[] {
     const out = new Map<string, string>();
-    for (const b of Object.values(this.boards))
-      for (const c of b.cards) {
-        // A card with no repository is of the primary issue repo, which the config selects anyway.
-        if (c.repo && !out.has(c.repo.toLowerCase())) out.set(c.repo.toLowerCase(), c.repo);
-      }
+    for (const c of this.boardCards())
+      if (!out.has(c.repo!.toLowerCase())) out.set(c.repo!.toLowerCase(), c.repo!);
     return [...out.values()];
+  }
+
+  /**
+   * The cards of the loaded boards that name a repository and sit on a board Setup still selects
+   * (a board removed in Setup can linger in memory and in the cache: its cards do not count). A
+   * card with no repository is of the primary issue repo, which the config selects anyway.
+   */
+  private boardCards(): BoardCard[] {
+    return Object.values(this.boards).flatMap((b) =>
+      b.cards.filter((c) => !!c.repo && !!c.project && !!projectByKey(c.project, this.config)),
+    );
+  }
+
+  /**
+   * The key of the selected board whose loaded cards hold this issue; with no number, or when no
+   * card is that issue, a board that holds an issue of the repository. Null when none does. The
+   * account of that board is who a card of a repository no account lists is read and written as.
+   */
+  boardOf(repo: string | null | undefined, number?: number): string | null {
+    if (!repo) return null;
+    const cards = this.boardCards().filter((c) => c.repo!.toLowerCase() === repo.toLowerCase());
+    return (cards.find((c) => c.number === number) ?? cards[0])?.project ?? null;
   }
 
   /** Show another sprint: from the cache at once, fetched when never seen before. */

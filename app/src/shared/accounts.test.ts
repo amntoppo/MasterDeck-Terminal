@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
   accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
-  matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
+  accountForCard, matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] }
@@ -253,5 +253,21 @@ describe('accountNotices', () => {
     expect(accountNotices({ ghActive: 'alice', master: 'alice' }, two)).toEqual([])
     expect(accountNotices({ ghActive: 'alice', master: undefined }, two)).toEqual([]) // not running
     expect(accountNotices({ ghActive: 'alice', master: null }, one)).toEqual([])
+  })
+})
+
+describe('the account a card\'s calls go out as', () => {
+  const acct = (login: string, owner: string, repos: string[], projects: unknown[], primary = false) => ({ login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repos[0].split('/')[1], repos, projects, ...(primary ? { primary: true } : {}) })
+  const cfg = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [{ owner: 'acme', number: 1, columns: ['Todo'] }], true), acct('bob-work', 'globex', ['globex/app'], [{ owner: 'globex', number: 7, columns: ['Todo'] }])] })
+  it('the account that lists the repository; else the account whose board holds the card; else the primary', () => {
+    expect(accountForCard('globex/app', 'acme/1', cfg)).toBe('bob-work') // listed: the board does not matter
+    expect(accountForCard('globex/infra', 'globex/7', cfg)).toBe('bob-work') // listed nowhere, on bob-work's board
+    expect(accountForCard('globex/infra', null, cfg)).toBe('alice') // on no loaded board
+    expect(accountForCard('globex/infra', 'other/9', cfg)).toBe('alice') // a board no account selects
+    expect(accountForCard(null, 'globex/7', cfg)).toBe('alice') // no repository: the primary issue repo
+  })
+  it('one account, or none: as before', () => {
+    expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true)] }))).toBe('alice')
+    expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
   })
 })

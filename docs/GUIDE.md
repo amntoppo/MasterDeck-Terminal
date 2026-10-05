@@ -845,7 +845,7 @@ cards is in them.
   never the primary account's. A card of the primary issue repo shows the list at once; for any
   other repository **Me** shows at once and "Loading who else can be assigned in app…" until the
   rest arrives (kept for an hour, so the next popup for that repository is instant). If the read
-  fails the popup says so and offers **Me** alone: assigning to yourself still works. A card on one of your boards whose repository is not ticked in Setup gets its repository's people too. The Board's
+  fails the popup says so and offers **Me** alone: assigning to yourself still works. A card on one of your boards whose repository is not ticked in Setup gets its repository's people too, read (and assigned) as the account whose board holds the card, so a private repository on bob-work's board is not asked for as the primary account. The Board's
   Assignee filter lists the people seen on the tab's cards and the tab's account; the primary issue
   repo's people are added only on the primary account's tab (or with one account).
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue

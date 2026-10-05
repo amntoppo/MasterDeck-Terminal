@@ -392,6 +392,39 @@ describe('RepoIssues: Retry and Refresh read past the caches', () => {
     expect(store.view()?.repos[0]).toMatchObject({ repo: 'acme/api', ok: true })
     expect(store.view()?.repos[0]).not.toHaveProperty('loading')
   })
+  it('a forced re-read queued behind a read that hit the rate limit does not run during the pause', async () => {
+    let release = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const calls: boolean[] = []
+    let paused = false
+    const store = new RepoIssues({
+      read: async (_repos, force) => {
+        calls.push(force)
+        await gate
+        return { ok: false, message: 'gh: API rate limit exceeded' }
+      },
+      config: () => boarded,
+      paused: (text) => {
+        if (text && RATE_LIMITED.test(text)) paused = true
+        return paused
+      },
+      changed: () => {},
+      now: () => 1_000_000,
+    })
+    store.ask(['acme/api'])
+    await tick()
+    const retry = store.refresh(true) // queued behind the read that is about to hit the limit
+    release()
+    expect(await retry).toEqual({ ok: false, message: 'GitHub calls paused' })
+    expect(calls).toEqual([false]) // the forced read never went out
+    const part = store.view()!.repos[0]
+    expect(part).toMatchObject({ repo: 'acme/api', ok: false, takenAt: null })
+    expect(part).not.toHaveProperty('loading')
+    expect(part.note).toContain('rate limit') // what the first read said stays
+    paused = false
+    expect((await store.refresh(true)).message).toBe('gh: API rate limit exceeded') // after the pause it is read again
+    expect(calls).toEqual([false, true])
+  })
   it('an unforced refresh, and a second forced one, still join the read that runs', async () => {
     let release = () => {}
     const gate = new Promise<void>((r) => (release = r))

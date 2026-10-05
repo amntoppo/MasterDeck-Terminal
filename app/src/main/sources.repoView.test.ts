@@ -72,6 +72,16 @@ describe('Sources and the repository view', () => {
     priv.boards = { '@current': { takenAt: 1, sprint: null, columns: [], cards: [card('partner/portal'), card('Partner/Portal'), card('acme/api')] }, 'Sprint 2': { takenAt: 1, sprint: null, columns: [], cards: [card('acme/web')] } }
     expect(src.boardRepos()).toEqual(['partner/portal', 'acme/api', 'acme/web'])
   })
+  it('only cards of a board Setup still selects count, and each knows its board', () => {
+    const { src, priv } = make()
+    const card = (repo: string | null, project: string | null, number = 1) => ({ number, repo, project, title: 't', url: '', status: 'To Do', prs: [], assignees: [], labels: [], milestone: null, type: null })
+    priv.boards = { '@current': { takenAt: 1, sprint: null, columns: [], cards: [card('partner/portal', 'acme/1', 4), card('old/gone', 'acme/9'), card('acme/loose', null), card('partner/portal', 'acme/1', 5)] } }
+    expect(src.boardRepos()).toEqual(['partner/portal']) // acme/9 was removed in Setup; a card with no board is no board's
+    expect(src.boardOf('Partner/Portal', 5)).toBe('acme/1')
+    expect(src.boardOf('partner/portal')).toBe('acme/1')
+    expect(src.boardOf('old/gone', 1)).toBeNull()
+    expect(src.boardOf(null, 4)).toBeNull()
+  })
   it('a rate-limited repository note starts the pause', () => {
     for (const t of ['acme/api not read: RATE_LIMITED', 'gh: API rate limit exceeded', 'secondary rate limit', 'abuse detection mechanism']) expect(RATE_LIMITED.test(t)).toBe(true)
     expect(RATE_LIMITED.test('Not found: acme/old')).toBe(false)

@@ -8,7 +8,7 @@ import { GitHub } from './github'
 import type { RunOpts, Runner } from './run'
 
 const alice = { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] }
-const bob = { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] }
+const bob = { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [{ owner: 'globex', number: 7, columns: ['Todo'] }] }
 const one = parseConfig({ accounts: [alice] })
 const two = parseConfig({ accounts: [alice, bob] })
 
@@ -27,6 +27,8 @@ function setup(cfg = two, bad: string[] = []) {
     runEnv,
     // win32: gh is called directly, so the fake run sees each call's env.
     ghFor: (account) => (made++, makeGhRunner(run, '/lib', 'python3', 'win32', account)),
+    // bob-work's board holds a card of globex/infra, a repository no account lists.
+    boardOf: (repo) => (repo?.toLowerCase() === 'globex/infra' ? 'globex/7' : null),
   })
   const as = () => calls.map((x) => x.opts?.env?.GHC_ACCOUNT ?? 'default')
   return { c, base, baseCalls, calls, as, made: () => made }
@@ -112,5 +114,21 @@ describe('accountClients', () => {
     expect(s.as()).toEqual(['bob-work', 'bob-work', 'alice', 'alice', 'alice', 'alice'])
     expect(s.calls[0].args.join(' ')).toContain('repos/globex/app/issues/7/assignees')
     expect(s.calls[1].args.join(' ')).toContain('repos/globex/app/assignees')
+  })
+  it('a card of a repository no account lists goes out as the account whose board holds it: reads and writes alike', async () => {
+    const s = setup()
+    await s.c.forCard('globex/infra', 7).github.assignableUsers(false, 'globex/infra')
+    await s.c.forCard('globex/infra', 7).github.assign({ repo: 'globex/infra', number: 7 }, 'zoe', [])
+    await s.c.boardOps.linkPr({ repo: 'globex/infra', number: 7 }, 'https://github.com/globex/infra/pull/9')
+    expect(new Set(s.as())).toEqual(new Set(['bob-work']))
+    const t = setup()
+    await t.c.forCard('partner/portal', 7).github.assignableUsers(false, 'partner/portal') // on no loaded board: the primary
+    await t.c.forCard('globex/app', 7).github.assignableUsers(false, 'globex/app') // listed: its account
+    await t.c.forCard(null, 7).github.assignableUsers()
+    expect(t.as()).toEqual(['alice', 'bob-work', 'alice'])
+  })
+  it('one account: a card on any board still uses the default runner', () => {
+    const s = setup(one)
+    expect(s.c.forCard('globex/infra', 7)).toBe(s.base)
   })
 })

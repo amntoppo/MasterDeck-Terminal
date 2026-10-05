@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
-import { AssignableUsers, ASSIGN_USERS_MAX, ASSIGN_USERS_TTL_MS } from './assignUsers'
+import { AssignableUsers, ASSIGN_USERS_FAILED_MS, ASSIGN_USERS_MAX, ASSIGN_USERS_TTL_MS } from './assignUsers'
 
 const BOARD = { owner: 'acme', number: 1, title: 'Delivery', columns: ['Todo'] }
 const acct = (login: string, owner: string, repos: string[], more: Record<string, unknown> = {}) => ({ login, name: login, email: `${login}@example.test`, owner, ownerType: 'organization', issueRepo: repos[0].split('/')[1], repos, projects: [], ...more })
@@ -54,13 +54,19 @@ describe('AssignableUsers (who can be assigned in a repository, read when the As
     expect(await Promise.all([a, b])).toEqual([{ ok: true, users: ['zoe'] }, { ok: true, users: ['zoe'] }])
     expect(calls).toEqual(['acme/api'])
   })
-  it('a failed read says so and is not kept: the next popup tries again', async () => {
+  it('a failed read says so and is tried again after a minute, not at once (a client cannot repeat it without bound)', async () => {
     let fail = true
-    const { store, calls } = make(two, () => (fail ? null : ['zoe']))
+    const { store, calls, t } = make(two, () => (fail ? null : ['zoe']))
     expect(await store.get('acme/api')).toEqual({ ok: false, message: 'Could not read who can be assigned in acme/api.' })
     fail = false
+    t.now += ASSIGN_USERS_FAILED_MS - 1
+    expect(await store.get('acme/api')).toEqual({ ok: false, message: 'Could not read who can be assigned in acme/api.' })
+    expect(calls).toHaveLength(1)
+    expect(await store.get('globex/app')).toMatchObject({ ok: true }) // another repository is not held back
+    t.now += 1
     expect(await store.get('acme/api')).toEqual({ ok: true, users: ['zoe'] })
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
+    expect(ASSIGN_USERS_FAILED_MS).toBe(60_000)
     const thrown = make(two, () => { throw new Error('spawn gh ENOENT') })
     expect(await thrown.store.get('acme/api')).toEqual({ ok: false, message: 'Could not read who can be assigned in acme/api.' })
   })
@@ -88,6 +94,14 @@ describe('AssignableUsers (who can be assigned in a repository, read when the As
     t.onBoard = ['not a repo', '../x', 'acme/..']
     for (const bad of t.onBoard) expect(await store.get(bad)).toMatchObject({ ok: false })
     expect(calls).toEqual(['Partner/Portal'])
+  })
+  it('the primary issue repo is always read, also when no account lists it', async () => {
+    const odd = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/api'], { primary: true, issueRepo: 'api' })] })
+    expect(odd.repos).not.toContain('acme/tracker')
+    const { store, calls } = make(odd)
+    expect(await store.get(null)).toMatchObject({ ok: true })
+    expect(await store.get('ACME/Tracker')).toMatchObject({ ok: true })
+    expect(calls).toEqual(['acme/tracker'])
   })
   it('remembers a bounded number of repositories: the one read longest ago goes', async () => {
     const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })

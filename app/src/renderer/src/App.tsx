@@ -1,5 +1,6 @@
 import {
   sameTicket,
+  ticketKey,
   ticketLabel,
   ticketOf,
   ticketUrl,
@@ -1453,6 +1454,7 @@ export function App() {
       )}
       {assignCard && (
         <AssignPopup
+          key={ticketKey(assignCard.card.repo, assignCard.card.number)}
           card={assignCard.card}
           me={assignCard.me}
           state={state}
