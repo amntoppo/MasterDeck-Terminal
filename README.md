@@ -141,7 +141,7 @@ echo '{"workspace": "/Users/me/code"}' | ~/.claude/skills/master/master config s
 | `statuses.done` / `finished` / `assignable` / `resumable` / `blocked` | Status sets: not new work; hidden from pick lists; master may assign; a session may resume; blocked |
 | `statuses.rank` | Optional order for "forward only" moves; by default the column order |
 | `sprintField`, `sprintQuery` | The board's iteration field and the filter for "my current sprint" |
-| `workspace` | Folder where master and new shells start, and where your repositories are cloned: a session for a ticket starts in the checkout of the ticket's repository found there (the folder itself, its sub-folders, or one level below those; matched by the checkout's `origin`), else in this folder |
+| `workspace` | Folder where master and new shells start, and where your repositories are cloned: a session for a ticket starts in the checkout of the ticket's repository found there (the folder itself, its sub-folders, or one level below those; matched by the checkout's `origin`; the folder named after the repository first), else in this folder |
 | `masterName` | Name of the master session (default `master-agent`) |
 | `masterEnabled` | `false` runs MasterDeck without a master-agent (Setup → Master agent) |
 | `accounts` | Connected GitHub accounts (Setup → GitHub accounts): each `login`, `name`/`email` for its commits, `primary` (exactly one), and its own `owner`, `issueRepo`, `repos`, `projects`. The top-level fields above are the primary account's. A repo belongs to one account. Any other account may carry its own `workspace` (where its repositories are cloned); without one it uses the top-level `workspace` |

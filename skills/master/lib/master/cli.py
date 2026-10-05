@@ -161,8 +161,10 @@ def cmd_add(args) -> int:
     if args.session:
         target = {"session": args.session}
     else:
-        add_repo = refs.stored(args.repo) if args.repo else refs.parse(args.issue)[0]
-        sp = {"name": args.spawn_name, "cwd": args.cwd or checkout.resolve(add_repo)["cwd"], "prompt": args.prompt}
+        add_repo, add_n = refs.parse(args.issue)
+        if args.repo:
+            add_repo = refs.stored(args.repo)
+        sp = {"name": args.spawn_name, "cwd": args.cwd or checkout.default_cwd(args.kind, add_n, add_repo), "prompt": args.prompt}
         if args.model:
             sp["model"] = args.model
         if args.account:
@@ -311,7 +313,11 @@ def cmd_draft_assign(args) -> int:
     print(json.dumps({"issue": a["issue"], "repo": a["repo"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
                       "summary": a["summary"], "title": issue["title"], "url": issue["url"],
                       # For the Start dialog: where it looked, for which repository, and whether it found it.
-                      "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"]}))
+                      "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"],
+                      # The text without a checkout: the dialog replaces a system prompt only while it is one of these.
+                      "genericPrompt": rules.assign_prompt(issue),
+                      # The search hit a limit: "not found" may be wrong, and the dialog says so.
+                      **({"partial": True, "searched": where["searched"]} if where.get("partial") else {})}))
     return 0
 
 

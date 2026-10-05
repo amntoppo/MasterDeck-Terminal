@@ -1,0 +1,8 @@
+You own acme/tracker#42 (Fix upload retry). https://github.com/acme/tracker/issues/42
+
+Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to acme/tracker#42):
+1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git worktree there for #42 (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), so the main checkout stays clean.
+2. Then stop and ask the user for instructions here: '#42: question — ready for instructions on #42: <one-line summary of the issue, the repo and the worktree/branch you created>'. Wait for their answer; they will brainstorm and plan the work with you in this session.
+3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.
+
+When you are done, blocked or have a question, say so in this session, first line '#42: done', '#42: blocked — <reason>' or '#42: question — <question>', and wait for the user's answer here.

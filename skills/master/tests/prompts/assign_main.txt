@@ -1,0 +1,8 @@
+You own acme/tracker#42 (Fix upload retry). https://github.com/acme/tracker/issues/42
+
+Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to acme/tracker#42):
+1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git worktree there for #42 (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), so the main checkout stays clean.
+2. Then stop and ask the user for instructions: tell master-agent '#42: question — ready for instructions on #42: <one-line summary of the issue, the repo and the worktree/branch you created>', and ask them the same here. Wait for their answer; they will brainstorm and plan the work with you in this session.
+3. Once a PR exists, MasterDeck watches it and sends you its review comments, conflicts and merge as messages; act on them. Do not merge.
+
+When you are done, blocked or have a question, tell master-agent with SendMessage. First line: '#42: done', '#42: blocked — <reason>' or '#42: question — <question>'. When you have a question, ALSO ask the user directly in this session (so they see it here too), and wait for the answer from either place. If the user answers you here, tell master-agent '#42: answered — <answer>'. If SendMessage says master-agent is not reachable, do not send it to any other session (none of them is master-agent, whatever its name); ask the user here instead.

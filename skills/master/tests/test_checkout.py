@@ -14,6 +14,10 @@ from unittest import mock
 from master import checkout, cli, config, ledger, rules, setup, spawn
 from tests.test_spawn import FakeRunner
 
+PROMPTS = Path(__file__).parent / "prompts"
+MAIN_STEP_1 = ("1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git "
+               "worktree there for {lab} (use Claude Code's worktree support / EnterWorktree, branch named after the ticket), "
+               "so the main checkout stays clean.\n")
 GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 A = {"login": "alice", "primary": True, "name": "Alice", "email": "", "owner": "acme", "ownerType": "organization",
@@ -78,6 +82,13 @@ class WorkspaceForTest(Base):
     def test_home_is_expanded(self):
         self.cfg(accounts=[A, dict(B, workspace="~/globex")])
         self.assertEqual(config.workspace_for("globex/app"), Path(os.path.expanduser("~/globex")))
+
+    def test_a_blank_workspace_is_none(self):
+        self.cfg(accounts=[A, dict(B, workspace="   ")])
+        self.assertEqual(config.accounts()[1]["workspace"], "")
+        self.assertEqual(config.workspace_for("globex/app"), self.ws)
+        with mock.patch.dict(config.CONFIG, {"accounts": [A, dict(B, workspace=f"  {self.tmp / 'globex'} ")]}):
+            self.assertEqual(config.workspace_for("globex/app"), self.tmp / "globex")
 
     def test_master_workspace_overrides_every_account(self):
         self.cfg(accounts=[A, dict(B, workspace=str(self.tmp / "globex"))])
@@ -168,7 +179,7 @@ class ScanTest(Base):
         self.assertIsNone(self.found("acme/vendor"))
 
     def test_depth_one_wins_over_depth_two(self):
-        clone(self.ws / "aaa" / "api", "git@github.com:acme/api.git")
+        clone(self.ws / "aaa" / "copy", "git@github.com:acme/api.git")
         clone(self.ws / "zzz", "git@github.com:acme/api.git")
         self.assertEqual(self.found("acme/api"), str(self.ws / "zzz"))
 
@@ -189,43 +200,92 @@ class ScanTest(Base):
         os.symlink(inside, self.ws / "web")  # a link that stays inside is fine
         self.assertEqual(self.found("acme/web"), str(self.ws / "web"))
 
-    def test_at_most_max_folders_are_looked_at(self):
+    def test_three_hundred_plain_folders_do_not_hide_a_checkout_and_git_is_never_run(self):
+        for n in range(300):
+            (self.ws / f"notes-{n:03}").mkdir()
+        clone(self.ws / "zzz-service", "git@github.com:acme/api.git")
+
+        def no_git(*a, **kw):
+            raise AssertionError(f"git was run: {a}")
+
+        with mock.patch.object(subprocess, "run", no_git):
+            r = checkout.resolve("acme/api")
+        self.assertEqual((r["found"], r["cwd"]), (True, str(self.ws / "zzz-service")))
+        self.assertNotIn("partial", r)
+
+    def test_duplicates_prefer_the_folder_named_after_the_repository_then_the_shortest_path(self):
+        for name in ("Api-backup", "api", "api-old"):
+            clone(self.ws / name, "git@github.com:acme/api.git")
+        self.assertEqual(self.found("acme/API"), str(self.ws / "api"))
+        for name in ("web-second-copy", "web2", "team/web"):
+            clone(self.ws / name, "git@github.com:acme/web.git")
+        for name in ("docs-second-copy", "docs2", "team/docs-site"):
+            clone(self.ws / name, "git@github.com:acme/docs.git")
+        self.assertEqual(self.found("acme/web"), str(self.ws / "team" / "web"))  # named, one level down
+        self.assertEqual(self.found("acme/docs"), str(self.ws / "docs2"))        # none named: the shortest path
+
+    def test_the_folder_named_after_the_repository_is_found_without_listing_the_workspace(self):
+        clone(self.ws / "api", "git@github.com:acme/api.git")
+        with mock.patch.object(checkout, "_folders", side_effect=AssertionError("listed")):
+            self.assertEqual(self.found("acme/api"), str(self.ws / "api"))
+
+    def test_a_linked_worktree_is_not_descended_into(self):
+        wt = self.ws / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: /elsewhere\n")
+        clone(wt / "inner", "git@github.com:acme/api.git")
+        self.assertIsNone(self.found("acme/api"))
+
+    def test_when_the_limit_is_reached_the_answer_says_so(self):
         for n in range(6):
             clone(self.ws / f"r{n}", f"git@github.com:acme/r{n}.git")
+        with mock.patch.object(checkout, "MAX_FOLDERS", 4):
+            got = checkout.scan(self.ws)
+            self.assertEqual(sorted(got["repos"]), ["acme/r0", "acme/r1", "acme/r2"])  # the workspace counts as one
+            self.assertEqual((got["searched"], got["partial"]), (4, True))
+            r = checkout.resolve("acme/nope")
+            self.assertEqual((r["found"], r["partial"], r["searched"]), (False, True, 4))
+            # The folder named after the repository is found whatever the limit.
+            self.assertEqual(checkout.resolve("acme/r5")["cwd"], str(self.ws / "r5"))
+            self.assertNotIn("partial", checkout.resolve("acme/r1"))  # found: nothing to say
+        checkout.forget()
+        self.assertEqual((checkout.scan(self.ws)["partial"], checkout.resolve("acme/nope").get("partial")), (False, None))
+
+    def test_git_is_asked_only_for_an_origin_the_config_does_not_spell_out_and_only_so_often(self):
+        for n in range(4):
+            c = clone(self.ws / f"r{n}", f"gh:acme/r{n}")
+            subprocess.run(["git", "-C", str(c), "config", "url.git@github.com:.insteadOf", "gh:"], check=True)
+        clone(self.ws / "plain", "https://gitlab.example/acme/plain.git")  # a full URL elsewhere: never asked
         asked = []
 
-        def origin(d):
-            asked.append(d)
+        def git(d):
+            asked.append(Path(d).name)
             return config.origin_repo(d)
 
-        with mock.patch.object(checkout, "MAX_FOLDERS", 4):
-            got = checkout.scan(self.ws, origin=origin)
-        self.assertEqual(sorted(got), ["acme/r0", "acme/r1", "acme/r2"])  # the workspace counts as one
-        self.assertEqual(len(asked), 3)
+        with mock.patch.object(checkout, "MAX_GIT_CALLS", 3):
+            got = checkout.scan(self.ws, git=git)
+        self.assertEqual(asked, ["r0", "r1", "r2"])
+        self.assertEqual((sorted(got["repos"]), got["partial"]), (["acme/r0", "acme/r1", "acme/r2"], True))
 
     def test_a_scan_is_remembered_briefly(self):
-        clone(self.ws / "api", "git@github.com:acme/api.git")
+        c = clone(self.ws / "service", "gh:acme/api")
+        subprocess.run(["git", "-C", str(c), "config", "url.git@github.com:.insteadOf", "gh:"], check=True)
         calls = []
 
-        def origin(d):
+        def git(d):
             calls.append(d)
             return config.origin_repo(d)
 
         clock = [100.0]
         for _ in range(3):
-            self.assertEqual(checkout.scan(self.ws, origin=origin, now=lambda: clock[0]), {"acme/api": str(self.ws / "api")})
+            self.assertEqual(checkout.scan(self.ws, git=git, now=lambda: clock[0])["repos"], {"acme/api": str(self.ws / "service")})
         self.assertEqual(len(calls), 1)
         clock[0] += checkout.TTL + 1
-        checkout.scan(self.ws, origin=origin, now=lambda: clock[0])
+        checkout.scan(self.ws, git=git, now=lambda: clock[0])
         self.assertEqual(len(calls), 2)
 
-    def test_a_missing_workspace_finds_nothing(self):
-        with mock.patch.dict(config.CONFIG, {"workspace": str(self.tmp / "nope")}):
-            r = checkout.resolve("acme/api")
-        self.assertEqual((r["found"], r["cwd"]), (False, str(self.tmp / "nope")))
-
     def test_a_git_that_hangs_is_no_match(self):
-        clone(self.ws / "api", "git@github.com:acme/api.git")
+        clone(self.ws / "service", "gh:acme/api")
 
         def slow(*a, **kw):
             self.assertLessEqual(kw["timeout"], 5)
@@ -233,6 +293,11 @@ class ScanTest(Base):
 
         with mock.patch.object(subprocess, "run", slow):
             self.assertIsNone(self.found("acme/api"))
+
+    def test_a_missing_workspace_finds_nothing(self):
+        with mock.patch.dict(config.CONFIG, {"workspace": str(self.tmp / "nope")}):
+            r = checkout.resolve("acme/api")
+        self.assertEqual((r["found"], r["cwd"]), (False, str(self.tmp / "nope")))
 
     def test_each_account_is_looked_up_in_its_own_workspace(self):
         other = self.tmp / "globex"
@@ -269,9 +334,13 @@ class AssignTest(Base):
         a = rules._assign(issue(7, "globex/app"))
         sp = a["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.other / "app"), "bob-work"))
-        self.assertIn("This folder is your checkout of globex/app", sp["prompt"])
-        self.assertIn("EnterWorktree", sp["prompt"])
-        self.assertNotIn("pick the repo it belongs to", sp["prompt"])
+        want = (PROMPTS / "assign_main_other_repo.txt").read_text().replace(MAIN_STEP_1.format(lab="app#7"), (
+            f"1. Read the issue. This folder is a checkout of globex/app, where the issue is filed. If the work belongs in "
+            f"another repository (the CLAUDE.md in {self.other} may say which), use that repository under {self.other} "
+            f"instead; otherwise work in a git worktree here for app#7 (use Claude Code's worktree support / EnterWorktree, "
+            f"branch named after the ticket), so the main checkout stays clean.\n"))
+        self.assertNotEqual(want, (PROMPTS / "assign_main_other_repo.txt").read_text())
+        self.assertEqual(sp["prompt"], want)  # only step 1 differs, and it asks nothing
         self.assertEqual(a["message"], sp["prompt"])
 
     def test_assign_without_a_checkout_is_as_before_in_the_account_workspace(self):
@@ -279,8 +348,7 @@ class AssignTest(Base):
         a = rules._assign(issue(7, "globex/app"))
         sp = a["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.other), "bob-work"))
-        self.assertIn("pick the repo it belongs to", sp["prompt"])
-        self.assertNotIn("This folder is your checkout", sp["prompt"])
+        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main_other_repo.txt").read_text())
         # The primary repo's ticket: alice's workspace, and alice.
         sp = rules._assign(issue(42))["target"]["spawn"]
         self.assertEqual((sp["cwd"], sp["account"]), (str(self.ws), "alice"))
@@ -300,15 +368,24 @@ class AssignTest(Base):
 
 
 class LegacyTest(Base):
+    """No checkout: the prompt is main's, byte for byte (stored copies made from main's rules.py)."""
+
     def test_a_config_without_accounts_and_no_checkout_is_exactly_as_before(self):
         self.cfg()
-        a = rules._assign(issue(42))
-        sp = a["target"]["spawn"]
+        sp = rules._assign(issue(42))["target"]["spawn"]
         self.assertEqual(sp["cwd"], str(self.ws))
         self.assertNotIn("account", sp)
-        self.assertIn("1. Read the issue, pick the repo it belongs to (the workspace CLAUDE.md may say), and work in a git "
-                      "worktree there for #42 (use Claude Code's worktree support / EnterWorktree, branch named after the "
-                      "ticket), so the main checkout stays clean.\n", sp["prompt"])
+        self.assertEqual(sp["prompt"], (PROMPTS / "assign_main.txt").read_text())
+        self.assertEqual(rules._assign(issue(7, "globex/app"))["target"]["spawn"]["prompt"],
+                         (PROMPTS / "assign_main_other_repo.txt").read_text())
+
+    def test_without_a_master_agent_too(self):
+        self.cfg(masterEnabled=False)
+        self.assertEqual(rules._assign(issue(42))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main_solo.txt").read_text())
+
+    def test_a_chosen_folder_that_is_no_checkout_keeps_the_prompt(self):
+        self.cfg()
+        self.assertEqual(rules._assign(issue(42), str(self.tmp))["target"]["spawn"]["prompt"], (PROMPTS / "assign_main.txt").read_text())
 
 
 class CliTest(Base):
@@ -341,10 +418,11 @@ class CliTest(Base):
     def test_the_draft_for_a_chosen_folder(self):
         d = self.draft("--cwd", str(self.tmp))
         self.assertEqual((d["cwd"], d["found"]), (str(self.tmp), False))
-        self.assertIn("pick the repo it belongs to", d["prompt"])
+        self.assertEqual(d["prompt"], d["genericPrompt"])
         d = self.draft("--cwd", str(self.other / "app"))
         self.assertEqual((d["cwd"], d["found"]), (str(self.other / "app"), True))
-        self.assertIn("This folder is your checkout of globex/app", d["prompt"])
+        self.assertIn("This folder is a checkout of globex/app, where the issue is filed", d["prompt"])
+        self.assertEqual(d["genericPrompt"], (PROMPTS / "assign_main_other_repo.txt").read_text().replace("Fix upload retry", "T"))
 
     def test_checkout_prints_the_folder_of_a_repository(self):
         code, out = self.run_cli("checkout", "Globex/App")
@@ -363,17 +441,46 @@ class CliTest(Base):
         got = [p["target"]["spawn"]["cwd"] for p in ledger.load()["proposals"]]
         self.assertEqual(got, [str(self.other / "app"), str(self.tmp)])
 
-    def test_spawn_of_a_proposal_without_a_folder_starts_in_the_checkout(self):
-        (self.tmp / "home" / "md" / "accounts").mkdir(parents=True)
-        (self.tmp / "home" / "md" / "accounts" / "bob-work.settings.json").write_text("{}")
+    def test_the_draft_says_when_the_search_was_cut_short(self):
+        (self.ws / "a").mkdir()
+        (self.ws / "b").mkdir()
+        with mock.patch.object(checkout, "MAX_FOLDERS", 1):
+            code, out = self.run_cli("draft-assign", "3", "--repo", "acme/api", "--title", "T", "--url", "u")
+        d = json.loads(out)
+        self.assertEqual((d["found"], d["partial"], d["searched"]), (False, True, 1))
+        self.assertNotIn("partial", self.draft())
+
+    def test_only_ticket_work_is_looked_up(self):
+        """A meeting's session, a proposal for no issue and anything else start in the workspace, as before."""
+        clone(self.ws / "tracker", "git@github.com:acme/tracker.git")
+        for i, (kind, n, want) in enumerate((("MEETING", "5", self.ws), ("CHAT", "5", self.ws), ("ASSIGN", "0", self.ws),
+                                             ("ASSIGN", "5", self.ws / "tracker"), ("PRREVIEW", "5", self.ws / "tracker"))):
+            self.run_cli("add", "--kind", kind, "--issue", n, "--source", f"f:{i}", "--summary", "s",
+                         "--message", "m", "--spawn-name", f"x-{i}", "--prompt", "do it")
+            self.assertEqual(ledger.load()["proposals"][-1]["target"]["spawn"]["cwd"], str(want), kind + n)
+
+    def _spawned_in(self, kind, issue_n, repo, spawn_target):
+        (self.tmp / "home" / "md" / "accounts").mkdir(parents=True, exist_ok=True)
+        for login in ("alice", "bob-work"):
+            (self.tmp / "home" / "md" / "accounts" / f"{login}.settings.json").write_text("{}")
         with mock.patch.dict(os.environ, {"MASTERDECK_HOME": str(self.tmp / "home" / "md")}), ledger.locked() as led:
-            p = ledger.add(led, kind="ASSIGN", issue=7, repo="globex/app", source="f:1",
-                           target={"spawn": {"name": "app-7-x", "prompt": "do it"}}, message="m", summary="s",
-                           now="2026-09-24T10:00:00Z")
+            p = ledger.add(led, kind=kind, issue=issue_n, repo=repo, source=f"f:{kind}:{issue_n}",
+                           target={"spawn": spawn_target}, message="m", summary="s", now="2026-09-24T10:00:00Z")
             ledger.transition(led, p["id"], "approved", now="2026-09-24T10:00:00Z")
-            runner = FakeRunner()
+            runner = FakeRunner(out="[]")
             spawn.spawn(led, p["id"], now="2026-09-24T10:00:01Z", runner=runner)
-        self.assertEqual(runner.calls[-1][1]["cwd"], str(self.other / "app"))
+        return runner.calls[-1][1]["cwd"]
+
+    def test_spawn_of_a_proposal_without_a_folder(self):
+        clone(self.ws / "tracker", "git@github.com:acme/tracker.git")
+        new = {"name": "x", "prompt": "do it"}
+        self.assertEqual(self._spawned_in("ASSIGN", 7, "globex/app", dict(new)), str(self.other / "app"))
+        self.assertEqual(self._spawned_in("PRREVIEW", 7, None, dict(new)), str(self.ws / "tracker"))
+        self.assertEqual(self._spawned_in("MEETING", 7, None, dict(new)), str(self.ws))
+        self.assertEqual(self._spawned_in("ASSIGN", 0, None, dict(new)), str(self.ws))
+        # A resume with no folder (an ORPHAN): the workspace, never a lookup.
+        self.assertEqual(self._spawned_in("ORPHAN", 7, None, {"name": "x", "resume": "4f2a9c1e-1234-4abc-9def-0123456789ab"}),
+                         str(self.ws))
 
 
 if __name__ == "__main__":

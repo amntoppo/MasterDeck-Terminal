@@ -167,7 +167,10 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         else:
             ledger.transition(led, pid, "held", now=now, note=note)
 
-    cwd = p["target"]["spawn"].get("cwd") or checkout.resolve(p.get("repo"))["cwd"]
+    sp0 = p["target"]["spawn"]
+    # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
+    cwd = sp0.get("cwd") or (str(config.workspace()) if sp0.get("resume")
+                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo")))
     if not Path(cwd).is_dir():
         note = f"cwd does not exist: {cwd}"
         hold(note)

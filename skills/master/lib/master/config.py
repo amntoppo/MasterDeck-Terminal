@@ -217,7 +217,7 @@ def account_view(a: dict) -> dict:
             "projects": [p for p in a.get("projects") or [] if isinstance(p, dict)],
             "allProjects": a.get("allProjects") is True,
             # Where this account's checkouts live; "" = the config's workspace.
-            "workspace": a["workspace"] if isinstance(a.get("workspace"), str) else ""}
+            "workspace": a["workspace"].strip() if isinstance(a.get("workspace"), str) else ""}
 
 
 def accounts(cfg: "dict | None" = None) -> list:
