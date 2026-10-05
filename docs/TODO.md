@@ -223,6 +223,13 @@ fixes it, and move the item here to "Recently done".
   change. The web app has it.
 - **P3 · An archived project item still shows as a chip** in the repository view (`projectItems`
   returns archived items). Approach: read `isArchived` and leave those out.
+- **P3 · The Assign popup of a card in a repository Setup does not select offers "Me" alone.** A
+  board can hold issues of a repository that is not ticked (with Select all on another account, or
+  another owner's repository on the board): `AssignableUsers.get` refuses it ("… is not selected in
+  Setup."), as every read asked for by name does. Approach: also accept the repository of a card
+  the loaded board holds.
+- **P3 · The per-repository Assign list was not seen in the app or against GitHub** (suites only):
+  the loading line, the error line, and `gh api repos/<o>/<r>/assignees` as a second account.
 - **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens
   the PR popup, so its fit at 390 px (with the new **Start a session** button) was not seen. Approach:
   add such a card to `web/preview/fixture.ts` and look at `/?preview` at 390x844.

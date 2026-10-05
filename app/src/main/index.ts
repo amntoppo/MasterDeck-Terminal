@@ -114,6 +114,7 @@ import {
 import { makeGhRunner, readGhCacheStatus } from "./ghc";
 import { GitHub } from "./github";
 import { accountClients } from "./accountClients";
+import { AssignableUsers } from "./assignUsers";
 import { Sender } from "./send";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
@@ -326,6 +327,11 @@ const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = ac
   run,
   runEnv: (l) => accountEnv.runEnv(l),
   ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+});
+// The Assign popup's people: who can be assigned in the card's repository, read as that repository's account.
+const assignableUsers = new AssignableUsers({
+  read: (repo) => forRepo(repo).github.assignableUsers(false, repo),
+  config: getConfig,
 });
 // "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
 // that account; the confirmation is the Mac's own dialog, built from main's fresh read.
@@ -2128,6 +2134,9 @@ function registerIpc(): void {
       ? forRepo(t.repo).github.issueBody(t)
       : { ok: false, message: "bad ticket" };
   });
+  // The Assign popup's people: the card's repository's, read as that repository's account (also
+  // from the web: a read; the repository is checked in AssignableUsers.get).
+  reg.handle(CH.assignableUsers, (_e, repo: unknown) => assignableUsers.get(repo));
   reg.handle(
     CH.assignIssue,
     async (_e, issue: unknown, login: string, current: string[]) => {

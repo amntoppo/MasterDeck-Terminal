@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { assignChoices, primaryMe, startSessionTitle } from '@shared/boardFilter'
-import { ticketLabel, ticketOf } from '@shared/ticket'
+import { assignChoices, assignSeed, startSessionTitle } from '@shared/boardFilter'
+import { fullRepo, ticketLabel, ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 
@@ -18,10 +18,37 @@ interface Props {
 
 export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tabMe }: Props) {
   const me = tabMe === undefined ? state.me : tabMe
-  const others = assignChoices(me, primaryMe(state.me, state.config), state.users).filter((u) => u.toLowerCase() !== me?.toLowerCase())
+  // The people who can be assigned in the card's repository. The primary issue repo's are in the
+  // state already; any other repository's are read now, as that repository's account (kept an hour
+  // in main). Until they arrive, and if the read fails, "Me" alone is offered.
+  const [people, setPeople] = useState<string[] | null>(() => assignSeed(card.repo, state))
+  const [peopleError, setPeopleError] = useState<string | null>(null)
+  const others = assignChoices(me, people ?? []).filter((u) => u.toLowerCase() !== me?.toLowerCase())
   const [login, setLogin] = useState(me ?? others[0] ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (people) return
+    let open = true
+    const failed = (message: string) => {
+      setPeople([])
+      setPeopleError(message)
+    }
+    Promise.resolve(deck().assignableUsers(card.repo ?? null)).then(
+      (r) => {
+        if (!open) return
+        if (!r.ok) return failed(r.message)
+        setPeople(r.users)
+        // Nobody to preselect yet (no login of mine is known): the first of the people read.
+        setLogin((l) => l || assignChoices(me, r.users)[0] || '')
+      },
+      (e) => open && failed(String(e)),
+    )
+    return () => {
+      open = false
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onClose()
@@ -68,6 +95,16 @@ export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tab
             </option>
           ))}
         </select>
+        {people === null && (
+          <div className="meta" style={{ marginTop: 6 }}>
+            Loading who else can be assigned in {fullRepo(card.repo).split('/')[1] ?? fullRepo(card.repo)}…
+          </div>
+        )}
+        {peopleError && (
+          <div className="error" style={{ marginTop: 6 }}>
+            {peopleError} {me ? 'You can still assign it to yourself.' : ''}
+          </div>
+        )}
         <div className="meta" style={{ marginTop: 6 }}>
           {change} {login === me ? 'Then the Start dialog opens so you can start a session for it.' : ''}
         </div>

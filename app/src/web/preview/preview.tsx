@@ -44,6 +44,7 @@ function previewDeck(noBoard: boolean): DeckApi {
     defaultModel: () => null,
     ticketRepoMeta: () => ({ labels: [], milestones: [], assignees: [] }),
     issueBody: () => ({ ok: true, body: 'Steps to reproduce: sign in from a fresh browser.' }),
+    assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
   }
   const local: Record<string, unknown> = {
     platform: 'web',

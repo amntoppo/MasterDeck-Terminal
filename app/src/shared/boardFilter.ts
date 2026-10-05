@@ -1,7 +1,7 @@
 import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
-import { accountForProject, accountForRepo, isMulti, primaryLogin } from './accounts'
-import { projectKey, type AppConfig } from './appConfig'
+import { accountForProject, accountForRepo, isMulti } from './accounts'
+import { primaryRepo, projectKey, type AppConfig } from './appConfig'
 import type { AssignRequest } from './ipc'
 import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
 
@@ -161,25 +161,39 @@ export function cardAction(c: BoardCard, me: string | null, sessions: Session[])
   return c.prs.length > 0 ? 'pr' : 'assign'
 }
 
-/** "Me" as the primary account: the login read from GitHub, else (not read yet) the config's primary account (`primaryLogin`). */
-export function primaryMe(me: string | null, c: AppConfig): string | null {
-  return me ?? primaryLogin(c)
-}
-
 /** The tooltip of "Start a session" on the Assign popup: the issue stays as it is, assigned or not. */
 export function startSessionTitle(assignees: string[]): string {
   return `Start a session for this issue as it is: ${assignees.length ? `it stays assigned to ${assignees.join(', ')}` : 'nobody is assigned'}, and nothing is written to GitHub`
 }
 
 /**
- * Who the Assign popup offers: me first (the tab's account), then the people who can be assigned.
- * `users` are the primary issue repo's, read as the primary account: a tab of another account
- * offers only its own login rather than another organisation's people.
+ * Who the Assign popup offers: me first (the tab's account), then `users`, the people who can be
+ * assigned in the card's repository, by name. Logins compare without case. With no users (not
+ * read yet, or the read failed) it is me alone, so assigning to me always works.
  */
-export function assignChoices(me: string | null, primaryMe: string | null, users: string[]): string[] {
-  const same = (a: string | null, b: string | null) => a === b || (!!a && !!b && a.toLowerCase() === b.toLowerCase())
-  const others = same(me, primaryMe) ? users.filter((u) => !same(u, me)).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) : []
+export function assignChoices(me: string | null, users: string[]): string[] {
+  const same = (a: string, b: string | null) => !!b && a.toLowerCase() === b.toLowerCase()
+  const others = users.filter((u, i) => !same(u, me) && users.findIndex((x) => same(x, u)) === i).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   return [...(me ? [me] : []), ...others]
+}
+
+/**
+ * The people the Assign popup can show at once, with no read: `state.users` (the primary issue
+ * repo's, read at every refresh as the primary account) when the card is of that repository. Null
+ * for any other repository, or while none were read: the popup then asks main (`assignableUsers`).
+ */
+export function assignSeed(cardRepo: string | null | undefined, state: { users: string[]; config: AppConfig }): string[] | null {
+  const primary = primaryRepo(state.config)
+  const mine = !cardRepo || (!!primary && cardRepo.toLowerCase() === primary.toLowerCase())
+  return mine && state.users.length ? state.users : null
+}
+
+/**
+ * The people the Assignee filter adds to the ones seen on a tab's cards: `users` (the primary
+ * issue repo's) on the primary account's tab or with one account; none on another account's tab.
+ */
+export function tabFilterUsers(acct: string | null, primary: string | null, users: string[]): string[] {
+  return acct && acct !== primary ? [] : users
 }
 
 const OPEN = new Set(['OPEN', 'DRAFT'])

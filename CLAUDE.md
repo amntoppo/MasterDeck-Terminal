@@ -69,7 +69,7 @@ cd app
 npm install          # postinstall runs electron-builder install-app-deps (node-pty for Electron)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.node.json + tsconfig.web.json; must be clean
-npm test             # vitest: ~1290 tests in ~125 files (~40 s); predictiveEcho alone ~30 s
+npm test             # vitest: ~1300 tests in ~126 files (~40 s); predictiveEcho alone ~30 s
 npm run build        # electron-vite build → out/
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
 npm run dev:web      # web app dev server (MD_API=http://localhost:8787 for a local backend)
@@ -147,6 +147,7 @@ web tabs keep working.
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
+| Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
@@ -321,7 +322,7 @@ buttons; it does not go through macOS window drag regions.
   can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on
   branch `feat/board-repository-view` (on `main` 7f971c4: 10 commits, the docs commit, and the
   final review's fixes), not merged, not pushed, not installed. Checked there: typecheck, vitest
-  (1291 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
+  (1302 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
   suites alone checked), the Board's markup for tabs with no repository picked (identical to `main`,
   also the live DOM and a screenshot of the isolated app against `main`'s), the isolated app with
   `MASTERDECK_BOARD_FIXTURE` and `MASTERDECK_REPO_FIXTURE` (the view, its notes, the loading, empty,

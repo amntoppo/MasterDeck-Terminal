@@ -43,6 +43,17 @@ describe('GitHub users', () => {
     expect(await new GitHub(f.run).assignableUsers()).toEqual(['alice', 'rahul'])
     expect(await new GitHub(f.run).me()).toBe('alice')
   })
+  it('reads the assignable users of the primary issue repo, or of the repository named', async () => {
+    const f = fake(() => ({ stdout: 'zoe\n' }))
+    const gh = new GitHub(f.run)
+    await gh.assignableUsers()
+    expect(await gh.assignableUsers(false, 'globex/app')).toEqual(['zoe'])
+    const paths = f.calls.map((c) => c.find((a) => a.includes('/assignees')))
+    expect(paths[1]).toBe('repos/globex/app/assignees?per_page=100')
+    expect(paths[0]).not.toBe(paths[1])
+    expect(paths[0]).toMatch(/^repos\/[^/]+\/[^/]+\/assignees\?per_page=100$/)
+    expect(f.calls.every((c) => !c.includes('-X'))).toBe(true) // a read
+  })
 })
 
 describe('GitHub.teamPrPages', () => {

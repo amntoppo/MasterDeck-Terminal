@@ -39,6 +39,7 @@ const api: DeckApi = {
   issueBody: (ticket) => ipcRenderer.invoke(CH.issueBody, ticket),
   shellPrepare: (dir) => ipcRenderer.invoke(CH.shellPrepare, dir),
   ticketMemory: (ticket) => ipcRenderer.invoke(CH.ticketMemory, ticket),
+  assignableUsers: (repo) => ipcRenderer.invoke(CH.assignableUsers, repo),
   assignIssue: (issue, login, current) =>
     ipcRenderer.invoke(CH.assignIssue, issue, login, current),
   startHere: (o) => ipcRenderer.invoke(CH.startHere, o),

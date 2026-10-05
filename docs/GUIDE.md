@@ -838,8 +838,16 @@ cards is in them.
   the Start dialog; someone else's (or nobody's) opens the PR popup when it has a PR, else the Assign
   popup. Both popups also have **Start a session**: it opens the Start dialog for the issue as it is,
   without assigning it and without writing anything to GitHub (its tooltip says who stays assigned).
-  With two or more accounts, "Me" in the Assign popup is the tab's account, and a tab of another
-  account than the primary offers only that login.
+  The Assign popup lists **Me** first (with two or more accounts: the tab's account), then the
+  people who can be assigned in the card's own repository, read from GitHub as the account that
+  repository belongs to, on any tab and for any card (a board card, a card of an account with no
+  board, a repository-view card). So bob-work's tab offers the people of bob-work's repository,
+  never the primary account's. A card of the primary issue repo shows the list at once; for any
+  other repository **Me** shows at once and "Loading who else can be assigned in app…" until the
+  rest arrives (kept for an hour, so the next popup for that repository is instant). If the read
+  fails the popup says so and offers **Me** alone: assigning to yourself still works. The Board's
+  Assignee filter lists the people seen on the tab's cards and the tab's account; the primary issue
+  repo's people are added only on the primary account's tab (or with one account).
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue
   opens a PR, MasterDeck adds that PR to the issue as a closing reference (it shows under the
   issue's Development box on GitHub), exactly as writing "Closes #12" in the PR would. This holds for

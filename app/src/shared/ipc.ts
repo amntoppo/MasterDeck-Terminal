@@ -163,6 +163,7 @@ export const CH = {
   shellPrepare: "shell:prepare",
   ticketMemory: "ticket:memory",
   assignIssue: "issue:assign",
+  assignableUsers: "issue:assignable",
   defaultModel: "models:default",
   startHere: "session:startHere",
   sendText: "session:sendText",
@@ -387,6 +388,13 @@ export interface DeckApi {
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
   dismissStopped(): Promise<void>;
+  /**
+   * Who can be assigned an issue of this repository (none: the primary issue repo), read as the
+   * repository's account when the Assign popup opens; kept an hour in main. A read.
+   */
+  assignableUsers(
+    repo: string | null,
+  ): Promise<{ ok: true; users: string[] } | { ok: false; message: string }>;
   /** Make `login` the only assignee (GitHub REST). */
   assignIssue(
     issue: Ticket,

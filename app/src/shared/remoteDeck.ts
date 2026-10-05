@@ -72,6 +72,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   tokensByDay: invoke(CH.tokensByDay),
   dismissStopped: invoke(CH.dismissStopped),
   assignIssue: invoke(CH.assignIssue),
+  assignableUsers: invoke(CH.assignableUsers),
   assign: invoke(CH.assign),
   defaultModel: invoke(CH.defaultModel),
   refresh: invoke(CH.refresh),

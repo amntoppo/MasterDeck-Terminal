@@ -181,6 +181,20 @@ describe('the popups name the ticket with its repository', () => {
     const p = renderToStaticMarkup(createElement(PrPopup, { card, state: fixtureState(), onClose: noop, onStartReview: noop, onStart: noop }))
     expect(p).toContain('api#7 Fix it')
   })
+  it('the Assign popup lists me at once; the people of another repository are loading until read', async () => {
+    const { AssignPopup } = await import('./AssignPopup')
+    const noop = () => {}
+    const state = { ...fixtureState(), me: 'alice', users: ['zoe', 'carol'] }
+    const popup = (repo: string | null, me?: string) => renderToStaticMarkup(createElement(AssignPopup, { card: { number: 7, repo, title: 'Fix it', url: 'u', status: 'Todo', assignees: [], prs: [], labels: [] } as never, state, onClose: noop, onAssigned: noop, onStart: noop, ...(me ? { me } : {}) }))
+    const primary = popup(null) // the primary issue repo: the people MasterDeck has, no read
+    expect([...primary.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])).toEqual(['alice', 'carol', 'zoe'])
+    expect(primary).not.toContain('Loading')
+    const other = popup('globex/app', 'bob-work') // bob-work's tab, its repository
+    expect([...other.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])).toEqual(['bob-work'])
+    expect(other).toContain('Me (bob-work)')
+    expect(other).toContain('Loading who else can be assigned in app…')
+    expect(other).not.toContain('zoe') // never the primary account's people
+  })
   it('Start a session on the Assign popup says who stays assigned', async () => {
     const { AssignPopup } = await import('./AssignPopup')
     const noop = () => {}

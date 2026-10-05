@@ -27,6 +27,7 @@ import {
   cardAction,
   defaultFilters,
   filterOptions,
+  tabFilterUsers,
   parseSavedTabs,
   sprintsForAccount,
   tabAccount,
@@ -438,7 +439,7 @@ export function BoardView({
   const options = useMemo(
     () =>
       b
-        ? filterOptions(b, me, acct && acct !== primary ? [] : state.users)
+        ? filterOptions(b, me, tabFilterUsers(acct, primary, state.users))
         : { assignees: [], labels: [], milestones: [] },
     [b, me, state.users, acct, primary],
   );
