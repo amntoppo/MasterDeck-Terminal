@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pickPr, reviewRequest } from '@shared/boardFilter'
 import type { AssignRequest } from '@shared/ipc'
 import type { PrSummary } from '@shared/prSummary'
+import { ticketLabel } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 import { PrIcon } from './BoardView'
@@ -63,12 +64,12 @@ export function PrPopup({ card, state, onClose, onStartReview, onStart }: Props)
   const decision = pr ? reviewSummary(pr.reviews) : null
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog wide" role="dialog" aria-label={`PR for #${card.number}`} style={{ borderTopColor: 'var(--accent)' }}>
+      <div className="dialog wide" role="dialog" aria-label={`PR for ${ticketLabel(card.repo, card.number)}`} style={{ borderTopColor: 'var(--accent)' }}>
         <h3>
           <span className="kind" style={{ ['--kind' as string]: 'var(--accent)' }}>
             PR
           </span>
-          #{card.number} {card.title}
+          {ticketLabel(card.repo, card.number)} {card.title}
         </h3>
         <div className="meta">
           Assigned to {card.assignees.length ? card.assignees.join(', ') : 'nobody'} · {card.status ?? 'no status'} ·{' '}

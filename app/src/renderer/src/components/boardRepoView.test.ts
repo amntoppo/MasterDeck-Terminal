@@ -55,6 +55,18 @@ describe('a tab with no repository picked', () => {
     expect(html).toContain('draggable="true"')
     expect(html).not.toContain('draggable="false"')
   })
+  it('keeps the + on every column, the Boards filter and its own empty state', () => {
+    const html = render()
+    expect(html.match(/class="col-add"/g)!.length).toBe(columns(html).length)
+    // Two boards: the Boards filter is offered (the repository view has none).
+    const two = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [BOARD, { ...BOARD, number: 2, title: 'Ops' }] })
+    const base = fixtureState()
+    expect(render({ config: two, state: { ...base, board: { ...base.board!, projects: [{ key: 'acme/1', title: 'Delivery', columns: BOARD.columns }, { key: 'acme/2', title: 'Ops', columns: BOARD.columns }] } } })).toContain('All boards')
+    const none = render({ assignees: ['nobody'] })
+    expect(none).toContain('No issues match')
+    expect(none).not.toContain('Back to board')
+    expect(none).not.toContain('repo-view')
+  })
   it('offers the Repos filter with one repository too', () => {
     // No board read yet, so the one option is the repository ticked in Setup.
     expect(render({ config: legacy, state: { ...fixtureState(), board: null } })).toContain('All repos ▾')
@@ -100,6 +112,13 @@ describe('a tab with repositories picked (its account has a board)', () => {
     expect(html).toContain('Show everyone&#x27;s issues')
     expect(html).toContain('Back to board')
   })
+  it('shows the cards already read with a note for the repositories still loading', () => {
+    const v = fixtureView()
+    const partial: RepoView = { ...v, repos: v.repos.map((r) => (r.repo === 'acme/tracker' ? { ...r, takenAt: null, loading: true } : r)) }
+    const html = render({ repos: ['acme/api', 'acme/tracker'], repoView: partial })
+    expect(html).toContain('Loading tracker…')
+    expect(html).toContain('Paginate the invoices endpoint')
+  })
   it('says when the issues are still loading, could not be read, or are none', () => {
     expect(render({ repos: ['acme/api'], repoView: null })).toContain('Loading issues…')
     const gone: RepoView = { cards: [], repos: [{ repo: 'acme/api', account: null, ok: false, total: 0, shown: 0, note: 'Not found: acme/api', takenAt: null }] }
@@ -123,5 +142,19 @@ describe('a tab of an account with no board', () => {
     expect(html).not.toContain('repo-view')
     expect(html).not.toContain('not the board')
     expect(columns(html)).toEqual(['Todo', 'In Dev', 'PR Raised', 'Done'])
+  })
+})
+
+describe('the popups name the ticket with its repository', () => {
+  it('the Assign and PR popups head with repo#number', async () => {
+    const { AssignPopup } = await import('./AssignPopup')
+    const { PrPopup } = await import('./PrPopup')
+    const card = { number: 7, repo: 'acme/api', title: 'Fix it', url: 'u', status: 'Todo', assignees: [], prs: [], labels: [] } as never
+    const noop = () => {}
+    const a = renderToStaticMarkup(createElement(AssignPopup, { card, state: fixtureState(), onClose: noop, onAssigned: noop, onStart: noop }))
+    expect(a).toContain('api#7 Fix it')
+    expect(a).toContain('aria-label="Assign api#7"')
+    const p = renderToStaticMarkup(createElement(PrPopup, { card, state: fixtureState(), onClose: noop, onStartReview: noop, onStart: noop }))
+    expect(p).toContain('api#7 Fix it')
   })
 })

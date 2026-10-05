@@ -173,13 +173,19 @@ export function cardAction(c: BoardCard, me: string | null, sessions: Session[])
   return c.prs.length > 0 ? 'pr' : 'assign'
 }
 
+/** The primary account's login: the one read from GitHub, else (not read yet) the config's primary account. */
+export function primaryLogin(me: string | null, c: AppConfig): string | null {
+  return me ?? c.accounts.find((a) => a.primary)?.login ?? null
+}
+
 /**
  * Who the Assign popup offers: me first (the tab's account), then the people who can be assigned.
  * `users` are the primary issue repo's, read as the primary account: a tab of another account
  * offers only its own login rather than another organisation's people.
  */
 export function assignChoices(me: string | null, primaryMe: string | null, users: string[]): string[] {
-  const others = me === primaryMe ? users.filter((u) => u !== me).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) : []
+  const same = (a: string | null, b: string | null) => a === b || (!!a && !!b && a.toLowerCase() === b.toLowerCase())
+  const others = same(me, primaryMe) ? users.filter((u) => !same(u, me)).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) : []
   return [...(me ? [me] : []), ...others]
 }
 

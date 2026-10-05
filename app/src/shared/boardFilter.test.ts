@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, assignChoices, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, assignChoices, primaryLogin, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
 import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -54,6 +54,18 @@ describe('a card that is not mine (also in the repository view)', () => {
     expect(assignChoices('bob-work', 'alice', ['zoe', 'alice'])).toEqual(['bob-work'])
     expect(assignChoices(null, null, ['zoe'])).toEqual(['zoe'])
     expect(assignChoices(null, 'alice', ['zoe'])).toEqual([])
+  })
+  it('logins compare without case, and the primary tab is the primary whatever state.me says', () => {
+    expect(assignChoices('Alice', 'alice', ['zoe', 'ALICE'])).toEqual(['Alice', 'zoe'])
+    expect(assignChoices('BOB-work', 'alice', ['zoe'])).toEqual(['BOB-work'])
+    const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'], projects: [] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [] },
+    ] })
+    expect(primaryLogin(null, c)).toBe('alice') // no login read yet: the config's primary
+    expect(primaryLogin('alice', c)).toBe('alice')
+    expect(primaryLogin(null, parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
+    expect(assignChoices('alice', primaryLogin(null, c), ['zoe'])).toEqual(['alice', 'zoe'])
   })
   it('a PR review is started for the ticket in its own repository', () => {
     const p = { url: 'https://github.com/acme/api/pull/5', repo: 'api', number: 5, title: 'Fix', author: 'rahul' }

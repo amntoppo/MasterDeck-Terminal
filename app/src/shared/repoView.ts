@@ -1,7 +1,7 @@
-import { projectByKey, repoSelected, type AppConfig } from './appConfig'
+import { primaryRepo, projectByKey, repoSelected, type AppConfig } from './appConfig'
 import { parseCards } from './board'
 import { boardDeriver, boardsOf, DERIVED_COLUMNS, repoBoardless, reposOf, type DeriveCtx } from './derivedBoard'
-import { fullRepo, sameTicket, type Ticket } from './ticket'
+import { fullRepo, sameTicket, ticketKey, type Ticket } from './ticket'
 import type { Board, BoardCard, RepoPart, RepoView } from './types'
 
 /**
@@ -53,6 +53,38 @@ function ownersOf(c: AppConfig): Set<string> {
 }
 
 /**
+ * Does the config select this repository? Well-formed, and listed in Setup; with "Select all" every
+ * name counts as selected, so there its owner must be one the config names (an ask or a link can
+ * come from a paired browser: it must not reach other people's repositories).
+ */
+export function repoPickable(repo: string, c: AppConfig): boolean {
+  if (!validRepo(repo) || !repoSelected(repo, c)) return false
+  if (!c.allRepos || c.repos.some((r) => repoKey(r) === repoKey(repo))) return true
+  return ownersOf(c).has(repo.split('/')[0].toLowerCase())
+}
+
+/**
+ * May a session be linked to this issue though no selected board holds it (one the repository
+ * view shows)? Only when its repository is known (none means the primary issue repo) and the
+ * config selects it (`repoPickable`).
+ */
+export function offBoardOk(repo: string | null | undefined, c: AppConfig): boolean {
+  const r = repo || primaryRepo(c)
+  return !!r && c.configured && repoPickable(r, c)
+}
+
+/** The Repos filter's new pick: a tab with no board keeps "all picked" as none (its label and count as before); a tab with a board keeps the pick. */
+export function reposFilterPick(picked: string[], options: number, noBoard: boolean): string[] {
+  return noBoard && picked.length === options ? [] : picked
+}
+
+/** The board with each card of `moving` showing its new column at once; not in the repository view, where nothing moves. */
+export function withMoving(board: Board | null, moving: Record<string, string>, repoMode: boolean): Board | null {
+  if (!board || repoMode || !Object.keys(moving).length) return board
+  return { ...board, cards: board.cards.map((c) => (moving[ticketKey(c.repo, c.number)] ? { ...c, status: moving[ticketKey(c.repo, c.number)] } : c)) }
+}
+
+/**
  * The repositories an ask may read: well-formed, selected in Setup, of an account with a board; each
  * once, as Setup spells it. With "Select all" every name counts as selected, so there the owner must
  * be one the config names (the ask can come from a paired browser: it must not read other people's repositories).
@@ -60,10 +92,8 @@ function ownersOf(c: AppConfig): Set<string> {
 export function cleanRepos(v: unknown, c: AppConfig): string[] {
   if (!Array.isArray(v) || !c.configured) return []
   const out: string[] = []
-  const owners = c.allRepos ? ownersOf(c) : null
   for (const x of v) {
-    if (typeof x !== 'string' || !validRepo(x) || !repoSelected(x, c) || repoBoardless(x, c)) continue
-    if (owners && !c.repos.some((r) => repoKey(r) === repoKey(x)) && !owners.has(x.split('/')[0].toLowerCase())) continue
+    if (typeof x !== 'string' || !repoPickable(x, c) || repoBoardless(x, c)) continue
     const name = c.repos.find((r) => repoKey(r) === repoKey(x)) ?? x
     if (!out.some((r) => repoKey(r) === repoKey(name))) out.push(name)
     if (out.length === REPO_VIEW_MAX_ASK) break
@@ -271,6 +301,7 @@ export interface RepoStatus {
 /** Where the picked repositories stand: still loading, not read, and what the reads left out. */
 export function repoViewStatus(v: RepoView | undefined, repos: string[], c: AppConfig): RepoStatus {
   const st: RepoStatus = { loading: false, failed: [], notes: [] }
+  const loading: string[] = []
   for (const r of repos) {
     if (!repoSelected(r, c)) {
       // A tab saved before the repository was unticked: it is never read.
@@ -281,12 +312,14 @@ export function repoViewStatus(v: RepoView | undefined, repos: string[], c: AppC
     const p = v?.repos.find((x) => repoKey(x.repo) === repoKey(r))
     if (!p || (p.loading && p.takenAt === null)) {
       st.loading = true
+      loading.push(short(r))
       continue
     }
     if (p.takenAt === null) st.failed.push(r)
     if (p.shown < p.total) st.notes.push(`${short(r)}: showing the first ${p.shown} of ${p.total} open issues.`)
     if (p.note) st.notes.push(p.note)
   }
+  if (loading.length) st.notes.push(`Loading ${loading.join(', ')}…`)
   return st
 }
 

@@ -177,7 +177,7 @@ export function fixtureState(noBoard = false): AppState {
         }),
       ],
       repos: [
-        { repo: 'acme/web', account: null, ok: true, total: 3, shown: 3, takenAt: now - 3 * min },
+        { repo: 'acme/web', account: null, ok: true, total: 4, shown: 4, takenAt: now - 3 * min },
         { repo: 'acme/api', account: null, ok: true, total: 412, shown: 300, takenAt: now - 3 * min },
       ],
     },

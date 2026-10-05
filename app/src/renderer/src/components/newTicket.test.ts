@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
+import { boardFor, boardTicketContext, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -147,6 +147,24 @@ describe("a new ticket from the repository view", () => {
     const of = (repos: string[]) => ticketDefaults(two, { ...ctx(repos), project: "acme/1", account: "alice" }).repo;
     expect(of(["globex/app", "ACME/api"])).toBe("ACME/api");
     expect(of(["globex/app"])).toBe("acme/tracker");
+  });
+});
+
+describe("the ticket context of a + on a column", () => {
+  const o = (more: Record<string, unknown>) => ({ state, col: "Done", filters: { ...defaultFilters("aman"), repos: ["Org/app"] }, selectedSprint: "@current", tab: "Mine", fallback: false, repoMode: false, readyCol: "Todo", ...more }) as Parameters<typeof boardTicketContext>[0];
+  it("on a board: the column, its board and the selected sprint", () => {
+    expect(boardTicketContext(o({}))).toMatchObject({ status: "Done", project: "Org/1", sprint: "@current", tab: "Mine" });
+  });
+  it("in the repository view: the board's ready column and no sprint the user cannot see", () => {
+    const c = boardTicketContext(o({ repoMode: true }));
+    expect(c).toMatchObject({ status: "Todo", project: "Org/1", sprint: "none" });
+    expect(ticketDefaults(state, c)).toMatchObject({ repo: "Org/app", status: "Todo", project: "Org/1", sprint: "" });
+  });
+  it("a tab with no board: no status, board or sprint", () => {
+    expect(boardTicketContext(o({ fallback: true }))).toMatchObject({ status: "", project: "", sprint: "none" });
+  });
+  it("carries the account and tab id when given", () => {
+    expect(boardTicketContext(o({ state: { ...state, config: { ...cfg, accounts: [] } }, account: "alice", tabId: "t9" }))).toMatchObject({ account: "alice", tabId: "t9" });
   });
 });
 

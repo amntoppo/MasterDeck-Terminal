@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { assignChoices } from '@shared/boardFilter'
-import { ticketOf } from '@shared/ticket'
+import { assignChoices, primaryLogin } from '@shared/boardFilter'
+import { ticketLabel, ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 
@@ -18,7 +18,7 @@ interface Props {
 
 export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tabMe }: Props) {
   const me = tabMe === undefined ? state.me : tabMe
-  const others = assignChoices(me, state.me, state.users).filter((u) => u !== me)
+  const others = assignChoices(me, primaryLogin(state.me, state.config), state.users).filter((u) => u.toLowerCase() !== me?.toLowerCase())
   const [login, setLogin] = useState(me ?? others[0] ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,12 +46,12 @@ export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tab
   const change = card.assignees.length ? `Replaces ${card.assignees.join(', ')}.` : 'Nobody is assigned yet.'
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="dialog" role="dialog" aria-label={`Assign #${card.number}`} style={{ borderTopColor: 'var(--amber)' }}>
+      <div className="dialog" role="dialog" aria-label={`Assign ${ticketLabel(card.repo, card.number)}`} style={{ borderTopColor: 'var(--amber)' }}>
         <h3>
           <span className="kind" style={{ ['--kind' as string]: 'var(--amber)' }}>
             ASSIGN
           </span>
-          #{card.number} {card.title}
+          {ticketLabel(card.repo, card.number)} {card.title}
         </h3>
         <div className="meta">
           {card.status ?? 'No status'} · no PR yet ·{' '}

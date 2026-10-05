@@ -55,6 +55,8 @@ import {
   repoViewBoard,
   repoViewEmpty,
   repoViewOn,
+  reposFilterPick,
+  withMoving,
   repoViewStatus,
   repoViewTitle,
 } from "@shared/repoView";
@@ -77,6 +79,8 @@ import type {
 import { deck, load, save, useNow } from "../deck";
 import {
   boardFor,
+  boardTicketContext,
+  ticketDefaults,
   claudePrompt,
   ClaudeMark,
   NewTicketDialog,
@@ -415,18 +419,8 @@ export function BoardView({
     [state.board, state.repoView, acct, cfg, repoMode, reposKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const b = useMemo(
-    () =>
-      rawBoard && Object.keys(moving).length
-        ? {
-            ...rawBoard,
-            cards: rawBoard.cards.map((c) =>
-              moving[ticketKey(c.repo, c.number)]
-                ? { ...c, status: moving[ticketKey(c.repo, c.number)] }
-                : c,
-            ),
-          }
-        : rawBoard,
-    [rawBoard, moving],
+    () => withMoving(rawBoard, moving, repoMode),
+    [rawBoard, moving, repoMode],
   );
   const shown = useMemo(
     () =>
@@ -661,22 +655,23 @@ export function BoardView({
   const readyCol = tabBoards[0]?.statuses.ready ?? cfg.statuses.ready;
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
-  const ctxFor = (col: string): TicketContext => ({
-    // No board: the ticket gets no status (the column is MasterDeck's, not GitHub's) and no board.
-    // The repository view: its columns are MasterDeck's too, so the ticket takes the board's "ready" column.
-    status: fallback ? "" : repoMode ? readyCol : col,
-    project: fallback
-      ? ""
-      : repoMode
-        ? boardFor(state, readyCol, { ...f, projects: [] }, acct ?? undefined)
-        : boardFor(state, col, f, acct ?? undefined),
-    filters: f,
-    // No board: no sprint to put the ticket in.
-    sprint: fallback ? "none" : state.selectedSprint,
-    tab: tab.name,
-    account: acct ?? undefined,
-    ...(multi ? { tabId: tab.id } : {}),
-  });
+  const ctxFor = (col: string): TicketContext =>
+    boardTicketContext({
+      state,
+      col,
+      filters: f,
+      selectedSprint: state.selectedSprint,
+      tab: tab.name,
+      fallback,
+      repoMode,
+      readyCol,
+      account: acct ?? undefined,
+      ...(multi ? { tabId: tab.id } : {}),
+    });
+  // The repository a + of the repository view creates in: the one the dialog will open with.
+  const plusRepo = repoMode
+    ? (ticketDefaults(state, ctxFor("Todo")).repo.split("/")[1] ?? "")
+    : "";
   // `restart`: a new conversation. Otherwise an open session keeps going: its context.json now
   // says where this + was, and what was typed in the dialog is sent to it as a message.
   const openClaude = async (
@@ -775,7 +770,9 @@ export function BoardView({
           label: r.split("/")[1] ?? r,
         }))}
         // With a board, picking repositories (even all of them) is the repository view; none is the board.
-        onChange={(v) => set({ repos: v })}
+        onChange={(v) =>
+          set({ repos: reposFilterPick(v, repos.length, fallback) })
+        }
         quick={[
           {
             label: fallback ? "All repos" : "The board (no repository)",
@@ -1200,8 +1197,8 @@ export function BoardView({
                       <button
                         className="col-add"
                         onClick={() => setTicketCtx(ctxFor(col))}
-                        title={`New ticket in ${repoMode ? repoNames[0] : col}`}
-                        aria-label={`New ticket in ${repoMode ? repoNames[0] : col}`}
+                        title={`New ticket in ${repoMode ? plusRepo : col}`}
+                        aria-label={`New ticket in ${repoMode ? plusRepo : col}`}
                       >
                         +
                       </button>

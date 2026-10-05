@@ -21,6 +21,39 @@ export interface TicketContext {
   tabId?: string;
 }
 
+/**
+ * The context of a + on a column. On a board: the column, its board and the selected sprint. A tab
+ * with no board: no status, board or sprint. The repository view: its columns are MasterDeck's, so
+ * the ticket takes the board's "ready" column, and no sprint (that view shows none).
+ */
+export function boardTicketContext(o: {
+  state: AppState;
+  col: string;
+  filters: FilterState;
+  selectedSprint: string;
+  tab: string;
+  fallback: boolean;
+  repoMode: boolean;
+  readyCol: string;
+  account?: string;
+  tabId?: string;
+}): TicketContext {
+  const { state, col, filters, fallback, repoMode, readyCol, account } = o;
+  return {
+    status: fallback ? "" : repoMode ? readyCol : col,
+    project: fallback
+      ? ""
+      : repoMode
+        ? boardFor(state, readyCol, { ...filters, projects: [] }, account)
+        : boardFor(state, col, filters, account),
+    filters,
+    sprint: fallback || repoMode ? "none" : o.selectedSprint,
+    tab: o.tab,
+    account,
+    ...(o.tabId ? { tabId: o.tabId } : {}),
+  };
+}
+
 /** The board a column belongs to: the one the tab filters to, else the first board (of the tab's account) that has the column. */
 export function boardFor(
   state: AppState,

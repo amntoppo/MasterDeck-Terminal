@@ -5,7 +5,7 @@ import { parseConfig, setConfig } from './appConfig'
 import { parseBoard, parseCards } from './board'
 import {
   applyRead, boardChips, cleanRepos, dumpEntries, liveRepos, loadEntries, needRead, parseRepoIssues, pruneEntries, repoChoices, repoViewBoard, repoViewDeriver,
-  repoViewEmpty, repoViewOn, repoViewStatus, repoViewTitle, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_MAX_CARDS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS, type RepoEntries,
+  repoViewEmpty, repoViewOn, offBoardOk, reposFilterPick, withMoving, repoViewStatus, repoViewTitle, trimEntries, viewOf, withAssignee, REPO_VIEW_LIVE_MS, REPO_VIEW_MAX_ASK, REPO_VIEW_MAX_CARDS, REPO_VIEW_MAX_ENTRIES, REPO_VIEW_RETRY_MS, REPO_VIEW_STALE_MS, type RepoEntries,
 } from './repoView'
 import type { DeriveCtx } from './derivedBoard'
 import type { BoardCard, RepoView, Session } from './types'
@@ -246,7 +246,7 @@ describe('what a tab shows', () => {
     expect(repoViewStatus(v, ['acme/api'], cfg)).toEqual({ loading: false, failed: [], notes: ['api: showing the first 300 of 412 open issues.'] })
     expect(repoViewStatus(v, ['acme/tracker'], cfg)).toEqual({ loading: false, failed: [], notes: ['acme/tracker not read: RATE_LIMITED'] }) // older cards still show
     expect(repoViewStatus(v, ['acme/web'], cfg)).toEqual({ loading: false, failed: ['acme/web'], notes: ['Not found: acme/web'] })
-    expect(repoViewStatus(v, ['acme/slow', 'acme/new'], cfg)).toEqual({ loading: true, failed: [], notes: [] }) // running, and asked a moment ago
+    expect(repoViewStatus(v, ['acme/slow', 'acme/new'], cfg)).toEqual({ loading: true, failed: [], notes: ['Loading slow, new…'] }) // running, and asked a moment ago
     expect(repoViewStatus(undefined, ['acme/api'], cfg).loading).toBe(true)
     // A saved tab naming a repository that was unticked since: never read, and said so (not "loading" for ever).
     expect(repoViewStatus(v, ['acme/gone'], cfg)).toEqual({ loading: false, failed: ['acme/gone'], notes: ['acme/gone is not selected in Setup.'] })
@@ -284,5 +284,54 @@ describe('the fixture `master repo-issues` answer (tests and the isolated app)',
     expect(boardChips(v.cards[0], boarded)).toEqual([{ key: 'acme/1', text: 'Dev Done', title: 'On the Delivery board: Dev Done' }])
     // Two weeks on, the closed one has left Done.
     expect(repoViewDeriver()(viewOf(entries, new Map()), ctx({ now: NOW + 14 * 86_400_000 }))!.cards.map((c) => c.number)).not.toContain(33)
+  })
+})
+
+describe('an issue that links with no card on a board (offBoardOk)', () => {
+  const sel = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [BOARD] })
+  const all = parseConfig({ owner: 'acme', issueRepo: 'tracker', allRepos: true, projects: [BOARD] })
+  it('a listed repository links; one that is not listed is refused', () => {
+    expect(offBoardOk('acme/api', sel)).toBe(true)
+    expect(offBoardOk('ACME/API', sel)).toBe(true)
+    expect(offBoardOk('acme/other', sel)).toBe(false)
+    expect(offBoardOk('evil/api', sel)).toBe(false)
+  })
+  it('with Select all only an owner the config names counts', () => {
+    expect(offBoardOk('acme/anything', all)).toBe(true)
+    expect(offBoardOk('globex/anything', all)).toBe(false)
+    expect(offBoardOk('not a repo', all)).toBe(false)
+  })
+  it('a ticket with no repository is the primary issue repo, which a legacy single-repo config selects', () => {
+    expect(offBoardOk(null, legacy)).toBe(true)
+    expect(offBoardOk(undefined, sel)).toBe(true)
+    expect(offBoardOk(null, parseConfig({}))).toBe(false) // no primary repo: nothing to resolve to
+  })
+})
+
+describe('the Repos filter\'s pick', () => {
+  it('a tab with no board keeps "all picked" as none; a tab with a board keeps the pick', () => {
+    expect(reposFilterPick(['a/x', 'a/y'], 2, true)).toEqual([])
+    expect(reposFilterPick(['a/x'], 2, true)).toEqual(['a/x'])
+    expect(reposFilterPick(['a/x', 'a/y'], 2, false)).toEqual(['a/x', 'a/y'])
+  })
+})
+
+describe('repositories still being read', () => {
+  it('says which, alongside the cards of the ones already read', () => {
+    const v: RepoView = { cards: [], repos: [
+      { repo: 'acme/api', account: null, ok: true, total: 1, shown: 1, takenAt: NOW },
+      { repo: 'acme/tracker', account: null, ok: true, total: 0, shown: 0, takenAt: null, loading: true },
+    ] }
+    const st = repoViewStatus(v, ['acme/api', 'acme/tracker'], boarded)
+    expect(st.loading).toBe(true)
+    expect(st.notes).toEqual(['Loading tracker…'])
+  })
+})
+
+describe('a move in flight', () => {
+  const board = { cards: [{ number: 7, repo: null, status: 'Todo' }] } as never as { cards: BoardCard[] }
+  it('relabels the card on the board, but not in the repository view', () => {
+    expect(withMoving(board as never, { 'acme/tracker#7': 'Done' }, false)!.cards[0].status).toBe('Done')
+    expect(withMoving(board as never, { 'acme/tracker#7': 'Done' }, true)).toBe(board)
   })
 })

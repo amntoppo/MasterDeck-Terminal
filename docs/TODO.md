@@ -178,6 +178,8 @@ fixes it, and move the item here to "Recently done".
     runs for a ticket without a board", a ticket with no card, and New ticket with a picked account
     that is not the repository's.
 
+- **P2 · BoardFlow autoLink marks `linkTried` before the attempt.** A transient `issueInfo` failure means the session is never linked (no retry); more visible now that off-board issues link (`offBoard`). Where: `main/boardFlow.ts` autoLink. Approach: set `linkTried` only after a definitive answer (linked, or refused as not selected), keep it unset on a read failure.
+
 ## Remote / web
 
 - **P1 · Drift test doesn't run in CI.** `app/src/shared/remote.drift.test.ts` skips without the
