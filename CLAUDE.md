@@ -324,11 +324,17 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-05)
+## Current state and next steps (2026-10-06)
 
+- **Where things stand:** several GitHub accounts (plan I, merge 6a83862), the Board without a GitHub
+  project (plan J, merge 7f971c4), the Board's repository view with assignable users per repository
+  (plan K, merge d2bb03e) and a workspace per account (merge 3da6a48) are all merged to local `main`
+  and installed locally. None of it is pushed or released (`main` is ahead of `origin/main`; the last
+  release is v0.7.1) and the web app is not redeployed. Their feature branches are deleted. Nothing
+  in them has run against GitHub or started a real session yet: the first real use is the live test.
+  Next: push and release when the user asks, then deploy the web app (after the desktop release).
 - A workspace per GitHub account, and sessions that start in the ticket's repository's checkout, are
-  on branch `feat/account-workspace` (off `main` d2bb03e; two commits and a review round), not
-  merged, not pushed, not installed. `accounts[].workspace` (optional; the top-level `workspace` is
+  merged to `main` (3da6a48), installed locally, not pushed. `accounts[].workspace` (optional; the top-level `workspace` is
   the primary's), one resolver in the master CLI (`checkout.py`) used by master's ASSIGN proposals,
   the Start dialog's draft, `master add` / `master spawn` for ticket work without a folder and PR
   review sessions; the Start dialog says where the session starts, says plainly when no checkout was
@@ -342,9 +348,7 @@ buttons; it does not go through macOS window drag regions.
   Start, anything that starts a session. Open points are in TODO ("Where a session starts").
 - Plan K (Board repository view: picking repositories in a Board tab's Repos filter shows all their
   issues, on a board or not, in MasterDeck's columns, with sessions started from a click; a session
-  can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is on
-  branch `feat/board-repository-view` (on `main` 7f971c4: 10 commits, the docs commit, and the
-  final review's fixes), not merged, not pushed, not installed. Checked there: typecheck, vitest
+  can be linked to an issue no board holds; **Start a session** on the Assign and PR popups) is merged to `main` (d2bb03e), installed locally, not pushed. Checked on its branch: typecheck, vitest
   (1317 passed, 3 skipped), the Python suite (361); and, before the final fixes (which the two
   suites alone checked), the Board's markup for tabs with no repository picked (identical to `main`,
   also the live DOM and a screenshot of the isolated app against `main`'s), the isolated app with
@@ -359,8 +363,7 @@ buttons; it does not go through macOS window drag regions.
   the desktop release that has it. Spec and plan: backend repo, `docs/superpowers/` (2026-10-05).
 - Plan J (Board without a GitHub project: repository issues in derived columns, Create a GitHub board,
   clearer empty states, linking and New ticket without a board, master proposals for such an account)
-  is on branch `feat/board-without-project` (13 commits on `main` 6b5e39c plus the docs commit), not
-  merged, not pushed, not installed. Checked there: typecheck, vitest, the Python suite, and the
+  is merged to `main` (7f971c4), installed locally, not pushed. Checked on its branch: typecheck, vitest, the Python suite, and the
   isolated app with board fixtures (no board: hint, four columns, no drag, empty states, New ticket
   dry run; with a board: same DOM as `main`). Board creation was tested with a fake gh only: the first
   real run is the user's, on a throwaway account or repository (the spec's §9 lists what schema

@@ -10,8 +10,8 @@ GitHub writes in tests**, **never type into the user's real sessions**.
   the daily machine.
 - `cd app && npm install` — `postinstall` runs `electron-builder install-app-deps` (node-pty for
   Electron). `npm run dev` for hot reload (bundles `../skills`).
-- Checks before a commit: `npm run typecheck`, `npm test` (~1300 tests, ~40 s), and for skill
-  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~360 tests).
+- Checks before a commit: `npm run typecheck`, `npm test` (~1360 tests, ~40 s), and for skill
+  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~416 tests).
 - Backend checkout next to this repo (`~/Documents/masterdeck-backend`) so the protocol
   drift test runs.
 
