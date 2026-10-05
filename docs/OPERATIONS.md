@@ -10,8 +10,8 @@ GitHub writes in tests**, **never type into the user's real sessions**.
   the daily machine.
 - `cd app && npm install` — `postinstall` runs `electron-builder install-app-deps` (node-pty for
   Electron). `npm run dev` for hot reload (bundles `../skills`).
-- Checks before a commit: `npm run typecheck`, `npm test` (~1180 tests, ~35 s), and for skill
-  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~315 tests).
+- Checks before a commit: `npm run typecheck`, `npm test` (~1300 tests, ~40 s), and for skill
+  changes `PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q` (~360 tests).
 - Backend checkout next to this repo (`~/Documents/masterdeck-backend`) so the protocol
   drift test runs.
 
@@ -113,6 +113,39 @@ npx electron . --remote-debugging-port=9333
   (`"repos": ["acme/tracker"], "project": 0, "projects": []`): the hint, the four columns, no drag.
   Never press **Create a GitHub board** in such a run: its read and its native dialog use the
   machine's real gh account, and the dialog is the last stop before a real write.
+- The Board's repository view without GitHub: add `MASTERDECK_REPO_FIXTURE=<json>`
+  (`app/test/fixtures/repo-issues.json`: issues of `acme/tracker` and `acme/api`) to a run whose
+  config has a board and both repositories (`"repos": ["acme/tracker", "acme/api"]`). Pick a
+  repository in a tab's Repos filter, or call `window.deck.boardRepos(["acme/api"])` and read
+  `repoView` from `window.deck.getState()`.
+  Before any tab asks, `repoView` is absent from the state. With both picked the tab shows "Issues of
+  tracker, api — not the board.", **Back to board**, the note "api: showing the first 300 of 412 open
+  issues.", the columns Todo / In Dev / PR Raised / Done, no drag, no sprint picker, no Summary, and
+  the chip "▦ Dev Done" on #967 (it is on the fixture board). The columns are worked out from the
+  machine's sessions too: a card sits in Todo unless a real session here happens to be linked to an
+  issue of that number, then it is In Dev and carries that session's name (keep no screenshot of
+  it). The fixture's closed issue is older than 14 days and does not show.
+  For the other states copy the fixture and add parts: `{"repo": "acme/web", "ok": true, "total": 0,
+  "shown": 0}` gives "No open issues", `{"repo": "acme/docs", "ok": false, "total": 0, "shown": 0,
+  "note": "…"}` gives "Could not read docs" with **Retry**; a tab saved with a repository the config
+  does not select says "… is not selected in Setup." The app rewrites `config.json` into the
+  accounts form on its first start: for a second run with other repositories edit `accounts[].repos`
+  too. With `board-derived.json` and a config with no board, picking a repository only filters (no
+  line, `repoView` stays absent, all picked reads "All repos" again).
+  Look only: never press **Assign**, **Assign to me**, **Create ticket**, **Create with Claude** or
+  **Start a session** in such a run (they act as the machine's real gh account or start a real
+  session); close popups with Esc. Add `MASTERDECK_TEST_NO_ATTACH=1` so a click on a session's card
+  cannot attach to a real session. A PR popup will say "gh: Not Found": the fictional repository was
+  asked for, read-only.
+- To compare with `main`: `git worktree add --detach <tmp>/main main` (the branch `main` itself is
+  checked out elsewhere), link `app/node_modules` into it, `npm run build` there, and launch it with
+  the same variables from a fresh `$E2E/home`, `ud` and `master`. With no repository picked the
+  Board's DOM differs only in the "refreshed" time's tooltip.
+- The phone layout without a phone: `npm run dev:web` (port 5173 unless `--port` is given), headless
+  Chrome with `--remote-debugging-port`, `Emulation.setDeviceMetricsOverride` 390x844 `mobile: true`
+  in the same CDP session as the checks, then `/?preview`: the Board, **Filters (n)** → Repos →
+  `web`. `document.documentElement.scrollWidth` must stay 390, and a popup's
+  `getBoundingClientRect()` inside the viewport. The preview deck sends nothing.
 - Before/after: record `shasum -a 256 ~/.claude/settings.json`; it must not change. Afterwards
   kill electron/wrangler/vite, check ports 8787/9333/9334/5175 are free, delete `$E2E` (that path
   only).

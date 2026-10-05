@@ -99,6 +99,7 @@ import {
 import type {
   AppState,
   Board,
+  BoardCard,
   CliResult,
   Sprint,
   GitInfo,
@@ -116,6 +117,7 @@ import {
   DEFAULT_CONFIG,
   getConfig,
   parseConfig,
+  projectByKey,
   setConfig,
   type AppConfig,
 } from "@shared/appConfig";
@@ -145,6 +147,8 @@ import {
 import { sessionScreen } from "./screen";
 import { TokenIndex } from "./tokens";
 import { loadCache, saveCache } from "./cache";
+import { RepoIssues } from "./repoIssues";
+import { repoViewDeriver } from "@shared/repoView";
 import { ghErrorText, type GhRunner } from "./ghc";
 import { GitHub } from "./github";
 import {
@@ -206,7 +210,8 @@ const GH_BACKGROUND_MS = 600_000;
 /** Sessions with an open PR, open in a tab or not: their comments, for the Ready-for-Review timer. */
 const REVIEW_MS = 120_000;
 const RATE_LIMIT_PAUSE_MS = 600_000;
-const RATE_LIMITED = /rate limit|secondary rate|abuse detection/i;
+/** gh's own words, and the repository view's note ("acme/api not read: RATE_LIMITED"). */
+export const RATE_LIMITED = /rate[ _-]?limit|secondary rate|abuse detection/i;
 
 function writeJsonAtomic(path: string, data: unknown): void {
   try {
@@ -325,6 +330,21 @@ export class Sources {
   private linkPrs: Record<string, string[]> = {};
   /** Gives the board of the last state build back while no card changed column. */
   private derive = boardDeriver();
+  /** The Board's repository view: issues of the repositories a tab picked, read only when asked for. */
+  private repoIssues = new RepoIssues({
+    // Test aid: MASTERDECK_REPO_FIXTURE=<json> replaces the GitHub call (as MASTERDECK_BOARD_FIXTURE does for the board).
+    read: async (repos, force) =>
+      process.env.MASTERDECK_REPO_FIXTURE
+        ? { ok: true, data: JSON.parse(readFileSync(process.env.MASTERDECK_REPO_FIXTURE, "utf8")) }
+        : this.cli.repoIssues(repos, force),
+    config: () => this.config,
+    paused: (output) => !process.env.MASTERDECK_REPO_FIXTURE && this.githubPaused(output),
+    changed: (read) => {
+      if (read) this.saveGithubCache();
+      this.emit();
+    },
+  });
+  private deriveRepo = repoViewDeriver();
   private linkStore: LinkStore;
   /** Session ids each background session has had (persisted), to carry links across a resume. */
   private history: SessionHistory = {};
@@ -915,6 +935,8 @@ export class Sources {
     setConfig(cfg);
     if (!process.env.MASTER_WORKSPACE && cfg.workspace)
       this.paths.masterWorkspace = cfg.workspace;
+    // Repositories unticked since (or an account whose board went) leave the repository view.
+    this.repoIssues.prune();
     this.emit();
     // Just set up: fetch GitHub now rather than waiting for the hourly refresh.
     if (cfg.configured && !was && this.started) void this.refreshGithub();
@@ -994,6 +1016,7 @@ export class Sources {
         this.rawBoards[k] = raw;
       }
     }
+    this.repoIssues.load(cache.repoIssues);
     if (Array.isArray(cache.sprints)) this.sprints = cache.sprints as Sprint[];
     if (cache.boardHistory && typeof cache.boardHistory === "object")
       for (const [k, v] of Object.entries(cache.boardHistory))
@@ -1056,7 +1079,52 @@ export class Sources {
   noteAssigned(t: Ticket, login: string): void {
     for (const b of Object.values(this.boards))
       for (const c of b.cards) if (sameTicket(c, t)) c.assignees = [login];
+    this.repoIssues.noteAssigned(t, login);
     this.emit();
+  }
+
+  /** A Board tab in repository view shows these repositories: read the ones not held yet, or held for over an hour. */
+  askRepos(repos: unknown): void {
+    this.repoIssues.ask(repos);
+  }
+
+  /**
+   * The repositories (owner/name, each once) of the cards on the boards loaded so far, any sprint.
+   * A board can hold issues of a repository Setup does not tick: the Assign popup may read who can
+   * be assigned there, because the name comes from GitHub's board, not from whoever asks.
+   */
+  boardRepos(): string[] {
+    const out = new Map<string, string>();
+    for (const c of this.boardCards())
+      if (!out.has(c.repo!.toLowerCase())) out.set(c.repo!.toLowerCase(), c.repo!);
+    return [...out.values()];
+  }
+
+  /** Changes whenever a board read lands (every loaded board's `takenAt`). */
+  boardStamp(): string {
+    return Object.entries(this.boards).map(([k, b]) => `${k}=${b.takenAt ?? ""}`).join("|");
+  }
+
+  /**
+   * The cards of the loaded boards that name a repository and sit on a board Setup still selects
+   * (a board removed in Setup can linger in memory and in the cache: its cards do not count). A
+   * card with no repository is of the primary issue repo, which the config selects anyway.
+   */
+  private boardCards(): BoardCard[] {
+    return Object.values(this.boards).flatMap((b) =>
+      b.cards.filter((c) => !!c.repo && !!c.project && !!projectByKey(c.project, this.config)),
+    );
+  }
+
+  /**
+   * The key of the selected board whose loaded cards hold this issue; with no number, or when no
+   * card is that issue, a board that holds an issue of the repository. Null when none does. The
+   * account of that board is who a card of a repository no account lists is read and written as.
+   */
+  boardOf(repo: string | null | undefined, number?: number): string | null {
+    if (!repo) return null;
+    const cards = this.boardCards().filter((c) => c.repo!.toLowerCase() === repo.toLowerCase());
+    return (cards.find((c) => c.number === number) ?? cards[0])?.project ?? null;
   }
 
   /** Show another sprint: from the cache at once, fetched when never seen before. */
@@ -1073,6 +1141,7 @@ export class Sources {
     saveCache(this.cachePath, {
       snapshot: this.rawSnapshot ?? undefined,
       boards: this.rawBoards,
+      repoIssues: this.repoIssues.dump(),
       sprints: this.sprints,
       users: this.users,
       me: this.me ?? undefined,
@@ -1109,6 +1178,8 @@ export class Sources {
   /** Issues/PRs (snapshot) and the sprint board together; then the cache is saved. `force` (the Refresh button) skips the shared gh cache. */
   async refreshGithub(
     force = false,
+    /** The user pressed the Board's Refresh/Retry: the repository view re-reads past the gh cache too. Not after a ticket, an assign or a Setup refresh. */
+    repoForce = false,
   ): Promise<{ ok: boolean; message: string }> {
     if (this.githubRefreshing)
       return { ok: true, message: "already refreshing" };
@@ -1127,6 +1198,9 @@ export class Sources {
         settle(gh ? this.refreshBoard(force) : skip),
         settle(gh ? this.refreshPeople(force) : skip),
         settle(gh ? this.refreshTeamPrs(0, force) : skip),
+        // The repository view: only the repositories a tab asked for in the last hour; none, no call.
+        // Its failures show in the view itself, not in this result.
+        settle(gh ? this.repoIssues.refresh(repoForce) : skip),
       ]);
       if (s.ok || b.ok) this.githubRefreshedAt = Date.now();
       this.saveGithubCache();
@@ -2250,6 +2324,14 @@ export class Sources {
           now,
         },
       ),
+      // The repository view's cards get their columns the same way; absent until a tab asks.
+      repoView: this.deriveRepo(this.repoIssues.view(), {
+        sessions,
+        past: this.past,
+        linkPrs: this.linkPrs,
+        prLive: this.prLive,
+        now,
+      }),
       sprints: this.sprints,
       selectedSprint: this.selectedSprint,
       users: this.users,

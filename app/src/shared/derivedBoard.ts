@@ -1,4 +1,4 @@
-import { accountForRepo, isMulti } from './accounts'
+import { accountForCard, accountForRepo, isMulti } from './accounts'
 import type { AppConfig, ProjectConfig } from './appConfig'
 import { boardForAccount } from './boardFilter'
 import { sessionForIssue } from './derive'
@@ -52,6 +52,15 @@ export function canMove(card: BoardCard | null | undefined, fallback: boolean): 
 /** Is this repository's account one with no board? `repo` null: the primary issue repo. */
 export function repoBoardless(repo: string | null | undefined, c: AppConfig): boolean {
   return boardless(isMulti(c) ? accountForRepo(repo, c) : null, c)
+}
+
+/**
+ * Has the account of this card no board? Asked of the account the card's calls go out as
+ * (`accountForCard`: `project` is the key of the loaded board that holds it, or null), so the gate
+ * before a status is written and the routing of that write cannot disagree.
+ */
+export function cardBoardless(repo: string | null | undefined, project: string | null | undefined, c: AppConfig): boolean {
+  return boardless(isMulti(c) ? accountForCard(repo, project, c) : null, c)
 }
 
 export interface DeriveCtx {

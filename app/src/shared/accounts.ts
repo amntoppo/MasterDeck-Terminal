@@ -63,6 +63,21 @@ export function accountForRepo(repo: string | null | undefined, c: AppConfig): s
   return matchRepo(repo, c) ?? primaryLogin(c)
 }
 
+/**
+ * A card's calls (who can be assigned, assign, status, links), in this order: the account that
+ * lists its repository; else an account whose owner is the repository's owner (the first in the
+ * config: it is the one with rights there, whichever board the card sits on); else the account
+ * whose board holds the card (`project`: that board's key, null when no loaded board holds it: a
+ * board can hold issues of a private repository only its own account can read); else the primary.
+ */
+export function accountForCard(repo: string | null | undefined, project: string | null | undefined, c: AppConfig): string | null {
+  const listed = matchRepo(repo, c)
+  if (listed) return listed
+  const owner = low(repo || primaryRepo(c)).split('/')[0]
+  const owned = owner ? c.accounts.find((a) => a.owner && low(a.owner) === owner)?.login : undefined
+  return owned ?? (project ? accountForProject(project, c) : null) ?? primaryLogin(c)
+}
+
 /** A new ticket's account: the one picked in the dialog when it is connected (two or more), else the repo's. */
 export function ticketAccount(picked: string | null | undefined, repo: string | null | undefined, c: AppConfig): string | null {
   return isMulti(c) && picked && c.accounts.some((a) => a.login === picked) ? picked : accountForRepo(repo, c)

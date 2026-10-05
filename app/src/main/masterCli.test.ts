@@ -74,6 +74,23 @@ describe('MasterCli', () => {
     await cli.board()
     expect(f.calls.map((c) => c.opts?.env?.GHC_FORCE)).toEqual(['1', '1', undefined])
   })
+  it('repoIssues runs master repo-issues for the named repositories, forced or not', async () => {
+    const f = fake({ stdout: JSON.stringify({ cards: [], repos: [] }) })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    expect(await cli.repoIssues(['acme/api', 'acme/web'])).toEqual({ ok: true, data: { cards: [], repos: [] } })
+    await cli.repoIssues(['acme/api'], true)
+    expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'repo-issues', '--repos', 'acme/api,acme/web'])
+    expect(f.calls.map((c) => c.opts?.env?.GHC_FORCE)).toEqual([undefined, '1'])
+    expect(await new MasterCli(fake({ stdout: 'nope' }).run, '/lib', 'python3').repoIssues(['acme/api'])).toEqual({ ok: false, message: 'repo-issues printed invalid JSON' })
+    expect(await new MasterCli(fake({ code: 2, stdout: '--repos takes owner/name, comma separated' }).run, '/lib', 'python3').repoIssues(['x'])).toEqual({ ok: false, message: '--repos takes owner/name, comma separated' })
+  })
+  it('repoIssues gives the CLI two minutes for each started ten repositories (it reads ten at a time)', async () => {
+    const f = fake({ stdout: JSON.stringify({ cards: [], repos: [] }) })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    for (const n of [1, 10, 11, 25, 30]) await cli.repoIssues(Array.from({ length: n }, (_, i) => `acme/r${i}`))
+    expect(f.calls.map((c) => c.opts?.timeoutMs)).toEqual([120_000, 120_000, 240_000, 360_000, 360_000])
+    expect(f.calls[3].args[4].split(',')).toHaveLength(25) // one call, whatever the number
+  })
   it('board runs master board and parses its JSON', async () => {
     const f = fake({ stdout: JSON.stringify({ cards: [], columns: [] }) })
     const r = await new MasterCli(f.run, '/lib', 'python3').board()

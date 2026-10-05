@@ -8,7 +8,7 @@ import { GitHub } from './github'
 import type { RunOpts, Runner } from './run'
 
 const alice = { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', repos: ['acme/web'] }
-const bob = { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] }
+const bob = { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [{ owner: 'globex', number: 7, columns: ['Todo'] }] }
 const one = parseConfig({ accounts: [alice] })
 const two = parseConfig({ accounts: [alice, bob] })
 
@@ -27,6 +27,8 @@ function setup(cfg = two, bad: string[] = []) {
     runEnv,
     // win32: gh is called directly, so the fake run sees each call's env.
     ghFor: (account) => (made++, makeGhRunner(run, '/lib', 'python3', 'win32', account)),
+    // bob-work's board holds cards of repositories no account lists.
+    boardOf: (repo) => (['partner/infra', 'acme/infra'].includes(repo?.toLowerCase() ?? '') ? 'globex/7' : null),
   })
   const as = () => calls.map((x) => x.opts?.env?.GHC_ACCOUNT ?? 'default')
   return { c, base, baseCalls, calls, as, made: () => made }
@@ -99,5 +101,42 @@ describe('accountClients', () => {
     expect(m.ok).toBe(false)
     expect(s.calls).toEqual([])
     expect(s.baseCalls).toEqual([])
+  })
+  it('assigning an issue, and reading who can be assigned, run as the account of the issue\'s repository', async () => {
+    const s = setup()
+    await s.c.forRepo('globex/app').github.assign({ repo: 'globex/app', number: 7 }, 'zoe', [])
+    await s.c.forRepo('globex/app').github.assignableUsers(false, 'globex/app')
+    await s.c.forRepo('acme/web').github.assignableUsers(false, 'acme/web')
+    await s.c.forRepo(null).github.assign({ repo: null, number: 7 }, 'zoe', [])
+    // A repository no account lists (a card of a board can be in one): assigned and read as the primary, alike.
+    await s.c.forRepo('partner/portal').github.assign({ repo: 'partner/portal', number: 7 }, 'zoe', [])
+    await s.c.forRepo('partner/portal').github.assignableUsers(false, 'partner/portal')
+    expect(s.as()).toEqual(['bob-work', 'bob-work', 'alice', 'alice', 'alice', 'alice'])
+    expect(s.calls[0].args.join(' ')).toContain('repos/globex/app/issues/7/assignees')
+    expect(s.calls[1].args.join(' ')).toContain('repos/globex/app/assignees')
+  })
+  it('a card of a repository no account lists goes out as the account whose board holds it: reads and writes alike', async () => {
+    const s = setup()
+    await s.c.forCard('partner/infra', 7).github.assignableUsers(false, 'partner/infra')
+    await s.c.forCard('partner/infra', 7).github.assign({ repo: 'partner/infra', number: 7 }, 'zoe', [])
+    await s.c.boardOps.linkPr({ repo: 'partner/infra', number: 7 }, 'https://github.com/partner/infra/pull/9')
+    await s.c.forCard('globex/infra', 7).github.assignableUsers(false, 'globex/infra') // bob-work's own owner, on no board
+    expect(new Set(s.as())).toEqual(new Set(['bob-work']))
+    expect(s.c.cardAccount('partner/infra', 7)).toBe('bob-work')
+    // acme/infra on bob-work's board: alice's owner is acme, so it stays alice's (she has the rights there).
+    const own = setup()
+    await own.c.forCard('acme/infra', 5).github.assign({ repo: 'acme/infra', number: 5 }, 'zoe', [])
+    expect(own.as()).toEqual(['alice'])
+    expect(own.c.cardAccount('acme/infra', 5)).toBe('alice')
+    const t = setup()
+    await t.c.forCard('partner/portal', 7).github.assignableUsers(false, 'partner/portal') // on no loaded board: the primary
+    await t.c.forCard('globex/app', 7).github.assignableUsers(false, 'globex/app') // listed: its account
+    await t.c.forCard(null, 7).github.assignableUsers()
+    expect(t.as()).toEqual(['alice', 'bob-work', 'alice'])
+  })
+  it('one account: a card on any board still uses the default runner', () => {
+    const s = setup(one)
+    expect(s.c.forCard('globex/infra', 7)).toBe(s.base)
+    expect(s.c.cardAccount('globex/infra', 7)).toBeNull()
   })
 })

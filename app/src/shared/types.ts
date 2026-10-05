@@ -218,6 +218,8 @@ export interface AppState {
   board: Board | null;
   boardError: string | null;
   boardLoading: boolean;
+  /** The Board's repository view; absent until a tab picks a repository. */
+  repoView?: RepoView;
   /** When issues and the board were last refreshed from GitHub (epoch ms), cache included. */
   githubRefreshedAt: number | null;
   githubRefreshing: boolean;
@@ -343,6 +345,8 @@ export interface BoardCard {
   /** Derived cards only: the issue's state on GitHub, and when it was closed. */
   state?: "OPEN" | "CLOSED";
   closedAt?: string | null;
+  /** Repository view only: the selected boards (owner/number) that hold this issue, and its column on each. */
+  onBoards?: { key: string; status: string | null }[];
 }
 
 export interface Sprint {
@@ -369,6 +373,33 @@ export interface DerivedPart {
   missing: string[];
   /** What the read could not do, as `master board` says it ("acme/api not read: RATE_LIMITED"). */
   notes?: string[];
+}
+
+/** Repository view: one repository whose issues a Board tab asked for (`master repo-issues`). */
+export interface RepoPart {
+  /** owner/name, as selected in Setup. */
+  repo: string;
+  /** The account that read it; null with one account. */
+  account: string | null;
+  /** The last read gave its issues. False: `note` says why not; cards of an earlier read stay. */
+  ok: boolean;
+  /** Open issues GitHub counts in it, and how many of those are cards. */
+  total: number;
+  shown: number;
+  /** What the read could not do ("Not found: acme/old", "acme/api not read: RATE_LIMITED"). */
+  note?: string;
+  /** When its cards were read (epoch ms); null: never. */
+  takenAt: number | null;
+  /** A read of it is running. */
+  loading?: true;
+  /** The state carries only the first of its cards (the view's card and size budget); `note` says how many. */
+  cut?: true;
+}
+
+/** Repository view: the issues of every repository read so far, each in its column (shared/repoView.ts). */
+export interface RepoView {
+  cards: BoardCard[];
+  repos: RepoPart[];
 }
 
 export interface Board {

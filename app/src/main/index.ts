@@ -53,6 +53,7 @@ import type {
   SetupCheck,
 } from "@shared/types";
 import { getConfig } from "@shared/appConfig";
+import { offBoardOk } from "@shared/repoView";
 import {
   AccountEnv,
   detectEnv,
@@ -113,6 +114,7 @@ import {
 import { makeGhRunner, readGhCacheStatus } from "./ghc";
 import { GitHub } from "./github";
 import { accountClients } from "./accountClients";
+import { AssignableUsers } from "./assignUsers";
 import { Sender } from "./send";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
@@ -122,7 +124,7 @@ import { PtyManager } from "./ptys";
 import { makeRunner } from "./run";
 import { Sources } from "./sources";
 import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
-import { repoBoardless } from "@shared/derivedBoard";
+import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { branchKey, LinkStore } from "./ticketLinks";
@@ -319,12 +321,22 @@ const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
 // Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
-const { forAccount, forRepo, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+const { forAccount, forRepo, forCard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
   config: getConfig,
   base: { gh, github, ops: boardOps },
   run,
   runEnv: (l) => accountEnv.runEnv(l),
   ghFor: (account) => makeGhRunner(run, paths.libDir, paths.python, process.platform, account),
+  // A card of a repository no account lists goes out as the account whose board holds it.
+  boardOf: (repo, number) => sources.boardOf(repo, number),
+});
+// The Assign popup's people: who can be assigned in the card's repository, read as that repository's account.
+const assignableUsers = new AssignableUsers({
+  // The same account `assignIssue` assigns a card of that repository as (`forCard`).
+  read: (repo) => forCard(repo).github.assignableUsers(false, repo),
+  config: getConfig,
+  boardRepos: () => sources.boardRepos(),
+  boardStamp: () => sources.boardStamp(),
 });
 // "Create a GitHub board" for an account that has none (the Board's hint). Every call goes out as
 // that account; the confirmation is the Mac's own dialog, built from main's fresh read.
@@ -1135,7 +1147,7 @@ async function linkSession(
     return { ok: false, message: "bad session id" };
   const r = await linkTicket(
     {
-      ops: forRepo(t.repo).ops,
+      ops: forCard(t.repo, t.number).ops,
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
       branch: (dir) => branchKey(run, dir),
       moves: (sid) => workflows().builtinsFor(sid).includes("ticket"),
@@ -1143,6 +1155,8 @@ async function linkSession(
       reload: () => sources.reloadLinks(),
       noteStatus: (tk, s) => sources.noteStatus(tk, s),
       boardless: (tk) => repoBoardless(tk.repo, getConfig()),
+      // An issue of a selected repository that no board holds (the Board's repository view shows these).
+      offBoard: (tk) => offBoardOk(tk.repo, getConfig()),
     },
     t,
     sessionId,
@@ -1734,9 +1748,10 @@ function registerIpc(): void {
     const t = asTicket(issue);
     if (!t) return { ok: false, message: "bad issue" };
     // No board on its account: the columns are MasterDeck's own, there is nothing to write.
-    if (repoBoardless(t.repo, getConfig()))
+    // Asked of the account the write below goes out as (`accountForCard`), never just of the repository's.
+    if (cardBoardless(t.repo, sources.boardOf(t.repo, t.number), getConfig()))
       return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
-    const r = await forRepo(t.repo).ops.setStatus(t, status);
+    const r = await forCard(t.repo, t.number).ops.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -2107,7 +2122,8 @@ function registerIpc(): void {
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
-    forRepo(prRepo(String(url))).github.prSummary(url),
+    // A PR of a repository no account lists: as the account whose board holds a card of that repository.
+    forCard(prRepo(String(url))).github.prSummary(url),
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -2122,15 +2138,18 @@ function registerIpc(): void {
   reg.handle(CH.issueBody, (_e, ticket: unknown) => {
     const t = asTicket(ticket);
     return t
-      ? forRepo(t.repo).github.issueBody(t)
+      ? forCard(t.repo, t.number).github.issueBody(t)
       : { ok: false, message: "bad ticket" };
   });
+  // The Assign popup's people: the card's repository's, read as that repository's account (also
+  // from the web: a read; the repository is checked in AssignableUsers.get).
+  reg.handle(CH.assignableUsers, (_e, repo: unknown) => assignableUsers.get(repo));
   reg.handle(
     CH.assignIssue,
     async (_e, issue: unknown, login: string, current: string[]) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      const r = await forRepo(t.repo).github.assign(t, login, current);
+      const r = await forCard(t.repo, t.number).github.assign(t, login, current);
       if (r.ok) sources.noteAssigned(t, login);
       return r;
     },
@@ -2149,9 +2168,9 @@ function registerIpc(): void {
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.
   reg.handle(CH.refresh, async () => {
     await refreshAccounts();
-    return sources.refreshGithub(true);
+    return sources.refreshGithub(true, true);
   });
-  reg.handle(CH.boardRefresh, () => sources.refreshGithub(true));
+  reg.handle(CH.boardRefresh, () => sources.refreshGithub(true, true));
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
   reg.handle(CH.ghAccounts, () => ghAccounts());
@@ -2550,6 +2569,8 @@ function registerIpc(): void {
       linkSession(issue, sessionId, cwd),
   );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
+  // The repository view asks for its repositories (also from the web: a read; the list is checked in RepoIssues.ask).
+  reg.on(CH.boardRepos, (_e, repos: unknown) => sources.askRepos(repos));
   // Create a GitHub board: on the Mac only (DECK_ACCESS blocks them; refused here as well).
   reg.handle(CH.boardCreatePlan, (e, account: unknown) =>
     isRemote(e)

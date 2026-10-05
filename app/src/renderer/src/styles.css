@@ -1263,3 +1263,5 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .board-hint { display: flex; align-items: center; gap: 2px 10px; flex-wrap: wrap; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; color: var(--muted); }
 .board-hint .link-btn { font-size: 12px; }
 .board-hint .board-note { flex-basis: 100%; overflow-wrap: anywhere; }
+/* Repository view: a card whose issue is also on a board shows that board's column. */
+.lbl.on-board { color: var(--accent); border-color: var(--accent); }

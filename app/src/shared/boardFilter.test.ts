@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeBoardFilterCount, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, repoOptions, reviewName, UNASSIGNED } from './boardFilter'
+import { activeBoardFilterCount, assignChoices, assignSeed, tabFilterUsers, startSessionTitle, reviewRequest, boardForAccount, parseSavedTabs, sprintsForAccount, tabAccount, withAccountTabs, type BoardTab, applyFilters, cardAction, composeReviewPrompt, defaultFilters, filterOptions, normalizeFilters, pickPr, reviewName, UNASSIGNED } from './boardFilter'
 import { parseConfig } from './appConfig'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -45,6 +45,55 @@ describe('cardAction', () => {
     expect(cardAction(cards[1], ME, [])).toBe('pr')
     expect(cardAction(cards[2], ME, [])).toBe('assign')
     expect(cardAction(cards[3], ME, [])).toBe('start')
+  })
+})
+
+describe('a card that is not mine (also in the repository view)', () => {
+  it('the Assign popup offers the tab\'s account first, then the people of the card\'s repository by name', () => {
+    expect(assignChoices('alice', ['zoe', 'alice', 'Bob'])).toEqual(['alice', 'Bob', 'zoe'])
+    expect(assignChoices('bob-work', ['zoe', 'alice'])).toEqual(['bob-work', 'alice', 'zoe']) // another account's tab gets its repository's people too
+    expect(assignChoices(null, ['zoe'])).toEqual(['zoe'])
+    expect(assignChoices('alice', [])).toEqual(['alice']) // not read yet, or the read failed: me can still be assigned
+    expect(assignChoices('Alice', ['zoe', 'ALICE'])).toEqual(['Alice', 'zoe']) // logins compare without case
+  })
+  it('a card of the primary issue repo starts from the people MasterDeck already has; any other repository is read', () => {
+    const one = parseConfig({ owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] })
+    const st = (users: string[], config = one) => ({ users, config })
+    expect(assignSeed(null, st(['zoe', 'bob']))).toEqual(['zoe', 'bob'])
+    expect(assignSeed('ACME/Tracker', st(['zoe']))).toEqual(['zoe'])
+    expect(assignSeed('acme/api', st(['zoe']))).toBeNull()
+    expect(assignSeed(null, st([]))).toBeNull() // nothing read yet: ask
+    const two = parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'], projects: [] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [] },
+    ] })
+    expect(assignSeed('globex/app', st(['zoe'], two))).toBeNull()
+    expect(assignSeed(null, st(['zoe'], two))).toEqual(['zoe'])
+  })
+  it('one account or a legacy config: the popup of a primary-repo card lists exactly who it listed before', () => {
+    const legacy = parseConfig({ owner: 'acme', issueRepo: 'tracker', project: 1 })
+    const users = ['zoe', 'alice', 'Bob', 'carol']
+    expect(assignChoices('alice', assignSeed(null, { users, config: legacy })!)).toEqual(['alice', 'Bob', 'carol', 'zoe'])
+  })
+  it('the Assignee filter adds the primary repo\'s people only on the primary account\'s tab (or with one account)', () => {
+    expect(tabFilterUsers(null, 'alice', ['zoe'])).toEqual(['zoe'])
+    expect(tabFilterUsers('alice', 'alice', ['zoe'])).toEqual(['zoe'])
+    expect(tabFilterUsers('bob-work', 'alice', ['zoe'])).toEqual([])
+    expect(filterOptions({ takenAt: null, sprint: null, columns: [], cards: [{ assignees: ['carol'], labels: [], milestone: null }] } as never, 'bob-work', tabFilterUsers('bob-work', 'alice', ['zoe'])).assignees).toEqual(['bob-work', 'carol'])
+  })
+  it('Start a session says what stays as it is: who is assigned, and that nothing is written', () => {
+    expect(startSessionTitle([])).toBe('Start a session for this issue as it is: nobody is assigned, and nothing is written to GitHub')
+    expect(startSessionTitle(['bob-work'])).toBe('Start a session for this issue as it is: it stays assigned to bob-work, and nothing is written to GitHub')
+    expect(startSessionTitle(['bob-work', 'zoe'])).toBe('Start a session for this issue as it is: it stays assigned to bob-work, zoe, and nothing is written to GitHub')
+  })
+  it('a PR review is started for the ticket in its own repository', () => {
+    const p = { url: 'https://github.com/acme/api/pull/5', repo: 'api', number: 5, title: 'Fix', author: 'rahul' }
+    const r = reviewRequest({ number: 7, repo: 'acme/api' }, p, { sessions: [], cwd: '/w', instructions: 'be kind' })
+    expect(r).toMatchObject({ kind: 'PRREVIEW', issue: 7, repo: 'acme/api', name: 'review-api-5', cwd: '/w', proposalId: null, edited: true, approved: false })
+    expect(r.prompt).toContain('for acme/api#7')
+    expect(r.prompt).toContain('be kind')
+    // The primary repo's card: no repo in the request, as before.
+    expect(reviewRequest({ number: 7, repo: null }, p, { sessions: [], cwd: '/w', instructions: '' }).repo).toBeNull()
   })
 })
 
@@ -104,10 +153,6 @@ describe('repos and boards', () => {
   it('a board filter shows only those boards columns', () => {
     expect(applyFilters(b, { ...f, projects: ['acme/2'] }).columns).toEqual(['Backlog', 'Doing'])
     expect(applyFilters(b, f).columns).toEqual(b.columns)
-  })
-
-  it('offers the selected repos and those on cards, once each', () => {
-    expect(repoOptions(b, ['acme/tracker', 'ACME/API'])).toEqual(['acme/tracker', 'ACME/API', 'acme/web'])
   })
 
   it('older saved filters get the new fields', () => {

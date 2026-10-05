@@ -311,6 +311,21 @@ def cmd_draft_assign(args) -> int:
     return 0
 
 
+def _pr_facts(src, items: list) -> "tuple[dict, str | None]":
+    """What is known of the PRs linked to repository issues: their state from the issue read, and
+    CI and review threads for the open ones (one more read, only when there is one). A failed read
+    keeps the states and says so in the second value."""
+    details = {u: {"state": st, "ci": None, "unresolved": 0}
+               for it in items for u, st in (it.get("pr states") or {}).items()}
+    live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
+    if live:
+        try:
+            details.update(src.pr_details(live))
+        except Exception as e:  # the states are known already; say CI and threads are missing
+            return details, f"Pull request details not read: {str(e).strip() or type(e).__name__}"
+    return details, None
+
+
 def _repo_cards(src, args) -> "tuple[list, dict, dict]":
     """An account with no board: its repositories' issues as board items, the details of their
     PRs, and what was read (for the Board's note)."""
@@ -319,16 +334,11 @@ def _repo_cards(src, args) -> "tuple[list, dict, dict]":
         me = ((getattr(src, "cfg", None) or {}).get("login") or src.me()).lower()
         got = dict(got, items=[it for it in got["items"] if me in [a.lower() for a in it.get("assignees") or []]])
     items, shown = board.trim_repo_issues(got["items"], board.done_since(_today(args)))
-    details = {u: {"state": st, "ci": None, "unresolved": 0}
-               for it in items for u, st in (it.get("pr states") or {}).items()}
     why = got.get("unread") or {}  # asked again next time: say why this time
     lines = [f"{r} not read: {w}" for r, w in why.items()]
-    live = [u for u, d in details.items() if d["state"] in ("OPEN", "DRAFT")]
-    if live:
-        try:
-            details.update(src.pr_details(live))
-        except Exception as e:  # the states are known already; say CI and threads are missing
-            lines.append(f"Pull request details not read: {str(e).strip() or type(e).__name__}")
+    details, pr_note = _pr_facts(src, items)
+    if pr_note:
+        lines.append(pr_note)
     part = {"repos": got["repos"], "total": got["total"], "shown": shown,
             "skipped": got["skipped"], "missing": got["missing"]}
     if lines:
@@ -375,6 +385,91 @@ def cmd_board(args) -> int:
     if notes:
         out["notes"] = notes
     print(json.dumps(out))
+    return 0
+
+
+def _repo_source(args, login: "str | None"):
+    """Where one account's repositories are read from: the fixtures, the whole config (one account),
+    or that account with its own token."""
+    if args.fixtures or login is None:
+        return _source(args)
+    return collect.Live.for_account(next(a for a in config.accounts() if a["login"] == login))
+
+
+def cmd_repo_issues(args) -> int:
+    """The Board's repository view: every issue of the named repositories (open, and closed
+    lately), whether or not a board holds it. Read-only. Each repository gets its own part
+    ({repo, account, ok, total, shown, note?}), so one that cannot be read never hides another."""
+    asked = list(dict.fromkeys(r.strip() for r in (args.repos or "").split(",") if r.strip()))
+    if not asked or not all(re.fullmatch(config.REPO_RE, r) for r in asked):
+        print("--repos takes owner/name, comma separated")
+        return 2
+    listed = {r.lower(): r for r in config.repos()}
+    parts, groups, order = {}, {}, []
+
+    def bad(repo, login, note):
+        return {"repo": repo, "account": login, "ok": False, "total": 0, "shown": 0, "note": note[:300]}
+
+    for r in asked:
+        name = listed.get(r.lower(), r)
+        if name in order:
+            continue
+        order.append(name)
+        # Stricter than repo_allowed: the names come from outside (a Board tab, also in a paired browser).
+        if not config.repo_readable(name):
+            parts[name] = bad(name, None, f"{name} is not selected in Setup")
+            continue
+        groups.setdefault(None if args.fixtures else config.account_for_repo(name), []).append(name)
+    since = board.done_since(_today(args))
+    items, details = [], {}
+
+    def why(e):  # gh missing, network, rate limit, an account to log in again: say what gh said
+        return str(e).strip() or type(e).__name__
+
+    for login, repos in groups.items():
+        try:
+            src = _repo_source(args, login)
+        except Exception as e:
+            for r in repos:
+                parts[r] = bad(r, login, f"{r} not read: {why(e)}")
+            continue
+        # One read takes DERIVED_MAX_REPOS repositories of an account: more are read in turn, so
+        # none is left out ("skipped") however many a tab picked.
+        step = config.DERIVED_MAX_REPOS
+        for at in range(0, len(repos), step):
+            chunk = repos[at:at + step]
+            try:
+                got = src.repo_issues(_today(args), only=chunk, boards=True)
+            except Exception as e:
+                # The rest of this account is not asked: the same failure (a rate limit) would only repeat.
+                for r in repos[at:]:
+                    parts[r] = bad(r, login, f"{r} not read: {why(e)}")
+                break
+            by_repo: dict = {}
+            for it in got["items"]:
+                by_repo.setdefault(str((it.get("content") or {}).get("repository") or "").lower(), []).append(it)
+            unread, kept = got.get("unread") or {}, []
+            for r in chunk:
+                if r in (got.get("skipped") or []):
+                    parts[r] = bad(r, login, f"{r} not read: more than {config.DERIVED_MAX_REPOS} repositories at once")
+                elif r in (got.get("missing") or []):
+                    parts[r] = bad(r, login, f"{r} not read: {unread[r]}" if r in unread else f"Not found: {r}")
+                else:
+                    # The Board's limits (open, then closed lately), for each repository on its own.
+                    mine, shown = board.trim_repo_issues(by_repo.get(r.lower(), []), since)
+                    kept += mine
+                    parts[r] = {"repo": r, "account": login, "ok": True, "shown": shown,
+                                "total": max(shown, int((got.get("totals") or {}).get(r) or 0))}
+            more, pr_note = _pr_facts(src, kept)
+            details.update(more)
+            notes = [n for n in (pr_note, (f"Board columns only partly read (later pages): {got['boards_unread']}" if got.get("boards_partial")
+                             else f"Board columns not read: {got['boards_unread']}") if got.get("boards_unread") else None) if n]
+            for r in chunk:
+                if notes and parts[r]["ok"]:
+                    parts[r]["note"] = "; ".join(notes)[:300]
+            items += [dict(it, account=login) for it in kept] if login else kept
+    print(json.dumps({"taken_at": _now(args), "cards": board.build(items, details, _now(args))["cards"],
+                      "repos": [parts[r] for r in order]}))
     return 0
 
 
@@ -494,6 +589,9 @@ def parser() -> argparse.ArgumentParser:
     bo.add_argument("--mine", action="store_true")
     bo.set_defaults(fn=cmd_board)
     with_src(sub.add_parser("sprints")).set_defaults(fn=cmd_sprints)
+    ri = with_src(sub.add_parser("repo-issues"))
+    ri.add_argument("--repos", required=True, help="owner/name, comma separated: the repositories a Board tab picked")
+    ri.set_defaults(fn=cmd_repo_issues)
 
     da = with_src(sub.add_parser("draft-assign"))
     da.add_argument("issue", help="12, name#12 or owner/name#12")

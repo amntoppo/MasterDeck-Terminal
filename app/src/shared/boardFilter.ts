@@ -1,7 +1,8 @@
 import { fullRepo, ticketLabel, ticketRef } from './ticket'
 import { sessionForIssue } from './derive'
 import { accountForProject, accountForRepo, isMulti } from './accounts'
-import { projectKey, type AppConfig } from './appConfig'
+import { primaryRepo, projectKey, type AppConfig } from './appConfig'
+import type { AssignRequest } from './ipc'
 import type { Board, BoardCard, BoardPr, Session, Sprint } from './types'
 
 export const UNASSIGNED = '(unassigned)'
@@ -147,18 +148,6 @@ export function applyFilters(b: Board, f: FilterState): Board {
   return { ...b, cards, columns }
 }
 
-/** The repos to offer in a board filter: the selected ones and any seen on cards. */
-export function repoOptions(b: Board | null, selected: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of [...selected, ...(b?.cards ?? []).map((c) => fullRepo(c.repo))])
-    if (r && !seen.has(r.toLowerCase())) {
-      seen.add(r.toLowerCase())
-      out.push(r)
-    }
-  return out
-}
-
 export type CardAction = 'session' | 'start' | 'pr' | 'assign'
 
 /**
@@ -170,6 +159,41 @@ export function cardAction(c: BoardCard, me: string | null, sessions: Session[])
   const mine = me !== null && c.assignees.includes(me)
   if (mine) return 'start'
   return c.prs.length > 0 ? 'pr' : 'assign'
+}
+
+/** The tooltip of "Start a session" on the Assign popup: the issue stays as it is, assigned or not. */
+export function startSessionTitle(assignees: string[]): string {
+  return `Start a session for this issue as it is: ${assignees.length ? `it stays assigned to ${assignees.join(', ')}` : 'nobody is assigned'}, and nothing is written to GitHub`
+}
+
+/**
+ * Who the Assign popup offers: me first (the tab's account), then `users`, the people who can be
+ * assigned in the card's repository, by name. Logins compare without case. With no users (not
+ * read yet, or the read failed) it is me alone, so assigning to me always works.
+ */
+export function assignChoices(me: string | null, users: string[]): string[] {
+  const same = (a: string, b: string | null) => !!b && a.toLowerCase() === b.toLowerCase()
+  const others = users.filter((u, i) => !same(u, me) && users.findIndex((x) => same(x, u)) === i).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return [...(me ? [me] : []), ...others]
+}
+
+/**
+ * The people the Assign popup can show at once, with no read: `state.users` (the primary issue
+ * repo's, read at every refresh as the primary account) when the card is of that repository. Null
+ * for any other repository, or while none were read: the popup then asks main (`assignableUsers`).
+ */
+export function assignSeed(cardRepo: string | null | undefined, state: { users: string[]; config: AppConfig }): string[] | null {
+  const primary = primaryRepo(state.config)
+  const mine = !cardRepo || (!!primary && cardRepo.toLowerCase() === primary.toLowerCase())
+  return mine && state.users.length ? state.users : null
+}
+
+/**
+ * The people the Assignee filter adds to the ones seen on a tab's cards: `users` (the primary
+ * issue repo's) on the primary account's tab or with one account; none on another account's tab.
+ */
+export function tabFilterUsers(acct: string | null, primary: string | null, users: string[]): string[] {
+  return acct && acct !== primary ? [] : users
 }
 
 const OPEN = new Set(['OPEN', 'DRAFT'])
@@ -199,6 +223,25 @@ export interface ReviewTarget {
   issue: number
   /** The issue's repo (owner/name); null or missing: the primary issue repo. */
   issueRepo?: string | null
+}
+
+/** What the PR popup's Start review sends: a review session for the card's ticket, in whichever repository that ticket is. */
+export function reviewRequest(
+  card: Pick<BoardCard, 'number' | 'repo'>,
+  pr: { url: string; repo: string; number: number; title: string; author: string },
+  o: { sessions: Session[]; cwd: string; instructions: string },
+): AssignRequest {
+  return {
+    kind: 'PRREVIEW',
+    issue: card.number,
+    repo: card.repo ?? null,
+    name: reviewName(pr.repo, pr.number, o.sessions),
+    cwd: o.cwd,
+    prompt: composeReviewPrompt({ url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, author: pr.author, issue: card.number, issueRepo: card.repo ?? null }, o.instructions),
+    proposalId: null,
+    edited: true,
+    approved: false,
+  }
 }
 
 /** `n`: the ticket's label, #12 or name#12. */

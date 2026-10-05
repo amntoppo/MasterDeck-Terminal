@@ -5,6 +5,7 @@ import { UNASSIGNED } from "@shared/boardFilter";
 import type { NewTicket } from "@shared/ipc";
 import type { AppState } from "@shared/types";
 import { accountChoices, isMulti, primaryLogin } from "@shared/accounts";
+import { boardless } from "@shared/derivedBoard";
 import { deck } from "../deck";
 
 /** Where a + was clicked on the Board: the column (status), its board, the tab's filters, the sprint shown. */
@@ -19,6 +20,39 @@ export interface TicketContext {
   account?: string;
   /** The tab's id (two or more accounts): its own ticket session folder. */
   tabId?: string;
+}
+
+/**
+ * The context of a + on a column. On a board: the column, its board and the selected sprint. A tab
+ * with no board: no status, board or sprint. The repository view: its columns are MasterDeck's, so
+ * the ticket takes the board's "ready" column, and no sprint (that view shows none).
+ */
+export function boardTicketContext(o: {
+  state: AppState;
+  col: string;
+  filters: FilterState;
+  selectedSprint: string;
+  tab: string;
+  fallback: boolean;
+  repoMode: boolean;
+  readyCol: string;
+  account?: string;
+  tabId?: string;
+}): TicketContext {
+  const { state, col, filters, fallback, repoMode, readyCol, account } = o;
+  return {
+    status: fallback ? "" : repoMode ? readyCol : col,
+    project: fallback
+      ? ""
+      : repoMode
+        ? boardFor(state, readyCol, { ...filters, projects: [] }, account)
+        : boardFor(state, col, filters, account),
+    filters,
+    sprint: fallback || repoMode ? "none" : o.selectedSprint,
+    tab: o.tab,
+    account,
+    ...(o.tabId ? { tabId: o.tabId } : {}),
+  };
 }
 
 /** The board a column belongs to: the one the tab filters to, else the first board (of the tab's account) that has the column. */
@@ -51,14 +85,23 @@ export function ticketDefaults(state: AppState, ctx: TicketContext): NewTicket {
     state.config.repos[0] ??
     `${state.config.owner}/${state.config.issueRepo}`;
   const me = ctx.account ?? state.me;
-  const only = ctx.filters.repos.length === 1 ? ctx.filters.repos[0] : "";
+  // The tab's Repos filter. In the repository view: the first picked repository that is one of the
+  // account's. On a tab with no board the filter only narrows the cards: as before, a single
+  // picked repository counts and several mean the primary.
+  const own = ctx.filters.repos.filter(
+    (r) => !acc || acc.repos.some((x) => x.toLowerCase() === r.toLowerCase()),
+  );
+  const picked = boardless(ctx.account, state.config)
+    ? ctx.filters.repos.length === 1
+      ? (own[0] ?? "")
+      : ""
+    : (own[0] ?? "");
   const people = ctx.filters.assignees.filter((a) => a !== UNASSIGNED);
   const board = (acc ? acc.projects : state.config.projects).find(
     (p) => `${p.owner}/${p.number}` === ctx.project,
   );
   return {
-    // A single-repo filter only counts when it is one of the account's repos.
-    repo: only && (!acc || acc.repos.includes(only)) ? only : primary,
+    repo: picked || primary,
     title: "",
     body: "",
     project: ctx.project,

@@ -215,6 +215,8 @@ export interface LinkDeps {
   noteStatus: (t: Ticket, status: string) => void
   /** The ticket's account has no GitHub board: it is linked all the same; there is no card to move. */
   boardless?: (t: Ticket) => boolean
+  /** The ticket is in a repository selected in Setup: it is linked even when no selected board holds it (a session started from the Board's repository view); there is no card to move. */
+  offBoard?: (t: Ticket) => boolean
 }
 
 /**
@@ -226,7 +228,7 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
   const label = ticketLabel(t.repo, t.number)
   const info = await d.ops.issueInfo(t)
   if (!info) return { ok: false, message: `could not read ${label}` }
-  if (!info.item && !d.boardless?.(t)) return { ok: false, message: `${label} is not on any selected board` }
+  if (!info.item && !d.boardless?.(t) && !d.offBoard?.(t)) return { ok: false, message: `${label} is not on any selected board` }
   try {
     d.link(sessionId, t, info.title, cwd ? await d.branch(cwd) : '')
   } catch (e) {

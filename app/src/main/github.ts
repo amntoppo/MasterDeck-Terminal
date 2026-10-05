@@ -37,8 +37,9 @@ export class GitHub {
     return r.code === 0 && LOGIN.test(login) ? login : null
   }
 
-  async assignableUsers(force = false): Promise<string[] | null> {
-    const r = await this.api([`${issueRepoPath()}/assignees?per_page=100`, '--paginate', '--jq', '.[].login'], 600, force)
+  /** Who can be assigned an issue of `repo` (none: the primary issue repo); null when the read failed. */
+  async assignableUsers(force = false, repo: string | null = null): Promise<string[] | null> {
+    const r = await this.api([`${issueRepoPath(repo)}/assignees?per_page=100`, '--paginate', '--jq', '.[].login'], 600, force)
     if (r.code !== 0) return null
     return r.stdout.split('\n').map((l) => l.trim()).filter((l) => LOGIN.test(l))
   }

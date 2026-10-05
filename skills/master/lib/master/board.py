@@ -98,18 +98,36 @@ _REPO_ISSUE = ("number title url state closedAt updatedAt "
 _BY_UPDATED = "orderBy: {field: UPDATED_AT, direction: DESC}"
 
 
+def status_fields(cfg: "dict | None" = None) -> list:
+    """The status field name of every selected board of one account's view (None: the whole
+    config), each once: what the repository view asks GitHub for, to say which column an issue is
+    in on a board."""
+    return list(dict.fromkeys(p["statusField"] for p in config.projects(cfg)))
+
+
+def _boards_part(fields: list) -> str:
+    """The boards an issue is on and its status on each (one alias per status field name). Only
+    fields MasterDeck already reads elsewhere: a board's items, an issue's project items."""
+    status = " ".join(f"s{i}: fieldValueByName(name: {_q(name)}) {{ ... on ProjectV2ItemFieldSingleSelectValue {{ name }} }}"
+                      for i, name in enumerate(fields))
+    return (" projectItems(first: 5) { nodes { project { number owner { ... on Organization { login } ... on User { login } } } "
+            + status + " } }")
+
+
 def done_since(today: date) -> str:
     """Before this, a closed issue is too old for the Done column. A whole day, so the board and
     the snapshot send the same call on the same day and the shared cache answers one of them."""
     return (today - timedelta(days=config.DERIVED_DONE_DAYS)).isoformat() + "T00:00:00Z"
 
 
-def repo_issues_query(reqs: list, since: str) -> "tuple[str, dict]":
+def repo_issues_query(reqs: list, since: str, fields: "list | None" = None) -> "tuple[str, dict]":
     """One GraphQL query for the issues of several repositories: reqs is [(alias, "owner/name",
     cursor, first)]. Open issues come 100 a page (`cursor`: the next page); with `first` (the
-    first round) also the 50 most recently updated closed ones since `since`. Returns the query
-    and its variables."""
+    first round) also the 50 most recently updated closed ones since `since`. `fields` (the
+    repository view: status_fields()): each issue also says which boards hold it. Returns the
+    query and its variables."""
     decl, variables, parts = [], {}, []
+    issue = _REPO_ISSUE + (_boards_part(fields) if fields else "")
     if any(first for _, _, _, first in reqs):
         decl.append("$since: DateTime!")  # only when used: an unused variable is a GraphQL error
         variables["since"] = since
@@ -119,10 +137,10 @@ def repo_issues_query(reqs: list, since: str) -> "tuple[str, dict]":
         if cursor:
             variables[f"c_{alias}"] = cursor
         closed = (f"closed: issues(states: CLOSED, first: 50, {_BY_UPDATED}, filterBy: {{since: $since}}) "
-                  f"{{ nodes {{ {_REPO_ISSUE} }} }}") if first else ""
+                  f"{{ nodes {{ {issue} }} }}") if first else ""
         parts.append(f"{alias}: repository(owner: {_q(owner)}, name: {_q(name)}) {{ "
                      f"open: issues(states: OPEN, first: 100, after: $c_{alias}, {_BY_UPDATED}) "
-                     f"{{ totalCount pageInfo {{ hasNextPage endCursor }} nodes {{ {_REPO_ISSUE} }} }} {closed} }}")
+                     f"{{ totalCount pageInfo {{ hasNextPage endCursor }} nodes {{ {issue} }} }} {closed} }}")
     return f"query({', '.join(decl)}) {{ {' '.join(parts)} }}", variables
 
 
@@ -130,10 +148,27 @@ def _pr_state(node: dict) -> "str | None":
     return "DRAFT" if node.get("state") == "OPEN" and node.get("isDraft") else node.get("state")
 
 
-def repo_issues_page(data: dict, alias: str, repo: str) -> "tuple[list, str | None, int]":
+def _held_on(n: dict, fields: list, cfg: "dict | None" = None) -> list:
+    """[{key, status}] for each selected board that holds the issue (a board not selected in
+    Setup is left out: nothing the user knows by name)."""
+    known = {config.project_key(p).lower(): p for p in config.projects(cfg)}
+    out = []
+    for it in (n.get("projectItems") or {}).get("nodes") or []:
+        pr = (it or {}).get("project") or {}
+        p = known.get(f"{(pr.get('owner') or {}).get('login')}/{pr.get('number')}".lower())
+        if not p or any(x["key"] == config.project_key(p) for x in out):
+            continue
+        i = fields.index(p["statusField"]) if p["statusField"] in fields else -1
+        out.append({"key": config.project_key(p), "status": (it.get(f"s{i}") or {}).get("name") if i >= 0 else None})
+    return out
+
+
+def repo_issues_page(data: dict, alias: str, repo: str, fields: "list | None" = None,
+                     cfg: "dict | None" = None) -> "tuple[list, str | None, int]":
     """One repository's issues from the query's answer, in the item shape `build` reads (plus
-    `state`, `closed_at`, `updated_at`, `pr states` and `derived`), the cursor of the next page
-    of open ones, and GitHub's count of open issues."""
+    `state`, `closed_at`, `updated_at`, `pr states` and `derived`; with `fields`, `on boards` for
+    an issue a selected board holds), the cursor of the next page of open ones, and GitHub's
+    count of open issues."""
     node = (data or {}).get(alias)
     if not isinstance(node, dict):
         return [], None, 0
@@ -159,6 +194,9 @@ def repo_issues_page(data: dict, alias: str, repo: str) -> "tuple[list, str | No
                 "closed_at": n.get("closedAt"), "updated_at": n.get("updatedAt") or "",
                 "derived": True,
             })
+            held = _held_on(n, fields, cfg) if fields else []
+            if held:
+                out[-1]["on boards"] = held
     conn = node.get("open") or {}
     page = conn.get("pageInfo") or {}
     return out, (page.get("endCursor") if page.get("hasNextPage") else None), int(conn.get("totalCount") or 0)
@@ -375,7 +413,9 @@ def build(items: list, pr_details: dict, now_iso: str) -> dict:
                       # An issue of an account with no board: facts only; MasterDeck works out its column.
                       **({"derived": True, "state": "CLOSED" if it.get("state") == "CLOSED" else "OPEN",
                           "closedAt": it.get("closed_at") if isinstance(it.get("closed_at"), str) else None}
-                         if it.get("derived") is True else {})})
+                         if it.get("derived") is True else {}),
+                      # The repository view: the selected boards that hold this issue, and its column there.
+                      **({"onBoards": it["on boards"]} if it.get("derived") is True and it.get("on boards") else {})})
     base = [c for p in config.projects() for c in p["columns"]] or list(config.BOARD_COLUMNS)
     base = list(dict.fromkeys(base))
     columns = base + [s for s in statuses if s not in base]

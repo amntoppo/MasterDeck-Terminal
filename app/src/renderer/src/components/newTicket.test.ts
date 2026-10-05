@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
+import { boardFor, boardTicketContext, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -119,6 +119,81 @@ describe("new ticket", () => {
       "acceptEdits",
       "Create this ticket",
     ]);
+  });
+});
+
+describe("a new ticket from the repository view", () => {
+  const ctx = (repos: string[]) => ({ status: "Todo", project: "Org/1", filters: { ...defaultFilters("alice"), repos }, sprint: "@current", tab: "Mine" });
+  it("is created in the picked repository; with several picked, the first", () => {
+    expect(ticketDefaults(state, ctx(["Org/app"])).repo).toBe("Org/app");
+    expect(ticketDefaults(state, ctx(["Org/app", "Org/Main"])).repo).toBe("Org/app");
+    expect(ticketDefaults(state, ctx([])).repo).toBe("Org/Main"); // nothing picked: the primary, as before
+  });
+  it("still goes on the board, in the column and sprint the context names", () => {
+    expect(ticketDefaults(state, ctx(["Org/app"]))).toMatchObject({ project: "Org/1", status: "Todo", sprint: "@current", sprintField: "Sprint" });
+    expect(ticketRequest(ticketDefaults(state, ctx(["Org/app"])), false, null)).toMatchObject({ repo: "Org/app", project: "Org/1", status: "Todo" });
+  });
+  it("with two or more accounts, only a repository of the tab's account counts", () => {
+    const two = {
+      ...state,
+      me: "alice",
+      config: parseConfig({
+        accounts: [
+          { login: "alice", primary: true, owner: "acme", issueRepo: "tracker", repos: ["acme/tracker", "acme/api"], projects: [{ owner: "acme", number: 1, columns: ["Todo", "In Dev"] }] },
+          { login: "bob-work", owner: "globex", issueRepo: "app", repos: ["globex/app"], projects: [] },
+        ],
+      }),
+    } as unknown as AppState;
+    const of = (repos: string[]) => ticketDefaults(two, { ...ctx(repos), project: "acme/1", account: "alice" }).repo;
+    expect(of(["globex/app", "ACME/api"])).toBe("ACME/api");
+    expect(of(["globex/app"])).toBe("acme/tracker");
+  });
+});
+
+describe("a new ticket from a tab with no board", () => {
+  const ctx = (repos: string[], account?: string) => ({ status: "", project: "", filters: { ...defaultFilters("alice"), repos }, sprint: "none", tab: "Mine", ...(account ? { account } : {}) });
+  it("defaults the repository as before the repository view: one picked repository counts, several mean the primary", () => {
+    const loose = { ...state, config: parseConfig({ owner: "Org", issueRepo: "Main", repos: ["Org/Main", "Org/app", "Org/web"] }) } as unknown as AppState;
+    expect(ticketDefaults(loose, ctx(["Org/app"])).repo).toBe("Org/app");
+    expect(ticketDefaults(loose, ctx(["Org/app", "Org/web"])).repo).toBe("Org/Main");
+    expect(ticketDefaults(loose, ctx([])).repo).toBe("Org/Main");
+  });
+  it("the same on the tab of an account with no board, beside an account that has one", () => {
+    const two = {
+      ...state,
+      me: "alice",
+      config: parseConfig({
+        owner: "acme",
+        issueRepo: "tracker",
+        accounts: [
+          { login: "alice", primary: true, owner: "acme", issueRepo: "tracker", repos: ["acme/tracker", "acme/api"], projects: [{ owner: "acme", number: 1, columns: ["Todo", "In Dev"] }] },
+          { login: "bob-work", owner: "globex", issueRepo: "app", repos: ["globex/app", "globex/web", "globex/docs"], projects: [] },
+        ],
+      }),
+    } as unknown as AppState;
+    expect(ticketDefaults(two, ctx(["globex/web", "globex/docs"], "bob-work")).repo).toBe("globex/app");
+    expect(ticketDefaults(two, ctx(["globex/web"], "bob-work")).repo).toBe("globex/web");
+    expect(ticketDefaults(two, ctx(["acme/api"], "bob-work")).repo).toBe("globex/app"); // not one of its repositories
+    // alice's tab has a board: the repository view's rule, the first picked.
+    expect(ticketDefaults(two, { ...ctx(["acme/api", "acme/tracker"], "alice"), project: "acme/1" }).repo).toBe("acme/api");
+  });
+});
+
+describe("the ticket context of a + on a column", () => {
+  const o = (more: Record<string, unknown>) => ({ state, col: "Done", filters: { ...defaultFilters("alice"), repos: ["Org/app"] }, selectedSprint: "@current", tab: "Mine", fallback: false, repoMode: false, readyCol: "Todo", ...more }) as Parameters<typeof boardTicketContext>[0];
+  it("on a board: the column, its board and the selected sprint", () => {
+    expect(boardTicketContext(o({}))).toMatchObject({ status: "Done", project: "Org/1", sprint: "@current", tab: "Mine" });
+  });
+  it("in the repository view: the board's ready column and no sprint the user cannot see", () => {
+    const c = boardTicketContext(o({ repoMode: true }));
+    expect(c).toMatchObject({ status: "Todo", project: "Org/1", sprint: "none" });
+    expect(ticketDefaults(state, c)).toMatchObject({ repo: "Org/app", status: "Todo", project: "Org/1", sprint: "" });
+  });
+  it("a tab with no board: no status, board or sprint", () => {
+    expect(boardTicketContext(o({ fallback: true }))).toMatchObject({ status: "", project: "", sprint: "none" });
+  });
+  it("carries the account and tab id when given", () => {
+    expect(boardTicketContext(o({ state: { ...state, config: { ...cfg, accounts: [] } }, account: "alice", tabId: "t9" }))).toMatchObject({ account: "alice", tabId: "t9" });
   });
 });
 
