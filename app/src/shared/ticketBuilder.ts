@@ -69,6 +69,8 @@ asks. The user sees this conversation next to MasterDeck's Board, and clicked **
 
 - \`status\`: the column; new tickets go there unless the user says otherwise.
 - \`project\`: the board (owner/number) it belongs to.
+- An empty \`status\` and \`project\`: this account has no GitHub board. Create the issue without
+  \`--project\`, \`--status\` and \`--sprint\`; MasterDeck's Board shows it in Todo by itself.
 - \`filters\`: the Board tab's filters: \`assignees\` (logins; \`(unassigned)\` means nobody), \`labels\`,
   \`milestone\`, \`repos\` (owner/name), \`projects\`. Use them as defaults: assign the people and put
   the labels and milestone the tab filters to, so the new ticket shows in the view they're looking at.

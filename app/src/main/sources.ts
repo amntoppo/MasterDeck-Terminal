@@ -187,6 +187,7 @@ import { LinkStore } from "./ticketLinks";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
 import {
   boardDeriver,
+  boardToShow,
   boardWanted,
   withoutDerived,
 } from "@shared/derivedBoard";
@@ -1214,8 +1215,17 @@ export class Sources {
   async refreshBoard(force = false): Promise<{ ok: boolean; message: string }> {
     if (this.boardRunning) return { ok: true, message: "already refreshing" };
     // No board and no repository selected: nothing to ask `master board` for.
-    if (!process.env.MASTERDECK_BOARD_FIXTURE && !boardWanted(this.config))
+    if (!process.env.MASTERDECK_BOARD_FIXTURE && !boardWanted(this.config)) {
+      // What was read before is of repositories and boards no longer selected: forget it.
+      if (Object.keys(this.boards).length) {
+        this.boards = {};
+        this.rawBoards = {};
+        this.boardError = null;
+        this.saveGithubCache();
+        this.emit();
+      }
       return { ok: true, message: "nothing selected" };
+    }
     const sprint = this.selectedSprint;
     if (!process.env.MASTERDECK_BOARD_FIXTURE && this.githubPaused()) {
       this.boardError = this.errors.github ?? "GitHub calls paused";
@@ -2226,13 +2236,20 @@ export class Sources {
       // Cards of an account with no board get their column here, from what MasterDeck knows now.
       // (A board without such cards comes back as the same object; one with them, as the object of
       // the build before while no card changed column.)
-      board: this.derive(this.boards[this.selectedSprint] ?? null, {
-        sessions,
-        past: this.past,
-        linkPrs: this.linkPrs,
-        prLive: this.prLive,
-        now,
-      }),
+      // Nothing selected any more: the cached board goes (no read replaces it).
+      // (MASTERDECK_BOARD_FIXTURE, the test aid, shows its board whatever the config.)
+      board: this.derive(
+        process.env.MASTERDECK_BOARD_FIXTURE
+          ? (this.boards[this.selectedSprint] ?? null)
+          : boardToShow(this.boards[this.selectedSprint] ?? null, this.config),
+        {
+          sessions,
+          past: this.past,
+          linkPrs: this.linkPrs,
+          prLive: this.prLive,
+          now,
+        },
+      ),
       sprints: this.sprints,
       selectedSprint: this.selectedSprint,
       users: this.users,

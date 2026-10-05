@@ -84,6 +84,21 @@ export function ticketRequest(
   };
 }
 
+/**
+ * What Create with Claude sends to the Board's session for what was typed in the dialog; nothing
+ * typed: no prompt. `status` empty (an account with no board): no column is named.
+ */
+export function claudePrompt(
+  status: string,
+  draft: NewTicket | undefined,
+): string | undefined {
+  if (!draft || !(draft.title.trim() || draft.body.trim())) return undefined;
+  return `Write this ticket${status ? ` for ${status}` : ""}: ${draft.title.trim()}${draft.body.trim() ? `. ${draft.body.trim()}` : ""} (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.`.replace(
+    /\s*\n+\s*/g,
+    " ",
+  );
+}
+
 /** Several values from a list: chips, and "Add…" for the rest. */
 function MultiPick({
   value,

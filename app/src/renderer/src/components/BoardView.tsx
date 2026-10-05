@@ -41,10 +41,12 @@ import {
   boardEmpty,
   boardless,
   boardsOf,
+  canMove,
   DERIVED_COLUMNS,
   derivedNotes,
   reposOf,
   tabBoard,
+  unreadRepos,
 } from "@shared/derivedBoard";
 import { CreateBoardDialog } from "./CreateBoardDialog";
 import { ticketSpend } from "@shared/costs";
@@ -65,6 +67,7 @@ import type {
 import { deck, load, save, useNow } from "../deck";
 import {
   boardFor,
+  claudePrompt,
   ClaudeMark,
   NewTicketDialog,
   type TicketContext,
@@ -241,7 +244,7 @@ export function BoardView({
 
   const doMove = async (card: BoardCard, to: string) => {
     // An issue of an account with no board has no status on GitHub: nothing to write.
-    if (card.derived) return;
+    if (!canMove(card, fallback)) return;
     const k = ticketKey(card.repo, card.number);
     const lab = ticketLabel(card.repo, card.number);
     setMoving((m) => ({ ...m, [k]: to }));
@@ -267,7 +270,7 @@ export function BoardView({
     const cols = projectByKey(card?.project)?.columns ?? state.config.columns;
     if (
       !card ||
-      card.derived ||
+      !canMove(card, fallback) ||
       !cols.includes(col) ||
       (moving[k] ?? card.status) === col
     )
@@ -445,15 +448,23 @@ export function BoardView({
   // Why the tab shows no card, when it shows none. Nothing selected for its account: also before
   // any board was read (none is asked for then).
   const tabRepoList = reposOf(acct, cfg);
+  // The repositories the read did not get: "no open issues" is not said of them.
+  const unread = unreadRepos(state.board, acct, cfg);
   const empty =
     b && shown
       ? boardEmpty(
-          { login: acct, total: b.cards.length, shown: shown.cards.length },
+          {
+            login: acct,
+            total: b.cards.length,
+            shown: shown.cards.length,
+            unread,
+          },
           cfg,
         )
       : tabBoards.length === 0 && tabRepoList.length === 0
         ? "nothing-selected"
         : null;
+  const hintNotes = derivedNotes(state.board, acct);
   const tabRepos = tabRepoList.map((r) => r.split("/")[1] ?? r);
   shownCols.current = columns;
   // A card dragged near the board's left or right edge scrolls it sideways, and near the top or
@@ -601,8 +612,9 @@ export function BoardView({
 
   // New ticket (+ on a column) and Create with Claude (a session on the right, on the Board only).
   const ctxFor = (col: string): TicketContext => ({
-    status: col,
-    project: boardFor(state, col, f, acct ?? undefined),
+    // No board: the ticket gets no status (the column is MasterDeck's, not GitHub's) and no board.
+    status: fallback ? "" : col,
+    project: fallback ? "" : boardFor(state, col, f, acct ?? undefined),
     filters: f,
     // No board: no sprint to put the ticket in.
     sprint: fallback ? "none" : state.selectedSprint,
@@ -625,13 +637,7 @@ export function BoardView({
     });
     if (!r.ok) return setMoveMsg(r.message);
     setTicketCtx(null);
-    const typed = draft && (draft.title.trim() || draft.body.trim());
-    const prompt = typed
-      ? `Write this ticket for ${ctx.status}: ${draft!.title.trim()}${draft!.body.trim() ? `. ${draft!.body.trim()}` : ""} (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.`.replace(
-          /\s*\n+\s*/g,
-          " ",
-        )
-      : undefined;
+    const prompt = claudePrompt(ctx.status, draft);
     if (claude && !restart) {
       setClaude({ ...claude, ctx });
       if (prompt) {
@@ -903,8 +909,8 @@ export function BoardView({
             ) : (
               <span>Create one from MasterDeck on your Mac.</span>
             )}
-            {derivedNotes(state.board, acct).map((n) => (
-              <div key={n} className="board-note">
+            {hintNotes.map((n, i) => (
+              <div key={i} className="board-note">
                 {n}
               </div>
             ))}
@@ -957,6 +963,31 @@ export function BoardView({
                 </button>
               </>
             )}
+          </div>
+        ) : empty === "not-read" ? (
+          <div className="welcome">
+            <h2>
+              Could not read{" "}
+              {(unread ?? []).map((r) => r.split("/")[1] ?? r).join(", ")}
+            </h2>
+            <div>
+              {state.boardError ??
+                (hintNotes.length
+                  ? "The lines above say why."
+                  : "GitHub gave no issues for it.")}
+            </div>
+            <div className="form-buttons">
+              <button className="btn" onClick={onSetup}>
+                Open Setup
+              </button>
+              <button
+                className="btn primary"
+                onClick={refresh}
+                disabled={loading}
+              >
+                {loading ? "Refreshing…" : "Retry"}
+              </button>
+            </div>
           </div>
         ) : empty === "no-issues" ? (
           <div className="welcome">
@@ -1060,7 +1091,7 @@ export function BoardView({
                         now={now}
                         spend={spend[ticketKey(c.repo, c.number)] ?? 0}
                         moving={!!moving[ticketKey(c.repo, c.number)]}
-                        readOnly={fallback || !!c.derived}
+                        readOnly={!canMove(c, fallback)}
                         onClick={() => onCard(c)}
                       />
                     ))}
@@ -1148,7 +1179,7 @@ export function BoardView({
                 className="muted small"
                 title="Where new tickets go; + on another column changes it"
               >
-                {claude.ctx.status}
+                {claude.ctx.status || "no board"}
                 {claude.ctx.tab ? ` · ${claude.ctx.tab}` : ""}
                 {claude.ctx.sprint && claude.ctx.sprint !== "none"
                   ? ` · ${claude.ctx.sprint === "@current" ? "current sprint" : claude.ctx.sprint}`

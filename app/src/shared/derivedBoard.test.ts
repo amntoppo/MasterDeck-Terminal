@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseConfig, setConfig } from './appConfig'
 import { parseBoard } from './board'
-import { boardDeriver, boardEmpty, boardless, boardsOf, boardWanted, columnsWithDerived, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
+import { boardDeriver, boardEmpty, boardless, boardsOf, boardToShow, boardWanted, canMove, columnsWithDerived, unreadRepos, deriveBoard, DERIVED_COLUMNS, derivedNotes, derivedStatus, repoBoardless, tabBoard, withoutDerived, type DeriveCtx } from './derivedBoard'
 import type { PastSession } from './pastSessions'
 import type { Board, BoardCard, BoardPr, Session } from './types'
 
@@ -220,5 +220,49 @@ describe('columnsWithDerived', () => {
   it('adds MasterDeck\'s columns after the board\'s; alone when every card is derived', () => {
     expect(columnsWithDerived(board([real, card({ status: 'Todo' })]))).toEqual(['To Do', 'In Dev', 'Todo', 'PR Raised', 'Done'])
     expect(columnsWithDerived(board([card({ status: 'Todo' })]))).toEqual(['Todo', 'In Dev', 'PR Raised', 'Done'])
+  })
+})
+
+describe('a tab whose repositories were not read', () => {
+  const part = { account: 'bob-work', repos: ['globex/app'], total: 0, shown: 0, skipped: [], missing: [] as string[] }
+  it('names the repositories the read did not get', () => {
+    expect(unreadRepos(board([], { derived: [part] }), 'bob-work', two)).toBeNull() // read, and empty
+    expect(unreadRepos(board([], { derived: [{ ...part, missing: ['globex/app'] }] }), 'bob-work', two)).toEqual(['globex/app']) // renamed or deleted
+    expect(unreadRepos(board([], { derived: [{ ...part, missing: ['globex/app'], notes: ['globex/app not read: RATE_LIMITED'] }] }), 'bob-work', two)).toEqual(['globex/app'])
+    expect(unreadRepos(board([], { derived: [{ ...part, notes: ['Pull request details not read: HTTP 401'] }] }), 'bob-work', two)).toEqual(['globex/app'])
+    expect(unreadRepos(board([], { derived: [{ ...part, account: 'alice', missing: ['x/y'] }] }), 'bob-work', two)).toEqual(['globex/app']) // no read of this account at all
+    expect(unreadRepos(board([]), null, one)).toEqual(['acme/tracker'])
+    expect(unreadRepos(board([]), null, boarded)).toBeNull() // a board: not this read
+    expect(unreadRepos(null, 'bob-work', two)).toBeNull() // nothing loaded yet
+  })
+  it('each empty state', () => {
+    expect(boardEmpty({ login: 'carol', total: 0, shown: 0, unread: null }, two)).toBe('nothing-selected')
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread: ['globex/app'] }, two)).toBe('not-read')
+    expect(boardEmpty({ login: 'bob-work', total: 0, shown: 0, unread: null }, two)).toBe('no-issues')
+    expect(boardEmpty({ login: 'bob-work', total: 3, shown: 0, unread: ['globex/api'] }, two)).toBe('filtered') // some were read: the filters hide them
+    expect(boardEmpty({ login: 'bob-work', total: 3, shown: 2, unread: ['globex/api'] }, two)).toBe('cards')
+    expect(boardEmpty({ login: null, total: 0, shown: 0, unread: ['x/y'] }, boarded)).toBe('filtered') // a board: as before
+  })
+})
+
+describe('boardToShow', () => {
+  it('no board on screen once nothing is selected', () => {
+    const b = board([card()])
+    expect(boardToShow(b, one)).toBe(b)
+    expect(boardToShow(b, boarded)).toBe(b)
+    expect(boardToShow(b, parseConfig({ configured: true, config: {} }))).toBeNull() // every repository and board unticked: the cached one goes
+    expect(boardToShow(b, parseConfig({}))).toBeNull()
+    expect(boardToShow(null, one)).toBeNull()
+  })
+})
+
+describe('canMove', () => {
+  const real = card({ derived: undefined, state: undefined, project: 'acme/1', status: 'In Dev' })
+  it('only a card of a real board, in a tab with a board', () => {
+    expect(canMove(real, false)).toBe(true)
+    expect(canMove(card(), false)).toBe(false) // an issue of an account with no board: no status on GitHub
+    expect(canMove(card(), true)).toBe(false)
+    expect(canMove(real, true)).toBe(false)
+    expect(canMove(undefined, false)).toBe(false)
   })
 })

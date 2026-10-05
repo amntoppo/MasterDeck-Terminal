@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, claudeHandoff, ticketDefaults, ticketRequest } from "./NewTicket";
+import { boardFor, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -164,5 +164,21 @@ describe("a ticket for an account with no board", () => {
   it("with a board it is what the dialog always sent", () => {
     expect(ticketRequest(t, false, "alice")).toEqual({ ...t, account: "alice" });
     expect(ticketRequest(t, false, null)).toEqual({ ...t, account: undefined });
+  });
+});
+
+describe("Create with Claude from the dialog", () => {
+  const d = { title: " Fix login ", body: "Steps:\n1. open" } as never;
+  it("names the column; without a board it names none", () => {
+    expect(claudePrompt("In Dev", d)).toBe("Write this ticket for In Dev: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+    expect(claudePrompt("", d)).toBe("Write this ticket: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+    expect(claudePrompt("Todo", { title: "T", body: " " } as never)).toBe("Write this ticket for Todo: T (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+  });
+  it("nothing typed: no prompt", () => {
+    expect(claudePrompt("Todo", undefined)).toBeUndefined();
+    expect(claudePrompt("Todo", { title: " ", body: "" } as never)).toBeUndefined();
+  });
+  it("the brief says what an empty status means", () => {
+    expect(ticketContext(cfg as never, [], [], null)).toContain("An empty `status` and `project`: this account has no GitHub board");
   });
 });

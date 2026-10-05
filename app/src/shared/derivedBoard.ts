@@ -39,6 +39,16 @@ export function boardWanted(c: AppConfig): boolean {
   return c.configured && (c.projects.length > 0 || c.repos.length > 0)
 }
 
+/** The board to put on screen: none once nothing is selected (the cached one would stay otherwise, since no read replaces it). */
+export function boardToShow(b: Board | null, c: AppConfig): Board | null {
+  return boardWanted(c) ? b : null
+}
+
+/** May this card be dragged to another column? Not an issue of an account with no board (it has no status on GitHub), and nothing in a tab without a board. */
+export function canMove(card: BoardCard | null | undefined, fallback: boolean): boolean {
+  return !!card && !card.derived && !fallback
+}
+
 /** Is this repository's account one with no board? `repo` null: the primary issue repo. */
 export function repoBoardless(repo: string | null | undefined, c: AppConfig): boolean {
   return boardless(isMulti(c) ? accountForRepo(repo, c) : null, c)
@@ -137,14 +147,33 @@ export function tabBoard(b: Board | null, login: string | null, c: AppConfig): B
   return withoutDerived(own)
 }
 
-export type BoardEmpty = 'cards' | 'filtered' | 'no-issues' | 'nothing-selected'
+const partOf = (b: Board | null, login: string | null) => (b?.derived ?? []).find((d) => (d.account ?? null) === (login ?? null))
 
-/** Why a tab shows no card: the filters hide them (also a board's empty sprint, as before), its repositories have no open issue, or nothing is selected for its account. */
-export function boardEmpty(o: { login: string | null; total: number; shown: number }, c: AppConfig): BoardEmpty {
+/**
+ * The repositories of a tab without a board that the last read did not get (renamed, deleted,
+ * rate limited, or no read of the account at all): "no open issues" must not be said of them.
+ * Null when every one was read, for a tab with a board, and before any board is loaded.
+ */
+export function unreadRepos(b: Board | null, login: string | null, c: AppConfig): string[] | null {
+  if (!b || !boardless(login, c)) return null
+  const part = partOf(b, login)
+  if (!part) return reposOf(login, c)
+  if (part.missing.length) return part.missing
+  return part.notes?.length ? part.repos : null
+}
+
+export type BoardEmpty = 'cards' | 'filtered' | 'no-issues' | 'not-read' | 'nothing-selected'
+
+/**
+ * Why a tab shows no card: the filters hide them (also a board's empty sprint, as before), its
+ * repositories have no open issue, they could not be read (`unread`, from unreadRepos), or
+ * nothing is selected for its account.
+ */
+export function boardEmpty(o: { login: string | null; total: number; shown: number; unread?: string[] | null }, c: AppConfig): BoardEmpty {
   if (o.shown > 0) return 'cards'
   if (boardsOf(o.login, c).length === 0) {
     if (reposOf(o.login, c).length === 0) return 'nothing-selected'
-    if (o.total === 0) return 'no-issues'
+    if (o.total === 0) return o.unread?.length ? 'not-read' : 'no-issues'
   }
   return 'filtered'
 }
@@ -153,7 +182,7 @@ const names = (repos: string[]) => repos.map((r) => r.split('/')[1] ?? r).join('
 
 /** What the read left out, for the hint line of an account with no board. */
 export function derivedNotes(b: Board | null, login: string | null): string[] {
-  const part = (b?.derived ?? []).find((d) => (d.account ?? null) === (login ?? null))
+  const part = partOf(b, login)
   if (!part) return []
   const out: string[] = []
   if (part.shown < part.total) out.push(`Showing the first ${part.shown} of ${part.total} open issues.`)

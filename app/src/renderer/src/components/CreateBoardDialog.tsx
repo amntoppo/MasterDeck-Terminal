@@ -184,6 +184,7 @@ export function CreateBoardDialog({ account, onClose }: { account: string | null
                 </li>
               ))}
             </ul>
+            {plan.moreBoards && <div className="muted small">The name could not be checked against all of {plan.owner}'s boards.</div>}
             {taken && (
               <div className="error">
                 {plan.owner} already has a board named “{taken.title}”. Pick it in Setup → Repos & boards, or choose another name.
