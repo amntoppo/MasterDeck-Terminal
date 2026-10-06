@@ -15,6 +15,8 @@ export interface StartFolder {
   checkoutOf?: string
   /** Not found, and the search stopped at a limit after this many folders: there may be one further on. */
   searched?: number
+  /** Claude Code may work in `cwd` (see shared/trust.ts); null or missing: not known. */
+  trusted?: boolean | null
 }
 
 export function folderOf(d: DraftAssign): StartFolder {
@@ -24,6 +26,7 @@ export function folderOf(d: DraftAssign): StartFolder {
     ...(typeof d.found === 'boolean' ? { found: d.found } : {}),
     ...(d.checkoutOf ? { checkoutOf: d.checkoutOf } : {}),
     ...(d.partial && typeof d.searched === 'number' ? { searched: d.searched } : {}),
+    ...(d.trusted === true || d.trusted === false || d.trusted === null ? { trusted: d.trusted } : {}),
   }
 }
 

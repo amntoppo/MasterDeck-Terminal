@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { remoteSettings, knownDirsOnly, chosenFolder, MacPanes } from './remoteGuards'
+import { join } from 'node:path'
+import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
   expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
@@ -23,6 +24,30 @@ it('a chosen folder counts only from the Mac\'s own window, and must be a folder
   expect(chosenFolder(false, `${tmpdir()}/no-such-folder-here`)).toMatchObject({ ok: false })
   expect(chosenFolder(false, __filename)).toMatchObject({ ok: false })
   expect(chosenFolder(false, 3)).toEqual({ ok: false, message: 'not a folder on this Mac' })
+})
+it('claude is opened only from the Mac\'s own window, in a folder that is there', () => {
+  expect(claudeFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
+  expect(claudeFolder(true, tmpdir())).toEqual({ ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' })
+  expect(claudeFolder(false, join(tmpdir(), 'no-such-folder-here'))).toMatchObject({ ok: false })
+  expect(claudeFolder(false, 'relative/x')).toEqual({ ok: false, message: 'not a folder on this Mac: relative/x' })
+  expect(claudeFolder(false, __filename)).toMatchObject({ ok: false })
+  for (const bad of [undefined, null, '', 3, '~']) expect(claudeFolder(false, bad)).toMatchObject({ ok: false })
+})
+it('an inbox action from the web app takes the path it always did; only opening Claude on the Mac is refused', () => {
+  // The paired web app is the user's own window elsewhere: reply, approve and the rest are passed
+  // on exactly as from the Mac's window (no remote mark: text and master relay as before).
+  for (const remote of [false, true]) {
+    expect(inboxActCall(remote, 'i1', 'reply', { text: '/compact' })).toEqual({ ok: true, id: 'i1', type: 'reply', payload: { text: '/compact' } })
+    expect(inboxActCall(remote, 'i1', 'approve', null)).toEqual({ ok: true, id: 'i1', type: 'approve', payload: {} })
+    for (const type of ['option', 'menu', 'continue', 'compact', 'reject', 'send', 'login', 'dismiss', 'snooze'])
+      expect(inboxActCall(remote, 'i1', type, { a: 1 })).toEqual({ ok: true, id: 'i1', type, payload: { a: 1 } })
+    expect(inboxActCall(remote, 'i1', 'reply', 'nope')).toEqual({ ok: true, id: 'i1', type: 'reply', payload: {} })
+  }
+  // Open Claude there… opens a tab on the Mac: never for a browser, whatever the item says.
+  expect(inboxActCall(true, 'i1', 'trust', {})).toEqual({ ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' })
+  expect(inboxActCall(false, 'i1', 'trust', {})).toEqual({ ok: true, id: 'i1', type: 'trust', payload: {} })
+  for (const [id, type] of [[1, 'approve'], ['i1', null], [undefined, undefined]])
+    expect(inboxActCall(false, id, type, {})).toEqual({ ok: false, message: 'bad inbox action' })
 })
 
 describe('MacPanes (spec §4 size rule)', () => {

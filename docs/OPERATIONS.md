@@ -107,6 +107,26 @@ npx electron . --remote-debugging-port=9333
 - Native dialogs: with `--inspect=127.0.0.1:9334` you can stub `dialog.*` / `shell.openExternal`
   in main for the run.
 - The isolated app still lists the user's real sessions: never Reply, Stop or answer their items.
+- **Never give the app itself a temp `HOME` on macOS**: without the login keychain there, startup
+  stops on a system keychain dialog (on the user's screen) and the window never opens. To keep it
+  off the real `~/.claude.json`, set `CLAUDE_CONFIG_DIR=$E2E/claudecfg` instead: `master trust`,
+  `draft-assign` and `checkout` then read `$E2E/claudecfg/.claude.json` (write
+  `{"projects": {"<real path of a folder>": {"hasTrustDialogAccepted": true}}}` there to make a
+  folder trusted, `{"projects": {}}` for none).
+- **Anything that would run `claude`** (Start, Try again, **Open Claude there…**): put a stand-in
+  first on the PATH the app uses. The app takes its PATH from `$SHELL -ilc`, so point `SHELL` at a
+  small script that sets `PATH="$E2E/bin:/usr/bin:/bin"` and runs `/bin/sh`, and put a `claude`
+  script in `$E2E/bin` that prints `[]` for `agents`, prints Claude Code's refusal and exits 1 for
+  `--bg` (or `backgrounded · 4f2a9c1e` and 0), and prints a line and sleeps with no arguments.
+  Checked this way (2026-10-06): the Start dialog's line and button for an untrusted temp checkout,
+  the tab running the stand-in in that folder, the dialog coming back once the temp file says
+  trusted, the refused start's tab, the HELD card, **Try again** / **Start now** spawning the one
+  proposal (held → sent), and no line for a trusted folder.
+- A unit test that opens a pane through `PtyManager` runs whatever `paneCommand` names, a real
+  shell included: replace `node-pty` for the whole file with `vi.mock` before anything loads it
+  (`ptys.test.ts`), so it cannot start a process even while it is red. An argument the code under
+  test does not take yet protects nothing. The same for the CLI: patch `subprocess.run` around a
+  `cli.main(["spawn", …])` in a test.
 - The Board without GitHub: `MASTERDECK_BOARD_FIXTURE=<json>` with a `config.json` under
   `$MASTER_HOME`. `app/test/fixtures/board.json` goes with a config that has a board;
   `app/test/fixtures/board-derived.json` with one that has repositories and no board
@@ -190,5 +210,6 @@ a tab open is still to be measured (TODO).
 | "Another Mac is connected to this account" | close 4005: only one Mac per account; sign the other out |
 | Notifications never show | the bundle needs a whole-bundle (ad-hoc) signature; reinstall from a fresh build |
 | `install-mac.sh` says MasterDeck is running | quit it and wait for `pgrep` to be empty |
+| A session does not start: "Workspace not trusted. Run `claude` in `<folder>` once…" / "Claude Code has not been allowed to work in `<folder>` yet." | Claude Code's trust prompt was never accepted for that folder (sessions start in the ticket's repository's checkout; for a git repository only the repository itself or a folder inside it up to its root counts, never the workspace above it; a plain folder is covered by any trusted parent). **Open Claude there…** (Start dialog, the "did not start" tab, the HELD card in Needs you), accept the prompt, **Try again**: it spawns the same held proposal (`master spawn <id> --held-for-trust`: only a start the CLI itself held for this, never beside a live session of that name). `master trust <folder>` prints what MasterDeck reads (`true`, `false`, `null` = not known) from `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set, 8 MB at most); it never writes that file |
 | Web shows "Update MasterDeck" | Mac and web `PROTOCOL_VERSION` differ; update the Mac or reload |
 | Backend CI deploy fails (7403) | deploy locally with `npx wrangler deploy` |

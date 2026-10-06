@@ -4,10 +4,13 @@ import * as pty from "node-pty";
 import { isSafeBgId, paneCommand } from "@shared/paneCommand";
 import type { PaneSpec } from "@shared/types";
 import type { PtyOpenResult } from "@shared/ipc";
+import { claudeFolder } from "./remoteGuards";
 
 const REPLAY_MAX = 200 * 1024;
 
 interface Pane {
+  /** What it runs (`PaneSpec.kind`). */
+  kind: PaneSpec["kind"];
   proc: pty.IPty | null;
   buffer: string;
   /** Total characters emitted so far; lets a view drop data already in its replay. */
@@ -38,8 +41,13 @@ export class PtyManager {
     }),
   ) {}
 
-  open(id: string, spec: PaneSpec, cols: number, rows: number): PtyOpenResult {
+  /** `remote`: asked by a browser, which gets an existing pane only as the kind it really is. */
+  open(id: string, spec: PaneSpec, cols: number, rows: number, remote = false): PtyOpenResult {
     const existing = this.panes.get(id);
+    if (existing && remote && existing.kind !== spec?.kind)
+      // Else a pane the browser may not open (claude in a folder, gh login) could be had by its
+      // id, asked for as a shell.
+      return { ok: false, replay: "", seq: 0, exited: true, message: "that terminal is open on the Mac only" };
     if (existing) {
       // An exited pane stays exited until the user asks to reattach (close, then open). A view
       // that remounts must not silently start a new `claude attach`, which resumes a parked session.
@@ -76,6 +84,11 @@ export class PtyManager {
         message: `refusing unsafe background id ${spec.bgId}`,
       };
     }
+    if (spec.kind === "claude-here") {
+      // Never anywhere else: `startDir` falls back to home, where Claude Code would ask to trust home.
+      const dir = claudeFolder(false, spec.cwd);
+      if (!dir.ok) return { ok: false, replay: "", seq: 0, exited: true, message: dir.message };
+    }
     const ticket = spec.kind === "ticket-builder" ? this.ticketPane(spec) : null;
     if (ticket && "error" in ticket)
       return { ok: false, replay: "", seq: 0, exited: true, message: ticket.error };
@@ -98,7 +111,7 @@ export class PtyManager {
       cmd.cwd = ticket.cwd;
       mkdirSync(cmd.cwd, { recursive: true });
     }
-    const pane: Pane = { proc: null, buffer: "", seq: 0, exited: false };
+    const pane: Pane = { kind: spec.kind, proc: null, buffer: "", seq: 0, exited: false };
     this.panes.set(id, pane);
     try {
       const proc = pty.spawn(cmd.file, cmd.args, {

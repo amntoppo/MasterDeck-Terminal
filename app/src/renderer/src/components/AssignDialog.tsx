@@ -10,7 +10,9 @@ import { formatAgo } from "@shared/format";
 import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
 import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
+import { startBlocked, startFlags, trustHeldAssign } from "@shared/trust";
 import { AccountBadge, AccountSelect } from "./AccountBits";
+import { TrustNote, useTrust } from "./TrustFix";
 import { deck } from "../deck";
 import { can } from "../web";
 
@@ -39,6 +41,9 @@ export function AssignDialog({
   const pending = pendingAssign(state.proposals, ticketOf(issue));
   const approved =
     pending?.status === "approved" && pending.target.spawn ? pending : null;
+  // A start of this ticket that Claude Code refused for its folder and that is still held: the
+  // dialog starts from it and, unchanged, tries that same proposal again instead of adding one.
+  const held = pending ? null : trustHeldAssign(state.proposals, ticketOf(issue));
   const [draft, setDraft] = useState<DraftAssign | null>(null);
   const [name, setName] = useState("");
   const [system, setSystem] = useState("");
@@ -72,6 +77,20 @@ export function AssignDialog({
   const [folder, setFolder] = useState<StartFolder | null>(null);
   const [chosen, setChosen] = useState(false);
   const chosenPath = useRef<string | null>(null);
+  // Claude Code starts a session only in a folder whose trust prompt was accepted. The draft says
+  // whether this one is; a folder it says nothing about (the proposal's own) is asked about once.
+  const trust = useTrust(folder?.cwd ?? null, folder ? folder.trusted : null);
+  // Start regardless: what was read may be wrong, and Claude Code decides.
+  const [anyway, setAnyway] = useState(false);
+  const blocked = startBlocked(trust.trusted, { desktop: trust.desktop, anyway });
+  // While the user answers Claude Code's prompt in the tab that opened, the dialog is out of the
+  // way (it would cover the terminal) and keeps what was typed; it comes back once the folder is
+  // trusted, or when the wait ends.
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    if (trust.opened && trust.trusted !== true) setAway(true);
+    else setAway(false);
+  }, [trust.opened, trust.trusted]);
   // The prompts MasterDeck's drafts wrote: a new draft replaces the system prompt only while it
   // is one of them (never one the user edited, or one master wrote by hand in its proposal).
   const generic = useRef<string[]>([]);
@@ -88,7 +107,9 @@ export function AssignDialog({
     if (!p) return;
     chosenPath.current = p;
     setChosen(true);
-    setFolder((cur) => ({ ...cur, cwd: p, found: undefined }));
+    // Nothing is known of the new folder yet, its trust included (asked about at once).
+    setFolder((cur) => ({ ...cur, cwd: p, found: undefined, trusted: undefined }));
+    setAnyway(false);
     // The same resolver says whether it is a checkout of the repository, and words the prompt for it.
     const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
     if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
@@ -132,7 +153,7 @@ export function AssignDialog({
 
   useEffect(() => {
     let alive = true;
-    const fromProposal = pending && pending.target.spawn ? pending : null;
+    const fromProposal = pending && pending.target.spawn ? pending : held;
     const use = (d: DraftAssign) => {
       setDraft(d);
       setName(d.name);
@@ -145,6 +166,12 @@ export function AssignDialog({
     };
     if (fromProposal) {
       const sp = fromProposal.target.spawn!;
+      // The refused start's prompt is the whole first message already (description and earlier
+      // sessions included): sent again as it is, not wrapped a second time.
+      if (fromProposal === held) {
+        setUseDesc(false);
+        setUseMemory(false);
+      }
       use({
         issue: issue.number,
         repo: issue.repo ?? null,
@@ -194,11 +221,12 @@ export function AssignDialog({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // Out of the way: Escape belongs to the Claude the user is answering.
+      if (e.key === "Escape" && !away) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, away]);
 
   const nameOk = NAME_RE.test(name);
   const prompt = composePrompt(
@@ -210,14 +238,14 @@ export function AssignDialog({
   const promptOk = prompt.length > 0 && !prompt.startsWith("-");
 
   const start = () => {
-    if (!draft || !nameOk || !promptOk) return;
+    if (!draft || !nameOk || !promptOk || blocked) return;
     const cwd = folder?.cwd || draft.cwd;
     // Nothing differs from master's proposal: it is approved as it is. Otherwise a new one, which
     // keeps the model master named unless one was picked here.
     const choice = startChoice(
       draft,
       { name, prompt, cwd, model, override: !!override },
-      draft.proposalId !== null ? pending?.target.spawn?.model : undefined,
+      draft.proposalId !== null ? (pending ?? held)?.target.spawn?.model : undefined,
     );
     const unchanged = !choice.edited;
     onStart({
@@ -228,10 +256,12 @@ export function AssignDialog({
       prompt,
       proposalId: draft.proposalId,
       edited: !unchanged,
-      approved:
-        unchanged &&
-        draft.proposalId !== null &&
-        draft.proposalId === approved?.id,
+      ...startFlags({
+        proposalId: draft.proposalId,
+        edited: !unchanged,
+        approvedId: approved?.id,
+        heldId: held?.id,
+      }),
       model: choice.model,
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
@@ -240,8 +270,21 @@ export function AssignDialog({
   };
 
   return (
+    <>
+    {away && (
+      <div className="trust-wait" role="status">
+        <span>
+          Starting #{issue.number}: accept Claude Code's prompt in this tab. The
+          Start dialog comes back by itself.
+        </span>
+        <button className="btn" onClick={() => setAway(false)}>
+          Back to the dialog
+        </button>
+      </div>
+    )}
     <div
       className="backdrop"
+      style={away ? { display: "none" } : undefined}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -270,7 +313,10 @@ export function AssignDialog({
           {draft?.proposalId != null && (
             <>
               {" "}
-              · from master's proposal {draft.proposalId}
+              ·{" "}
+              {held?.id === draft.proposalId
+                ? `the start Claude Code refused (proposal ${draft.proposalId}); it is tried again`
+                : `from master's proposal ${draft.proposalId}`}
               {approved ? " (approved, not started yet)" : ""}
             </>
           )}
@@ -331,6 +377,10 @@ export function AssignDialog({
               account={isMulti(state.config) ? account : null}
               onChoose={can("pickFolder") ? choose : undefined}
             />
+            {/* Nothing for a trusted folder, or one nothing is known about. */}
+            {(trust.trusted === false || trust.opened) && (
+              <TrustNote trust={trust} />
+            )}
             <label>Session name</label>
             <input
               value={name}
@@ -518,11 +568,20 @@ export function AssignDialog({
               <button className="btn" onClick={onClose}>
                 Cancel
               </button>
+              {blocked && (
+                <button
+                  className="link-btn"
+                  onClick={() => setAnyway(true)}
+                  title="Start without waiting: if Claude Code refuses the folder, the start can be tried again"
+                >
+                  Start anyway
+                </button>
+              )}
               <button
                 className="btn primary"
-                disabled={!nameOk || !promptOk}
+                disabled={!nameOk || !promptOk || blocked}
                 onClick={start}
-                title="⌘↵"
+                title={blocked ? "Claude Code has not been allowed to work in this folder yet" : "⌘↵"}
               >
                 Start
               </button>
@@ -543,6 +602,7 @@ export function AssignDialog({
         )}
       </div>
     </div>
+    </>
   );
 }
 

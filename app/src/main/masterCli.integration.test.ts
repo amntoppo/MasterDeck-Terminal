@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -35,4 +35,27 @@ describe.runIf(hasPython())('MasterCli against the real CLI', () => {
     const again = await cli.approve([1])
     expect(again.ok).toBe(false)
   })
+
+  // HOME is a temp folder: the CLI reads `.claude.json` there, never the machine's own.
+  it('says whether Claude Code may work in a folder, and notices when the user allows it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'deck-home-'))
+    const folder = join(home, 'code', 'api')
+    mkdirSync(folder, { recursive: true })
+    const { CLAUDE_CONFIG_DIR: _none, ...rest } = process.env
+    const env = { ...rest, HOME: home, USERPROFILE: home, MASTER_HOME: join(home, 'master') }
+    const cli = new MasterCli(makeRunner(() => cleanEnv(env)), LIB, 'python3')
+    const file = join(home, '.claude.json')
+    // Claude Code keys a folder by its real path (no links; `native` also spells out Windows short names, as the CLI does).
+    const allow = (yes: boolean) => writeFileSync(file, JSON.stringify({ projects: { [realpathSync.native(folder)]: { hasTrustDialogAccepted: yes } } }), 'utf8')
+    expect(await cli.trust(folder)).toBeNull() // no file: not known
+    allow(false)
+    expect(await cli.trust(folder)).toBe(false)
+    const before = readFileSync(file, 'utf8')
+    setTimeout(() => allow(true), 300)
+    expect(await cli.trust(folder, 20)).toBe(true)
+    expect(await cli.trust(join(home, 'code'))).toBe(false) // a parent of a trusted folder is not trusted by it
+    allow(false)
+    await cli.trust(folder)
+    expect(readFileSync(file, 'utf8')).toBe(before) // read only
+  }, 30_000)
 })

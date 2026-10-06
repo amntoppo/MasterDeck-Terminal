@@ -115,12 +115,53 @@ describe('MasterCli', () => {
   it('checkout asks where a repository\'s sessions start', async () => {
     const f = fake({ stdout: JSON.stringify({ cwd: '/code/globex/app', workspace: '/code/globex', repo: 'globex/app', found: true }) })
     const cli = new MasterCli(f.run, '/lib', 'python3')
-    expect(await cli.checkout('globex/app')).toEqual({ ok: true, cwd: '/code/globex/app', workspace: '/code/globex', found: true })
+    expect(await cli.checkout('globex/app')).toEqual({ ok: true, cwd: '/code/globex/app', workspace: '/code/globex', found: true, trusted: null })
     expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'checkout', 'globex/app'])
     expect((await cli.checkout('--oops')).ok).toBe(false)
     expect(f.calls).toHaveLength(1)
     expect((await new MasterCli(fake({ stdout: 'nope' }).run, '/lib', 'python3').checkout('globex/app')).ok).toBe(false)
     expect((await new MasterCli(fake({ stdout: '{}' }).run, '/lib', 'python3').checkout('globex/app')).ok).toBe(false)
+  })
+  it('a draft and a checkout say whether Claude Code may work in the folder', async () => {
+    const d = (trusted: unknown) => new MasterCli(fake({ stdout: JSON.stringify({ issue: 9, name: 'n', cwd: 'code/api', prompt: 'p', summary: 's', title: 't', url: 'u', trusted }) }).run, '/lib', 'python3').draftAssign({ repo: null, number: 9 })
+    for (const t of [true, false, null]) {
+      const r = await d(t)
+      expect(r.ok && r.draft.trusted).toBe(t)
+    }
+    const c = (trusted: unknown) => new MasterCli(fake({ stdout: JSON.stringify({ cwd: 'code/api', workspace: 'code', found: true, ...(trusted === undefined ? {} : { trusted }) }) }).run, '/lib', 'python3').checkout('acme/api')
+    expect(await c(false)).toEqual({ ok: true, cwd: 'code/api', workspace: 'code', found: true, trusted: false })
+    // An older CLI, or anything that is not a yes or a no: not known.
+    expect(await c(undefined)).toMatchObject({ trusted: null })
+    expect(await c('yes')).toMatchObject({ trusted: null })
+  })
+  it('spawnHeld is the guarded retry, and reject can say why', async () => {
+    const f = fake({ stdout: '5: sent' })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    expect(await cli.spawnHeld(5)).toEqual({ ok: true, message: '5: sent' })
+    expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'spawn', '5', '--held-for-trust'])
+    await cli.reject([5], 'closed: it runs already')
+    expect(f.calls[1].args).toEqual(['-m', 'master.cli', 'reject', '5', '--note', 'closed: it runs already'])
+    await cli.reject([5])
+    expect(f.calls[2].args).toEqual(['-m', 'master.cli', 'reject', '5'])
+  })
+  it('trust asks about one folder, and can wait for the answer to turn yes', async () => {
+    const f = fake({ stdout: JSON.stringify({ cwd: 'code/api', trusted: false }) })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    expect(await cli.trust('code/api')).toBe(false)
+    expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'trust', 'code/api'])
+    expect(await cli.trust('code/api', 15)).toBe(false)
+    expect(f.calls[1].args).toEqual(['-m', 'master.cli', 'trust', 'code/api', '--wait', '15'])
+    // The CLI gets longer than it waits.
+    expect(f.calls[1].opts?.timeoutMs).toBeGreaterThan(15_000)
+    expect(await new MasterCli(fake({ stdout: JSON.stringify({ cwd: 'code/api', trusted: true }) }).run, '/lib', 'python3').trust('code/api')).toBe(true)
+  })
+  it('trust is not known when the CLI fails, prints something else, or the folder looks like an option', async () => {
+    for (const reply of [{ code: 1, stdout: 'boom' }, { stdout: 'nope' }, { stdout: '{}' }, { stdout: '{"trusted":"yes"}' }, { stdout: '{"trusted":null}' }])
+      expect(await new MasterCli(fake(reply).run, '/lib', 'python3').trust('code/api')).toBeNull()
+    const f = fake({ stdout: '{"trusted":true}' })
+    expect(await new MasterCli(f.run, '/lib', 'python3').trust('--wait')).toBeNull()
+    expect(await new MasterCli(f.run, '/lib', 'python3').trust('')).toBeNull()
+    expect(f.calls).toEqual([])
   })
   it('draftAssign parses JSON and marks it as not from a proposal', async () => {
     const f = fake({ stdout: JSON.stringify({ issue: 9, name: 'n', cwd: '/w', prompt: 'p', summary: 's', title: 't', url: 'u' }) })
