@@ -621,7 +621,7 @@ export function AssignDialog({
                           : !worktreeHere
                             ? "no checkout of the ticket's repository here: choose its folder first"
                           : worktreeOn
-                            ? "the session starts in its own worktree"
+                            ? "the session starts in the worktree below, made from the folder above"
                             : "off: the session starts in the folder above and sets itself up"}
                     </span>
                   </label>
