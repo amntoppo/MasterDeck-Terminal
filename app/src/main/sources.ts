@@ -189,6 +189,7 @@ import {
   requestPrompt,
   ticketContext,
   type HookRequest,
+  type PeerFact,
 } from "@shared/deckHooks";
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
@@ -853,7 +854,10 @@ export class Sources {
 
   setPeerStore(store: PeerStore): void {
     this.peerStore = store;
-    store.onChange(() => this.emit());
+    store.onChange(() => {
+      this.writeTicketContext(this.lastSessions);
+      this.emit();
+    });
   }
 
   /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
@@ -2030,34 +2034,58 @@ export class Sources {
     if (!deck) return;
     const live = new Set<string>();
     for (const s of sessions) {
-      if (s.issue === null || s.state === "done") continue;
+      if (s.state === "done") continue;
+      const peers = this.peerFacts(s.key);
+      if (s.issue === null && !peers.length) continue;
       live.add(s.sessionId);
-      const key = ticketKey(s.issueRepo, s.issue);
-      const issue = this.snapshot.issues.find((i) =>
-        sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! }),
-      );
-      const earlier = (this.past[key] ?? [])
-        .filter((p) => p.sessionId !== s.sessionId)
-        .map((p) => {
-          const sum = this.summaryOf(p.sessionId);
-          return sum
-            ? { name: p.name, at: p.lastActivity, text: sum.text }
-            : null;
-        })
-        .filter((x): x is { name: string; at: number; text: string } => !!x);
-      deck.setContext(
-        s.sessionId,
-        ticketContext(
-          {
-            label: ticketLabel(s.issueRepo, s.issue),
-            title: issue?.title ?? null,
-            url: issue?.url ?? null,
-          },
-          earlier,
-        ),
-      );
+      let ticket: { label: string; title: string | null; url: string | null } | null = null;
+      let earlier: { name: string; at: number; text: string }[] = [];
+      if (s.issue !== null) {
+        const key = ticketKey(s.issueRepo, s.issue);
+        const issue = this.snapshot.issues.find((i) =>
+          sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! }),
+        );
+        ticket = {
+          label: ticketLabel(s.issueRepo, s.issue),
+          title: issue?.title ?? null,
+          url: issue?.url ?? null,
+        };
+        earlier = (this.past[key] ?? [])
+          .filter((p) => p.sessionId !== s.sessionId)
+          .map((p) => {
+            const sum = this.summaryOf(p.sessionId);
+            return sum
+              ? { name: p.name, at: p.lastActivity, text: sum.text }
+              : null;
+          })
+          .filter((x): x is { name: string; at: number; text: string } => !!x);
+      }
+      deck.setContext(s.sessionId, ticketContext(ticket, earlier, peers));
+      for (const p of peers)
+        if (p.summary) this.peerStore?.markSeen(s.key, p.key, p.summary.at);
     }
+    deck.pruneDeltas(live);
     deck.pruneContext(live);
+  }
+
+  /** What this session's linked sessions are doing (facts + saved summary), by Session.key. */
+  peerFacts(key: string): PeerFact[] {
+    if (!this.peerStore) return [];
+    const out: PeerFact[] = [];
+    for (const pk of this.peerStore.of(key)) {
+      const s = this.lastSessions.find((x) => x.key === pk);
+      if (!s || s.state === "done") continue;
+      out.push({
+        key: pk,
+        name: s.name,
+        cwd: this.stats[s.sessionId]?.currentDir ?? s.cwd,
+        branch: this.git[s.sessionId]?.branch ?? null,
+        ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
+        state: s.state,
+        summary: this.summaryOf(s.sessionId),
+      });
+    }
+    return out;
   }
 
   /** Background work a session started and is still waiting on (the last 256 KB of its transcript). */

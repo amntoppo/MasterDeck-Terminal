@@ -93,7 +93,7 @@ if [ "$ev" = MasterReport ]; then
   printf '%s' "$in" | jq -c --arg cfg "$(cat "$C" 2>/dev/null)" --arg sids "$(cat "$D/master-sids" 2>/dev/null)" --arg q "'" '${MASTER_REPORT_JQ}' 2>/dev/null
   exit 0
 fi
-mkdir -p "$D/pending" "$D/answers" "$D/context" 2>/dev/null
+mkdir -p "$D/pending" "$D/answers" "$D/context" "$D/peers" 2>/dev/null
 case "$ev" in
   MonitorCall)
     [ "$(cat "$D/monitors-by" 2>/dev/null)" = masterdeck ] || exit 0
@@ -126,6 +126,11 @@ case "$ev" in
     rm -f "$D/pending/$id.json"
     exit 0 ;;
   UserPromptSubmit)
+    # Linked sessions: a peer's summary changed since this session last heard (one file, read once).
+    case "$sid" in *[!0-9a-fA-F-]*|'') ;; *)
+      pd="$D/peers/$sid.delta.json"
+      if [ -f "$pd" ] && mv "$pd" "$pd.read" 2>/dev/null; then cat "$pd.read"; rm -f "$pd.read"; exit 0; fi ;;
+    esac
     # Fast path: only /queue prompts go further (no jq, nothing logged, for the rest).
     case "$in" in *'"prompt":"/queue'*|*'"prompt": "/queue'*) ;; *) exit 0 ;; esac
     [ -f "$D/queue-off" ] && exit 0
@@ -224,7 +229,7 @@ export class DeckHooks {
 
   /** Write the script (every launch: it follows this version) and the folders it uses. */
   setup(): void {
-    for (const d of ['', 'pending', 'answers', 'context', 'watch-requests', 'watch-answers', 'queue-requests', 'queue-answers']) mkdirSync(join(this.dir, d), { recursive: true })
+    for (const d of ['', 'pending', 'answers', 'context', 'peers', 'watch-requests', 'watch-answers', 'queue-requests', 'queue-answers']) mkdirSync(join(this.dir, d), { recursive: true })
     writeFileSync(this.script, hookScript(this.dir, this.queues, this.config))
     chmodSync(this.script, 0o755)
     try {
@@ -498,6 +503,29 @@ export class DeckHooks {
     }
     writeFileSync(`${p}.tmp`, text)
     renameSync(`${p}.tmp`, p)
+  }
+
+  /** What the next prompt of this session is told about a linked session (overwrites; read once by the hook). */
+  setDelta(sessionId: string, json: object): void {
+    if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return
+    const dir = join(this.dir, 'peers')
+    mkdirSync(dir, { recursive: true })
+    const p = join(dir, `${sessionId}.delta.json`)
+    writeFileSync(`${p}.tmp`, JSON.stringify(json))
+    renameSync(`${p}.tmp`, p)
+  }
+
+  clearDelta(sessionId: string): void {
+    rm(join(this.dir, 'peers', `${sessionId}.delta.json`))
+  }
+
+  /** Delta files of sessions no longer live. */
+  pruneDeltas(live: Set<string>): void {
+    try {
+      for (const n of readdirSync(join(this.dir, 'peers'))) if (n.endsWith('.delta.json') && !live.has(n.slice(0, -'.delta.json'.length))) rm(join(this.dir, 'peers', n))
+    } catch {
+      // none
+    }
   }
 
   /** Context files of sessions no longer live. */

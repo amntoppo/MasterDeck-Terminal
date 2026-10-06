@@ -1,9 +1,11 @@
+import { peersBlock, type PeerFact } from './deckHooks'
+
 /**
  * The first message a new session gets: master's ASSIGN prompt, plus the ticket's description and
  * the user's own first instructions when either is given. The ASSIGN prompt says to stop and ask for
  * instructions (its step 3); with either given, the session is told to use them instead of asking.
  */
-export function composePrompt(system: string, instructions: string, description = '', earlier = '', setup = ''): string {
+export function composePrompt(system: string, instructions: string, description = '', earlier = '', setup = '', peers = ''): string {
   // `setup`: what MasterDeck already did for the session (the worktree it made), said with the system prompt.
   const sys = [system.trim(), setup.trim()].filter(Boolean).join('\n\n')
   const own = instructions.trim()
@@ -16,6 +18,7 @@ export function composePrompt(system: string, instructions: string, description 
   }
   // Context, not instructions: what earlier sessions on this ticket already did.
   if (past) parts.push(`## What earlier sessions on this ticket did (from their summaries)\n\n${past}`)
+  if (peers.trim()) parts.push(peers.trim())
   if (desc) parts.push(`## The ticket's description\n\n${desc}`)
   if (own) parts.push(`## The user's first instructions\n\n${own}`)
   return parts.join('\n\n')
@@ -27,4 +30,9 @@ export function earlierBlock(list: { name: string; at: number; text: string }[])
     .slice(0, 3)
     .map((e) => `### ${e.name} (${new Date(e.at).toISOString().slice(0, 10)})\n\n${e.text.trim().length > 2500 ? `${e.text.trim().slice(0, 2500)}…` : e.text.trim()}`)
     .join('\n\n')
+}
+
+/** Linked sessions as one block for the first prompt (same text as the SessionStart context). */
+export function peersPromptBlock(peers: PeerFact[]): string {
+  return peersBlock(peers)
 }

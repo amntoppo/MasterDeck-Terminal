@@ -413,3 +413,29 @@ describe.skipIf(process.platform === 'win32')('installDeckHooks, the master repo
     expect(JSON.parse(readFileSync(p, 'utf8')).hooks.PreToolUse.filter((m: { matcher?: string }) => m.matcher === 'Monitor')).toHaveLength(1)
   })
 })
+
+describe.skipIf(process.platform === 'win32')('the peer delta (UserPromptSubmit)', () => {
+  it('prints a peer delta once, then nothing', () => {
+    const home = mkdtempSync(join(tmpdir(), 'deck-'))
+    const d = new DeckHooks(home)
+    d.setup()
+    const run = (input: object) => execFileSync(d.script, ['UserPromptSubmit'], { input: JSON.stringify(input) }).toString()
+    const delta = { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'hi' } }
+    d.setDelta(SID, delta)
+    expect(JSON.parse(run({ session_id: SID, prompt: 'hello' }))).toEqual(delta)
+    expect(existsSync(join(home, 'deck', 'peers', `${SID}.delta.json`))).toBe(false)
+    expect(run({ session_id: SID, prompt: 'hello' })).toBe('')
+  })
+  it('clears and prunes deltas', () => {
+    const home = mkdtempSync(join(tmpdir(), 'deck-'))
+    const d = new DeckHooks(home)
+    d.setup()
+    const other = SID.replace(/.$/, SID.endsWith('0') ? '1' : '0')
+    d.setDelta(SID, { a: 1 })
+    d.setDelta(other, { a: 2 })
+    d.clearDelta(SID)
+    expect(readdirSync(join(home, 'deck', 'peers'))).toEqual([`${other}.delta.json`])
+    d.pruneDeltas(new Set())
+    expect(readdirSync(join(home, 'deck', 'peers'))).toEqual([])
+  })
+})

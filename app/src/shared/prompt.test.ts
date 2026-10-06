@@ -26,3 +26,10 @@ describe('composePrompt', () => {
     expect(p).toBe("You own #9.\n\nThe ticket's description is below; follow it instead of stopping to ask in step 3.\n\n## The ticket's description\n\nBell shows no count.")
   })
 })
+
+describe('composePrompt peers', () => {
+  it('adds the linked sessions block after the earlier-sessions block', () => {
+    const p = composePrompt('SYS', '', '', 'EARLIER', '', '## Linked sessions\n\n### x')
+    expect(p.indexOf('EARLIER')).toBeLessThan(p.indexOf('## Linked sessions'))
+  })
+})
