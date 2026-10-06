@@ -12,6 +12,7 @@ import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { GhAccount } from "./ghAuth";
+import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { HookEntry } from "./workflow";
 import type {
   CustomTrigger,
@@ -191,6 +192,12 @@ export const CH = {
   templates: "templates:list",
   saveTemplate: "templates:save",
   deleteTemplate: "templates:delete",
+  notesList: "notes:list",
+  notesGet: "notes:get",
+  notesSearch: "notes:search",
+  notesSave: "notes:save",
+  notesDelete: "notes:delete",
+  notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
   ticketCreate: "ticket:create",
@@ -368,6 +375,15 @@ export interface DeckApi {
   templates(): Promise<Template[]>;
   saveTemplate(t: Template): Promise<Template[]>;
   deleteTemplate(name: string): Promise<Template[]>;
+  /** The user's notes (MASTERDECK_HOME/notes): titles and previews. A body is read with notesGet. */
+  notesList(): Promise<NoteMeta[]>;
+  notesGet(id: string): Promise<Note | null>;
+  /** Ids of the notes whose title, text or ticket has every word of the query. */
+  notesSearch(query: string): Promise<string[]>;
+  /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
+  notesSave(input: NoteInput): Promise<SaveResult>;
+  notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */
   ticketCreate(

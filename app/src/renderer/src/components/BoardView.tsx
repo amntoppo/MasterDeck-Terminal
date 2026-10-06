@@ -7,7 +7,13 @@ import {
 } from "@shared/appConfig";
 import { nextTabName, ViewTabs } from "./ViewTabs";
 import { isMulti, primaryLogin } from "@shared/accounts";
-import { fullRepo, ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
+import {
+  fullRepo,
+  ticketKey,
+  ticketLabel,
+  ticketOf,
+  type Ticket,
+} from "@shared/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cardBadge,
@@ -19,6 +25,9 @@ import {
 } from "@shared/board";
 import { createPortal } from "react-dom";
 import { can, usePhone } from "../web";
+import { ticketNote } from "../notes";
+import { RailIcon } from "./Rail";
+import type { NoteMeta } from "@shared/notes";
 import { PhoneFilters } from "./PhoneFilters";
 import type { PastSession } from "@shared/pastSessions";
 import {
@@ -105,6 +114,9 @@ interface Props {
   onSummary: () => void;
   /** Open Setup (an account with nothing selected, or no board). */
   onSetup: () => void;
+  notes?: NoteMeta[];
+  /** Open a ticket's note (absent: Notes is not available here). */
+  onNote?: (t: Ticket) => void;
 }
 
 const BADGE_ICON: Record<Badge["kind"], string> = {
@@ -210,6 +222,8 @@ export function BoardView({
   onAssign,
   onSummary,
   onSetup,
+  notes,
+  onNote,
 }: Props) {
   const now = useNow(15_000);
   const [refreshing, setRefreshing] = useState(false);
@@ -1223,6 +1237,12 @@ export function BoardView({
                         moving={!!moving[ticketKey(c.repo, c.number)]}
                         readOnly={!canMove(c, worked)}
                         onClick={() => onCard(c)}
+                        noted={!!ticketNote(notes ?? [], c.repo, c.number)}
+                        onNote={
+                          onNote && can("notesList")
+                            ? () => onNote(ticketOf(c))
+                            : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -1389,6 +1409,8 @@ function Card({
   moving,
   readOnly,
   onClick,
+  noted,
+  onNote,
 }: {
   card: BoardCard;
   state: AppState;
@@ -1399,6 +1421,10 @@ function Card({
   /** An issue of an account with no board: it cannot be dragged to another column. */
   readOnly: boolean;
   onClick: () => void;
+  /** This ticket has a note. */
+  noted: boolean;
+  /** Open the ticket's note (absent: Notes is not available here). */
+  onNote?: () => void;
 }) {
   const t = ticketOf(card);
   const s = sessionForIssue(state.sessions, t);
@@ -1451,6 +1477,27 @@ function Card({
           {fullRepo(card.repo).split("/")[1]} #{card.number}
         </span>
         <span style={{ flex: 1 }} />
+        {onNote && (
+          <button
+            className={`bcard-note ${noted ? "has" : ""}`}
+            title={noted ? "Open the note" : "Add a note"}
+            aria-label={noted ? "Open the note" : "Add a note"}
+            draggable={false}
+            // A press on the mark must not start the draggable card's drag.
+            onDragStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            // The card is a button itself: the mark must not run the card's click or its Enter.
+            onClick={(e) => {
+              e.stopPropagation();
+              onNote();
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <RailIcon name="notes" size={13} />
+          </button>
+        )}
         {badge ? (
           <span
             className={`badge ${badge.kind}`}

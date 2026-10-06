@@ -64,6 +64,13 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   templates: invoke(CH.templates),
   saveTemplate: invoke(CH.saveTemplate),
   deleteTemplate: invoke(CH.deleteTemplate),
+  // Notes travel to a browser over the encrypted bridge only; they are in no snapshot.
+  notesList: invoke(CH.notesList),
+  notesGet: invoke(CH.notesGet),
+  notesSearch: invoke(CH.notesSearch),
+  notesSave: invoke(CH.notesSave),
+  notesDelete: invoke(CH.notesDelete),
+  onNotesChanged: { kind: "event", ch: CH.notesChanged },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
@@ -149,6 +156,7 @@ export const REMOTE_EVENTS: Record<string, string> = {
   onPtyExit: CH.ptyExit,
   onWorkflowDraft: CH.workflowDraft,
   onTicketsCreated: CH.ticketsCreated,
+  onNotesChanged: CH.notesChanged,
 };
 
 /** Argument reshaping the preload does for remote methods, so RemoteDeck and the preload agree. */

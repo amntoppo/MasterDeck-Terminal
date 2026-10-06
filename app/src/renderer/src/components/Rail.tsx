@@ -13,6 +13,7 @@ const ICONS: Record<string, string> = {
   costs: 'M12 3v18M16.5 7.5c0-1.9-2-3-4.5-3s-4.5 1.1-4.5 3 2 2.6 4.5 3 4.5 1.1 4.5 3-2 3-4.5 3-4.5-1.1-4.5-3',
   history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   janitor: 'M14 3l7 7M9 8l7 7M4 21l6-6M10 15l-3-3 5-5 5 5-5 5z',
+  notes: 'M4 20h4l10-10-4-4L4 16zM13 7l4 4M12 20h8',
   workflow: 'M5 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 6h10M6 8l5 8M18 8l-5 8',
   broadcast: 'M3 11v2a2 2 0 0 0 2 2h1l5 4V5L6 9H5a2 2 0 0 0-2 2zM16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14',
   standup: 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 8h8M8 12h8M8 16h5',
@@ -45,6 +46,9 @@ interface Props {
   remote: Presence[]
   /** Open Settings → Remote. */
   onRemote: () => void
+  /** The Notes panel is open. */
+  notesOpen: boolean
+  onNotes: () => void
 }
 
 /** The blinking amber dot (only while something remote is connected) and its hover/focus card. */
@@ -104,9 +108,11 @@ const VIEWS: [View, string, string][] = [
   ['prs', 'Pull requests', ''],
   ['tasks', 'Tasks', ''],
 ]
-const TOOLS: [View, string][] = [
+/** Notes is a panel over the current view, not a view: its button toggles it. */
+const TOOLS: [View | 'notes', string][] = [
   ['costs', 'Costs'],
   ['janitor', 'Janitor'],
+  ['notes', 'Notes'],
   ['workflow', 'Workflow'],
 ]
 const ACTIONS: [RailAction, string, string][] = [
@@ -117,7 +123,7 @@ const ACTIONS: [RailAction, string, string][] = [
 ]
 
 /** The Command Center rail: views on top, tools, then actions and Settings at the bottom. */
-export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote }: Props) {
+export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes }: Props) {
   const viewBtn = (v: View, label: string, hint = '', badge = 0) => (
     <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${label}  ${hint}` : label} aria-label={label} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
       <RailIcon name={v} />
@@ -129,7 +135,15 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
       <div className="rail-drag" />
       {VIEWS.filter(([v]) => screenOk(v)).map(([v, label, hint]) => viewBtn(v, label, hint, v === 'terminals' ? needs : v === 'prs' ? prAttention : 0))}
       {TOOLS.some(([v]) => screenOk(v)) && <div className="rail-sep" />}
-      {TOOLS.filter(([v]) => screenOk(v)).map(([v, label]) => viewBtn(v, label))}
+      {TOOLS.filter(([v]) => screenOk(v)).map(([v, label]) =>
+        v === 'notes' ? (
+          <button key={v} className={`rb ${notesOpen ? 'on' : ''}`} data-tip={label} aria-label={label} aria-pressed={notesOpen} onClick={onNotes}>
+            <RailIcon name="notes" />
+          </button>
+        ) : (
+          viewBtn(v, label)
+        ),
+      )}
       <div style={{ flex: 1 }} />
       <RemoteIndicator remote={remote} onRemote={onRemote} />
       {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label, hint]) => (
@@ -156,10 +170,12 @@ interface PhoneProps {
   onAction: (a: RailAction) => void
   needs: number
   prAttention: number
+  notesOpen: boolean
+  onNotes: () => void
 }
 
 /** The phone's bottom tab bar (web, narrow window): the rail's views as tabs, the rest under More. */
-export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction, needs, prAttention }: PhoneProps) {
+export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction, needs, prAttention, notesOpen, onNotes }: PhoneProps) {
   const [more, setMore] = useState(false)
   const main = screen === 'main'
   const tab = (key: string, label: string, icon: string, on: boolean, click: () => void, badge = 0) => (
@@ -169,15 +185,15 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
       <span className="pb-l">{label}</span>
     </button>
   )
-  const tools = [...TOOLS, ['settings', 'Settings'] as [View, string]].filter(([v]) => screenOk(v))
-  const moreOn = main && tools.some(([v]) => v === view)
+  const tools = [...TOOLS, ['settings', 'Settings'] as [View | 'notes', string]].filter(([v]) => screenOk(v))
+  const moreOn = notesOpen || (main && tools.some(([v]) => v === view))
   return (
     <nav className="rail phone-bar" aria-label="Views">
-      {tab('sessions', 'Sessions', 'terminals', screen === 'list' || (main && view === 'terminals'), onSessions, needs)}
+      {tab('sessions', 'Sessions', 'terminals', !notesOpen && (screen === 'list' || (main && view === 'terminals')), onSessions, needs)}
       {(['tasks', 'board', 'prs'] as View[]).filter(screenOk).map((v) =>
-        tab(v, v === 'prs' ? 'PRs' : v[0].toUpperCase() + v.slice(1), v, main && view === v, () => onView(v), v === 'prs' ? prAttention : 0),
+        tab(v, v === 'prs' ? 'PRs' : v[0].toUpperCase() + v.slice(1), v, !notesOpen && main && view === v, () => onView(v), v === 'prs' ? prAttention : 0),
       )}
-      {onMaster && tab('master', 'Master', 'master', screen === 'master', onMaster)}
+      {onMaster && tab('master', 'Master', 'master', !notesOpen && screen === 'master', onMaster)}
       <button className={`pb ${moreOn || more ? 'on' : ''}`} aria-label="More" aria-expanded={more} onClick={() => setMore(!more)}>
         <RailIcon name="more" size={20} />
         <span className="pb-l">More</span>
@@ -187,7 +203,12 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
           <div className="phone-more-back" onClick={() => setMore(false)} />
           <div className="menu phone-more" role="menu">
             {tools.map(([v, label]) => (
-              <button key={v} role="menuitem" className={main && view === v ? 'on' : ''} onClick={() => (setMore(false), onView(v))}>
+              <button
+                key={v}
+                role="menuitem"
+                className={(v === 'notes' ? notesOpen : main && view === v) ? 'on' : ''}
+                onClick={() => (setMore(false), v === 'notes' ? onNotes() : onView(v))}
+              >
                 <RailIcon name={v} /> {label}
               </button>
             ))}

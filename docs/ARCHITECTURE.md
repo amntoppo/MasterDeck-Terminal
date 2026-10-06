@@ -305,6 +305,60 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
 
+### Notes
+
+`main/notes.ts` `NotesStore` keeps the user's notes in `<home>/notes/`, one JSON file per note,
+written as temp file + rename. A global note is `n-<32 hex>`, a ticket's is `t-<owner>~<name>~<number>`
+(one per ticket). Every argument is checked in the store (`shared/notes.ts`: id pattern, limits,
+characters), a save carries the `base` version it was made from and is refused as a conflict when the
+stored note differs. Limits (`shared/notes.ts`): title 200 characters, text 50,000, 1000 notes, search
+query 200. A `.json` file in the folder that MasterDeck cannot read as a note is skipped at load and
+left alone. When its name is a valid note id (bad JSON or the wrong shape under `n-…` / `t-…`), a save
+or delete of a note with that id is refused with a message until the file is moved away (then the id
+is free again); a file with any other name is simply ignored, since no save or delete can name it.
+The store reads every file in the folder whatever its size and follows symlinks (see TODO).
+A write that fails on disk (the temp file, the rename, the removal) is answered `{ ok: false,
+message, retry: true }`: the message carries the error's code at most ("Could not save the note
+(EBUSY)."), never Node's own text, which names the file and could go to a browser; the whole error
+is logged in main. A refusal about the note itself (the limit, a character) has no `retry`.
+Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text leaves the process only
+through the `notes:*` handlers. A note's full text travels to a web tab in two answers only: `notes:get`
+(a note opened), and the conflict answer of `notes:save`, which carries the stored note to the tab
+that tried to save over it (so the editor can offer Reload). The list (`notes:list`) and
+`notes:changed` carry `NoteMeta`, which has a 120-character `preview` (whitespace collapsed) instead
+of the text. `notes:search` runs in main and returns ids.
+
+The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
+after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
+titles and previews, kept current by `notes:changed`). The editor is `NoteEditor`
+(`shared/noteEditor.ts`), one per window, living outside the panel. Its rule: typed text is dropped
+only by the user's own choice (Reload, Discard, Delete). It saves 500 ms after the last key, and at
+the latest 2 s after the first unsaved one (`SAVE_MAX_WAIT_MS`: typing without a pause still saves), one
+save at a time (text typed while a save is out goes with the next, based on the version that save
+returned); `show` opens another note only after `flush` stored what was typed, and stays where it
+is when that fails or a conflict waits for an answer (the panel then goes back to the open note);
+`seen` compares the list's row with the draft's `base` (`incoming`): a clean draft takes the new
+text, a dirty one shows "Changed elsewhere" (Reload / Keep mine, the latter a save with `force`),
+and nothing is written until the user chose. Closing the panel flushes (`leave`), and so do
+`pagehide` and the document becoming hidden (`visibilitychange`: a phone that puts the tab away often
+sends only that); text that could
+not be saved stays in the editor and is on screen again when the panel opens. Two failures are kept
+apart: a save that got no answer (the call threw: the line is down), or that the store could not
+write to disk (`retry: true`), is retried every 5 s with the status "Not saved"; a save
+the store refused with a reason (the limit of notes, a character it does not take) is in `refused`
+and is tried again only when the text changes or the user leaves, and the editor shows a line with
+**Discard** (`discardUnsaved`: a stored note returns to its stored text, a draft never saved
+closes), which also says so when a switch or a close was held back by it (`stayed`). `target` is
+what the draft was opened for: where the panel goes back to when `show` answers false. Delete
+(`remove`) deletes the note that was open at the click, and nothing when another was opened while
+the question was on screen.
+
+Layers (`styles.css`, `web.css`): the panel is 40, above the views (20) and the find bar (35); the
+rail is 41, so its tooltips and the remote indicator's card, which stick out over the panel's place,
+draw above it; dialogs are 50. On a phone the panel is a sheet at 46 (the inspector's is 45) and the
+tab bar is 47: the More menu lives in the bar's stacking context and would open behind a sheet
+otherwise.
+
 ### Queue
 
 `main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` in the
@@ -646,9 +700,13 @@ waits, and writes nothing if accounts appeared meanwhile.
   `ipcRenderer.send` (fire-and-forget: `setSprint`, `ptyWrite`, `ptyResize`, `ptyClose`,
   `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`, `boardRepos`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
-  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
+  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`, `onNotesChanged`,
   `onGhLogin(login)`: open a gh-login tab for that account; `onOpenClaude(cwd)`: open a tab
   running `claude` in that folder, see "Whether Claude Code may work in that folder").
+- Notes: `notesList`, `notesGet`, `notesSearch`, `notesSave`, `notesDelete` (`notes:*`, invoke) and the
+  event `onNotesChanged` (`notes:changed`), all open to the web (`remote` / `event`). The store
+  validates every argument; a save carries `base` and is refused as a conflict when the stored version
+  differs; `notes:delete` asks with the native dialog unless `isRemote(e)` (the web asked with `webConfirm`).
 - GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
   `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
@@ -680,6 +738,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
+| Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`), `noteEditor.ts` (`NoteEditor`: the editor's saves, switches and conflicts, without its screen) |
 
 ## Renderer (`renderer/src/`)
 
@@ -694,6 +753,20 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
   (`TasksView`), `costs` (`CostsView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).
+- Notes is a panel over the current view, not a view: the Rail's button (`notesOpen` / `onNotes`,
+  `aria-pressed`; under More on a phone) toggles and the palette opens `App.tsx`'s `notesAt` (`null` closed,
+  `{}` the list, `{id}` / `{ticket}` / `{fresh}` a note to open). `renderer/src/notes.ts` has `useNotes`
+  (the list of `NoteMeta`, read once and kept current by `onNotesChanged`; `loaded` is false until the
+  first read, and a failed first read is not retried) and `ticketNote(metas, repo, number)`.
+  `components/NotesPanel.tsx` draws the list, search and editor; the editor's rules live in
+  `shared/noteEditor.ts` (`NoteEditor`, one per window, outside the panel: 500 ms debounce, `base`,
+  `incoming`, see "Notes" above). The panel is mounted after the headers (like the ★ Master button) so
+  it gets its clicks. The entry points are `SessionDetails.tsx` (**Add note** / **Edit note**) and the
+  mark in the top row of a `BoardView` `Card` (`bcard-note`; always visible on a phone). A ticket's
+  title in the panel comes from `ticketTitle` over the issues, the board and the repository view.
+  On a phone the panel is a full-screen sheet (`web.css`, `.app.phone > .notes-panel`) and `App.tsx`
+  closes it when a screen is chosen (another tab, the palette, a More dialog); unsaved text is saved
+  first (the panel's unmount flushes).
 - Terminals: `TerminalView` (xterm 6 + fit + search; replay/seq handling; Cmd+C/V; size only from
   the visible view; on the web all output goes through `predictiveEcho`).
 - Web gating: `web.ts` — `isWeb()` (`deck().platform === 'web'`), `can(method)`, `WEB_VIEWS`,
@@ -756,6 +829,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |

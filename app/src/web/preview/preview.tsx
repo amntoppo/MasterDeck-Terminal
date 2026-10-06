@@ -5,6 +5,7 @@ import type { Root } from 'react-dom/client'
 import { DECK_ACCESS } from '@shared/remoteDeck'
 import type { DeckApi } from '@shared/ipc'
 import type { AppState } from '@shared/types'
+import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { fakeScreen, fixtureState } from './fixture'
@@ -21,6 +22,25 @@ function previewDeck(noBoard: boolean): DeckApi {
     // Show what was sent: printable text as is, control bytes as ^X / ESC[..
     const shown = d.replace(/\x1b/g, '⎋').replace(/[\x00-\x1f]/g, (c) => (c === '\r' ? '\r\n' : `^${String.fromCharCode(c.charCodeAt(0) + 64)}`))
     for (const cb of pty.get(id) ?? []) cb(shown, ++seq)
+  }
+  // Notes in memory: what the Mac's store does, in the shapes of DeckApi, so the panel can be looked at.
+  const notes = new Map<string, Note>()
+  const noteCbs = new Set<(c: NoteChange) => void>()
+  const noteSave = (i: NoteInput) => {
+    const id = i.id ?? (i.ticket ? ticketNoteId(i.ticket.repo ?? 'acme/web', i.ticket.number) : null) ?? `n-${Math.random().toString(16).slice(2).padEnd(32, '0')}`
+    const old = notes.get(id)
+    if (old && i.base !== old.updated && !i.force) return { ok: false as const, conflict: true as const, note: old }
+    if (i.ticket && !i.title && !i.body.trim()) {
+      notes.delete(id)
+      for (const cb of noteCbs) cb({ id, deleted: true })
+      return { ok: true as const, deleted: true as const, id }
+    }
+    const now = Date.now()
+    const note: Note = { id, title: i.title, body: i.body, ticket: i.ticket ? { repo: i.ticket.repo ?? 'acme/web', number: i.ticket.number } : null, created: old?.created ?? now, updated: Math.max(now, (old?.updated ?? 0) + 1) }
+    notes.set(id, note)
+    const meta = noteMeta(note)
+    for (const cb of noteCbs) cb({ id, meta })
+    return { ok: true as const, meta }
   }
   const ok = { ok: true, message: 'preview: nothing was sent' }
   const calls: Record<string, Fn> = {
@@ -52,6 +72,16 @@ function previewDeck(noBoard: boolean): DeckApi {
     }),
   }
   const local: Record<string, unknown> = {
+    notesList: async () => sortNotes([...notes.values()].map(noteMeta)),
+    notesGet: async (id: string) => notes.get(id) ?? null,
+    notesSearch: async (q: string) => [...notes.values()].filter((n) => matches(n, q)).map((n) => n.id),
+    notesSave: async (i: NoteInput) => noteSave(i),
+    notesDelete: async (id: string) => {
+      const had = notes.delete(id)
+      if (had) for (const cb of noteCbs) cb({ id, deleted: true })
+      return { ok: true }
+    },
+    onNotesChanged: (cb: (c: NoteChange) => void) => (noteCbs.add(cb), () => noteCbs.delete(cb)),
     platform: 'web',
     home: '/Users/dev',
     openExternal: () => {},

@@ -4,7 +4,7 @@
 .web-card p { margin: 0; color: var(--muted); line-height: 1.5; }
 .web-words { font-family: 'Geist Mono Variable', monospace; font-size: 22px; letter-spacing: .02em; color: var(--text, #e6e9ef); }
 .web-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 6px 12px; text-align: center; font-size: 12px; background: rgba(245, 184, 61, .15); color: var(--amber); border-bottom: 1px solid rgba(245, 184, 61, .35); }
-.web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 30; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
+.web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 42; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
 .web-signout:hover { color: var(--red); }
 
 /* Narrow windows: the sign-in cards get a gutter (the app itself switches to the phone layout below). */
@@ -44,6 +44,9 @@
   order: 10; position: relative; flex: none; width: auto; height: var(--tabbar-h);
   flex-direction: row; align-items: stretch; gap: 0; padding: 0 4px env(safe-area-inset-bottom);
   border-right: 0; border-top: 1px solid var(--line); background: var(--bg-2);
+  /* Above the sheets (the inspector 45, Notes 46), which end where the bar starts: the More menu lives in this
+     stacking context, and at the rail's own level it would open behind an open sheet. */
+  z-index: 47;
 }
 .phone-bar .pb { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; background: none; color: var(--muted); font-size: 10.5px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .phone-bar .pb.on { color: var(--text); }
@@ -121,3 +124,13 @@ html.phone .filters-sheet-body { flex: 1; min-height: 0; overflow-y: auto; -webk
 html.phone .filters-sheet-body .fsel { width: 100%; min-height: 40px; padding: 8px 10px; text-align: left; font-size: 16px; }
 html.phone .filters-sheet-body .mpick-menu { position: static; max-height: none; margin-top: 4px; box-shadow: none; }
 html.phone .filters-sheet-body .mpick-row { padding: 9px 10px; font-size: 14px; }
+
+/* Notes on the phone: a sheet over the screen, above the inspector sheet (45), under the tab bar and its menu (47). List first; a note replaces it. */
+.app.phone > .notes-panel { left: 0; right: 0; width: auto; top: env(safe-area-inset-top); bottom: var(--tabbar-h); z-index: 46; border-right: 0; box-shadow: none; }
+.app.phone > .notes-panel.editing > .notes-list { display: none; }
+.app.phone > .notes-panel .notes-editor { border-top: 0; }
+.app.phone > .notes-panel .note-row { padding: 11px 10px; }
+.app.phone > .notes-panel .note-row-t { font-size: 15px; }
+.app.phone > .notes-panel .notes-search, .app.phone > .notes-panel .notes-title, .app.phone > .notes-panel .notes-body { font-size: 16px; }
+/* A phone has no hover: the faint mark stays visible. :not(.has) keeps a card with a note fully amber (the desktop .has rule has less specificity than this one would). */
+.app.phone .bcard-note:not(.has) { opacity: .55; }

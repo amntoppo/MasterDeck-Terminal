@@ -72,6 +72,12 @@ const api: DeckApi = {
   templates: () => ipcRenderer.invoke(CH.templates),
   saveTemplate: (t) => ipcRenderer.invoke(CH.saveTemplate, t),
   deleteTemplate: (name) => ipcRenderer.invoke(CH.deleteTemplate, name),
+  notesList: () => ipcRenderer.invoke(CH.notesList),
+  notesGet: (id) => ipcRenderer.invoke(CH.notesGet, id),
+  notesSearch: (query) => ipcRenderer.invoke(CH.notesSearch, query),
+  notesSave: (input) => ipcRenderer.invoke(CH.notesSave, input),
+  notesDelete: (id) => ipcRenderer.invoke(CH.notesDelete, id),
+  onNotesChanged: (cb) => listen(CH.notesChanged, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),
   onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),

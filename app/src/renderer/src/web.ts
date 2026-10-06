@@ -32,7 +32,7 @@ export const can = (m: Method) => !isWeb() || DECK_ACCESS[m].kind !== 'blocked'
 export const keyPlatform = () => (isWeb() ? (navigator.platform.includes('Mac') ? 'darwin' : 'web') : deck().platform)
 
 /** Screens: the views, plus the popups that act like one. */
-export type Screen = View | 'history' | 'broadcast' | 'standup' | 'sprint-summary' | 'skills'
+export type Screen = View | 'history' | 'broadcast' | 'standup' | 'sprint-summary' | 'skills' | 'notes'
 
 /**
  * THE web allowlist: the screens the web app shows (stage 2: all of them, matching the desktop). Everything below
@@ -52,6 +52,7 @@ export const WEB_VIEWS: ReadonlySet<Screen> = new Set<Screen>([
   'standup',
   'sprint-summary',
   'skills',
+  'notes',
 ])
 
 /** The method a screen cannot work without, if any. */
@@ -65,6 +66,7 @@ const SCREEN_NEEDS: Partial<Record<Screen, Method>> = {
   standup: 'standupCommits',
   'sprint-summary': 'setSprint',
   skills: 'skillReinstall',
+  notes: 'notesList',
 }
 export const screenOk = (s: Screen) => !isWeb() || (WEB_VIEWS.has(s) && can(SCREEN_NEEDS[s] ?? 'getState'))
 
@@ -91,6 +93,7 @@ const ACTION_NEEDS: Partial<Record<PaletteAction, Need>> = {
   'sprint-summary': { screen: 'sprint-summary' },
   settings: { screen: 'settings' },
   skills: { screen: 'skills' },
+  notes: { screen: 'notes' },
 }
 export const actionOk = (a: PaletteAction) =>
   !isWeb() || (a.startsWith('view:') && a !== 'view:history' ? screenOk(a.slice(5) as View) : ok(ACTION_NEEDS[a]))

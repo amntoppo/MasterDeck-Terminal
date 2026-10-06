@@ -438,11 +438,46 @@ fixes it, and move the item here to "Recently done".
   `~/.claude/projects`; scratch dirs in `~/.claude/jobs/*/tmp`; the leftover untracked
   `skills/babysit-proof/` (only `__pycache__`, skill removed in 9329db4).
 
+## Notes: open points (2026-10-06, issue #63; Markdown is #65)
+
+- **P2 · Markdown with a preview** (#65). A note is plain text today; `Note.body` is stored as typed, so
+  a renderer can come later without a migration. Also open: no history of a note's earlier versions
+  and no export (the files in `~/.claude/masterdeck/notes/` are plain JSON).
+- **P3 · Editor edges.** (a) If the answer to a first save is lost (the line drops after the store
+  wrote it), the editor retries as a new note and makes a duplicate. (b) A note marked "Deleted
+  elsewhere" with nothing unsaved is dropped when the user switches to another note. (c) The notes
+  list is not retried when its first read fails (`useNotes`: the panel stays on "Loading notes…" until
+  the window reloads). (d) **Delete** on a brand-new draft that was never typed in asks nothing.
+  (e) "Could not open the note" is set on the status line, which is drawn only inside an open editor:
+  with the list alone nothing shows it. (f) **Discard** does not look again after its read: text typed
+  in that moment goes with the rest. (g) Refused text is tried once more when the user leaves; when
+  that try gets no answer (the line dropped just then) it is not retried on the timer (the text stays
+  in the editor). (h) ⌘K on a phone-width window can leave the sheet over a pick that stays in the
+  same view. (i) **Keep mine** that gets no answer is not tried again by the timer: the conflict line
+  stays and the user presses it again. (j) A disk failure that does not clear (no space, no
+  permission) is retried every 5 s with only "Not saved": no reason shown, no **Discard**, and
+  switching notes is held back. (k) A drag that starts on a Board card's note mark may still drag
+  the card (the mark's own `dragstart` handler was only checked with a made-up event).
+- **P3 · Store edges.** (a) The store reads any file in the notes folder whatever its size and follows
+  symlinks (only a file that is not a note is left alone). (b) A preview is cut at 120 UTF-16 units and
+  can cut an emoji in half. (c) No fsync before the rename: a power cut can leave an empty note file
+  (it then loads as "not a note" and is left alone). (d) An empty or broken file with a ticket note's
+  name (`t-<owner>~<name>~<number>.json`) blocks that ticket's note until the user moves it away: the
+  save says so and names the file. (e) At 1000 notes with long non-Latin titles and previews (3 bytes
+  a character) the answer of `notes:list` can pass the web bridge's frame (about 1.05 MB of JSON); the
+  web panel then stays on "Loading notes…". (f) Search lowercases every note's text in main on each
+  call (up to 50 MB of string work at 1000 full notes), and the panel searches again on every list
+  change while a query is typed.
+- **P3 · The Board card's note mark** keeps 20 px in every card's top row, also while it is
+  invisible, so the badge beside it sits further left than before. The user's eye decides.
+- **P2 · Not checked.** The native **Delete** confirmation (a native dialog blocks CDP: only the
+  user can press it); the real web app over the real bridge (needs a web deploy after the desktop
+  release that has Notes); a real phone (iOS zoom on focusing the editor: the CSS sets 16 px); the
+  Master tab closing the phone sheet; the session Details entry (**Add note** / **Edit note**) on
+  screen (no listed session had a ticket in the isolated run); Windows.
+
 ## Product ideas (from the user, 2026-10-03)
 
-- **P2 · Notes section.** A place in MasterDeck to write notes (free text, kept between launches;
-  could live in the left rail as its own view, saved under `~/.claude/masterdeck/`). Open questions:
-  per ticket / per session or global, Markdown, sync to the web app.
 - **P2 · Working hours per GitHub account, from tickets worked on.** Estimate time worked per
   account from what MasterDeck already knows: each session's account (`session-accounts.json`, plan I),
   its linked ticket (`ticket-links.json`), session activity/turn times and commit times. Show per
@@ -453,6 +488,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |
 | A start Claude Code refuses ("Workspace not trusted") no longer dead-ends: one reader of Claude Code's `.claude.json` in the CLI (`trust.py`, `master trust`, `trusted` in `draft-assign` / `checkout`), the Start dialog says so before starting and opens `claude` in the folder (**Open Claude there…**, a `claude-here` tab; MasterDeck never answers the prompt or writes the file) and comes back once it is trusted, the refused start's tab and the HELD card offer the same with **Try again**, which starts the same held proposal through `master spawn --held-for-trust` (only a start the CLI marked `held_for: "trust"`, never beside a live session; `AssignRequest.retry`, `retryHeld`; a retry used to add a second proposal when a model or account was named), the Start dialog reuses a held refused start, the trust read follows Claude Code's parent walk, a browser can neither open Claude on the Mac nor take its pane, `master spawn` records the folder it was refused in | fix/workspace-trust | — |
 | A workspace per GitHub account, and a ticket's session starts in its repository's checkout: `accounts[].workspace` (Setup → Preferences, one field per other account; the top-level `workspace` stays the primary's), one resolver `skills/master/lib/master/checkout.py` (origin match over the workspace, depth 2, 2000 folders, no links out) behind `rules._assign`, `master draft-assign` (`--cwd`, `found`), `master add` / `spawn` without a folder and `master checkout` (PR review, `cwdRepo`); the Start dialog shows the folder, "No checkout of owner/name found in <workspace>", **Choose folder…** and the account. Review round: the origin is read from `.git/config` (2000 folders, 20 git calls, "only the first N folders were searched"), duplicates ranked, only ASSIGN / PR review of a real issue is looked up, a session MasterDeck parks in a main checkout does not take the branch it found there (`parked-sessions.json`, `ownsFolderBranch`; hand-started sessions as before), `Ops.repos()` covers every account's workspace (`main/checkouts.ts`), master's chosen folder, prompt and model survive the Start dialog, Setup swaps workspaces when the primary changes | merge 660c726 (released in v0.8.0) | — |

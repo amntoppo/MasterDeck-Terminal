@@ -33,6 +33,8 @@ import {
 } from "./components/SummaryDialogs";
 import { BoardView } from "./components/BoardView";
 import { PrPopup } from "./components/PrPopup";
+import { NotesPanel, type NotesTarget } from "./components/NotesPanel";
+import { useNotes } from "./notes";
 import { StartHereDialog } from "./components/StartHereDialog";
 import { LinkDialog } from "./components/LinkDialog";
 import { MasterPane, masterPaneId } from "./components/MasterPane";
@@ -240,6 +242,9 @@ export function App() {
   // The left sidebar's width, dragged at its right edge (double-click resets it).
   const [sideW, setSideW] = useState<number>(() => load("sideW", SIDE_W));
   const [sideDragging, setSideDragging] = useState(false);
+  // The Notes panel: null closed, {} the list, or the note to open.
+  const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
+  const notes = useNotes(!!state);
   // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
@@ -282,6 +287,15 @@ export function App() {
     save("view", view);
     deck().setBoardOpen(view === "board");
   }, [view]);
+  // Phone: the Notes sheet covers the screen, so a screen chosen from anywhere (the palette, a result, a tab) must close
+  // it. Closing unmounts the panel, which sends what is typed. The desktop panel stays open across views.
+  const screenKey = `${view}/${phoneScreen}`;
+  const lastScreen = useRef(screenKey);
+  useEffect(() => {
+    if (lastScreen.current === screenKey) return;
+    lastScreen.current = screenKey;
+    if (phone) setNotesAt(null);
+  }, [screenKey, phone]);
   useEffect(() => {
     document.body.classList.toggle("win", deck().platform === "win32");
   }, []);
@@ -887,6 +901,7 @@ export function App() {
     else if (a === "new-shell") openShell();
     else if (a === "start-master") void deck().masterStart();
     else if (a === "settings") setView("settings");
+    else if (a === "notes") setNotesAt((n) => n ?? {});
     else setDialog(a as "broadcast" | "standup" | "sprint-summary" | "skills");
   };
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
@@ -1018,15 +1033,31 @@ export function App() {
           view={view}
           screen={phoneScreen}
           onView={(v) => {
+            setNotesAt(null);
             setView(v);
             setPhoneScreen("main");
           }}
           onSessions={() => {
+            setNotesAt(null);
             setView("terminals");
             setPhoneScreen("list");
           }}
-          onMaster={useMaster ? () => setPhoneScreen("master") : undefined}
-          onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
+          onMaster={
+            useMaster
+              ? () => {
+                  setNotesAt(null);
+                  setPhoneScreen("master");
+                }
+              : undefined
+          }
+          notesOpen={!!notesAt}
+          onNotes={() => setNotesAt((n) => (n ? null : {}))}
+          onAction={(a) => {
+            // A dialog or the palette opens over the sheet; one that picks the view already showing would leave it there.
+            setNotesAt(null);
+            if (a === "palette") setPalette(true);
+            else setDialog(a);
+          }}
           needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
           prAttention={
             state.inbox.open.filter((e) => e.item.detail.type === "offer")
@@ -1037,6 +1068,8 @@ export function App() {
       <Rail
         view={view}
         onView={setView}
+        notesOpen={!!notesAt}
+        onNotes={() => setNotesAt((n) => (n ? null : {}))}
         remote={remote}
         onRemote={() => {
           setSettingsAt({ section: "remote", at: Date.now() });
@@ -1120,6 +1153,8 @@ export function App() {
           onAssign={(card, me) => setAssignCard({ card, me })}
           onSummary={() => setDialog("sprint-summary")}
           onSetup={() => setDialog("setup")}
+          notes={notes.metas}
+          onNote={(t) => setNotesAt({ ticket: t })}
         />
       )}
       {view === "prs" &&
@@ -1339,6 +1374,8 @@ export function App() {
       >
         <Inspector
           state={state}
+          notes={notes.metas}
+          onNote={(t) => setNotesAt({ ticket: t })}
           session={
             activeKey
               ? (state.sessions.find((x) => x.key === activeKey) ?? null)
@@ -1405,6 +1442,16 @@ export function App() {
           onClose={() => setPrCard(null)}
           onStartReview={startSession}
           onStart={(card) => setAssigning(issueOf(card))}
+        />
+      )}
+      {notesAt && (
+        <NotesPanel
+          notes={notes}
+          state={state}
+          target={notesAt}
+          onTarget={setNotesAt}
+          onClose={() => setNotesAt(null)}
+          phone={phone}
         />
       )}
       {palette && (
