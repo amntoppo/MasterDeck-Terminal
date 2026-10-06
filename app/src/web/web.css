@@ -4,7 +4,7 @@
 .web-card p { margin: 0; color: var(--muted); line-height: 1.5; }
 .web-words { font-family: 'Geist Mono Variable', monospace; font-size: 22px; letter-spacing: .02em; color: var(--text, #e6e9ef); }
 .web-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 6px 12px; text-align: center; font-size: 12px; background: rgba(245, 184, 61, .15); color: var(--amber); border-bottom: 1px solid rgba(245, 184, 61, .35); }
-.web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 30; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
+.web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 42; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
 .web-signout:hover { color: var(--red); }
 
 /* Narrow windows: the sign-in cards get a gutter (the app itself switches to the phone layout below). */
@@ -44,6 +44,9 @@
   order: 10; position: relative; flex: none; width: auto; height: var(--tabbar-h);
   flex-direction: row; align-items: stretch; gap: 0; padding: 0 4px env(safe-area-inset-bottom);
   border-right: 0; border-top: 1px solid var(--line); background: var(--bg-2);
+  /* Above the sheets (the inspector 45, Notes 46), which end where the bar starts: the More menu lives in this
+     stacking context, and at the rail's own level it would open behind an open sheet. */
+  z-index: 47;
 }
 .phone-bar .pb { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; background: none; color: var(--muted); font-size: 10.5px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .phone-bar .pb.on { color: var(--text); }

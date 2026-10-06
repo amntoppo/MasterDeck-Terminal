@@ -16,6 +16,8 @@ export interface NoteDraft {
 export type NoteClash = { kind: 'changed'; note: Note } | { kind: 'gone' }
 
 export const SAVE_AFTER_MS = 500
+/** However fast the keys come, a save goes out this long after the first unsaved one at the latest. */
+export const SAVE_MAX_WAIT_MS = 2000
 export const SAVE_RETRY_MS = 5000
 
 export const draftOf = (n: Note): NoteDraft => ({ id: n.id, ticket: n.ticket, title: n.title, body: n.body, base: n.updated, dirty: false })
@@ -50,9 +52,10 @@ export interface NoteEditorDeps {
  * Anything else that would replace the draft waits until it is saved, and gives up when it cannot be.
  * It outlives the panel, so text whose save was still on its way (or failed) when the panel closed is there again
  * when it opens.
- * Two failures are kept apart. A save that got no answer (the line is down) is tried again on a timer. A save the
- * store refused with a reason (the limit of notes, a character it does not take) would get the same answer for ever:
- * it is tried again only when the text changes or the user leaves, and the user may discard the text instead.
+ * Two failures are kept apart. A save that got no answer (the line is down), or that the store could not write to
+ * disk (`retry`), is tried again on a timer. A save the store refused with a reason (the limit of notes, a character
+ * it does not take) would get the same answer for ever: it is tried again only when the text changes or the user
+ * leaves, and the user may discard the text instead.
  */
 export class NoteEditor {
   draft: NoteDraft | null = null
@@ -78,6 +81,8 @@ export class NoteEditor {
   /** The text the store refused: sent again only once it differs (or the user leaves). */
   private refusedText: { title: string; body: string } | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
+  /** When the first key not yet sent was typed; null when everything typed was sent. */
+  private waitingSince: number | null = null
   /** Names the draft: an answer for one that was replaced meanwhile is not applied to the next. */
   private serial = 0
   /** Names the newest `show`: an older one still waiting gives way. */
@@ -95,6 +100,12 @@ export class NoteEditor {
     this.timer = null
   }
 
+  /** Nothing typed is waiting any more: the draft was replaced by a stored text, or closed. */
+  private settled(): void {
+    this.stopTimer()
+    this.waitingSince = null
+  }
+
   /** No save or delete of its own is on its way any more. */
   private async idle(): Promise<void> {
     while (this.saving) await this.saving.catch(() => {})
@@ -108,7 +119,7 @@ export class NoteEditor {
   }
 
   private replace(d: NoteDraft | null, target: NoteTarget): void {
-    this.stopTimer()
+    this.settled()
     this.draft = d
     this.target = target
     this.key = noteTargetKey(target)
@@ -122,7 +133,7 @@ export class NoteEditor {
 
   /** The open note as it is stored, in place of what was typed (the user's choice: Reload, Discard). */
   private restore(n: Note): void {
-    this.stopTimer()
+    this.settled()
     // The whole note, id and ticket too: a draft never saved (a ticket's, met by a note made elsewhere) is that note now.
     this.draft = draftOf(n)
     this.clash = null
@@ -137,7 +148,11 @@ export class NoteEditor {
     this.draft = { ...this.draft, ...patch, dirty: true }
     this.status = ''
     this.stayed = false
-    this.later(SAVE_AFTER_MS)
+    // Half a second after the last key, but never later than the max wait after the first: typing without a pause
+    // must not mean saving nothing.
+    const now = Date.now()
+    this.waitingSince ??= now
+    this.later(Math.max(0, Math.min(SAVE_AFTER_MS, this.waitingSince + SAVE_MAX_WAIT_MS - now)))
     this.onChange()
   }
 
@@ -159,6 +174,7 @@ export class NoteEditor {
     // While the user has not chosen between the two versions, nothing is written.
     if (!sent || !sent.dirty || (this.clash && !force)) return false
     const serial = this.serial
+    this.waitingSince = null
     this.status = 'Saving…'
     this.onChange()
     // null: no answer (the call threw: the line is down). Anything else is the store's own word.
@@ -176,7 +192,8 @@ export class NoteEditor {
       this.onChange()
       return !!r?.ok
     }
-    if (!r) {
+    // No answer, or the disk failed under the store: neither is about the text, so the same save is worth another try.
+    if (!r || (!r.ok && 'retry' in r && r.retry)) {
       this.status = 'Not saved'
       this.later(SAVE_RETRY_MS)
       this.onChange()

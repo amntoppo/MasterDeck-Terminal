@@ -72,6 +72,16 @@ export class NotesStore {
     return `The file ${id}.json in the notes folder is not a note MasterDeck can read. Move it away, then try again.`
   }
 
+  /**
+   * What the editor is told about a failed write: the error's code at most. Node's own message names the file, and
+   * the answer may go to a browser; the whole error stays in this process's log.
+   */
+  private diskError(what: 'save' | 'delete', e: unknown): string {
+    console.error(`notes: could not ${what} a note`, e)
+    const code = e && typeof e === 'object' && typeof (e as { code?: unknown }).code === 'string' ? (e as { code: string }).code : ''
+    return `Could not ${what} the note${/^[A-Z0-9_]{1,32}$/.test(code) ? ` (${code})` : ''}.`
+  }
+
   private notify(c: NoteChange): void {
     try {
       this.onChange(c)
@@ -116,7 +126,7 @@ export class NotesStore {
     if (ticket && id && !v.body.trim()) {
       if (old) {
         const gone = this.remove(id)
-        if (!gone.ok) return { ok: false, message: gone.message ?? 'Could not delete the note.' }
+        if (!gone.ok) return { ok: false, message: gone.message ?? 'Could not delete the note.', ...(gone.retry ? { retry: true as const } : {}) }
       }
       return { ok: true, deleted: true, id }
     }
@@ -142,7 +152,7 @@ export class NotesStore {
       try {
         rmSync(tmp, { force: true })
       } catch {}
-      return { ok: false, message: `Could not save the note: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, message: this.diskError('save', e), retry: true }
     }
     this.notes.set(id, note)
     const meta = noteMeta(note)
@@ -150,17 +160,17 @@ export class NotesStore {
     return { ok: true, meta }
   }
 
-  delete(id: unknown): { ok: boolean; message?: string } {
+  delete(id: unknown): { ok: boolean; message?: string; retry?: true } {
     if (typeof id !== 'string' || !NOTE_ID.test(id)) return { ok: false, message: 'Not a note.' }
     if (this.blocked(id)) return { ok: false, message: this.foreignMessage(id) }
     return this.notes.has(id) ? this.remove(id) : { ok: true }
   }
 
-  private remove(id: string): { ok: boolean; message?: string } {
+  private remove(id: string): { ok: boolean; message?: string; retry?: true } {
     try {
       rmSync(join(this.dir, `${id}.json`), { force: true })
     } catch (e) {
-      return { ok: false, message: `Could not delete the note: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, message: this.diskError('delete', e), retry: true }
     }
     this.notes.delete(id)
     this.notify({ id, deleted: true })

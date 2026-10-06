@@ -45,11 +45,15 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
     redraw()
     // Leaving (the panel closes, the window goes away): what is typed is sent.
     const send = () => void editor.leave()
+    // A phone that puts the tab away often says only this, and then stops its timers.
+    const hidden = () => document.visibilityState === 'hidden' && send()
     window.addEventListener('pagehide', send)
+    document.addEventListener('visibilitychange', hidden)
     return () => {
       open.current = false
       editor.onChange = () => {}
       window.removeEventListener('pagehide', send)
+      document.removeEventListener('visibilitychange', hidden)
       send()
     }
   }, [apply])

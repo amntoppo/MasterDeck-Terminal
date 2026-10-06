@@ -188,9 +188,50 @@ describe('NotesStore', () => {
     const s = open()
     const id = 't-acme~web~63'
     mkdirSync(join(dir, `${id}.json`), { recursive: true }) // a directory made after load, so rename onto it fails
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const r = s.save({ title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 } })
+    log.mockRestore()
     expect(r).toMatchObject({ ok: false })
     expect(readdirSync(dir)).toEqual([`${id}.json`])
+  })
+
+  it('a failed write is marked as worth another try, and its answer names no path', () => {
+    const s = open()
+    const id = 't-acme~web~63'
+    mkdirSync(join(dir, `${id}.json`), { recursive: true })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = s.save({ title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 } })
+    // The whole error, path included, is for the log of this process only.
+    expect(log).toHaveBeenCalledOnce()
+    expect(String(log.mock.calls[0][1])).toContain(dir)
+    log.mockRestore()
+    expect(r).toMatchObject({ ok: false, retry: true })
+    const message = (r as { message: string }).message
+    expect(message).toMatch(/^Could not save the note \([A-Z0-9_]+\)\.$/)
+    expect(message).not.toContain(dir)
+    expect(JSON.stringify(r)).not.toContain(tmpdir())
+  })
+
+  it('a failed delete is marked the same way; the note stays', () => {
+    const s = open()
+    const m = saved(s.save({ title: 'a', body: 'x', base: null }))
+    const file = join(dir, `${m.id}.json`)
+    rmSync(file)
+    mkdirSync(file) // a directory in the file's place: removing it as a file fails
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = s.delete(m.id)
+    expect(log).toHaveBeenCalledOnce()
+    log.mockRestore()
+    expect(r).toMatchObject({ ok: false, retry: true })
+    expect(r.message).toMatch(/^Could not delete the note( \([A-Z0-9_]+\))?\.$/)
+    expect(r.message).not.toContain(dir)
+    expect(s.get(m.id)?.body).toBe('x')
+  })
+
+  it('a refusal about the note itself is not marked for another try', () => {
+    const s = open()
+    expect(s.save({ title: 'a', body: 'x\x1b[31m', base: null })).toEqual({ ok: false, message: 'The note has characters that cannot be saved.' })
+    expect(s.save({ title: '', body: 'x', base: null, ticket: { repo: null, number: 1 } })).not.toHaveProperty('retry')
   })
 
   it('search answers ids, newest first', () => {

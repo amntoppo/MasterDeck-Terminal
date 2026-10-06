@@ -312,28 +312,39 @@ written as temp file + rename. A global note is `n-<32 hex>`, a ticket's is `t-<
 (one per ticket). Every argument is checked in the store (`shared/notes.ts`: id pattern, limits,
 characters), a save carries the `base` version it was made from and is refused as a conflict when the
 stored note differs. Limits (`shared/notes.ts`): title 200 characters, text 50,000, 1000 notes, search
-query 200. A file in the folder that MasterDeck cannot read as a note (bad JSON, wrong shape, a name
-that is not an id) is skipped at load and left alone: a save or delete of a note with that name is
-refused with a message until the file is moved away (then the id is free again). The store reads
-every file in the folder whatever its size and follows symlinks (see TODO).
+query 200. A `.json` file in the folder that MasterDeck cannot read as a note is skipped at load and
+left alone. When its name is a valid note id (bad JSON or the wrong shape under `n-…` / `t-…`), a save
+or delete of a note with that id is refused with a message until the file is moved away (then the id
+is free again); a file with any other name is simply ignored, since no save or delete can name it.
+The store reads every file in the folder whatever its size and follows symlinks (see TODO).
+A write that fails on disk (the temp file, the rename, the removal) is answered `{ ok: false,
+message, retry: true }`: the message carries the error's code at most ("Could not save the note
+(EBUSY)."), never Node's own text, which names the file and could go to a browser; the whole error
+is logged in main. A refusal about the note itself (the limit, a character) has no `retry`.
 Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text leaves the process only
-through the `notes:*` handlers. A note's text travels to a subscribed web tab only on `notes:get`
-(a note opened); the list (`notes:list`) and `notes:changed` carry `NoteMeta`, which has a 120-character
-`preview` (whitespace collapsed) instead of the text. `notes:search` runs in main and returns ids.
+through the `notes:*` handlers. A note's full text travels to a web tab in two answers only: `notes:get`
+(a note opened), and the conflict answer of `notes:save`, which carries the stored note to the tab
+that tried to save over it (so the editor can offer Reload). The list (`notes:list`) and
+`notes:changed` carry `NoteMeta`, which has a 120-character `preview` (whitespace collapsed) instead
+of the text. `notes:search` runs in main and returns ids.
 
 The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
 after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
 titles and previews, kept current by `notes:changed`). The editor is `NoteEditor`
 (`shared/noteEditor.ts`), one per window, living outside the panel. Its rule: typed text is dropped
-only by the user's own choice (Reload, Discard, Delete). It saves 500 ms after the last key, one
+only by the user's own choice (Reload, Discard, Delete). It saves 500 ms after the last key, and at
+the latest 2 s after the first unsaved one (`SAVE_MAX_WAIT_MS`: typing without a pause still saves), one
 save at a time (text typed while a save is out goes with the next, based on the version that save
 returned); `show` opens another note only after `flush` stored what was typed, and stays where it
 is when that fails or a conflict waits for an answer (the panel then goes back to the open note);
 `seen` compares the list's row with the draft's `base` (`incoming`): a clean draft takes the new
 text, a dirty one shows "Changed elsewhere" (Reload / Keep mine, the latter a save with `force`),
-and nothing is written until the user chose. Closing the panel flushes (`leave`); text that could
+and nothing is written until the user chose. Closing the panel flushes (`leave`), and so do
+`pagehide` and the document becoming hidden (`visibilitychange`: a phone that puts the tab away often
+sends only that); text that could
 not be saved stays in the editor and is on screen again when the panel opens. Two failures are kept
-apart: a save that got no answer (the call threw: the line is down) is retried every 5 s; a save
+apart: a save that got no answer (the call threw: the line is down), or that the store could not
+write to disk (`retry: true`), is retried every 5 s with the status "Not saved"; a save
 the store refused with a reason (the limit of notes, a character it does not take) is in `refused`
 and is tried again only when the text changes or the user leaves, and the editor shows a line with
 **Discard** (`discardUnsaved`: a stored note returns to its stored text, a draft never saved
@@ -341,6 +352,12 @@ closes), which also says so when a switch or a close was held back by it (`staye
 what the draft was opened for: where the panel goes back to when `show` answers false. Delete
 (`remove`) deletes the note that was open at the click, and nothing when another was opened while
 the question was on screen.
+
+Layers (`styles.css`, `web.css`): the panel is 40, above the views (20) and the find bar (35); the
+rail is 41, so its tooltips and the remote indicator's card, which stick out over the panel's place,
+draw above it; dialogs are 50. On a phone the panel is a sheet at 46 (the inspector's is 45) and the
+tab bar is 47: the More menu lives in the bar's stacking context and would open behind a sheet
+otherwise.
 
 ### Queue
 

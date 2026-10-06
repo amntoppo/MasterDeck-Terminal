@@ -339,8 +339,13 @@ buttons; it does not go through macOS window drag regions.
 - **Notes are private and are not state.** They have their own channels (`notes:*`) and never enter
   `AppState`, `toRemoteSnapshot`, a prompt or a GitHub call; a new reader of `NotesStore` needs a
   decision first. A save carries `base`; never write a note without it except with the user's **Keep
-  mine**. A web tab gets a 120-character preview with the list and the change event and a full text
-  only from `notes:get`. A file in the notes folder that is not a note is never overwritten.
+  mine**. A web tab gets a 120-character preview with the list and the change event; a full text
+  goes to it in two answers only: `notes:get`, and the conflict answer of `notes:save` (the stored
+  note, to the tab that tried to save over it). A file in the notes folder that is not a note is
+  never overwritten. A failed disk write is answered with `retry: true` and a message without the
+  path (`diskError`): the editor retries those and only those on a timer; keep a new store failure
+  on the right side of that line. The rail (z-index 41) is above the panel (40), and the phone's tab
+  bar (47) above its sheets (45, 46): a popout of either must stay visible over an open panel.
 
 ## Style
 
@@ -352,17 +357,24 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-06)
 
-- **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (11 commits from
-  0e93bb3 to b0b7229): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the
+- **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
+  0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
+  this line): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the
   real app, waits for the user's word). A rail panel (under More on a phone) for the user's notes and
   one note per ticket (Details, a mark on the Board card), saved under `MASTERDECK_HOME/notes`, open to
-  the web app over the bridge. Checked: typecheck, vitest (133 files passed, 2 skipped; 1507 tests
-  passed, 4 skipped), the Python suite (450; three ghcache tests fail only when the shell has
+  the web app over the bridge. Checked: typecheck, vitest (133 files passed, 2 skipped; 1515 tests
+  passed, 4 skipped), the web build (`build:web`), the Python suite (450; three ghcache tests fail only when the shell has
   `GH_TOKEN` / `GHC_ACCOUNT` set, so run it with those unset), and the isolated app (a note typed and
   found after a restart, a ticket's note from a Board card and its removal when emptied, search, "Changed
   elsewhere" with Keep mine, nothing but `notes/*.json` holding note text, no `.tmp`, no note text in
-  `getState()`). Not checked: the native Delete dialog, the session Details entry on screen (no listed
-  session had a ticket), the phone layout, the real web app over the real bridge, a real phone, Windows.
+  `getState()`). The final review's fixes (a save at the latest 2 s after the first unsaved key, a
+  failed disk write retried and answered without its path, a flush when the tab is hidden, the rail
+  above the panel, the phone's tab bar above the sheet) were checked by the suites, and on screen: a
+  rail tooltip over the open panel in the isolated app, and the More menu over the open sheet (its
+  items pressed with real pointer events) in the web preview at 390 x 844. Not checked: the native
+  Delete dialog, the session Details entry on screen (no listed session had a ticket), the remote
+  indicator's card over the panel (nothing was connected), the real web app over the real bridge, a
+  real phone, Windows. The Python suite was not run again for the final fixes (no Python changed).
   Open points are in TODO ("Notes: open points").
 - **Where things stand:** `main` is pushed and released as **v0.8.2** (2026-10-06; v0.8.0 and v0.8.1 had no Windows build): several GitHub
   accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the

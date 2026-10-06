@@ -565,14 +565,15 @@ A place for what you would otherwise keep in another app: your own notes, and on
 
 - **Open it:** the **Notes** button on the rail, above Workflow (on a phone: **More → Notes**), or **Notes** in ⌘K. It
   opens a panel over the current view, next to the rail; the app behind it stays usable. Close it
-  with the button again, the ✕ or **Esc**. On a phone it is a full-screen sheet: the list first, a
+  with the button again, the ✕, or **Esc** while you are in the panel. On a phone it is a full-screen sheet: the list first, a
   note replaces it, **‹ Notes** goes back, and choosing another tab, the command palette or a More
   screen closes the sheet (what you typed is saved first).
 - **Your notes:** **New note** opens a title and a text. There is no Save button: the note is saved
-  half a second after you stop typing, and when you leave it or close the panel. Every note stays
+  half a second after you stop typing (every two seconds while you keep typing), and when you leave
+  it or close the panel. Every note stays
   in the list under **Notes**, the one edited last first, with the start of its text. The search
   box above the list finds notes by their titles and texts (every word you type must be in the
-  note). **Delete** (under the text) asks first and cannot be undone.
+  note), and a ticket's note by its ticket too, written `owner/name#12`. **Delete** (under the text) asks first and cannot be undone.
 - **A ticket's note:** one per ticket. In a session's **Details** tab, **Add note** (or **Edit
   note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
   on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
@@ -583,12 +584,14 @@ A place for what you would otherwise keep in another app: your own notes, and on
   can **Keep** it (save it again) or **Discard** it.
 - **When a note cannot be saved** (1000 notes already, or a character a note cannot hold) the
   editor says so with **Discard**, and keeps your text on screen until you choose. When the Mac
-  does not answer (the web app, a lost connection), it tries again every few seconds.
+  does not answer (the web app, a lost connection), or could not write the file just then, it says
+  **Not saved** and tries again every few seconds.
 - **Every note:** plain text (Markdown with a preview is planned). It is kept on this Mac, in
   `~/.claude/masterdeck/notes/` (one small file each), never sent to a session or to GitHub, and
   not part of what the phone and API line carries. A browser gets notes only over the end-to-end
-  encrypted connection: the list carries the first 120 characters of each, a whole note only when
-  you open it. A file in that folder that MasterDeck cannot read as a note is left alone.
+  encrypted connection: the list carries the first 120 characters of each; a whole note is sent
+  when you open it, and when your save meets a newer version of that note (so the editor can offer
+  **Reload**). A file in that folder that MasterDeck cannot read as a note is left alone.
 - **Limits:** 200 characters in a title, 50,000 in a note, 1000 notes.
 
 ## Settings (⚙)

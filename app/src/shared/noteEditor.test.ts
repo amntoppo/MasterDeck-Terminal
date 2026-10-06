@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NoteEditor, SAVE_AFTER_MS, SAVE_RETRY_MS, afterSave, blankDraft, draftOf, noteTargetKey, type NoteDraft } from './noteEditor'
+import { NoteEditor, SAVE_AFTER_MS, SAVE_MAX_WAIT_MS, SAVE_RETRY_MS, afterSave, blankDraft, draftOf, noteTargetKey, type NoteDraft } from './noteEditor'
 import { noteMeta, ticketNoteId, type Note, type NoteChange, type NoteInput, type NoteMeta, type SaveResult } from './notes'
 
 const ID = (n: number) => 'n-' + String(n).padStart(32, '0')
@@ -16,6 +16,8 @@ class FakeStore {
   down = false
   /** The store's reason for taking nothing (the limit, a character). */
   refusing = ''
+  /** The store could not write the file. */
+  diskFails = false
   /** The store's change event, as the list hears it. */
   onEvent: (c: NoteChange) => void = () => {}
 
@@ -31,6 +33,7 @@ class FakeStore {
     return n
   }
   private apply(i: NoteInput): SaveResult {
+    if (this.diskFails) return { ok: false, message: 'Could not save the note (EBUSY).', retry: true }
     if (this.refusing) return { ok: false, message: this.refusing }
     // A ticket's note is named by its ticket, as in the real store.
     const id = i.ticket ? ticketNoteId(i.ticket.repo ?? 'acme/tracker', i.ticket.number)! : i.id
@@ -826,5 +829,91 @@ describe('more than one thing at a time', () => {
     await kept
     expect(store.saves.filter((i) => i.force)).toHaveLength(1)
     expect(store.saves.at(-1)).toMatchObject({ body: 'mine', force: true })
+  })
+})
+
+describe('typing without a pause', () => {
+  it('a save goes out two seconds after the first unsaved key at the latest', async () => {
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
+    let body = ''
+    // A key every 300 ms: the half second after the last key never comes.
+    for (let t = 0; t < SAVE_MAX_WAIT_MS; t += 300) {
+      ed.edit({ body: (body += 'x') })
+      expect(store.saves).toHaveLength(0)
+      vi.advanceTimersByTime(Math.min(300, SAVE_MAX_WAIT_MS - t))
+    }
+    expect(store.saves).toHaveLength(1)
+    expect(store.saves[0].body).toBe(body)
+    await store.answer()
+    expect(ed.draft).toMatchObject({ body, dirty: false })
+  })
+
+  it('the wait starts again with the first key after a save went out', async () => {
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
+    ed.edit({ body: 'a' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    vi.advanceTimersByTime(SAVE_MAX_WAIT_MS * 2)
+    // Long after the first save: a key now waits its half second, not zero.
+    ed.edit({ body: 'ab' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS - 1)
+    expect(store.saves).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(store.saves).toHaveLength(2)
+  })
+
+  it('keys typed while a save is out are sent within the max wait too', async () => {
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
+    ed.edit({ body: 'a' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    let body = 'a'
+    for (let t = 0; t < 900; t += 300) {
+      ed.edit({ body: (body += 'x') })
+      vi.advanceTimersByTime(300)
+    }
+    await store.answer()
+    // The answer came 900 ms after the first of those keys; typing goes on without a pause.
+    for (let t = 0; t < SAVE_MAX_WAIT_MS - 900; t += 300) {
+      expect(store.saves).toHaveLength(1)
+      ed.edit({ body: (body += 'y') })
+      vi.advanceTimersByTime(300)
+    }
+    expect(store.saves).toHaveLength(2)
+    expect(store.saves[1].body).toBe(body)
+  })
+})
+
+describe('the disk failed under the store', () => {
+  it('is tried again like a save that got no answer, with no line to discard', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await open(a)
+    store.diskFails = true
+    ed.edit({ body: 'more' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(ed.refused).toBeNull()
+    expect(ed.status).toBe('Not saved')
+    expect(ed.draft).toMatchObject({ body: 'more', dirty: true })
+    vi.advanceTimersByTime(SAVE_RETRY_MS)
+    expect(store.saves).toHaveLength(2)
+    store.diskFails = false
+    await store.answer()
+    expect(store.notes.get(a.id)!.body).toBe('more')
+    expect(ed.status).toBe('Saved')
+  })
+
+  it('a switch away is held back, and nothing says the text cannot be saved', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    await open(a)
+    store.diskFails = true
+    ed.edit({ body: 'more' })
+    const shown = open(b)
+    await settle()
+    await store.answer()
+    expect(await shown).toBe(false)
+    expect(ed.stayed).toBe(false)
+    expect(ed.refused).toBeNull()
+    expect(ed.draft).toMatchObject({ id: a.id, body: 'more', dirty: true })
   })
 })
