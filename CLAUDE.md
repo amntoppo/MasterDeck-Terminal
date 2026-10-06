@@ -69,7 +69,7 @@ cd app
 npm install          # postinstall runs electron-builder install-app-deps (node-pty for Electron)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.node.json + tsconfig.web.json; must be clean
-npm test             # vitest: ~1300 tests in ~126 files (~40 s); predictiveEcho alone ~30 s
+npm test             # vitest: ~1500 tests in ~133 files (~45 s); predictiveEcho alone ~30 s
 npm run build        # electron-vite build → out/
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
 npm run dev:web      # web app dev server (MD_API=http://localhost:8787 for a local backend)

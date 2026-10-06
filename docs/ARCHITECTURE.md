@@ -686,7 +686,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   `ipcRenderer.send` (fire-and-forget: `setSprint`, `ptyWrite`, `ptyResize`, `ptyClose`,
   `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`, `boardRepos`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
-  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
+  `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`, `onNotesChanged`,
   `onGhLogin(login)`: open a gh-login tab for that account; `onOpenClaude(cwd)`: open a tab
   running `claude` in that folder, see "Whether Claude Code may work in that folder").
 - Notes: `notesList`, `notesGet`, `notesSearch`, `notesSave`, `notesDelete` (`notes:*`, invoke) and the

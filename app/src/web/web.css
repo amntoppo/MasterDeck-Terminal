@@ -125,7 +125,7 @@ html.phone .filters-sheet-body .fsel { width: 100%; min-height: 40px; padding: 8
 html.phone .filters-sheet-body .mpick-menu { position: static; max-height: none; margin-top: 4px; box-shadow: none; }
 html.phone .filters-sheet-body .mpick-row { padding: 9px 10px; font-size: 14px; }
 
-/* Notes on the phone: a sheet over the screen, above the inspector sheet (45), under the tab bar's menu (60). List first; a note replaces it. */
+/* Notes on the phone: a sheet over the screen, above the inspector sheet (45), under the tab bar and its menu (47). List first; a note replaces it. */
 .app.phone > .notes-panel { left: 0; right: 0; width: auto; top: env(safe-area-inset-top); bottom: var(--tabbar-h); z-index: 46; border-right: 0; box-shadow: none; }
 .app.phone > .notes-panel.editing > .notes-list { display: none; }
 .app.phone > .notes-panel .notes-editor { border-top: 0; }

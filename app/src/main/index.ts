@@ -225,7 +225,9 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
-// The user's notes. Their only way out of this process is the notes handlers below.
+// The user's notes. They leave this process two ways only: as answers of the notes handlers below,
+// and in this change event (a note's title and 120-character preview, to the window and to web
+// tabs that subscribed).
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),

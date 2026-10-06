@@ -376,7 +376,7 @@ export interface DeckApi {
   notesGet(id: string): Promise<Note | null>;
   /** Ids of the notes whose title, text or ticket has every word of the query. */
   notesSearch(query: string): Promise<string[]>;
-  /** Refused as a conflict when the stored note is not the version `base` names. */
+  /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;

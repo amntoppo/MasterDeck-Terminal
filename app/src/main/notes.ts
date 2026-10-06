@@ -16,7 +16,8 @@ interface Deps {
 
 /**
  * The user's notes: one JSON file per note under MASTERDECK_HOME/notes, all of them in memory.
- * Private text: read by the notes IPC handlers only, never part of AppState, a snapshot, a prompt or a GitHub call.
+ * Private text: read by the notes IPC handlers only (onChange carries a title and preview to the
+ * same listeners), never part of AppState, a snapshot, a prompt or a GitHub call.
  */
 export class NotesStore {
   private notes = new Map<string, Note>()

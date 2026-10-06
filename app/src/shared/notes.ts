@@ -13,6 +13,8 @@ export function ticketTitle(t: { repo?: string | null; number: number }, ...list
 
 export const NOTE_TITLE_MAX = 200
 export const NOTE_BODY_MAX = 50_000
+// ponytail: the list goes to the web in one answer. At this cap, titles and previews in 3-byte
+// characters can pass the bridge's frame (about 1.05 MB of JSON); page the list if that is ever met.
 export const NOTES_MAX = 1000
 export const NOTE_PREVIEW = 120
 export const NOTE_QUERY_MAX = 200
