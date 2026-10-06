@@ -169,6 +169,8 @@ def cmd_add(args) -> int:
             sp["model"] = args.model
         if args.account:
             sp["account"] = args.account
+        if args.permission_mode:
+            sp["permissionMode"] = args.permission_mode
         err = spawn.validate_spawn_target(sp)
         if err:
             print(err)
@@ -560,6 +562,8 @@ def parser() -> argparse.ArgumentParser:
     ad.add_argument("--cwd")
     ad.add_argument("--model", help="claude --model for the spawned session; omitted: the default model")
     ad.add_argument("--account", help="gh login the spawned session works as (MasterDeck's connected accounts)")
+    ad.add_argument("--permission-mode", help="claude --permission-mode for the spawned session (plan, acceptEdits, …); "
+                                              "omitted: Claude Code's default")
     ad.set_defaults(fn=cmd_add)
 
     for name, to in (("approve", "approved"), ("reject", "rejected")):

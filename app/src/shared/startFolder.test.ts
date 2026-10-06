@@ -85,5 +85,7 @@ describe('startChoice (what Start sends for a draft from master\'s proposal)', (
   it('a model or account picked in the dialog wins', () => {
     expect(startChoice(d, { ...same, model: 'sonnet' }, 'opus')).toEqual({ edited: true, model: 'sonnet' })
     expect(startChoice(d, { ...same, override: true }, 'opus')).toEqual({ edited: true, model: 'opus' })
+    expect(startChoice(d, { ...same, permissionMode: 'plan' }, 'opus')).toEqual({ edited: true, model: 'opus' })
+    expect(startChoice(d, { ...same, permissionMode: '' }, 'opus')).toEqual({ edited: false, model: undefined })
   })
 })

@@ -88,6 +88,8 @@ export interface SpawnTarget {
   account?: string;
   /** `claude --model` the proposal names; absent: the default model. */
   model?: string;
+  /** `claude --permission-mode` the proposal names; absent: Claude Code's default. */
+  permissionMode?: string;
 }
 
 export interface Proposal {

@@ -57,13 +57,34 @@ part of the app does.
 ## Starting and linking sessions
 
 Clicking a ticket with no session (a card on the board, an issue in the ⌘K palette, or **Start…** on
-an ASSIGN card in Needs you) opens the **Start** dialog:
+an ASSIGN card in Needs you) opens the **Start** dialog. Its fields are in four groups: **Ticket**,
+**Where it runs**, **Options** and **Instructions**. Enter in any one-line field starts, ⌘↵ (Ctrl+↵)
+starts from anywhere, Esc cancels. With nothing changed, Start does what it always did.
 
 - **Ticket description:** the issue's body from GitHub, editable. With **Include as instructions**
   ticked (the default), your edited copy is sent after the system prompt, and the session works from
   it instead of stopping to ask. Untick it to leave the description out; your edits don't change the
-  issue on GitHub.
-- **System prompt:** master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
+  issue on GitHub. **Text / Preview** switches between the Markdown text and the description as
+  GitHub shows it (headings, lists, task lists, code, quotes, tables, links, images); the text is
+  never changed by looking at it. A link opens in the browser (https only). An image that cannot be
+  loaded (an upload in a private repository needs a login the app does not have) is shown as a link.
+- **Create worktree** (the Mac's window only; off by default): MasterDeck makes a git worktree for
+  the ticket before the session starts, `<checkout>/.claude/worktrees/<branch>`, on a new branch,
+  and starts the session in it. **Branch name** is `<number>-<title>` unless you type another;
+  **Base branch** is the repository's default branch as it is on this machine (nothing is fetched),
+  or any branch you name. A branch or folder of that name already there, a base that does not
+  exist, or anything else git refuses is said in the dialog and nothing starts. Unticked, the
+  session starts in the folder shown and sets up its own worktree, as before. The box is greyed
+  out when the folder is not a git checkout.
+- **Model** and **Permission mode:** `claude --model` and `claude --permission-mode` for the new
+  session (Default, Plan mode, Accept edits, Auto). Default sends neither flag.
+- **Assign to me:** shown for a board card nobody is assigned to. Ticked, the ticket is assigned to
+  you on GitHub before the session starts; if GitHub refuses, the dialog says so and nothing starts.
+- **Remember these choices for `<repository>`:** ticked at Start, the worktree box, base branch,
+  model, permission mode, workflow and assign-to-me become the defaults for that repository's next
+  ticket (kept in this window's storage). Unticked at Start, they are forgotten.
+- The card moves to In Dev by itself once the session is linked, as before: there is no box for it.
+- **System prompt** (closed until you open it): master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
   follows them instead of stopping to ask.
 - **Start:** switches to Terminals at once with a "Starting…" tab. The app records and approves the

@@ -8,7 +8,7 @@ export interface AssignCli {
   spawn(id: number): Promise<CliResult>
   /** The guarded retry of a start held for an untrusted folder (`master spawn --held-for-trust`). */
   spawnHeld(id: number): Promise<CliResult>
-  addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string; account?: string }): Promise<
+  addAssign(a: { issue: number; repo?: string | null; name: string; cwd: string; prompt: string; source: string; kind?: string; model?: string; account?: string; permissionMode?: string }): Promise<
     { ok: true; id: number } | { ok: false; message: string }
   >
 }
@@ -41,8 +41,8 @@ export async function startAssign(
     if (r.ok || ALREADY_SENT.test(r.message)) return { ok: true, message: `started proposal ${req.proposalId}`, proposalId: req.proposalId }
     return { ok: false, message: r.message, proposalId: req.proposalId }
   }
-  // A chosen model or account means a new proposal: master's own has its spawn target already.
-  if (req.proposalId !== null && !req.edited && !req.model && !req.account) {
+  // A chosen model, account or permission mode means a new proposal: master's own has its spawn target already.
+  if (req.proposalId !== null && !req.edited && !req.model && !req.account && !req.permissionMode) {
     id = req.proposalId
     if (!req.approved) {
       const a = await cli.approve([id])
@@ -52,7 +52,7 @@ export async function startAssign(
     const kind = req.kind ?? 'ASSIGN'
     const t = req.repo ? `${req.repo}#${req.issue}` : String(req.issue)
     const source = kind === 'PRREVIEW' ? `app:review:${t}:${req.name}:${now}` : `app:issue:${t}:${now}`
-    const added = await cli.addAssign({ issue: req.issue, repo: req.repo ?? null, name: req.name, cwd: req.cwd, prompt: req.prompt, source, kind, model: req.model || undefined, account: req.account || fallbackAccount || undefined })
+    const added = await cli.addAssign({ issue: req.issue, repo: req.repo ?? null, name: req.name, cwd: req.cwd, prompt: req.prompt, source, kind, model: req.model || undefined, account: req.account || fallbackAccount || undefined, permissionMode: req.permissionMode || undefined })
     if (!added.ok) return { ok: false, message: added.message }
     const a = await cli.approve([added.id])
     if (!a.ok) {

@@ -1,8 +1,8 @@
 import { actionCount, type WorkflowTemplate } from "@shared/flow";
 import { useEffect, useRef, useState } from "react";
-import { ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
+import { sameTicket, ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
 import { pendingAssign } from "@shared/derive";
-import type { AssignRequest, Template } from "@shared/ipc";
+import type { AssignRequest, DeckApi, Template } from "@shared/ipc";
 import { defaultModelLabel, MODELS } from "@shared/models";
 import { composePrompt, earlierBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
@@ -11,9 +11,11 @@ import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts
 import { isMulti } from "@shared/accounts";
 import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
 import { startBlocked, startFlags, trustHeldAssign } from "@shared/trust";
+import { baseError, branchError, parsePrefs, PERMISSION_MODES, prefsKey, ticketBranch, worktreeDir, worktreeNote, type StartPrefs } from "@shared/startOptions";
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { TrustNote, useTrust } from "./TrustFix";
-import { deck } from "../deck";
+import { MarkdownView } from "./MarkdownView";
+import { deck, load, save } from "../deck";
 import { can } from "../web";
 
 interface Props {
@@ -50,11 +52,16 @@ export function AssignDialog({
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [savingAs, setSavingAs] = useState<string | null>(null);
+  // The choices kept for this repository by "Remember these choices"; none: today's defaults.
+  const prefs = useRef(parsePrefs(load<unknown>(prefsKey(issue.repo), null))).current;
+  const [remember, setRemember] = useState(prefs !== null);
   // '' = start without --model: Claude Code's default (the one in settings.json, if set).
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState(prefs?.model ?? "");
+  // '' = start without --permission-mode: Claude Code's default.
+  const [permissionMode, setPermissionMode] = useState(prefs?.permissionMode ?? "");
   const [configuredModel, setConfiguredModel] = useState<string | null>(null);
   // The workflow the new session starts with (a copy of it): the default, or a template.
-  const [workflow, setWorkflow] = useState("default");
+  const [workflow, setWorkflow] = useState(prefs?.workflow ?? "default");
   // The issue's account by default; picking another starts (or resumes) as that one.
   const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null } }, state.config);
   const [account, setAccount] = useState<string | null>(defAccount);
@@ -64,7 +71,11 @@ export function AssignDialog({
   useEffect(() => {
     void deck()
       .workflowGet()
-      .then((w) => setWorkflows(w.templates));
+      .then((w) => {
+        setWorkflows(w.templates);
+        // A remembered template that is gone: the default again.
+        setWorkflow((cur) => (w.templates.some((t) => t.id === cur) ? cur : "default"));
+      });
   }, []);
   useEffect(() => {
     void deck().templates().then(setTemplates);
@@ -119,6 +130,42 @@ export function AssignDialog({
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
   const past = state.pastSessions[ticketKey(issue.repo, issue.number)] ?? [];
   const [resuming, setResuming] = useState<string | null>(null);
+  // Create worktree: MasterDeck makes the ticket's worktree (a new branch from `base`) under the
+  // checkout, and the session starts in it. Only the Mac's own window can (git runs on the Mac).
+  const canWorktree = can("worktreeCreate");
+  const [worktree, setWorktree] = useState(!!prefs?.worktree);
+  const [branch, setBranch] = useState(() => ticketBranch(issue.number, issue.title));
+  const [base, setBase] = useState(prefs?.base ?? "");
+  const baseTyped = useRef(!!prefs?.base);
+  const [repoInfo, setRepoInfo] = useState<Awaited<ReturnType<DeckApi["worktreeInfo"]>> | null>(null);
+  const startCwd = folder?.cwd ?? null;
+  useEffect(() => {
+    if (!canWorktree || !startCwd) return;
+    let alive = true;
+    setRepoInfo(null);
+    void deck()
+      .worktreeInfo(startCwd)
+      .then((r) => {
+        if (!alive) return;
+        setRepoInfo(r);
+        if (r.ok && !baseTyped.current) setBase(r.base);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [startCwd, canWorktree]);
+  // Ticked and possible: a remembered tick does nothing in a folder that is no checkout.
+  const worktreeOn = canWorktree && worktree && repoInfo?.ok === true;
+  const worktreeError = worktreeOn ? (branchError(branch.trim()) ?? (base.trim() === "HEAD" ? null : baseError(base.trim()))) : null;
+  // Assign me: only a ticket nobody has, and only when its assignees are known (a board card).
+  const card = state.board?.cards.find((c) => sameTicket(c, issue));
+  const canAssignMe = !!state.me && !!card && card.assignees.length === 0 && can("assignIssue");
+  const [assignMe, setAssignMe] = useState(!!prefs?.assignMe);
+  const assigned = useRef(false);
+  // What Start is doing before the session is asked for (assigning, making the worktree).
+  const [busy, setBusy] = useState<string | null>(null);
+  // The description as rendered Markdown instead of the text; the text itself is never touched.
+  const [preview, setPreview] = useState(false);
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
   // The ticket's GitHub description: null while loading; editable, and sent when `useDesc` is on.
   const [desc, setDesc] = useState<string | null>(null);
@@ -229,22 +276,61 @@ export function AssignDialog({
   }, [onClose, away]);
 
   const nameOk = NAME_RE.test(name);
-  const prompt = composePrompt(
-    system,
-    instructions,
-    useDesc ? (desc ?? "") : "",
-    useMemory ? earlierBlock(memory) : "",
-  );
-  const promptOk = prompt.length > 0 && !prompt.startsWith("-");
+  // `setup`: what MasterDeck already did for the session (the worktree it made).
+  const compose = (setup = "") =>
+    composePrompt(
+      system,
+      instructions,
+      useDesc ? (desc ?? "") : "",
+      useMemory ? earlierBlock(memory) : "",
+      setup,
+    );
+  const promptOk = compose().length > 0 && !compose().startsWith("-");
+  const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError;
 
-  const start = () => {
-    if (!draft || !nameOk || !promptOk || blocked) return;
-    const cwd = folder?.cwd || draft.cwd;
+  const start = async () => {
+    if (!draft || !ready) return;
+    setError(null);
+    let cwd = folder?.cwd || draft.cwd;
+    let setup = "";
+    // Everything that can fail happens first and is said here: no session starts half set up.
+    if (canAssignMe && assignMe && !assigned.current) {
+      setBusy("Assigning…");
+      const a = await deck().assignIssue(ticketOf(issue), state.me!, []);
+      if (!a.ok) {
+        setBusy(null);
+        setError(`${a.message}. Untick "Assign to me" to start without it.`);
+        return;
+      }
+      assigned.current = true;
+    }
+    if (worktreeOn) {
+      setBusy("Creating worktree…");
+      const w = await deck().worktreeCreate(cwd, branch.trim(), base.trim() || "HEAD");
+      if (!w.ok) {
+        setBusy(null);
+        setError(w.message);
+        return;
+      }
+      cwd = w.cwd;
+      setup = worktreeNote(w);
+    }
+    const prompt = compose(setup);
+    const kept: StartPrefs = {
+      worktree,
+      // The repository's own default is not kept as a name: it is looked up again next time.
+      base: repoInfo?.ok && base.trim() === repoInfo.base ? "" : base.trim(),
+      model,
+      permissionMode,
+      workflow,
+      assignMe,
+    };
+    save(prefsKey(issue.repo), remember ? kept : null);
     // Nothing differs from master's proposal: it is approved as it is. Otherwise a new one, which
     // keeps the model master named unless one was picked here.
     const choice = startChoice(
       draft,
-      { name, prompt, cwd, model, override: !!override },
+      { name, prompt, cwd, model, override: !!override, permissionMode },
       draft.proposalId !== null ? (pending ?? held)?.target.spawn?.model : undefined,
     );
     const unchanged = !choice.edited;
@@ -263,12 +349,14 @@ export function AssignDialog({
         heldId: held?.id,
       }),
       model: choice.model,
+      ...(permissionMode ? { permissionMode } : {}),
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
     });
     onClose();
   };
 
+  const repoLabel = issue.repo ?? "this repository";
   return (
     <>
     {away && (
@@ -288,9 +376,20 @@ export function AssignDialog({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className="dialog"
+        className="dialog start"
         role="dialog"
+        aria-modal="true"
         aria-label={`Start a session for #${issue.number}`}
+        onKeyDown={(e) => {
+          // Enter starts from any one-line field; ⌘↵ / Ctrl+↵ from anywhere (the text boxes too).
+          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+          const el = e.target as HTMLElement;
+          const line = el.tagName === "INPUT" && !el.dataset.own;
+          if (e.metaKey || e.ctrlKey || line) {
+            e.preventDefault();
+            void start();
+          }
+        }}
       >
         <h3>
           <span
@@ -299,7 +398,9 @@ export function AssignDialog({
           >
             START
           </span>
-          #{issue.number} {issue.title}
+          <span className="sd-title">
+            #{issue.number} {issue.title}
+          </span>
         </h3>
         <div className="meta">
           {issue.status ?? "No board status"}
@@ -321,11 +422,6 @@ export function AssignDialog({
             </>
           )}
         </div>
-        <AccountSelect state={state} value={account} onChange={(l) => {
-            setAccount(l);
-            setAccountPicked(true);
-          }}
-        />
 
         {past.length > 0 && (
           <div className="past">
@@ -370,189 +466,380 @@ export function AssignDialog({
           <p className="meta">Drafting…</p>
         ) : draft ? (
           <>
-            {/* Near the top: the dialog scrolls on a short window, and "no checkout found" must be seen. */}
-            <StartFolderLine
-              folder={folder ?? { cwd: draft.cwd }}
-              chosen={chosen}
-              account={isMulti(state.config) ? account : null}
-              onChoose={can("pickFolder") ? choose : undefined}
-            />
-            {/* Nothing for a trusted folder, or one nothing is known about. */}
-            {(trust.trusted === false || trust.opened) && (
-              <TrustNote trust={trust} />
-            )}
-            <label>Session name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              spellCheck={false}
-            />
-            {!nameOk && (
-              <div className="error" style={{ fontSize: 11, marginTop: 3 }}>
-                Letters, digits, dot, dash and underscore; up to 64 characters.
-              </div>
-            )}
-            <label>Model</label>
-            <select
-              className="fsel full"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              title="claude --model for the new session"
-            >
-              <option value="">{defaultModelLabel(configuredModel)}</option>
-              {MODELS.filter((m) => m.value !== configuredModel).map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            {workflows.length > 1 && (
-              <>
-                <label>Workflow</label>
-                <select
-                  className="fsel full"
-                  value={workflow}
-                  onChange={(e) => setWorkflow(e.target.value)}
-                  title="The session gets its own copy of this workflow; change it later from its Details (Workflow → Edit)"
+            <section className="sd-sec" aria-label="Ticket">
+              <h4>Ticket</h4>
+              <div className="label-row">
+                <label htmlFor="sd-desc">Description</label>
+                <div className="seg" role="group" aria-label="Description view">
+                  <button
+                    type="button"
+                    className={preview ? undefined : "on"}
+                    aria-pressed={!preview}
+                    onClick={() => setPreview(false)}
+                    title="The Markdown text, as it is sent; edit it here"
+                  >
+                    Text
+                  </button>
+                  <button
+                    type="button"
+                    className={preview ? "on" : undefined}
+                    aria-pressed={preview}
+                    onClick={() => setPreview(true)}
+                    title="The description as GitHub shows it"
+                  >
+                    Preview
+                  </button>
+                </div>
+                <span style={{ flex: 1 }} />
+                <label
+                  className="check"
+                  title="Send the description (as edited here) with the first instructions"
                 >
-                  {workflows.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({actionCount(t.flow)} blocks)
+                  <input
+                    type="checkbox"
+                    checked={useDesc && !!desc?.trim()}
+                    disabled={!desc?.trim()}
+                    onChange={(e) => setUseDesc(e.target.checked)}
+                  />
+                  Include as instructions
+                </label>
+              </div>
+              {desc === null ? (
+                <div className="meta">Loading the description from GitHub…</div>
+              ) : preview ? (
+                <div
+                  className={`desc-preview${useDesc && desc.trim() ? "" : " off"}`}
+                  tabIndex={0}
+                  aria-label="Ticket description, rendered"
+                >
+                  {desc.trim() ? (
+                    <MarkdownView text={desc} />
+                  ) : (
+                    <span className="muted">
+                      {descError
+                        ? `Could not load the description: ${descError}`
+                        : "This ticket has no description."}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  id="sd-desc"
+                  className={`desc${useDesc && desc.trim() ? "" : " off"}`}
+                  value={desc}
+                  placeholder={
+                    descError
+                      ? `Could not load the description: ${descError}`
+                      : "This ticket has no description."
+                  }
+                  onChange={(e) => setDesc(e.target.value)}
+                  spellCheck={false}
+                />
+              )}
+              {memory.length > 0 && (
+                <label
+                  className="check memory-check"
+                  title={memory
+                    .slice(0, 3)
+                    .map((m) => `${m.name}: ${m.text.slice(0, 200)}…`)
+                    .join("\n\n")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={useMemory}
+                    onChange={(e) => setUseMemory(e.target.checked)}
+                  />
+                  Include what earlier sessions on{" "}
+                  {ticketLabel(issue.repo ?? null, issue.number)} did (
+                  {Math.min(3, memory.length)} summar
+                  {Math.min(3, memory.length) === 1 ? "y" : "ies"})
+                </label>
+              )}
+            </section>
+
+            <section className="sd-sec" aria-label="Where it runs">
+              <h4>Where it runs</h4>
+              <StartFolderLine
+                folder={folder ?? { cwd: draft.cwd }}
+                chosen={chosen}
+                account={isMulti(state.config) ? account : null}
+                onChoose={can("pickFolder") ? choose : undefined}
+              />
+              {/* Nothing for a trusted folder, or one nothing is known about. */}
+              {(trust.trusted === false || trust.opened) && (
+                <TrustNote trust={trust} />
+              )}
+              {canWorktree && (
+                <>
+                  <label
+                    className="check sd-check"
+                    title="MasterDeck makes a git worktree for the ticket (a new branch) and starts the session in it; the main checkout stays as it is"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={worktreeOn}
+                      disabled={repoInfo?.ok !== true}
+                      onChange={(e) => setWorktree(e.target.checked)}
+                    />
+                    Create worktree
+                    <span className="sd-hint inline">
+                      {repoInfo === null
+                        ? "checking the folder…"
+                        : !repoInfo.ok
+                          ? "this folder is not a git checkout"
+                          : worktreeOn
+                            ? "the session starts in its own worktree"
+                            : "off: the session starts in the folder above and sets itself up"}
+                    </span>
+                  </label>
+                  {worktreeOn && repoInfo?.ok && (
+                    <div className="sd-sub">
+                      <div className="sd-grid">
+                        <div>
+                          <label htmlFor="sd-branch">Branch name</label>
+                          <input
+                            id="sd-branch"
+                            value={branch}
+                            onChange={(e) => setBranch(e.target.value)}
+                            spellCheck={false}
+                            aria-invalid={!!branchError(branch.trim())}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="sd-base">Base branch</label>
+                          <input
+                            id="sd-base"
+                            list="sd-branches"
+                            value={base}
+                            onChange={(e) => {
+                              baseTyped.current = true;
+                              setBase(e.target.value);
+                            }}
+                            spellCheck={false}
+                            title="The new branch starts from this one, as it is on this machine (nothing is fetched)"
+                          />
+                          <datalist id="sd-branches">
+                            {repoInfo.branches.map((b) => (
+                              <option key={b} value={b} />
+                            ))}
+                          </datalist>
+                        </div>
+                      </div>
+                      {worktreeError ? (
+                        <div className="sd-hint error">{worktreeError}</div>
+                      ) : (
+                        <div className="sd-hint">
+                          Worktree:{" "}
+                          <code className="mono">
+                            {repoInfo.root}/.claude/worktrees/{worktreeDir(branch.trim())}
+                          </code>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+              <div className={`sd-grid${isMulti(state.config) ? "" : " one"}`}>
+                <div>
+                  <label htmlFor="sd-name">Session name</label>
+                  <input
+                    id="sd-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    spellCheck={false}
+                    aria-invalid={!nameOk}
+                  />
+                </div>
+                <div>
+                  <AccountSelect state={state} value={account} onChange={(l) => {
+                      setAccount(l);
+                      setAccountPicked(true);
+                    }}
+                  />
+                </div>
+              </div>
+              {!nameOk && (
+                <div className="sd-hint error">
+                  Session name: letters, digits, dot, dash and underscore; up to 64 characters.
+                </div>
+              )}
+            </section>
+
+            <section className="sd-sec" aria-label="Options">
+              <h4>Options</h4>
+              <div className="sd-grid">
+                <div>
+                  <label htmlFor="sd-model">Model</label>
+                  <select
+                    id="sd-model"
+                    className="fsel full"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    title="claude --model for the new session"
+                  >
+                    <option value="">{defaultModelLabel(configuredModel)}</option>
+                    {MODELS.filter((m) => m.value !== configuredModel).map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                    {/* A remembered model that is no longer in the list is still the one chosen. */}
+                    {model && !MODELS.some((m) => m.value === model && m.value !== configuredModel) && (
+                      <option value={model}>{model}</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="sd-mode">Permission mode</label>
+                  <select
+                    id="sd-mode"
+                    className="fsel full"
+                    value={permissionMode}
+                    onChange={(e) => setPermissionMode(e.target.value)}
+                    title={`claude --permission-mode for the new session. ${PERMISSION_MODES.find((m) => m.value === permissionMode)?.hint ?? ""}`}
+                  >
+                    {PERMISSION_MODES.map((m) => (
+                      <option key={m.value} value={m.value} title={m.hint}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {workflows.length > 1 && (
+                  <div>
+                    <label htmlFor="sd-flow">Workflow</label>
+                    <select
+                      id="sd-flow"
+                      className="fsel full"
+                      value={workflow}
+                      onChange={(e) => setWorkflow(e.target.value)}
+                      title="The session gets its own copy of this workflow; change it later from its Details (Workflow → Edit)"
+                    >
+                      {workflows.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({actionCount(t.flow)} blocks)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="sd-checks">
+                {canAssignMe && (
+                  <label
+                    className="check"
+                    title="Nobody is assigned: assign the ticket to you on GitHub before the session starts"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={assignMe}
+                      onChange={(e) => setAssignMe(e.target.checked)}
+                    />
+                    Assign to me ({state.me})
+                  </label>
+                )}
+                <label
+                  className="check"
+                  title="Use these as the defaults the next time a session is started for a ticket of this repository: worktree, base branch, model, permission mode, workflow, assign to me"
+                >
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                  />
+                  Remember these choices for {repoLabel}
+                </label>
+              </div>
+            </section>
+
+            <section className="sd-sec" aria-label="Instructions">
+              <h4>Instructions</h4>
+              <div className="label-row">
+                <label htmlFor="sd-instructions">Your first instructions (optional)</label>
+                <span style={{ flex: 1 }} />
+                <select
+                  className="fsel"
+                  value=""
+                  onChange={(e) => {
+                    const t = templates.find((x) => x.name === e.target.value);
+                    if (t)
+                      setInstructions((cur) =>
+                        cur.trim() ? `${cur.trim()}\n\n${t.text}` : t.text,
+                      );
+                  }}
+                  title="Insert a saved instruction snippet"
+                  aria-label="Insert a saved instruction snippet"
+                >
+                  <option value="">Template…</option>
+                  {templates.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.builtin ? "" : "★ "}
+                      {t.name}
                     </option>
                   ))}
                 </select>
-              </>
-            )}
-            <div className="label-row">
-              <label>Ticket description</label>
-              <span style={{ flex: 1 }} />
-              <label
-                className="check"
-                title="Send the description (as edited here) with the first instructions"
-              >
-                <input
-                  type="checkbox"
-                  checked={useDesc && !!desc?.trim()}
-                  disabled={!desc?.trim()}
-                  onChange={(e) => setUseDesc(e.target.checked)}
-                />
-                Include as instructions
-              </label>
-            </div>
-            {desc === null ? (
-              <div className="meta">Loading the description from GitHub…</div>
-            ) : (
-              <textarea
-                className={`desc${useDesc && desc.trim() ? "" : " off"}`}
-                value={desc}
-                placeholder={
-                  descError
-                    ? `Could not load the description: ${descError}`
-                    : "This ticket has no description."
-                }
-                onChange={(e) => setDesc(e.target.value)}
-                spellCheck={false}
-              />
-            )}
-            {memory.length > 0 && (
-              <label
-                className="check memory-check"
-                title={memory
-                  .slice(0, 3)
-                  .map((m) => `${m.name}: ${m.text.slice(0, 200)}…`)
-                  .join("\n\n")}
-              >
-                <input
-                  type="checkbox"
-                  checked={useMemory}
-                  onChange={(e) => setUseMemory(e.target.checked)}
-                />
-                Include what earlier sessions on{" "}
-                {ticketLabel(issue.repo ?? null, issue.number)} did (
-                {Math.min(3, memory.length)} summar
-                {Math.min(3, memory.length) === 1 ? "y" : "ies"})
-              </label>
-            )}
-            <label>System prompt</label>
-            <textarea
-              className="system"
-              value={system}
-              onChange={(e) => setSystem(e.target.value)}
-              spellCheck={false}
-            />
-            <div className="label-row">
-              <label>Your first instructions (optional)</label>
-              <span style={{ flex: 1 }} />
-              <select
-                className="fsel"
-                value=""
-                onChange={(e) => {
-                  const t = templates.find((x) => x.name === e.target.value);
-                  if (t)
-                    setInstructions((cur) =>
-                      cur.trim() ? `${cur.trim()}\n\n${t.text}` : t.text,
-                    );
-                }}
-                title="Insert a saved instruction snippet"
-              >
-                <option value="">Template…</option>
-                {templates.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.builtin ? "" : "★ "}
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              {savingAs === null ? (
-                <button
-                  className="link-btn"
-                  disabled={!instructions.trim()}
-                  onClick={() => setSavingAs("")}
-                >
-                  Save as template
-                </button>
-              ) : (
-                <>
-                  <input
-                    className="tpl-name"
-                    autoFocus
-                    placeholder="Template name"
-                    value={savingAs}
-                    onChange={(e) => setSavingAs(e.target.value)}
-                  />
+                {savingAs === null ? (
                   <button
                     className="link-btn"
-                    disabled={!savingAs.trim()}
-                    onClick={async () => {
-                      setTemplates(
-                        await deck().saveTemplate({
-                          name: savingAs.trim(),
-                          text: instructions.trim(),
-                        }),
-                      );
-                      setSavingAs(null);
-                    }}
+                    disabled={!instructions.trim()}
+                    onClick={() => setSavingAs("")}
                   >
-                    Save
+                    Save as template
                   </button>
-                </>
-              )}
-            </div>
-            <textarea
-              ref={instructionsRef}
-              className="instructions"
-              value={instructions}
-              placeholder="e.g. Fix the web half only; keep native as is. Use the existing NotificationBell component."
-              onChange={(e) => setInstructions(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start();
-              }}
-            />
-            <div className="meta" style={{ marginTop: 6 }}>
-              {instructions.trim() || (useDesc && desc?.trim())
-                ? "Sent after the system prompt; the session follows these instead of stopping to ask."
-                : "Empty: the session sets up, then asks you for instructions."}
-            </div>
+                ) : (
+                  <>
+                    <input
+                      className="tpl-name"
+                      data-own="1"
+                      autoFocus
+                      placeholder="Template name"
+                      aria-label="Template name"
+                      value={savingAs}
+                      onChange={(e) => setSavingAs(e.target.value)}
+                    />
+                    <button
+                      className="link-btn"
+                      disabled={!savingAs.trim()}
+                      onClick={async () => {
+                        setTemplates(
+                          await deck().saveTemplate({
+                            name: savingAs.trim(),
+                            text: instructions.trim(),
+                          }),
+                        );
+                        setSavingAs(null);
+                      }}
+                    >
+                      Save
+                    </button>
+                  </>
+                )}
+              </div>
+              <textarea
+                id="sd-instructions"
+                ref={instructionsRef}
+                className="instructions"
+                value={instructions}
+                placeholder="e.g. Fix the web half only; keep native as is. Use the existing NotificationBell component."
+                onChange={(e) => setInstructions(e.target.value)}
+              />
+              <div className="sd-hint">
+                {instructions.trim() || (useDesc && desc?.trim())
+                  ? "Sent after the system prompt; the session follows these instead of stopping to ask."
+                  : "Empty: the session sets up, then asks you for instructions."}
+              </div>
+              {/* Rarely edited: closed until asked for, open at once when it cannot be sent as it is. */}
+              <details className="sd-more" open={!promptOk || undefined}>
+                <summary>System prompt</summary>
+                <textarea
+                  className="system"
+                  aria-label="System prompt"
+                  value={system}
+                  onChange={(e) => setSystem(e.target.value)}
+                  spellCheck={false}
+                />
+              </details>
+            </section>
 
             <div className="foot">
               <button
@@ -562,10 +849,10 @@ export function AssignDialog({
               >
                 Link session…
               </button>
-              <span className="grow">
+              <span className="grow" role="alert">
                 {error && <span className="error">{error}</span>}
               </span>
-              <button className="btn" onClick={onClose}>
+              <button className="btn" onClick={onClose} title="Esc">
                 Cancel
               </button>
               {blocked && (
@@ -579,11 +866,11 @@ export function AssignDialog({
               )}
               <button
                 className="btn primary"
-                disabled={!nameOk || !promptOk || blocked}
-                onClick={start}
-                title={blocked ? "Claude Code has not been allowed to work in this folder yet" : "⌘↵"}
+                disabled={!ready}
+                onClick={() => void start()}
+                title={blocked ? "Claude Code has not been allowed to work in this folder yet" : "↵ in a field, ⌘↵ anywhere"}
               >
-                Start
+                {busy ?? "Start"}
               </button>
             </div>
           </>

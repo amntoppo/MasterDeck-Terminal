@@ -138,6 +138,8 @@ export const CH = {
   configDetectAll: "config:detectAll",
   configSave: "config:save",
   pickFolder: "app:pickFolder",
+  worktreeInfo: "start:worktreeInfo",
+  worktreeCreate: "start:worktreeCreate",
   skillReinstall: "skills:reinstall",
   skillRemove: "skills:remove",
   workflowGet: "workflow:get",
@@ -225,6 +227,8 @@ export interface AssignRequest {
   kind?: "ASSIGN" | "PRREVIEW";
   /** `claude --model` for the new session; absent: the default model. */
   model?: string;
+  /** `claude --permission-mode` for the new session (plan, acceptEdits, auto); absent: Claude Code's default. */
+  permissionMode?: string;
   /** The workflow template the session starts with; absent: the default. */
   workflow?: string;
   /** Another GitHub account than the issue's default (the Start dialog's Account field). */
@@ -449,6 +453,16 @@ export interface DeckApi {
   /** Setup: save settings (merged into the config file), then reload everything. */
   configSave(patch: unknown): Promise<CliResult>;
   pickFolder(start?: string): Promise<string | null>;
+  /** The Start dialog's "Create worktree": is this folder a git checkout, and which branches has it (a read). */
+  worktreeInfo(
+    cwd: string,
+  ): Promise<{ ok: true; root: string; base: string; branches: string[] } | { ok: false; message: string }>;
+  /** Make the ticket's worktree (a new branch from `base`) under the checkout's `.claude/worktrees/`; the session then starts in `cwd`. */
+  worktreeCreate(
+    cwd: string,
+    branch: string,
+    base: string,
+  ): Promise<{ ok: true; cwd: string; branch: string; base: string } | { ok: false; message: string }>;
   /** Install a bundled skill (or replace the copy there); a skill removed before is added back. */
   skillReinstall(name: string): Promise<CliResult>;
   /** Take a bundled skill out of ~/.claude/skills (kept in its backup folder) and keep it out. */

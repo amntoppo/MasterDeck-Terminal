@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes } from './remoteGuards'
+import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, worktreeFolder } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
   expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
@@ -66,4 +66,11 @@ describe('MacPanes (spec §4 size rule)', () => {
   it('a size of 0 never resizes', () => {
     expect(new MacPanes().remoteSize('p', 0, 0)).toBeNull()
   })
+})
+
+it("a worktree is made only from the Mac's own window, in a folder that is there", () => {
+  expect(worktreeFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
+  expect(worktreeFolder(true, tmpdir())).toMatchObject({ ok: false })
+  expect(worktreeFolder(false, join(tmpdir(), 'no-such-folder-here'))).toMatchObject({ ok: false })
+  expect(worktreeFolder(false, undefined)).toMatchObject({ ok: false })
 })

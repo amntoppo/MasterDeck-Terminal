@@ -46,6 +46,17 @@ export function claudeFolder(remote: boolean, cwd: unknown): { ok: true; cwd: st
 }
 
 /**
+ * The checkout the Start dialog's **Create worktree** makes a worktree in: only from the Mac's own
+ * window (git runs in a folder on this Mac), and only an absolute path to a folder that is there.
+ */
+export function worktreeFolder(remote: boolean, cwd: unknown): { ok: true; cwd: string } | { ok: false; message: string } {
+  if (remote) return { ok: false, message: 'A worktree is made from the Mac: start this ticket there, or start without one.' }
+  if (typeof cwd !== 'string' || !cwd) return { ok: false, message: 'not a folder on this Mac' }
+  const r = chosenFolder(false, cwd)
+  return r.ok ? { ok: true, cwd } : r
+}
+
+/**
  * An inbox action as the `inboxAct` handler passes it on. The paired web app's actions take the
  * same path as the window's (reply, approve and the rest, unchanged); only **Open Claude there…**
  * (`trust`), which opens a tab on the Mac, is refused for a browser, whatever the item allows.

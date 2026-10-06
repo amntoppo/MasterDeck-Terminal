@@ -84,7 +84,8 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
+import { createWorktree, worktreeInfo } from "./startWorktree";
 import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
@@ -2201,6 +2202,15 @@ function registerIpc(): void {
       return r;
     },
   );
+  // The Start dialog's "Create worktree": only from the Mac's own window (a folder on this Mac).
+  reg.handle(CH.worktreeInfo, (e, cwd: unknown) => {
+    const dir = worktreeFolder(isRemote(e), cwd);
+    return dir.ok ? worktreeInfo(run, dir.cwd) : dir;
+  });
+  reg.handle(CH.worktreeCreate, (e, cwd: unknown, branch: unknown, base: unknown) => {
+    const dir = worktreeFolder(isRemote(e), cwd);
+    return dir.ok ? createWorktree(run, dir.cwd, branch, base) : dir;
+  });
   reg.handle(CH.assign, (_e, req: AssignRequest) => {
     // The template picked in the Start dialog: the new session copies it instead of the default.
     if (
