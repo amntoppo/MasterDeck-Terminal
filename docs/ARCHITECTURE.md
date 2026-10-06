@@ -315,6 +315,19 @@ stored note differs, and a file in the folder that is not a note is never overwr
 Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text leaves the process only
 through the `notes:*` handlers.
 
+The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
+after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
+titles and previews, kept current by `notes:changed`). The editor is `NoteEditor`
+(`shared/noteEditor.ts`), one per window, living outside the panel. Its rule: typed text is dropped
+only by the user's own choice (Reload, Discard, Delete). It saves 500 ms after the last key, one
+save at a time (text typed while a save is out goes with the next, based on the version that save
+returned); `show` opens another note only after `flush` stored what was typed, and stays where it
+is when that fails or a conflict waits for an answer (the panel then goes back to the open note);
+`seen` compares the list's row with the draft's `base` (`incoming`): a clean draft takes the new
+text, a dirty one shows "Changed elsewhere" (Reload / Keep mine, the latter a save with `force`),
+and nothing is written until the user chose. Closing the panel flushes; text that could not be
+saved stays in the editor, is retried every 5 s, and is on screen again when the panel opens.
+
 ### Queue
 
 `main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` in the
@@ -680,7 +693,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
-| Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`) |
+| Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`), `noteEditor.ts` (`NoteEditor`: the editor's saves, switches and conflicts, without its screen) |
 
 ## Renderer (`renderer/src/`)
 

@@ -15,6 +15,7 @@ export type PaletteAction =
   | 'view:janitor'
   | 'view:history'
   | 'view:workflow'
+  | 'notes'
   | 'broadcast'
   | 'standup'
   | 'sprint-summary'
@@ -50,6 +51,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['view:janitor', 'Go to Janitor', 'worktrees and parked sessions'],
   ['view:history', 'History: search every session', 'full-text over transcripts · ⌘⇧F'],
   ['view:workflow', 'Go to Workflow', 'issue to merged PR, hooks, your own steps'],
+  ['notes', 'Notes', 'write something down, for you or for a ticket'],
   ['broadcast', 'Broadcast a message…', 'to several sessions'],
   ['standup', 'Standup…', "yesterday's commits, PRs and reports"],
   ['sprint-summary', 'Sprint summary…', 'done, in progress, blocked, burndown'],

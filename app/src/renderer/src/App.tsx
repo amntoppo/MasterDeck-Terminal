@@ -33,6 +33,8 @@ import {
 } from "./components/SummaryDialogs";
 import { BoardView } from "./components/BoardView";
 import { PrPopup } from "./components/PrPopup";
+import { NotesPanel, type NotesTarget } from "./components/NotesPanel";
+import { useNotes } from "./notes";
 import { StartHereDialog } from "./components/StartHereDialog";
 import { LinkDialog } from "./components/LinkDialog";
 import { MasterPane, masterPaneId } from "./components/MasterPane";
@@ -240,6 +242,9 @@ export function App() {
   // The left sidebar's width, dragged at its right edge (double-click resets it).
   const [sideW, setSideW] = useState<number>(() => load("sideW", SIDE_W));
   const [sideDragging, setSideDragging] = useState(false);
+  // The Notes panel: null closed, {} the list, or the note to open.
+  const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
+  const notes = useNotes(!!state);
   // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
@@ -887,6 +892,7 @@ export function App() {
     else if (a === "new-shell") openShell();
     else if (a === "start-master") void deck().masterStart();
     else if (a === "settings") setView("settings");
+    else if (a === "notes") setNotesAt((n) => n ?? {});
     else setDialog(a as "broadcast" | "standup" | "sprint-summary" | "skills");
   };
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
@@ -1037,6 +1043,8 @@ export function App() {
       <Rail
         view={view}
         onView={setView}
+        notesOpen={!!notesAt}
+        onNotes={() => setNotesAt((n) => (n ? null : {}))}
         remote={remote}
         onRemote={() => {
           setSettingsAt({ section: "remote", at: Date.now() });
@@ -1405,6 +1413,16 @@ export function App() {
           onClose={() => setPrCard(null)}
           onStartReview={startSession}
           onStart={(card) => setAssigning(issueOf(card))}
+        />
+      )}
+      {notesAt && (
+        <NotesPanel
+          notes={notes}
+          state={state}
+          target={notesAt}
+          onTarget={setNotesAt}
+          onClose={() => setNotesAt(null)}
+          phone={phone}
         />
       )}
       {palette && (
