@@ -212,6 +212,8 @@ export interface AppState {
   sessionWorktrees: Record<string, import("./worktrees").SessionWorktree[]>;
   /** PR URLs linked to each session (sessionId): MasterDeck's links, then PRs it created. Oldest first. */
   sessionPrs: Record<string, string[]>;
+  /** Sessions linked to each other ("Linked sessions"), by Session.key; symmetric, sorted. */
+  peers: Record<string, string[]>;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */

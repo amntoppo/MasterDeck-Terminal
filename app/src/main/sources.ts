@@ -193,6 +193,8 @@ import {
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
+import type { PeerStore } from "./peers";
+import { adjacency } from "@shared/peers";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
 import {
   boardDeriver,
@@ -244,6 +246,7 @@ const EMPTY_SNAPSHOT: ParsedSnapshot = {
  */
 export class Sources {
   private rawSessions: Session[] = [];
+  private peerStore: PeerStore | null = null;
   private snapshot: ParsedSnapshot = EMPTY_SNAPSHOT;
   private proposals: Proposal[] = [];
   /** Needs you: every item waiting on the user, what they did about it, and its history. */
@@ -848,11 +851,17 @@ export class Sources {
     }
   }
 
+  setPeerStore(store: PeerStore): void {
+    this.peerStore = store;
+    store.onChange(() => this.emit());
+  }
+
   /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
   noteCopy(old: { bgId: string; sessionId: string }, copyBg: string): void {
     if (!carryCopy(this.history, this.createdPrs, old, copyBg)) return;
     this.saveHistory();
     this.saveSessionPrs();
+    this.peerStore?.carry(old.bgId, copyBg);
   }
 
   /** Re-link resumed background sessions to the ticket their earlier session id had. */
@@ -1457,6 +1466,13 @@ export class Sources {
     }
     this.reloadLinks();
     this.carryLinks();
+    if (this.peerStore) {
+      const live = new Set(
+        this.rawSessions.filter((s) => s.state !== "done").map((s) => s.key),
+      );
+      this.peerStore.prune(live);
+      this.peerStore.claim(this.rawSessions);
+    }
     const now = Date.now();
     for (const s of this.rawSessions) {
       const p = this.transcripts.find(s.sessionId, now);
@@ -2299,6 +2315,7 @@ export class Sources {
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
+      peers: this.peerStore ? adjacency(this.peerStore.data()) : {},
       watches: this.watchInfo(),
       schedules: Object.fromEntries(
         sessions

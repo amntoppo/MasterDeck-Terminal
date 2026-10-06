@@ -177,6 +177,7 @@ import {
   migrateLegacyHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
+import { PeerStore } from "./peers";
 import {
   installStatusline,
   isInstalled,
@@ -519,6 +520,8 @@ const summaries = new Summaries(
   paths.projectsDir,
 );
 const deckHooks = new DeckHooks(paths.home, undefined, paths.config);
+const peerStore = new PeerStore(join(paths.home, "session-peers.json"));
+peerStore.load();
 const sources = new Sources(
   paths,
   run,
@@ -622,6 +625,7 @@ const sources = new Sources(
   ghRouted,
   () => readGhCacheStatus(undefined, undefined, isMulti(getConfig())),
 );
+sources.setPeerStore(peerStore);
 sources.setMasterAccount((s) => sessionAccounts.get(s));
 sources.setAccountRunners({
   github: (login) => forAccount(login).github,
