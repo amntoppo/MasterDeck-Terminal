@@ -142,3 +142,18 @@ export async function waitForTrust(
   }
   return false
 }
+
+// What the CLI (`spawn.py`) and `closeOrSpawnHeld` say when a held start was closed instead of started.
+const CLOSED_FOR = /a session named (\S+) is already running; this held start was closed/
+
+/**
+ * What a "Starting…" tab shows. `running`: its retry was closed because the ticket has a session
+ * already (that session is offered, and nothing can be retried: the proposal is over). `refused`:
+ * Claude Code refused the folder. `error`: anything else, with Retry as always.
+ */
+export function pendingPane(error: string | undefined): { kind: 'starting' | 'refused' | 'error' } | { kind: 'running'; name: string } {
+  if (!error) return { kind: 'starting' }
+  const m = CLOSED_FOR.exec(error)
+  if (m) return { kind: 'running', name: m[1] }
+  return { kind: isNotTrusted(error) ? 'refused' : 'error' }
+}

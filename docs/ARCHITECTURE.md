@@ -190,7 +190,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   proposal that `master spawn` marked `held_for: "trust"` (Claude Code refused its folder) gets the actions `trust`
   (**Open Claude there…**, the window only) and `approve` (**Try again**: `retryHeld` starts that
   same proposal through `master spawn --held-for-trust`); any other held item still has only Open.
-  The `inboxAct` handler passes on whether a browser asked (`inboxActCall`). Dismissing
+  The `inboxAct` handler refuses `trust` for a browser (`inboxActCall`); its other actions run as the window's. Dismissing
   an `ext-…` item also sends `itemDismissed` to the backend.
 
 ### Hooks
@@ -453,9 +453,9 @@ arguments in that folder (`paneCommand`). It is the Mac's only, at every door: t
 `WEB_PANES` has no `claude-here`; `ptyOpen` refuses it from a browser; `PtyManager.open(…,
 remote)` remembers each pane's kind and gives a browser an existing pane only as the kind it is
 (else `claude:<folder>` could be had by asking for it as a `shell`); `PtyManager.open` refuses a
-missing folder (`startDir` would fall back to home); and the `inboxAct` handler passes on who
-asked (`inboxActCall` in `remoteGuards.ts`: a browser's action runs as a remote one, like a
-phone's, and `trust` is refused for it before anything else). MasterDeck never answers the
+missing folder (`startDir` would fall back to home); and the `inboxAct` handler refuses `trust`
+for a browser (`inboxActCall` in `remoteGuards.ts`; every other action of the web app takes the
+window's path, as it always did). MasterDeck never answers the
 prompt, never writes `.claude.json`, and never closes that tab.
 
 **Try again** starts the same proposal, and only one the CLI itself held for this. When Claude
@@ -470,7 +470,9 @@ the ledger lock: it refuses anything not `held` with that mark, and before start
 held start is rejected with a note instead ("a session named X is already running; this held
 start was closed"); not known, nothing starts and it stays held. The app asks first too
 (`sessionForProposal`: a live session with the proposal's name or its ticket) and then closes the
-held start with `master reject <id> --note …`. Both doors use only that: the held Needs-you item
+held start with `master reject <id> --note …`; the "did not start" tab then says "<ticket>
+already has a session: <name>" with **Open it** and Close, no Retry (`pendingPane` reads the
+closing sentence, the CLI's and the app's being the same). Both doors use only that: the held Needs-you item
 (actions `trust` and `approve`, label **Try again**; `approve` because it is the one a phone's
 `inbox.act` can send) → `runInboxAction` → `retryHeld` (`main/assign.ts`); and
 `AssignRequest.retry` → `startAssign`, which then never calls the plain `spawn` (so a browser

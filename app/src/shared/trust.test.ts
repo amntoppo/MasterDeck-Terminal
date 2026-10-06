@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Proposal } from './types'
-import { heldForTrust, retryRequest, startFlags, trustHeldAssign, isNotTrusted, needsTrust, remoteTrustMessage, startBlocked, trustLine, trustView, waitForTrust } from './trust'
+import { heldForTrust, pendingPane, retryRequest, startFlags, trustHeldAssign, isNotTrusted, needsTrust, remoteTrustMessage, startBlocked, trustLine, trustView, waitForTrust } from './trust'
 
 // What `claude --bg` prints in a folder whose trust prompt was never accepted, as `master spawn` reports it.
 const REFUSAL = 'Workspace not trusted. Run `claude` in <a checkout folder> once and accept the trust prompt, then retry.'
@@ -188,5 +188,23 @@ describe('waitForTrust', () => {
       return true
     }, { alive: () => true, ...c })
     expect([ok, n]).toEqual([true, 2])
+  })
+})
+
+describe('pendingPane', () => {
+  it('still starting', () => {
+    expect(pendingPane(undefined)).toEqual({ kind: 'starting' })
+  })
+  it('a retry closed because the ticket has a session already: that session, no retry', () => {
+    expect(pendingPane('a session named 9-x is already running; this held start was closed')).toEqual({ kind: 'running', name: '9-x' })
+    // As the CLI says it (it found the session by name itself).
+    expect(pendingPane('proposal 85: a session named 9-x is already running; this held start was closed')).toEqual({ kind: 'running', name: '9-x' })
+  })
+  it("Claude Code's refusal of the folder", () => {
+    expect(pendingPane(`proposal 85: ${REFUSAL}`)).toEqual({ kind: 'refused' })
+  })
+  it('anything else: the error and Retry, as always', () => {
+    expect(pendingPane('proposal 85: not logged in')).toEqual({ kind: 'error' })
+    expect(pendingPane('is already running')).toEqual({ kind: 'error' })
   })
 })

@@ -274,7 +274,8 @@ buttons; it does not go through macOS window drag regions.
   the CLI alone (`master spawn --held-for-trust`: the `held_for: "trust"` mark it wrote itself, and
   no live session of that name); never judge it by a proposal's note, and never open a retry path
   that calls the plain `spawn`. Opening Claude on the Mac is the window's only: anything reachable
-  from the web gets `isRemote(e)` passed through.
+  from the web checks `isRemote(e)` (the `inboxAct` handler refuses only `trust` for it; the web app's
+  other inbox actions run as the window's).
 - **Never launch the isolated app with a temp `HOME` on macOS** (a system keychain dialog blocks
   startup); use `CLAUDE_CONFIG_DIR` for a fake `.claude.json` and a stand-in `claude` on the PATH
   ([OPERATIONS](docs/OPERATIONS.md#isolated-e2e-test-recipe)). A test that touches `PtyManager`
@@ -360,7 +361,7 @@ buttons; it does not go through macOS window drag regions.
   prompt (MasterDeck never does, and never writes that file), the dialog comes back when the
   folder is trusted, and a refused start (its tab, the HELD card in Needs you, a phone) has **Try
   again**, which starts the same held proposal (only one the CLI held for this, never beside a
-  live session). Checked: the Python suite (450), typecheck, vitest (1415 passed, 3 skipped), and,
+  live session). Checked: the Python suite (450), typecheck, vitest (1419 passed, 3 skipped), and,
   before the review fixes (which the suites alone checked), the isolated app with a stand-in `claude` and a temp
   `CLAUDE_CONFIG_DIR` (the dialog's line and button, the tab in that folder, the dialog returning,
   the refused start's tab, the HELD card, Try again / Start now on the one proposal, no line for a

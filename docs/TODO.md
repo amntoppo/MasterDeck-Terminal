@@ -279,10 +279,6 @@ fixes it, and move the item here to "Recently done".
 - **P3 · A held start does not count in the Needs you badge and sends no notification** (held
   items never do). A start master spawned and Claude Code refused is only seen in the list.
   Decide whether a refused start should be its own kind.
-- **P3 · A browser's Needs-you actions now run as remote ones** (2026-10-06: the `inboxAct`
-  handler passes on who asked). Its replies are checked like a phone's (no text starting with `/`
-  or `!`) and are never relayed through master-agent. Decide whether the web app should keep that
-  or get its own rule.
 - **P3 · Claude Code's parent walk is mirrored from a reading of its code**, not from a documented
   rule (inside a repository up to its root, outside one all the way up). If a release changes it,
   `trust.py` is the one place; a wrong False only shows the line and holds Start until Start

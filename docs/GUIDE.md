@@ -91,7 +91,7 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
   one. Only a start MasterDeck's own spawn held for this reason can be tried again this way (not
   one held for anything else, such as a start that timed out and may be running). If the ticket
   has a session by then (you started it again another way), Try again starts nothing and closes
-  the held start, saying so. Opening the Start dialog for the ticket again starts from the held
+  the held start; the tab then says "#12 already has a session: `<name>`" with **Open it**. Opening the Start dialog for the ticket again starts from the held
   start ("the start Claude Code refused (proposal N); it is tried again"): unchanged, Start tries
   that proposal again; changed, a new one replaces it. Pressing **Open Claude there…** again for a
   tab whose Claude has exited starts Claude in it again. From a phone or the API the answer says to open Claude there on your Mac, and the held

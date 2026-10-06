@@ -13,7 +13,7 @@ import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
 import { TrustNote, useTrust } from "./components/TrustFix";
-import { isNotTrusted, retryRequest } from "@shared/trust";
+import { isNotTrusted, pendingPane, retryRequest } from "@shared/trust";
 import { AssignPopup } from "./components/AssignPopup";
 import { BroadcastDialog } from "./components/BroadcastDialog";
 import {
@@ -1229,7 +1229,22 @@ export function App() {
             >
               {t.kind === "pending" ? (
                 <div className="welcome">
-                  {t.error && isNotTrusted(t.error) ? (
+                  {pendingPane(t.error).kind === "running" ? (
+                    <AlreadyRunning
+                      ticket={ticketLabel(t.req?.repo ?? null, t.issue)}
+                      session={state?.sessions.find(
+                        (x) =>
+                          x.state !== "done" &&
+                          x.name === (pendingPane(t.error) as { name: string }).name,
+                      )}
+                      name={(pendingPane(t.error) as { name: string }).name}
+                      onOpen={(x) => {
+                        closeTab(t.id);
+                        openSession(x);
+                      }}
+                      onClose={() => closeTab(t.id)}
+                    />
+                  ) : t.error && isNotTrusted(t.error) ? (
                     <StartRefused
                       name={t.name}
                       error={t.error}
@@ -1790,6 +1805,34 @@ function StartRefused(p: {
         <button className="btn primary" onClick={p.onRetry}>
           {ready ? "Start now" : "Try again"}
         </button>
+      </div>
+    </>
+  );
+}
+
+/** A retry that started nothing because the ticket has a session already: that session, and no Retry. */
+function AlreadyRunning(p: {
+  ticket: string;
+  name: string;
+  session: Session | undefined;
+  onOpen: (s: Session) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <h2>
+        {p.ticket} already has a session: {p.name}
+      </h2>
+      <div>Nothing new was started.</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn" onClick={p.onClose}>
+          Close
+        </button>
+        {p.session && (
+          <button className="btn primary" onClick={() => p.onOpen(p.session!)}>
+            Open it
+          </button>
+        )}
       </div>
     </>
   );

@@ -83,9 +83,9 @@ describe('startAssign', () => {
   it('a retry while the ticket already has a session closes the held start and starts nothing', async () => {
     const f = fakeCli()
     const r = await startAssign(f.cli, req({ proposalId: 30, retry: true }), 0, null, () => '9-x')
-    expect(f.calls).toEqual(['reject 30 (9-x is already running; this held start was closed)'])
+    expect(f.calls).toEqual(['reject 30 (a session named 9-x is already running; this held start was closed)'])
     // Said on the "did not start" tab: there is no new session for it to wait for.
-    expect(r).toEqual({ ok: false, message: '9-x is already running; this held start was closed', proposalId: 30 })
+    expect(r).toEqual({ ok: false, message: 'a session named 9-x is already running; this held start was closed', proposalId: 30 })
   })
   it('a retry with no proposal yet starts over', async () => {
     const f = fakeCli()
@@ -110,8 +110,8 @@ describe('retryHeld', () => {
   it('the ticket was started again in the meantime: the held start is closed, no second session', async () => {
     const f = fakeCli()
     const x = deps('9-x')
-    expect(await retryHeld(f.cli, held(), x.d)).toEqual({ ok: true, message: '9-x is already running; this held start was closed' })
-    expect(f.calls).toEqual(['reject 85 (9-x is already running; this held start was closed)'])
+    expect(await retryHeld(f.cli, held(), x.d)).toEqual({ ok: true, message: 'a session named 9-x is already running; this held start was closed' })
+    expect(f.calls).toEqual(['reject 85 (a session named 9-x is already running; this held start was closed)'])
     expect(x.expected).toEqual([])
   })
   it('a proposal master spawned in the meantime counts as started', async () => {

@@ -1765,9 +1765,9 @@ function registerIpc(): void {
   reg.handle(
     CH.inboxAct,
     async (e, id: unknown, type: unknown, payload: unknown) => {
-      // Who asked goes along: a browser's action is a remote one (as a phone's is).
+      // The web app's actions run as the window's, as always; only opening Claude on the Mac is refused for it.
       const c = inboxActCall(isRemote(e), id, type, payload);
-      return c.ok ? inboxAct(c.id, c.type, c.payload, c.remote) : c;
+      return c.ok ? inboxAct(c.id, c.type, c.payload) : c;
     },
   );
   reg.handle(CH.queueList, (_e, sessionId: string) =>

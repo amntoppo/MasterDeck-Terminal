@@ -72,7 +72,7 @@ export async function startAssign(
 /** A held start whose ticket has a session already is closed, not started: it would be a second session of it. */
 async function closeOrSpawnHeld(cli: Pick<AssignCli, 'spawnHeld' | 'reject'>, id: number, owner: string | null): Promise<CliResult> {
   if (owner) {
-    const note = `${owner} is already running; this held start was closed`
+    const note = `a session named ${owner} is already running; this held start was closed`
     const r = await cli.reject([id], note)
     return r.ok ? { ok: true, message: note } : r
   }
