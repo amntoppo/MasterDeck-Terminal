@@ -158,6 +158,21 @@ describe('NotesStore', () => {
     expect(readdirSync(dir)).toEqual([`${id}.json`])
   })
 
+  it('a skipped file moved away frees its id', () => {
+    const id = 't-acme~web~63'
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${id}.json`), 'junk')
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const s = open()
+    err.mockRestore()
+    const input = { title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 } }
+    expect(s.save(input)).toMatchObject({ ok: false })
+    rmSync(join(dir, `${id}.json`))
+    expect(s.delete(id)).toEqual({ ok: true })
+    expect(saved(s.save(input)).id).toBe(id)
+    expect(s.get(id)?.body).toBe('x')
+  })
+
   it('a throwing onChange does not fail a done save or delete', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     const s = new NotesStore(dir, { onChange: () => { throw new Error('boom') }, now: () => clock })

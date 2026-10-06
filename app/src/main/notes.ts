@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -60,6 +60,14 @@ export class NotesStore {
     if (skipped) console.error(`notes: ${skipped} file(s) in ${this.dir} are not notes; left untouched`)
   }
 
+  /** True while a skipped file still sits under this id; once the user moved it away the id is free again. */
+  private blocked(id: string): boolean {
+    if (!this.foreign.has(id)) return false
+    if (existsSync(join(this.dir, `${id}.json`))) return true
+    this.foreign.delete(id)
+    return false
+  }
+
   private foreignMessage(id: string): string {
     return `The file ${id}.json in the notes folder is not a note MasterDeck can read. Move it away, then try again.`
   }
@@ -99,7 +107,7 @@ export class NotesStore {
       id = tid
       ticket = { repo, number: v.ticket.number }
     }
-    if (id && this.foreign.has(id)) return { ok: false, message: this.foreignMessage(id) }
+    if (id && this.blocked(id)) return { ok: false, message: this.foreignMessage(id) }
     const old = id ? (this.notes.get(id) ?? null) : null
     // A ticket note named by id alone keeps the ticket it has.
     if (!ticket) ticket = old?.ticket ?? null
@@ -144,7 +152,7 @@ export class NotesStore {
 
   delete(id: unknown): { ok: boolean; message?: string } {
     if (typeof id !== 'string' || !NOTE_ID.test(id)) return { ok: false, message: 'Not a note.' }
-    if (this.foreign.has(id)) return { ok: false, message: this.foreignMessage(id) }
+    if (this.blocked(id)) return { ok: false, message: this.foreignMessage(id) }
     return this.notes.has(id) ? this.remove(id) : { ok: true }
   }
 
