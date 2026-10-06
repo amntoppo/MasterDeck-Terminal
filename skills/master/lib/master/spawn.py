@@ -14,6 +14,9 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$")
 ACCOUNT_RE = re.compile(rf"^{config.LOGIN_RE}$")
+# `claude --permission-mode` values a proposal may name. bypassPermissions is left out on purpose:
+# a session nobody watches is never started with every check off.
+PERMISSION_MODES = ("acceptEdits", "auto", "dontAsk", "manual", "plan")
 
 
 class SpawnError(RuntimeError):
@@ -37,6 +40,12 @@ def validate_prompt(prompt: "str | None") -> "str | None":
 def validate_model(model: "str | None") -> "str | None":
     if model is not None and not MODEL_RE.fullmatch(model):
         return f"invalid model: {model!r}"
+    return None
+
+
+def validate_permission_mode(mode: "str | None") -> "str | None":
+    if mode is not None and mode not in PERMISSION_MODES:
+        return f"invalid permission mode: {mode!r} (one of {', '.join(PERMISSION_MODES)})"
     return None
 
 
@@ -67,7 +76,8 @@ def validate_spawn_target(sp: dict) -> "str | None":
         return err
     if sp.get("resume"):
         return validate_resume(sp["resume"])
-    err = validate_name(sp.get("name")) or validate_model(sp.get("model"))
+    err = (validate_name(sp.get("name")) or validate_model(sp.get("model"))
+           or validate_permission_mode(sp.get("permissionMode")))
     if err:
         return err
     return validate_prompt(sp.get("prompt"))
@@ -101,7 +111,8 @@ def command(target: dict) -> list:
             acct = []
         return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
-    return ["claude", "--bg", *acct, "-n", sp["name"], *model, sp["prompt"]]
+    mode = ["--permission-mode", sp["permissionMode"]] if sp.get("permissionMode") else []
+    return ["claude", "--bg", *acct, "-n", sp["name"], *model, *mode, sp["prompt"]]
 
 
 def default_account(led: dict, p: dict, cwd: str) -> "str | None":

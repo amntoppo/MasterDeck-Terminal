@@ -240,6 +240,15 @@ class CliTest(unittest.TestCase):
                                "--message", "m", "--spawn-name", "6-x", "--prompt", "do it", "--model", "x;y")
         self.assertEqual(code, 2)
 
+    def test_add_spawn_target_keeps_the_permission_mode(self):
+        self.run_cli("add", "--kind", "ASSIGN", "--issue", "5", "--source", "f:1", "--summary", "s",
+                     "--message", "m", "--spawn-name", "5-x", "--prompt", "do it", "--permission-mode", "plan")
+        self.assertEqual(ledger.load()["proposals"][0]["target"]["spawn"]["permissionMode"], "plan")
+        code, _ = self.run_cli("add", "--kind", "ASSIGN", "--issue", "6", "--source", "f:2", "--summary", "s",
+                               "--message", "m", "--spawn-name", "6-x", "--prompt", "do it",
+                               "--permission-mode", "bypassPermissions")
+        self.assertEqual(code, 2)
+
     def test_add_spawn_hostile_prompt_refused(self):
         code, out = self.run_cli("add", "--kind", "MEETING", "--issue", "5", "--source", "f:1",
                                  "--summary", "s", "--message", "m", "--spawn-name", "5-x",

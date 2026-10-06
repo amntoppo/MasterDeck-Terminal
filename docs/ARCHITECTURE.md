@@ -458,7 +458,21 @@ The app never decides the folder: the Start dialog (`AssignDialog.tsx`, `shared/
 shows the draft's answer; for master's proposal it looks the ticket up again and `adoptFresh` moves
 to a checkout only from a plain workspace; `swapPrompt` replaces a prompt only while it is one of
 the drafts' own texts; `startChoice` approves master's proposal when nothing differs and otherwise
-carries its model (`SpawnTarget.model`). **Choose folder…** asks for a draft with `--cwd`. A PR
+carries its model (`SpawnTarget.model`). The dialog's other options live in `shared/startOptions.ts`
+(`ticketBranch`, `branchError`, `worktreeDir`, `worktreeNote`, `PERMISSION_MODES`, the per-repository
+`StartPrefs` kept in localStorage under `prefsKey`). **Create worktree** is the one thing the app
+does to a folder itself: `main/startWorktree.ts` (`worktreeInfo`: main checkout, branches, default
+base; `createWorktree`: `git worktree add -b <branch> <root>/.claude/worktrees/<dir> <base>`, never
+reusing a branch or folder), behind `CH.worktreeInfo` / `CH.worktreeCreate` (`worktreeFolder` in
+`remoteGuards.ts`: the Mac's window only, `blocked` in `DECK_ACCESS`). The dialog awaits it before
+`assign`, so a failure is shown there and nothing starts; the request then carries the worktree as
+`cwd` and `worktreeNote` after the system prompt (`composePrompt`'s `setup`). The permission mode
+travels as `AssignRequest.permissionMode` → `master add --permission-mode` →
+`SpawnTarget.permissionMode` → `claude --bg --permission-mode` (`spawn.PERMISSION_MODES`:
+`bypassPermissions` is refused); like a model, it always makes a new proposal. The description's
+Preview is `shared/markdown.ts` (`parseMarkdown` → a tree; `safeHref` / `safeImage`: https only)
+drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the text; the CSP's
+`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. A PR
 review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
 `master checkout`. For web callers main drops only the `cwd` argument of `draftAssign`
 (`chosenFolder` in `main/remoteGuards.ts`; from the window it must be an absolute, existing folder);

@@ -98,6 +98,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   configDetectAll: invoke(CH.configDetectAll),
   configSave: invoke(CH.configSave),
   pickFolder: blocked,
+  // Making a worktree on the Mac is the Mac window's, like choosing a folder there.
+  worktreeInfo: blocked,
+  worktreeCreate: blocked,
   skillReinstall: invoke(CH.skillReinstall),
   skillRemove: invoke(CH.skillRemove),
   workflowGet: invoke(CH.workflowGet),

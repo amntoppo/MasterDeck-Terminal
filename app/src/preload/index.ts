@@ -106,6 +106,9 @@ const api: DeckApi = {
   configDetectAll: (login) => ipcRenderer.invoke(CH.configDetectAll, login),
   configSave: (patch) => ipcRenderer.invoke(CH.configSave, patch),
   pickFolder: (start) => ipcRenderer.invoke(CH.pickFolder, start),
+  worktreeInfo: (cwd) => ipcRenderer.invoke(CH.worktreeInfo, cwd),
+  worktreeCreate: (cwd, branch, base) =>
+    ipcRenderer.invoke(CH.worktreeCreate, cwd, branch, base),
   skillReinstall: (name) => ipcRenderer.invoke(CH.skillReinstall, name),
   skillRemove: (name) => ipcRenderer.invoke(CH.skillRemove, name),
   workflowGet: () => ipcRenderer.invoke(CH.workflowGet),

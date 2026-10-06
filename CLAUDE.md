@@ -153,6 +153,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
+| The Start dialog's options (worktree made before the start, permission mode, remembered choices) and its Markdown preview | `shared/startOptions.ts`, `main/startWorktree.ts` (`worktreeInfo`, `createWorktree`), `worktreeFolder` in `main/remoteGuards.ts`, `AssignRequest.permissionMode` → `master add --permission-mode` → `spawn.command`, `shared/markdown.ts` + `renderer/.../MarkdownView.tsx` (reuse for any Markdown view), `renderer/.../AssignDialog.tsx` |
 | Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); whether a folder's branch is the session's: `ownsFolderBranch` in `shared/parked.ts`, `main/parked.ts` (`parked-sessions.json`, written by `master spawn`: `checkout.parked`), `Sources.ownsBranch`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
 | Whether Claude Code may work in a folder (its trust prompt), and a start it refused | `skills/master/lib/master/trust.py` (the one reader of Claude Code's `.claude.json`, read only: `trusted`, `wait`, `not_trusted`; `master trust`, `trusted` in `draft-assign` / `checkout`), `MasterCli.trust`, `shared/trust.ts` (`isNotTrusted`, `trustView`, `startBlocked`, `heldForTrust`, `trustHeldAssign`, `startFlags`, `retryRequest`, `waitForTrust`), `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`: Start dialog, `StartRefused` in `App.tsx`, the held `ProposalCard`), **Open Claude there…**: `openClaude` in `main/index.ts`, `claudeFolder` in `main/remoteGuards.ts`, the `claude-here` pane; Try again: `AssignRequest.retry` / `retryHeld` in `main/assign.ts` → `MasterCli.spawnHeld` (`master spawn --held-for-trust`, `held_for` in the ledger); who asked an inbox action: `inboxActCall` in `main/remoteGuards.ts` |
 | GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts` (also resume: `resumeAs`), `main/superseded.ts` + `shared/superseded.ts` (the old side of a copy, hidden), `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
@@ -383,6 +384,17 @@ buttons; it does not go through macOS window drag regions.
   `main`. The backend's `session.start.account` is merged and deployed (backend PR #10); specs and
   plans are on backend `master` (PR #11). The bullets below say what was checked for each feature
   before the release; where they say "not pushed", that was true then.
+- **The Start dialog is redesigned (#66)** (branch `worktree-MasterDeck-Terminal-66-start-session`,
+  not merged; see "The Start dialog's options" under Where things live): four groups, **Create
+  worktree** with branch name and base branch (made before the session, the Mac's window only, only
+  in the ticket's checkout or a chosen folder, never for a held refused start), **Permission mode**,
+  **Assign to me**, **Remember these choices** per repository (never applied to a dialog opened from
+  a proposal, so an unchanged proposal is still approved or tried again as it is), and the
+  description's **Text / Preview**. Checked in an isolated app with a stand-in `claude`: the
+  Preview, the "branch already exists" error (no worktree, no session), a start in a new worktree
+  with `--permission-mode plan`. Not checked live: Assign to me (a real GitHub write), a real
+  `claude --bg` in a fresh worktree (trust is assumed to follow the checkout above it), the web
+  app. Leftovers: `docs/TODO.md` → "Start dialog (#66): leftovers".
 - **A start that Claude Code refuses ("Workspace not trusted") is fixed in the app** (branch
   `fix/workspace-trust`, not merged, not pushed, not installed; 2026-10-06). Since 0.8.0 a ticket's
   session starts in its repository's checkout, a folder whose trust prompt was usually never
