@@ -20,6 +20,8 @@ interface Deps {
  */
 export class NotesStore {
   private notes = new Map<string, Note>()
+  /** Ids of files at load that carry a note's name but are not notes: never overwritten or removed. */
+  private foreign = new Set<string>()
   private onChange: (c: NoteChange) => void
   private repoOf: (repo: string | null) => string
   private now: () => number
@@ -50,9 +52,24 @@ export class NotesStore {
         note = null
       }
       if (note) this.notes.set(id, note)
-      else skipped++
+      else {
+        skipped++
+        if (NOTE_ID.test(id)) this.foreign.add(id)
+      }
     }
     if (skipped) console.error(`notes: ${skipped} file(s) in ${this.dir} are not notes; left untouched`)
+  }
+
+  private foreignMessage(id: string): string {
+    return `The file ${id}.json in the notes folder is not a note MasterDeck can read. Move it away, then try again.`
+  }
+
+  private notify(c: NoteChange): void {
+    try {
+      this.onChange(c)
+    } catch (e) {
+      console.error('notes: onChange failed', e)
+    }
   }
 
   list(): NoteMeta[] {
@@ -82,6 +99,7 @@ export class NotesStore {
       id = tid
       ticket = { repo, number: v.ticket.number }
     }
+    if (id && this.foreign.has(id)) return { ok: false, message: this.foreignMessage(id) }
     const old = id ? (this.notes.get(id) ?? null) : null
     // A ticket note named by id alone keeps the ticket it has.
     if (!ticket) ticket = old?.ticket ?? null
@@ -106,23 +124,27 @@ export class NotesStore {
       created: old?.created ?? t,
       updated: Math.max(t, (old?.updated ?? 0) + 1),
     }
+    const file = join(this.dir, `${id}.json`)
+    const tmp = `${file}.${process.pid}.tmp`
     try {
       mkdirSync(this.dir, { recursive: true })
-      const file = join(this.dir, `${id}.json`)
-      const tmp = `${file}.${process.pid}.tmp`
       writeFileSync(tmp, JSON.stringify(note, null, 2))
       renameSync(tmp, file)
     } catch (e) {
+      try {
+        rmSync(tmp, { force: true })
+      } catch {}
       return { ok: false, message: `Could not save the note: ${e instanceof Error ? e.message : String(e)}` }
     }
     this.notes.set(id, note)
     const meta = noteMeta(note)
-    this.onChange({ id, meta })
+    this.notify({ id, meta })
     return { ok: true, meta }
   }
 
   delete(id: unknown): { ok: boolean; message?: string } {
     if (typeof id !== 'string' || !NOTE_ID.test(id)) return { ok: false, message: 'Not a note.' }
+    if (this.foreign.has(id)) return { ok: false, message: this.foreignMessage(id) }
     return this.notes.has(id) ? this.remove(id) : { ok: true }
   }
 
@@ -133,7 +155,7 @@ export class NotesStore {
       return { ok: false, message: `Could not delete the note: ${e instanceof Error ? e.message : String(e)}` }
     }
     this.notes.delete(id)
-    this.onChange({ id, deleted: true })
+    this.notify({ id, deleted: true })
     return { ok: true }
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -107,8 +107,11 @@ describe('NotesStore', () => {
       ['n-' + '3'.repeat(32) + '.json.123.tmp']: 'half',
     }
     for (const [f, text] of Object.entries(strays)) writeFileSync(join(dir, f), text)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     mkdirSync(join(dir, 'n-' + '4'.repeat(32) + '.json'))
     expect(open().list()).toEqual([good])
+    expect(err).toHaveBeenCalledTimes(1)
+    err.mockRestore()
     for (const [f, text] of Object.entries(strays)) expect(readFileSync(join(dir, f), 'utf8')).toBe(text)
   })
 
@@ -137,6 +140,42 @@ describe('NotesStore', () => {
     const s = open()
     const a = saved(s.save({ title: 't', body: 'b', base: null }))
     expect(changes).toEqual([{ id: a.id, meta: a }])
+  })
+
+  it('a skipped file with a note name is never overwritten or deleted', () => {
+    const id = 't-acme~web~63'
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${id}.json`), '{ hand edited')
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const s = open()
+    const msg = `The file ${id}.json in the notes folder is not a note MasterDeck can read. Move it away, then try again.`
+    const input = { title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 } }
+    expect(s.save(input)).toEqual({ ok: false, message: msg })
+    expect(s.save({ ...input, force: true })).toEqual({ ok: false, message: msg })
+    expect(s.delete(id)).toEqual({ ok: false, message: msg })
+    err.mockRestore()
+    expect(readFileSync(join(dir, `${id}.json`), 'utf8')).toBe('{ hand edited')
+    expect(readdirSync(dir)).toEqual([`${id}.json`])
+  })
+
+  it('a throwing onChange does not fail a done save or delete', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const s = new NotesStore(dir, { onChange: () => { throw new Error('boom') }, now: () => clock })
+    const m = saved(s.save({ title: 't', body: 'b', base: null }))
+    expect(s.get(m.id)?.body).toBe('b')
+    expect(s.delete(m.id)).toEqual({ ok: true })
+    expect(s.get(m.id)).toBeNull()
+    expect(err).toHaveBeenCalledTimes(2)
+    err.mockRestore()
+  })
+
+  it('a failed rename leaves no temp file', () => {
+    const s = open()
+    const id = 't-acme~web~63'
+    mkdirSync(join(dir, `${id}.json`), { recursive: true }) // a directory made after load, so rename onto it fails
+    const r = s.save({ title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 } })
+    expect(r).toMatchObject({ ok: false })
+    expect(readdirSync(dir)).toEqual([`${id}.json`])
   })
 
   it('search answers ids, newest first', () => {
