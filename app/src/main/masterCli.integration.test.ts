@@ -53,7 +53,7 @@ describe.runIf(hasPython())('MasterCli against the real CLI', () => {
     const before = readFileSync(file, 'utf8')
     setTimeout(() => allow(true), 300)
     expect(await cli.trust(folder, 20)).toBe(true)
-    expect(await cli.trust(join(home, 'code'))).toBe(false) // the folder itself, not its parent
+    expect(await cli.trust(join(home, 'code'))).toBe(false) // a parent of a trusted folder is not trusted by it
     allow(false)
     await cli.trust(folder)
     expect(readFileSync(file, 'utf8')).toBe(before) // read only

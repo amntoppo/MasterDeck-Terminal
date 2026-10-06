@@ -134,6 +134,16 @@ describe('MasterCli', () => {
     expect(await c(undefined)).toMatchObject({ trusted: null })
     expect(await c('yes')).toMatchObject({ trusted: null })
   })
+  it('spawnHeld is the guarded retry, and reject can say why', async () => {
+    const f = fake({ stdout: '5: sent' })
+    const cli = new MasterCli(f.run, '/lib', 'python3')
+    expect(await cli.spawnHeld(5)).toEqual({ ok: true, message: '5: sent' })
+    expect(f.calls[0].args).toEqual(['-m', 'master.cli', 'spawn', '5', '--held-for-trust'])
+    await cli.reject([5], 'closed: it runs already')
+    expect(f.calls[1].args).toEqual(['-m', 'master.cli', 'reject', '5', '--note', 'closed: it runs already'])
+    await cli.reject([5])
+    expect(f.calls[2].args).toEqual(['-m', 'master.cli', 'reject', '5'])
+  })
   it('trust asks about one folder, and can wait for the answer to turn yes', async () => {
     const f = fake({ stdout: JSON.stringify({ cwd: 'code/api', trusted: false }) })
     const cli = new MasterCli(f.run, '/lib', 'python3')

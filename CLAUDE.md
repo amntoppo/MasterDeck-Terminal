@@ -154,7 +154,7 @@ web tabs keep working.
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
 | Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); whether a folder's branch is the session's: `ownsFolderBranch` in `shared/parked.ts`, `main/parked.ts` (`parked-sessions.json`, written by `master spawn`: `checkout.parked`), `Sources.ownsBranch`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
-| Whether Claude Code may work in a folder (its trust prompt), and a start it refused | `skills/master/lib/master/trust.py` (the one reader of Claude Code's `.claude.json`, read only: `trusted`, `wait`, `not_trusted`; `master trust`, `trusted` in `draft-assign` / `checkout`), `MasterCli.trust`, `shared/trust.ts` (`isNotTrusted`, `trustView`, `startBlocked`, `heldForTrust`, `waitForTrust`), `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`: Start dialog, `StartRefused` in `App.tsx`, the held `ProposalCard`), **Open Claude there…**: `openClaude` in `main/index.ts`, `claudeFolder` in `main/remoteGuards.ts`, the `claude-here` pane; Try again: `AssignRequest.retry` / `retryHeld` in `main/assign.ts` |
+| Whether Claude Code may work in a folder (its trust prompt), and a start it refused | `skills/master/lib/master/trust.py` (the one reader of Claude Code's `.claude.json`, read only: `trusted`, `wait`, `not_trusted`; `master trust`, `trusted` in `draft-assign` / `checkout`), `MasterCli.trust`, `shared/trust.ts` (`isNotTrusted`, `trustView`, `startBlocked`, `heldForTrust`, `trustHeldAssign`, `startFlags`, `retryRequest`, `waitForTrust`), `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`: Start dialog, `StartRefused` in `App.tsx`, the held `ProposalCard`), **Open Claude there…**: `openClaude` in `main/index.ts`, `claudeFolder` in `main/remoteGuards.ts`, the `claude-here` pane; Try again: `AssignRequest.retry` / `retryHeld` in `main/assign.ts` → `MasterCli.spawnHeld` (`master spawn --held-for-trust`, `held_for` in the ledger); who asked an inbox action: `inboxActCall` in `main/remoteGuards.ts` |
 | GitHub accounts | `main/accountEnv.ts`, `main/sessionAccounts.ts` (also resume: `resumeAs`), `main/superseded.ts` + `shared/superseded.ts` (the old side of a copy, hidden), `main/accountClients.ts` (which account MasterDeck's own calls use), `shared/accounts.ts`, Setup's accounts step: `renderer/.../SetupDialog.tsx`, `renderer/.../setupAccounts.ts`, badges/pickers: `renderer/.../AccountBits.tsx` |
 | Account | `main/account.ts`, `main/loopback.ts`, `shared/account.ts`, `renderer/.../AccountPanel.tsx` |
 | Remote line | `main/cloudSync.ts`, `main/remoteCommands.ts`, `shared/remoteSnapshot.ts`, `shared/remoteGuard.ts`, `shared/remote.ts` |
@@ -264,16 +264,22 @@ buttons; it does not go through macOS window drag regions.
 - **`claude --bg` in a fresh temp dir** stops on "Workspace not trusted"; accepting writes the real
   `~/.claude.json`. For web E2E use a shell pane ("Terminal in a repo") unless the user agrees.
 - **Claude Code's trust is per folder, and MasterDeck only reads it.** A session starts in the
-  ticket's repository's checkout, which needs its own accepted trust prompt (a trusted workspace
-  above it does not count for `--bg`). `trust.py` reads `.claude.json` and nothing in MasterDeck
+  ticket's repository's checkout, which needs an accepted trust prompt for itself or a folder
+  inside the repository above it (Claude Code walks up to the git root only; a trusted workspace
+  above a repository does not count, while a plain folder is covered by any trusted parent). `trust.py` reads `.claude.json` and nothing in MasterDeck
   may write it or pass a flag that skips the prompt: the fix is always the user answering Claude
   Code's own prompt (**Open Claude there…**). Unknown is never shown as trusted. A new place that
   can show a failed start should go through `isNotTrusted` and `TrustNote`, and retry the held
-  proposal (`retry: true` / `retryHeld`), never add a second one.
+  proposal (`retry: true` / `retryHeld`), never add a second one. What may be retried is decided by
+  the CLI alone (`master spawn --held-for-trust`: the `held_for: "trust"` mark it wrote itself, and
+  no live session of that name); never judge it by a proposal's note, and never open a retry path
+  that calls the plain `spawn`. Opening Claude on the Mac is the window's only: anything reachable
+  from the web gets `isRemote(e)` passed through.
 - **Never launch the isolated app with a temp `HOME` on macOS** (a system keychain dialog blocks
   startup); use `CLAUDE_CONFIG_DIR` for a fake `.claude.json` and a stand-in `claude` on the PATH
-  ([OPERATIONS](docs/OPERATIONS.md#isolated-e2e-test-recipe)). A test that opens a pane through
-  `PtyManager` must name a `claude` that does not exist.
+  ([OPERATIONS](docs/OPERATIONS.md#isolated-e2e-test-recipe)). A test that touches `PtyManager`
+  mocks `node-pty` for the whole file (`vi.mock`), and a Python test around `cli.main(["spawn", …])`
+  patches `subprocess.run`: a red test must not be able to start a process either.
 - **Remote text** may never start with `/` or `!` or contain control characters (`noEscape`), and
   remote sends are never relayed through master-agent (`sendMasterUp(true, …)` is false).
 - **Claude Code's TUI runs on the alternate screen** (`?1049h`) with mouse/focus/bracketed-paste
@@ -353,8 +359,9 @@ buttons; it does not go through macOS window drag regions.
   by `trust.py`), **Open Claude there…** opens `claude` in the folder for the user to accept the
   prompt (MasterDeck never does, and never writes that file), the dialog comes back when the
   folder is trusted, and a refused start (its tab, the HELD card in Needs you, a phone) has **Try
-  again**, which spawns the same held proposal. Checked: the Python suite (435), typecheck, vitest
-  (1399 passed, 3 skipped), and the isolated app with a stand-in `claude` and a temp
+  again**, which starts the same held proposal (only one the CLI held for this, never beside a
+  live session). Checked: the Python suite (450), typecheck, vitest (1415 passed, 3 skipped), and,
+  before the review fixes (which the suites alone checked), the isolated app with a stand-in `claude` and a temp
   `CLAUDE_CONFIG_DIR` (the dialog's line and button, the tab in that folder, the dialog returning,
   the refused start's tab, the HELD card, Try again / Start now on the one proposal, no line for a
   trusted folder). Not checked: the real `claude` and its real prompt, Windows, the web app and a

@@ -46,6 +46,23 @@ export function claudeFolder(remote: boolean, cwd: unknown): { ok: true; cwd: st
 }
 
 /**
+ * An inbox action as the `inboxAct` handler passes it on: who asked is kept (`remote`: a browser;
+ * its text is checked like a phone's and never relayed through master-agent), and **Open Claude
+ * there…** (`trust`) is refused for a browser here already, whatever the item allows.
+ */
+export function inboxActCall(
+  remote: boolean,
+  id: unknown,
+  type: unknown,
+  payload: unknown,
+): { ok: true; id: string; type: string; payload: Record<string, unknown>; remote: boolean } | { ok: false; message: string } {
+  if (typeof id !== 'string' || typeof type !== 'string') return { ok: false, message: 'bad inbox action' }
+  if (remote && type === 'trust') return claudeFolder(true, null) as { ok: false; message: string }
+  const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {}
+  return { ok: true, id, type, payload: p, remote }
+}
+
+/**
  * Spec §4 size rule: one size per PTY; while the Mac's window shows a pane its size wins, otherwise the latest
  * browser size applies. The window reports a shown pane with cols > 0 (ptyOpen/ptyResize) and a hidden one with 0.
  * ponytail: one flag per pane id; two Mac views of one pane (split) hiding one clears it until the other resizes.

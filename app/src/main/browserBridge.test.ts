@@ -337,6 +337,11 @@ describe('BrowserBridge channel', () => {
     const specs = [{ kind: 'attach', bgId: 'x' }, { kind: 'shell', cwd: '/' }, { kind: 'ticket-builder', resume: false }, { kind: 'builder', resume: false }, { kind: 'installer', tools: [] }]
     for (const spec of specs) expect(await c.call('ptyOpen', ['p', spec, 80, 24])).toMatchObject({ ok: true })
     expect(await c.call('ptyOpen', ['p9', { kind: 'bogus' }, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
+    // Claude Code's trust prompt, and gh's login, are answered on the Mac.
+    for (const spec of [{ kind: 'claude-here', cwd: '/' }, { kind: 'gh-login' }])
+      expect(await c.call('ptyOpen', ['p9', spec, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
+    for (const m of ['trust', 'openClaudeIn'])
+      expect(await c.call(m, ['/'])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
     expect(w.call).toHaveBeenCalledTimes(specs.length)
   })
 

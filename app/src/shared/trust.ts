@@ -1,3 +1,5 @@
+import type { AssignRequest } from './ipc'
+import { sameTicket, type Ticket } from './ticket'
 import type { Proposal } from './types'
 
 /**
@@ -67,13 +69,41 @@ export function startBlocked(trusted: Trusted, o: { desktop: boolean; anyway: bo
 }
 
 /**
- * A proposal held because Claude Code refused its folder: the folder to open Claude in, the
- * proposal's own (`master spawn` records it when the proposal named none). Null: held for another
- * reason, or not held.
+ * A start `master spawn` held because Claude Code refused its folder (`held_for: "trust"` in the
+ * ledger, written by the CLI at that failure only; never judged by the note, which master-agent
+ * can write): the folder to open Claude in, the proposal's own. Null: anything else. The CLI
+ * checks the same again before it starts one (`master spawn --held-for-trust`).
  */
 export function heldForTrust(p: Proposal): { folder: string | null } | null {
-  if (p.status !== 'held' || !p.target.spawn || !isNotTrusted(p.note)) return null
+  if (p.status !== 'held' || p.heldFor !== 'trust' || !p.target.spawn) return null
   return { folder: p.target.spawn.cwd || null }
+}
+
+/** The refused start of a ticket, if one is still held (the newest): the Start dialog offers that one again instead of adding another. */
+export function trustHeldAssign(proposals: Proposal[], t: Ticket): Proposal | null {
+  const c = proposals.filter((p) => p.kind === 'ASSIGN' && sameTicket({ repo: p.repo ?? null, number: p.issue }, t) && heldForTrust(p))
+  return c.sort((a, b) => b.id - a.id)[0] ?? null
+}
+
+/**
+ * What Start sends about the proposal its draft came from. Unchanged from master's: approve it, or
+ * only spawn one already approved (`approvedId`). Unchanged from the ticket's refused start
+ * (`heldId`): that same proposal is tried again. Edited, or no proposal: a new one.
+ */
+export function startFlags(o: { proposalId: number | null; edited: boolean; approvedId: number | undefined; heldId: number | undefined }): { approved: boolean; retry?: true } {
+  if (o.edited || o.proposalId === null) return { approved: false }
+  if (o.proposalId === o.heldId) return { approved: true, retry: true }
+  return { approved: o.proposalId === o.approvedId }
+}
+
+/**
+ * What the "did not start" tab sends again. A start Claude Code refused for its folder: the held
+ * proposal itself, as a retry (never a second proposal). Any other failure: what Retry always
+ * sent. No proposal yet: the request as it was.
+ */
+export function retryRequest(req: AssignRequest, proposalId: number | undefined, error: string | undefined): AssignRequest {
+  if (proposalId === undefined) return req
+  return { ...req, proposalId, edited: false, approved: true, ...(isNotTrusted(error) ? { retry: true } : {}) }
 }
 
 /** For a start asked from a phone or the API: there is no tab to open there. */

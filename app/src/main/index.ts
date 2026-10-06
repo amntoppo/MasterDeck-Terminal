@@ -84,7 +84,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
 import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
@@ -298,6 +298,10 @@ async function assignNow(
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
     expect: (name, login) => sessionAccounts.expect(name, login),
+    owner: (id) => {
+      const p = latest?.proposals.find((x) => x.id === id);
+      return (p && latest ? sessionForProposal(p, latest.sessions)?.name : null) ?? null;
+    },
   });
 }
 const ptys = new PtyManager(
@@ -1099,8 +1103,11 @@ async function runInboxAction(
         return { ok: false, message: "not a proposal" };
       // Try again on a start that was held: the same proposal is spawned again (held → sent).
       if (type === "approve" && d.proposal.status === "held")
-        return retryHeld(cli, d.proposal, (name, login) => {
-          if (isMulti(getConfig())) sessionAccounts.expect(name, login);
+        return retryHeld(cli, d.proposal, {
+          expect: (name, login) => {
+            if (isMulti(getConfig())) sessionAccounts.expect(name, login);
+          },
+          owner: () => owner()?.name ?? null,
         });
       return type === "approve"
         ? cli.approve([d.proposal.id])
@@ -1757,14 +1764,10 @@ function registerIpc(): void {
   );
   reg.handle(
     CH.inboxAct,
-    async (_e, id: unknown, type: unknown, payload: unknown) => {
-      if (typeof id !== "string" || typeof type !== "string")
-        return { ok: false, message: "bad inbox action" };
-      const p =
-        payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>)
-          : {};
-      return inboxAct(id, type, p);
+    async (e, id: unknown, type: unknown, payload: unknown) => {
+      // Who asked goes along: a browser's action is a remote one (as a phone's is).
+      const c = inboxActCall(isRemote(e), id, type, payload);
+      return c.ok ? inboxAct(c.id, c.type, c.payload, c.remote) : c;
     },
   );
   reg.handle(CH.queueList, (_e, sessionId: string) =>
@@ -2792,7 +2795,7 @@ function registerIpc(): void {
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
-      return ptys.open(id, spec, cols, rows);
+      return ptys.open(id, spec, cols, rows, isRemote(e));
     },
   );
   reg.on(CH.ptyWrite, (_e, id: string, data: string) =>

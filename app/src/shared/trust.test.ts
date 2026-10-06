@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Proposal } from './types'
-import { heldForTrust, isNotTrusted, needsTrust, remoteTrustMessage, startBlocked, trustLine, trustView, waitForTrust } from './trust'
+import { heldForTrust, retryRequest, startFlags, trustHeldAssign, isNotTrusted, needsTrust, remoteTrustMessage, startBlocked, trustLine, trustView, waitForTrust } from './trust'
 
 // What `claude --bg` prints in a folder whose trust prompt was never accepted, as `master spawn` reports it.
 const REFUSAL = 'Workspace not trusted. Run `claude` in <a checkout folder> once and accept the trust prompt, then retry.'
@@ -83,17 +83,61 @@ describe('startBlocked', () => {
 })
 
 describe('heldForTrust', () => {
-  const p = (over: Partial<Proposal>): Proposal => ({ id: 85, kind: 'ASSIGN', issue: 9, status: 'held', summary: 's', message: 'm', note: REFUSAL, target: { spawn: { name: '9-x', cwd: 'code/api', prompt: 'go' } }, ...over })
-  it("a start Claude Code refused: the proposal's own folder", () => {
+  const p = (over: Partial<Proposal>): Proposal => ({ id: 85, kind: 'ASSIGN', issue: 9, status: 'held', heldFor: 'trust', summary: 's', message: 'm', note: REFUSAL, target: { spawn: { name: '9-x', cwd: 'code/api', prompt: 'go' } }, ...over })
+  it("a start `master spawn` held because Claude Code refused its folder: the proposal's own folder", () => {
     expect(heldForTrust(p({}))).toEqual({ folder: 'code/api' })
     expect(heldForTrust(p({ target: { spawn: { name: '9-x' } } }))).toEqual({ folder: null })
+    expect(heldForTrust(p({ note: 'reworded by a later Claude Code' }))).toEqual({ folder: 'code/api' })
+  })
+  it('never by its note alone: master-agent can write any note', () => {
+    expect(heldForTrust(p({ heldFor: undefined }))).toBeNull()
+    expect(heldForTrust(p({ heldFor: 'other' }))).toBeNull()
   })
   it('nothing else', () => {
-    expect(heldForTrust(p({ note: 'cwd does not exist: code/api' }))).toBeNull()
-    expect(heldForTrust(p({ note: null }))).toBeNull()
     expect(heldForTrust(p({ status: 'blocked' }))).toBeNull()
     expect(heldForTrust(p({ status: 'sent' }))).toBeNull()
     expect(heldForTrust(p({ target: { session: '9-x' } }))).toBeNull()
+  })
+})
+
+describe('trustHeldAssign', () => {
+  const p = (over: Partial<Proposal>): Proposal => ({ id: 85, kind: 'ASSIGN', issue: 9, status: 'held', heldFor: 'trust', summary: 's', message: 'm', note: REFUSAL, target: { spawn: { name: '9-x', cwd: 'code/api', prompt: 'go' } }, ...over })
+  it("the ticket's refused start, the newest one", () => {
+    expect(trustHeldAssign([p({ id: 80 }), p({ id: 85 }), p({ id: 90, issue: 10 })], { repo: null, number: 9 })?.id).toBe(85)
+  })
+  it('not another ticket, kind or reason', () => {
+    expect(trustHeldAssign([p({ repo: 'acme/api' })], { repo: null, number: 9 })).toBeNull()
+    expect(trustHeldAssign([p({ kind: 'PRREVIEW' })], { repo: null, number: 9 })).toBeNull()
+    expect(trustHeldAssign([p({ heldFor: undefined })], { repo: null, number: 9 })).toBeNull()
+    expect(trustHeldAssign([p({ status: 'sent' })], { repo: null, number: 9 })).toBeNull()
+  })
+})
+
+describe('startFlags', () => {
+  it("unchanged from master's proposal: approve it, or only spawn one already approved", () => {
+    expect(startFlags({ proposalId: 20, edited: false, approvedId: undefined, heldId: undefined })).toEqual({ approved: false })
+    expect(startFlags({ proposalId: 20, edited: false, approvedId: 20, heldId: undefined })).toEqual({ approved: true })
+  })
+  it('unchanged from the refused start of this ticket: that same proposal is tried again', () => {
+    expect(startFlags({ proposalId: 85, edited: false, approvedId: undefined, heldId: 85 })).toEqual({ approved: true, retry: true })
+  })
+  it('edited, or no proposal: a new one, never a retry', () => {
+    expect(startFlags({ proposalId: 85, edited: true, approvedId: undefined, heldId: 85 })).toEqual({ approved: false })
+    expect(startFlags({ proposalId: null, edited: true, approvedId: 20, heldId: 85 })).toEqual({ approved: false })
+  })
+})
+
+describe('retryRequest', () => {
+  const req = { issue: 9, name: '9-x', cwd: 'code/api', prompt: 'P', proposalId: null, edited: true, approved: false, model: 'sonnet' }
+  it('a start Claude Code refused for its folder: the held proposal itself, marked as a retry', () => {
+    expect(retryRequest(req, 85, `proposal 85: ${REFUSAL}`)).toEqual({ ...req, proposalId: 85, edited: false, approved: true, retry: true })
+  })
+  it('any other failure: exactly what Retry always sent', () => {
+    expect(retryRequest(req, 85, 'proposal 85: not logged in')).toEqual({ ...req, proposalId: 85, edited: false, approved: true })
+    expect(retryRequest(req, 85, undefined)).toEqual({ ...req, proposalId: 85, edited: false, approved: true })
+  })
+  it('no proposal yet: start over', () => {
+    expect(retryRequest(req, undefined, REFUSAL)).toBe(req)
   })
 })
 

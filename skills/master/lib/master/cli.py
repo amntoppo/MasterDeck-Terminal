@@ -188,7 +188,7 @@ def _decide(args, to: str) -> int:
     now = _now(args)
     with ledger.locked() as led:  # one bad id raises and saves none of them
         for pid in args.ids:
-            ledger.transition(led, pid, to, now=now)
+            ledger.transition(led, pid, to, now=now, note=getattr(args, "note", None))
     print(f"{to}: {' '.join(str(i) for i in args.ids)}")
     return 0
 
@@ -211,7 +211,7 @@ def cmd_spawn(args) -> int:
     err = None
     with ledger.locked() as led:
         try:
-            p = spawn.spawn(led, args.id, now=_now(args))
+            p = spawn.spawn(led, args.id, now=_now(args), held_for_trust=args.held_for_trust)
         except spawn.SpawnError as e:
             err = str(e)
     if err:
@@ -566,6 +566,7 @@ def parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name)
         p.add_argument("ids", type=int, nargs="+")
         p.add_argument("--now")
+        p.add_argument("--note", help="why, kept on the proposals")
         p.set_defaults(fn=lambda a, to=to: _decide(a, to))
 
     mk = sub.add_parser("mark")
@@ -586,6 +587,8 @@ def parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("spawn")
     sp.add_argument("id", type=int)
     sp.add_argument("--now")
+    sp.add_argument("--held-for-trust", action="store_true",
+                    help="the app's Try again: only a start held because Claude Code refused its folder, and never beside a live session of that name")
     sp.set_defaults(fn=cmd_spawn)
 
     sy = sub.add_parser("say")

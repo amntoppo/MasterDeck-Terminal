@@ -161,14 +161,33 @@ def running(session_id: str, runner=subprocess.run) -> "bool | None":
                for x in rows)
 
 
-def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
+def named_running(name: str, runner=subprocess.run) -> "bool | None":
+    """Whether `claude agents` shows a live process for a session of this name. None: not known."""
+    try:
+        r = runner(["claude", "agents", "--json"], capture_output=True, text=True, timeout=30)
+        rows = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    return any(isinstance(x, dict) and x.get("pid") and x.get("name") == name for x in rows)
+
+
+def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run, held_for_trust: bool = False) -> dict:
+    """`held_for_trust`: the app's Try again. Only a proposal this function itself held because
+    Claude Code refused its folder (`held_for: "trust"`, never a note someone wrote), and never
+    beside a live session of the same name."""
     p = ledger.get(led, pid)
     if "spawn" not in p["target"]:
         raise SpawnError(f"proposal {pid} targets a session; send it with SendMessage")
+    if held_for_trust and not (p["status"] == "held" and p.get("held_for") == "trust"):
+        # Held for anything else (a start that timed out may be running; a resume beside a
+        # running session) is not for a button to start again.
+        raise SpawnError(f"proposal {pid} is not a start held because Claude Code refused its folder")
     if p["status"] not in ("approved", "held"):
         raise SpawnError(f"proposal {pid} is {p['status']}, not approved")
 
-    def hold(note: str) -> None:
+    def hold(note: str, why: "str | None" = None) -> None:
         # A failure moves an approved proposal to held so a re-armed watch never re-emits
         # it (watch_lines only emits "approved"). An already-held proposal just gets a
         # fresher note — held -> held is not a transition ledger.TRANSITIONS allows.
@@ -176,6 +195,23 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
             ledger.set_note(led, pid, note)
         else:
             ledger.transition(led, pid, "held", now=now, note=note)
+        # Why it is held, when that is something the app can fix and retry (only "trust").
+        if why:
+            p["held_for"] = why
+        else:
+            p.pop("held_for", None)
+
+    if held_for_trust:
+        name = p["target"]["spawn"].get("name") or ""
+        live = named_running(name, runner)
+        if live:
+            # The ticket was started again in the meantime (the Start dialog, master): this start
+            # would be a second session of the same name. It is over.
+            note = f"a session named {name} is already running; this held start was closed"
+            ledger.transition(led, pid, "rejected", now=now, note=note)
+            raise SpawnError(f"proposal {pid}: {note}")
+        if live is None:
+            raise SpawnError(f"proposal {pid}: `claude agents` failed, so it is not known whether {name} already runs; not started")
 
     sp0 = p["target"]["spawn"]
     # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
@@ -226,7 +262,9 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
             # Claude Code was never allowed to work in this folder. The proposal now names it: the
             # app shows it (and opens `claude` there), and the retry starts in the same one.
             sp0.setdefault("cwd", cwd)
-        hold(err)
+            hold(err, "trust")
+        else:
+            hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
     out = r.stdout or ""
     if park:

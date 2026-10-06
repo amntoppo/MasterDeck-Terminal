@@ -102,6 +102,9 @@ export interface Proposal {
   note: string | null;
   target: { session?: string; spawn?: SpawnTarget };
   closedAt?: string | null;
+  /** Why `master spawn` itself held it, when that can be fixed and tried again: "trust" (Claude
+   * Code refused its folder). Written by the CLI only; a note anyone can write never counts. */
+  heldFor?: string;
 }
 
 export type MasterState =

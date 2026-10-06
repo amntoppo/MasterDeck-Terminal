@@ -122,8 +122,11 @@ npx electron . --remote-debugging-port=9333
   the tab running the stand-in in that folder, the dialog coming back once the temp file says
   trusted, the refused start's tab, the HELD card, **Try again** / **Start now** spawning the one
   proposal (held → sent), and no line for a trusted folder.
-- A unit test that opens a pane through `PtyManager` runs whatever `paneCommand` names: give it a
-  `claude` path that does not exist (`ptys.test.ts`), never the default.
+- A unit test that opens a pane through `PtyManager` runs whatever `paneCommand` names, a real
+  shell included: replace `node-pty` for the whole file with `vi.mock` before anything loads it
+  (`ptys.test.ts`), so it cannot start a process even while it is red. An argument the code under
+  test does not take yet protects nothing. The same for the CLI: patch `subprocess.run` around a
+  `cli.main(["spawn", …])` in a test.
 - The Board without GitHub: `MASTERDECK_BOARD_FIXTURE=<json>` with a `config.json` under
   `$MASTER_HOME`. `app/test/fixtures/board.json` goes with a config that has a board;
   `app/test/fixtures/board-derived.json` with one that has repositories and no board
@@ -207,6 +210,6 @@ a tab open is still to be measured (TODO).
 | "Another Mac is connected to this account" | close 4005: only one Mac per account; sign the other out |
 | Notifications never show | the bundle needs a whole-bundle (ad-hoc) signature; reinstall from a fresh build |
 | `install-mac.sh` says MasterDeck is running | quit it and wait for `pgrep` to be empty |
-| A session does not start: "Workspace not trusted. Run `claude` in `<folder>` once…" / "Claude Code has not been allowed to work in `<folder>` yet." | Claude Code's trust prompt was never accepted in that folder (sessions start in the ticket's repository's checkout; a trusted parent does not count). **Open Claude there…** (Start dialog, the "did not start" tab, the HELD card in Needs you), accept the prompt, **Try again**: it spawns the same held proposal. `master trust <folder>` prints what MasterDeck reads (`true`, `false`, `null` = not known) from `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set); it never writes that file |
+| A session does not start: "Workspace not trusted. Run `claude` in `<folder>` once…" / "Claude Code has not been allowed to work in `<folder>` yet." | Claude Code's trust prompt was never accepted for that folder (sessions start in the ticket's repository's checkout; for a git repository only the repository itself or a folder inside it up to its root counts, never the workspace above it; a plain folder is covered by any trusted parent). **Open Claude there…** (Start dialog, the "did not start" tab, the HELD card in Needs you), accept the prompt, **Try again**: it spawns the same held proposal (`master spawn <id> --held-for-trust`: only a start the CLI itself held for this, never beside a live session of that name). `master trust <folder>` prints what MasterDeck reads (`true`, `false`, `null` = not known) from `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set, 8 MB at most); it never writes that file |
 | Web shows "Update MasterDeck" | Mac and web `PROTOCOL_VERSION` differ; update the Mac or reload |
 | Backend CI deploy fails (7403) | deploy locally with `npx wrangler deploy` |

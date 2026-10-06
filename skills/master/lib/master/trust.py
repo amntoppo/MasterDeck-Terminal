@@ -1,15 +1,20 @@
 """Whether Claude Code has been allowed to work in a folder: its trust prompt was accepted there.
 
 `claude --bg` refuses to start a session in a folder where it was not ("Workspace not trusted.
-Run `claude` in <folder> once and accept the trust prompt, then retry."), and a trusted parent
-folder does not carry over. Claude Code records the answer in its own `.claude.json`, under
-`projects["<folder>"].hasTrustDialogAccepted`.
+Run `claude` in <folder> once and accept the trust prompt, then retry."). Claude Code records the
+answer in its own `.claude.json`, under `projects["<folder>"].hasTrustDialogAccepted`, and looks
+at the folder and its parents: inside a git repository up to and including the repository's root
+(the first folder with a `.git`), outside one all the way up. So a sub-folder of a trusted
+repository is trusted, a plain folder under a trusted parent is trusted, and a repository under a
+trusted plain parent is not (a ticket's checkout under a trusted workspace).
 
 The one place that reads it, for the Start dialog's draft (`master draft-assign`), PR review
 sessions (`master checkout`) and the app's re-check while the user accepts the prompt (`master
 trust`). Read only: accepting the prompt is Claude Code's own, done by the user in `claude`.
 The answer is True, False, or None when it is not known (no file, one that cannot be read or
-parsed, too large, or not the expected shape): never True on a guess.
+parsed, too large, not the expected shape, a folder that is not there, a linked worktree that is
+not listed): never True on a guess, and never False on one either (the app holds Start back on
+False).
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-MAX_BYTES = 64 * 1024 * 1024  # the file holds every project's history; larger than this is not read
+MAX_BYTES = 8 * 1024 * 1024  # far above any real one; larger than this is not read
 EVERY = 2.0                   # seconds between two looks while waiting
 MAX_WAIT = 60.0
 
@@ -68,16 +73,45 @@ def _spelled(p: str) -> str:
     return p.lower() if os.name == "nt" else p
 
 
+def _walk(folder: str) -> "tuple[list, bool] | None":
+    """The folders Claude Code looks at for `folder` (real paths: it never sees a link), and
+    whether the walk ended at a linked worktree or submodule (a `.git` file). None: no such folder."""
+    try:
+        real = os.path.realpath(folder)
+    except (OSError, ValueError):
+        return None
+    if not folder or not os.path.isdir(real):
+        return None
+    out, d = [], real
+    while True:
+        out.append(d)
+        g = os.path.join(d, ".git")
+        if os.path.isdir(g):
+            return out, False
+        if os.path.isfile(g):
+            return out, True
+        up = os.path.dirname(d)
+        if up == d:
+            return out, False
+        d = up
+
+
 def trusted(folder: str, path: "Path | None" = None, max_bytes: int = MAX_BYTES) -> "bool | None":
-    """True: the trust prompt was accepted for exactly this folder (as given, or as the folder its
-    links lead to: Claude Code sees the real one). False: the file is readable and does not say so.
-    None: not known."""
+    """True: the trust prompt was accepted for this folder or a parent Claude Code counts (see the
+    module text), each compared by its real path with the keys as they are stored. False: the file
+    is readable and says so for none of them. None: not known."""
     projects = _projects(path or claude_json(), max_bytes)
     if projects is None:
         return None
-    mine = {_spelled(p) for p in (folder, os.path.abspath(folder), os.path.realpath(folder))}
-    return any(isinstance(k, str) and _spelled(k) in mine and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True
-               for k, v in projects.items())
+    walk = _walk(folder)
+    if walk is None:
+        return None
+    mine = {_spelled(d) for d in walk[0]}
+    if any(isinstance(k, str) and _spelled(k) in mine and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True
+           for k, v in projects.items()):
+        return True
+    # A linked worktree: Claude Code may go by its main repository. Not a no, then.
+    return None if walk[1] else False
 
 
 def wait(folder: str, seconds: float, path: "Path | None" = None, sleep=time.sleep, clock=time.monotonic) -> "bool | None":

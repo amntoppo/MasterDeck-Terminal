@@ -10,7 +10,7 @@ import { formatAgo } from "@shared/format";
 import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
 import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
-import { startBlocked } from "@shared/trust";
+import { startBlocked, startFlags, trustHeldAssign } from "@shared/trust";
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { TrustNote, useTrust } from "./TrustFix";
 import { deck } from "../deck";
@@ -41,6 +41,9 @@ export function AssignDialog({
   const pending = pendingAssign(state.proposals, ticketOf(issue));
   const approved =
     pending?.status === "approved" && pending.target.spawn ? pending : null;
+  // A start of this ticket that Claude Code refused for its folder and that is still held: the
+  // dialog starts from it and, unchanged, tries that same proposal again instead of adding one.
+  const held = pending ? null : trustHeldAssign(state.proposals, ticketOf(issue));
   const [draft, setDraft] = useState<DraftAssign | null>(null);
   const [name, setName] = useState("");
   const [system, setSystem] = useState("");
@@ -150,7 +153,7 @@ export function AssignDialog({
 
   useEffect(() => {
     let alive = true;
-    const fromProposal = pending && pending.target.spawn ? pending : null;
+    const fromProposal = pending && pending.target.spawn ? pending : held;
     const use = (d: DraftAssign) => {
       setDraft(d);
       setName(d.name);
@@ -163,6 +166,12 @@ export function AssignDialog({
     };
     if (fromProposal) {
       const sp = fromProposal.target.spawn!;
+      // The refused start's prompt is the whole first message already (description and earlier
+      // sessions included): sent again as it is, not wrapped a second time.
+      if (fromProposal === held) {
+        setUseDesc(false);
+        setUseMemory(false);
+      }
       use({
         issue: issue.number,
         repo: issue.repo ?? null,
@@ -236,7 +245,7 @@ export function AssignDialog({
     const choice = startChoice(
       draft,
       { name, prompt, cwd, model, override: !!override },
-      draft.proposalId !== null ? pending?.target.spawn?.model : undefined,
+      draft.proposalId !== null ? (pending ?? held)?.target.spawn?.model : undefined,
     );
     const unchanged = !choice.edited;
     onStart({
@@ -247,10 +256,12 @@ export function AssignDialog({
       prompt,
       proposalId: draft.proposalId,
       edited: !unchanged,
-      approved:
-        unchanged &&
-        draft.proposalId !== null &&
-        draft.proposalId === approved?.id,
+      ...startFlags({
+        proposalId: draft.proposalId,
+        edited: !unchanged,
+        approvedId: approved?.id,
+        heldId: held?.id,
+      }),
       model: choice.model,
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
@@ -302,7 +313,10 @@ export function AssignDialog({
           {draft?.proposalId != null && (
             <>
               {" "}
-              · from master's proposal {draft.proposalId}
+              ·{" "}
+              {held?.id === draft.proposalId
+                ? `the start Claude Code refused (proposal ${draft.proposalId}); it is tried again`
+                : `from master's proposal ${draft.proposalId}`}
               {approved ? " (approved, not started yet)" : ""}
             </>
           )}

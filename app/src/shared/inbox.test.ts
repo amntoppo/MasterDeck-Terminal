@@ -134,7 +134,7 @@ describe('collectItems', () => {
     const note = 'Workspace not trusted. Run `claude` in code/api once and accept the trust prompt, then retry.'
     const spawn = { name: '7-x', cwd: 'code/api', prompt: 'go' }
     it('can be fixed and tried again from the item', () => {
-      const [h] = collectItems(input({ proposals: [prop({ id: 85, status: 'held', note, target: { spawn } })] }))
+      const [h] = collectItems(input({ proposals: [prop({ id: 85, status: 'held', heldFor: 'trust', note, target: { spawn } })] }))
       expect([h.kind, h.actions]).toEqual(['held', [{ type: 'trust', label: 'Open Claude there…' }, { type: 'approve', label: 'Try again', primary: true }]])
       expect(h.body).toBe('Claude Code has not been allowed to work in code/api yet. Open Claude in that folder once and accept its prompt, then try again.')
       expect(allowed(h, 'approve')).toBe(true)
@@ -142,11 +142,12 @@ describe('collectItems', () => {
       expect(h.detail).toMatchObject({ type: 'proposal', proposal: { id: 85 } })
     })
     it('the item is the same one while the refusal is', () => {
-      const id = () => collectItems(input({ proposals: [prop({ id: 85, status: 'held', note, target: { spawn } })] }))[0].id
+      const id = () => collectItems(input({ proposals: [prop({ id: 85, status: 'held', heldFor: 'trust', note, target: { spawn } })] }))[0].id
       expect(id()).toBe(id())
     })
     it('held for any other reason stays as it was: nothing to press but Open', () => {
-      for (const p of [prop({ status: 'held', note: 'cwd does not exist: code/api', target: { spawn } }), prop({ status: 'held', note, target: { session: 'a' } }), prop({ status: 'held' })]) {
+      // The last one: a note that only reads like the refusal (master-agent wrote it), not held by `master spawn`.
+      for (const p of [prop({ status: 'held', note: 'cwd does not exist: code/api', target: { spawn } }), prop({ status: 'held', heldFor: 'trust', note, target: { session: 'a' } }), prop({ status: 'held' }), prop({ status: 'held', note, target: { spawn } })]) {
         const [h] = collectItems(input({ proposals: [p] }))
         expect(h.actions).toEqual([{ type: 'open', label: 'Open' }])
         expect(h.body).toBe(p.note ?? p.summary)

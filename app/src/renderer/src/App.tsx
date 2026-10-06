@@ -13,7 +13,7 @@ import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
 import { TrustNote, useTrust } from "./components/TrustFix";
-import { isNotTrusted } from "@shared/trust";
+import { isNotTrusted, retryRequest } from "@shared/trust";
 import { AssignPopup } from "./components/AssignPopup";
 import { BroadcastDialog } from "./components/BroadcastDialog";
 import {
@@ -72,6 +72,8 @@ type Tab =
       login?: string;
       /** Plain `claude` in `cwd`, for the user to answer its trust prompt (Open Claude there…): never restored. */
       claude?: true;
+      /** When Open Claude there… was pressed again for it: an exited one starts again. */
+      asked?: number;
     }
   /** A session being started from the Start dialog; becomes a session tab when it appears. */
   | {
@@ -542,18 +544,10 @@ export function App() {
         return;
       }
       if (!t.req) return;
-      // The failed spawn left its proposal held; spawn that one again, as it is (`retry`: never a
-      // second proposal, whatever model or account the first start named). With no proposal yet, start over.
-      const again: AssignRequest =
-        t.proposalId !== undefined
-          ? {
-              ...t.req,
-              proposalId: t.proposalId,
-              edited: false,
-              approved: true,
-              retry: true,
-            }
-          : t.req;
+      // The failed spawn left its proposal held; spawn that one again. A start Claude Code refused
+      // for its folder goes as a retry (the same proposal, never a second one); with no proposal
+      // yet, start over.
+      const again = retryRequest(t.req, t.proposalId, t.error);
       void deck()
         .assign(again)
         .then((r) => {
@@ -635,7 +629,10 @@ export function App() {
       setView("terminals");
       setTabs((cur) =>
         cur.some((t) => t.id === id)
-          ? cur
+          ? // Asked for again: if its Claude has exited, the pane starts it again (ShellPane).
+            cur.map((t) =>
+              t.id === id && t.kind === "shell" ? { ...t, asked: Date.now() } : t,
+            )
           : [
               ...cur,
               {
@@ -1568,6 +1565,15 @@ function ShellPane(p: {
   const { tab, visible, focus } = p;
   const [exited, setExited] = useState(false);
   const [gen, setGen] = useState(0);
+  // Open Claude there… pressed again: a Claude that exited starts again; a running one is left alone.
+  const exitedNow = useRef(false);
+  exitedNow.current = exited;
+  useEffect(() => {
+    if (!tab.asked || !exitedNow.current) return;
+    deck().ptyClose(tab.id);
+    setExited(false);
+    setGen((g) => g + 1);
+  }, [tab.asked, tab.id]);
   if (!p.armed)
     return (
       <NotStarted

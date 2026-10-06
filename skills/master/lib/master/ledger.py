@@ -135,6 +135,8 @@ def transition(led: dict, pid: int, to: str, *, now: str, note: str | None = Non
     if p["status"] == "done":
         p["closed_at"] = None
     p["status"] = to
+    if to != "held":
+        p.pop("held_for", None)  # why `master spawn` held it (spawn.py): gone with the hold
     if to in ("approved", "rejected") and p["decided_at"] is None:
         p["decided_at"] = now
     if to == "sent":

@@ -170,8 +170,9 @@ export class MasterCli {
     return this.write(['mark', String(id), status, '--note', '-'], note)
   }
 
-  reject(ids: number[]): Promise<CliResult> {
-    return this.write(['reject', ...ids.map(String)])
+  /** `note`: why (kept on the proposals), e.g. a held start that was closed. */
+  reject(ids: number[], note?: string): Promise<CliResult> {
+    return this.write(['reject', ...ids.map(String), ...(note ? ['--note', note] : [])])
   }
 
   /** Add an ASSIGN proposal. The prompt goes on stdin; the message is the same text. */
@@ -194,6 +195,15 @@ export class MasterCli {
    */
   spawn(id: number): Promise<CliResult> {
     return this.write(['spawn', String(id)])
+  }
+
+  /**
+   * `master spawn <id> --held-for-trust`: Try again. The CLI starts it only when it held the
+   * proposal itself because Claude Code refused its folder, and never beside a live session of
+   * the same name (it closes the held start then). Nothing else is ever retried through this.
+   */
+  spawnHeld(id: number): Promise<CliResult> {
+    return this.write(['spawn', String(id), '--held-for-trust'])
   }
 
   /** `master say --to <name>`: master-agent relays the text to that session with SendMessage. */
