@@ -2,6 +2,8 @@ import { QueuePanel } from "./QueuePanel";
 import { SessionDetails } from "./SessionDetails";
 import { SummaryPanel } from "./SummaryPanel";
 import type { AppState, Session } from "@shared/types";
+import type { NoteMeta } from "@shared/notes";
+import type { Ticket } from "@shared/ticket";
 
 export type InspectorTab = "details" | "queue" | "summary";
 
@@ -16,6 +18,8 @@ interface Props {
   onDetach: () => void;
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
+  notes?: NoteMeta[];
+  onNote?: (t: Ticket) => void;
 }
 
 /**
@@ -32,6 +36,8 @@ export function Inspector({
   onDetach,
   onAskMaster,
   masterAttached,
+  notes,
+  onNote,
 }: Props) {
   const tabs: [InspectorTab, string][] = [
     ["details", "Details"],
@@ -73,6 +79,8 @@ export function Inspector({
               onDetach={onDetach}
               onAskMaster={onAskMaster}
               masterAttached={masterAttached}
+              notes={notes}
+              onNote={onNote}
             />
           ) : (
             <div className="insp-empty">

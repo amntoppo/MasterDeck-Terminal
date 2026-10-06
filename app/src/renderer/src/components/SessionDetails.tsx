@@ -1,7 +1,12 @@
 import { useRef, useState } from "react";
 import { AskPanel } from "./AskPanel";
 import { StatusDialog } from "./StatusDialog";
-import { sameTicket, ticketLabel, ticketUrl } from "@shared/ticket";
+import {
+  sameTicket,
+  ticketLabel,
+  ticketUrl,
+  type Ticket,
+} from "@shared/ticket";
 import { sessionTicket } from "@shared/derive";
 import { formatAgo, formatDiff, formatPct } from "@shared/format";
 import { contextLevel } from "@shared/stats";
@@ -10,6 +15,8 @@ import { attentionFor, sessionStatus } from "@shared/review";
 import { STEPS, taskStep } from "@shared/tasks";
 import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
+import { ticketNote } from "../notes";
+import type { NoteMeta } from "@shared/notes";
 import { can } from "../web";
 import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
@@ -23,6 +30,9 @@ interface Props {
   onDetach: () => void;
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
+  notes?: NoteMeta[];
+  /** Open the ticket's note (absent: Notes is not available here). */
+  onNote?: (t: Ticket) => void;
 }
 
 /**
@@ -36,6 +46,8 @@ export function SessionDetails({
   onDetach,
   onAskMaster,
   masterAttached,
+  notes,
+  onNote,
 }: Props) {
   const now = useNow(1000);
   const [note, setNote] = useState<string | null>(null);
@@ -188,6 +200,17 @@ export function SessionDetails({
         ) : (
           <div className="d-text muted">No issue linked</div>
         )}
+        {t && issueLink && onNote && can("notesList") && (() => {
+          const tn = ticketNote(notes ?? [], t.repo, t.number);
+          return (
+            <div className="d-note">
+              {tn && <div className="d-note-text">{tn.preview}</div>}
+              <button className="d-link" onClick={() => onNote(t)}>
+                {tn ? "Edit note" : "Add note"}
+              </button>
+            </div>
+          );
+        })()}
         <div
           className={`d-steps tone-${step.tone}`}
           title={STEPS.map(

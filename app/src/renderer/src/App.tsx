@@ -1128,6 +1128,8 @@ export function App() {
           onAssign={(card, me) => setAssignCard({ card, me })}
           onSummary={() => setDialog("sprint-summary")}
           onSetup={() => setDialog("setup")}
+          notes={notes.metas}
+          onNote={(t) => setNotesAt({ ticket: t })}
         />
       )}
       {view === "prs" &&
@@ -1347,6 +1349,8 @@ export function App() {
       >
         <Inspector
           state={state}
+          notes={notes.metas}
+          onNote={(t) => setNotesAt({ ticket: t })}
           session={
             activeKey
               ? (state.sessions.find((x) => x.key === activeKey) ?? null)
