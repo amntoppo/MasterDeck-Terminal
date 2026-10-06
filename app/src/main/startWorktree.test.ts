@@ -13,7 +13,8 @@ const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { stdio: 'pipe' }).toString()
 
 beforeAll(() => {
-  top = realpathSync(mkdtempSync(join(tmpdir(), 'md-wt-')))
+  // .native: on Windows the temp folder comes as a short name (RUNNER~1) and git answers with the long one.
+  top = realpathSync.native(mkdtempSync(join(tmpdir(), 'md-wt-')))
   repo = join(top, 'app')
   mkdirSync(repo)
   git(repo, 'init', '-q', '-b', 'main')
