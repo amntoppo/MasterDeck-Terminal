@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AssignRequest } from '@shared/ipc'
-import { assignNow, inRepoFolder, startAssign, type AssignCli } from './assign'
+import type { Proposal } from '@shared/types'
+import { assignNow, inRepoFolder, retryHeld, startAssign, type AssignCli } from './assign'
 
 function fakeCli(over: Partial<Record<keyof AssignCli, unknown>> = {}) {
   const calls: string[] = []
@@ -66,6 +67,49 @@ describe('startAssign', () => {
     await startAssign(f.cli, req({ proposalId: 30, approved: true }))
     expect(f.calls).toEqual(['spawn 30'])
   })
+  it('a retry spawns the same held proposal once, whatever model or account the first start named', async () => {
+    const f = fakeCli()
+    const r = await startAssign(f.cli, req({ proposalId: 30, retry: true, edited: true, approved: true, model: 'sonnet', account: 'bob-work' }), 0, 'alice')
+    expect(f.calls).toEqual(['spawn 30'])
+    expect(r).toEqual({ ok: true, message: 'started proposal 30', proposalId: 30 })
+  })
+  it('a retry that fails again keeps the proposal for the next one', async () => {
+    const f = fakeCli({ spawn: { ok: false, message: 'proposal 30: Workspace not trusted.' } })
+    expect(await startAssign(f.cli, req({ proposalId: 30, retry: true, model: 'sonnet' }))).toEqual({ ok: false, message: 'proposal 30: Workspace not trusted.', proposalId: 30 })
+    expect(f.calls).toEqual(['spawn 30'])
+  })
+  it('a retry with no proposal yet starts over', async () => {
+    const f = fakeCli()
+    await startAssign(f.cli, req({ retry: true }))
+    expect(f.calls).toEqual(['add 9-x', 'approve 30', 'spawn 30'])
+  })
+})
+
+describe('retryHeld', () => {
+  const held = (over: Partial<Proposal> = {}): Proposal => ({ id: 85, kind: 'ASSIGN', issue: 9, status: 'held', summary: 's', message: 'm', note: 'Workspace not trusted.', target: { spawn: { name: '9-x', cwd: 'code/api', prompt: 'go', account: 'alice' } }, ...over })
+  it('spawns the held proposal itself, once, and records its account', async () => {
+    const f = fakeCli()
+    const expected: string[] = []
+    expect(await retryHeld(f.cli, held(), (n, l) => expected.push(`${n} ${l}`))).toEqual({ ok: true, message: 'started 9-x' })
+    expect(f.calls).toEqual(['spawn 85'])
+    expect(expected).toEqual(['9-x alice'])
+  })
+  it('a proposal master spawned in the meantime counts as started', async () => {
+    const f = fakeCli({ spawn: { ok: false, message: 'proposal 85 is sent, not approved' } })
+    expect((await retryHeld(f.cli, held(), () => {})).ok).toBe(true)
+  })
+  it('a failure is passed on and nothing is recorded', async () => {
+    const f = fakeCli({ spawn: { ok: false, message: 'proposal 85: Workspace not trusted.' } })
+    const expected: string[] = []
+    expect(await retryHeld(f.cli, held(), (n) => expected.push(n))).toEqual({ ok: false, message: 'proposal 85: Workspace not trusted.' })
+    expect(expected).toEqual([])
+  })
+  it('only a held start is started again', async () => {
+    const f = fakeCli()
+    expect((await retryHeld(f.cli, held({ status: 'sent' }), () => {})).ok).toBe(false)
+    expect((await retryHeld(f.cli, held({ target: { session: '9-x' } }), () => {})).ok).toBe(false)
+    expect(f.calls).toEqual([])
+  })
 })
 
 describe('assignNow', () => {
@@ -95,6 +139,13 @@ describe('assignNow', () => {
     const g = fakeCli()
     await assignNow(g.cli, req({ proposalId: 20, account: 'bob-work' }), multi('alice').acc, 0)
     expect(g.calls[0]).toBe('add 9-x --account bob-work')
+  })
+  it('a retry spawns the held proposal even when the state has not seen it yet, and records the account', async () => {
+    const f = fakeCli()
+    const m = multi(null)
+    expect((await assignNow(f.cli, req({ proposalId: 30, retry: true, approved: true }), m.acc, 0)).ok).toBe(true)
+    expect(f.calls).toEqual(['spawn 30'])
+    expect(m.expected).toEqual(['9-x alice'])
   })
   it('one account: the account is dropped and nothing is recorded', async () => {
     const f = fakeCli()

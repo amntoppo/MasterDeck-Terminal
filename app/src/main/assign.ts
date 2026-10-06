@@ -1,5 +1,5 @@
 import type { AssignRequest } from '@shared/ipc'
-import type { CliResult } from '@shared/types'
+import type { CliResult, Proposal } from '@shared/types'
 
 export interface AssignCli {
   approve(ids: number[]): Promise<CliResult>
@@ -20,8 +20,14 @@ const ALREADY_SENT = /is (sent|done|question|blocked), not approved/
  */
 export async function startAssign(cli: AssignCli, req: AssignRequest, now = Date.now(), fallbackAccount: string | null = null): Promise<CliResult & { proposalId?: number }> {
   let id: number
+  if (req.retry && req.proposalId !== null) {
+    // Try again: the failed start left this proposal held, with its name, folder, model and account.
+    // Spawn that one (held → sent). Reading the request again would add a second proposal whenever
+    // it names a model or an account.
+    id = req.proposalId
+  }
   // A chosen model or account means a new proposal: master's own has its spawn target already.
-  if (req.proposalId !== null && !req.edited && !req.model && !req.account) {
+  else if (req.proposalId !== null && !req.edited && !req.model && !req.account) {
     id = req.proposalId
     if (!req.approved) {
       const a = await cli.approve([id])
@@ -46,6 +52,20 @@ export async function startAssign(cli: AssignCli, req: AssignRequest, now = Date
   if (s.ok || ALREADY_SENT.test(s.message)) return { ok: true, message: `started proposal ${id}`, proposalId: id }
   // The failed spawn left the proposal `held`; `master spawn <id>` can retry it.
   return { ok: false, message: s.message, proposalId: id }
+}
+
+/**
+ * Try again from Needs you: spawn a held proposal itself (held → sent), under the ledger lock like
+ * any spawn, so it starts once. `expect`: record the session's account once it shows up (two or
+ * more accounts).
+ */
+export async function retryHeld(cli: Pick<AssignCli, 'spawn'>, p: Proposal, expect: (name: string, login: string) => void): Promise<CliResult> {
+  const sp = p.target.spawn
+  if (p.status !== 'held' || !sp) return { ok: false, message: `proposal ${p.id} is not a start that was held` }
+  const s = await cli.spawn(p.id)
+  if (!s.ok && !ALREADY_SENT.test(s.message)) return s
+  if (sp.account) expect(sp.name, sp.account)
+  return { ok: true, message: `started ${sp.name}` }
 }
 
 /**
@@ -83,7 +103,8 @@ export async function assignNow(cli: AssignCli, req: AssignRequest, acc: AssignA
   const as = await acc.settings(req.account)
   if (!as.ok) return { ok: false, message: as.message }
   if (!as.account) return startAssign(cli, { ...req, account: undefined }, now)
-  const reuse = req.proposalId !== null && acc.proposalAccount(req.proposalId) === as.account
+  // A retry spawns the held proposal as it is: its account is in it (the state may not have it yet).
+  const reuse = req.proposalId !== null && (req.retry === true || acc.proposalAccount(req.proposalId) === as.account)
   const r = await startAssign(cli, { ...req, account: reuse ? undefined : as.account }, now, as.account)
   if (r.ok) acc.expect(req.name, as.account)
   return r

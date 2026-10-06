@@ -4,6 +4,7 @@ import * as pty from "node-pty";
 import { isSafeBgId, paneCommand } from "@shared/paneCommand";
 import type { PaneSpec } from "@shared/types";
 import type { PtyOpenResult } from "@shared/ipc";
+import { claudeFolder } from "./remoteGuards";
 
 const REPLAY_MAX = 200 * 1024;
 
@@ -75,6 +76,11 @@ export class PtyManager {
         exited: true,
         message: `refusing unsafe background id ${spec.bgId}`,
       };
+    }
+    if (spec.kind === "claude-here") {
+      // Never anywhere else: `startDir` falls back to home, where Claude Code would ask to trust home.
+      const dir = claudeFolder(false, spec.cwd);
+      if (!dir.ok) return { ok: false, replay: "", seq: 0, exited: true, message: dir.message };
     }
     const ticket = spec.kind === "ticket-builder" ? this.ticketPane(spec) : null;
     if (ticket && "error" in ticket)

@@ -428,7 +428,7 @@ class CliTest(Base):
         code, out = self.run_cli("checkout", "Globex/App")
         self.assertEqual(code, 0, out)
         self.assertEqual(json.loads(out), {"cwd": str(self.other / "app"), "workspace": str(self.other),
-                                           "repo": "Globex/App", "found": True})
+                                           "repo": "Globex/App", "found": True, "trusted": None})
         code, out = self.run_cli("checkout", "not a repo")
         self.assertEqual(code, 2)
         self.assertFalse(cli._is_write(cli.parser().parse_args(["checkout", "acme/api"])))

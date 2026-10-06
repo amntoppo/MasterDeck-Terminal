@@ -9,7 +9,7 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn
+from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn, trust
 
 WRITE_CMDS = {"add", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
 
@@ -316,6 +316,8 @@ def cmd_draft_assign(args) -> int:
                       "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"],
                       # The text without a checkout: the dialog replaces a system prompt only while it is one of these.
                       "genericPrompt": rules.assign_prompt(issue),
+                      # Whether Claude Code may work in that folder (null: not known); it refuses to start where it may not.
+                      "trusted": trust.trusted(sp["cwd"]),
                       # The search hit a limit: "not found" may be wrong, and the dialog says so.
                       **({"partial": True, "searched": where["searched"]} if where.get("partial") else {})}))
     return 0
@@ -326,7 +328,17 @@ def cmd_checkout(args) -> int:
     if not re.fullmatch(config.REPO_RE, args.repo):
         print(f"not a repository (owner/name): {args.repo}")
         return 2
-    print(json.dumps(checkout.resolve(args.repo)))
+    where = checkout.resolve(args.repo)
+    print(json.dumps({**where, "trusted": trust.trusted(where["cwd"])}))
+    return 0
+
+
+def cmd_trust(args) -> int:
+    """Whether Claude Code has been allowed to work in a folder: JSON, `trusted` true, false or
+    null (not known). `--wait N`: look again every two seconds, for N seconds at most, until it is
+    (the app, while the user accepts Claude Code's prompt)."""
+    got = trust.wait(args.folder, args.wait) if args.wait > 0 else trust.trusted(args.folder)
+    print(json.dumps({"cwd": args.folder, "trusted": got}))
     return 0
 
 
@@ -624,6 +636,10 @@ def parser() -> argparse.ArgumentParser:
     co = sub.add_parser("checkout")
     co.add_argument("repo", help="owner/name")
     co.set_defaults(fn=cmd_checkout)
+    tr = sub.add_parser("trust", help="has Claude Code been allowed to work in this folder (read only)")
+    tr.add_argument("folder")
+    tr.add_argument("--wait", type=float, default=0, help="seconds to keep looking until it is (60 at most)")
+    tr.set_defaults(fn=cmd_trust)
 
     return ap
 

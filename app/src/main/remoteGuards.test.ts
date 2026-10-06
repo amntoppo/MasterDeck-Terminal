@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { remoteSettings, knownDirsOnly, chosenFolder, MacPanes } from './remoteGuards'
+import { join } from 'node:path'
+import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, MacPanes } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
   expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
@@ -23,6 +24,14 @@ it('a chosen folder counts only from the Mac\'s own window, and must be a folder
   expect(chosenFolder(false, `${tmpdir()}/no-such-folder-here`)).toMatchObject({ ok: false })
   expect(chosenFolder(false, __filename)).toMatchObject({ ok: false })
   expect(chosenFolder(false, 3)).toEqual({ ok: false, message: 'not a folder on this Mac' })
+})
+it('claude is opened only from the Mac\'s own window, in a folder that is there', () => {
+  expect(claudeFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
+  expect(claudeFolder(true, tmpdir())).toEqual({ ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' })
+  expect(claudeFolder(false, join(tmpdir(), 'no-such-folder-here'))).toMatchObject({ ok: false })
+  expect(claudeFolder(false, 'relative/x')).toEqual({ ok: false, message: 'not a folder on this Mac: relative/x' })
+  expect(claudeFolder(false, __filename)).toMatchObject({ ok: false })
+  for (const bad of [undefined, null, '', 3, '~']) expect(claudeFolder(false, bad)).toMatchObject({ ok: false })
 })
 
 describe('MacPanes (spec §4 size rule)', () => {

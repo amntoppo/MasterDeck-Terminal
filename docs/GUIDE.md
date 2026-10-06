@@ -69,7 +69,26 @@ an ASSIGN card in Needs you) opens the **Start** dialog:
 - **Start:** switches to Terminals at once with a "Starting…" tab. The app records and approves the
   proposal and runs `master spawn`. The tab attaches as soon as `claude agents` lists the session.
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
-  error with **Retry**, which spawns the same (now held) proposal again.
+  error with **Retry**, which spawns the same (now held) proposal again, as it is (never a second
+  proposal, whatever model or account you picked).
+- **A folder Claude Code has not been allowed to work in.** Claude Code starts a session only in a
+  folder where its own trust prompt was accepted once, and a trusted parent folder does not count.
+  The dialog knows before you start (it reads Claude Code's `~/.claude.json`, and never writes it).
+  For such a folder it says "Claude Code has not been allowed to work in `<folder>` yet." under
+  the folder line, with **Open Claude there…**, and **Start** waits. The button opens a tab running
+  `claude` in that folder; the dialog steps aside (what you typed is kept) while you answer Claude
+  Code's prompt there, and comes back by itself as soon as the folder is trusted (it looks every two
+  seconds, for ten minutes at most; **Back to the dialog** returns earlier): "Claude Code can work
+  in `<folder>` now. You can close that tab." MasterDeck never answers the prompt for you and never
+  closes that tab. **Start anyway** starts without waiting, for when MasterDeck read it wrong. A
+  trusted folder, or one nothing is known about, shows none of this. In the web app and on a phone
+  the line says to do it on your Mac, and Start stays available.
+- **A start Claude Code refused** ("Workspace not trusted…") never ends there. The "did not start"
+  tab says the same line, with **Open Claude there…** and **Try again** (**Start now** once the
+  folder is trusted). If you closed that tab, or master started the proposal, the start is in Needs
+  you as a HELD card with the same two buttons; **Try again** starts that same proposal, not a new
+  one. From a phone or the API the answer says to open Claude there on your Mac, and the held
+  start's **Try again** works from the phone too. Any other failure reads as before.
 - **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
 - **Where it starts:** the line under the Account field (near the top, so it is seen on a short window). MasterDeck looks for a checkout of the
   ticket's repository in the workspace of the ticket's account (Setup → Preferences): the workspace
@@ -911,6 +930,13 @@ cards is in them.
 - **Data:** `master board` (2 GitHub calls; for an account with no board one call for its repositories' issues, and one more only when a linked PR is open), refreshed together with the issues: at startup, every
   hour, and on **Refresh**. "refreshed 15 minutes ago" beside the button shows the last refresh. The
   board is cached with the issues, so it shows immediately on the next start.
+
+## Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| "Workspace not trusted. Run `claude` in `<folder>` once and accept the trust prompt, then retry." / "Claude Code has not been allowed to work in `<folder>` yet." | Claude Code has never been allowed to work in that folder (a session now starts in the ticket's repository's checkout, and trusting the workspace above it does not count). Press **Open Claude there…** (the Start dialog, the "did not start" tab, or the HELD card in Needs you), accept Claude Code's prompt in the tab that opens, then **Start** / **Try again**; you can close that tab afterwards. By hand: run `claude` in that folder once. Do it once per checkout. |
+| The line stays after you accepted the prompt | MasterDeck reads Claude Code's `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) and found no accepted entry for exactly that folder. **Start anyway** / **Try again** asks Claude Code itself, which decides. |
 
 ## Environment
 

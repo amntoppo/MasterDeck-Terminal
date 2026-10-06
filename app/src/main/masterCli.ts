@@ -130,16 +130,34 @@ export class MasterCli {
   }
 
   /** `master checkout <owner/name>`: where a session for that repository starts (its checkout, else its account's workspace). */
-  async checkout(repo: string): Promise<{ ok: true; cwd: string; workspace: string; found: boolean } | { ok: false; message: string }> {
+  async checkout(repo: string): Promise<{ ok: true; cwd: string; workspace: string; found: boolean; trusted: boolean | null } | { ok: false; message: string }> {
     if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(repo)) return { ok: false, message: 'not a repository (owner/name)' }
     const r = await this.exec(['checkout', repo])
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       const d = JSON.parse(r.stdout)
       if (typeof d?.cwd !== 'string' || !d.cwd) return { ok: false, message: 'checkout printed an unexpected shape' }
-      return { ok: true, cwd: d.cwd, workspace: typeof d.workspace === 'string' ? d.workspace : d.cwd, found: d.found === true }
+      return { ok: true, cwd: d.cwd, workspace: typeof d.workspace === 'string' ? d.workspace : d.cwd, found: d.found === true, trusted: typeof d.trusted === 'boolean' ? d.trusted : null }
     } catch {
       return { ok: false, message: 'checkout printed invalid JSON' }
+    }
+  }
+
+  /**
+   * `master trust <folder>`: has Claude Code been allowed to work there (its trust prompt was
+   * accepted)? The CLI reads Claude Code's own file and never writes it. `waitSeconds`: it keeps
+   * looking (every two seconds) until the answer is yes or the time is over. null: not known.
+   */
+  async trust(folder: string, waitSeconds = 0): Promise<boolean | null> {
+    if (!folder || folder.startsWith('-')) return null
+    const wait = Math.min(Math.max(Math.round(waitSeconds), 0), 60)
+    const r = await this.exec(['trust', folder, ...(wait ? ['--wait', String(wait)] : [])], undefined, (wait + 20) * 1000)
+    if (r.code !== 0) return null
+    try {
+      const t = JSON.parse(r.stdout)?.trusted
+      return typeof t === 'boolean' ? t : null
+    } catch {
+      return null
     }
   }
 

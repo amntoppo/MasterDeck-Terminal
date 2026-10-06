@@ -27,6 +27,8 @@ import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
 import { AccountBadge } from "./AccountBits";
 import { isMulti } from "@shared/accounts";
+import { heldForTrust, isNotTrusted } from "@shared/trust";
+import { TrustNote, useTrust } from "./TrustFix";
 
 export type View =
   | "terminals"
@@ -970,6 +972,13 @@ function ProposalCard({
       ? `→ spawn ${p.target.spawn.name}`
       : "";
   const question = attention && p.status === "question";
+  // A start Claude Code refused for its folder: the card fixes it and starts the same proposal again.
+  const refused = attention ? heldForTrust(p) : null;
+  const trust = useTrust(
+    refused?.folder ?? null,
+    refused ? undefined : null,
+    () => deck().inboxAct(itemId, "trust"),
+  );
 
   const decide = async (approve: boolean) => {
     setBusy(true);
@@ -1026,6 +1035,10 @@ function ProposalCard({
           actions={openBtn}
           itemId={itemId}
         />
+      ) : refused ? (
+        <div title={p.note ?? undefined}>
+          <TrustNote trust={trust} />
+        </div>
       ) : (
         <div className="body">{attention && p.note ? p.note : p.summary}</div>
       )}
@@ -1046,8 +1059,23 @@ function ProposalCard({
       )}
       {!question && (
         <div className="actions">
-          {error && <span className="error">{error}</span>}
+          {error && (
+            <span className="error">
+              {refused && isNotTrusted(error)
+                ? "Claude Code still refuses that folder."
+                : error}
+            </span>
+          )}
           {openBtn}
+          {refused && (
+            <button
+              className="btn primary"
+              disabled={busy}
+              onClick={() => decide(true)}
+            >
+              {trust.trusted === true ? "Start now" : "Try again"}
+            </button>
+          )}
           {!attention && (
             <>
               <button

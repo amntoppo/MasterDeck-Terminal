@@ -50,6 +50,10 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setSettings: invoke(CH.setSettings),
   onAutoOpen: blocked,
   onGhLogin: blocked,
+  // Claude Code's trust prompt is answered on the Mac, in a tab of its window.
+  trust: blocked,
+  openClaudeIn: blocked,
+  onOpenClaude: blocked,
   setStatus: invoke(CH.setStatus),
   standupCommits: invoke(CH.standupCommits),
   janitor: invoke(CH.janitor),

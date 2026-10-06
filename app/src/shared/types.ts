@@ -463,6 +463,9 @@ export interface DraftAssign {
   /** Not found, and the search stopped at a limit after `searched` folders. */
   partial?: boolean;
   searched?: number;
+  /** Claude Code has been allowed to work in `cwd` (its trust prompt was accepted there): it refuses
+   * to start a session where it was not. null: not known; missing: an older CLI, or a proposal's draft. */
+  trusted?: boolean | null;
 }
 
 export interface CliResult {
@@ -498,4 +501,7 @@ export type PaneSpec =
    */
   | { kind: "ticket-builder"; resume: boolean; prompt?: string; tab?: string; account?: string }
   /** Setup's "Add an account": gh's own browser login. */
-  | { kind: "gh-login" };
+  | { kind: "gh-login" }
+  /** Plain `claude` in a folder Claude Code was never allowed to work in: the user answers its trust
+   * prompt there (Open Claude there…). Never opened from a browser or a phone. */
+  | { kind: "claude-here"; cwd: string };

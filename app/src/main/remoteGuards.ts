@@ -34,6 +34,18 @@ export function chosenFolder(remote: boolean, cwd: unknown): { ok: true; cwd?: s
 }
 
 /**
+ * The folder **Open Claude there…** runs `claude` in, for the user to answer Claude Code's trust
+ * prompt: only from the Mac's own window (a browser or a phone has no tab for it), and only an
+ * absolute path to a folder that is there (anything else would start claude in another folder).
+ */
+export function claudeFolder(remote: boolean, cwd: unknown): { ok: true; cwd: string } | { ok: false; message: string } {
+  if (remote) return { ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' }
+  if (typeof cwd !== 'string' || !cwd) return { ok: false, message: 'not a folder on this Mac' }
+  const r = chosenFolder(false, cwd)
+  return r.ok ? { ok: true, cwd } : r
+}
+
+/**
  * Spec §4 size rule: one size per PTY; while the Mac's window shows a pane its size wins, otherwise the latest
  * browser size applies. The window reports a shown pane with cols > 0 (ptyOpen/ptyResize) and a hidden one with 0.
  * ponytail: one flag per pane id; two Mac views of one pane (split) hiding one clears it until the other resizes.

@@ -79,12 +79,13 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
-import { assignNow as assignAs, inRepoFolder } from "./assign";
+import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, claudeFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
@@ -1003,6 +1004,20 @@ async function inboxAct(
 }
 
 /**
+ * Open Claude there…: a tab in the Mac's window running `claude` in a folder Claude Code was never
+ * allowed to work in, so the user answers its trust prompt. MasterDeck does not answer it, and
+ * never writes Claude Code's own config.
+ */
+function openClaude(folder: unknown, remote: boolean): CliResult {
+  const dir = claudeFolder(remote, folder);
+  if (!dir.ok) return dir;
+  if (!win) return { ok: false, message: "the MasterDeck window is not open" };
+  // The window only: a browser has no tab for it.
+  win.webContents.send(CH.openClaude, dir.cwd);
+  return { ok: true, message: `opened claude in ${dir.cwd}` };
+}
+
+/**
  * Carry out an inbox item's action: the one path the Needs-you cards, notifications and (later) a
  * phone all use. The inbox has checked the item is still open; this checks the session is still in
  * a state where the action makes sense, then uses the same code as the rest of the app.
@@ -1082,9 +1097,19 @@ async function runInboxAction(
     case "reject":
       if (d.type !== "proposal")
         return { ok: false, message: "not a proposal" };
+      // Try again on a start that was held: the same proposal is spawned again (held → sent).
+      if (type === "approve" && d.proposal.status === "held")
+        return retryHeld(cli, d.proposal, (name, login) => {
+          if (isMulti(getConfig())) sessionAccounts.expect(name, login);
+        });
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "trust": {
+      const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
+      if (!held) return { ok: false, message: "not a start Claude Code refused" };
+      return openClaude(held.folder, remote);
+    }
     case "send": {
       if (d.type !== "offer") return { ok: false, message: "not a PR offer" };
       // master's own proposal: approving it lets master send it (and track it).
@@ -2262,6 +2287,11 @@ function registerIpc(): void {
     if (r.ok) sources.loadConfig();
     return r;
   });
+  reg.handle(CH.trust, (e, cwd: unknown, wait: unknown) => {
+    if (isRemote(e) || typeof cwd !== "string") return null;
+    return cli.trust(cwd, typeof wait === "number" && wait > 0 ? wait : 0);
+  });
+  reg.handle(CH.openClaudeIn, (e, cwd: unknown) => openClaude(cwd, isRemote(e)));
   reg.handle(CH.pickFolder, async (_e, start: unknown) => {
     const r = await dialog.showOpenDialog(win!, {
       properties: ["openDirectory", "createDirectory"],
@@ -2756,6 +2786,9 @@ function registerIpc(): void {
       // gh's browser login is Setup's on the Mac (it opens a browser there).
       if (isRemote(e) && spec?.kind === "gh-login")
         return { ok: false, replay: "", seq: 0, exited: true, message: "log in to GitHub on the Mac" };
+      // Claude Code's trust prompt is answered on the Mac.
+      if (isRemote(e) && spec?.kind === "claude-here")
+        return { ok: false, replay: "", seq: 0, exited: true, message: "open Claude in that folder on the Mac" };
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];

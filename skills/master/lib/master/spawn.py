@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import checkout, config, ledger
+from . import checkout, config, ledger, trust
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
@@ -222,6 +222,10 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         raise SpawnError(f"proposal {pid}: {note}")
     if r.returncode != 0:
         err = (r.stderr or r.stdout or f"exit {r.returncode}").strip()[:500]
+        if trust.not_trusted(err):
+            # Claude Code was never allowed to work in this folder. The proposal now names it: the
+            # app shows it (and opens `claude` there), and the retry starts in the same one.
+            sp0.setdefault("cwd", cwd)
         hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
     out = r.stdout or ""

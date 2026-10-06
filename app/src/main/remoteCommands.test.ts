@@ -89,6 +89,16 @@ describe('RemoteCommands', () => {
     })
   })
 
+  it('session.start refused for an untrusted folder says what to do on the Mac; other failures stay as they are', async () => {
+    const refused = 'proposal 85: Workspace not trusted. Run `claude` in /w/app once and accept the trust prompt, then retry.'
+    const d = deps(st([]), { startAssign: vi.fn(async () => ({ ok: false, message: refused, proposalId: 85 })) })
+    expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 142 } }))).toEqual({
+      ok: false,
+      message: 'Claude Code has not been allowed to work in /w/app yet. Do this on your Mac: in MasterDeck, Needs you has this start with Open Claude there… and Try again.',
+    })
+    const e = deps(st([]), { startAssign: vi.fn(async () => ({ ok: false, message: 'proposal 85: not logged in' })) })
+    expect(await new RemoteCommands(e, file()).run(cmd({ type: 'session.start', args: { issue: 142 } }))).toEqual({ ok: false, message: 'proposal 85: not logged in' })
+  })
   it('session.start reports a failed draft', async () => {
     const d = deps(st([]), { draftAssign: vi.fn(async () => ({ ok: false as const, message: 'no workspace for o/x' })) })
     expect(await new RemoteCommands(d, file()).run(cmd({ type: 'session.start', args: { issue: 1, repo: 'o/x' } }))).toEqual({ ok: false, message: 'no workspace for o/x' })

@@ -56,6 +56,9 @@ const api: DeckApi = {
   setSettings: (s) => ipcRenderer.invoke(CH.setSettings, s),
   onAutoOpen: (cb) => listen(CH.autoOpen, cb),
   onGhLogin: (cb) => listen(CH.ghLogin, cb),
+  trust: (cwd, waitSeconds) => ipcRenderer.invoke(CH.trust, cwd, waitSeconds),
+  openClaudeIn: (cwd) => ipcRenderer.invoke(CH.openClaudeIn, cwd),
+  onOpenClaude: (cb) => listen(CH.openClaude, cb),
   setStatus: (issue, status) => ipcRenderer.invoke(CH.setStatus, issue, status),
   standupCommits: (since, dirs, until) =>
     ipcRenderer.invoke(CH.standupCommits, since, dirs, until),

@@ -314,6 +314,16 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dialog .start-folder > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .dialog .start-folder.missing .why { color: var(--amber); }
 .dialog .start-folder .link-btn { flex: none; font-size: 12px; }
+/* Claude Code was never allowed to work in the folder (TrustFix.tsx): the dialog, a failed start, a held item */
+.trust-note { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin: 6px 0 2px; text-align: left; }
+.trust-note > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.trust-note .why { color: var(--amber); }
+.trust-note.ready .why { color: var(--green); }
+.trust-note .btn { flex: none; }
+.welcome .trust-note { max-width: 560px; font-size: 13px; }
+.card .trust-note { flex-wrap: wrap; margin: 4px 0; }
+.trust-wait { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; max-width: min(640px, calc(100vw - 32px)); padding: 9px 12px; font-size: 12px; background: var(--bg-2); border: 1px solid var(--amber); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.trust-wait .btn { flex: none; }
 
 /* Board filters */
 .sprint-pick, .fsel { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }

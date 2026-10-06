@@ -175,6 +175,9 @@ export const CH = {
   getSettings: "settings:get",
   setSettings: "settings:set",
   ghLogin: "accounts:login",
+  trust: "claude:trust",
+  openClaudeIn: "claude:openIn",
+  openClaude: "claude:open",
   autoOpen: "app:autoOpen",
   setStatus: "board:setStatus",
   standupCommits: "standup:commits",
@@ -229,6 +232,9 @@ export interface AssignRequest {
   /** owner/name: main picks the folder (this repository's checkout, else its account's workspace)
    * and `cwd` is only the fallback. A PR review names its PR's repository. */
   cwdRepo?: string;
+  /** Try again: `proposalId` is the proposal a failed start left held. It is spawned again as it
+   * is (its own name, folder, model and account), never replaced by a new one. */
+  retry?: boolean;
 }
 
 export interface PtyOpenResult {
@@ -325,6 +331,14 @@ export interface DeckApi {
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
   /** Needs you → Log in: open a terminal tab running gh auth login for this account. */
   onGhLogin(cb: (login: string) => void): () => void;
+  /**
+   * Has Claude Code been allowed to work in this folder (its trust prompt was accepted there)?
+   * `waitSeconds`: keep looking until it is, that long at most. null: not known. Read only.
+   */
+  trust(cwd: string, waitSeconds?: number): Promise<boolean | null>;
+  /** Open Claude there…: a terminal tab running `claude` in the folder, for the user to answer its trust prompt. */
+  openClaudeIn(cwd: string): Promise<CliResult>;
+  onOpenClaude(cb: (cwd: string) => void): () => void;
   /** Move a ticket to a board column (BoardOps). */
   setStatus(issue: Ticket, status: string): Promise<CliResult>;
   standupCommits(

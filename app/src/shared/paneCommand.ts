@@ -56,6 +56,8 @@ export function paneCommand(
         "acceptEdits",
       ],
     };
+  // The user's own Claude, as they would run it in a terminal there: it asks whether to trust the folder.
+  if (spec.kind === "claude-here") return { file: claude, args: [], cwd: spec.cwd };
   if (spec.kind === "gh-login")
     return { file: win ? "gh.exe" : "gh", args: ["auth", "login", "--hostname", "github.com", "--web"] };
   if (win) return { file: "powershell.exe", args: ["-NoLogo"], cwd: spec.cwd };

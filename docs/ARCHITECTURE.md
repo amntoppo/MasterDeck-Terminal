@@ -186,7 +186,10 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 - Every action goes through `inboxAct(id, type, payload, remote)` → `sources.inbox.act(…,
   runInboxAction)`. `runInboxAction` re-checks the session, then uses the normal paths: `sender.send`
   (reply/option/continue/compact/send), `answerMenuFor` (menus, hook-held questions and
-  permissions), `cli.approve/reject` (proposals), `cloud.answerItem` (external items). Dismissing
+  permissions), `cli.approve/reject` (proposals), `cloud.answerItem` (external items). A `held`
+  proposal whose note is Claude Code's "Workspace not trusted" refusal gets the actions `trust`
+  (**Open Claude there…**, the window only) and `approve` (**Try again**: `retryHeld` spawns that
+  same proposal); any other held item still has only Open. Dismissing
   an `ext-…` item also sends `itemDismissed` to the backend.
 
 ### Hooks
@@ -407,6 +410,50 @@ review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/
 an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
 window, as `cwd` always was. Which account the session runs as is not part of this:
 `config.account_for_repo` / `defaultAccount` as before.
+
+**Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
+was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust
+prompt, then retry."; a trusted parent does not count) is read in one place,
+`skills/master/lib/master/trust.py`: `trusted(folder)` reads Claude Code's own `.claude.json`
+(`claude_json()`: the home folder, or `CLAUDE_CONFIG_DIR`) and looks for
+`projects[<folder>].hasTrustDialogAccepted === true`, the folder compared exactly as Claude Code
+keys it (as given, absolute, and with links resolved; forward slashes, no trailing one, NFC; no
+case on Windows; never by prefix). True, False, or None for not known (no file, unreadable, not
+JSON, not UTF-8, over 64 MB, no `projects` object): never True on a guess. It never writes the
+file. `master draft-assign` and `master checkout` add `trusted` to their JSON; `master trust
+<folder> [--wait N]` answers for one folder, and with `--wait` looks again every two seconds (the
+file's time, size and inode; it is read again only when one changed, and each call starts with a
+read) until it is trusted or N seconds (60 at most) passed. The app has no reader of its own:
+`MasterCli.trust(folder, wait)` behind `deck.trust` (`CH.trust`, the window only).
+`shared/trust.ts` holds what the app says and decides: `isNotTrusted(text)` (the one matcher for
+the refusal, loose about wording; `trust.not_trusted` is its copy in the CLI, tested on the same
+sentence), `needsTrust`, `trustView` (the line, the hint, whether **Open Claude there…** shows:
+`ask` / `waiting` / `ready`), `startBlocked` (the dialog's Start waits only for a folder known not
+to be trusted, in the window), `heldForTrust(proposal)` (a proposal held with that note: its own
+`target.spawn.cwd`), `waitForTrust` (the loop of 15-second `deck.trust` calls, ten minutes at
+most) and `remoteTrustMessage`. `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`) is the one
+view of it, used by the Start dialog (`DraftAssign.trusted` → `StartFolder.trusted`; a folder the
+draft says nothing about is asked about once; while the user answers the prompt the dialog is
+hidden, not unmounted, behind a small strip), the "did not start" pane (`StartRefused` in
+`App.tsx`) and the held card (`ProposalCard` in `Sidebar.tsx`). **Open Claude there…** is
+`deck.openClaudeIn(cwd)` or the item's `trust` action → `openClaude` in `index.ts`
+(`claudeFolder` in `remoteGuards.ts`: the window only, an absolute folder that is there) →
+`CH.openClaude` to the window alone → a shell tab with `claude: true` (id `claude:<folder>`, one
+per folder, never restored) whose pane is `{kind: "claude-here", cwd}`: the resolved `claude`
+with no arguments in that folder (`paneCommand`); `PtyManager.open` refuses it for a missing
+folder (`startDir` would fall back to home) and `ptyOpen` refuses it from a browser. MasterDeck
+never answers the prompt, never writes `.claude.json`, and never closes that tab.
+**Try again** spawns the same proposal: `master spawn` of a `held` one (held → sent, under the
+ledger lock). The "did not start" tab sends its request again with `retry: true`
+(`AssignRequest.retry`: `startAssign` then only spawns `proposalId`; without it a request naming
+a model or an account added a second proposal and rejected the held one, and with two accounts so
+did a retry made before the state had the new proposal). The held Needs-you item of a refused
+start carries the actions `trust` and `approve` (label **Try again**; `approve` because it is the
+one a phone's `inbox.act` can send): `runInboxAction` runs `retryHeld` (`main/assign.ts`) for
+`approve` on a held proposal. When Claude Code refuses a folder the proposal did not name
+(`default_cwd` picked it), `master spawn` writes that folder into the proposal, so the app shows
+it and the retry starts there. `session.start` from the API answers a refused start with
+`remoteTrustMessage`. Other failures are untouched.
 Because MasterDeck now starts sessions in main checkouts, `master spawn` records each new ASSIGN or
 PRREVIEW session it starts in a folder that is not a workspace (`checkout.parked`, written to
 `$MASTERDECK_HOME/parked-sessions.json`: `{ <bg id, or "name:<session name>"> : {dir, branch,
@@ -557,7 +604,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   `setFocus`, `setVisible`, `openExternal`, `copy`, `setBoardOpen`, `boardRepos`) and `listen()` for events
   (`onState`, `onFocusSession`, `onShowNeedsYou`, `onShowInboxItem`, `onAutoOpen`,
   `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
-  `onGhLogin(login)`: open a gh-login tab for that account).
+  `onGhLogin(login)`: open a gh-login tab for that account; `onOpenClaude(cwd)`: open a tab
+  running `claude` in that folder, see "Whether Claude Code may work in that folder").
 - GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
   `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.

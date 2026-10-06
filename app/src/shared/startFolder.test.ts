@@ -32,6 +32,12 @@ describe('folderOf', () => {
     expect(folderOf(draft({ cwd: '/code/globex/app', workspace: '/code/globex', found: true, checkoutOf: 'globex/app' }))).toEqual({ cwd: '/code/globex/app', workspace: '/code/globex', found: true, checkoutOf: 'globex/app' })
     expect(folderOf(draft({}))).toEqual({ cwd: '/code/globex' })
   })
+  it('carries whether Claude Code may work there, when the CLI said', () => {
+    expect(folderOf(draft({ trusted: false })).trusted).toBe(false)
+    expect(folderOf(draft({ trusted: true })).trusted).toBe(true)
+    expect(folderOf(draft({ trusted: null })).trusted).toBeNull()
+    expect('trusted' in folderOf(draft({}))).toBe(false)
+  })
 })
 
 describe('adoptFresh (a draft from master\'s proposal, looked up again)', () => {

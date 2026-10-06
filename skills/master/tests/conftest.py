@@ -15,6 +15,8 @@ os.environ["MASTER_CONFIG"] = os.path.join(_here, "config.json")
 # - MASTER_HOME: the ledger. MASTER_WORKSPACE: `checkout.resolve` (behind rules.propose, `master
 #   add`, `master spawn`, draft-assign) scans it; it starts empty.
 # - git reads no user or system config.
+# - CLAUDE_CONFIG_DIR is unset: `master.trust` reads Claude Code's `.claude.json` from HOME, so
+#   from the sandbox (there is none until a test writes one).
 # The fixture below puts them back before every test (a test may change them for itself) and
 # fails a test that left a `master` path pointing into the real home.
 import atexit
@@ -39,6 +41,8 @@ _ENV = {
 for _d in ("home", "workspace"):
     os.makedirs(os.path.join(SANDBOX, _d), exist_ok=True)
 os.environ.update(_ENV)
+# Claude Code's own config (`.claude.json`, read by master.trust) is looked for in HOME only.
+os.environ.pop("CLAUDE_CONFIG_DIR", None)
 
 
 def _under(p: str, root: str) -> bool:
@@ -54,6 +58,7 @@ def _in_real_home(p) -> bool:
 @pytest.fixture(autouse=True)
 def _sandboxed_home():
     os.environ.update(_ENV)
+    os.environ.pop("CLAUDE_CONFIG_DIR", None)
     yield
     from master import config
     leaked = {k: str(v) for k, v in (("HOME", os.path.expanduser("~")), ("masterdeck_home", config.masterdeck_home()),
