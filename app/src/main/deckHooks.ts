@@ -515,6 +515,12 @@ export class DeckHooks {
     renameSync(`${p}.tmp`, p)
   }
 
+  /** A delta is waiting for this session's next prompt (the hook moves it away when it reads it). */
+  hasDelta(sessionId: string): boolean {
+    if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return false
+    return existsSync(join(this.dir, 'peers', `${sessionId}.delta.json`))
+  }
+
   clearDelta(sessionId: string): void {
     if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return
     rm(join(this.dir, 'peers', `${sessionId}.delta.json`))

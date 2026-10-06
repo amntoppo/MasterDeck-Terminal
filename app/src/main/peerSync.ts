@@ -1,5 +1,5 @@
 import type { CliResult, Session } from '@shared/types'
-import { peerDelta, type PeerFact } from '@shared/deckHooks'
+import { peerDeltas, type PeerFact } from '@shared/deckHooks'
 import { canDeliver } from '@shared/watches'
 import type { PeerStore } from './peers'
 
@@ -17,6 +17,8 @@ export interface PeerSyncDeps {
   makeSummary: (key: string) => Promise<{ ok: true; summary: { at: number } } | { ok: false; message: string }>
   setDelta: (sessionId: string, json: object) => void
   clearDelta: (sessionId: string) => void
+  /** The session has a delta its next prompt has not read yet (DeckHooks.hasDelta). */
+  deltaPending: (sessionId: string) => boolean
   /** Rewrite every session's context file (Sources.rewriteSessionContext). */
   rewriteContext: () => void
   /** False on win32 or when the deck hooks are not installed: no per-prompt delta reaches a session. */
@@ -28,14 +30,15 @@ export interface PeerSyncDeps {
   auto?: () => boolean
 }
 
-const deltaText = (fact: PeerFact, now: number): string =>
-  (peerDelta(fact, now) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext
+const deltaText = (facts: PeerFact[], now: number): string =>
+  (peerDeltas(facts, now) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext
 
 /** Keeps linked sessions' summaries fresh and tells each session when a peer's summary changed. */
 export class PeerSync {
   private lastMake = new Map<string, number>()
-  private inFlight = new Set<string>()
-  private again = new Set<string>()
+  private inFlight = new Map<string, Promise<CliResult>>()
+  /** Per target: the peers in the delta last written for it (one file each, overwritten, read once). */
+  private queued = new Map<string, Set<string>>()
 
   constructor(private readonly deps: PeerSyncDeps) {}
 
@@ -48,11 +51,21 @@ export class PeerSync {
   private byKey(key: string): Session | undefined {
     return this.deps.sessions().find((s) => s.key === key)
   }
-  /** `key` as its peer `peerKey` sees it, when it has a summary `peerKey` has not seen yet. */
-  private unseen(peerKey: string, key: string): PeerFact | null {
-    const fact = this.deps.facts(peerKey).find((f) => f.key === key)
-    if (!fact?.summary) return null
-    return this.deps.store.seen(peerKey, key) >= fact.summary.at ? null : fact
+  /** Every peer of `target` with a summary `target` has not seen yet. */
+  private unseen(target: string): (PeerFact & { summary: { at: number; text: string } })[] {
+    return this.deps
+      .facts(target)
+      .filter((f): f is PeerFact & { summary: { at: number; text: string } } => !!f.summary && this.deps.store.seen(target, f.key) < f.summary.at)
+  }
+  /** The live sessions linked to any of `keys`: the ones a change to `keys` must reach. */
+  private targets(keys: string[]): Session[] {
+    const out = new Map<string, Session>()
+    for (const key of keys)
+      for (const pk of this.deps.store.of(key)) {
+        const peer = this.byKey(pk)
+        if (peer && peer.state !== 'done') out.set(pk, peer)
+      }
+    return [...out.values()]
   }
 
   /** A Stop event: summarize a linked session again (debounced, only when its transcript grew). */
@@ -60,49 +73,50 @@ export class PeerSync {
     if (this.deps.auto && !this.deps.auto()) return
     const s = this.byId(sessionId)
     if (!s || s.state === 'done' || !this.deps.store.of(s.key).length) return
+    if (this.inFlight.has(s.key)) return
     if (this.now() - (this.lastMake.get(s.key) ?? 0) < PEER_SYNC_MIN_MS) return
     if (!this.deps.summaryStale(s.key)) return
     void this.make(s.key)
   }
 
-  private async make(key: string): Promise<CliResult> {
-    if (this.inFlight.has(key)) {
-      this.again.add(key)
-      return { ok: true, message: 'already summarizing' }
-    }
-    this.inFlight.add(key)
+  private make(key: string): Promise<CliResult> {
+    // Set before the call, so a failed auto make still holds the debounce (no retry storm on every Stop).
     this.lastMake.set(key, this.now())
-    try {
-      const r = await this.deps.makeSummary(key)
-      if (!r.ok) return r
-      this.refreshAll([key])
-      return { ok: true, message: 'synced' }
-    } catch (e) {
-      return { ok: false, message: String(e) }
-    } finally {
-      this.inFlight.delete(key)
-      if (this.again.delete(key)) void this.make(key)
-    }
+    const p = (async (): Promise<CliResult> => {
+      try {
+        const r = await this.deps.makeSummary(key)
+        if (!r.ok) return r
+        this.refreshAll([key])
+        return { ok: true, message: 'synced' }
+      } catch (e) {
+        return { ok: false, message: String(e) }
+      } finally {
+        this.inFlight.delete(key)
+      }
+    })()
+    this.inFlight.set(key, p)
+    return p
   }
 
   /**
-   * After a summary or link change for `keys`: rewrite every context file, then (hooks live) a
-   * delta for each peer that has not seen the newest summary, marked seen. Without hooks nothing is
-   * marked: syncNow delivers through the Sender and marks what it delivered.
+   * After a summary or link change for `keys`: rewrite every context file, then (hooks live) one
+   * delta per peer of `keys` listing every linked session it has not seen, marked seen. Without
+   * hooks nothing is marked: syncNow delivers through the Sender and marks what it delivered.
    */
   refreshAll(keys: string[]): void {
     this.deps.rewriteContext()
     if (!this.deps.hooksLive()) return
-    for (const key of keys) {
-      if (!this.byKey(key)) continue
-      for (const peerKey of this.deps.store.of(key)) {
-        const peer = this.byKey(peerKey)
-        if (!peer || peer.state === 'done') continue
-        const fact = this.unseen(peerKey, key)
-        if (!fact?.summary) continue
-        this.deps.setDelta(peer.sessionId, peerDelta(fact, this.now()))
-        this.deps.store.markSeen(peerKey, key, fact.summary.at)
-      }
+    for (const target of this.targets(keys)) {
+      const fresh = this.unseen(target.key)
+      if (!fresh.length) continue
+      // The delta file is overwritten: keep the peers of one not read yet, or they are lost (already marked seen).
+      const kept = this.deps.deltaPending(target.sessionId) ? (this.queued.get(target.key) ?? new Set<string>()) : new Set<string>()
+      const facts = this.deps
+        .facts(target.key)
+        .filter((f): f is PeerFact & { summary: { at: number; text: string } } => !!f.summary && (kept.has(f.key) || fresh.some((x) => x.key === f.key)))
+      this.deps.setDelta(target.sessionId, peerDeltas(facts, this.now()))
+      this.queued.set(target.key, new Set(facts.map((f) => f.key)))
+      for (const f of fresh) this.deps.store.markSeen(target.key, f.key, f.summary.at)
     }
   }
 
@@ -110,26 +124,32 @@ export class PeerSync {
   unlinked(keys: string[]): void {
     for (const key of keys) {
       if (this.deps.store.of(key).length) continue
+      this.queued.delete(key)
       const s = this.byKey(key)
       if (s) this.deps.clearDelta(s.sessionId)
     }
   }
 
-  /** "Sync now": summarize regardless of the debounce, refresh, and type it into peers when hooks are not live. */
+  /**
+   * "Sync now": wait for a summary already being made, then make a fresh one regardless of the
+   * debounce, refresh, and type it into each peer when hooks are not live.
+   */
   async syncNow(key: string): Promise<CliResult> {
     if (!this.byKey(key)) return { ok: false, message: 'session not found' }
-    const peers = this.deps.store.of(key)
-    if (!peers.length) return { ok: false, message: 'no linked sessions' }
-    this.lastMake.delete(key)
+    if (!this.deps.store.of(key).length) return { ok: false, message: 'no linked sessions' }
+    await this.inFlight.get(key)
     const r = await this.make(key)
     if (!r.ok) return r
     if (!this.deps.hooksLive())
-      for (const pk of peers) {
-        const peer = this.byKey(pk)
-        const fact = this.unseen(pk, key)
-        if (!peer || peer.state === 'done' || !fact?.summary || !canDeliver(peer)) continue
-        const sent = await this.deps.deliver(peer, deltaText(fact, this.now()))
-        if (sent.ok) this.deps.store.markSeen(pk, key, fact.summary.at)
+      for (const target of this.targets([key])) {
+        const facts = this.unseen(target.key)
+        if (!facts.length || !canDeliver(target)) continue
+        try {
+          const sent = await this.deps.deliver(target, deltaText(facts, this.now()))
+          if (sent.ok) for (const f of facts) this.deps.store.markSeen(target.key, f.key, f.summary.at)
+        } catch (e) {
+          console.error(`peer sync: deliver to ${target.key}: ${String(e)}`)
+        }
       }
     return { ok: true, message: 'synced' }
   }

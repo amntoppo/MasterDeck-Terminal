@@ -659,6 +659,7 @@ const peerSync = new PeerSync({
   makeSummary: makeSummaryFor,
   setDelta: (sid, json) => deckHooks.setDelta(sid, json),
   clearDelta: (sid) => deckHooks.clearDelta(sid),
+  deltaPending: (sid) => deckHooks.hasDelta(sid),
   rewriteContext: () => sources.rewriteSessionContext(),
   hooksLive: () =>
     process.platform !== "win32" && deckHooksInstalled(paths.claudeSettings),

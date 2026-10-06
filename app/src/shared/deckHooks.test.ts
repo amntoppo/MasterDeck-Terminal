@@ -10,6 +10,7 @@ import {
   requestPrompt,
   ruleText,
   peerDelta,
+  peerDeltas,
   peersBlock,
   ticketContext,
   type HookSessionState,
@@ -288,5 +289,19 @@ describe("peers context", () => {
     expect(d.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
     expect(d.hookSpecificOutput.additionalContext).toContain("Linked session api-auth updated (1 min ago)");
     expect(d.hookSpecificOutput.additionalContext).toContain("- a");
+  });
+  it("peerDeltas lists every updated peer in one message", () => {
+    const d = peerDeltas(
+      [
+        fact({ key: "b", name: "web-ui", summary: { at: 1_000, text: "did b" } }),
+        fact({ key: "c", name: "api-auth", summary: { at: 61_000, text: "did c" } }),
+      ],
+      61_000,
+    ) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    const t = d.hookSpecificOutput.additionalContext;
+    expect(d.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
+    expect(t).toContain("Linked session web-ui updated (1 min ago):\n\ndid b");
+    expect(t).toContain("Linked session api-auth updated (just now):\n\ndid c");
+    expect(t).toContain("did b\n\nLinked session api-auth");
   });
 });

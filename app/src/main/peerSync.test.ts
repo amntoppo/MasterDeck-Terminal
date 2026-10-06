@@ -22,6 +22,7 @@ function rig(over: Partial<PeerSyncDeps> = {}) {
     makeSummary: vi.fn(async (k: string) => { summaries[k] = { at: now, text: `sum ${k} ${now}` }; return { ok: true as const, summary: { at: now } } }),
     setDelta: vi.fn(),
     clearDelta: vi.fn(),
+    deltaPending: () => true,
     rewriteContext: vi.fn(),
     hooksLive: () => true,
     deliver: vi.fn(async () => ({ ok: true, message: 'sent' })),
@@ -106,5 +107,63 @@ describe('PeerSync', () => {
     r.sync.unlinked(['a', 'b'])
     expect(r.deps.clearDelta).toHaveBeenCalledTimes(1)
     expect(r.deps.clearDelta).toHaveBeenCalledWith('b-sid')
+  })
+  it('composes one delta per target with every peer it has not seen', async () => {
+    const r = rig()
+    r.store.set('a', 'b', true)
+    r.store.set('a', 'c', true)
+    r.sync.onStop('b-sid'); await flush()
+    r.tick(1000)
+    r.sync.onStop('c-sid'); await flush()
+    const toA = vi.mocked(r.deps.setDelta).mock.calls.filter(([sid]) => sid === 'a-sid')
+    const last = toA[toA.length - 1][1] as { hookSpecificOutput: { additionalContext: string } }
+    expect(last.hookSpecificOutput.additionalContext).toContain('Linked session b updated')
+    expect(last.hookSpecificOutput.additionalContext).toContain('Linked session c updated')
+    expect(r.store.seen('a', 'b')).toBe(r.summaries.b.at)
+    expect(r.store.seen('a', 'c')).toBe(r.summaries.c.at)
+  })
+  it('syncNow waits for a summary in flight, then makes and delivers a fresh one', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((res) => (release = res))
+    let calls = 0
+    const r = rig({ hooksLive: () => false })
+    const base = r.deps.makeSummary
+    r.deps.makeSummary = vi.fn(async (k: string) => {
+      calls++
+      if (calls === 1) await gate
+      r.tick(10)
+      return base(k)
+    })
+    r.store.set('a', 'b', true)
+    const first = r.sync.syncNow('a')
+    const second = r.sync.syncNow('a')
+    release()
+    expect((await first).ok).toBe(true)
+    expect((await second).ok).toBe(true)
+    expect(r.deps.makeSummary).toHaveBeenCalledTimes(2)
+    expect(r.deps.deliver).toHaveBeenCalledTimes(2)
+    expect(r.summaries.a.text).toBe('sum a 1000020')
+    expect(r.deps.deliver).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'b' }), expect.stringContaining('sum a 1000020'))
+  })
+  it('one failing delivery does not stop the rest', async () => {
+    const r = rig({ hooksLive: () => false, deliver: vi.fn(async (s: Session) => { if (s.key === 'b') throw new Error('boom'); return { ok: true, message: 'sent' } }) })
+    r.store.set('a', 'b', true)
+    r.store.set('a', 'c', true)
+    expect((await r.sync.syncNow('a')).ok).toBe(true)
+    expect(r.deps.deliver).toHaveBeenCalledTimes(2)
+    expect(r.store.seen('b', 'a')).toBe(0)
+    expect(r.store.seen('c', 'a')).toBe(r.summaries.a.at)
+  })
+  it('a delta already read is not repeated in the next one', async () => {
+    const r = rig({ deltaPending: () => false })
+    r.store.set('a', 'b', true)
+    r.store.set('a', 'c', true)
+    r.sync.onStop('b-sid'); await flush()
+    r.tick(1000)
+    r.sync.onStop('c-sid'); await flush()
+    const toA = vi.mocked(r.deps.setDelta).mock.calls.filter(([sid]) => sid === 'a-sid')
+    const last = (toA[toA.length - 1][1] as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext
+    expect(last).toContain('Linked session c updated')
+    expect(last).not.toContain('Linked session b updated')
   })
 })

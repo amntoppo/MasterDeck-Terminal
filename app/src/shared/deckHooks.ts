@@ -328,7 +328,17 @@ const ago = (ms: number): string =>
 
 /** What a session is told on its next prompt when a linked session's summary changed. */
 export function peerDelta(p: PeerFact, now: number): object {
-  const text = `Linked session ${p.name} updated (${ago(now - (p.summary?.at ?? now))}):\n\n${p.summary ? clip(p.summary.text.trim(), 2500) : "(no summary yet)"}`;
+  return peerDeltas([p], now);
+}
+
+/** One message for every linked session whose summary changed since this session last heard: a block each. */
+export function peerDeltas(peers: PeerFact[], now: number): object {
+  const text = peers
+    .map(
+      (p) =>
+        `Linked session ${p.name} updated (${ago(now - (p.summary?.at ?? now))}):\n\n${p.summary ? clip(p.summary.text.trim(), 2500) : "(no summary yet)"}`,
+    )
+    .join("\n\n");
   return {
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
