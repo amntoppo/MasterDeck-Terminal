@@ -858,10 +858,10 @@ export class Sources {
 
   /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
   noteCopy(old: { bgId: string; sessionId: string }, copyBg: string): void {
+    if (copyBg && copyBg !== old.bgId) this.peerStore?.carry(old.bgId, copyBg);
     if (!carryCopy(this.history, this.createdPrs, old, copyBg)) return;
     this.saveHistory();
     this.saveSessionPrs();
-    this.peerStore?.carry(old.bgId, copyBg);
   }
 
   /** Re-link resumed background sessions to the ticket their earlier session id had. */
@@ -1470,7 +1470,7 @@ export class Sources {
       const live = new Set(
         this.rawSessions.filter((s) => s.state !== "done").map((s) => s.key),
       );
-      this.peerStore.prune(live);
+      if (this.rawSessions.length > 0) this.peerStore.prune(live);
       this.peerStore.claim(this.rawSessions);
     }
     const now = Date.now();
