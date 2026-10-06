@@ -287,6 +287,15 @@ export function App() {
     save("view", view);
     deck().setBoardOpen(view === "board");
   }, [view]);
+  // Phone: the Notes sheet covers the screen, so a screen chosen from anywhere (the palette, a result, a tab) must close
+  // it. Closing unmounts the panel, which sends what is typed. The desktop panel stays open across views.
+  const screenKey = `${view}/${phoneScreen}`;
+  const lastScreen = useRef(screenKey);
+  useEffect(() => {
+    if (lastScreen.current === screenKey) return;
+    lastScreen.current = screenKey;
+    if (phone) setNotesAt(null);
+  }, [screenKey, phone]);
   useEffect(() => {
     document.body.classList.toggle("win", deck().platform === "win32");
   }, []);
@@ -1043,7 +1052,12 @@ export function App() {
           }
           notesOpen={!!notesAt}
           onNotes={() => setNotesAt((n) => (n ? null : {}))}
-          onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
+          onAction={(a) => {
+            // A dialog or the palette opens over the sheet; one that picks the view already showing would leave it there.
+            setNotesAt(null);
+            if (a === "palette") setPalette(true);
+            else setDialog(a);
+          }}
           needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
           prAttention={
             state.inbox.open.filter((e) => e.item.detail.type === "offer")

@@ -189,11 +189,11 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
   const moreOn = notesOpen || (main && tools.some(([v]) => v === view))
   return (
     <nav className="rail phone-bar" aria-label="Views">
-      {tab('sessions', 'Sessions', 'terminals', screen === 'list' || (main && view === 'terminals'), onSessions, needs)}
+      {tab('sessions', 'Sessions', 'terminals', !notesOpen && (screen === 'list' || (main && view === 'terminals')), onSessions, needs)}
       {(['tasks', 'board', 'prs'] as View[]).filter(screenOk).map((v) =>
-        tab(v, v === 'prs' ? 'PRs' : v[0].toUpperCase() + v.slice(1), v, main && view === v, () => onView(v), v === 'prs' ? prAttention : 0),
+        tab(v, v === 'prs' ? 'PRs' : v[0].toUpperCase() + v.slice(1), v, !notesOpen && main && view === v, () => onView(v), v === 'prs' ? prAttention : 0),
       )}
-      {onMaster && tab('master', 'Master', 'master', screen === 'master', onMaster)}
+      {onMaster && tab('master', 'Master', 'master', !notesOpen && screen === 'master', onMaster)}
       <button className={`pb ${moreOn || more ? 'on' : ''}`} aria-label="More" aria-expanded={more} onClick={() => setMore(!more)}>
         <RailIcon name="more" size={20} />
         <span className="pb-l">More</span>
