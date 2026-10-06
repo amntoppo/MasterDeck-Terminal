@@ -86,6 +86,7 @@ import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
 import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
 import { createWorktree, worktreeInfo } from "./startWorktree";
+import { isPermissionMode } from "@shared/startOptions";
 import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
@@ -2211,7 +2212,9 @@ function registerIpc(): void {
     const dir = worktreeFolder(isRemote(e), cwd);
     return dir.ok ? createWorktree(run, dir.cwd, branch, base) : dir;
   });
-  reg.handle(CH.assign, (_e, req: AssignRequest) => {
+  reg.handle(CH.assign, (_e, given: AssignRequest) => {
+    // Only a mode the Start dialog offers: the web reaches this handler too.
+    const req: AssignRequest = { ...given, permissionMode: isPermissionMode(given?.permissionMode) && given.permissionMode ? given.permissionMode : undefined };
     // The template picked in the Start dialog: the new session copies it instead of the default.
     if (
       typeof req?.workflow === "string" &&

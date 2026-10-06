@@ -111,6 +111,30 @@ describe('parseMarkdown', () => {
     const big = 'x'.repeat(MAX_MARKDOWN + 1)
     expect(parseMarkdown(big)).toEqual([p(t(big))])
   })
+  it('stays quick on long hostile lines (an issue body is up to 65 KB of anyone\'s text)', () => {
+    const n = 65_000
+    const hostile = [
+      '# a' + ' '.repeat(n) + 'b',
+      '~~~' + 'a'.repeat(n) + '`',
+      '*a '.repeat(n / 3),
+      '!['.repeat(n / 2),
+      '~~a '.repeat(n / 4),
+      '| a |\n' + ' '.repeat(n) + 'x',
+      'a' + ' '.repeat(n) + 'x\nb',
+      'h'.repeat(n),
+      '_a'.repeat(n / 2),
+      '`'.repeat(n) + 'a',
+      '<!--'.repeat(n / 4),
+      '['.repeat(n / 2) + '](',
+      '#'.repeat(n) + 'a',
+      '# ' + '#'.repeat(n) + 'a',
+    ]
+    for (const src of hostile) {
+      const t0 = performance.now()
+      parseMarkdown(src)
+      expect(performance.now() - t0, src.slice(0, 12)).toBeLessThan(1500)
+    }
+  })
   it('does not hang or overflow on hostile nesting', () => {
     expect(parseMarkdown('> '.repeat(500) + 'x').length).toBe(1)
     expect(parseInline('*'.repeat(2000) + 'a').length).toBeGreaterThan(0)

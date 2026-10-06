@@ -353,6 +353,17 @@ buttons; it does not go through macOS window drag regions.
   `main`. The backend's `session.start.account` is merged and deployed (backend PR #10); specs and
   plans are on backend `master` (PR #11). The bullets below say what was checked for each feature
   before the release; where they say "not pushed", that was true then.
+- **The Start dialog is redesigned (#66)** (branch `worktree-MasterDeck-Terminal-66-start-session`,
+  not merged; see "The Start dialog's options" under Where things live): four groups, **Create
+  worktree** with branch name and base branch (made before the session, the Mac's window only, only
+  in the ticket's checkout or a chosen folder, never for a held refused start), **Permission mode**,
+  **Assign to me**, **Remember these choices** per repository (never applied to a dialog opened from
+  a proposal, so an unchanged proposal is still approved or tried again as it is), and the
+  description's **Text / Preview**. Checked in an isolated app with a stand-in `claude`: the
+  Preview, the "branch already exists" error (no worktree, no session), a start in a new worktree
+  with `--permission-mode plan`. Not checked live: Assign to me (a real GitHub write), a real
+  `claude --bg` in a fresh worktree (trust is assumed to follow the checkout above it), the web
+  app. Leftovers: `docs/TODO.md` → "Start dialog (#66): leftovers".
 - **A start that Claude Code refuses ("Workspace not trusted") is fixed in the app** (branch
   `fix/workspace-trust`, not merged, not pushed, not installed; 2026-10-06). Since 0.8.0 a ticket's
   session starts in its repository's checkout, a folder whose trust prompt was usually never

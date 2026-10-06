@@ -53,7 +53,11 @@ export function AssignDialog({
   const [templates, setTemplates] = useState<Template[]>([]);
   const [savingAs, setSavingAs] = useState<string | null>(null);
   // The choices kept for this repository by "Remember these choices"; none: today's defaults.
-  const prefs = useRef(parsePrefs(load<unknown>(prefsKey(issue.repo), null))).current;
+  // Never for a dialog that starts from a proposal (master's, or the ticket's refused start):
+  // unchanged, that proposal is approved or tried again as it is, and a remembered model, mode
+  // or worktree would make every such start a new proposal.
+  const fromProposal = useRef(!!pending?.target.spawn || held !== null).current;
+  const prefs = useRef(fromProposal ? null : parsePrefs(load<unknown>(prefsKey(issue.repo), null))).current;
   const [remember, setRemember] = useState(prefs !== null);
   // '' = start without --model: Claude Code's default (the one in settings.json, if set).
   const [model, setModel] = useState(prefs?.model ?? "");
@@ -132,7 +136,8 @@ export function AssignDialog({
   const [resuming, setResuming] = useState<string | null>(null);
   // Create worktree: MasterDeck makes the ticket's worktree (a new branch from `base`) under the
   // checkout, and the session starts in it. Only the Mac's own window can (git runs on the Mac).
-  const canWorktree = can("worktreeCreate");
+  // Not for the ticket's refused start: its folder and prompt are the whole start already.
+  const canWorktree = can("worktreeCreate") && !(held !== null && !pending);
   const [worktree, setWorktree] = useState(!!prefs?.worktree);
   const [branch, setBranch] = useState(() => ticketBranch(issue.number, issue.title));
   const [base, setBase] = useState(prefs?.base ?? "");
@@ -154,16 +159,27 @@ export function AssignDialog({
       alive = false;
     };
   }, [startCwd, canWorktree]);
-  // Ticked and possible: a remembered tick does nothing in a folder that is no checkout.
-  const worktreeOn = canWorktree && worktree && repoInfo?.ok === true;
+  // Only in the ticket's own checkout or a folder chosen for it: in a workspace where no checkout
+  // was found the session has to find the repository itself, and a worktree would pin it there.
+  const startKind = folder ? folderKind(folder, chosen) : "plain";
+  const worktreeHere = repoInfo?.ok === true && startKind !== "missing" && startKind !== "missing-partial";
+  // Ticked and possible: a remembered tick does nothing in a folder that takes no worktree.
+  const worktreeOn = canWorktree && worktree && worktreeHere;
   const worktreeError = worktreeOn ? (branchError(branch.trim()) ?? (base.trim() === "HEAD" ? null : baseError(base.trim()))) : null;
   // Assign me: only a ticket nobody has, and only when its assignees are known (a board card).
   const card = state.board?.cards.find((c) => sameTicket(c, issue));
-  const canAssignMe = !!state.me && !!card && card.assignees.length === 0 && can("assignIssue");
+  // "Me" is the account the session runs as (two or more), as on the Board; else my login.
+  const meLogin = isMulti(state.config) ? account : state.me;
+  const canAssignMe = !!meLogin && !!card && card.assignees.length === 0 && can("assignIssue");
   const [assignMe, setAssignMe] = useState(!!prefs?.assignMe);
   const assigned = useRef(false);
   // What Start is doing before the session is asked for (assigning, making the worktree).
   const [busy, setBusy] = useState<string | null>(null);
+  // Start is on its way (assigning, making the worktree): the dialog stays until that is done or
+  // has failed, so a start that was asked for is never half cancelled.
+  const close = () => {
+    if (!busy) onClose();
+  };
   // The description as rendered Markdown instead of the text; the text itself is never touched.
   const [preview, setPreview] = useState(false);
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
@@ -269,11 +285,12 @@ export function AssignDialog({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Out of the way: Escape belongs to the Claude the user is answering.
-      if (e.key === "Escape" && !away) onClose();
+      if (e.key === "Escape" && !away) close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, away]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, away, busy]);
 
   const nameOk = NAME_RE.test(name);
   // `setup`: what MasterDeck already did for the session (the worktree it made).
@@ -296,7 +313,7 @@ export function AssignDialog({
     // Everything that can fail happens first and is said here: no session starts half set up.
     if (canAssignMe && assignMe && !assigned.current) {
       setBusy("Assigning…");
-      const a = await deck().assignIssue(ticketOf(issue), state.me!, []);
+      const a = await deck().assignIssue(ticketOf(issue), meLogin!, []);
       if (!a.ok) {
         setBusy(null);
         setError(`${a.message}. Untick "Assign to me" to start without it.`);
@@ -325,7 +342,8 @@ export function AssignDialog({
       workflow,
       assignMe,
     };
-    save(prefsKey(issue.repo), remember ? kept : null);
+    // Unticked in a dialog that never read them (it started from a proposal): they stay as they are.
+    if (remember || !fromProposal) save(prefsKey(issue.repo), remember ? kept : null);
     // Nothing differs from master's proposal: it is approved as it is. Otherwise a new one, which
     // keeps the model master named unless one was picked here.
     const choice = startChoice(
@@ -334,6 +352,10 @@ export function AssignDialog({
       draft.proposalId !== null ? (pending ?? held)?.target.spawn?.model : undefined,
     );
     const unchanged = !choice.edited;
+    // A new proposal keeps the mode the one it replaces named, as it keeps its model.
+    const mode =
+      permissionMode ||
+      (draft.proposalId !== null && !unchanged ? (pending ?? held)?.target.spawn?.permissionMode : undefined);
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
@@ -349,7 +371,7 @@ export function AssignDialog({
         heldId: held?.id,
       }),
       model: choice.model,
-      ...(permissionMode ? { permissionMode } : {}),
+      ...(mode ? { permissionMode: mode } : {}),
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
     });
@@ -373,7 +395,7 @@ export function AssignDialog({
     <div
       className="backdrop"
       style={away ? { display: "none" } : undefined}
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
         className="dialog start"
@@ -381,10 +403,11 @@ export function AssignDialog({
         aria-modal="true"
         aria-label={`Start a session for #${issue.number}`}
         onKeyDown={(e) => {
-          // Enter starts from any one-line field; ⌘↵ / Ctrl+↵ from anywhere (the text boxes too).
+          // Enter starts from a one-line text field; ⌘↵ / Ctrl+↵ from anywhere (the text boxes too).
+          // Not from a tick box, the template's name, or the base branch (Enter there picks a suggestion).
           if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-          const el = e.target as HTMLElement;
-          const line = el.tagName === "INPUT" && !el.dataset.own;
+          const el = e.target as HTMLInputElement;
+          const line = el.tagName === "INPUT" && el.type === "text" && !el.dataset.own && !el.list;
           if (e.metaKey || e.ctrlKey || line) {
             e.preventDefault();
             void start();
@@ -578,7 +601,7 @@ export function AssignDialog({
                     <input
                       type="checkbox"
                       checked={worktreeOn}
-                      disabled={repoInfo?.ok !== true}
+                      disabled={!worktreeHere}
                       onChange={(e) => setWorktree(e.target.checked)}
                     />
                     Create worktree
@@ -587,6 +610,8 @@ export function AssignDialog({
                         ? "checking the folder…"
                         : !repoInfo.ok
                           ? "this folder is not a git checkout"
+                          : !worktreeHere
+                            ? "no checkout of the ticket's repository here: choose its folder first"
                           : worktreeOn
                             ? "the session starts in its own worktree"
                             : "off: the session starts in the folder above and sets itself up"}
@@ -735,7 +760,7 @@ export function AssignDialog({
                       checked={assignMe}
                       onChange={(e) => setAssignMe(e.target.checked)}
                     />
-                    Assign to me ({state.me})
+                    Assign to me ({meLogin})
                   </label>
                 )}
                 <label
@@ -852,7 +877,7 @@ export function AssignDialog({
               <span className="grow" role="alert">
                 {error && <span className="error">{error}</span>}
               </span>
-              <button className="btn" onClick={onClose} title="Esc">
+              <button className="btn" onClick={close} disabled={!!busy} title="Esc">
                 Cancel
               </button>
               {blocked && (

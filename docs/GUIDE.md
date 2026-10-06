@@ -75,14 +75,18 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   or any branch you name. A branch or folder of that name already there, a base that does not
   exist, or anything else git refuses is said in the dialog and nothing starts. Unticked, the
   session starts in the folder shown and sets up its own worktree, as before. The box is greyed
-  out when the folder is not a git checkout.
+  out when the folder is not a git checkout, or is a workspace where no checkout of the ticket's
+  repository was found (choose its folder first); it is not shown for a refused start that is
+  tried again. While Start is assigning or making the worktree the dialog cannot be closed.
 - **Model** and **Permission mode:** `claude --model` and `claude --permission-mode` for the new
   session (Default, Plan mode, Accept edits, Auto). Default sends neither flag.
 - **Assign to me:** shown for a board card nobody is assigned to. Ticked, the ticket is assigned to
-  you on GitHub before the session starts; if GitHub refuses, the dialog says so and nothing starts.
+  you (with two or more accounts: the account the session runs as) on GitHub before the session starts; if GitHub refuses, the dialog says so and nothing starts.
 - **Remember these choices for `<repository>`:** ticked at Start, the worktree box, base branch,
   model, permission mode, workflow and assign-to-me become the defaults for that repository's next
-  ticket (kept in this window's storage). Unticked at Start, they are forgotten.
+  ticket (kept in this window's storage). Unticked at Start, they are forgotten. They are not
+  applied to a dialog opened from master's proposal or from a refused start: unchanged, that
+  proposal is approved or tried again as it is.
 - The card moves to In Dev by itself once the session is linked, as before: there is no box for it.
 - **System prompt** (closed until you open it): master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
