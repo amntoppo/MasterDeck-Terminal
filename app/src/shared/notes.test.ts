@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   NOTE_BODY_MAX, NOTE_ID, NOTE_TITLE_MAX, applyChange, cleanNote, incoming, matches, noteMeta,
-  sortNotes, storedNote, ticketNoteId, type Note, type NoteMeta,
+  sortNotes, storedNote, ticketNoteId, ticketTitle, type Note, type NoteMeta,
 } from './notes'
 
 const note = (over: Partial<Note> = {}): Note => ({
@@ -112,5 +112,25 @@ describe('incoming', () => {
     expect(incoming(e, m)).toBe('reload')
     expect(incoming({ ...e, dirty: true }, m)).toBe('ask')
     expect(incoming(e, undefined)).toBe('gone')
+  })
+})
+
+describe('ticketTitle', () => {
+  const issues = [{ number: 5, title: 'From issues' }]
+  const cards = [{ number: 6, title: 'From the board' }, { number: 3, repo: 'acme/web', title: 'Web card' }]
+  const view = [{ number: 7, repo: 'acme/api', title: 'From the view' }]
+  const find = (t: { repo?: string | null; number: number }) => ticketTitle(t, issues, cards, view)
+  it('finds it in the issues, on the board and in the repository view', () => {
+    expect(find({ number: 5 })).toBe('From issues')
+    expect(find({ number: 6 })).toBe('From the board')
+    expect(find({ repo: 'acme/api', number: 7 })).toBe('From the view')
+  })
+  it('keeps repositories apart', () => {
+    expect(find({ repo: 'Acme/Web', number: 3 })).toBe('Web card')
+    expect(find({ repo: 'acme/api', number: 3 })).toBe('')
+  })
+  it('is empty when nobody knows it, or a list is missing', () => {
+    expect(find({ number: 99 })).toBe('')
+    expect(ticketTitle({ number: 1 }, undefined)).toBe('')
   })
 })

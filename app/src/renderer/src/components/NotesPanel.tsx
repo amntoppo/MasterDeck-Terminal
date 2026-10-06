@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { NOTE_BODY_MAX, NOTE_QUERY_MAX, NOTE_TITLE_MAX, type NoteMeta } from '@shared/notes'
+import { NOTE_BODY_MAX, NOTE_QUERY_MAX, NOTE_TITLE_MAX, ticketTitle, type NoteMeta } from '@shared/notes'
 import { NoteEditor, blankDraft, draftOf, noteTargetKey, type NoteDraft, type NoteTarget } from '@shared/noteEditor'
-import { sameTicket, ticketLabel } from '@shared/ticket'
+import { ticketLabel } from '@shared/ticket'
 import { formatAgo } from '@shared/format'
 import type { AppState } from '@shared/types'
 import { deck, useNow } from '../deck'
@@ -129,7 +129,9 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
   const shown = useMemo(() => (found ? metas.filter((m) => found.has(m.id)) : metas), [metas, found])
   const globals = shown.filter((m) => !m.ticket)
   const tickets = shown.filter((m) => m.ticket)
-  const issueTitle = (t: { repo: string | null; number: number }) => state.issues.find((i) => sameTicket(i, t))?.title ?? ''
+  // A ticket known only as a board card (or in the repository view) has no entry in state.issues.
+  const issueTitle = (t: { repo: string | null; number: number }) =>
+    ticketTitle(t, state.issues, state.board?.cards, state.repoView?.cards)
   const row = (m: NoteMeta) => (
     <button key={m.id} className={`note-row ${draft?.id === m.id ? 'on' : ''}`} onClick={() => onTarget({ id: m.id })}>
       <span className="note-row-t">

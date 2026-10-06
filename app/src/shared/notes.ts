@@ -1,4 +1,15 @@
-import { asTicket, type Ticket } from './ticket'
+import { asTicket, sameTicket, type Ticket } from './ticket'
+
+type Titled = { repo?: string | null; number: number; title: string }
+
+/** A ticket's title from the lists the state keeps (issues of the primary repository, board cards, the repository view); '' when none knows it. */
+export function ticketTitle(t: { repo?: string | null; number: number }, ...lists: (readonly Titled[] | undefined)[]): string {
+  for (const l of lists) {
+    const hit = l?.find((x) => x.title && sameTicket(x, t))
+    if (hit) return hit.title
+  }
+  return ''
+}
 
 export const NOTE_TITLE_MAX = 200
 export const NOTE_BODY_MAX = 50_000

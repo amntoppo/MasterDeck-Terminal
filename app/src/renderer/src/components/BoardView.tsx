@@ -1483,6 +1483,11 @@ function Card({
             title={noted ? "Open the note" : "Add a note"}
             aria-label={noted ? "Open the note" : "Add a note"}
             draggable={false}
+            // A press on the mark must not start the draggable card's drag.
+            onDragStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             // The card is a button itself: the mark must not run the card's click or its Enter.
             onClick={(e) => {
               e.stopPropagation();
