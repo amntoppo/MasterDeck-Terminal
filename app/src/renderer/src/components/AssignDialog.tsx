@@ -310,10 +310,19 @@ export function AssignDialog({
     setError(null);
     let cwd = folder?.cwd || draft.cwd;
     let setup = "";
+    // A call that throws (main, or a dropped line to the Mac) is a failure like any other: the
+    // dialog must never be left busy, since it cannot be closed while it is.
+    const step = async <T extends { ok: boolean }>(label: string, call: () => Promise<T>): Promise<T | { ok: false; message: string }> => {
+      setBusy(label);
+      try {
+        return await call();
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    };
     // Everything that can fail happens first and is said here: no session starts half set up.
     if (canAssignMe && assignMe && !assigned.current) {
-      setBusy("Assigning…");
-      const a = await deck().assignIssue(ticketOf(issue), meLogin!, []);
+      const a = await step("Assigning…", () => deck().assignIssue(ticketOf(issue), meLogin!, []));
       if (!a.ok) {
         setBusy(null);
         setError(`${a.message}. Untick "Assign to me" to start without it.`);
@@ -322,8 +331,7 @@ export function AssignDialog({
       assigned.current = true;
     }
     if (worktreeOn) {
-      setBusy("Creating worktree…");
-      const w = await deck().worktreeCreate(cwd, branch.trim(), base.trim() || "HEAD");
+      const w = await step("Creating worktree…", () => deck().worktreeCreate(cwd, branch.trim(), base.trim() || "HEAD"));
       if (!w.ok) {
         setBusy(null);
         setError(w.message);
