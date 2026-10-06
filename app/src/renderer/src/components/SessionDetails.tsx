@@ -22,6 +22,8 @@ import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
+import { PeersDialog } from "./PeersDialog";
+import { peerRows } from "./peersView";
 
 interface Props {
   session: Session;
@@ -52,6 +54,8 @@ export function SessionDetails({
   const now = useNow(1000);
   const [note, setNote] = useState<string | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [peersOpen, setPeersOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const since = useStateSince(s);
   const status = sessionStatus(
     s,
@@ -70,6 +74,7 @@ export function SessionDetails({
     flash(`Copied ${what}`);
   };
 
+  const peers = peerRows(state, s.key);
   const t = sessionTicket(s);
   const issue = t ? state.issues.find((i) => sameTicket(i, t)) : undefined;
   const issueLink = issue?.url ?? (t ? ticketUrl(t.repo, t.number) : null);
@@ -236,6 +241,56 @@ export function SessionDetails({
         </div>
       </section>
 
+      {(peers.length > 0 || peersOpen) && (
+        <section className="dsec">
+          <div className="eyebrow">Linked sessions</div>
+          {peers.map((p) => (
+            <div key={p.key} className="d-peer">
+              <i className={`dot ${p.state}`} />
+              <span className="d-peer-name">{p.name}</span>
+              <span className="muted">
+                {" "}
+                {p.folder}
+                {p.ticket ? ` · ${p.ticket}` : ""}
+              </span>
+              {can("peersSet") && (
+                <button
+                  className="d-x"
+                  title="Unlink"
+                  onClick={async () => {
+                    const r = await deck().peersSet(s.key, p.key, false);
+                    if (!r.ok) flash(r.message);
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="d-actions-inline">
+            {can("peersSet") && (
+              <button className="d-link" onClick={() => setPeersOpen(true)}>
+                Add…
+              </button>
+            )}
+            {peers.length > 0 && can("peersSync") && (
+              <button
+                className="d-link"
+                disabled={syncing}
+                onClick={async () => {
+                  setSyncing(true);
+                  const r = await deck().peersSync(s.key);
+                  setSyncing(false);
+                  flash(r.ok ? "Synced" : r.message);
+                }}
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="dsec">
         <div className="eyebrow">Pull requests</div>
         {prUrls.length === 0 && <div className="d-text muted">No PR yet</div>}
@@ -394,6 +449,11 @@ export function SessionDetails({
               Copy attach command
             </button>
           )}
+          {peers.length === 0 && can("peersSet") && (
+            <button className="btn" onClick={() => setPeersOpen(true)}>
+              Link sessions…
+            </button>
+          )}
           <button
             className="btn"
             onClick={onDetach}
@@ -417,6 +477,13 @@ export function SessionDetails({
           )}
         </div>
       </section>
+      {peersOpen && (
+        <PeersDialog
+          state={state}
+          session={s}
+          onClose={() => setPeersOpen(false)}
+        />
+      )}
     </div>
   );
 }
