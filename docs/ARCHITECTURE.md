@@ -311,9 +311,15 @@ One MasterDeck hook per trigger in settings.json reads the session's copy.
 written as temp file + rename. A global note is `n-<32 hex>`, a ticket's is `t-<owner>~<name>~<number>`
 (one per ticket). Every argument is checked in the store (`shared/notes.ts`: id pattern, limits,
 characters), a save carries the `base` version it was made from and is refused as a conflict when the
-stored note differs, and a file in the folder that is not a note is never overwritten or deleted.
+stored note differs. Limits (`shared/notes.ts`): title 200 characters, text 50,000, 1000 notes, search
+query 200. A file in the folder that MasterDeck cannot read as a note (bad JSON, wrong shape, a name
+that is not an id) is skipped at load and left alone: a save or delete of a note with that name is
+refused with a message until the file is moved away (then the id is free again). The store reads
+every file in the folder whatever its size and follows symlinks (see TODO).
 Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text leaves the process only
-through the `notes:*` handlers.
+through the `notes:*` handlers. A note's text travels to a subscribed web tab only on `notes:get`
+(a note opened); the list (`notes:list`) and `notes:changed` carry `NoteMeta`, which has a 120-character
+`preview` (whitespace collapsed) instead of the text. `notes:search` runs in main and returns ids.
 
 The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
 after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
@@ -716,6 +722,20 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
   (`TasksView`), `costs` (`CostsView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).
+- Notes is a panel over the current view, not a view: the Rail's button (`notesOpen` / `onNotes`,
+  `aria-pressed`; under More on a phone) toggles and the palette opens `App.tsx`'s `notesAt` (`null` closed,
+  `{}` the list, `{id}` / `{ticket}` / `{fresh}` a note to open). `renderer/src/notes.ts` has `useNotes`
+  (the list of `NoteMeta`, read once and kept current by `onNotesChanged`; `loaded` is false until the
+  first read, and a failed first read is not retried) and `ticketNote(metas, repo, number)`.
+  `components/NotesPanel.tsx` draws the list, search and editor; the editor's rules live in
+  `shared/noteEditor.ts` (`NoteEditor`, one per window, outside the panel: 500 ms debounce, `base`,
+  `incoming`, see "Notes" above). The panel is mounted after the headers (like the ★ Master button) so
+  it gets its clicks. The entry points are `SessionDetails.tsx` (**Add note** / **Edit note**) and the
+  mark in the top row of a `BoardView` `Card` (`bcard-note`; always visible on a phone). A ticket's
+  title in the panel comes from `ticketTitle` over the issues, the board and the repository view.
+  On a phone the panel is a full-screen sheet (`web.css`, `.app.phone > .notes-panel`) and `App.tsx`
+  closes it when a screen is chosen (another tab, the palette, a More dialog); unsaved text is saved
+  first (the panel's unmount flushes).
 - Terminals: `TerminalView` (xterm 6 + fit + search; replay/seq handling; Cmd+C/V; size only from
   the visible view; on the web all output goes through `predictiveEcho`).
 - Web gating: `web.ts` — `isWeb()` (`deck().platform === 'web'`), `can(method)`, `WEB_VIEWS`,

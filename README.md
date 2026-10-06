@@ -16,6 +16,8 @@ It runs on macOS and Windows.
   connect them in Setup, and each session, Board tab and PR tab works as one account (its own
   token and commit identity, shown as `@login`). One account behaves as before. MasterDeck never
   runs `gh auth switch`.
+- **Notes.** A panel for what you would otherwise keep in another app: your own notes, and one
+  note per ticket, shown on its card and its session. Plain text, kept on your Mac, also in the web app.
 - **Hygiene.** Costs per ticket, standup notes from your commits, a worktree janitor, history
   search, templates and broadcast.
 - **Automatic upkeep.** MasterDeck links a session to its issue and moves the board card (In Dev,

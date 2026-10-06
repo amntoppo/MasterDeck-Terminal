@@ -2,8 +2,8 @@
 
 One window for all your Claude Code sessions, laid out as a command center:
 
-- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, Janitor and
-  Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
+- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, Janitor,
+  Notes and Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
   on Terminals counts what needs you; one on PRs counts PRs waiting on you. A blinking amber dot
   above the bottom buttons means a browser, phone or API client is connected right now (see
   *Remote connections* below).
@@ -559,6 +559,38 @@ creation.
   conversations load a window around the match, with **show more** at either end. **Open session**
   (live) or **Resume** (ended), and **Copy id**.
 
+## Notes
+
+A place for what you would otherwise keep in another app: your own notes, and one note per ticket.
+
+- **Open it:** the **Notes** button on the rail, above Workflow (on a phone: **More → Notes**), or **Notes** in ⌘K. It
+  opens a panel over the current view, next to the rail; the app behind it stays usable. Close it
+  with the button again, the ✕ or **Esc**. On a phone it is a full-screen sheet: the list first, a
+  note replaces it, **‹ Notes** goes back, and choosing another tab, the command palette or a More
+  screen closes the sheet (what you typed is saved first).
+- **Your notes:** **New note** opens a title and a text. There is no Save button: the note is saved
+  half a second after you stop typing, and when you leave it or close the panel. Every note stays
+  in the list under **Notes**, the one edited last first, with the start of its text. The search
+  box above the list finds notes by their titles and texts (every word you type must be in the
+  note). **Delete** (under the text) asks first and cannot be undone.
+- **A ticket's note:** one per ticket. In a session's **Details** tab, **Add note** (or **Edit
+  note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
+  on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
+  the ticket and its title. It is listed under **Tickets**. Emptying it removes it.
+- **In the web app:** the same panel and the same notes. When a note is changed in two places at
+  once (the Mac and a browser), the editor says **Changed elsewhere** and asks: **Reload** takes
+  the other version, **Keep mine** saves yours over it. A note deleted elsewhere says so, and you
+  can **Keep** it (save it again) or **Discard** it.
+- **When a note cannot be saved** (1000 notes already, or a character a note cannot hold) the
+  editor says so with **Discard**, and keeps your text on screen until you choose. When the Mac
+  does not answer (the web app, a lost connection), it tries again every few seconds.
+- **Every note:** plain text (Markdown with a preview is planned). It is kept on this Mac, in
+  `~/.claude/masterdeck/notes/` (one small file each), never sent to a session or to GitHub, and
+  not part of what the phone and API line carries. A browser gets notes only over the end-to-end
+  encrypted connection: the list carries the first 120 characters of each, a whole note only when
+  you open it. A file in that folder that MasterDeck cannot read as a note is left alone.
+- **Limits:** 200 characters in a title, 50,000 in a note, 1000 notes.
+
 ## Settings (⚙)
 
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
@@ -694,7 +726,7 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
   the browser shows the same three words. **Deny** is the default; Esc does nothing. A request
   expires after 5 minutes. A private window can't be approved (it can't keep its key).
 - **What works:** every view (Terminals with live terminals you can type in, Board, PRs, Tasks,
-  Costs, Janitor, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
+  Costs, Janitor, Notes, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
   page instead of on the Mac. Not on the web: signing in or out of the Mac's account, approving
   browsers, connecting GitHub accounts, the folder picker (a repo picker instead), opening editors,
   and turning Remote off.
@@ -714,7 +746,7 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
 
 - **Tab bar** at the bottom: **Sessions** (Needs you and the session list; badge = what needs
   you), **Tasks**, **Board**, **PRs** (badge = PRs waiting on you), **Master** (when master-agent is
-  on) and **More** (Costs, Janitor, Workflow, Settings, Broadcast, Standup, Skills, Commands).
+  on) and **More** (Costs, Janitor, Notes, Workflow, Settings, Broadcast, Standup, Skills, Commands).
 - **A session:** tap it in Sessions. The terminal fills the screen: **‹ Sessions** goes back,
   **Panel** opens Details / Queue / Summary as a sheet (› closes it). One terminal at a time (no
   split).
