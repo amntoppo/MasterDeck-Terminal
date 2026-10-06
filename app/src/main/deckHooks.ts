@@ -516,13 +516,22 @@ export class DeckHooks {
   }
 
   clearDelta(sessionId: string): void {
+    if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return
     rm(join(this.dir, 'peers', `${sessionId}.delta.json`))
   }
 
   /** Delta files of sessions no longer live. */
   pruneDeltas(live: Set<string>): void {
     try {
-      for (const n of readdirSync(join(this.dir, 'peers'))) if (n.endsWith('.delta.json') && !live.has(n.slice(0, -'.delta.json'.length))) rm(join(this.dir, 'peers', n))
+      for (const n of readdirSync(join(this.dir, 'peers'))) {
+        const p = join(this.dir, 'peers', n)
+        if (n.endsWith('.delta.json')) {
+          if (!live.has(n.slice(0, -'.delta.json'.length))) rm(p)
+        } else if (n.endsWith('.delta.json.read') || n.endsWith('.delta.json.tmp')) {
+          // Left by a crash between the hook's mv and rm, or between a write and its rename.
+          if (Date.now() - statSync(p).mtimeMs > 60_000) rm(p)
+        }
+      }
     } catch {
       // none
     }

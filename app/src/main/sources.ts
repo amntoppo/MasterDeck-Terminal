@@ -2026,8 +2026,10 @@ export class Sources {
   }
 
   /**
-   * What SessionStart tells each live session on a ticket (after a resume, a compaction, /clear):
-   * the ticket and what earlier sessions on it did, from their saved summaries.
+   * What SessionStart tells each live session on a ticket or with linked sessions (after a resume,
+   * a compaction, /clear): the ticket, what earlier sessions on it did, and what its peers are doing.
+   * It never marks a peer summary as seen: a running session does not re-read this file, so only
+   * the per-prompt delta (PeerSync) advances that.
    */
   private writeTicketContext(sessions: Session[]): void {
     const deck = this.deck;
@@ -2061,8 +2063,6 @@ export class Sources {
           .filter((x): x is { name: string; at: number; text: string } => !!x);
       }
       deck.setContext(s.sessionId, ticketContext(ticket, earlier, peers));
-      for (const p of peers)
-        if (p.summary) this.peerStore?.markSeen(s.key, p.key, p.summary.at);
     }
     deck.pruneDeltas(live);
     deck.pruneContext(live);
