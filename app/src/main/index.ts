@@ -79,6 +79,7 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
+import { NotesStore } from "./notes";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -224,6 +225,11 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
+// The user's notes. Their only way out of this process is the notes handlers below.
+const notes = new NotesStore(join(paths.home, "notes"), {
+  onChange: (c) => emit(CH.notesChanged, c),
+  repoOf: (repo) => fullRepo(repo),
+});
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -1858,6 +1864,28 @@ function registerIpc(): void {
   reg.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // Notes: the store checks every argument itself (ids, limits, characters).
+  reg.handle(CH.notesList, () => notes.list());
+  reg.handle(CH.notesGet, (_e, id: unknown) => notes.get(id));
+  reg.handle(CH.notesSearch, (_e, query: unknown) => notes.search(query));
+  reg.handle(CH.notesSave, (_e, input: unknown) => notes.save(input));
+  reg.handle(CH.notesDelete, async (e, id: unknown) => {
+    const note = notes.get(id);
+    if (!note) return notes.delete(id);
+    // From a browser: the web UI asked first; no native dialog on the Mac.
+    const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
+      type: "warning",
+      buttons: ["Cancel", "Delete note"],
+      defaultId: 0,
+      cancelId: 0,
+      message: note.ticket
+        ? `Delete the note for ${note.ticket.repo}#${note.ticket.number}?`
+        : `Delete "${note.title.trim() || "Untitled"}"?`,
+      detail: "The note is removed from this Mac. This cannot be undone.",
+    });
+    if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    return notes.delete(id);
+  });
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {

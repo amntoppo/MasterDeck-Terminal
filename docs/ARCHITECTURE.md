@@ -305,6 +305,16 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
 
+### Notes
+
+`main/notes.ts` `NotesStore` keeps the user's notes in `<home>/notes/`, one JSON file per note,
+written as temp file + rename. A global note is `n-<32 hex>`, a ticket's is `t-<owner>~<name>~<number>`
+(one per ticket). Every argument is checked in the store (`shared/notes.ts`: id pattern, limits,
+characters), a save carries the `base` version it was made from and is refused as a conflict when the
+stored note differs, and a file in the folder that is not a note is never overwritten or deleted.
+Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text leaves the process only
+through the `notes:*` handlers.
+
 ### Queue
 
 `main/queue.ts` reads/edits `~/.claude/queue/<sessionId>.jsonl` (`MASTERDECK_QUEUE_DIR` in the
@@ -635,6 +645,10 @@ waits, and writes nothing if accounts appeared meanwhile.
   `onPtyData(id)` = `pty:data:<id>`, `onPtyExit(id)`, `onWorkflowDraft`, `onTicketsCreated`,
   `onGhLogin(login)`: open a gh-login tab for that account; `onOpenClaude(cwd)`: open a tab
   running `claude` in that folder, see "Whether Claude Code may work in that folder").
+- Notes: `notesList`, `notesGet`, `notesSearch`, `notesSave`, `notesDelete` (`notes:*`, invoke) and the
+  event `onNotesChanged` (`notes:changed`), all open to the web (`remote` / `event`). The store
+  validates every argument; a save carries `base` and is refused as a conflict when the stored version
+  differs; `notes:delete` asks with the native dialog unless `isRemote(e)` (the web asked with `webConfirm`).
 - GitHub accounts: `accountFor(cwd)` (a new session's default account for a folder; remote-allowed),
   `ghUser(login)` and `configDetectAll(login?)` (Setup's per-account reads; `ghUser` is local only),
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
@@ -666,6 +680,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
+| Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`) |
 
 ## Renderer (`renderer/src/`)
 
@@ -742,6 +757,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
