@@ -160,6 +160,8 @@ export const CH = {
   workflowTriggerDelete: "workflow:triggerDelete",
   sessionWorkflowSave: "workflow:sessionSave",
   linkSession: "session:link",
+  peersSet: "peers:set",
+  peersSync: "peers:sync",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
@@ -547,6 +549,10 @@ export interface DeckApi {
     sessionId: string,
     cwd: string | null,
   ): Promise<CliResult>;
+  /** Link (on) or unlink (off) two sessions to each other (Session.key); two-way. */
+  peersSet(a: string, b: string, on: boolean): Promise<CliResult>;
+  /** Linked sessions → Sync now: summarize this session and refresh what its peers see. */
+  peersSync(sessionKey: string): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
   /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
   boardRepos(repos: string[]): void;

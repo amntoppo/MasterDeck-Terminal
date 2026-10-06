@@ -2667,6 +2667,14 @@ function registerIpc(): void {
     (_e, issue: unknown, sessionId: string, cwd: string | null) =>
       linkSession(issue, sessionId, cwd),
   );
+  reg.handle(CH.peersSet, (_e, a: unknown, b: unknown, on: unknown) => {
+    if (typeof a !== "string" || typeof b !== "string" || a.length > 200 || b.length > 200) return { ok: false, message: "bad session" };
+    const live = new Set((latest?.sessions ?? []).filter((s) => s.state !== "done").map((s) => s.key));
+    if (on === true && (!live.has(a) || !live.has(b))) return { ok: false, message: "link running sessions only" };
+    return peerStore.set(a, b, on === true);
+  });
+  // Until the sync lands (Task 5) there is nothing to run.
+  reg.handle(CH.peersSync, () => ({ ok: false, message: "not yet" }));
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
   // The repository view asks for its repositories (also from the web: a read; the list is checked in RepoIssues.ask).
   reg.on(CH.boardRepos, (_e, repos: unknown) => sources.askRepos(repos));
@@ -3286,6 +3294,7 @@ app.on("window-all-closed", () => app.quit());
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
   cloud?.stop();
+  peerStore.flush();
   sender.killAll();
   watches.killAll();
   ptys.closeAll();
