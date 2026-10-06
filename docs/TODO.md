@@ -1,11 +1,11 @@
-# TODO (as of 2026-10-05)
+# TODO (as of 2026-10-06)
 
 Open work, grouped and roughly prioritized (P1 first). Each item: context, where in the code, and
 a suggested approach. Nothing here is started. The older design note for Codex/Copilot support is
 the repo-root [TODO.md](../TODO.md).
 
 Each open item below is also a GitHub issue with code pointers, approach and acceptance criteria:
-[issues #4–#29](https://github.com/amntoppo/MasterDeck-Terminal/issues). Close the issue in the PR that
+[issues #4–#64](https://github.com/amntoppo/MasterDeck-Terminal/issues). Close the issue in the PR that
 fixes it, and move the item here to "Recently done".
 
 ## Shipping / ops
@@ -267,6 +267,21 @@ fixes it, and move the item here to "Recently done".
   is not `answered`; count the aliases that did succeed in a partial answer; retry a failed batch
   once after a pause before giving up; do not report `ok` with the board selected while nothing was
   added (the tab then shows an empty board until Try again). Not reproduced in a test yet.
+
+## Untrusted start folder: review leftovers (2026-10-06, no issue yet)
+
+- **P3 · Small leftovers of the trust fix.** (a) `ptyWrite` / `ptyClose` have no caller or kind
+  check, so a paired browser can blind-write to or close the `claude:<folder>` helper tab by its id
+  (it cannot open or read it; same as the `gh-login` tab). (b) The retry branch of `startAssign`
+  rejects a proposal whose ticket has a live session without checking it is held for trust. (c) The
+  "already running" closing sentence is three separate literals (CLI, `assign.ts`, `trust.ts`): share
+  one. (d) A proposal started elsewhere in the meantime answers the retry with an error, not
+  "started". (e) A held card can stay behind when master has a newer proposal for the same ticket.
+  (f) `trust.py`: a folder spelled in another letter case than Claude Code's key reads as not
+  trusted (Start waits for **Start anyway**); a `.git` that cannot be read is walked past. (g) The
+  Python trust tests have no file-level guard against a real `claude` call if `spawn()` stopped
+  honouring its runner. (h) The parent-folder rule mirrors a reading of Claude Code's code; confirm
+  it against the real prompt once.
 
 ## Where a session starts (2026-10-05)
 
