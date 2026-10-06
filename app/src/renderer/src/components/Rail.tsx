@@ -170,10 +170,12 @@ interface PhoneProps {
   onAction: (a: RailAction) => void
   needs: number
   prAttention: number
+  notesOpen: boolean
+  onNotes: () => void
 }
 
 /** The phone's bottom tab bar (web, narrow window): the rail's views as tabs, the rest under More. */
-export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction, needs, prAttention }: PhoneProps) {
+export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction, needs, prAttention, notesOpen, onNotes }: PhoneProps) {
   const [more, setMore] = useState(false)
   const main = screen === 'main'
   const tab = (key: string, label: string, icon: string, on: boolean, click: () => void, badge = 0) => (
@@ -183,8 +185,8 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
       <span className="pb-l">{label}</span>
     </button>
   )
-  const tools = [...(TOOLS.filter(([v]) => v !== 'notes') as [View, string][]), ['settings', 'Settings'] as [View, string]].filter(([v]) => screenOk(v))
-  const moreOn = main && tools.some(([v]) => v === view)
+  const tools = [...TOOLS, ['settings', 'Settings'] as [View | 'notes', string]].filter(([v]) => screenOk(v))
+  const moreOn = notesOpen || (main && tools.some(([v]) => v === view))
   return (
     <nav className="rail phone-bar" aria-label="Views">
       {tab('sessions', 'Sessions', 'terminals', screen === 'list' || (main && view === 'terminals'), onSessions, needs)}
@@ -201,7 +203,12 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
           <div className="phone-more-back" onClick={() => setMore(false)} />
           <div className="menu phone-more" role="menu">
             {tools.map(([v, label]) => (
-              <button key={v} role="menuitem" className={main && view === v ? 'on' : ''} onClick={() => (setMore(false), onView(v))}>
+              <button
+                key={v}
+                role="menuitem"
+                className={(v === 'notes' ? notesOpen : main && view === v) ? 'on' : ''}
+                onClick={() => (setMore(false), v === 'notes' ? onNotes() : onView(v))}
+              >
                 <RailIcon name={v} /> {label}
               </button>
             ))}

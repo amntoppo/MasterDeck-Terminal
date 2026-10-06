@@ -1024,14 +1024,25 @@ export function App() {
           view={view}
           screen={phoneScreen}
           onView={(v) => {
+            setNotesAt(null);
             setView(v);
             setPhoneScreen("main");
           }}
           onSessions={() => {
+            setNotesAt(null);
             setView("terminals");
             setPhoneScreen("list");
           }}
-          onMaster={useMaster ? () => setPhoneScreen("master") : undefined}
+          onMaster={
+            useMaster
+              ? () => {
+                  setNotesAt(null);
+                  setPhoneScreen("master");
+                }
+              : undefined
+          }
+          notesOpen={!!notesAt}
+          onNotes={() => setNotesAt((n) => (n ? null : {}))}
           onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
           needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
           prAttention={
