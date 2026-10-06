@@ -223,8 +223,10 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 - `main/deckHooks.ts` writes `<home>/deck/hook.sh` (one script for every event, `$1` = event) and
   reads what it leaves: `pending/<id>.json` + `answers/<id>.json` (PermissionRequest and
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`
-  (printed on SessionStart), `watch-requests/` + `watch-answers/` (Monitor takeover),
+  (printed on SessionStart: ticket and linked sessions), `peers/<session>.delta.json` (printed and deleted by the next UserPromptSubmit), `watch-requests/` + `watch-answers/` (Monitor takeover),
   `events.jsonl` (the rest; emptied at launch past 4 MB), `alive`, `monitors-by`.
+  A pending linked-sessions delta is printed first; a `/queue` typed on that same prompt is skipped
+  that once.
   It also handles `/queue`: UserPromptSubmit stores `/queue <prompt>` (any other prompt returns at
   once, unread and unlogged); Stop hands over the next item through `queue-requests/<id>.json` →
   claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when
@@ -358,6 +360,42 @@ rail is 41, so its tooltips and the remote indicator's card, which stick out ove
 draw above it; dialogs are 50. On a phone the panel is a sheet at 46 (the inspector's is 45) and the
 tab bar is 47: the More menu lives in the bar's stacking context and would open behind a sheet
 otherwise.
+
+### Linked sessions (peers)
+
+A user can link sessions to each other (running sessions only, any repository or account). `shared/peers.ts` is the
+pure graph (`addEdge`, `removeEdge`, `peersOf`, `prune`, `carry`; `MAX_PEERS = 8` per session) and
+`main/peers.ts` `PeerStore` keeps it in `<home>/session-peers.json`: `{version: 1, edges, seen}`,
+keyed by `Session.key`. `seen[T][P]` is the `at` of P's summary that T last received. `seen` is
+written coalesced (500 ms) and flushed on quit; a file that cannot be read is moved aside
+(`.corrupt-<ts>`) and the store starts empty. The store is pruned against the live sessions on each
+agents poll (never when that list is empty), so an ended or removed session drops its edges on the
+next poll; a resume or copy carries them to the new key (`carry`). `expect`/`claim` hold the links
+chosen in a Start dialog until the new session shows up in the poll. `AppState.peers` is the
+symmetric adjacency by key.
+
+What a linked session receives (`shared/deckHooks.ts`):
+- `peersBlock` (a `## Linked sessions` block: name, folder, branch, ticket, state, the summary
+  capped at 2500 characters; newest 5) is part of the SessionStart context. `Sources.writeTicketContext`
+  writes `deck/context/<sid>.json` for a session on a ticket or with linked sessions; a context
+  write never marks `seen`. `composePrompt` takes the block as its 6th argument, so the first turn
+  has it too.
+- `peerDeltas` is the per-prompt delta: `deck/peers/<sid>.delta.json`, printed once by the deck
+  hook's `UserPromptSubmit` case and deleted. It is composed per target and lists every peer that
+  target has not received; peers in a delta the hook has not consumed yet stay queued in it.
+
+`main/peerSync.ts` `PeerSync`: on a Stop of a session with at least one peer, when its summary is
+stale (the same check as the Summary panel) and at least 2 minutes (`PEER_SYNC_MIN_MS`) passed since
+the last make for it, it makes a summary (haiku, as the Summary panel does) and writes one delta per
+peer target. `seen` advances only when a delta is written (or, with **Sync now** on Windows, typed
+in). **Sync now** (`CH.peersSync`) awaits a make already under way, then makes a fresh one and
+delivers; syncs of one session are serialized. Where deck hooks are not live (Windows, or not
+installed) it types the text through `Sender` into peers that are idle (`canDeliver`) and skips the
+rest. `peerSync.auto` in the app config (default true) turns off the automatic part on Stop.
+IPC: `CH.peersSet` (add or remove one link) and `CH.peersSync`, both open to remote callers.
+Renderer: `PeersDialog.tsx` and `PeerPicker.tsx` (`peersView.ts`), the "Linked sessions" section of
+`SessionDetails.tsx`, and a "Link to sessions" field in `AssignDialog` and `NewSessionDialog`.
+Unlinking stops further sharing but retracts nothing already in a transcript.
 
 ### Queue
 
@@ -812,6 +850,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `remote` (+ `warning`), `remoteClients` | `CloudSync` status / `clients` message (`syncRemote`), bridge warning |
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
+| `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -829,13 +868,14 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
 | `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
-| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `events.jsonl`, `alive`, `monitors-by` |
+| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |

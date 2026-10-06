@@ -165,6 +165,38 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
   moves the ticket to your in-progress status if it's earlier on the board.
 
+## Linked sessions
+
+Link sessions that should know about each other: a backend session and the client one, two repositories
+changed for the same ticket, a reviewer and the author. Any running sessions can be linked, in any
+repository or GitHub account, up to 8 links per session. A link works both ways.
+
+- **At start:** the Start dialogs (**Where it runs** in Assign, and **New Claude session…**) have a
+  **Link to sessions** field. Pick running sessions; the new session knows them in its first message.
+- **Later:** in a session's details, **Linked sessions** lists its links. **Add…** links another
+  session, **×** removes one. With no links, **Link sessions…** is in the actions row.
+
+What a linked session sees:
+- A **Linked sessions** block: each peer's name, folder, branch, ticket, state and its summary. It is
+  given when the session starts or resumes, and again after a compaction or `/clear`.
+- When a peer's summary changes (it is made again after the peer stops, at most every 2 minutes, only
+  when its transcript grew), a note about it comes with the session's **next prompt**, once. A session
+  that was idle for hours gets one current note, not a backlog.
+- Nothing is shared with a session that has no links. `peerSync.auto: false` in the app config turns
+  off the automatic part; the block at start and **Sync now** still work.
+
+**Sync now** (in the section) makes a fresh summary of the session and delivers what its peers have not
+received yet, without waiting for their next prompt or Stop.
+
+**Unlink or end:** removing a link stops further sharing at once; it does not take back what is already in a
+session's transcript. A session that ends or is removed loses its links at the next poll.
+
+On Windows (and where MasterDeck's hook is not installed) there is no per-prompt note: **Sync now** types
+the update into peers that are idle, and skips busy ones.
+
+If you type `/queue ...` as the same prompt that picks up a pending note, that prompt's `/queue` is skipped
+once; type it again.
+
 ## Shells and manual sessions
 
 **+** (Sessions header) opens a menu:

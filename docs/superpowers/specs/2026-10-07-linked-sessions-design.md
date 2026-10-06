@@ -42,8 +42,9 @@ issue does.
 
   - `edges`: pairwise, unordered, deduped. Keyed by `Session.key` (the bgId when there is one,
     so it survives resume; else the sessionId).
-  - `seen[T][P]`: the `at` of P's summary that T last received (SessionStart file write or delta
-    consumed). Drives the per-prompt delta.
+  - `seen[T][P]`: the `at` of P's summary that T last received: it advances only when a delta is
+    written for T (or typed into T by Sync now). Drives the per-prompt delta. It is written coalesced
+    (500 ms) and flushed on quit.
   - Written temp+rename like `session-status.json`; a corrupt file is moved aside and treated as
     empty, like `ticket-links.json`.
 - `app/src/shared/peers.ts`: pure graph logic — `addEdge`, `removeEdge`, `peersOf`, `prune(live)`,
@@ -108,13 +109,13 @@ issue does.
    then the summary text capped at 2500 characters, or "(no summary yet)". The block goes into
    the existing `deck/context/<sid>.json`, written by the 60 s `writeTicketContext` pass and
    immediately on edge change or summary change. Resume, compaction and `/clear` therefore get the
-   current peers for free. Writing the file sets `seen[T][P] = P.summary.at` for each peer.
+   current peers for free. Writing the file never marks `seen`: only a delta (or a typed Sync now) does.
 2. **Per-prompt delta** — the UserPromptSubmit hook script gets one more cheap check before its
    `/queue` fast path: if `deck/peers/<sid>.delta.json` exists, rename it to a temp name, print its
-   `additionalContext`, delete it. Main writes the delta when a peer's summary is newer than
-   `seen[T][P]`; content: "Linked session <name> updated (<ago>):" + the summary's Done /
+   `additionalContext`, delete it. Main composes the delta per target T and lists every peer whose
+   summary is newer than `seen[T][P]` (peers in a delta the hook has not consumed yet stay included); content: "Linked session <name> updated (<ago>):" + the summary's Done /
    Decisions / Open / State sections. One file per consumer; a newer change overwrites it, so a
-   session idle for hours gets one current delta, not a backlog. Consumption marks `seen`.
+   session idle for hours gets one current delta, not a backlog. `seen` advances when the delta is written.
 3. **Start prompt** — `composePrompt` gains a `peersBlock()` (same shape as `earlierBlock()`) so
    the first turn knows its peers before any hook fires, and on Windows.
 4. **Sync now** — `CH.peersSync(key)`: make the summary now (ignoring the debounce), then
