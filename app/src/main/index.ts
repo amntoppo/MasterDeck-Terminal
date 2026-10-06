@@ -79,12 +79,15 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
-import { assignNow as assignAs, inRepoFolder } from "./assign";
+import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, knownDirsOnly, MacPanes, remoteSettings } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
+import { createWorktree, worktreeInfo } from "./startWorktree";
+import { isPermissionMode } from "@shared/startOptions";
+import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
@@ -297,6 +300,10 @@ async function assignNow(
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
     expect: (name, login) => sessionAccounts.expect(name, login),
+    owner: (id) => {
+      const p = latest?.proposals.find((x) => x.id === id);
+      return (p && latest ? sessionForProposal(p, latest.sessions)?.name : null) ?? null;
+    },
   });
 }
 const ptys = new PtyManager(
@@ -1003,6 +1010,20 @@ async function inboxAct(
 }
 
 /**
+ * Open Claude there…: a tab in the Mac's window running `claude` in a folder Claude Code was never
+ * allowed to work in, so the user answers its trust prompt. MasterDeck does not answer it, and
+ * never writes Claude Code's own config.
+ */
+function openClaude(folder: unknown, remote: boolean): CliResult {
+  const dir = claudeFolder(remote, folder);
+  if (!dir.ok) return dir;
+  if (!win) return { ok: false, message: "the MasterDeck window is not open" };
+  // The window only: a browser has no tab for it.
+  win.webContents.send(CH.openClaude, dir.cwd);
+  return { ok: true, message: `opened claude in ${dir.cwd}` };
+}
+
+/**
  * Carry out an inbox item's action: the one path the Needs-you cards, notifications and (later) a
  * phone all use. The inbox has checked the item is still open; this checks the session is still in
  * a state where the action makes sense, then uses the same code as the rest of the app.
@@ -1082,9 +1103,22 @@ async function runInboxAction(
     case "reject":
       if (d.type !== "proposal")
         return { ok: false, message: "not a proposal" };
+      // Try again on a start that was held: the same proposal is spawned again (held → sent).
+      if (type === "approve" && d.proposal.status === "held")
+        return retryHeld(cli, d.proposal, {
+          expect: (name, login) => {
+            if (isMulti(getConfig())) sessionAccounts.expect(name, login);
+          },
+          owner: () => owner()?.name ?? null,
+        });
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "trust": {
+      const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
+      if (!held) return { ok: false, message: "not a start Claude Code refused" };
+      return openClaude(held.folder, remote);
+    }
     case "send": {
       if (d.type !== "offer") return { ok: false, message: "not a PR offer" };
       // master's own proposal: approving it lets master send it (and track it).
@@ -1732,14 +1766,10 @@ function registerIpc(): void {
   );
   reg.handle(
     CH.inboxAct,
-    async (_e, id: unknown, type: unknown, payload: unknown) => {
-      if (typeof id !== "string" || typeof type !== "string")
-        return { ok: false, message: "bad inbox action" };
-      const p =
-        payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>)
-          : {};
-      return inboxAct(id, type, p);
+    async (e, id: unknown, type: unknown, payload: unknown) => {
+      // The web app's actions run as the window's, as always; only opening Claude on the Mac is refused for it.
+      const c = inboxActCall(isRemote(e), id, type, payload);
+      return c.ok ? inboxAct(c.id, c.type, c.payload) : c;
     },
   );
   reg.handle(CH.queueList, (_e, sessionId: string) =>
@@ -2173,7 +2203,18 @@ function registerIpc(): void {
       return r;
     },
   );
-  reg.handle(CH.assign, (_e, req: AssignRequest) => {
+  // The Start dialog's "Create worktree": only from the Mac's own window (a folder on this Mac).
+  reg.handle(CH.worktreeInfo, (e, cwd: unknown) => {
+    const dir = worktreeFolder(isRemote(e), cwd);
+    return dir.ok ? worktreeInfo(run, dir.cwd) : dir;
+  });
+  reg.handle(CH.worktreeCreate, (e, cwd: unknown, branch: unknown, base: unknown) => {
+    const dir = worktreeFolder(isRemote(e), cwd);
+    return dir.ok ? createWorktree(run, dir.cwd, branch, base) : dir;
+  });
+  reg.handle(CH.assign, (_e, given: AssignRequest) => {
+    // Only a mode the Start dialog offers: the web reaches this handler too.
+    const req: AssignRequest = { ...given, permissionMode: isPermissionMode(given?.permissionMode) && given.permissionMode ? given.permissionMode : undefined };
     // The template picked in the Start dialog: the new session copies it instead of the default.
     if (
       typeof req?.workflow === "string" &&
@@ -2262,6 +2303,11 @@ function registerIpc(): void {
     if (r.ok) sources.loadConfig();
     return r;
   });
+  reg.handle(CH.trust, (e, cwd: unknown, wait: unknown) => {
+    if (isRemote(e) || typeof cwd !== "string") return null;
+    return cli.trust(cwd, typeof wait === "number" && wait > 0 ? wait : 0);
+  });
+  reg.handle(CH.openClaudeIn, (e, cwd: unknown) => openClaude(cwd, isRemote(e)));
   reg.handle(CH.pickFolder, async (_e, start: unknown) => {
     const r = await dialog.showOpenDialog(win!, {
       properties: ["openDirectory", "createDirectory"],
@@ -2756,10 +2802,13 @@ function registerIpc(): void {
       // gh's browser login is Setup's on the Mac (it opens a browser there).
       if (isRemote(e) && spec?.kind === "gh-login")
         return { ok: false, replay: "", seq: 0, exited: true, message: "log in to GitHub on the Mac" };
+      // Claude Code's trust prompt is answered on the Mac.
+      if (isRemote(e) && spec?.kind === "claude-here")
+        return { ok: false, replay: "", seq: 0, exited: true, message: "open Claude in that folder on the Mac" };
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
-      return ptys.open(id, spec, cols, rows);
+      return ptys.open(id, spec, cols, rows, isRemote(e));
     },
   );
   reg.on(CH.ptyWrite, (_e, id: string, data: string) =>

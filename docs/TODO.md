@@ -1,11 +1,11 @@
-# TODO (as of 2026-10-05)
+# TODO (as of 2026-10-06)
 
 Open work, grouped and roughly prioritized (P1 first). Each item: context, where in the code, and
 a suggested approach. Nothing here is started. The older design note for Codex/Copilot support is
 the repo-root [TODO.md](../TODO.md).
 
 Each open item below is also a GitHub issue with code pointers, approach and acceptance criteria:
-[issues #4–#29](https://github.com/amntoppo/MasterDeck-Terminal/issues). Close the issue in the PR that
+[issues #4–#64](https://github.com/amntoppo/MasterDeck-Terminal/issues). Close the issue in the PR that
 fixes it, and move the item here to "Recently done".
 
 ## Shipping / ops
@@ -268,7 +268,38 @@ fixes it, and move the item here to "Recently done".
   once after a pause before giving up; do not report `ok` with the board selected while nothing was
   added (the tab then shows an empty board until Try again). Not reproduced in a test yet.
 
+## Untrusted start folder: review leftovers (2026-10-06, no issue yet)
+
+- **P3 · Small leftovers of the trust fix.** (a) `ptyWrite` / `ptyClose` have no caller or kind
+  check, so a paired browser can blind-write to or close the `claude:<folder>` helper tab by its id
+  (it cannot open or read it; same as the `gh-login` tab). (b) The retry branch of `startAssign`
+  rejects a proposal whose ticket has a live session without checking it is held for trust. (c) The
+  "already running" closing sentence is three separate literals (CLI, `assign.ts`, `trust.ts`): share
+  one. (d) A proposal started elsewhere in the meantime answers the retry with an error, not
+  "started". (e) A held card can stay behind when master has a newer proposal for the same ticket.
+  (f) `trust.py`: a folder spelled in another letter case than Claude Code's key reads as not
+  trusted (Start waits for **Start anyway**); a `.git` that cannot be read is walked past. (g) The
+  Python trust tests have no file-level guard against a real `claude` call if `spawn()` stopped
+  honouring its runner. (h) The parent-folder rule mirrors a reading of Claude Code's code; confirm
+  it against the real prompt once.
+
 ## Where a session starts (2026-10-05)
+
+- **P2 · Trust: the first real run** (2026-10-06). The untrusted-folder flow was checked with fake
+  runners and, in the isolated app, a stand-in `claude` and a temp `.claude.json`. Never done: the
+  real `claude` in the tab (its real prompt, then `~/.claude.json` changing under a real
+  `--bg`), and Windows (how Claude Code spells a folder's key there is assumed: forward slashes,
+  compared without case). If Claude Code moves or renames `hasTrustDialogAccepted`, the dialog says
+  nothing (not known) and the refused start still offers the fix; check `trust.py` then.
+- **P3 · A held start does not count in the Needs you badge and sends no notification** (held
+  items never do). A start master spawned and Claude Code refused is only seen in the list.
+  Decide whether a refused start should be its own kind.
+- **P3 · Claude Code's parent walk is mirrored from a reading of its code**, not from a documented
+  rule (inside a repository up to its root, outside one all the way up). If a release changes it,
+  `trust.py` is the one place; a wrong False only shows the line and holds Start until Start
+  anyway.
+- **P3 · The web app cannot re-check trust** (`deck.trust` is the window's): its Start dialog
+  shows the line from the draft and leaves Start available.
 
 - **P2 · Start a session from it once.** Seen in the isolated app (2026-10-05): Setup's rows, the
   Start dialog's found / not found / cut-short lines, the phone width. Never done: pressing Start,
@@ -303,6 +334,21 @@ fixes it, and move the item here to "Recently done".
   only** (`config.workspace().parent`); another account's workspace falls back to the GitHub API.
 - **P3 · The web app has no Choose folder…** (the native picker is desktop-only, and main drops a
   folder a browser sends). `RepoPicker` plus `knownDirsOnly` could offer the workspace repos there.
+
+## Start dialog (#66): leftovers (2026-10-06)
+
+- **P3 · The app has one theme.** #66 asks for light and dark; the dialog uses the palette's
+  variables only, so a light theme would carry over, but there is none to check against.
+- **P3 · Create worktree is the Mac window's only.** The web app does not show the box
+  (`worktreeCreate` is `blocked`). To offer it there the folder must be the one the CLI resolves
+  for the ticket, never one the browser names.
+- **P3 · A worktree whose start then fails stays.** The worktree is made before `master spawn`; if
+  the spawn fails, **Retry** starts the held proposal in it, but closing the tab leaves the
+  worktree and its branch (Janitor lists it). Starting the ticket again with the box ticked says
+  the branch exists.
+- **P3 · Notes (#65) should draw Markdown with `MarkdownView`** (`shared/markdown.ts`), not a second renderer. The small `Markdown` in `SummaryPanel.tsx` could move to it too.
+- **P3 · Remembered choices are per window profile** (localStorage): the web app keeps its own.
+- **P3 · `skills/master/tests/test_ghcache.py`: three tests fail when run from inside a MasterDeck-started session** (seen 2026-10-06, on `main` too; cause not looked into, the session's own `GHC_*` environment is the suspect).
 
 ## Remote / web
 
@@ -407,6 +453,8 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |
+| A start Claude Code refuses ("Workspace not trusted") no longer dead-ends: one reader of Claude Code's `.claude.json` in the CLI (`trust.py`, `master trust`, `trusted` in `draft-assign` / `checkout`), the Start dialog says so before starting and opens `claude` in the folder (**Open Claude there…**, a `claude-here` tab; MasterDeck never answers the prompt or writes the file) and comes back once it is trusted, the refused start's tab and the HELD card offer the same with **Try again**, which starts the same held proposal through `master spawn --held-for-trust` (only a start the CLI marked `held_for: "trust"`, never beside a live session; `AssignRequest.retry`, `retryHeld`; a retry used to add a second proposal when a model or account was named), the Start dialog reuses a held refused start, the trust read follows Claude Code's parent walk, a browser can neither open Claude on the Mac nor take its pane, `master spawn` records the folder it was refused in | fix/workspace-trust | — |
 | A workspace per GitHub account, and a ticket's session starts in its repository's checkout: `accounts[].workspace` (Setup → Preferences, one field per other account; the top-level `workspace` stays the primary's), one resolver `skills/master/lib/master/checkout.py` (origin match over the workspace, depth 2, 2000 folders, no links out) behind `rules._assign`, `master draft-assign` (`--cwd`, `found`), `master add` / `spawn` without a folder and `master checkout` (PR review, `cwdRepo`); the Start dialog shows the folder, "No checkout of owner/name found in <workspace>", **Choose folder…** and the account. Review round: the origin is read from `.git/config` (2000 folders, 20 git calls, "only the first N folders were searched"), duplicates ranked, only ASSIGN / PR review of a real issue is looked up, a session MasterDeck parks in a main checkout does not take the branch it found there (`parked-sessions.json`, `ownsFolderBranch`; hand-started sessions as before), `Ops.repos()` covers every account's workspace (`main/checkouts.ts`), master's chosen folder, prompt and model survive the Start dialog, Setup swaps workspaces when the primary changes | merge 660c726 (released in v0.8.0) | — |
 | Board repository view (plan K; spec and plan in the backend repo, 2026-10-05): a Board tab with repositories picked in its Repos filter, on an account with a board, shows every issue of them, on a board or not, in Todo / In Dev / PR Raised / Done (`shared/repoView.ts`, `main/repoIssues.ts`, `master repo-issues`), read only while such a tab is on screen, ten repositories of an account per GitHub call and as many calls as needed (at most 1200 cards, 500 KB and 30 repositories in the state, none on screen ever dropped for another; only the Board's Refresh / Retry skips the gh cache; a never-read repository is asked for again every 5 minutes); a picked repository that is never read says why (not selected in Setup, another account's with no board, more than 30 picked, no room) instead of loading; with Select all an unlisted repository is read only under the owner of the account that has it (`repoPickable`, `config.repo_readable`); a chip shows the column of an issue that is also on a board; a session can be started from any card (**Start a session** on the Assign and PR popups) and linked to an issue no board holds (`offBoardOk`); a new ticket from the view goes to the first picked repository with no sprint; the Repos filter shows with one repository in a tab with a board; a tab with no board still only filters and keeps its older defaults; a linked session's PR is a closing reference on the issue, also for an issue no board holds; master is unchanged | merge e75ec9c (released in v0.8.0) | — |
 | Board without a GitHub project (plan J; spec and plan in the backend repo, 2026-10-05): a tab whose account has no board shows its repositories' issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck on every state (`shared/derivedBoard.ts`, `master board` repository read, read-only columns, hint and notes); **Create a GitHub board** makes a real one as that account, on the Mac only (`main/boardCreate.ts`: plan, native confirmation, re-check, columns, links, issues 20 a request, Try again, config last, `sprintless`); empty states say what is empty ("No open issues", "Could not read …", "Nothing selected"); linking a session and New ticket / Create with Claude work without a board; master proposes only that account's own Todo issues | merge 7714ec8 (released in v0.8.0) | — (no protocol change) |

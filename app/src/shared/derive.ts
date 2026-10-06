@@ -108,6 +108,7 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
       message: s(p.message) ?? '',
       note: s(p.note),
       closedAt: s(p.closed_at),
+      ...(s(p.held_for) ? { heldFor: s(p.held_for)! } : {}),
       target: {
         session: s(t.session) ?? undefined,
         spawn: s(spawn.name)

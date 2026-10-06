@@ -14,6 +14,7 @@ import type { Pr, Proposal, Session } from "./types";
 import type { ExternalItem } from "./remote";
 import type { GhAccountStatus } from "./accounts";
 import type { ScreenMenu } from "./ask";
+import { heldForTrust, trustLine } from "./trust";
 
 /**
  * Needs you, as one inbox: every item the user may act on, built in one place (the main process)
@@ -49,6 +50,7 @@ export type InboxActionType =
   | "send" // a PR offer: master's proposal, or the message to the session
   | "start" // open the Start dialog (the renderer does it)
   | "login" // run gh auth login for an account (the renderer opens it)
+  | "trust" // open claude in a folder it was not allowed to work in (the renderer opens it)
   | "open"; // open the session (the renderer does it)
 
 export interface InboxAction {
@@ -283,6 +285,10 @@ export function collectItems(x: InboxInput): InboxItem[] {
         : p.status === "blocked"
           ? "blocked"
           : "held";
+    // A start Claude Code refused because it was never allowed to work in the folder: it can be
+    // fixed (Claude's own prompt, in a tab) and the same proposal started again. `approve` is the
+    // go-ahead for it: the one action a phone can send too.
+    const trust = kind === "held" ? heldForTrust(p) : null;
     out.push({
       // A new question on the same proposal replaces its note: a new item.
       id: `${kind}:${p.id}:${shortHash(p.note ?? "")}`,
@@ -291,9 +297,15 @@ export function collectItems(x: InboxInput): InboxItem[] {
       sessionKey: null,
       ticket: t,
       title: ticketLabel(t.repo, t.number),
-      body: p.note ?? p.summary,
-      actions:
-        kind === "held"
+      body: trust
+        ? `${trustLine(trust.folder)} Open Claude in that folder once and accept its prompt, then try again.`
+        : (p.note ?? p.summary),
+      actions: trust
+        ? [
+            { type: "trust", label: "Open Claude there…" },
+            { type: "approve", label: "Try again", primary: true },
+          ]
+        : kind === "held"
           ? [{ type: "open", label: "Open" }]
           : [
               { type: "reply", label: "Reply", primary: true },

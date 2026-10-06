@@ -12,6 +12,8 @@ import { mergePresence } from "@shared/remotePresence";
 import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
+import { TrustNote, useTrust } from "./components/TrustFix";
+import { isNotTrusted, pendingPane, retryRequest } from "@shared/trust";
 import { AssignPopup } from "./components/AssignPopup";
 import { BroadcastDialog } from "./components/BroadcastDialog";
 import {
@@ -68,6 +70,10 @@ type Tab =
       title: string;
       /** A gh auth login tab (Needs you → Log in): never restored. */
       login?: string;
+      /** Plain `claude` in `cwd`, for the user to answer its trust prompt (Open Claude there…): never restored. */
+      claude?: true;
+      /** When Open Claude there… was pressed again for it: an exited one starts again. */
+      asked?: number;
     }
   /** A session being started from the Start dialog; becomes a session tab when it appears. */
   | {
@@ -119,7 +125,7 @@ export function App() {
     load<Tab[]>("tabs", []).filter((t) =>
       t.kind === "session"
         ? typeof t.key === "string"
-        : t.kind === "shell" && !t.login,
+        : t.kind === "shell" && !t.login && !t.claude,
     ),
   );
   const [active, setActive] = useState<string | null>(() =>
@@ -538,16 +544,10 @@ export function App() {
         return;
       }
       if (!t.req) return;
-      // The failed spawn left its proposal held; spawn that one again. With no proposal yet, start over.
-      const again: AssignRequest =
-        t.proposalId !== undefined
-          ? {
-              ...t.req,
-              proposalId: t.proposalId,
-              edited: false,
-              approved: true,
-            }
-          : t.req;
+      // The failed spawn left its proposal held; spawn that one again. A start Claude Code refused
+      // for its folder goes as a retry (the same proposal, never a second one); with no proposal
+      // yet, start over.
+      const again = retryRequest(t.req, t.proposalId, t.error);
       void deck()
         .assign(again)
         .then((r) => {
@@ -623,6 +623,29 @@ export function App() {
       activate(id);
       arm(id);
     });
+    // Open Claude there…: plain claude in a folder it was never allowed to work in. One tab per folder.
+    const offClaude = deck().onOpenClaude((cwd) => {
+      const id = `claude:${cwd}`;
+      setView("terminals");
+      setTabs((cur) =>
+        cur.some((t) => t.id === id)
+          ? // Asked for again: if its Claude has exited, the pane starts it again (ShellPane).
+            cur.map((t) =>
+              t.id === id && t.kind === "shell" ? { ...t, asked: Date.now() } : t,
+            )
+          : [
+              ...cur,
+              {
+                id,
+                kind: "shell",
+                cwd,
+                title: `claude · ${cwd.split(/[\\/]/).filter(Boolean).pop() || cwd}`,
+                claude: true,
+              },
+            ],
+      );
+      activate(id);
+    });
     const offFocus = deck().onFocusSession((key) => {
       const s = state?.sessions.find((x) => x.key === key);
       if (s) openSession(s);
@@ -636,6 +659,7 @@ export function App() {
     return () => {
       offAuto();
       offLogin();
+      offClaude();
       offFocus();
       offNeeds();
       offItem();
@@ -1205,7 +1229,38 @@ export function App() {
             >
               {t.kind === "pending" ? (
                 <div className="welcome">
-                  {t.error ? (
+                  {pendingPane(t.error).kind === "running" ? (
+                    <AlreadyRunning
+                      ticket={ticketLabel(t.req?.repo ?? null, t.issue)}
+                      session={state?.sessions.find(
+                        (x) =>
+                          x.state !== "done" &&
+                          x.name === (pendingPane(t.error) as { name: string }).name,
+                      )}
+                      name={(pendingPane(t.error) as { name: string }).name}
+                      onOpen={(x) => {
+                        closeTab(t.id);
+                        openSession(x);
+                      }}
+                      onClose={() => closeTab(t.id)}
+                    />
+                  ) : t.error && isNotTrusted(t.error) ? (
+                    <StartRefused
+                      name={t.name}
+                      error={t.error}
+                      // The proposal's own folder, once the ledger shows it; until then the one asked for.
+                      folder={
+                        state?.proposals.find((p) => p.id === t.proposalId)
+                          ?.target.spawn?.cwd ??
+                        t.req?.cwd ??
+                        t.claude?.cwd ??
+                        t.here?.cwd ??
+                        null
+                      }
+                      onClose={() => closeTab(t.id)}
+                      onRetry={() => retryStart(t.id)}
+                    />
+                  ) : t.error ? (
                     <>
                       <h2>{t.name} did not start</h2>
                       <div
@@ -1525,11 +1580,20 @@ function ShellPane(p: {
   const { tab, visible, focus } = p;
   const [exited, setExited] = useState(false);
   const [gen, setGen] = useState(0);
+  // Open Claude there… pressed again: a Claude that exited starts again; a running one is left alone.
+  const exitedNow = useRef(false);
+  exitedNow.current = exited;
+  useEffect(() => {
+    if (!tab.asked || !exitedNow.current) return;
+    deck().ptyClose(tab.id);
+    setExited(false);
+    setGen((g) => g + 1);
+  }, [tab.asked, tab.id]);
   if (!p.armed)
     return (
       <NotStarted
-        label={tab.login ? `gh auth login for ${tab.login}` : `Shell in ${tab.cwd}`}
-        action="Open shell"
+        label={tab.login ? `gh auth login for ${tab.login}` : tab.claude ? `claude in ${tab.cwd}` : `Shell in ${tab.cwd}`}
+        action={tab.claude ? "Open Claude" : "Open shell"}
         onStart={p.onArm}
       />
     );
@@ -1537,7 +1601,7 @@ function ShellPane(p: {
     <>
       <TerminalView
         paneId={tab.id}
-        spec={tab.login ? { kind: "gh-login" } : { kind: "shell", cwd: tab.cwd }}
+        spec={tab.login ? { kind: "gh-login" } : tab.claude ? { kind: "claude-here", cwd: tab.cwd } : { kind: "shell", cwd: tab.cwd }}
         visible={visible}
         focusOnShow={focus}
         generation={gen}
@@ -1551,7 +1615,7 @@ function ShellPane(p: {
           className="overlay"
           style={{ position: "relative", flex: "none", padding: 10 }}
         >
-          <span>Shell exited.</span>
+          <span>{tab.claude ? "Claude exited. You can close this tab." : "Shell exited."}</span>
           <button
             className="btn"
             onClick={() => {
@@ -1712,6 +1776,65 @@ function QuickKeys({ paneId }: { paneId: string }) {
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * A start Claude Code refused because it was never allowed to work in the folder: say so plainly,
+ * open Claude there for the user to answer its prompt, and start the same proposal again.
+ */
+function StartRefused(p: {
+  name: string;
+  error: string;
+  folder: string | null;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  const trust = useTrust(p.folder, undefined);
+  const ready = trust.trusted === true;
+  return (
+    <>
+      <h2>{p.name} did not start</h2>
+      <div title={p.error}>
+        <TrustNote trust={trust} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn" onClick={p.onClose}>
+          Close
+        </button>
+        <button className="btn primary" onClick={p.onRetry}>
+          {ready ? "Start now" : "Try again"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/** A retry that started nothing because the ticket has a session already: that session, and no Retry. */
+function AlreadyRunning(p: {
+  ticket: string;
+  name: string;
+  session: Session | undefined;
+  onOpen: (s: Session) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <h2>
+        {p.ticket} already has a session: {p.name}
+      </h2>
+      <div>Nothing new was started.</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn" onClick={p.onClose}>
+          Close
+        </button>
+        {p.session && (
+          <button className="btn primary" onClick={() => p.onOpen(p.session!)}>
+            Open it
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 

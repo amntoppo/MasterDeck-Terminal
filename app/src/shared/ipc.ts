@@ -138,6 +138,8 @@ export const CH = {
   configDetectAll: "config:detectAll",
   configSave: "config:save",
   pickFolder: "app:pickFolder",
+  worktreeInfo: "start:worktreeInfo",
+  worktreeCreate: "start:worktreeCreate",
   skillReinstall: "skills:reinstall",
   skillRemove: "skills:remove",
   workflowGet: "workflow:get",
@@ -175,6 +177,9 @@ export const CH = {
   getSettings: "settings:get",
   setSettings: "settings:set",
   ghLogin: "accounts:login",
+  trust: "claude:trust",
+  openClaudeIn: "claude:openIn",
+  openClaude: "claude:open",
   autoOpen: "app:autoOpen",
   setStatus: "board:setStatus",
   standupCommits: "standup:commits",
@@ -222,6 +227,8 @@ export interface AssignRequest {
   kind?: "ASSIGN" | "PRREVIEW";
   /** `claude --model` for the new session; absent: the default model. */
   model?: string;
+  /** `claude --permission-mode` for the new session (plan, acceptEdits, auto); absent: Claude Code's default. */
+  permissionMode?: string;
   /** The workflow template the session starts with; absent: the default. */
   workflow?: string;
   /** Another GitHub account than the issue's default (the Start dialog's Account field). */
@@ -229,6 +236,9 @@ export interface AssignRequest {
   /** owner/name: main picks the folder (this repository's checkout, else its account's workspace)
    * and `cwd` is only the fallback. A PR review names its PR's repository. */
   cwdRepo?: string;
+  /** Try again: `proposalId` is the proposal a failed start left held. It is spawned again as it
+   * is (its own name, folder, model and account), never replaced by a new one. */
+  retry?: boolean;
 }
 
 export interface PtyOpenResult {
@@ -325,6 +335,14 @@ export interface DeckApi {
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
   /** Needs you → Log in: open a terminal tab running gh auth login for this account. */
   onGhLogin(cb: (login: string) => void): () => void;
+  /**
+   * Has Claude Code been allowed to work in this folder (its trust prompt was accepted there)?
+   * `waitSeconds`: keep looking until it is, that long at most. null: not known. Read only.
+   */
+  trust(cwd: string, waitSeconds?: number): Promise<boolean | null>;
+  /** Open Claude there…: a terminal tab running `claude` in the folder, for the user to answer its trust prompt. */
+  openClaudeIn(cwd: string): Promise<CliResult>;
+  onOpenClaude(cb: (cwd: string) => void): () => void;
   /** Move a ticket to a board column (BoardOps). */
   setStatus(issue: Ticket, status: string): Promise<CliResult>;
   standupCommits(
@@ -435,6 +453,16 @@ export interface DeckApi {
   /** Setup: save settings (merged into the config file), then reload everything. */
   configSave(patch: unknown): Promise<CliResult>;
   pickFolder(start?: string): Promise<string | null>;
+  /** The Start dialog's "Create worktree": is this folder a git checkout, and which branches has it (a read). */
+  worktreeInfo(
+    cwd: string,
+  ): Promise<{ ok: true; root: string; base: string; branches: string[] } | { ok: false; message: string }>;
+  /** Make the ticket's worktree (a new branch from `base`) under the checkout's `.claude/worktrees/`; the session then starts in `cwd`. */
+  worktreeCreate(
+    cwd: string,
+    branch: string,
+    base: string,
+  ): Promise<{ ok: true; cwd: string; branch: string; base: string } | { ok: false; message: string }>;
   /** Install a bundled skill (or replace the copy there); a skill removed before is added back. */
   skillReinstall(name: string): Promise<CliResult>;
   /** Take a bundled skill out of ~/.claude/skills (kept in its backup folder) and keep it out. */

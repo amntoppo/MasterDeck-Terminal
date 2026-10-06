@@ -314,6 +314,16 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dialog .start-folder > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .dialog .start-folder.missing .why { color: var(--amber); }
 .dialog .start-folder .link-btn { flex: none; font-size: 12px; }
+/* Claude Code was never allowed to work in the folder (TrustFix.tsx): the dialog, a failed start, a held item */
+.trust-note { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin: 6px 0 2px; text-align: left; }
+.trust-note > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.trust-note .why { color: var(--amber); }
+.trust-note.ready .why { color: var(--green); }
+.trust-note .btn { flex: none; }
+.welcome .trust-note { max-width: 560px; font-size: 13px; }
+.card .trust-note { flex-wrap: wrap; margin: 4px 0; }
+.trust-wait { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; max-width: min(640px, calc(100vw - 32px)); padding: 9px 12px; font-size: 12px; background: var(--bg-2); border: 1px solid var(--amber); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.trust-wait .btn { flex: none; }
 
 /* Board filters */
 .sprint-pick, .fsel { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
@@ -1269,3 +1279,77 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .board-hint .board-note { flex-basis: 100%; overflow-wrap: anywhere; }
 /* Repository view: a card whose issue is also on a board shows that board's column. */
 .lbl.on-board { color: var(--accent); border-color: var(--accent); }
+
+/* Start dialog (AssignDialog): sections on the app's own surfaces; the fields sit one step lighter than their card. */
+.dialog.start { width: min(720px, 94vw); padding: 18px 20px 16px; }
+.dialog.start h3 { align-items: baseline; font-size: 16px; line-height: 1.3; }
+.dialog.start h3 .kind { position: relative; top: -2px; }
+.dialog.start .sd-title { min-width: 0; overflow-wrap: anywhere; }
+.dialog.start > .meta { margin-bottom: 4px; }
+.dialog.start .sd-sec { margin-top: 12px; padding: 2px 14px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+.dialog.start .sd-sec > h4 { margin: 10px 0 0; font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
+.dialog.start .sd-sec input:not([type="checkbox"]), .dialog.start .sd-sec textarea, .dialog.start .sd-sec .fsel, .dialog.start .desc-preview { background: var(--bg-2); border-color: var(--line-2); }
+.dialog.start .sd-sec input:not([type="checkbox"]), .dialog.start .sd-sec .fsel.full { height: 32px; padding: 0 9px; }
+.dialog.start .sd-sec input[aria-invalid="true"] { border-color: var(--red); }
+.dialog.start :is(input, textarea, select, button, summary, .desc-preview):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.dialog.start input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; flex: none; }
+.dialog.start textarea.desc, .dialog.start .desc-preview { min-height: 132px; }
+.dialog.start textarea.instructions { min-height: 96px; }
+.dialog.start textarea.system { min-height: 150px; margin-top: 6px; }
+.dialog.start .start-folder { margin: 10px 0 0; line-height: 1.5; }
+.dialog.start .label-row { margin-top: 10px; margin-bottom: 4px; min-height: 22px; flex-wrap: wrap; }
+.dialog.start .foot { bottom: -16px; margin-top: 12px; padding: 12px 0 2px; border-top: 1px solid transparent; }
+.dialog.start .foot .btn { padding: 5px 14px; }
+.dialog.start .foot .btn.primary { min-width: 76px; }
+.sd-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.sd-grid.one { grid-template-columns: minmax(0, 1fr); }
+.sd-grid.one > div:empty { display: none; }
+.sd-sub { margin: 8px 0 2px 6px; padding: 0 0 2px 14px; border-left: 2px solid var(--line-2); }
+.sd-sub label:first-child, .sd-sub .sd-grid label { margin-top: 4px; }
+.sd-hint { color: var(--muted); font-size: 11px; line-height: 1.45; margin-top: 6px; overflow-wrap: anywhere; }
+.sd-hint.error { color: var(--red); }
+.sd-hint.inline { margin: 0 0 0 4px; }
+.dialog.start label.check.sd-check { margin: 12px 0 0; flex-wrap: wrap; }
+.sd-checks { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.dialog.start .sd-checks label.check { margin: 0; }
+.dialog.start label.check.memory-check { margin: 10px 0 0; }
+/* The app's own segmented control (.seg), at the size of a label row. */
+.dialog.start .label-row .seg { flex: none; }
+.dialog.start .label-row .seg button { flex: none; padding: 2px 10px; font-size: 11px; }
+.desc-preview { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; resize: vertical; }
+.desc-preview.off { opacity: .6; }
+details.sd-more { margin-top: 10px; }
+details.sd-more > summary { cursor: pointer; width: fit-content; font-size: 11px; color: var(--muted); border-radius: 4px; padding: 1px 3px; margin-left: -3px; }
+details.sd-more > summary:hover { color: var(--text); }
+
+/* Rendered Markdown (MarkdownView): an issue's description as GitHub shows it. */
+.mdv { font: 13px/1.55 var(--font); color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.mdv > :first-child { margin-top: 0; }
+.mdv > :last-child { margin-bottom: 0; }
+.mdv h1, .mdv h2, .mdv h3, .mdv h4, .mdv h5, .mdv h6 { display: block; margin: 16px 0 6px; font-weight: 600; line-height: 1.3; text-wrap: balance; }
+.mdv h1 { font-size: 18px; }
+.mdv h2 { font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.mdv h3 { font-size: 14px; }
+.mdv h4, .mdv h5, .mdv h6 { font-size: 13px; }
+.mdv h6 { color: var(--muted); }
+.mdv p { margin: 0 0 10px; }
+.mdv ul, .mdv ol { margin: 0 0 10px; padding-left: 22px; }
+.mdv li { margin: 2px 0; }
+.mdv li > ul, .mdv li > ol { margin: 2px 0; }
+.mdv li > p { margin: 6px 0; }
+.mdv li.task { list-style: none; margin-left: -20px; }
+.mdv li.task > input { width: 13px; height: 13px; margin: 0 7px 0 0; vertical-align: -2px; accent-color: var(--accent); }
+.mdv a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.mdv a:hover { text-decoration: underline; }
+.mdv code { font: 12px/1.4 var(--mono); background: var(--bg-3); padding: 1px 5px; border-radius: 4px; }
+.mdv pre { margin: 0 0 10px; padding: 9px 11px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+.mdv pre code { background: none; padding: 0; white-space: pre; }
+.mdv blockquote { margin: 0 0 10px; padding: 0 0 0 12px; border-left: 3px solid var(--line-2); color: var(--muted); }
+.mdv hr { border: 0; border-top: 1px solid var(--line-2); margin: 14px 0; }
+.mdv img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
+.mdv del { color: var(--muted); }
+.mdv-table { overflow-x: auto; margin: 0 0 10px; }
+.mdv table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mdv th, .mdv td { border: 1px solid var(--line-2); padding: 4px 9px; text-align: left; vertical-align: top; }
+.mdv th { background: var(--bg-3); font-weight: 600; }
+.desc-preview .muted { color: var(--muted); font-size: 12px; }

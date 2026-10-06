@@ -4,6 +4,7 @@ import type { AssignRequest, QueueEdit } from '@shared/ipc'
 import { MASTER_NAME } from '@shared/derive'
 import { CommandInput, type Command, type CommandResult } from '@shared/remote'
 import type { Ticket } from '@shared/ticket'
+import { isNotTrusted, remoteTrustMessage } from '@shared/trust'
 import type { AppState, CliResult, DraftAssign, Session } from '@shared/types'
 
 export interface RemoteDeps {
@@ -151,7 +152,9 @@ export class RemoteCommands {
           ...(cmd.args.model ? { model: cmd.args.model } : {}),
           ...(account ? { account } : {}),
         }
-        return this.deps.startAssign(req)
+        const r = await this.deps.startAssign(req)
+        // No tab can open on a phone: say where to fix it. The held start is in Needs you (Try again).
+        return !r.ok && isNotTrusted(r.message) ? { ok: false, message: remoteTrustMessage(req.cwd) } : r
       }
       case 'session.stop': {
         const s = session(cmd.args.key)

@@ -9,7 +9,7 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn
+from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn, trust
 
 WRITE_CMDS = {"add", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
 
@@ -169,6 +169,8 @@ def cmd_add(args) -> int:
             sp["model"] = args.model
         if args.account:
             sp["account"] = args.account
+        if args.permission_mode:
+            sp["permissionMode"] = args.permission_mode
         err = spawn.validate_spawn_target(sp)
         if err:
             print(err)
@@ -188,7 +190,7 @@ def _decide(args, to: str) -> int:
     now = _now(args)
     with ledger.locked() as led:  # one bad id raises and saves none of them
         for pid in args.ids:
-            ledger.transition(led, pid, to, now=now)
+            ledger.transition(led, pid, to, now=now, note=getattr(args, "note", None))
     print(f"{to}: {' '.join(str(i) for i in args.ids)}")
     return 0
 
@@ -211,7 +213,7 @@ def cmd_spawn(args) -> int:
     err = None
     with ledger.locked() as led:
         try:
-            p = spawn.spawn(led, args.id, now=_now(args))
+            p = spawn.spawn(led, args.id, now=_now(args), held_for_trust=args.held_for_trust)
         except spawn.SpawnError as e:
             err = str(e)
     if err:
@@ -316,6 +318,8 @@ def cmd_draft_assign(args) -> int:
                       "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"],
                       # The text without a checkout: the dialog replaces a system prompt only while it is one of these.
                       "genericPrompt": rules.assign_prompt(issue),
+                      # Whether Claude Code may work in that folder (null: not known); it refuses to start where it may not.
+                      "trusted": trust.trusted(sp["cwd"]),
                       # The search hit a limit: "not found" may be wrong, and the dialog says so.
                       **({"partial": True, "searched": where["searched"]} if where.get("partial") else {})}))
     return 0
@@ -326,7 +330,17 @@ def cmd_checkout(args) -> int:
     if not re.fullmatch(config.REPO_RE, args.repo):
         print(f"not a repository (owner/name): {args.repo}")
         return 2
-    print(json.dumps(checkout.resolve(args.repo)))
+    where = checkout.resolve(args.repo)
+    print(json.dumps({**where, "trusted": trust.trusted(where["cwd"])}))
+    return 0
+
+
+def cmd_trust(args) -> int:
+    """Whether Claude Code has been allowed to work in a folder: JSON, `trusted` true, false or
+    null (not known). `--wait N`: look again every two seconds, for N seconds at most, until it is
+    (the app, while the user accepts Claude Code's prompt)."""
+    got = trust.wait(args.folder, args.wait) if args.wait > 0 else trust.trusted(args.folder)
+    print(json.dumps({"cwd": args.folder, "trusted": got}))
     return 0
 
 
@@ -548,12 +562,15 @@ def parser() -> argparse.ArgumentParser:
     ad.add_argument("--cwd")
     ad.add_argument("--model", help="claude --model for the spawned session; omitted: the default model")
     ad.add_argument("--account", help="gh login the spawned session works as (MasterDeck's connected accounts)")
+    ad.add_argument("--permission-mode", help="claude --permission-mode for the spawned session (plan, acceptEdits, …); "
+                                              "omitted: Claude Code's default")
     ad.set_defaults(fn=cmd_add)
 
     for name, to in (("approve", "approved"), ("reject", "rejected")):
         p = sub.add_parser(name)
         p.add_argument("ids", type=int, nargs="+")
         p.add_argument("--now")
+        p.add_argument("--note", help="why, kept on the proposals")
         p.set_defaults(fn=lambda a, to=to: _decide(a, to))
 
     mk = sub.add_parser("mark")
@@ -574,6 +591,8 @@ def parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("spawn")
     sp.add_argument("id", type=int)
     sp.add_argument("--now")
+    sp.add_argument("--held-for-trust", action="store_true",
+                    help="the app's Try again: only a start held because Claude Code refused its folder, and never beside a live session of that name")
     sp.set_defaults(fn=cmd_spawn)
 
     sy = sub.add_parser("say")
@@ -624,6 +643,10 @@ def parser() -> argparse.ArgumentParser:
     co = sub.add_parser("checkout")
     co.add_argument("repo", help="owner/name")
     co.set_defaults(fn=cmd_checkout)
+    tr = sub.add_parser("trust", help="has Claude Code been allowed to work in this folder (read only)")
+    tr.add_argument("folder")
+    tr.add_argument("--wait", type=float, default=0, help="seconds to keep looking until it is (60 at most)")
+    tr.set_defaults(fn=cmd_trust)
 
     return ap
 

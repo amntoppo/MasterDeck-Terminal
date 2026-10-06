@@ -8,12 +8,15 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import checkout, config, ledger
+from . import checkout, config, ledger, trust
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # A model alias (opus, sonnet[1m]) or full name (claude-opus-5-5); never an option.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$")
 ACCOUNT_RE = re.compile(rf"^{config.LOGIN_RE}$")
+# `claude --permission-mode` values a proposal may name. bypassPermissions is left out on purpose:
+# a session nobody watches is never started with every check off.
+PERMISSION_MODES = ("acceptEdits", "auto", "dontAsk", "manual", "plan")
 
 
 class SpawnError(RuntimeError):
@@ -37,6 +40,12 @@ def validate_prompt(prompt: "str | None") -> "str | None":
 def validate_model(model: "str | None") -> "str | None":
     if model is not None and not MODEL_RE.fullmatch(model):
         return f"invalid model: {model!r}"
+    return None
+
+
+def validate_permission_mode(mode: "str | None") -> "str | None":
+    if mode is not None and mode not in PERMISSION_MODES:
+        return f"invalid permission mode: {mode!r} (one of {', '.join(PERMISSION_MODES)})"
     return None
 
 
@@ -67,7 +76,8 @@ def validate_spawn_target(sp: dict) -> "str | None":
         return err
     if sp.get("resume"):
         return validate_resume(sp["resume"])
-    err = validate_name(sp.get("name")) or validate_model(sp.get("model"))
+    err = (validate_name(sp.get("name")) or validate_model(sp.get("model"))
+           or validate_permission_mode(sp.get("permissionMode")))
     if err:
         return err
     return validate_prompt(sp.get("prompt"))
@@ -101,7 +111,8 @@ def command(target: dict) -> list:
             acct = []
         return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
-    return ["claude", "--bg", *acct, "-n", sp["name"], *model, sp["prompt"]]
+    mode = ["--permission-mode", sp["permissionMode"]] if sp.get("permissionMode") else []
+    return ["claude", "--bg", *acct, "-n", sp["name"], *model, *mode, sp["prompt"]]
 
 
 def default_account(led: dict, p: dict, cwd: str) -> "str | None":
@@ -161,14 +172,33 @@ def running(session_id: str, runner=subprocess.run) -> "bool | None":
                for x in rows)
 
 
-def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
+def named_running(name: str, runner=subprocess.run) -> "bool | None":
+    """Whether `claude agents` shows a live process for a session of this name. None: not known."""
+    try:
+        r = runner(["claude", "agents", "--json"], capture_output=True, text=True, timeout=30)
+        rows = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    return any(isinstance(x, dict) and x.get("pid") and x.get("name") == name for x in rows)
+
+
+def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run, held_for_trust: bool = False) -> dict:
+    """`held_for_trust`: the app's Try again. Only a proposal this function itself held because
+    Claude Code refused its folder (`held_for: "trust"`, never a note someone wrote), and never
+    beside a live session of the same name."""
     p = ledger.get(led, pid)
     if "spawn" not in p["target"]:
         raise SpawnError(f"proposal {pid} targets a session; send it with SendMessage")
+    if held_for_trust and not (p["status"] == "held" and p.get("held_for") == "trust"):
+        # Held for anything else (a start that timed out may be running; a resume beside a
+        # running session) is not for a button to start again.
+        raise SpawnError(f"proposal {pid} is not a start held because Claude Code refused its folder")
     if p["status"] not in ("approved", "held"):
         raise SpawnError(f"proposal {pid} is {p['status']}, not approved")
 
-    def hold(note: str) -> None:
+    def hold(note: str, why: "str | None" = None) -> None:
         # A failure moves an approved proposal to held so a re-armed watch never re-emits
         # it (watch_lines only emits "approved"). An already-held proposal just gets a
         # fresher note — held -> held is not a transition ledger.TRANSITIONS allows.
@@ -176,6 +206,23 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
             ledger.set_note(led, pid, note)
         else:
             ledger.transition(led, pid, "held", now=now, note=note)
+        # Why it is held, when that is something the app can fix and retry (only "trust").
+        if why:
+            p["held_for"] = why
+        else:
+            p.pop("held_for", None)
+
+    if held_for_trust:
+        name = p["target"]["spawn"].get("name") or ""
+        live = named_running(name, runner)
+        if live:
+            # The ticket was started again in the meantime (the Start dialog, master): this start
+            # would be a second session of the same name. It is over.
+            note = f"a session named {name} is already running; this held start was closed"
+            ledger.transition(led, pid, "rejected", now=now, note=note)
+            raise SpawnError(f"proposal {pid}: {note}")
+        if live is None:
+            raise SpawnError(f"proposal {pid}: `claude agents` failed, so it is not known whether {name} already runs; not started")
 
     sp0 = p["target"]["spawn"]
     # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
@@ -222,7 +269,13 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run) -> dict:
         raise SpawnError(f"proposal {pid}: {note}")
     if r.returncode != 0:
         err = (r.stderr or r.stdout or f"exit {r.returncode}").strip()[:500]
-        hold(err)
+        if trust.not_trusted(err):
+            # Claude Code was never allowed to work in this folder. The proposal now names it: the
+            # app shows it (and opens `claude` there), and the retry starts in the same one.
+            sp0.setdefault("cwd", cwd)
+            hold(err, "trust")
+        else:
+            hold(err)
         raise SpawnError(f"proposal {pid}: {err}")
     out = r.stdout or ""
     if park:

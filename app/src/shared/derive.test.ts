@@ -54,6 +54,10 @@ describe('parseSnapshot / parseLedger', () => {
     const assign = l.proposals.find((p) => p.kind === 'ASSIGN')!
     expect(assign.target.spawn?.name).toBeTruthy()
   })
+  it('carries why `master spawn` held a proposal, and nothing else for it', () => {
+    const l = parseLedger({ proposals: [{ id: 1, status: 'held', held_for: 'trust', target: { spawn: { name: 'a' } } }, { id: 2, status: 'held', held_for: 7, target: {} }, { id: 3, status: 'held', target: {} }] })
+    expect(l.proposals.map((p) => p.heldFor)).toEqual(['trust', undefined, undefined])
+  })
   it("keeps a spawn's account; a malformed login is dropped", () => {
     const l = parseLedger({
       proposals: [

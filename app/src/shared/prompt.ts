@@ -3,8 +3,9 @@
  * the user's own first instructions when either is given. The ASSIGN prompt says to stop and ask for
  * instructions (its step 3); with either given, the session is told to use them instead of asking.
  */
-export function composePrompt(system: string, instructions: string, description = '', earlier = ''): string {
-  const sys = system.trim()
+export function composePrompt(system: string, instructions: string, description = '', earlier = '', setup = ''): string {
+  // `setup`: what MasterDeck already did for the session (the worktree it made), said with the system prompt.
+  const sys = [system.trim(), setup.trim()].filter(Boolean).join('\n\n')
   const own = instructions.trim()
   const desc = description.trim()
   const past = earlier.trim()

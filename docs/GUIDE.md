@@ -57,19 +57,70 @@ part of the app does.
 ## Starting and linking sessions
 
 Clicking a ticket with no session (a card on the board, an issue in the ⌘K palette, or **Start…** on
-an ASSIGN card in Needs you) opens the **Start** dialog:
+an ASSIGN card in Needs you) opens the **Start** dialog. Its fields are in four groups: **Ticket**,
+**Where it runs**, **Options** and **Instructions**. Enter in any one-line field starts, ⌘↵ (Ctrl+↵)
+starts from anywhere, Esc cancels. With nothing changed, Start does what it always did.
 
 - **Ticket description:** the issue's body from GitHub, editable. With **Include as instructions**
   ticked (the default), your edited copy is sent after the system prompt, and the session works from
   it instead of stopping to ask. Untick it to leave the description out; your edits don't change the
-  issue on GitHub.
-- **System prompt:** master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
+  issue on GitHub. **Text / Preview** switches between the Markdown text and the description as
+  GitHub shows it (headings, lists, task lists, code, quotes, tables, links, images); the text is
+  never changed by looking at it. A link opens in the browser (https only). An image that cannot be
+  loaded (an upload in a private repository needs a login the app does not have) is shown as a link.
+- **Create worktree** (the Mac's window only; off by default): MasterDeck makes a git worktree for
+  the ticket before the session starts, `<checkout>/.claude/worktrees/<branch>`, on a new branch,
+  and starts the session in it. **Branch name** is `<number>-<title>` unless you type another;
+  **Base branch** is the repository's default branch as it is on this machine (nothing is fetched),
+  or any branch you name. A branch or folder of that name already there, a base that does not
+  exist, or anything else git refuses is said in the dialog and nothing starts. Unticked, the
+  session starts in the folder shown and sets up its own worktree, as before. The box is greyed
+  out when the folder is not a git checkout, or is a workspace where no checkout of the ticket's
+  repository was found (choose its folder first); it is not shown for a refused start that is
+  tried again. While Start is assigning or making the worktree the dialog cannot be closed.
+- **Model** and **Permission mode:** `claude --model` and `claude --permission-mode` for the new
+  session (Default, Plan mode, Accept edits, Auto). Default sends neither flag.
+- **Assign to me:** shown for a board card nobody is assigned to. Ticked, the ticket is assigned to
+  you (with two or more accounts: the account the session runs as) on GitHub before the session starts; if GitHub refuses, the dialog says so and nothing starts.
+- **Remember these choices for `<repository>`:** ticked at Start, the worktree box, base branch,
+  model, permission mode, workflow and assign-to-me become the defaults for that repository's next
+  ticket (kept in this window's storage). Unticked at Start, they are forgotten. They are not
+  applied to a dialog opened from master's proposal or from a refused start: unchanged, that
+  proposal is approved or tried again as it is.
+- The card moves to In Dev by itself once the session is linked, as before: there is no box for it.
+- **System prompt** (closed until you open it): master's ASSIGN text (worktree, reply protocol; MasterDeck links the ticket itself), editable.
 - **Your first instructions:** optional. They are sent after the system prompt, and the session
   follows them instead of stopping to ask.
 - **Start:** switches to Terminals at once with a "Starting…" tab. The app records and approves the
   proposal and runs `master spawn`. The tab attaches as soon as `claude agents` lists the session.
   The ledger lock means master can't spawn it a second time. If the spawn fails, the tab shows the
-  error with **Retry**, which spawns the same (now held) proposal again.
+  error with **Retry**, which spawns the same (now held) proposal again, as it is (never a second
+  proposal, whatever model or account you picked).
+- **A folder Claude Code has not been allowed to work in.** Claude Code starts a session only in a
+  folder where its own trust prompt was accepted once. Claude Code looks at the folder and its parents: inside a git repository up to the repository's root, outside one all the way up. So a sub-folder of a trusted repository is fine, a plain folder under a trusted folder is fine, and a repository under a trusted plain folder (a checkout in a trusted workspace) is not.
+  The dialog knows before you start (it reads Claude Code's `~/.claude.json`, and never writes it).
+  For such a folder it says "Claude Code has not been allowed to work in `<folder>` yet." under
+  the folder line, with **Open Claude there…**, and **Start** waits. The button opens a tab running
+  `claude` in that folder; the dialog steps aside (what you typed is kept) while you answer Claude
+  Code's prompt there, and comes back by itself as soon as the folder is trusted (it looks every two
+  seconds, for ten minutes at most; **Back to the dialog** returns earlier): "Claude Code can work
+  in `<folder>` now. You can close that tab." MasterDeck never answers the prompt for you and never
+  closes that tab. **Start anyway** starts without waiting, for when MasterDeck read it wrong. A
+  trusted folder, or one nothing is known about (no file, a linked worktree that is not listed, a
+  folder that is not there), shows none of this and Start is never held back. In the web app and on a phone
+  the line says to do it on your Mac, and Start stays available.
+- **A start Claude Code refused** ("Workspace not trusted…") never ends there. The "did not start"
+  tab says the same line, with **Open Claude there…** and **Try again** (**Start now** once the
+  folder is trusted). If you closed that tab, or master started the proposal, the start is in Needs
+  you as a HELD card with the same two buttons; **Try again** starts that same proposal, not a new
+  one. Only a start MasterDeck's own spawn held for this reason can be tried again this way (not
+  one held for anything else, such as a start that timed out and may be running). If the ticket
+  has a session by then (you started it again another way), Try again starts nothing and closes
+  the held start; the tab then says "#12 already has a session: `<name>`" with **Open it**. Opening the Start dialog for the ticket again starts from the held
+  start ("the start Claude Code refused (proposal N); it is tried again"): unchanged, Start tries
+  that proposal again; changed, a new one replaces it. Pressing **Open Claude there…** again for a
+  tab whose Claude has exited starts Claude in it again. From a phone or the API the answer says to open Claude there on your Mac, and the held
+  start's **Try again** works from the phone too. Any other failure reads as before.
 - **Account** (two or more GitHub accounts): who the session works as; see Several GitHub accounts.
 - **Where it starts:** the line under the Account field (near the top, so it is seen on a short window). MasterDeck looks for a checkout of the
   ticket's repository in the workspace of the ticket's account (Setup → Preferences): the workspace
@@ -911,6 +962,13 @@ cards is in them.
 - **Data:** `master board` (2 GitHub calls; for an account with no board one call for its repositories' issues, and one more only when a linked PR is open), refreshed together with the issues: at startup, every
   hour, and on **Refresh**. "refreshed 15 minutes ago" beside the button shows the last refresh. The
   board is cached with the issues, so it shows immediately on the next start.
+
+## Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| "Workspace not trusted. Run `claude` in `<folder>` once and accept the trust prompt, then retry." / "Claude Code has not been allowed to work in `<folder>` yet." | Claude Code has never been allowed to work in that folder. A session now starts in the ticket's repository's checkout, and for a git repository trusting the workspace folder above it does not count (trusting the repository covers its sub-folders). Press **Open Claude there…** (the Start dialog, the "did not start" tab, or the HELD card in Needs you), accept Claude Code's prompt in the tab that opens, then **Start** / **Try again**; you can close that tab afterwards. By hand: run `claude` in that folder once. Do it once per checkout. |
+| The line stays after you accepted the prompt | MasterDeck reads Claude Code's `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) and found no accepted entry for that folder or a parent that counts. **Start anyway** / **Try again** asks Claude Code itself, which decides. |
 
 ## Environment
 

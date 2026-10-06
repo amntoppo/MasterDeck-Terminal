@@ -37,4 +37,8 @@ describe('paneCommand', () => {
     expect(paneCommand({ kind: 'gh-login' }, 'darwin', '/bin/zsh')).toEqual({ file: 'gh', args: ['auth', 'login', '--hostname', 'github.com', '--web'] })
     expect(paneCommand({ kind: 'gh-login' }, 'win32', undefined).file).toBe('gh.exe')
   })
+  it('opens plain claude in a folder, for the user to answer its trust prompt', () => {
+    expect(paneCommand({ kind: 'claude-here', cwd: 'code/api' }, 'darwin', '/bin/zsh', '/opt/bin/claude')).toEqual({ file: '/opt/bin/claude', args: [], cwd: 'code/api' })
+    expect(paneCommand({ kind: 'claude-here', cwd: 'code\\api' }, 'win32', undefined, 'claude.exe')).toEqual({ file: 'claude.exe', args: [], cwd: 'code\\api' })
+  })
 })

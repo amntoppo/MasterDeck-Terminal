@@ -50,6 +50,10 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setSettings: invoke(CH.setSettings),
   onAutoOpen: blocked,
   onGhLogin: blocked,
+  // Claude Code's trust prompt is answered on the Mac, in a tab of its window.
+  trust: blocked,
+  openClaudeIn: blocked,
+  onOpenClaude: blocked,
   setStatus: invoke(CH.setStatus),
   standupCommits: invoke(CH.standupCommits),
   janitor: invoke(CH.janitor),
@@ -87,6 +91,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   configDetectAll: invoke(CH.configDetectAll),
   configSave: invoke(CH.configSave),
   pickFolder: blocked,
+  // Making a worktree on the Mac is the Mac window's, like choosing a folder there.
+  worktreeInfo: blocked,
+  worktreeCreate: blocked,
   skillReinstall: invoke(CH.skillReinstall),
   skillRemove: invoke(CH.skillRemove),
   workflowGet: invoke(CH.workflowGet),

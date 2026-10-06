@@ -38,6 +38,16 @@ class SpawnTest(unittest.TestCase):
             ledger.transition(self.led, p["id"], "approved", now=NOW)
         return p
 
+    def test_permission_mode_goes_before_the_prompt_and_is_validated(self):
+        self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "model": "opus", "permissionMode": "plan"}}),
+                         ["claude", "--bg", "-n", "981-x", "--model", "opus", "--permission-mode", "plan", "go"])
+        # None named: the command is the one it always was.
+        self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go"}}),
+                         ["claude", "--bg", "-n", "981-x", "go"])
+        for bad in ("bypassPermissions", "plan;rm", "--plan", "Plan"):
+            with self.assertRaises(spawn.SpawnError):
+                spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "permissionMode": bad}})
+
     def test_model_goes_before_the_prompt_and_is_validated(self):
         self.assertEqual(spawn.command({"spawn": {"name": "981-x", "cwd": "/w", "prompt": "go", "model": "opus[1m]"}}),
                          ["claude", "--bg", "-n", "981-x", "--model", "opus[1m]", "go"])
