@@ -1,4 +1,5 @@
 import type { AppState, Session, SessionState } from '@shared/types'
+import type { PeerFact } from '@shared/deckHooks'
 import { suggestSessions } from '@shared/link'
 import { ticketLabel } from '@shared/ticket'
 
@@ -30,4 +31,29 @@ export function peerRows(state: AppState, key: string): PeerRow[] {
 export function linkable(state: AppState, key: string, text: string, limit = 8): Session[] {
   const taken = new Set(state.peers[key] ?? [])
   return suggestSessions(text, state.sessions.filter((s) => s.key !== key && !taken.has(s.key)), limit)
+}
+
+/** Candidates for the Start dialogs' picker: live sessions not already chosen. */
+export function pickable(state: AppState, chosen: string[], text: string, limit = 8): Session[] {
+  const taken = new Set(chosen)
+  return suggestSessions(text, state.sessions.filter((s) => !taken.has(s.key)), limit)
+}
+
+/** What a new session's first prompt says about the sessions it is linked to. */
+export function peerFactsFor(state: AppState, keys: string[]): PeerFact[] {
+  const facts: PeerFact[] = []
+  for (const k of keys) {
+    const s = state.sessions.find((x) => x.key === k)
+    if (!s) continue
+    facts.push({
+      key: s.key,
+      name: s.name,
+      cwd: state.stats[s.sessionId]?.currentDir ?? s.cwd,
+      branch: state.git[s.sessionId]?.branch ?? null,
+      ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
+      state: s.state,
+      summary: null,
+    })
+  }
+  return facts
 }

@@ -248,6 +248,8 @@ export interface AssignRequest {
   /** Try again: `proposalId` is the proposal a failed start left held. It is spawned again as it
    * is (its own name, folder, model and account), never replaced by a new one. */
   retry?: boolean;
+  /** Session keys to link the new session to (two-way). */
+  peers?: string[];
 }
 
 export interface PtyOpenResult {
@@ -415,6 +417,8 @@ export interface DeckApi {
     mode?: string;
     /** The GitHub account it works as (two or more connected); omitted: the folder's account. */
     account?: string;
+    /** Session keys to link the new session to (two-way). */
+    peers?: string[];
   }): Promise<CliResult>;
   resumeSession(
     sessionId: string,

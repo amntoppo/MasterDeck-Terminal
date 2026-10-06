@@ -178,6 +178,7 @@ import {
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import { PeerStore } from "./peers";
+import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import {
   installStatusline,
@@ -208,6 +209,15 @@ function emit(channel: string, ...args: unknown[]): void {
   }
 }
 let latest: AppState | null = null;
+
+/** The keys a Start dialog asked to link to: strings that are live sessions, unique, at most MAX_PEERS. */
+function livePeerKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const live = new Set((latest?.sessions ?? []).filter((s) => s.state !== "done").map((s) => s.key));
+  const out: string[] = [];
+  for (const k of raw) if (typeof k === "string" && live.has(k) && !out.includes(k)) out.push(k);
+  return out.slice(0, MAX_PEERS);
+}
 let focused: string | null = null;
 let pathEnv = process.env.PATH ?? "";
 let claudeBin = "claude";
@@ -2136,6 +2146,7 @@ function registerIpc(): void {
       workflow?: unknown;
       mode?: unknown;
       account?: unknown;
+      peers?: unknown;
     };
     const mode =
       typeof o.mode === "string" &&
@@ -2178,6 +2189,8 @@ function registerIpc(): void {
       o.workflow !== DEFAULT_TEMPLATE
     )
       workflows().setPending(name, o.workflow);
+    const linked = livePeerKeys(o.peers);
+    if (linked.length) peerStore.expect(name, linked);
     const r = await run(
       claudeBin,
       [
@@ -2298,6 +2311,8 @@ function registerIpc(): void {
       typeof req.name === "string"
     )
       workflows().setPending(req.name, req.workflow);
+    const peers = livePeerKeys(given?.peers);
+    if (peers.length && typeof req.name === "string") peerStore.expect(req.name, peers);
     return assignNow(req);
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
