@@ -178,6 +178,7 @@ import {
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
 import { PeerStore } from "./peers";
+import { PeerSync } from "./peerSync";
 import {
   installStatusline,
   isInstalled,
@@ -626,6 +627,46 @@ const sources = new Sources(
   () => readGhCacheStatus(undefined, undefined, isMulti(getConfig())),
 );
 sources.setPeerStore(peerStore);
+/** Summarize a session from its transcript (the Summary panel's button and PeerSync). */
+async function makeSummaryFor(key: string) {
+  const s = latest?.sessions.find((x) => x.key === key);
+  if (!s) return { ok: false as const, message: "session not found" };
+  const f = sources.sessionFacts(s.sessionId, s.key);
+  if (!f.transcript)
+    return { ok: false as const, message: "no transcript for this session yet" };
+  return summaries.make({
+    sessionId: s.sessionId,
+    name: s.name,
+    transcript: f.transcript,
+    cwd: f.cwd ?? s.cwd,
+    issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null,
+    prs: f.prs,
+  });
+}
+// Linked sessions: a fresh summary on Stop, then a delta on each peer's next prompt.
+const peerSync = new PeerSync({
+  store: peerStore,
+  sessions: () => latest?.sessions ?? [],
+  facts: (k) => sources.peerFacts(k),
+  summaryStale: (key) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return false;
+    const summary = summaries.get(s.sessionId);
+    const t = sources.sessionFacts(s.sessionId, s.key).transcript;
+    const size = t && existsSync(t) ? statSync(t).size : 0;
+    return !summary || size > summary.size;
+  },
+  makeSummary: makeSummaryFor,
+  setDelta: (sid, json) => deckHooks.setDelta(sid, json),
+  clearDelta: (sid) => deckHooks.clearDelta(sid),
+  rewriteContext: () => sources.rewriteSessionContext(),
+  hooksLive: () =>
+    process.platform !== "win32" && deckHooksInstalled(paths.claudeSettings),
+  deliver: (s, text) =>
+    sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+  auto: () => getConfig().peerSync?.auto !== false,
+});
+sources.onSessionStop((sid) => peerSync.onStop(sid));
 sources.setMasterAccount((s) => sessionAccounts.get(s));
 sources.setAccountRunners({
   github: (login) => forAccount(login).github,
@@ -2375,21 +2416,7 @@ function registerIpc(): void {
     const size = t && existsSync(t) ? statSync(t).size : 0;
     return { summary, stale: !!summary && size > summary.size };
   });
-  reg.handle(CH.summaryMake, async (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key);
-    if (!s) return { ok: false, message: "session not found" };
-    const f = sources.sessionFacts(s.sessionId, s.key);
-    if (!f.transcript)
-      return { ok: false, message: "no transcript for this session yet" };
-    return summaries.make({
-      sessionId: s.sessionId,
-      name: s.name,
-      transcript: f.transcript,
-      cwd: f.cwd ?? s.cwd,
-      issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null,
-      prs: f.prs,
-    });
-  });
+  reg.handle(CH.summaryMake, (_e, key: string) => makeSummaryFor(key));
   reg.handle(CH.summaryPost, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
@@ -2671,10 +2698,17 @@ function registerIpc(): void {
     if (typeof a !== "string" || typeof b !== "string" || a.length > 200 || b.length > 200) return { ok: false, message: "bad session" };
     const live = new Set((latest?.sessions ?? []).filter((s) => s.state !== "done").map((s) => s.key));
     if (on === true && (!live.has(a) || !live.has(b))) return { ok: false, message: "link running sessions only" };
-    return peerStore.set(a, b, on === true);
+    const r = peerStore.set(a, b, on === true);
+    if (!r.ok) return r;
+    if (on !== true) peerSync.unlinked([a, b]);
+    peerSync.refreshAll([a, b]);
+    return r;
   });
-  // Until the sync lands (Task 5) there is nothing to run.
-  reg.handle(CH.peersSync, () => ({ ok: false, message: "not yet" }));
+  reg.handle(CH.peersSync, (_e, key: unknown) =>
+    typeof key === "string" && key.length <= 200
+      ? peerSync.syncNow(key)
+      : { ok: false, message: "bad session" },
+  );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
   // The repository view asks for its repositories (also from the web: a read; the list is checked in RepoIssues.ask).
   reg.on(CH.boardRepos, (_e, repos: unknown) => sources.askRepos(repos));

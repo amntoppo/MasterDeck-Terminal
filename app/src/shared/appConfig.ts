@@ -88,6 +88,8 @@ export interface AppConfig {
   /** Connected GitHub accounts, the primary first; [] before the first launch of the multi-account
    * version. A repo is under one account only. `repos`/`projects` above are every account's. */
   accounts: AccountConfig[]
+  /** Linked sessions: `auto: false` stops summarizing a linked session on every Stop (Sync now still works). No UI. */
+  peerSync?: { auto?: boolean }
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -285,6 +287,7 @@ export function parseConfig(raw: unknown): AppConfig {
     projects: unionProjects.length ? unionProjects : projects,
     allProjects: c.allProjects === true || accounts.some((a) => a.allProjects),
     accounts,
+    ...(typeof obj(c.peerSync).auto === 'boolean' ? { peerSync: { auto: obj(c.peerSync).auto as boolean } } : {}),
   }
 }
 

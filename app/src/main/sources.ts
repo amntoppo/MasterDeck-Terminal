@@ -268,6 +268,9 @@ export class Sources {
   private menusRunning = false;
   private reviewRunning = false;
   private lastSessions: Session[] = [];
+  private stopListeners: ((sessionId: string) => void)[] = [];
+  /** The last Stop seen per session id: a Stop is reported once. */
+  private lastStopAt: Record<string, number> = {};
   /** Questions already marked answered from here, by proposal id and question time (once each). */
   private answered = new Set<string>();
   private stats: Record<string, SessionStats> = {};
@@ -850,6 +853,16 @@ export class Sources {
     } catch {
       // best effort; the next change tries again
     }
+  }
+
+  /** Called once for each Stop a session reports (deck events). */
+  onSessionStop(cb: (sessionId: string) => void): void {
+    this.stopListeners.push(cb);
+  }
+
+  /** Rewrite every live session's context file now (a peer's summary or link changed). */
+  rewriteSessionContext(): void {
+    this.writeTicketContext(this.lastSessions);
   }
 
   setPeerStore(store: PeerStore): void {
@@ -1943,6 +1956,16 @@ export class Sources {
     let changed = false;
     for (const sid of deck.readEvents()) {
       changed = true;
+      const st = deck.sessions[sid]?.stoppedAt ?? null;
+      if (st && st !== this.lastStopAt[sid]) {
+        this.lastStopAt[sid] = st;
+        for (const cb of this.stopListeners)
+          try {
+            cb(sid);
+          } catch (e) {
+            console.error(`session stop: ${String(e)}`);
+          }
+      }
       // A session that moved into a worktree (EnterWorktree, cd): it works there.
       const cwd = deck.sessions[sid]?.cwd;
       const key = this.rawSessions.find((x) => x.sessionId === sid)?.key;
