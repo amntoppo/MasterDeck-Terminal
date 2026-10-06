@@ -79,23 +79,34 @@ export class PeerSync {
     void this.make(s.key)
   }
 
+  /**
+   * Summarize `key` after any make already running for it: the chained promise is registered before
+   * anything awaits, so concurrent callers queue instead of running side by side.
+   */
   private make(key: string): Promise<CliResult> {
+    const prev = this.inFlight.get(key) ?? Promise.resolve()
+    const p = prev.then(
+      () => this.run(key),
+      () => this.run(key),
+    )
+    this.inFlight.set(key, p)
+    void p.finally(() => {
+      if (this.inFlight.get(key) === p) this.inFlight.delete(key)
+    })
+    return p
+  }
+
+  private async run(key: string): Promise<CliResult> {
     // Set before the call, so a failed auto make still holds the debounce (no retry storm on every Stop).
     this.lastMake.set(key, this.now())
-    const p = (async (): Promise<CliResult> => {
-      try {
-        const r = await this.deps.makeSummary(key)
-        if (!r.ok) return r
-        this.refreshAll([key])
-        return { ok: true, message: 'synced' }
-      } catch (e) {
-        return { ok: false, message: String(e) }
-      } finally {
-        this.inFlight.delete(key)
-      }
-    })()
-    this.inFlight.set(key, p)
-    return p
+    try {
+      const r = await this.deps.makeSummary(key)
+      if (!r.ok) return r
+      this.refreshAll([key])
+      return { ok: true, message: 'synced' }
+    } catch (e) {
+      return { ok: false, message: String(e) }
+    }
   }
 
   /**
@@ -131,13 +142,12 @@ export class PeerSync {
   }
 
   /**
-   * "Sync now": wait for a summary already being made, then make a fresh one regardless of the
-   * debounce, refresh, and type it into each peer when hooks are not live.
+   * "Sync now": a fresh summary regardless of the debounce (queued after one already being made),
+   * refresh, and type it into each peer when hooks are not live.
    */
   async syncNow(key: string): Promise<CliResult> {
     if (!this.byKey(key)) return { ok: false, message: 'session not found' }
     if (!this.deps.store.of(key).length) return { ok: false, message: 'no linked sessions' }
-    await this.inFlight.get(key)
     const r = await this.make(key)
     if (!r.ok) return r
     if (!this.deps.hooksLive())
