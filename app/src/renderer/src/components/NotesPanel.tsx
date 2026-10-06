@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { NOTE_BODY_MAX, NOTE_QUERY_MAX, NOTE_TITLE_MAX, type NoteMeta } from '@shared/notes'
-import { NoteEditor, blankDraft, draftOf, noteTargetKey, type NoteDraft } from '@shared/noteEditor'
-import { sameTicket, ticketLabel, type Ticket } from '@shared/ticket'
+import { NoteEditor, blankDraft, draftOf, noteTargetKey, type NoteDraft, type NoteTarget } from '@shared/noteEditor'
+import { sameTicket, ticketLabel } from '@shared/ticket'
 import { formatAgo } from '@shared/format'
 import type { AppState } from '@shared/types'
 import { deck, useNow } from '../deck'
@@ -9,15 +9,13 @@ import { webConfirm } from '../webConfirm'
 import { ticketNote, type NotesList } from '../notes'
 
 /** {}: the list only. `fresh` is a timestamp, so asking twice for a new note is two requests. */
-export type NotesTarget = { id?: string; ticket?: Ticket; fresh?: number }
+export type NotesTarget = NoteTarget
 
 /**
  * One editor for the window, kept outside the panel: text whose save is still on its way (or failed) when the panel
  * closes goes on being saved, and is in the editor again when the panel opens.
  */
 const editor = new NoteEditor({ save: (i) => deck().notesSave(i), get: (id) => deck().notesGet(id) })
-/** What the editor's draft was opened for: where the panel goes back to when it cannot leave the draft. */
-let openFor: NotesTarget = {}
 
 interface Props {
   notes: NotesList
@@ -37,7 +35,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
   const [found, setFound] = useState<Set<string> | null>(null)
   // An answer that comes after the panel closed must not open it again.
   const open = useRef(true)
-  const { draft, clash, status } = editor
+  const { draft, clash, status, refused, stayed } = editor
 
   useEffect(() => {
     open.current = true
@@ -46,7 +44,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
     editor.onApplied = apply
     redraw()
     // Leaving (the panel closes, the window goes away): what is typed is sent.
-    const send = () => void editor.flush()
+    const send = () => void editor.leave()
     window.addEventListener('pagehide', send)
     return () => {
       open.current = false
@@ -74,10 +72,9 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
       if (target.ticket) return blankDraft(target.ticket)
       return target.fresh ? blankDraft(null) : null
     }
-    void editor.show(key, load).then((shown) => {
-      if (shown && editor.key === key) openFor = target
-      // The open text could not be saved: the panel stays on it rather than lose it.
-      else if (!shown && live && noteTargetKey(openFor) === editor.key) onTarget(openFor)
+    void editor.show(target, load).then((shown) => {
+      // The open text could not be saved: the panel stays on it rather than lose it (the editor says why).
+      if (!shown && live) onTarget(editor.target)
     })
     return () => {
       live = false
@@ -114,19 +111,19 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
 
   const discard = () => {
     editor.drop()
-    openFor = {}
     onTarget({})
   }
+  /** Text the store will not take is dropped: back to the stored note, or to the list when there is none. */
+  const discardUnsaved = async () => {
+    await editor.discardUnsaved()
+    if (!editor.draft && open.current) onTarget({})
+  }
   const remove = async () => {
-    // A first save on its way decides whether there is a stored note to ask about.
-    await editor.flush()
-    const d = editor.draft
-    if (!d) return
-    const stored = !!d.id && d.base !== null
-    if (stored && !(await webConfirm('Delete this note? This cannot be undone.', { confirmLabel: 'Delete', danger: true }))) return
-    if (!(await editor.remove((id) => deck().notesDelete(id)))) return
-    openFor = {}
-    if (open.current) onTarget({})
+    const gone = await editor.remove(
+      (id) => deck().notesDelete(id),
+      () => webConfirm('Delete this note? This cannot be undone.', { confirmLabel: 'Delete', danger: true }),
+    )
+    if (gone && open.current) onTarget({})
   }
 
   const shown = useMemo(() => (found ? metas.filter((m) => found.has(m.id)) : metas), [metas, found])
@@ -245,6 +242,15 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
               )}
               <button className="btn" onClick={() => void editor.keepMine()}>
                 {clash.kind === 'changed' ? 'Keep mine' : 'Keep'}
+              </button>
+            </div>
+          )}
+          {!clash && refused !== null && (
+            <div className="notes-clash" role="alert">
+              {stayed ? 'Not saved, so this note stays open.' : 'This text cannot be saved.'}
+              <span style={{ flex: 1 }} />
+              <button className="btn" onClick={() => void discardUnsaved()}>
+                Discard
               </button>
             </div>
           )}

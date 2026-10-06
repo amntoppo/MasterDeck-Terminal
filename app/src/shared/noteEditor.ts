@@ -21,8 +21,11 @@ export const SAVE_RETRY_MS = 5000
 export const draftOf = (n: Note): NoteDraft => ({ id: n.id, ticket: n.ticket, title: n.title, body: n.body, base: n.updated, dirty: false })
 export const blankDraft = (ticket: Ticket | null): NoteDraft => ({ id: null, ticket, title: '', body: '', base: null, dirty: false })
 
-/** One string per thing the panel can be asked to show ('' is the list alone). `fresh` is a timestamp: two requests for a new note differ. */
-export function noteTargetKey(t: { id?: string; ticket?: Ticket; fresh?: number }): string {
+/** What the panel can be asked to show. {}: the list alone. `fresh` is a timestamp: two requests for a new note differ. */
+export type NoteTarget = { id?: string; ticket?: Ticket; fresh?: number }
+
+/** One string per target ('' is the list alone). */
+export function noteTargetKey(t: NoteTarget): string {
   if (t.id) return `i:${t.id}`
   if (t.ticket) return `t:${ticketKey(t.ticket.repo, t.ticket.number)}`
   return t.fresh ? `f:${t.fresh}` : ''
@@ -47,12 +50,21 @@ export interface NoteEditorDeps {
  * Anything else that would replace the draft waits until it is saved, and gives up when it cannot be.
  * It outlives the panel, so text whose save was still on its way (or failed) when the panel closed is there again
  * when it opens.
+ * Two failures are kept apart. A save that got no answer (the line is down) is tried again on a timer. A save the
+ * store refused with a reason (the limit of notes, a character it does not take) would get the same answer for ever:
+ * it is tried again only when the text changes or the user leaves, and the user may discard the text instead.
  */
 export class NoteEditor {
   draft: NoteDraft | null = null
   clash: NoteClash | null = null
   status = ''
-  /** What the draft was opened for (noteTargetKey). */
+  /** The store's reason for refusing the text as it is; null when it has not. */
+  refused: string | null = null
+  /** The user tried to leave (another note, closing the panel) and the refused text kept the draft open. */
+  stayed = false
+  /** What the draft was opened for: where the panel goes back to when it cannot leave the draft. */
+  target: NoteTarget = {}
+  /** `target` as one string (noteTargetKey). */
   key = ''
   /** Grows when a save or delete ends or the draft is replaced: the list's row is worth another look (`seen`). */
   rev = 0
@@ -63,6 +75,8 @@ export class NoteEditor {
 
   /** A save or delete of its own, in flight. */
   private saving: Promise<unknown> | null = null
+  /** The text the store refused: sent again only once it differs (or the user leaves). */
+  private refusedText: { title: string; body: string } | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   /** Names the draft: an answer for one that was replaced meanwhile is not applied to the next. */
   private serial = 0
@@ -76,14 +90,44 @@ export class NoteEditor {
     this.timer = setTimeout(() => this.saveNow(), ms)
   }
 
-  private replace(d: NoteDraft | null, key: string): void {
+  private stopTimer(): void {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  /** No save or delete of its own is on its way any more. */
+  private async idle(): Promise<void> {
+    while (this.saving) await this.saving.catch(() => {})
+  }
+
+  /** The store has nothing against the text any more (it took it, or the text is gone). */
+  private accepted(): void {
+    this.refused = null
+    this.refusedText = null
+    this.stayed = false
+  }
+
+  private replace(d: NoteDraft | null, target: NoteTarget): void {
+    this.stopTimer()
     this.draft = d
-    this.key = key
+    this.target = target
+    this.key = noteTargetKey(target)
     this.clash = null
     this.status = ''
+    this.accepted()
     this.serial++
+    this.rev++
+    this.onChange()
+  }
+
+  /** The open note as it is stored, in place of what was typed (the user's choice: Reload, Discard). */
+  private restore(n: Note): void {
+    this.stopTimer()
+    // The whole note, id and ticket too: a draft never saved (a ticket's, met by a note made elsewhere) is that note now.
+    this.draft = draftOf(n)
+    this.clash = null
+    this.status = ''
+    this.accepted()
     this.rev++
     this.onChange()
   }
@@ -92,41 +136,55 @@ export class NoteEditor {
     if (!this.draft) return
     this.draft = { ...this.draft, ...patch, dirty: true }
     this.status = ''
+    this.stayed = false
     this.later(SAVE_AFTER_MS)
     this.onChange()
   }
 
-  /** Save what is typed, unless a save is on its way (its end sends the rest) or the user has a choice to make. */
+  /**
+   * Save what is typed, unless a save is on its way (its end sends the rest), the user has a choice to make,
+   * or the store already refused this very text.
+   */
   saveNow(): void {
-    if (!this.saving) void this.send(false)
+    const d = this.draft
+    const no = this.refusedText
+    if (this.saving || (d && no && d.title === no.title && d.body === no.body)) return
+    void this.send(false)
   }
 
   /** One save. True when the store took it. Only called with no save in flight. */
   private async send(force: boolean): Promise<boolean> {
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = null
+    this.stopTimer()
     const sent = this.draft
     // While the user has not chosen between the two versions, nothing is written.
     if (!sent || !sent.dirty || (this.clash && !force)) return false
     const serial = this.serial
     this.status = 'Saving…'
     this.onChange()
+    // null: no answer (the call threw: the line is down). Anything else is the store's own word.
     const call = this.deps
       .save({ id: sent.id ?? undefined, title: sent.title, body: sent.body, ticket: sent.ticket, base: sent.base, force })
-      .catch((): SaveResult => ({ ok: false, message: 'Not saved' }))
+      .catch((): SaveResult | null => null)
     this.saving = call
     const r = await call
     this.saving = null
     this.rev++
-    if (r.ok) this.onApplied('meta' in r ? { id: r.meta.id, meta: r.meta } : { id: r.id, deleted: true })
+    if (r?.ok) this.onApplied('meta' in r ? { id: r.meta.id, meta: r.meta } : { id: r.id, deleted: true })
     // The draft was dropped meanwhile (Discard, Delete): the answer is for the list only.
     if (serial !== this.serial || !this.draft) {
       if (this.draft?.dirty) this.later(SAVE_AFTER_MS)
       this.onChange()
-      return r.ok
+      return !!r?.ok
+    }
+    if (!r) {
+      this.status = 'Not saved'
+      this.later(SAVE_RETRY_MS)
+      this.onChange()
+      return false
     }
     this.draft = afterSave(sent, this.draft, r)
     if (r.ok) {
+      this.accepted()
       this.clash = null
       this.status = 'meta' in r ? 'Saved' : ''
       // Typed on while the save was out.
@@ -135,11 +193,16 @@ export class NoteEditor {
         this.later(SAVE_AFTER_MS)
       }
     } else if ('conflict' in r) {
+      this.accepted()
       this.clash = r.note ? { kind: 'changed', note: r.note } : { kind: 'gone' }
       this.status = ''
     } else {
-      this.status = r.message || 'Not saved'
-      this.later(SAVE_RETRY_MS)
+      // No timer: the same text would get the same answer. The next key, or leaving, tries again.
+      this.refused = r.message || 'Not saved'
+      this.refusedText = { title: sent.title, body: sent.body }
+      this.status = this.refused
+      // Typed on while the save was out: that is other text, worth its own try.
+      if (this.draft.title !== sent.title || this.draft.body !== sent.body) this.later(SAVE_AFTER_MS)
     }
     this.onChange()
     return r.ok
@@ -158,29 +221,61 @@ export class NoteEditor {
     }
   }
 
+  /** The draft stays open because its text was refused: the editor says so, where the user is looking. */
+  private stay(): void {
+    if (this.refused === null || !this.draft?.dirty) return
+    this.stayed = true
+    this.onChange()
+  }
+
+  /** The panel closes or the window goes away: what is typed is sent. False when it could not be stored. */
+  async leave(): Promise<boolean> {
+    const stored = await this.flush()
+    if (!stored) this.stay()
+    return stored
+  }
+
   /**
    * Show what was asked for: `load` reads it (null: the list alone). What is open is saved first.
    * False: nothing changed, because the open text could not be saved or the other note could not be read;
-   * the caller goes back to `key`.
+   * the caller goes back to `target`.
    */
-  async show(key: string, load: () => Promise<NoteDraft | null>): Promise<boolean> {
+  async show(target: NoteTarget, load: () => Promise<NoteDraft | null>): Promise<boolean> {
     const turn = ++this.turn
+    const key = noteTargetKey(target)
     if (key === this.key) return true
+    // Saved before the read: a target that is the open note under another name is then read as it is now.
+    if (!(await this.flush())) {
+      if (turn !== this.turn) return true
+      this.stay()
+      return false
+    }
+    if (turn !== this.turn) return true
     let next: NoteDraft | null
     try {
       next = await load()
     } catch {
-      if (turn === this.turn) {
-        this.status = 'Could not open the note'
-        this.onChange()
-      }
-      return turn !== this.turn
+      if (turn !== this.turn) return true
+      this.status = 'Could not open the note'
+      this.onChange()
+      return false
     }
-    // The flush is the last thing waited for: nothing can be typed between its answer and the swap.
+    // Again, for what was typed during the read. This flush is the last thing waited for: nothing can be typed
+    // between its answer and the swap.
     const stored = await this.flush()
     if (turn !== this.turn) return true
-    if (!stored) return false
-    this.replace(next, key)
+    if (!stored) {
+      this.stay()
+      return false
+    }
+    // The open note under another name (a new draft, saved, then picked in the list): the editor has the newer text.
+    if (next?.id && next.id === this.draft?.id) {
+      this.target = target
+      this.key = key
+      this.onChange()
+      return true
+    }
+    this.replace(next, target)
     return true
   }
 
@@ -216,19 +311,12 @@ export class NoteEditor {
 
   /** The user takes the other version. */
   reload(): void {
-    if (!this.draft || this.clash?.kind !== 'changed') return
-    const n = this.clash.note
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = null
-    this.draft = { ...this.draft, title: n.title, body: n.body, base: n.updated, dirty: false }
-    this.clash = null
-    this.status = ''
-    this.onChange()
+    if (this.draft && this.clash?.kind === 'changed') this.restore(this.clash.note)
   }
 
   /** The user keeps what is typed: it is written over the other version (or again, when the note was deleted). */
   async keepMine(): Promise<void> {
-    while (this.saving) await this.saving.catch(() => {})
+    await this.idle()
     if (!this.draft || !this.clash) return
     this.draft = { ...this.draft, dirty: true }
     await this.send(true)
@@ -237,26 +325,52 @@ export class NoteEditor {
   /** The user drops the draft. */
   drop(): void {
     this.turn++
-    this.replace(null, '')
+    this.replace(null, {})
   }
 
   /**
-   * Delete the open note. `del` asks the store (which may ask the user and answer 'cancelled').
-   * True when the draft is gone.
+   * The user drops text the store refused: a stored note is shown as it is stored, a draft never saved closes
+   * (`draft` is null then).
    */
-  async remove(del: (id: string) => Promise<{ ok: boolean; message?: string }>): Promise<boolean> {
-    // A first save on its way gives the draft its id: wait, or the note would be stored after it was "deleted".
-    while (this.saving) await this.saving.catch(() => {})
+  async discardUnsaved(): Promise<void> {
+    await this.idle()
     const d = this.draft
-    if (!d) return false
+    // The save that was out may have been taken after all: nothing is left to discard.
+    if (!d || this.refused === null) return
+    if (!d.id || d.base === null) return this.drop()
+    const serial = this.serial
+    let n: Note | null
+    try {
+      n = await this.deps.get(d.id)
+    } catch {
+      this.status = 'Could not read the note'
+      return this.onChange()
+    }
+    if (serial !== this.serial) return
+    if (n) this.restore(n)
+    else this.drop()
+  }
+
+  /**
+   * Delete the open note. `ask` is the question before it, for a stored note (the web's; the desktop's is the
+   * store's own, which answers 'cancelled'). True when the draft is gone.
+   * Whatever is waited for, it is the note open at the click that goes: when another was opened meanwhile, nothing does.
+   */
+  async remove(del: (id: string) => Promise<{ ok: boolean; message?: string }>, ask: () => Promise<boolean> = async () => true): Promise<boolean> {
+    const serial = this.serial
+    // A first save on its way gives the draft its id: wait, or the note would be stored after it was "deleted".
+    await this.idle()
+    const d = this.draft
+    if (!d || serial !== this.serial) return false
     if (!d.id || d.base === null) {
       this.drop()
       return true
     }
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = null
-    const serial = this.serial
     const id = d.id
+    if (!(await ask())) return false
+    await this.idle()
+    if (serial !== this.serial || this.draft?.id !== id) return false
+    this.stopTimer()
     const call = del(id).catch(() => ({ ok: false, message: 'Not deleted' }))
     // Held as a save is: nothing is written, and the list's change is not taken for someone else's.
     this.saving = call

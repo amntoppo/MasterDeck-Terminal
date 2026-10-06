@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NoteEditor, SAVE_AFTER_MS, SAVE_RETRY_MS, afterSave, blankDraft, draftOf, noteTargetKey, type NoteDraft } from './noteEditor'
-import { noteMeta, type Note, type NoteChange, type NoteInput, type NoteMeta, type SaveResult } from './notes'
+import { noteMeta, ticketNoteId, type Note, type NoteChange, type NoteInput, type NoteMeta, type SaveResult } from './notes'
 
 const ID = (n: number) => 'n-' + String(n).padStart(32, '0')
 
@@ -12,26 +12,39 @@ class FakeStore {
   /** Calls not answered yet, oldest first. */
   waiting: (() => void)[] = []
   saves: NoteInput[] = []
-  failing = false
+  /** The line is down: a save gets no answer. */
+  down = false
+  /** The store's reason for taking nothing (the limit, a character). */
+  refusing = ''
   /** The store's change event, as the list hears it. */
   onEvent: (c: NoteChange) => void = () => {}
 
-  write(id: string, title: string, body: string): Note {
+  erase(id: string): void {
+    this.notes.delete(id)
+    this.onEvent({ id, deleted: true })
+  }
+  write(id: string, title: string, body: string, ticket: Note['ticket'] = null): Note {
     const old = this.notes.get(id)
-    const n: Note = { id, title, body, ticket: null, created: old?.created ?? this.clock, updated: ++this.clock }
+    const n: Note = { id, title, body, ticket, created: old?.created ?? this.clock, updated: ++this.clock }
     this.notes.set(id, n)
     this.onEvent({ id, meta: noteMeta(n) })
     return n
   }
   private apply(i: NoteInput): SaveResult {
-    if (this.failing) return { ok: false, message: 'Disk full' }
-    const old = i.id ? (this.notes.get(i.id) ?? null) : null
+    if (this.refusing) return { ok: false, message: this.refusing }
+    // A ticket's note is named by its ticket, as in the real store.
+    const id = i.ticket ? ticketNoteId(i.ticket.repo ?? 'acme/tracker', i.ticket.number)! : i.id
+    const old = id ? (this.notes.get(id) ?? null) : null
     if (!i.force && (old?.updated ?? null) !== i.base) return { ok: false, conflict: true, note: old }
-    return { ok: true, meta: noteMeta(this.write(i.id ?? ID(++this.made), i.title, i.body)) }
+    if (i.ticket && id && !i.body.trim()) {
+      if (old) this.erase(id)
+      return { ok: true, deleted: true, id }
+    }
+    return { ok: true, meta: noteMeta(this.write(id ?? ID(++this.made), i.ticket ? '' : i.title, i.body, i.ticket ? { repo: i.ticket.repo ?? 'acme/tracker', number: i.ticket.number } : null)) }
   }
   save = (i: NoteInput): Promise<SaveResult> => {
     this.saves.push(i)
-    return new Promise((done) => this.waiting.push(() => done(this.apply(i))))
+    return new Promise((done, fail) => this.waiting.push(() => (this.down ? fail(new Error('offline')) : done(this.apply(i)))))
   }
   get = async (id: string): Promise<Note | null> => this.notes.get(id) ?? null
   /** The oldest waiting call reaches the store and its answer comes back. */
@@ -48,7 +61,7 @@ let store: FakeStore
 let ed: NoteEditor
 let metas: Map<string, NoteMeta>
 const row = () => (ed.draft?.id ? metas.get(ed.draft.id) : undefined)
-const open = (n: Note) => ed.show(noteTargetKey({ id: n.id }), async () => draftOf((await store.get(n.id))!))
+const open = (n: Note) => ed.show({ id: n.id }, async () => draftOf((await store.get(n.id))!))
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -92,7 +105,7 @@ describe('noteTargetKey', () => {
 
 describe('typing and saving', () => {
   it('saves half a second after the last key, once', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.edit({ title: 'To' })
     vi.advanceTimersByTime(SAVE_AFTER_MS - 1)
     ed.edit({ title: 'Tomorrow' })
@@ -107,7 +120,7 @@ describe('typing and saving', () => {
   })
 
   it('text typed while a save is out stays, and is saved next with the new version as its base', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.edit({ body: 'one' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     ed.edit({ body: 'one two' })
@@ -143,16 +156,16 @@ describe('typing and saving', () => {
     expect(ed.draft).toMatchObject({ body: 'one two', dirty: false })
   })
 
-  it('a save that fails keeps the text and tries again', async () => {
+  it('a save that got no answer keeps the text and tries again', async () => {
     const n = store.write(ID(1), 'a', 'one')
     await open(n)
-    store.failing = true
+    store.down = true
     ed.edit({ body: 'one two' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     await store.answer()
-    expect(ed.status).toBe('Disk full')
+    expect(ed.status).toBe('Not saved')
     expect(ed.draft).toMatchObject({ body: 'one two', dirty: true })
-    store.failing = false
+    store.down = false
     vi.advanceTimersByTime(SAVE_RETRY_MS)
     await store.answer()
     expect(store.notes.get(n.id)!.body).toBe('one two')
@@ -161,7 +174,7 @@ describe('typing and saving', () => {
 
   it('a save that throws (the line dropped) is a failed save', async () => {
     const bad = new NoteEditor({ save: () => Promise.reject(new Error('gone')), get: store.get })
-    await bad.show('f:1', async () => blankDraft(null))
+    await bad.show({ fresh: 1 }, async () => blankDraft(null))
     bad.edit({ body: 'x' })
     expect(await bad.flush()).toBe(false)
     expect(bad.draft).toMatchObject({ body: 'x', dirty: true })
@@ -195,7 +208,8 @@ describe('another note is asked for', () => {
     const b = store.write(ID(2), 'b', 'other')
     await open(a)
     let read!: () => void
-    const shown = ed.show(`i:${b.id}`, () => new Promise((done) => (read = () => done(draftOf(b)))))
+    const shown = ed.show({ id: b.id }, () => new Promise((done) => (read = () => done(draftOf(b)))))
+    await settle()
     ed.edit({ body: 'typed late' })
     read()
     await settle()
@@ -210,7 +224,7 @@ describe('another note is asked for', () => {
     const a = store.write(ID(1), 'a', 'one')
     const b = store.write(ID(2), 'b', 'other')
     await open(a)
-    store.failing = true
+    store.down = true
     ed.edit({ body: 'one two' })
     const shown = open(b)
     await settle()
@@ -218,6 +232,8 @@ describe('another note is asked for', () => {
     expect(await shown).toBe(false)
     expect(ed.draft).toMatchObject({ id: a.id, body: 'one two', dirty: true })
     expect(ed.key).toBe(`i:${a.id}`)
+    // Where the panel goes back to.
+    expect(ed.target).toEqual({ id: a.id })
   })
 
   it('stays on the open note while the user has not chosen between two versions', async () => {
@@ -236,10 +252,10 @@ describe('another note is asked for', () => {
   })
 
   it('a new draft does not inherit the id of the note whose save was still out', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.edit({ body: 'first' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
-    const shown = ed.show('f:2', async () => blankDraft(null))
+    const shown = ed.show({ fresh: 2 }, async () => blankDraft(null))
     await settle()
     await store.answer()
     await shown
@@ -263,7 +279,8 @@ describe('another note is asked for', () => {
     const a = store.write(ID(1), 'a', 'one')
     const b = store.write(ID(2), 'b', 'two')
     let read!: () => void
-    const first = ed.show(`i:${a.id}`, () => new Promise((done) => (read = () => done(draftOf(a)))))
+    const first = ed.show({ id: a.id }, () => new Promise((done) => (read = () => done(draftOf(a)))))
+    await settle()
     await open(b)
     read()
     await first
@@ -273,14 +290,14 @@ describe('another note is asked for', () => {
   it('a note that cannot be read leaves things as they are', async () => {
     const a = store.write(ID(1), 'a', 'one')
     await open(a)
-    expect(await ed.show('i:x', () => Promise.reject(new Error('no')))).toBe(false)
+    expect(await ed.show({ id: 'x' }, () => Promise.reject(new Error('no')))).toBe(false)
     expect(ed.draft!.id).toBe(a.id)
   })
 })
 
 describe('the panel closes', () => {
   it('what is typed is sent, and what was typed while a save was out goes after it', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.edit({ body: 'one' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     ed.edit({ body: 'one two' })
@@ -294,22 +311,22 @@ describe('the panel closes', () => {
   it('text that could not be saved is still in the editor when the panel opens again', async () => {
     const a = store.write(ID(1), 'a', 'one')
     await open(a)
-    store.failing = true
+    store.down = true
     ed.edit({ body: 'one two' })
     const closed = ed.flush()
     await store.answer()
     expect(await closed).toBe(false)
     // Opened again on the list: the editor will not leave the text.
-    const shown = ed.show('', async () => null)
+    const shown = ed.show({}, async () => null)
     await settle()
     await store.answer()
     expect(await shown).toBe(false)
     expect(ed.draft).toMatchObject({ id: a.id, body: 'one two', dirty: true })
-    store.failing = false
+    store.down = false
     vi.advanceTimersByTime(SAVE_RETRY_MS)
     await store.answer()
     expect(store.notes.get(a.id)!.body).toBe('one two')
-    expect(await ed.show('', async () => null)).toBe(true)
+    expect(await ed.show({}, async () => null)).toBe(true)
     expect(ed.draft).toBeNull()
   })
 })
@@ -407,7 +424,7 @@ describe('the note changed somewhere else', () => {
     await open(a)
     ed.seen(undefined, false)
     expect(ed.clash).toBeNull()
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.seen(undefined, true)
     expect(ed.clash).toBeNull()
   })
@@ -429,7 +446,7 @@ describe('delete', () => {
   })
 
   it('waits for a first save on its way, so the note is not stored after it was deleted', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     ed.edit({ body: 'one' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     const gone = ed.remove(del)
@@ -441,7 +458,7 @@ describe('delete', () => {
   })
 
   it('a draft never saved is dropped without asking the store', async () => {
-    await ed.show('f:1', async () => blankDraft(null))
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
     const asked = vi.fn(del)
     expect(await ed.remove(asked)).toBe(true)
     expect(asked).not.toHaveBeenCalled()
@@ -457,5 +474,357 @@ describe('delete', () => {
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     await store.answer()
     expect(store.notes.get(a.id)!.body).toBe('one two')
+  })
+})
+
+describe('a save the store refuses', () => {
+  const LIMIT = '1000 notes is the limit. Delete some first.'
+  const refuse = async (n: Note) => {
+    await open(n)
+    store.refusing = LIMIT
+    ed.edit({ body: 'more' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+  }
+
+  it('is not tried again by a timer, and says why', async () => {
+    await refuse(store.write(ID(1), 'a', 'one'))
+    expect(ed.refused).toBe(LIMIT)
+    expect(ed.status).toBe(LIMIT)
+    expect(ed.stayed).toBe(false)
+    expect(ed.draft).toMatchObject({ body: 'more', dirty: true })
+    vi.advanceTimersByTime(SAVE_RETRY_MS * 10)
+    // Leaving the field with the same text asks nothing either.
+    ed.saveNow()
+    expect(store.saves).toHaveLength(1)
+  })
+
+  it('a later key tries again', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await refuse(a)
+    ed.edit({ body: 'more text' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    expect(store.saves).toHaveLength(2)
+    await store.answer()
+    expect(ed.refused).toBe(LIMIT)
+    store.refusing = ''
+    ed.edit({ body: 'fits now' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(store.notes.get(a.id)!.body).toBe('fits now')
+    expect(ed.refused).toBeNull()
+    expect(ed.draft!.dirty).toBe(false)
+  })
+
+  it('text typed while the refused save was out gets its own try', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await open(a)
+    store.refusing = LIMIT
+    ed.edit({ body: 'more' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    ed.edit({ body: 'more and more' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    expect(store.saves).toHaveLength(2)
+    expect(store.saves[1].body).toBe('more and more')
+  })
+
+  it('a switch away is tried, refused, and reported in the editor', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'other')
+    await refuse(a)
+    const shown = open(b)
+    await settle()
+    // Leaving is a reason to ask the store again.
+    expect(store.saves).toHaveLength(2)
+    await store.answer()
+    expect(await shown).toBe(false)
+    expect(ed.stayed).toBe(true)
+    expect(ed.target).toEqual({ id: a.id })
+    expect(ed.draft).toMatchObject({ id: a.id, body: 'more', dirty: true })
+    // The next key takes the remark away; the refusal stands until the store says otherwise.
+    ed.edit({ body: 'more!' })
+    expect(ed.stayed).toBe(false)
+    expect(ed.refused).toBe(LIMIT)
+  })
+
+  it('closing the panel is reported the same way', async () => {
+    await refuse(store.write(ID(1), 'a', 'one'))
+    const left = ed.leave()
+    await settle()
+    await store.answer()
+    expect(await left).toBe(false)
+    expect(ed.stayed).toBe(true)
+  })
+
+  it('Discard on a stored note brings its stored text back', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await refuse(a)
+    await ed.discardUnsaved()
+    expect(ed.draft).toEqual(draftOf(store.notes.get(a.id)!))
+    expect(ed.refused).toBeNull()
+    expect(ed.status).toBe('')
+    expect(ed.key).toBe(`i:${a.id}`)
+    vi.advanceTimersByTime(SAVE_RETRY_MS)
+    expect(store.saves).toHaveLength(1)
+    // And the editor can be left again.
+    expect(await ed.show({}, async () => null)).toBe(true)
+  })
+
+  it('Discard on a draft never saved closes it', async () => {
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
+    store.refusing = LIMIT
+    ed.edit({ body: 'one too many' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(ed.refused).toBe(LIMIT)
+    await ed.discardUnsaved()
+    expect(ed.draft).toBeNull()
+    expect(ed.target).toEqual({})
+    expect(ed.refused).toBeNull()
+    expect(store.notes.size).toBe(0)
+  })
+
+  it('Discard does nothing when nothing was refused', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await open(a)
+    ed.edit({ body: 'mine' })
+    await ed.discardUnsaved()
+    expect(ed.draft).toMatchObject({ body: 'mine', dirty: true })
+  })
+
+  it('no answer at all is still tried again every few seconds', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await open(a)
+    store.down = true
+    ed.edit({ body: 'more' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(ed.refused).toBeNull()
+    vi.advanceTimersByTime(SAVE_RETRY_MS)
+    expect(store.saves).toHaveLength(2)
+  })
+})
+
+describe("a ticket's note", () => {
+  const T = { repo: 'acme/tracker', number: 5 }
+  const TID = 't-acme~tracker~5'
+  const openTicket = () => ed.show({ ticket: T }, async () => blankDraft(T))
+
+  it('is saved with its ticket and takes its id from the answer', async () => {
+    await openTicket()
+    expect(ed.key).toBe('t:acme/tracker#5')
+    ed.edit({ body: 'waiting for the API' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(store.saves[0]).toEqual({ id: undefined, title: '', body: 'waiting for the API', ticket: T, base: null, force: false })
+    expect(ed.draft).toMatchObject({ id: TID, base: store.notes.get(TID)!.updated, dirty: false })
+  })
+
+  it('emptied, it is removed, and the next text starts a new one', async () => {
+    await openTicket()
+    ed.edit({ body: 'x' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    ed.edit({ body: '' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(store.notes.size).toBe(0)
+    expect(metas.size).toBe(0)
+    expect(ed.draft).toMatchObject({ id: null, base: null, dirty: false, ticket: T })
+    expect(ed.status).toBe('')
+    ed.seen(row(), true)
+    expect(ed.clash).toBeNull()
+    ed.edit({ body: 'again' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(store.notes.get(TID)!.body).toBe('again')
+  })
+
+  it('met by a note made elsewhere: Reload makes the draft that note, so Delete deletes it and changes are seen', async () => {
+    await openTicket()
+    ed.edit({ body: 'mine' })
+    store.write(TID, '', 'theirs', T)
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(ed.clash).toMatchObject({ kind: 'changed', note: { body: 'theirs' } })
+    ed.reload()
+    expect(ed.draft).toEqual(draftOf(store.notes.get(TID)!))
+    // Watched like any stored note.
+    store.write(TID, '', 'theirs, again', T)
+    ed.seen(row(), true)
+    await settle()
+    expect(ed.draft!.body).toBe('theirs, again')
+    // And Delete asks, then deletes the stored note.
+    const ask = vi.fn(async () => true)
+    const del = vi.fn(async (id: string) => (store.erase(id), { ok: true }))
+    expect(await ed.remove(del, ask)).toBe(true)
+    expect(ask).toHaveBeenCalledOnce()
+    expect(del).toHaveBeenCalledWith(TID)
+    expect(store.notes.size).toBe(0)
+  })
+
+  it('met by a note made elsewhere: Keep mine writes over it', async () => {
+    await openTicket()
+    ed.edit({ body: 'mine' })
+    store.write(TID, '', 'theirs', T)
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    const kept = ed.keepMine()
+    await settle()
+    await store.answer()
+    await kept
+    expect(store.notes.get(TID)!.body).toBe('mine')
+    expect(ed.draft).toMatchObject({ id: TID, dirty: false })
+  })
+})
+
+describe('more than one thing at a time', () => {
+  it('a second request while the first waits for a save: the second is shown', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    const c = store.write(ID(3), 'c', 'three')
+    await open(a)
+    ed.edit({ body: 'one more' })
+    const first = open(b)
+    await settle()
+    const second = open(c)
+    await settle()
+    await store.answer()
+    expect(await first).toBe(true)
+    expect(await second).toBe(true)
+    expect(store.notes.get(a.id)!.body).toBe('one more')
+    expect(ed.draft!.id).toBe(c.id)
+    expect(ed.target).toEqual({ id: c.id })
+  })
+
+  it('cancelShow: a request still waiting changes nothing, and the text is saved all the same', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    await open(a)
+    ed.edit({ body: 'one more' })
+    const shown = open(b)
+    await settle()
+    ed.cancelShow()
+    await store.answer()
+    expect(await shown).toBe(true)
+    expect(ed.draft).toMatchObject({ id: a.id, body: 'one more', dirty: false })
+    expect(ed.key).toBe(`i:${a.id}`)
+  })
+
+  it('the row of the open draft: the same note under another name keeps the newest text', async () => {
+    await ed.show({ fresh: 1 }, async () => blankDraft(null))
+    ed.edit({ body: 'one' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    const id = ed.draft!.id!
+    ed.edit({ body: 'one two' })
+    // Its row is clicked while that text is unsaved; more is typed while the note is read.
+    let read!: () => void
+    const shown = ed.show({ id }, async () => {
+      const n = draftOf((await store.get(id))!)
+      await new Promise<void>((done) => (read = done))
+      return n
+    })
+    await settle()
+    await store.answer()
+    expect(store.notes.get(id)!.body).toBe('one two')
+    ed.edit({ body: 'one two three' })
+    read()
+    await settle()
+    await store.answer()
+    expect(await shown).toBe(true)
+    expect(ed.draft).toMatchObject({ id, body: 'one two three', dirty: false })
+    expect(ed.target).toEqual({ id })
+    ed.seen(row(), true)
+    await settle()
+    expect(ed.clash).toBeNull()
+  })
+
+  it('unsaved text in a note deleted elsewhere is kept until the user chooses', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    await open(a)
+    ed.edit({ body: 'mine' })
+    store.erase(a.id)
+    ed.seen(row(), true)
+    expect(ed.clash).toEqual({ kind: 'gone' })
+    vi.advanceTimersByTime(SAVE_RETRY_MS)
+    expect(store.saves).toHaveLength(0)
+    expect(await open(b)).toBe(false)
+    expect(ed.draft).toMatchObject({ id: a.id, body: 'mine', dirty: true })
+    const kept = ed.keepMine()
+    await settle()
+    await store.answer()
+    await kept
+    expect(store.notes.get(a.id)!.body).toBe('mine')
+  })
+
+  it('Delete: when another note was opened while the question was on screen, nothing is deleted', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    await open(a)
+    let answer!: (yes: boolean) => void
+    const del = vi.fn(async () => ({ ok: true }))
+    const gone = ed.remove(del, () => new Promise((done) => (answer = done)))
+    await settle()
+    await open(b)
+    answer(true)
+    expect(await gone).toBe(false)
+    expect(del).not.toHaveBeenCalled()
+    expect(ed.draft!.id).toBe(b.id)
+  })
+
+  it('Delete: the question answered no leaves everything', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    await open(a)
+    const del = vi.fn(async () => ({ ok: true }))
+    expect(await ed.remove(del, async () => false)).toBe(false)
+    expect(del).not.toHaveBeenCalled()
+    expect(ed.draft!.id).toBe(a.id)
+  })
+
+  it('only Keep mine and Keep ever force a save', async () => {
+    const a = store.write(ID(1), 'a', 'one')
+    const b = store.write(ID(2), 'b', 'two')
+    await open(a)
+    ed.edit({ body: 'timer' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    ed.edit({ body: 'blur' })
+    ed.saveNow()
+    await store.answer()
+    ed.edit({ body: 'switch' })
+    const shown = open(b)
+    await settle()
+    await store.answer()
+    await shown
+    ed.edit({ body: 'close' })
+    const left = ed.leave()
+    await settle()
+    await store.answer()
+    await left
+    store.down = true
+    ed.edit({ body: 'retry' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    store.down = false
+    vi.advanceTimersByTime(SAVE_RETRY_MS)
+    await store.answer()
+    // A conflict, met by a plain save.
+    ed.edit({ body: 'mine' })
+    store.write(b.id, 'b', 'theirs')
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(ed.clash).not.toBeNull()
+    expect(store.saves.length).toBeGreaterThanOrEqual(7)
+    expect(store.saves.every((i) => i.force === false)).toBe(true)
+    const kept = ed.keepMine()
+    await settle()
+    await store.answer()
+    await kept
+    expect(store.saves.filter((i) => i.force)).toHaveLength(1)
+    expect(store.saves.at(-1)).toMatchObject({ body: 'mine', force: true })
   })
 })

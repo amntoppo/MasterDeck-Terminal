@@ -325,8 +325,16 @@ returned); `show` opens another note only after `flush` stored what was typed, a
 is when that fails or a conflict waits for an answer (the panel then goes back to the open note);
 `seen` compares the list's row with the draft's `base` (`incoming`): a clean draft takes the new
 text, a dirty one shows "Changed elsewhere" (Reload / Keep mine, the latter a save with `force`),
-and nothing is written until the user chose. Closing the panel flushes; text that could not be
-saved stays in the editor, is retried every 5 s, and is on screen again when the panel opens.
+and nothing is written until the user chose. Closing the panel flushes (`leave`); text that could
+not be saved stays in the editor and is on screen again when the panel opens. Two failures are kept
+apart: a save that got no answer (the call threw: the line is down) is retried every 5 s; a save
+the store refused with a reason (the limit of notes, a character it does not take) is in `refused`
+and is tried again only when the text changes or the user leaves, and the editor shows a line with
+**Discard** (`discardUnsaved`: a stored note returns to its stored text, a draft never saved
+closes), which also says so when a switch or a close was held back by it (`stayed`). `target` is
+what the draft was opened for: where the panel goes back to when `show` answers false. Delete
+(`remove`) deletes the note that was open at the click, and nothing when another was opened while
+the question was on screen.
 
 ### Queue
 
