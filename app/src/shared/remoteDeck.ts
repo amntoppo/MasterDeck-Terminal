@@ -120,6 +120,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   summaryMake: invoke(CH.summaryMake),
   summaryPost: invoke(CH.summaryPost),
   linkSession: invoke(CH.linkSession),
+  peersSet: invoke(CH.peersSet),
+  peersSync: invoke(CH.peersSync),
   setBoardOpen: local,
   boardRepos: send(CH.boardRepos),
   boardCreatePlan: blocked,

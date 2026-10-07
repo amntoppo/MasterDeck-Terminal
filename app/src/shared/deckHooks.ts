@@ -247,30 +247,102 @@ export function applyEventLine(
   return sid;
 }
 
+export interface PeerFact {
+  key: string;
+  name: string;
+  cwd: string;
+  branch: string | null;
+  ticket: string | null;
+  state: string;
+  summary: { at: number; text: string } | null;
+}
+
+/** "## Linked sessions": what this session's peers are doing, newest summary first (at most 5). */
+export function peersBlock(peers: PeerFact[]): string {
+  if (!peers.length) return "";
+  const list = [...peers]
+    .sort((a, b) => (b.summary?.at ?? 0) - (a.summary?.at ?? 0))
+    .slice(0, 5);
+  const parts = [
+    "## Linked sessions",
+    "Other MasterDeck sessions linked to this one. Use their context; do not edit their files unless asked.",
+  ];
+  for (const p of list) {
+    const facts = [
+      `folder ${p.cwd}`,
+      p.branch ? `branch ${p.branch}` : null,
+      p.ticket ? `ticket ${p.ticket}` : null,
+      `state ${p.state}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    parts.push(
+      `### ${p.name}\n${facts}\n\n${p.summary ? clip(p.summary.text.trim(), 2500) : "(no summary yet)"}`,
+    );
+  }
+  return parts.join("\n\n");
+}
+
 /**
- * What a session is told at SessionStart (resume, compaction, /clear): its ticket and what earlier
- * sessions on it did, from their saved summaries. The hook prints this JSON as it is.
+ * What a session is told at SessionStart (resume, compaction, /clear): its ticket, what earlier
+ * sessions on it did (from their saved summaries) and what its linked sessions are doing. The hook
+ * prints this JSON as it is. Null when there is nothing to say.
  */
 export function ticketContext(
-  ticket: { label: string; title: string | null; url: string | null },
+  ticket: { label: string; title: string | null; url: string | null } | null,
   earlier: { name: string; at: number; text: string }[],
-): object {
-  const parts = [
-    `This session works on ${ticket.label}${ticket.title ? ` (${ticket.title})` : ""}.${ticket.url ? ` ${ticket.url}` : ""}`,
-  ];
-  if (earlier.length) {
+  peers: PeerFact[] = [],
+): object | null {
+  const parts: string[] = [];
+  if (ticket) {
     parts.push(
-      "Earlier sessions on this ticket, newest first (from their summaries):",
+      `This session works on ${ticket.label}${ticket.title ? ` (${ticket.title})` : ""}.${ticket.url ? ` ${ticket.url}` : ""}`,
     );
-    for (const e of earlier.slice(0, 3))
+    if (earlier.length) {
       parts.push(
-        `### ${e.name} (${new Date(e.at).toISOString().slice(0, 10)})\n${clip(e.text, 2500)}`,
+        "Earlier sessions on this ticket, newest first (from their summaries):",
       );
+      for (const e of earlier.slice(0, 3))
+        parts.push(
+          `### ${e.name} (${new Date(e.at).toISOString().slice(0, 10)})\n${clip(e.text, 2500)}`,
+        );
+    }
   }
+  const pb = peersBlock(peers);
+  if (pb) parts.push(pb);
+  if (!parts.length) return null;
   return {
     hookSpecificOutput: {
       hookEventName: "SessionStart",
       additionalContext: parts.join("\n\n"),
+    },
+  };
+}
+
+const ago = (ms: number): string =>
+  ms < 60_000
+    ? "just now"
+    : ms < 3_600_000
+      ? `${Math.round(ms / 60_000)} min ago`
+      : `${Math.round(ms / 3_600_000)} h ago`;
+
+/** What a session is told on its next prompt when a linked session's summary changed. */
+export function peerDelta(p: PeerFact, now: number): object {
+  return peerDeltas([p], now);
+}
+
+/** One message for every linked session whose summary changed since this session last heard: a block each. */
+export function peerDeltas(peers: PeerFact[], now: number): object {
+  const text = peers
+    .map(
+      (p) =>
+        `Linked session ${p.name} updated (${ago(now - (p.summary?.at ?? now))}):\n\n${p.summary ? clip(p.summary.text.trim(), 2500) : "(no summary yet)"}`,
+    )
+    .join("\n\n");
+  return {
+    hookSpecificOutput: {
+      hookEventName: "UserPromptSubmit",
+      additionalContext: text,
     },
   };
 }

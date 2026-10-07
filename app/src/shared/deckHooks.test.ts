@@ -9,8 +9,12 @@ import {
   requestOver,
   requestPrompt,
   ruleText,
+  peerDelta,
+  peerDeltas,
+  peersBlock,
   ticketContext,
   type HookSessionState,
+  type PeerFact,
 } from "./deckHooks";
 
 // Shapes as Claude Code 2.1 sends them (captured from a probe session).
@@ -248,5 +252,56 @@ describe("AskUserQuestion requests", () => {
     expect(requestQuestions(bash)).toBeNull();
     expect(requestMenu(bash).permission?.title).toBe("Bash command");
     expect(answersDecision(bash, {})).toBeNull();
+  });
+});
+
+const fact = (o: Partial<PeerFact>): PeerFact => ({ key: "k", name: "api-auth", cwd: "/w/acme/api", branch: "feat/auth", ticket: "acme/api#12", state: "working", summary: null, ...o });
+
+describe("peers context", () => {
+  it("is empty with no peers", () => {
+    expect(peersBlock([])).toBe("");
+    expect(ticketContext(null, [], [])).toBeNull();
+  });
+  it('lists facts and "(no summary yet)"', () => {
+    const b = peersBlock([fact({})]);
+    expect(b).toContain("## Linked sessions");
+    expect(b).toContain("### api-auth");
+    expect(b).toContain("acme/api#12");
+    expect(b).toContain("feat/auth");
+    expect(b).toContain("(no summary yet)");
+  });
+  it("orders newest summary first, caps at 5 peers and 2500 chars", () => {
+    const list = Array.from({ length: 7 }, (_, i) => fact({ key: `k${i}`, name: `s${i}`, summary: { at: i, text: "x".repeat(3000) } }));
+    const b = peersBlock(list);
+    expect(b.indexOf("### s6")).toBeLessThan(b.indexOf("### s5"));
+    expect(b).not.toContain("### s1");
+    expect(b).toContain("x".repeat(2500) + "…");
+  });
+  it("ticketContext keeps the ticket part and adds peers", () => {
+    const c = ticketContext({ label: "acme/web#3", title: "T", url: null }, [], [fact({})]) as { hookSpecificOutput: { additionalContext: string } };
+    expect(c.hookSpecificOutput.additionalContext).toContain("acme/web#3");
+    expect(c.hookSpecificOutput.additionalContext).toContain("## Linked sessions");
+    const noTicket = ticketContext(null, [], [fact({})]) as { hookSpecificOutput: { additionalContext: string } };
+    expect(noTicket.hookSpecificOutput.additionalContext.startsWith("## Linked sessions")).toBe(true);
+  });
+  it("peerDelta names the session and the age", () => {
+    const d = peerDelta(fact({ summary: { at: 1_000, text: "## Done\n- a" } }), 61_000) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    expect(d.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
+    expect(d.hookSpecificOutput.additionalContext).toContain("Linked session api-auth updated (1 min ago)");
+    expect(d.hookSpecificOutput.additionalContext).toContain("- a");
+  });
+  it("peerDeltas lists every updated peer in one message", () => {
+    const d = peerDeltas(
+      [
+        fact({ key: "b", name: "web-ui", summary: { at: 1_000, text: "did b" } }),
+        fact({ key: "c", name: "api-auth", summary: { at: 61_000, text: "did c" } }),
+      ],
+      61_000,
+    ) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    const t = d.hookSpecificOutput.additionalContext;
+    expect(d.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
+    expect(t).toContain("Linked session web-ui updated (1 min ago):\n\ndid b");
+    expect(t).toContain("Linked session api-auth updated (just now):\n\ndid c");
+    expect(t).toContain("did b\n\nLinked session api-auth");
   });
 });

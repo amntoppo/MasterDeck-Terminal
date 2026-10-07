@@ -189,10 +189,13 @@ import {
   requestPrompt,
   ticketContext,
   type HookRequest,
+  type PeerFact,
 } from "@shared/deckHooks";
 import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
+import type { PeerStore } from "./peers";
+import { adjacency } from "@shared/peers";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
 import {
   boardDeriver,
@@ -244,6 +247,7 @@ const EMPTY_SNAPSHOT: ParsedSnapshot = {
  */
 export class Sources {
   private rawSessions: Session[] = [];
+  private peerStore: PeerStore | null = null;
   private snapshot: ParsedSnapshot = EMPTY_SNAPSHOT;
   private proposals: Proposal[] = [];
   /** Needs you: every item waiting on the user, what they did about it, and its history. */
@@ -264,6 +268,11 @@ export class Sources {
   private menusRunning = false;
   private reviewRunning = false;
   private lastSessions: Session[] = [];
+  private stopListeners: ((sessionId: string) => void)[] = [];
+  /** Sessions that gained linked peers they were started with (PeerStore.claim). */
+  private claimListeners: ((keys: string[]) => void)[] = [];
+  /** The last Stop seen per session id: a Stop is reported once. */
+  private lastStopAt: Record<string, number> = {};
   /** Questions already marked answered from here, by proposal id and question time (once each). */
   private answered = new Set<string>();
   private stats: Record<string, SessionStats> = {};
@@ -848,8 +857,31 @@ export class Sources {
     }
   }
 
+  /** Called once for each Stop a session reports (deck events). */
+  onSessionStop(cb: (sessionId: string) => void): void {
+    this.stopListeners.push(cb);
+  }
+
+  onPeersClaimed(cb: (keys: string[]) => void): void {
+    this.claimListeners.push(cb);
+  }
+
+  /** Rewrite every live session's context file now (a peer's summary or link changed). */
+  rewriteSessionContext(): void {
+    this.writeTicketContext(this.lastSessions);
+  }
+
+  setPeerStore(store: PeerStore): void {
+    this.peerStore = store;
+    store.onChange(() => {
+      this.writeTicketContext(this.lastSessions);
+      this.emit();
+    });
+  }
+
   /** A resume started a copy (see resumeAs): it keeps the old session's ticket link and PRs. */
   noteCopy(old: { bgId: string; sessionId: string }, copyBg: string): void {
+    if (copyBg && copyBg !== old.bgId) this.peerStore?.carry(old.bgId, copyBg);
     if (!carryCopy(this.history, this.createdPrs, old, copyBg)) return;
     this.saveHistory();
     this.saveSessionPrs();
@@ -1457,6 +1489,14 @@ export class Sources {
     }
     this.reloadLinks();
     this.carryLinks();
+    let claimed: string[] = [];
+    if (this.peerStore) {
+      const live = new Set(
+        this.rawSessions.filter((s) => s.state !== "done").map((s) => s.key),
+      );
+      if (this.rawSessions.length > 0) this.peerStore.prune(live);
+      claimed = this.peerStore.claim(this.rawSessions);
+    }
     const now = Date.now();
     for (const s of this.rawSessions) {
       const p = this.transcripts.find(s.sessionId, now);
@@ -1464,6 +1504,8 @@ export class Sources {
       if (m !== null) this.lastWrite[s.sessionId] = m;
     }
     this.emit();
+    // PeerSync refreshes the new session's peers: their deltas and every context file.
+    if (claimed.length) for (const cb of this.claimListeners) cb(claimed);
   }
 
   /** A trigger point was reached by something other than a transcript (the app's own link). */
@@ -1923,6 +1965,16 @@ export class Sources {
     let changed = false;
     for (const sid of deck.readEvents()) {
       changed = true;
+      const st = deck.sessions[sid]?.stoppedAt ?? null;
+      if (st && st !== this.lastStopAt[sid]) {
+        this.lastStopAt[sid] = st;
+        for (const cb of this.stopListeners)
+          try {
+            cb(sid);
+          } catch (e) {
+            console.error(`session stop: ${String(e)}`);
+          }
+      }
       // A session that moved into a worktree (EnterWorktree, cd): it works there.
       const cwd = deck.sessions[sid]?.cwd;
       const key = this.rawSessions.find((x) => x.sessionId === sid)?.key;
@@ -2006,42 +2058,68 @@ export class Sources {
   }
 
   /**
-   * What SessionStart tells each live session on a ticket (after a resume, a compaction, /clear):
-   * the ticket and what earlier sessions on it did, from their saved summaries.
+   * What SessionStart tells each live session on a ticket or with linked sessions (after a resume,
+   * a compaction, /clear): the ticket, what earlier sessions on it did, and what its peers are doing.
+   * It never marks a peer summary as seen: a running session does not re-read this file, so only
+   * the per-prompt delta (PeerSync) advances that.
    */
   private writeTicketContext(sessions: Session[]): void {
     const deck = this.deck;
-    if (!deck) return;
+    // No sessions (e.g. before the first poll after a restart): nothing to write, and pruning against
+    // an empty set would delete every delta still waiting for a session's next prompt.
+    if (!deck || sessions.length === 0) return;
     const live = new Set<string>();
     for (const s of sessions) {
-      if (s.issue === null || s.state === "done") continue;
+      if (s.state === "done") continue;
+      const peers = this.peerFacts(s.key);
+      if (s.issue === null && !peers.length) continue;
       live.add(s.sessionId);
-      const key = ticketKey(s.issueRepo, s.issue);
-      const issue = this.snapshot.issues.find((i) =>
-        sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! }),
-      );
-      const earlier = (this.past[key] ?? [])
-        .filter((p) => p.sessionId !== s.sessionId)
-        .map((p) => {
-          const sum = this.summaryOf(p.sessionId);
-          return sum
-            ? { name: p.name, at: p.lastActivity, text: sum.text }
-            : null;
-        })
-        .filter((x): x is { name: string; at: number; text: string } => !!x);
-      deck.setContext(
-        s.sessionId,
-        ticketContext(
-          {
-            label: ticketLabel(s.issueRepo, s.issue),
-            title: issue?.title ?? null,
-            url: issue?.url ?? null,
-          },
-          earlier,
-        ),
-      );
+      let ticket: { label: string; title: string | null; url: string | null } | null = null;
+      let earlier: { name: string; at: number; text: string }[] = [];
+      if (s.issue !== null) {
+        const key = ticketKey(s.issueRepo, s.issue);
+        const issue = this.snapshot.issues.find((i) =>
+          sameTicket(i, { repo: s.issueRepo ?? null, number: s.issue! }),
+        );
+        ticket = {
+          label: ticketLabel(s.issueRepo, s.issue),
+          title: issue?.title ?? null,
+          url: issue?.url ?? null,
+        };
+        earlier = (this.past[key] ?? [])
+          .filter((p) => p.sessionId !== s.sessionId)
+          .map((p) => {
+            const sum = this.summaryOf(p.sessionId);
+            return sum
+              ? { name: p.name, at: p.lastActivity, text: sum.text }
+              : null;
+          })
+          .filter((x): x is { name: string; at: number; text: string } => !!x);
+      }
+      deck.setContext(s.sessionId, ticketContext(ticket, earlier, peers));
     }
+    deck.pruneDeltas(live);
     deck.pruneContext(live);
+  }
+
+  /** What this session's linked sessions are doing (facts + saved summary), by Session.key. */
+  peerFacts(key: string): PeerFact[] {
+    if (!this.peerStore) return [];
+    const out: PeerFact[] = [];
+    for (const pk of this.peerStore.of(key)) {
+      const s = this.lastSessions.find((x) => x.key === pk);
+      if (!s || s.state === "done") continue;
+      out.push({
+        key: pk,
+        name: s.name,
+        cwd: this.stats[s.sessionId]?.currentDir ?? s.cwd,
+        branch: this.git[s.sessionId]?.branch ?? null,
+        ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
+        state: s.state,
+        summary: this.summaryOf(s.sessionId),
+      });
+    }
+    return out;
   }
 
   /** Background work a session started and is still waiting on (the last 256 KB of its transcript). */
@@ -2299,6 +2377,7 @@ export class Sources {
       git: { ...this.git },
       prLive: { ...this.prLive },
       sessionPrs,
+      peers: this.peerStore ? adjacency(this.peerStore.data()) : {},
       watches: this.watchInfo(),
       schedules: Object.fromEntries(
         sessions

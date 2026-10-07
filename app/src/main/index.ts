@@ -177,6 +177,9 @@ import {
   migrateLegacyHooks,
 } from "./hooks";
 import { DeckHooks } from "./deckHooks";
+import { PeerStore } from "./peers";
+import { MAX_PEERS } from "@shared/peers";
+import { PeerSync } from "./peerSync";
 import {
   installStatusline,
   isInstalled,
@@ -206,6 +209,15 @@ function emit(channel: string, ...args: unknown[]): void {
   }
 }
 let latest: AppState | null = null;
+
+/** The keys a Start dialog asked to link to: strings that are live sessions, unique, at most MAX_PEERS. */
+function livePeerKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const live = new Set((latest?.sessions ?? []).filter((s) => s.state !== "done").map((s) => s.key));
+  const out: string[] = [];
+  for (const k of raw) if (typeof k === "string" && live.has(k) && !out.includes(k)) out.push(k);
+  return out.slice(0, MAX_PEERS);
+}
 let focused: string | null = null;
 let pathEnv = process.env.PATH ?? "";
 let claudeBin = "claude";
@@ -519,6 +531,8 @@ const summaries = new Summaries(
   paths.projectsDir,
 );
 const deckHooks = new DeckHooks(paths.home, undefined, paths.config);
+const peerStore = new PeerStore(join(paths.home, "session-peers.json"));
+peerStore.load();
 const sources = new Sources(
   paths,
   run,
@@ -622,6 +636,50 @@ const sources = new Sources(
   ghRouted,
   () => readGhCacheStatus(undefined, undefined, isMulti(getConfig())),
 );
+sources.setPeerStore(peerStore);
+/** Summarize a session from its transcript (the Summary panel's button and PeerSync). */
+async function makeSummaryFor(key: string) {
+  const s = latest?.sessions.find((x) => x.key === key);
+  if (!s) return { ok: false as const, message: "session not found" };
+  const f = sources.sessionFacts(s.sessionId, s.key);
+  if (!f.transcript)
+    return { ok: false as const, message: "no transcript for this session yet" };
+  return summaries.make({
+    sessionId: s.sessionId,
+    name: s.name,
+    transcript: f.transcript,
+    cwd: f.cwd ?? s.cwd,
+    issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null,
+    prs: f.prs,
+  });
+}
+// Linked sessions: a fresh summary on Stop, then a delta on each peer's next prompt.
+const peerSync = new PeerSync({
+  store: peerStore,
+  sessions: () => latest?.sessions ?? [],
+  facts: (k) => sources.peerFacts(k),
+  summaryStale: (key) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return false;
+    const summary = summaries.get(s.sessionId);
+    const t = sources.sessionFacts(s.sessionId, s.key).transcript;
+    const size = t && existsSync(t) ? statSync(t).size : 0;
+    return !summary || size > summary.size;
+  },
+  makeSummary: makeSummaryFor,
+  setDelta: (sid, json) => deckHooks.setDelta(sid, json),
+  clearDelta: (sid) => deckHooks.clearDelta(sid),
+  deltaPending: (sid) => deckHooks.hasDelta(sid),
+  rewriteContext: () => sources.rewriteSessionContext(),
+  hooksLive: () =>
+    process.platform !== "win32" && deckHooksInstalled(paths.claudeSettings),
+  deliver: (s, text) =>
+    sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+  auto: () => getConfig().peerSync?.auto !== false,
+});
+sources.onSessionStop((sid) => peerSync.onStop(sid));
+// A session started with linked peers appeared: its context file and its peers' deltas follow.
+sources.onPeersClaimed((keys) => peerSync.refreshAll(keys));
 sources.setMasterAccount((s) => sessionAccounts.get(s));
 sources.setAccountRunners({
   github: (login) => forAccount(login).github,
@@ -2090,6 +2148,7 @@ function registerIpc(): void {
       workflow?: unknown;
       mode?: unknown;
       account?: unknown;
+      peers?: unknown;
     };
     const mode =
       typeof o.mode === "string" &&
@@ -2132,6 +2191,8 @@ function registerIpc(): void {
       o.workflow !== DEFAULT_TEMPLATE
     )
       workflows().setPending(name, o.workflow);
+    const linked = livePeerKeys(o.peers);
+    if (linked.length) peerStore.expect(name, linked);
     const r = await run(
       claudeBin,
       [
@@ -2252,6 +2313,8 @@ function registerIpc(): void {
       typeof req.name === "string"
     )
       workflows().setPending(req.name, req.workflow);
+    const peers = livePeerKeys(given?.peers);
+    if (peers.length && typeof req.name === "string") peerStore.expect(req.name, peers);
     return assignNow(req);
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
@@ -2371,21 +2434,7 @@ function registerIpc(): void {
     const size = t && existsSync(t) ? statSync(t).size : 0;
     return { summary, stale: !!summary && size > summary.size };
   });
-  reg.handle(CH.summaryMake, async (_e, key: string) => {
-    const s = latest?.sessions.find((x) => x.key === key);
-    if (!s) return { ok: false, message: "session not found" };
-    const f = sources.sessionFacts(s.sessionId, s.key);
-    if (!f.transcript)
-      return { ok: false, message: "no transcript for this session yet" };
-    return summaries.make({
-      sessionId: s.sessionId,
-      name: s.name,
-      transcript: f.transcript,
-      cwd: f.cwd ?? s.cwd,
-      issue: s.issue !== null ? ticketRef(s.issueRepo, s.issue) : null,
-      prs: f.prs,
-    });
-  });
+  reg.handle(CH.summaryMake, (_e, key: string) => makeSummaryFor(key));
   reg.handle(CH.summaryPost, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
@@ -2662,6 +2711,21 @@ function registerIpc(): void {
     CH.linkSession,
     (_e, issue: unknown, sessionId: string, cwd: string | null) =>
       linkSession(issue, sessionId, cwd),
+  );
+  reg.handle(CH.peersSet, (_e, a: unknown, b: unknown, on: unknown) => {
+    if (typeof a !== "string" || typeof b !== "string" || a.length > 200 || b.length > 200) return { ok: false, message: "bad session" };
+    const live = new Set((latest?.sessions ?? []).filter((s) => s.state !== "done").map((s) => s.key));
+    if (on === true && (!live.has(a) || !live.has(b))) return { ok: false, message: "link running sessions only" };
+    const r = peerStore.set(a, b, on === true);
+    if (!r.ok) return r;
+    if (on !== true) peerSync.unlinked(a, b);
+    peerSync.refreshAll([a, b]);
+    return r;
+  });
+  reg.handle(CH.peersSync, (_e, key: unknown) =>
+    typeof key === "string" && key.length <= 200
+      ? peerSync.syncNow(key)
+      : { ok: false, message: "bad session" },
   );
   reg.on(CH.boardOpen, (_e, open: boolean) => sources.setBoardOpen(open));
   // The repository view asks for its repositories (also from the web: a read; the list is checked in RepoIssues.ask).
@@ -3282,6 +3346,7 @@ app.on("window-all-closed", () => app.quit());
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
   cloud?.stop();
+  peerStore.flush();
   sender.killAll();
   watches.killAll();
   ptys.closeAll();

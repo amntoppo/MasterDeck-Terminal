@@ -4,7 +4,7 @@ import { sameTicket, ticketKey, ticketLabel, ticketOf } from "@shared/ticket";
 import { pendingAssign } from "@shared/derive";
 import type { AssignRequest, DeckApi, Template } from "@shared/ipc";
 import { defaultModelLabel, MODELS } from "@shared/models";
-import { composePrompt, earlierBlock } from "@shared/prompt";
+import { composePrompt, earlierBlock, peersPromptBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
 import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
@@ -15,6 +15,8 @@ import { baseError, branchError, parsePrefs, PERMISSION_MODES, prefsKey, ticketB
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { TrustNote, useTrust } from "./TrustFix";
 import { MarkdownView } from "./MarkdownView";
+import { PeerPicker } from "./PeerPicker";
+import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { deck, load, save } from "../deck";
 import { can } from "../web";
 
@@ -48,6 +50,26 @@ export function AssignDialog({
   const held = pending ? null : trustHeldAssign(state.proposals, ticketOf(issue));
   const [draft, setDraft] = useState<DraftAssign | null>(null);
   const [name, setName] = useState("");
+  const [peers, setPeers] = useState<string[]>([]);
+  // The chosen peers' saved summaries, for the first prompt's linked-sessions block.
+  const [peerSummaries, setPeerSummaries] = useState<PeerSummaries>({});
+  useEffect(() => {
+    let alive = true;
+    const missing = peers.filter((k) => !(k in peerSummaries));
+    for (const k of missing)
+      void deck()
+        .summaryGet(k)
+        .then(({ summary }) => {
+          if (alive) setPeerSummaries((m) => ({ ...m, [k]: summary ? { at: summary.at, text: summary.text } : null }));
+        })
+        .catch(() => {
+          if (alive) setPeerSummaries((m) => ({ ...m, [k]: null }));
+        });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peers]);
   const [system, setSystem] = useState("");
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -301,6 +323,7 @@ export function AssignDialog({
       useDesc ? (desc ?? "") : "",
       useMemory ? earlierBlock(memory) : "",
       setup,
+      peersPromptBlock(peerFactsFor(state, peers, peerSummaries)),
     );
   const promptOk = compose().length > 0 && !compose().startsWith("-");
   const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError;
@@ -382,6 +405,7 @@ export function AssignDialog({
       ...(mode ? { permissionMode: mode } : {}),
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
+      ...(peers.length ? { peers } : {}),
     });
     onClose();
   };
@@ -696,6 +720,7 @@ export function AssignDialog({
                   Session name: letters, digits, dot, dash and underscore; up to 64 characters.
                 </div>
               )}
+              <PeerPicker state={state} value={peers} onChange={setPeers} />
             </section>
 
             <section className="sd-sec" aria-label="Options">

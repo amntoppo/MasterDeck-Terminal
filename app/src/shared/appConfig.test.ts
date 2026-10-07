@@ -21,6 +21,14 @@ describe('appConfig', () => {
   })
 })
 
+describe('peerSync', () => {
+  it('is absent unless auto is a boolean', () => {
+    expect(parseConfig({}).peerSync).toBeUndefined()
+    expect(parseConfig({ peerSync: { auto: 'no' } }).peerSync).toBeUndefined()
+    expect(parseConfig({ peerSync: { auto: false } }).peerSync).toEqual({ auto: false })
+  })
+})
+
 describe('masterEnabled', () => {
   it('defaults to on; only false turns master off', () => {
     expect(parseConfig({}).masterEnabled).toBe(true)

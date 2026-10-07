@@ -90,3 +90,19 @@ describe('Sources and the repository view', () => {
     expect(RATE_LIMITED.test('Not found: acme/old')).toBe(false)
   })
 })
+
+describe('Sources.rewriteSessionContext', () => {
+  it('keeps pending deltas when there are no sessions yet (restart), prunes once there are', () => {
+    const { src, priv } = make()
+    const deck = { setContext: vi.fn(), pruneDeltas: vi.fn(), pruneContext: vi.fn() }
+    priv.deck = deck
+    priv.lastSessions = []
+    src.rewriteSessionContext()
+    expect(deck.pruneDeltas).not.toHaveBeenCalled()
+    expect(deck.pruneContext).not.toHaveBeenCalled()
+    priv.lastSessions = [{ key: 'a', sessionId: 'a-sid', name: 'a', state: 'idle', issue: null, cwd: '/w/a' }]
+    src.rewriteSessionContext()
+    expect(deck.pruneDeltas).toHaveBeenCalledTimes(1)
+    expect(deck.pruneContext).toHaveBeenCalledTimes(1)
+  })
+})

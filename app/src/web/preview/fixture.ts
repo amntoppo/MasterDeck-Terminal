@@ -134,6 +134,7 @@ export function fixtureState(noBoard = false): AppState {
     prLive: {},
     hookInfo: {},
     sessionWorktrees: {},
+    peers: { [SESSIONS[0].key]: [SESSIONS[1].key], [SESSIONS[1].key]: [SESSIONS[0].key] },
     sessionPrs: { [SESSIONS[0].sessionId]: ['https://github.com/acme/web/pull/131'] },
     watches: [],
     schedules: {},
