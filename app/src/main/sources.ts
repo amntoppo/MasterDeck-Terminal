@@ -269,6 +269,8 @@ export class Sources {
   private reviewRunning = false;
   private lastSessions: Session[] = [];
   private stopListeners: ((sessionId: string) => void)[] = [];
+  /** Sessions that gained linked peers they were started with (PeerStore.claim). */
+  private claimListeners: ((keys: string[]) => void)[] = [];
   /** The last Stop seen per session id: a Stop is reported once. */
   private lastStopAt: Record<string, number> = {};
   /** Questions already marked answered from here, by proposal id and question time (once each). */
@@ -858,6 +860,10 @@ export class Sources {
   /** Called once for each Stop a session reports (deck events). */
   onSessionStop(cb: (sessionId: string) => void): void {
     this.stopListeners.push(cb);
+  }
+
+  onPeersClaimed(cb: (keys: string[]) => void): void {
+    this.claimListeners.push(cb);
   }
 
   /** Rewrite every live session's context file now (a peer's summary or link changed). */
@@ -1483,12 +1489,13 @@ export class Sources {
     }
     this.reloadLinks();
     this.carryLinks();
+    let claimed: string[] = [];
     if (this.peerStore) {
       const live = new Set(
         this.rawSessions.filter((s) => s.state !== "done").map((s) => s.key),
       );
       if (this.rawSessions.length > 0) this.peerStore.prune(live);
-      this.peerStore.claim(this.rawSessions);
+      claimed = this.peerStore.claim(this.rawSessions);
     }
     const now = Date.now();
     for (const s of this.rawSessions) {
@@ -1497,6 +1504,8 @@ export class Sources {
       if (m !== null) this.lastWrite[s.sessionId] = m;
     }
     this.emit();
+    // PeerSync refreshes the new session's peers: their deltas and every context file.
+    if (claimed.length) for (const cb of this.claimListeners) cb(claimed);
   }
 
   /** A trigger point was reached by something other than a transcript (the app's own link). */
@@ -2056,7 +2065,9 @@ export class Sources {
    */
   private writeTicketContext(sessions: Session[]): void {
     const deck = this.deck;
-    if (!deck) return;
+    // No sessions (e.g. before the first poll after a restart): nothing to write, and pruning against
+    // an empty set would delete every delta still waiting for a session's next prompt.
+    if (!deck || sessions.length === 0) return;
     const live = new Set<string>();
     for (const s of sessions) {
       if (s.state === "done") continue;

@@ -678,6 +678,8 @@ const peerSync = new PeerSync({
   auto: () => getConfig().peerSync?.auto !== false,
 });
 sources.onSessionStop((sid) => peerSync.onStop(sid));
+// A session started with linked peers appeared: its context file and its peers' deltas follow.
+sources.onPeersClaimed((keys) => peerSync.refreshAll(keys));
 sources.setMasterAccount((s) => sessionAccounts.get(s));
 sources.setAccountRunners({
   github: (login) => forAccount(login).github,
@@ -2716,7 +2718,7 @@ function registerIpc(): void {
     if (on === true && (!live.has(a) || !live.has(b))) return { ok: false, message: "link running sessions only" };
     const r = peerStore.set(a, b, on === true);
     if (!r.ok) return r;
-    if (on !== true) peerSync.unlinked([a, b]);
+    if (on !== true) peerSync.unlinked(a, b);
     peerSync.refreshAll([a, b]);
     return r;
   });

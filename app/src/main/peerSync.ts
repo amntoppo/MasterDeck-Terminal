@@ -131,13 +131,36 @@ export class PeerSync {
     }
   }
 
-  /** After an unlink: a session left with no peers drops any delta still waiting for its next prompt. */
-  unlinked(keys: string[]): void {
-    for (const key of keys) {
-      if (this.deps.store.of(key).length) continue
-      this.queued.delete(key)
+  /**
+   * After the link a–b is removed: a side left with no peers drops any delta still waiting for its
+   * next prompt; a side with other peers has the removed one taken out of a pending delta (the
+   * delta is rewritten from the peers still in it, or cleared when none remain).
+   */
+  unlinked(a: string, b: string): void {
+    for (const [key, gone] of [
+      [a, b],
+      [b, a],
+    ] as const) {
       const s = this.byKey(key)
-      if (s) this.deps.clearDelta(s.sessionId)
+      if (!this.deps.store.of(key).length) {
+        this.queued.delete(key)
+        if (s) this.deps.clearDelta(s.sessionId)
+        continue
+      }
+      const q = this.queued.get(key)
+      if (!q?.has(gone)) continue
+      q.delete(gone)
+      if (!s || !this.deps.deltaPending(s.sessionId)) continue
+      const facts = this.deps
+        .facts(key)
+        .filter((f): f is PeerFact & { summary: { at: number; text: string } } => !!f.summary && q.has(f.key))
+      if (facts.length) {
+        this.deps.setDelta(s.sessionId, peerDeltas(facts, this.now()))
+        this.queued.set(key, new Set(facts.map((f) => f.key)))
+      } else {
+        this.queued.delete(key)
+        this.deps.clearDelta(s.sessionId)
+      }
     }
   }
 

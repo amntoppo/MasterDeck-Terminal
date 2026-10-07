@@ -126,13 +126,17 @@ case "$ev" in
     rm -f "$D/pending/$id.json"
     exit 0 ;;
   UserPromptSubmit)
-    # Linked sessions: a peer's summary changed since this session last heard (one file, read once).
-    case "$sid" in *[!0-9a-fA-F-]*|'') ;; *)
-      pd="$D/peers/$sid.delta.json"
-      if [ -f "$pd" ] && mv "$pd" "$pd.read" 2>/dev/null; then cat "$pd.read"; rm -f "$pd.read"; exit 0; fi ;;
+    # Fast path: only /queue prompts go further (no jq, nothing logged, for the rest). A /queue
+    # prompt is answered first and never reaches the model, so a pending delta waits for the next
+    # real prompt.
+    case "$in" in *'"prompt":"/queue'*|*'"prompt": "/queue'*) ;; *)
+      # Linked sessions: a peer's summary changed since this session last heard (one file, read once).
+      case "$sid" in *[!0-9a-fA-F-]*|'') ;; *)
+        pd="$D/peers/$sid.delta.json"
+        if [ -f "$pd" ] && mv "$pd" "$pd.read" 2>/dev/null; then cat "$pd.read"; rm -f "$pd.read"; fi ;;
+      esac
+      exit 0 ;;
     esac
-    # Fast path: only /queue prompts go further (no jq, nothing logged, for the rest).
-    case "$in" in *'"prompt":"/queue'*|*'"prompt": "/queue'*) ;; *) exit 0 ;; esac
     [ -f "$D/queue-off" ] && exit 0
     command -v jq >/dev/null 2>&1 || exit 0
     case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac

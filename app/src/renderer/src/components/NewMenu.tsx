@@ -10,7 +10,7 @@ import { deck } from "../deck";
 import { can, keyPlatform } from "../web";
 import { RepoPicker } from "./RepoPicker";
 import { PeerPicker } from "./PeerPicker";
-import { peerFactsFor } from "./peersView";
+import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { peersPromptBlock } from "@shared/prompt";
 
 export type Repo = { name: string; path: string };
@@ -214,6 +214,25 @@ export function NewSessionDialog({
   const [name, setName] = useState("");
   const [named, setNamed] = useState(false);
   const [peers, setPeers] = useState<string[]>([]);
+  // The chosen peers' saved summaries, for the first prompt's linked-sessions block.
+  const [peerSummaries, setPeerSummaries] = useState<PeerSummaries>({});
+  useEffect(() => {
+    let alive = true;
+    const missing = peers.filter((k) => !(k in peerSummaries));
+    for (const k of missing)
+      void deck()
+        .summaryGet(k)
+        .then(({ summary }) => {
+          if (alive) setPeerSummaries((m) => ({ ...m, [k]: summary ? { at: summary.at, text: summary.text } : null }));
+        })
+        .catch(() => {
+          if (alive) setPeerSummaries((m) => ({ ...m, [k]: null }));
+        });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peers]);
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState("");
   const [configured, setConfigured] = useState<string | null>(null);
@@ -267,11 +286,18 @@ export function NewSessionDialog({
   const start = () => {
     if (!cwd || !nameOk || !promptOk || (multi && !account)) return;
     const text = prompt.trim();
-    const block = peers.length ? peersPromptBlock(peerFactsFor(state, peers)) : "";
+    const block = peers.length ? peersPromptBlock(peerFactsFor(state, peers, peerSummaries)) : "";
     onStart({
       name,
       cwd,
-      prompt: text ? (block ? `${text}\n\n${block}` : text) : undefined,
+      // No prompt but linked peers: the peers block alone starts the session with their context.
+      prompt: text
+        ? block
+          ? `${text}\n\n${block}`
+          : text
+        : block
+          ? `Context from MasterDeck (linked sessions):\n\n${block}`
+          : undefined,
       model: model || undefined,
       workflow: workflow === DEFAULT_TEMPLATE ? undefined : workflow,
       mode: mode || undefined,

@@ -744,7 +744,7 @@ it('adds the linked sessions block after the earlier-sessions block', () => {
 
 - [ ] **Step 5: Hook script delta fast path + `DeckHooks` delta files**
 
-In `src/main/deckHooks.ts`, in the generated script's `UserPromptSubmit)` case, **before** the `/queue` fast path:
+In `src/main/deckHooks.ts`, in the generated script's `UserPromptSubmit)` case, in the non-queue (`*)`) branch of the `/queue` fast path (as shipped after the final review; originally placed before it):
 ```sh
     # Linked sessions: a peer's summary changed since this session last heard (one file, read once).
     case "$sid" in *[!0-9a-fA-F-]*|'') ;; *)
@@ -752,7 +752,7 @@ In `src/main/deckHooks.ts`, in the generated script's `UserPromptSubmit)` case, 
       if [ -f "$pd" ] && mv "$pd" "$pd.read" 2>/dev/null; then cat "$pd.read"; rm -f "$pd.read"; exit 0; fi ;;
     esac
 ```
-(Mind the template-literal escaping used by the rest of the script: `\\n` inside `printf`, `\${…}` for shell parameter expansion.) A UserPromptSubmit hook may print only one JSON; `exit 0` after the delta means a `/queue` typed in the same prompt is not handled that one time — acceptable and documented.
+(Mind the template-literal escaping used by the rest of the script: `\\n` inside `printf`, `\${…}` for shell parameter expansion.) A UserPromptSubmit hook may print only one JSON, so the `/queue` fast path is handled first and the delta is printed only for a non-queue prompt (final review: the delta stays on disk for the next real prompt).
 
 Add to class `DeckHooks` (next to `setContext`):
 ```ts
@@ -1255,7 +1255,7 @@ git commit -m "feat(peers): Link to sessions in both Start dialogs"
 ### Task 8: Docs
 
 **Files:**
-- Modify: `docs/ARCHITECTURE.md` (files-on-disk table: `session-peers.json`, `deck/peers/*.delta.json`; AppState `peers`; hooks: UserPromptSubmit delta; `PeerSync`), `docs/GUIDE.md` (section "Linked sessions": link at start / in details, what peers see, Sync now, unlink, Windows note), `docs/TODO.md` (Done: #67 with the commit; Open: "Sync now typed delivery only covers idle peers", "`/queue` typed on the same prompt as a pending delta is not handled that once").
+- Modify: `docs/ARCHITECTURE.md` (files-on-disk table: `session-peers.json`, `deck/peers/*.delta.json`; AppState `peers`; hooks: UserPromptSubmit delta; `PeerSync`), `docs/GUIDE.md` (section "Linked sessions": link at start / in details, what peers see, Sync now, unlink, Windows note), `docs/TODO.md` (Done: #67 with the commit; Open: "Sync now typed delivery only covers idle peers").
 
 - [ ] **Step 1: Write the three doc edits** in the voice of the surrounding text (short, factual, file names in backticks).
 - [ ] **Step 2: Commit**

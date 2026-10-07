@@ -42,12 +42,12 @@ describe('PeerStore', () => {
     const s = new PeerStore(join(dir(), 'p.json'), () => now)
     s.load()
     s.expect('new-one', ['a', 'b'])
-    expect(s.claim([{ key: 'a', name: 'a', state: 'idle' }])).toBe(false)
-    expect(s.claim([{ key: 'n1', name: 'new-one', state: 'working' }, { key: 'a', name: 'a', state: 'idle' }])).toBe(true)
+    expect(s.claim([{ key: 'a', name: 'a', state: 'idle' }])).toEqual([])
+    expect(s.claim([{ key: 'n1', name: 'new-one', state: 'working' }, { key: 'a', name: 'a', state: 'idle' }])).toEqual(['n1'])
     expect(s.of('n1').sort()).toEqual(['a', 'b'])
     s.expect('late', ['a'])
     now += 11 * 60_000
-    expect(s.claim([{ key: 'l1', name: 'late', state: 'idle' }])).toBe(false)
+    expect(s.claim([{ key: 'l1', name: 'late', state: 'idle' }])).toEqual([])
     expect(s.of('l1')).toEqual([])
   })
   it('calls onChange after a save', () => {

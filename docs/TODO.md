@@ -480,8 +480,6 @@ fixes it, and move the item here to "Recently done".
 
 - **Sync now typed delivery covers idle peers only.** Without live hooks (Windows) a busy peer is
   skipped and gets nothing until the next Sync now.
-- **`/queue` on a prompt that picks up a delta is skipped once.** The hook prints the delta and returns;
-  the user has to type the `/queue` again.
 - **The first poll after launch may replay old Stops.** Bounded by the 2-minute debounce and the stale
   check, but a summary can be made for a session that did nothing new.
 - **A `StopFailure` counts as a Stop** for the summary on Stop.

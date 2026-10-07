@@ -225,8 +225,8 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   AskUserQuestion held while MasterDeck runs, given up after ~9 min), `context/<session>.json`
   (printed on SessionStart: ticket and linked sessions), `peers/<session>.delta.json` (printed and deleted by the next UserPromptSubmit), `watch-requests/` + `watch-answers/` (Monitor takeover),
   `events.jsonl` (the rest; emptied at launch past 4 MB), `alive`, `monitors-by`.
-  A pending linked-sessions delta is printed first; a `/queue` typed on that same prompt is skipped
-  that once.
+  A `/queue` prompt is handled first and leaves a pending linked-sessions delta on disk; any other
+  prompt prints (and deletes) the delta.
   It also handles `/queue`: UserPromptSubmit stores `/queue <prompt>` (any other prompt returns at
   once, unread and unlogged); Stop hands over the next item through `queue-requests/<id>.json` →
   claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when

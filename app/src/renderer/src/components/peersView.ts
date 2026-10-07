@@ -39,8 +39,11 @@ export function pickable(state: AppState, chosen: string[], text: string, limit 
   return suggestSessions(text, state.sessions.filter((s) => !taken.has(s.key)), limit)
 }
 
+/** A chosen peer's saved summary (summaryGet), null when it has none; missing while loading. */
+export type PeerSummaries = Record<string, { at: number; text: string } | null>
+
 /** What a new session's first prompt says about the sessions it is linked to. */
-export function peerFactsFor(state: AppState, keys: string[]): PeerFact[] {
+export function peerFactsFor(state: AppState, keys: string[], summaries: PeerSummaries = {}): PeerFact[] {
   const facts: PeerFact[] = []
   for (const k of keys) {
     const s = state.sessions.find((x) => x.key === k)
@@ -52,7 +55,7 @@ export function peerFactsFor(state: AppState, keys: string[]): PeerFact[] {
       branch: state.git[s.sessionId]?.branch ?? null,
       ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
       state: s.state,
-      summary: null,
+      summary: summaries[s.key] ?? null,
     })
   }
   return facts

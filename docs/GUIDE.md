@@ -194,8 +194,8 @@ session's transcript. A session that ends or is removed loses its links at the n
 On Windows (and where MasterDeck's hook is not installed) there is no per-prompt note: **Sync now** types
 the update into peers that are idle, and skips busy ones.
 
-If you type `/queue ...` as the same prompt that picks up a pending note, that prompt's `/queue` is skipped
-once; type it again.
+A `/queue ...` prompt is handled as usual and does not use up a pending note: the note waits for your next
+real prompt.
 
 ## Shells and manual sessions
 

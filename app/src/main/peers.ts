@@ -77,8 +77,9 @@ export class PeerStore {
     if (peers.length) this.pending.set(name, { peers, at: this.now() })
   }
 
-  claim(sessions: Pick<Session, 'key' | 'name' | 'state'>[]): boolean {
-    let changed = false
+  /** Link each expected session that has appeared; returns the keys of the sessions that gained a peer. */
+  claim(sessions: Pick<Session, 'key' | 'name' | 'state'>[]): string[] {
+    const claimed: string[] = []
     const now = this.now()
     for (const [name, p] of this.pending) {
       if (now - p.at > EXPECT_MS) {
@@ -88,11 +89,13 @@ export class PeerStore {
       const s = sessions.find((x) => x.name === name && x.state !== 'done')
       if (s) {
         this.pending.delete(name)
-        for (const k of p.peers) if (addEdge(this.d, s.key, k).ok) changed = true
+        let added = false
+        for (const k of p.peers) if (addEdge(this.d, s.key, k).ok) added = true
+        if (added) claimed.push(s.key)
       }
     }
-    if (changed) this.save()
-    return changed
+    if (claimed.length) this.save()
+    return claimed
   }
 
   onChange(cb: () => void): void {

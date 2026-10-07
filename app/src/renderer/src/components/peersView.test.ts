@@ -27,4 +27,10 @@ describe('peersView', () => {
     } as unknown as Partial<AppState>)
     expect(peerFactsFor(st, ['b', 'gone'])).toEqual([{ key: 'b', name: 'b', cwd: '/w/b/sub', branch: 'feat', ticket: 'web#7', state: 'working', summary: null }])
   })
+  it('peerFactsFor fills each summary from the map, null when absent', () => {
+    const st = state({ sessions: [sess('a'), sess('b')], git: {} } as unknown as Partial<AppState>)
+    const facts = peerFactsFor(st, ['a', 'b'], { a: { at: 5, text: 'did a' }, b: null })
+    expect(facts.map((f) => [f.key, f.summary])).toEqual([['a', { at: 5, text: 'did a' }], ['b', null]])
+    expect(peerFactsFor(st, ['b'], {})[0].summary).toBeNull()
+  })
 })
