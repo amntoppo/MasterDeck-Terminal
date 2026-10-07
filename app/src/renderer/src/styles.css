@@ -807,6 +807,14 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow-x { border: none; background: none; color: var(--faint); font-size: 14px; line-height: 1; padding: 0 2px; cursor: pointer; visibility: hidden; }
 .srow:hover .srow-x { visibility: visible; }
 .srow-x:hover { color: var(--text); }
+.srow-star { border: none; background: none; color: var(--faint); font-size: 13px; line-height: 1; padding: 0 2px; cursor: pointer; flex: none; visibility: hidden; }
+.srow:hover .srow-star, .srow-star.on, .srow-star:focus-visible { visibility: visible; }
+.srow-star.on { color: var(--amber); }
+.srow-star:hover { color: var(--amber); }
+.section-head.lane-starred { color: var(--amber); }
+.d-star { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; }
+.d-star:hover { color: var(--text); }
+.d-star.on { color: var(--amber); border-color: var(--amber); }
 .dot.st-shell { background: var(--grey); }
 .dot.st-waiting { background: #4fd1c5; }
 .section-head.lane-you { color: var(--red); } .section-head.lane-review { color: var(--accent); } .section-head.lane-working { color: var(--green); } .section-head.lane-idle { color: var(--amber); } .section-head.lane-done { color: var(--purple); }
