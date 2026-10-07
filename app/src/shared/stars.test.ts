@@ -40,8 +40,24 @@ describe('pruneStars', () => {
     const stars = ['a', 'b']
     expect(pruneStars(stars, [s('a'), s('b', 'idle')])).toBe(stars)
   })
-  it('drops sessions that are done, parked or gone', () => {
-    expect(pruneStars(['a', 'b', 'c', 'd'], [s('a'), s('b', 'done'), s('c', 'suspended')])).toEqual(['a'])
+  it('drops sessions that are done or parked at once', () => {
+    expect(pruneStars(['a', 'b', 'c'], [s('a'), s('b', 'done'), s('c', 'suspended')])).toEqual(['a'])
+  })
+  it('keeps a missing session through the grace period, then drops it', () => {
+    const missing = new Map<string, number>()
+    const stars = ['a', 'b']
+    const list = [s('a')]
+    expect(pruneStars(stars, list, missing, 1_000, 60_000)).toBe(stars)
+    expect(pruneStars(stars, list, missing, 30_000, 60_000)).toBe(stars)
+    expect(pruneStars(stars, list, missing, 61_000, 60_000)).toEqual(['a'])
+    expect(missing.size).toBe(0)
+  })
+  it('a session that comes back resets its grace period', () => {
+    const missing = new Map<string, number>()
+    const stars = ['a', 'b']
+    pruneStars(stars, [s('a')], missing, 1_000, 60_000)
+    pruneStars(stars, [s('a'), s('b')], missing, 2_000, 60_000)
+    expect(pruneStars(stars, [s('a')], missing, 62_000, 60_000)).toBe(stars)
   })
   it('never clears on an empty session list (state not loaded yet)', () => {
     const stars = ['a']

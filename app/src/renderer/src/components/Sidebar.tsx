@@ -83,6 +83,8 @@ export interface ColumnTab {
 export type SessionAction = "summary" | "close-tab";
 
 const ORDER_KEY = "sessionOrder";
+/** When each starred session was first missing from the list (see pruneStars). */
+const starsMissingSince = new Map<string, number>();
 
 const STATE_LABEL: Record<string, string> = {
   working: "working",
@@ -184,7 +186,10 @@ export function Sidebar({
   const live = sessions.filter((s) => s.state !== "suspended");
   // Starred: pinned above the status groups, whatever their status; an ended one loses its star.
   const stars = useStars();
-  useEffect(() => setStars(pruneStars(stars, state.sessions)), [stars, state.sessions]);
+  useEffect(
+    () => setStars(pruneStars(stars, state.sessions, starsMissingSince)),
+    [stars, state.sessions],
+  );
   const { starred, rest: unstarred } = splitStarred(live, stars);
   const suspended = sessions.filter((s) => s.state === "suspended");
 
