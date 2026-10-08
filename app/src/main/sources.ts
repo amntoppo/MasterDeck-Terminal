@@ -129,7 +129,7 @@ import {
   type RestoreEntry,
   type RestoreFile,
 } from "@shared/restore";
-import { totalOf, type Tokens, type TokensByDay } from "@shared/tokens";
+import { totalOf, type Span, type Tokens, type TokensByDay } from "@shared/tokens";
 import {
   pastByIssue,
   type PastSession,
@@ -505,6 +505,31 @@ export class Sources {
         (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
       ),
     );
+  }
+
+  /** When these sessions were active (the Costs view's Hours), with each one's key and folder to find its account. */
+  async hoursActivity(
+    sessionIds: string[],
+  ): Promise<Record<string, { spans: Span[]; key: string; cwd: string | null }>> {
+    const ids = sessionIds.filter(
+      (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
+    );
+    const spans = await this.tokenIndex.activity(ids);
+    const out: Record<string, { spans: Span[]; key: string; cwd: string | null }> = {};
+    for (const [id, s] of Object.entries(spans))
+      out[id] = {
+        spans: s,
+        key:
+          this.costBook[id]?.key ??
+          this.rawSessions.find((x) => x.sessionId === id)?.key ??
+          id.slice(0, 8),
+        cwd:
+          this.stats[id]?.currentDir ??
+          this.tails[id]?.cwd ??
+          this.transcriptInfo(id)?.cwd ??
+          null,
+      };
+    return out;
   }
 
   /** The sessions of the last `claude agents` scan; null until one succeeded. */

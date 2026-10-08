@@ -20,7 +20,8 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
@@ -2245,6 +2246,39 @@ function registerIpc(): void {
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
+  // Working hours (issue #64) stay on this Mac: DECK_ACCESS blocks both, and main refuses a remote call too.
+  reg.handle(CH.hoursActivity, async (e, ids: unknown) => {
+    if (isRemote(e)) return {};
+    const raw = await sources.hoursActivity(Array.isArray(ids) ? ids : []);
+    const out: Record<string, SessionActivity> = {};
+    for (const [id, a] of Object.entries(raw))
+      out[id] = {
+        spans: a.spans,
+        account: hoursAccount(
+          {
+            recorded: sessionAccounts.get({ sessionId: id, key: a.key }),
+            origin: a.cwd ? await originNow(a.cwd) : null,
+          },
+          getConfig(),
+        ),
+      };
+    return out;
+  });
+  reg.handle(CH.hoursExport, async (e, csv: unknown, name: unknown) => {
+    if (isRemote(e) || typeof csv !== "string" || csv.length > 5_000_000)
+      return null;
+    const file =
+      typeof name === "string" && /^[\w.-]{1,80}\.csv$/.test(name)
+        ? name
+        : "hours.csv";
+    const r = await dialog.showSaveDialog(win!, {
+      defaultPath: join(app.getPath("downloads"), file),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, csv);
+    return r.filePath;
+  });
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
   reg.handle(CH.setSettings, (e, s: unknown) =>
     sources.setSettings(
