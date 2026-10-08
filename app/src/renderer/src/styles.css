@@ -1151,6 +1151,18 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .wf-builder-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wf-builder-term > * { flex: 1; min-height: 0; }
 .wf-builder-tip { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--line); }
+/* Create with Claude's settings bar (TicketSettingsBar): one line collapsed, pickers expanded. */
+.tsb { border-top: 1px solid var(--line); background: var(--bg-2); flex: none; }
+.tsb.open { max-height: 45vh; overflow-y: auto; }
+.tsb-line { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: none; color: inherit; font: inherit; font-size: 12px; padding: 6px 10px; cursor: pointer; text-align: left; }
+.tsb-line:hover { background: var(--bg-3); }
+.tsb-icon { color: var(--muted); width: 10px; flex: none; }
+.tsb-sum { display: flex; flex-wrap: wrap; gap: 0 6px; min-width: 0; }
+.tsb-sum > span + span::before { content: '·'; margin-right: 6px; color: var(--muted); }
+.tsb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 10px; padding: 2px 10px 10px; }
+.tsb-grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tsb-grid label { font-size: 11px; color: var(--muted); }
+.tsb-grid .tsb-wide { grid-column: 1 / -1; }
 .wf-editor { gap: 0; }
 .wf-canvas { margin-right: 0; }
 .wf-builder { width: auto; min-width: 320px; max-width: none; }

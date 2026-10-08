@@ -90,6 +90,34 @@ describe('pumpTicketDir', () => {
   })
 })
 
+describe('pumpTicketDir with a settings bar', () => {
+  const bar = { repo: 'acme/web', project: 'acme/1', status: 'Todo', assignees: ['ann'], labels: ['bug'], milestone: '', sprint: '@current', sprintField: 'Sprint' }
+  const run = async (args: string[], settings: unknown) => {
+    const d = mkdtempSync(join(tmpdir(), 'tps-'))
+    mkdirSync(join(d, 'requests'))
+    writeFileSync(join(d, 'context.json'), JSON.stringify({ settings }))
+    writeFileSync(join(d, 'requests', '1-1-1.req'), [...args, ''].join('\0'))
+    const seen: Record<string, unknown>[] = []
+    await pumpTicketDir(d, async (p) => (seen.push(p), { ok: true, url: 'https://github.com/acme/web/issues/3', number: 3 }))
+    return { seen, answer: JSON.parse(readFileSync(join(d, 'answers', '1-1-1.json'), 'utf8')) }
+  }
+  it("creates with the bar's values, whatever the session passed, and says which it replaced", async () => {
+    const { seen, answer } = await run(['--title', 'T', '--repo', 'acme/api', '--assignee', 'bob', '--milestone', 'v2', '--status', 'Todo'], bar)
+    expect(seen[0]).toMatchObject({ title: 'T', repo: 'acme/web', project: 'acme/1', status: 'Todo', assignees: ['ann'], labels: ['bug'], sprint: '@current', sprintField: 'Sprint' })
+    expect(seen[0].milestone).toBeUndefined()
+    expect(answer.applied).toMatchObject({ repo: 'acme/web', assignees: ['ann'], sprint: '@current' })
+    expect(answer.overridden.map((o: { field: string }) => o.field)).toEqual(['repo', 'assignees', 'milestone'])
+    expect(answer.note).toContain('settings bar')
+  })
+  it('without a bar (or a bad one) the flags pass as before', async () => {
+    for (const s of [undefined, { repo: 'not a repo' }]) {
+      const { seen, answer } = await run(['--title', 'T', '--repo', 'acme/api'], s)
+      expect(seen[0]).toMatchObject({ repo: 'acme/api' })
+      expect(answer.applied).toBeUndefined()
+    }
+  })
+})
+
 describe('isTicketBuilderSession', () => {
   it("is the shared folder's or any tab folder's session, or one named md-ticket-builder[-tab]", () => {
     const h = '/h'

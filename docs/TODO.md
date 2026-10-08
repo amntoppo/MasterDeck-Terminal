@@ -488,6 +488,17 @@ fixes it, and move the item here to "Recently done".
 - **The phone API `session.start` has no `peers`.** A session started from a phone cannot be linked at
   start; it can be linked after, from its details.
 
+## Create with Claude settings bar: open points (2026-10-09, issue #68)
+
+- **Not run against GitHub.** A ticket created through the bar (assignees, labels, milestone,
+  sprint) was checked with fake creates only; the first real one is the user's.
+- **The bar is per session in memory.** Closing the app (or the tab) loses its edits; it starts again
+  from where the + was clicked. Persist it per tab if that is missed.
+- **One bar for every ticket.** "Split this into tickets" in different repositories means changing the
+  bar between them; per-ticket values would need the bar to hold a list.
+- **Labels or a milestone the repository lacks** (from the tab's filters) are only caught by
+  `gh issue create` failing; the bar does not drop them once the repository's labels load.
+
 ## Product ideas (from the user, 2026-10-03)
 
 - **P2 · Working hours per GitHub account, from tickets worked on.** Estimate time worked per
@@ -500,6 +511,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |

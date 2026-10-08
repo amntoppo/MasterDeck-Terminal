@@ -581,7 +581,15 @@ creation.
   `./create-ticket.sh` (the one command it may run without asking), and the Board refreshes with a
   note of what it created. What you typed in the dialog is handed over as a draft it shows you
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
-  command). **New chat** starts over.
+  command). **New chat** starts over (the settings bar keeps its values).
+  - **The settings bar**, below the chat, says what every ticket it creates gets: repository,
+    people, column (and board, with several), sprint, labels and milestone, on one line. Click it to
+    change them (label and milestone choices follow the repository; column and sprint follow the
+    board); a change applies to the next ticket, without a new chat. It starts from where you
+    clicked: the column, the tab's filters and sprint, or what you picked in the New ticket dialog.
+    The bar always wins: MasterDeck creates the ticket with its values whatever Claude passes. Ask
+    for something else in the chat ("assign it to Ravi") and Claude says the bar's value applies, so
+    change it in the bar; if Claude passed another value anyway, it tells you which one was used.
   With two or more GitHub accounts each Board tab has its own Create with Claude session, working
   as the tab's account (its header says `as @login`; its folder is
   `~/.claude/masterdeck/ticket-builder/tab-<tab id>/`). Tickets it creates go in as that account.

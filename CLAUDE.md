@@ -149,7 +149,7 @@ web tabs keep working.
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
-| Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
+| Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
@@ -356,7 +356,22 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-06)
+## Current state and next steps (2026-10-09)
+
+- **Create with Claude's settings bar** (issue #68) is built on branch
+  `worktree-MasterDeck-Terminal-68-ticket-settings`: not merged, not pushed, **not installed** (the
+  rebuild and relaunch of the real app waits for the user's word). A bar below the chat, collapsed
+  to one line (repo · people · column (board) · sprint · labels · milestone), expanded to pickers;
+  it starts from the + column, the tab's filters and sprint, or the dialog's draft; each change
+  rewrites `context.json` (`settings`) and the create pump enforces it on the next ticket
+  (`enforceSettings`), answering with `applied` and any `overridden` value. A conflict is handled one
+  way: Claude says the bar's value applies, and the user changes it in the bar. Checked: typecheck,
+  vitest (142 files passed, 2 skipped; 1620 tests passed, 4 skipped, before the last sprint fix; the
+  touched files again after it), and the isolated app with a fixture board and a stand-in `claude`
+  (the collapsed line and expanded pickers, a board change moving status and sprint and reaching
+  `context.json`, a hand-made dry-run request answered with the bar's values and four overrides).
+  Not checked: a real Claude session following the briefing, a real create on GitHub, the web app,
+  a phone, two or more accounts on screen, Windows. Open points: TODO ("Create with Claude settings bar").
 
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
