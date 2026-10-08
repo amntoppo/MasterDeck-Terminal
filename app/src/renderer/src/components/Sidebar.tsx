@@ -8,6 +8,8 @@ import {
   sessionForProposal,
 } from "@shared/derive";
 import { inOrder, moveBefore, trimOrder, withNew } from "@shared/sessionOrder";
+import { pruneStars, splitStarred } from "@shared/stars";
+import { setStars, toggleStar, useStars } from "../stars";
 import { NewMenu, type NewAction } from "./NewMenu";
 import { StatusDialog } from "./StatusDialog";
 import { SessionMenu } from "./SessionMenu";
@@ -81,6 +83,8 @@ export interface ColumnTab {
 export type SessionAction = "summary" | "close-tab";
 
 const ORDER_KEY = "sessionOrder";
+/** When each starred session was first missing from the list (see pruneStars). */
+const starsMissingSince = new Map<string, number>();
 
 const STATE_LABEL: Record<string, string> = {
   working: "working",
@@ -180,6 +184,13 @@ export function Sidebar({
       state.manualStatus[s.key],
     );
   const live = sessions.filter((s) => s.state !== "suspended");
+  // Starred: pinned above the status groups, whatever their status; an ended one loses its star.
+  const stars = useStars();
+  useEffect(
+    () => setStars(pruneStars(stars, state.sessions, starsMissingSince)),
+    [stars, state.sessions],
+  );
+  const { starred, rest: unstarred } = splitStarred(live, stars);
   const suspended = sessions.filter((s) => s.state === "suspended");
 
   // Cleanup: rows become selectable (merged ones picked); Stop ends the picked sessions.
@@ -229,6 +240,8 @@ export function Sidebar({
         active={s.key === activeKey}
         now={now}
         status={status}
+        starred={stars.includes(s.key)}
+        onStar={() => toggleStar(s.key)}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
       />
@@ -390,8 +403,19 @@ export function Sidebar({
             No live sessions. Start one from the board, or open a shell.
           </div>
         )}
+        {starred.length > 0 && (
+          <div className="section">
+            <div
+              className="section-head lane-starred"
+              title="Sessions you starred stay here whatever their status. Unstar to send one back to its group."
+            >
+              Starred <span className="count">{starred.length}</span>
+            </div>
+            {starred.map((s) => rowFor(s, statusOf(s)))}
+          </div>
+        )}
         {LANES.filter((l) => l.id !== "parked").map((l) => {
-          const list = live.filter((s) => laneOf(statusOf(s).key) === l.id);
+          const list = unstarred.filter((s) => laneOf(statusOf(s).key) === l.id);
           if (!list.length) return null;
           return (
             <div className="section" key={l.id}>
@@ -481,6 +505,8 @@ export function Sidebar({
             onMove={() =>
               move(menu.s.key, inOrder(shownSessions, order)[0]?.key ?? null)
             }
+            starred={stars.includes(menu.s.key)}
+            onStar={() => toggleStar(menu.s.key)}
             flash={flash}
           />
         )}
@@ -814,6 +840,8 @@ function SessionRow({
   status,
   onClick,
   pick,
+  starred,
+  onStar,
   dragging,
   dropBefore,
   ...drag
@@ -825,6 +853,9 @@ function SessionRow({
   onClick: () => void;
   /** Cleanup: picked or not; null when it can't be stopped. Undefined outside Cleanup. */
   pick?: boolean | null;
+  /** Starred or not, and its toggle; absent (Cleanup) shows no star. */
+  starred?: boolean;
+  onStar?: () => void;
   dragging?: boolean;
   dropBefore?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -862,6 +893,20 @@ function SessionRow({
           <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
         )}
         <AccountBadge login={s.account} ghActive={s.ghActive} />
+        {onStar && (
+          <button
+            className={`srow-star ${starred ? "on" : ""}`}
+            aria-label={starred ? `Unstar ${s.name}` : `Star ${s.name}`}
+            aria-pressed={!!starred}
+            title={starred ? "Unstar: back to its status group" : "Star: keep it in Starred at the top"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStar();
+            }}
+          >
+            {starred ? "★" : "☆"}
+          </button>
+        )}
       </div>
       <div className="srow-sub">
         <span className={`st-${status?.key ?? s.state}`}>

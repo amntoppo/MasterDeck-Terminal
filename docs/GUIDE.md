@@ -8,7 +8,7 @@ One window for all your Claude Code sessions, laid out as a command center:
   above the bottom buttons means a browser, phone or API client is connected right now (see
   *Remote connections* below).
 - **Terminals:**
-  - **Sessions column:** what needs you, then every session grouped by what it needs (Needs you,
+  - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
     sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
     side by side; **+** opens the new-terminal / new-session menu.
@@ -364,8 +364,13 @@ checkout whose branch was once linked to a ticket does not link it.
   session in another terminal is stopped there.
 - **Session order:** within each group the column keeps your order. A session moves to another
   group only when what it needs changes. Drag a session to move it; right-click → Move to top.
+- **Starred sessions:** click the ☆ on a session's row (it shows on hover), right-click → Star, or
+  **☆ Star** in the Details tab. A starred session sits in **Starred** at the top of the column and
+  stays there whatever its status; its row still shows the status. Unstar it to send it back to its
+  group. Stopping it, or it ending, takes the star off. Stars are kept across restarts (per
+  window: the web app keeps its own). With nothing starred the section is hidden.
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
-  Open folder in editor, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
+  Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
 - **Session status:** the column and the Details tab show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more

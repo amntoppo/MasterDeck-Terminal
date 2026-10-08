@@ -20,6 +20,8 @@ export function SessionMenu({
   onStatus,
   onAction,
   onMove,
+  starred,
+  onStar,
   flash,
 }: {
   s: Session
@@ -31,6 +33,8 @@ export function SessionMenu({
   onStatus: () => void
   onAction: (a: SessionAction) => void
   onMove: (where: 'top') => void
+  starred: boolean
+  onStar: () => void
   flash: (m: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -92,6 +96,7 @@ export function SessionMenu({
           Open folder in editor
         </button>
       )}
+      <button onClick={run(onStar)}>{starred ? 'Unstar' : 'Star'}</button>
       <button onClick={run(() => onMove('top'))}>Move to top</button>
       {canStop && (
         <>
