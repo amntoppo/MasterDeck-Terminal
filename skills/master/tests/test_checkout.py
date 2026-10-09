@@ -563,5 +563,147 @@ class ParkedTest(Base):
         self.assertEqual(self.parked(), {})
 
 
+# globex/app's issues are built in acme/api (alice's repository); bob files them.
+CODE = [{"issues": "globex/app", "code": "acme/api"}]
+
+
+class CodeLivesInTest(Base):
+    """Issue #61, case 1: an issue filed in one repository (a tracker) and built in another starts in
+    the other one's checkout, as that repository's account, when Setup says so."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.tmp / "globex"
+        self.other.mkdir()
+
+    def test_pairs_are_read_and_bad_ones_dropped(self):
+        self.cfg(codeRepos=CODE + [{"issues": "GLOBEX/app", "code": "acme/web"}, {"issues": "x/y", "code": "x/y"},
+                                   {"issues": "nope", "code": "acme/api"}, "acme/api", {"issues": "a/b"}])
+        self.assertEqual(config.code_repos(), {"globex/app": "acme/api"})  # the first pair for a repository wins
+        self.assertEqual(config.code_repo("Globex/App"), "acme/api")
+        self.assertEqual(config.code_repo("acme/tracker"), "acme/tracker")
+
+    def test_the_session_starts_in_the_code_checkout_as_its_account(self):
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))], codeRepos=CODE)
+        clone(self.other / "app", "git@github.com:globex/app.git")   # the tracker's own checkout is not picked
+        api = clone(self.ws / "api", "git@github.com:acme/api.git")
+        self.assertEqual(config.start_account("globex/app"), "alice")
+        r = checkout.resolve("globex/app")
+        self.assertEqual((r["cwd"], r["workspace"], r["repo"], r["filedIn"], r["found"]),
+                         (str(api), str(self.ws), "acme/api", "globex/app", True))
+        sp = rules._assign(issue(7, "globex/app"))["target"]["spawn"]
+        self.assertEqual((sp["cwd"], sp["account"]), (str(api), "alice"))
+        self.assertIn("1. Read the issue. This folder is a checkout of acme/api, where the code of globex/app issues lives. "
+                      "Work in a git worktree here for app#7", sp["prompt"])
+        self.assertNotIn("If the work belongs in another repository", sp["prompt"])
+
+    def test_no_checkout_of_the_code_names_it_in_the_prompt(self):
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))], codeRepos=CODE)
+        r = checkout.resolve("globex/app")
+        self.assertEqual((r["cwd"], r["found"], r["repo"], r["filedIn"]), (str(self.ws), False, "acme/api", "globex/app"))
+        sp = rules._assign(issue(7, "globex/app"))["target"]["spawn"]
+        self.assertIn(f"1. Read the issue. Its code lives in acme/api (it is filed in globex/app): find that repository's "
+                      f"checkout under {self.ws} and work in a git worktree there for app#7", sp["prompt"])
+
+    def test_a_code_repository_no_account_lists_keeps_the_issue_account(self):
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))], codeRepos=[{"issues": "globex/app", "code": "initech/engine"}])
+        self.assertEqual(config.start_account("globex/app"), "bob-work")
+        self.assertEqual(checkout.resolve("globex/app")["workspace"], str(self.other))
+
+    def test_one_account_and_no_accounts_follow_the_pair_too(self):
+        api = clone(self.ws / "api", "git@github.com:acme/api.git")
+        for accs in ([], [A]):
+            checkout.forget()
+            with mock.patch.dict(config.CONFIG, {"workspace": str(self.ws), "accounts": accs, "codeRepos": CODE}):
+                self.assertIsNone(config.start_account("globex/app"))
+                self.assertEqual(checkout.resolve("globex/app")["cwd"], str(api))
+                self.assertNotIn("account", rules._assign(issue(7, "globex/app"))["target"]["spawn"])
+
+    def test_without_pairs_nothing_changes(self):
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))])
+        r = checkout.resolve("globex/app")
+        self.assertNotIn("filedIn", r)
+        self.assertEqual(rules._assign(issue(7, "globex/app"))["target"]["spawn"]["prompt"],
+                         (PROMPTS / "assign_main_other_repo.txt").read_text(encoding="utf-8"))
+
+    def test_a_pr_repository_is_never_mapped(self):
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))], codeRepos=CODE)
+        app = clone(self.other / "app", "git@github.com:globex/app.git")
+        r = checkout.resolve("globex/app", mapped=False)
+        self.assertEqual((r["cwd"], r["repo"], r["found"]), (str(app), "globex/app", True))
+        self.assertNotIn("filedIn", r)
+
+    def test_setup_saves_and_replaces_the_pairs(self):
+        p = self.tmp / "config.json"
+        cfg = setup.save({"accounts": [A, B], "codeRepos": CODE + [{"issues": "acme/tracker", "code": "acme/api"}]}, p)
+        self.assertEqual(len(cfg["codeRepos"]), 2)
+        setup.save({"codeRepos": CODE}, p)  # a list: the save replaces it, a dropped pair is gone
+        self.assertEqual(json.loads(p.read_text())["codeRepos"], CODE)
+        cfg = setup.save({"masterEnabled": False}, p)
+        self.assertEqual(cfg["codeRepos"], CODE)
+        for bad in ([{"issues": "globex/app"}], [{"issues": "globex/app", "code": "not a repo"}], {"globex/app": "acme/api"}):
+            with self.assertRaises(ValueError):
+                setup.save({"codeRepos": bad}, p)
+
+
+class PickedAccountTest(Base):
+    """Issue #61, cases 2 and 3: the account a session runs as decides the workspace looked in, when
+    the Start dialog picks another one, and for a PR review (its PR's repository's account)."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.tmp / "globex"
+        self.cfg(accounts=[A, dict(B, workspace=str(self.other))])
+        self.mine = clone(self.ws / "app", "git@github.com:globex/app.git")      # alice's copy of bob's repository
+        self.bobs = clone(self.other / "app", "git@github.com:globex/app.git")
+
+    def run_cli(self, *argv):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main(list(argv))
+        return code, buf.getvalue()
+
+    def test_resolve_looks_in_the_given_account_workspace(self):
+        self.assertEqual(checkout.resolve("globex/app")["cwd"], str(self.bobs))
+        r = checkout.resolve("globex/app", account="alice")
+        self.assertEqual((r["cwd"], r["workspace"], r["found"]), (str(self.mine), str(self.ws), True))
+        self.assertEqual(checkout.resolve("globex/app", account="ALICE")["cwd"], str(self.mine))
+        # A login that is not connected: the primary's, as for a repository no account lists.
+        self.assertEqual(checkout.resolve("globex/app", account="mallory")["workspace"], str(self.ws))
+
+    def test_draft_assign_with_an_account(self):
+        args = ("draft-assign", "7", "--repo", "globex/app", "--title", "T", "--url", "https://github.com/globex/app/issues/7")
+        d = json.loads(self.run_cli(*args)[1])
+        self.assertEqual((d["cwd"], d["account"]), (str(self.bobs), "bob-work"))
+        d = json.loads(self.run_cli(*args, "--account", "alice")[1])
+        self.assertEqual((d["cwd"], d["workspace"], d["found"], d["account"]), (str(self.mine), str(self.ws), True, "alice"))
+        # A chosen folder stays whatever the account.
+        d = json.loads(self.run_cli(*args, "--account", "alice", "--cwd", str(self.tmp))[1])
+        self.assertEqual((d["cwd"], d["account"]), (str(self.tmp), "alice"))
+
+    def test_checkout_with_an_account(self):
+        code, out = self.run_cli("checkout", "globex/app", "--account", "alice")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((json.loads(out)["cwd"], json.loads(out)["workspace"]), (str(self.mine), str(self.ws)))
+
+    def test_add_without_a_folder_looks_in_its_account_workspace(self):
+        self.run_cli("add", "--kind", "ASSIGN", "--issue", "7", "--repo", "globex/app", "--source", "f:1", "--summary", "s",
+                     "--message", "m", "--spawn-name", "app-7-x", "--prompt", "do it", "--account", "alice")
+        self.assertEqual(ledger.load()["proposals"][-1]["target"]["spawn"]["cwd"], str(self.mine))
+
+
+class ResumeAccountTest(Base):
+    """A resume with no recorded account keeps the issue's account, never the code repository's: a
+    resume as another account than the session's own adds --settings and starts a copy."""
+
+    def test_an_orphan_resume_falls_back_to_the_issue_account(self):
+        self.cfg(accounts=[A, B], codeRepos=CODE)
+        led = ledger.empty()
+        resume = {"target": {"spawn": {"name": "app-7-x", "resume": "4f2a9c1e-1234-4abc-9def-0123456789ab"}}, "repo": "globex/app"}
+        new = {"target": {"spawn": {"name": "app-8-x", "prompt": "go"}}, "repo": "globex/app"}
+        self.assertEqual(spawn.default_account(led, resume, str(self.tmp)), "bob-work")
+        self.assertEqual(spawn.default_account(led, new, str(self.tmp)), "alice")
+
+
 if __name__ == "__main__":
     unittest.main()

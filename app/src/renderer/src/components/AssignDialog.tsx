@@ -7,9 +7,9 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import { composePrompt, earlierBlock, peersPromptBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
-import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
+import { startAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
-import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
+import { adoptFresh, folderKind, folderOf, refindOnAccount, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
 import { startBlocked, startFlags, trustHeldAssign } from "@shared/trust";
 import { baseError, branchError, parsePrefs, PERMISSION_MODES, prefsKey, ticketBranch, worktreeDir, worktreeNote, type StartPrefs } from "@shared/startOptions";
 import { AccountBadge, AccountSelect } from "./AccountBits";
@@ -88,8 +88,9 @@ export function AssignDialog({
   const [configuredModel, setConfiguredModel] = useState<string | null>(null);
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState(prefs?.workflow ?? "default");
-  // The issue's account by default; picking another starts (or resumes) as that one.
-  const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null } }, state.config);
+  // The account of the repository the ticket's code is in (else the issue's) by default; picking
+  // another starts (or resumes) as that one, and its workspace is looked in for the folder.
+  const defAccount = startAccount(issue.repo ?? null, state.config);
   const [account, setAccount] = useState<string | null>(defAccount);
   const [accountPicked, setAccountPicked] = useState(false);
   const override = accountOverride(account, defAccount, state.config);
@@ -151,6 +152,27 @@ export function AssignDialog({
     const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
     if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
     setFolder(folderOf(r.draft));
+    swapPrompt(r.draft);
+  };
+  // Another account picked: the folder is looked for again in its workspace (the latest pick wins).
+  // `picked`: the account the folder must be looked for in now (undefined: the ticket's default).
+  // `looking`: lookups under way; Start waits for them, so a folder never leaves with another
+  // account than the one it was found for.
+  const picked = useRef<string | undefined>(undefined);
+  const lookups = useRef(0);
+  const [looking, setLooking] = useState(0);
+  const track = <T,>(p: Promise<T>): Promise<T> => {
+    setLooking((n) => n + 1);
+    return p.finally(() => setLooking((n) => n - 1));
+  };
+  const refind = async (from: StartFolder | null) => {
+    if (!refindOnAccount(from, chosen, !!held)) return;
+    const n = ++lookups.current;
+    const other = picked.current;
+    const r = await track(deck().draftAssign(ticketOf(issue), issue.title, issue.url, undefined, other));
+    if (!r.ok || n !== lookups.current || chosenPath.current) return;
+    setFolder(folderOf(r.draft));
+    setAnyway(false);
     swapPrompt(r.draft);
   };
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
@@ -269,10 +291,11 @@ export function AssignDialog({
         proposalId: fromProposal.id,
       });
       // The proposal only has its folder: look the ticket up now, for where it would start today.
-      void deck()
-        .draftAssign(ticketOf(issue), issue.title, issue.url)
+      const asked = picked.current;
+      const n = ++lookups.current;
+      void track(deck().draftAssign(ticketOf(issue), issue.title, issue.url))
         .then((r) => {
-          if (!alive || !r.ok || chosenPath.current) return;
+          if (!alive || !r.ok || chosenPath.current || n !== lookups.current) return;
           const was = sp.cwd ?? state.masterWorkspace;
           const now = adoptFresh(was, r.draft, state.config.workspace || state.masterWorkspace);
           setFolder(now);
@@ -282,6 +305,8 @@ export function AssignDialog({
             if (r.draft.genericPrompt) generic.current.push(r.draft.genericPrompt);
             swapPrompt(r.draft);
           } else learn(r.draft);
+          // Another account was picked while this ran (the pick could not look yet): look again for it.
+          if (picked.current !== asked) void refind(now);
         });
       return () => {
         alive = false;
@@ -326,7 +351,7 @@ export function AssignDialog({
       peersPromptBlock(peerFactsFor(state, peers, peerSummaries)),
     );
   const promptOk = compose().length > 0 && !compose().startsWith("-");
-  const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError;
+  const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError && !looking;
 
   const start = async () => {
     if (!draft || !ready) return;
@@ -711,6 +736,8 @@ export function AssignDialog({
                   <AccountSelect state={state} value={account} onChange={(l) => {
                       setAccount(l);
                       setAccountPicked(true);
+                      picked.current = accountOverride(l, defAccount, state.config) ?? undefined;
+                      void refind(folder);
                     }}
                   />
                 </div>
@@ -982,14 +1009,16 @@ function StartFolderLine({
           </>
         ) : kind === "missing" ? (
           <>
-            No checkout of {folder.checkoutOf} found in{" "}
+            No checkout of {folder.checkoutOf}
+            {folder.filedIn ? <> (where {folder.filedIn}'s code lives)</> : null} found in{" "}
             <code className="mono">{folder.workspace || folder.cwd}</code>. The
             session starts in that folder and has to find the repository
             itself.
           </>
         ) : kind === "found" ? (
           <>
-            Starts in {dir}, your checkout of {folder.checkoutOf}.
+            Starts in {dir}, your checkout of {folder.checkoutOf}
+            {folder.filedIn ? <> (where {folder.filedIn}'s code lives)</> : null}.
           </>
         ) : kind === "chosen-found" ? (
           <>

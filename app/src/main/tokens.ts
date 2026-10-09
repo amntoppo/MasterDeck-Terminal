@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { open, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { mergeByDay, newFileTally, tallyLines, type FileTally, type TokensByDay } from '@shared/tokens'
+import { mergeByDay, newFileTally, tallyLines, type FileTally, type Span, type TokensByDay } from '@shared/tokens'
 import type { TranscriptIndex } from './files'
 
 const CHUNK = 4 * 1024 * 1024
+const VERSION = 2
 
 /**
  * Tokens per session and day, from its transcript and its subagents' transcripts. Each file's
@@ -23,7 +24,8 @@ export class TokenIndex {
   ) {
     try {
       const raw = JSON.parse(readFileSync(cachePath, 'utf8'))
-      if (raw && typeof raw === 'object' && raw.files && typeof raw.files === 'object') this.files = raw.files
+      // Version 1 had no activity spans: read every transcript again once.
+      if (raw && typeof raw === 'object' && raw.version === VERSION && raw.files && typeof raw.files === 'object') this.files = raw.files
     } catch {
       // first run: start empty
     }
@@ -74,14 +76,14 @@ export class TokenIndex {
     }
   }
 
-  /** Bring these sessions up to date and return tokens per day for each (one refresh at a time). */
-  refresh(sessionIds: string[]): Promise<Record<string, TokensByDay>> {
+  /** Bring these sessions up to date, then answer from their files' tallies (one read at a time). */
+  private read<T>(sessionIds: string[], pick: (tallies: FileTally[]) => T): Promise<Record<string, T>> {
     const run = async () => {
-      const out: Record<string, TokensByDay> = {}
+      const out: Record<string, T> = {}
       for (const id of sessionIds) {
         const paths = this.pathsFor(id)
         for (const p of paths) await this.readFile(p)
-        if (paths.length) out[id] = mergeByDay(paths.map((p) => this.files[p]?.byDay ?? {}))
+        if (paths.length) out[id] = pick(paths.map((p) => this.files[p]).filter((t): t is FileTally => !!t))
       }
       // Live sessions add lines every few seconds: write the cache at most every 30 s (and on quit).
       if (Date.now() - this.savedAt > 30_000) this.save()
@@ -92,12 +94,22 @@ export class TokenIndex {
     return next
   }
 
+  /** Tokens per day for each of these sessions. */
+  refresh(sessionIds: string[]): Promise<Record<string, TokensByDay>> {
+    return this.read(sessionIds, (ts) => mergeByDay(ts.map((t) => t.byDay)))
+  }
+
+  /** When each of these sessions was active: its own and its subagents' spans (not merged). */
+  activity(sessionIds: string[]): Promise<Record<string, Span[]>> {
+    return this.read(sessionIds, (ts) => ts.flatMap((t) => t.spans ?? []))
+  }
+
   save(): void {
     if (!this.dirty) return
     this.dirty = false
     this.savedAt = Date.now()
     try {
-      writeFileSync(`${this.cachePath}.tmp`, JSON.stringify({ version: 1, files: this.files }))
+      writeFileSync(`${this.cachePath}.tmp`, JSON.stringify({ version: VERSION, files: this.files }))
       renameSync(`${this.cachePath}.tmp`, this.cachePath)
     } catch {
       this.dirty = true

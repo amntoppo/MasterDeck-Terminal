@@ -10,7 +10,7 @@ One window for all your Claude Code sessions, laid out as a command center:
 - **Terminals:**
   - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
-    sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
+    sessions starting, and Parked; a **Filters** line above the groups narrows the list. Click one to open its terminal. **Split** shows two terminals
     side by side; **+** opens the new-terminal / new-session menu.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
@@ -140,13 +140,24 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   Mac, not in the web app) picks any other folder for this session; if it is a checkout of the
   repository the prompt says so. The prompt changes with the folder only while it is MasterDeck's
   own text: one you edited, or one master wrote for its proposal, is left alone. With two or more
-  accounts the line also says who the session runs as. A ticket with no repository of its own is
-  looked up as the primary repository.
+  accounts the line also says who the session runs as, and the folder is looked for in that
+  account's workspace: picking another **Account** looks again in the picked account's workspace
+  (not after **Choose folder…**, and not for a refused start being tried again). A ticket with no
+  repository of its own is looked up as the primary repository.
+  **Issues built in another repository** (an issue tracker whose code lives elsewhere): add the pair
+  in Setup → Repos & boards, under **Issues whose code is in another repository** (issues filed in
+  `acme/tracker`, code in `acme/api`). A ticket of the tracker then starts in the checkout of
+  `acme/api`, as the account that has `acme/api` (else the tracker's), and the line says "your
+  checkout of acme/api (where acme/tracker's code lives)". The system prompt names the code
+  repository instead of asking the session to find it. The session runs as the code repository's
+  account, so that account must be able to read the tracker: a private tracker under another
+  account cannot be read from the session (pick the tracker's account in the Start dialog then).
   For master's proposal the dialog looks the ticket up again: a checkout that exists now replaces
   the proposal's folder only when that folder is the plain workspace (a folder master chose on
   purpose stays), and the new proposal keeps the proposal's model; when nothing differs, master's
   own proposal is approved as it is. master's ASSIGN proposals and a PR's **Start review** (for the
-  PR's repository) pick the folder the same way, and so does `master add` without `--cwd` for an
+  PR's repository, as the PR's repository's account: it reads and pushes there; the card's issue
+  repository's account only when no account has the PR's) pick the folder the same way, and so does `master add` without `--cwd` for an
   ASSIGN or a PR review of a real issue; a meeting's session and any other kind start in the
   workspace, as before.
 - **The PR of the folder's branch:** a session working by hand in a repository's main checkout on a
@@ -369,6 +380,21 @@ checkout whose branch was once linked to a ticket does not link it.
   stays there whatever its status; its row still shows the status. Unstar it to send it back to its
   group. Stopping it, or it ending, takes the star off. Stars are kept across restarts (per
   window: the web app keeps its own). With nothing starred the section is hidden.
+- **Filter the sessions:** the **Filters** line above the session groups is closed by default;
+  click it to open the search (on the session name, its ticket and its repository's folder, every
+  word must match) and the
+  choices: **Status** (the column's groups, and Parked), **Account** (only with two or more
+  accounts; "gh's active account" for a session started without one), **Repo** (the folder each
+  session runs in; a session in a worktree counts under its repository) and **★ Starred only**.
+  Within one kind any picked value matches; different kinds must all match. Closed, the line shows
+  how many filters are on and a chip for each (× removes it; more than fit scroll sideways), and
+  **Clear all**; closed, the line stays at the top while the list scrolls. When nothing matches,
+  the column says so with **Clear filters**. Picking Parked opens the Parked fold (it stays open
+  while that filter is on). Shells and starting sessions show only when no status, account, repo
+  or star filter is on, and the search looks at their names. A folder chip shows as many parts of
+  the path as it takes to tell two folders of one name apart. Cleanup offers only the sessions the
+  filters show. The filters and
+  whether the line is open are kept across restarts (per window: the web app keeps its own).
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
   Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
 - **Session status:** the column and the Details tab show one status, first match wins:
@@ -516,6 +542,22 @@ creation.
   baseline: it's in All time and ticket totals, but not in any day. **USD / Tokens** (top right)
   switches the whole view to tokens: the figures, the chart and both tables (sorted by tokens), with
   dollars as the second figure. The choice is remembered.
+- **Hours (Costs view, desktop only):** the third choice beside USD / Tokens: an *estimate* of how
+  long you worked per GitHub account, per day and per ticket, from when your sessions on this Mac
+  were active (every line of their transcripts and their subagents'). It is not a time tracker. The
+  rule is written next to the numbers: a gap of up to 1 hour between a session's activity counts as
+  working, a longer one does not (pick 15 min, 30 min, 1 h or 2 h; remembered), whether you were there
+  or the session worked on its own. An account counts each minute once, however many of its sessions
+  were active then; a ticket gets its full time, so two tickets worked from 10:00 to 11:00 show 1 h
+  each and 1 h for the account. A session with no ticket counts for its account only. A session's
+  account is the one it was started as, else the account of its folder's repository, else of its
+  ticket's repository (a removed worktree), else (with one account) that account; anything else is
+  listed as **unknown account**. A resumed session is one session: the gap across the resume is
+  filled like any other. All of a session's time goes to the ticket it is linked to now. The numbers
+  refresh every minute while the tab is open. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
+  per account and day, then its tickets) where you choose. Only this Mac's sessions are counted, and
+  only sessions the Costs view knows (those with a status line record). Nothing of it goes to the
+  web app, a phone or the API.
 - **Context warnings:** at the warning level (85% by default), a notification (once), a Needs-you card
   and **Compact now** in the Details tab, which types `/compact`.
 - **Budget per ticket:** past $X (Settings), a notification (once) and a Needs-you card. Board cards show
@@ -783,7 +825,9 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   is connected to this account" and keeps retrying slowly.
 - **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
   the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
-  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (another Mac is
+  MasterDeck connects once its session list is in, so waiting commands find their sessions; if
+  `claude agents` fails the status says why, and after a minute it connects anyway: phone and API
+  commands then fail with that reason, and the phone keeps its last session list, until the list is in), red an error that needs you (another Mac is
   connected, or MasterDeck is too old for the backend), grey off. If the server signs this Mac out
   (or the account was deleted) the line stops and says so.
 - **Security:** anyone signed in to your account can drive your Claude sessions. Keep your password
@@ -908,7 +952,8 @@ is a `gh` login (`gh auth status` lists them).
   the + menu's repos and standup cover every account's workspace.
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
-  accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
+  accounts): it defaults to the account of the repository the issue's code is in (the issue's own
+  unless Setup says another), else the issue's repository's, else the folder's `origin`, else the
   primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog: that starts a copy of the conversation as the new account (a running session is

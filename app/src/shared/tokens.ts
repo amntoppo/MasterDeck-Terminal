@@ -60,25 +60,60 @@ export interface FileTally {
   byDay: TokensByDay
   /** Message ids counted lately: a message's repeated lines sit close together. */
   recent: string[]
+  /** When the session was active (shared/hours.ts): lines within SPAN_GRAIN of each other share a span. */
+  spans?: Span[]
 }
+
+/** [start, end] in epoch ms. */
+export type Span = [number, number]
+
+/** Lines this close together share a span; the hours estimate never uses a smaller idle gap. */
+export const SPAN_GRAIN = 5 * 60_000
 
 const RECENT = 64
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 
 export function newFileTally(): FileTally {
-  return { offset: 0, rest: '', byDay: {}, recent: [] }
+  return { offset: 0, rest: '', byDay: {}, recent: [], spans: [] }
 }
 
-/** Count the usage in these transcript lines into the tally. */
+/** A parsed transcript line's own time (epoch ms; NaN without one): the top-level key only. */
+const ownTime = (d: Record<string, unknown>): number => (typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN)
+
+/** A transcript line's own time; a "timestamp" nested in it (a tool result, a file snapshot) never counts. */
+export function lineTime(line: string): number {
+  try {
+    return ownTime(JSON.parse(line))
+  } catch {
+    return NaN
+  }
+}
+
+/** One moment of activity: it widens the last span when close to it, else opens one. */
+export function addMoment(spans: Span[], at: number): void {
+  const last = spans[spans.length - 1]
+  if (last && at >= last[0] - SPAN_GRAIN && at <= last[1] + SPAN_GRAIN) {
+    if (at < last[0]) last[0] = at
+    if (at > last[1]) last[1] = at
+  } else spans.push([at, at])
+}
+
+/** Count the usage in these transcript lines into the tally, and their times into its spans. */
 export function tallyLines(t: FileTally, lines: string[]): void {
+  const spans = (t.spans ??= [])
   for (const line of lines) {
-    if (!line.includes('"usage"')) continue
+    // Parsed once, for its time and its usage: a nested "timestamp" must not pass for the line's own.
+    if (!line.includes('"timestamp"') && !line.includes('"usage"')) continue
     let d: Record<string, unknown>
     try {
       d = JSON.parse(line)
     } catch {
       continue
     }
+    // Any line with a time is activity: a prompt, a reply, a tool run.
+    const at = ownTime(d)
+    if (Number.isFinite(at)) addMoment(spans, at)
+    if (!line.includes('"usage"')) continue
     const m = d.message as Record<string, unknown> | undefined
     const u = m && typeof m === 'object' ? (m.usage as Record<string, unknown> | undefined) : undefined
     if (!u || typeof u !== 'object') continue
@@ -88,7 +123,6 @@ export function tallyLines(t: FileTally, lines: string[]): void {
       t.recent.push(id)
       if (t.recent.length > RECENT) t.recent.splice(0, t.recent.length - RECENT)
     }
-    const at = typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN
     const day = dayOf(Number.isFinite(at) ? at : Date.now())
     t.byDay[day] = addTokens(t.byDay[day] ?? NO_TOKENS, {
       input: n(u.input_tokens),

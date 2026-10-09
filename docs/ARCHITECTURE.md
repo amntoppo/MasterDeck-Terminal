@@ -482,10 +482,16 @@ workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/
 `gh` directly on Windows).
 
 **Where a ticket's session starts** is decided in one place, `skills/master/lib/master/checkout.py`
-(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`, plus `partial` and `searched` when it
-was not found and a limit was reached): the workspace of the ticket's account
-(`config.workspace_for`: the account that lists the repository, else the primary; an account's own
-`workspace`, blank counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all).
+(`resolve(repo, cwd=None, account=None, mapped=True)` → `{cwd, workspace, repo, found}`, plus
+`filedIn` when the repository looked for is not the issue's, and `partial` and `searched` when it
+was not found and a limit was reached). The repository looked for is where the issue's code lives:
+`config.code_repo` (Setup's `codeRepos` pairs, `[{issues, code}]`, a list so a save replaces it;
+`mapped=False` for a PR's repository). It is looked for in the workspace of the account the session
+runs as (`config.workspace_for(repo, cfg, account)`: `account` when given, else the code
+repository's account, else the issue's, else the primary; an account's own `workspace`, blank
+counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all). That account is
+`config.start_account` (two or more accounts; the app's `startAccount` in `shared/accounts.ts` is
+the same rule, plus a PR review's repository first).
 First the folder named after the repository (`_named`: one directory read, no scan). Else `scan`:
 the workspace, its sub-folders, and the sub-folders of the plain ones; a `.git` folder whose
 `origin` is the repository, without case. The origin is read from `.git/config` (`_config_origin`,
@@ -499,10 +505,12 @@ longer a pure function of the snapshot. The tests' `conftest.py` points HOME, `M
 `MASTER_HOME` and `MASTER_WORKSPACE` into one temp sandbox before anything is imported and again
 before every test, and fails a test that leaves a path in the real home (`test_isolation.py`).
 Found: `cwd` is the checkout and step 1 of the ASSIGN prompt (`rules.assign_prompt`) says so, naming
-the workspace for an issue filed in one repository and built in another; else `cwd` is the workspace
-and the prompt is the text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
+the workspace for an issue filed in one repository and built in another; with a `codeRepos` pair it
+names the code repository instead (found or not); else `cwd` is the workspace and the prompt is the
+text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
 (master's proposals and `master draft-assign`, which also prints `workspace`, `found`, `checkoutOf`,
-`genericPrompt`, and takes `--cwd` for a folder the user chose), `master checkout <owner/name>`, and
+`genericPrompt`, `filedIn` and `account`, and takes `--cwd` for a folder the user chose and
+`--account` for another account than the ticket's), `master checkout <owner/name> [--account]`, and
 `checkout.default_cwd` for `master add` without `--cwd` and `master spawn` of a proposal without a
 folder: only an ASSIGN or PRREVIEW for an issue number above 0 is looked up; any other kind, issue 0
 and a resume keep `config.workspace()`.
@@ -524,13 +532,16 @@ travels as `AssignRequest.permissionMode` → `master add --permission-mode` →
 `bypassPermissions` is refused); like a model, it always makes a new proposal. The description's
 Preview is `shared/markdown.ts` (`parseMarkdown` → a tree; `safeHref` / `safeImage`: https only)
 drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the text; the CSP's
-`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. A PR
-review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
-`master checkout`. For web callers main drops only the `cwd` argument of `draftAssign`
-(`chosenFolder` in `main/remoteGuards.ts`; from the window it must be an absolute, existing folder);
-an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
-window, as `cwd` always was. Which account the session runs as is not part of this:
-`config.account_for_repo` / `defaultAccount` as before.
+`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. Picking another account asks for a draft with
+`--account` (`refindOnAccount`: not after Choose folder…, not for a held start, not for a
+proposal's own folder); main passes a connected login only (two or more accounts). A PR
+review names its repository (`AssignRequest.cwdRepo`): main's `assignNow` takes the picked account,
+else `startAccount(repo, cfg, cwdRepo)` (the PR's repository's account), and `inRepoFolder`
+(`main/assign.ts`) asks `master checkout --account` for it, so folder and account agree. For web
+callers main drops only the `cwd` argument of `draftAssign` (`chosenFolder` in
+`main/remoteGuards.ts`; from the window it must be an absolute, existing folder); an `assign`
+request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the window, as `cwd`
+always was.
 
 **Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
 was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust
@@ -776,6 +787,29 @@ waits, and writes nothing if accounts appeared meanwhile.
   shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
 
+### Working hours (issue #64)
+
+The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day
+and ticket. `TokenIndex` (`main/tokens.ts`) keeps, next to each transcript file's tokens, its
+activity `spans`: every line with a top-level `timestamp` (the line is parsed; a nested one never
+counts) widens the last span when within `SPAN_GRAIN` (5 min) of it, else opens one (`addMoment`,
+`shared/tokens.ts`). The cache is `tokens.json` version 2; a version 1 file is dropped and every
+transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
+re-asks every minute) answers `{spans, account}` for each session active since `since`:
+`Sources.hoursActivity` gives the spans, key, folder and ticket, main's handler the account
+(`hoursAccount`: recorded in `session-accounts.json` and still connected, else the account of the
+folder's origin repository, else of the ticket's repository, else the only account; else `null`,
+"unknown account"; never the primary as a guess). Origins come from `hoursOrigins`: the state's
+`origins` when known, else `git remote` four at a time for folders that still exist, in a cache of
+its own (`hoursRepos`) so past folders never evict live ones. `shared/hours.ts` `estimateHours` is
+pure: a session's spans (grouped by key, account and ticket, so a resume's new id fills its gap)
+joined across gaps up to the idle gap (at least `SPAN_GRAIN`), then a union per account and per
+(account, ticket), cut at local midnight;
+so an account counts a minute once and each ticket gets its full time. `hoursCsv` writes
+`date,account,ticket,minutes`; `CH.hoursExport` saves it through a save dialog. Both channels are
+`blocked` in `DECK_ACCESS` and refuse a remote call: nothing reaches `AppState`, the snapshot or
+the web.
+
 ## Shared modules (`shared/`)
 
 Pure TypeScript, no electron/node imports in the types, tested with vitest. The main groups:
@@ -783,8 +817,8 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Area | Modules |
 |---|---|
 | Types, IPC, settings | `types.ts` (`AppState`, `Session`, `PaneSpec`…), `ipc.ts`, `settings.ts` (`Settings`, `DEFAULT_SETTINGS`, `normalizeSettings`), `appConfig.ts`, `shortcuts.ts`, `keys.ts` |
-| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
-| Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts`, `costs.ts`, `schedules.ts`, `watches.ts` |
+| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `sessionFilter.ts`, `stars.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
+| Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
@@ -803,7 +837,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   and **`MasterPane`** (master-agent's terminal; ★ Master / ⌘⇧M). Dialogs and popups mount at the
   end (`BrowserApproval` only where `can('browserDecide')`, i.e. desktop).
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
-  (`TasksView`), `costs` (`CostsView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
+  (`TasksView`), `costs` (`CostsView`; its Hours choice is `HoursView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).
 - Notes is a panel over the current view, not a view: the Rail's button (`notesOpen` / `onNotes`,
   `aria-pressed`; under More on a phone) toggles and the palette opens `App.tsx`'s `notesAt` (`null` closed,
@@ -876,7 +910,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 |---|---|
 | `settings.json` | `Settings` |
 | `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs, the repository view's issues (`repoIssues`) |
-| `costs.json`, `tokens.json`, `stats/` | cost book, token index, status line output per session |
+| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 2: per transcript file, tokens per day and activity `spans`), status line output per session |
 | `statusline_tee.py` | installed status line tee (settings.json points here) |
 | `inbox.json`, `inbox-events.jsonl` | Needs you state and event log |
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |

@@ -20,7 +20,8 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
@@ -71,6 +72,7 @@ import {
   prRepo,
   repoFromRemote,
   sessionAccount,
+  startAccount,
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
@@ -94,7 +96,7 @@ import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
-import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
   externalAnswerAllowed,
   optionMessage,
@@ -276,6 +278,40 @@ function originOf(cwd: string): string | null {
   if (!originLookups.has(cwd)) void originNow(cwd).then(() => sources.changed());
   return origins.get(cwd) ?? null;
 }
+/**
+ * The origin repository of each folder, for the Costs view's Hours: answered from the state's
+ * lookups when they have it, else from git, four at a time, kept in a cache of its own so past
+ * sessions' folders never push live ones out of `origins`. A folder that is gone is not asked.
+ */
+const hoursRepos = new Map<string, string | null>();
+async function hoursOrigins(
+  dirs: string[],
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const ask: string[] = [];
+  for (const d of new Set(dirs)) {
+    if (origins.has(d)) out.set(d, origins.get(d) ?? null);
+    else if (hoursRepos.has(d)) out.set(d, hoursRepos.get(d) ?? null);
+    else if (existsSync(d)) ask.push(d);
+  }
+  const POOL = 4;
+  for (let i = 0; i < ask.length; i += POOL)
+    await Promise.all(
+      ask.slice(i, i + POOL).map(async (d) => {
+        const r = await run("git", ["remote", "get-url", "origin"], {
+          cwd: d,
+          timeoutMs: 5_000,
+        });
+        const repo = r.code === 0 ? repoFromRemote(r.stdout) : null;
+        // ponytail: past HOURS_REPOS_MAX folders the cache starts again; an LRU if it ever matters.
+        if (hoursRepos.size >= HOURS_REPOS_MAX) hoursRepos.clear();
+        hoursRepos.set(d, repo);
+        out.set(d, repo);
+      }),
+    );
+  return out;
+}
+const HOURS_REPOS_MAX = 2000;
 /** A session's account: recorded at start, its spawn proposal's, its folder's repo, the primary. */
 function accountOfSession(
   s: { sessionId: string; key: string; name: string },
@@ -309,13 +345,15 @@ function settingsFor(
 async function assignNow(
   given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  const cfg = getConfig();
+  // The account it runs as: the one picked, else the code's repository's (a PR review: its PR's),
+  // else the issue's. Its workspace is where the folder is looked for.
+  const picked = given.account && cfg.accounts.some((a) => a.login === given.account) ? given.account : null;
+  const as = picked ?? startAccount(given.repo ?? null, cfg, given.cwdRepo);
   // A PR review names its repository, not a folder: the CLI's resolver picks it.
-  const req = await inRepoFolder(cli, given);
+  const req = await inRepoFolder(cli, given, isMulti(cfg) ? as : null);
   return assignAs(cli, req, {
-    settings: (account) =>
-      settingsFor(account, async () =>
-        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
-      ),
+    settings: (account) => settingsFor(account, async () => as),
     proposalAccount: (id) =>
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
@@ -595,18 +633,19 @@ const sources = new Sources(
     }
     void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
+    // The session list is in: commands that waited while MasterDeck was closed can run now.
+    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
-      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+      // Not before the session list: an empty one would wipe what the phone and web still show.
+      if (sessionsLoaded) cloud?.push(toRemoteSnapshot(state, app.getVersion()));
     } catch (e) {
       console.error(`remote snapshot: ${String(e)}`);
     }
     try {
-      if (!remoteReady && sources.isHealthy("agents")) {
-        // The session list is in: commands that waited while MasterDeck was closed can run now.
-        remoteReady = true;
-        syncRemote();
-      } else if (
+      if (
+        // While waiting: dial once the list is in or the wait is over, and keep the reason current.
+        (!remoteReady && remoteWaitSince !== null) ||
         state.settings.remoteEnabled !== prev?.settings.remoteEnabled
       )
         syncRemote();
@@ -958,7 +997,13 @@ bridge = new BrowserBridge({
 });
 const remoteCommands = new RemoteCommands(
   {
-    state: () => latest,
+    // No state before the first session list: a command is answered "still loading" (retried) while it
+    // loads, and fails at once with the reason while `claude agents` fails.
+    state: () => (sessionsLoaded ? latest : null),
+    notLoaded: () => {
+      const a = sources.sourceHealth("agents");
+      return !sessionsLoaded && a.health === "error" ? `MasterDeck has no session list: ${agentsFailure(a.error)}` : null;
+    },
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
@@ -979,8 +1024,14 @@ const remoteCommands = new RemoteCommands(
 );
 let cloud: CloudSync | null = null;
 let cloudKey = "";
-/** True once the first state with the session list exists; until then the backend is not dialled. */
+/** True once `claude agents` has answered; until then remote commands are answered "still loading". */
+let sessionsLoaded = false;
+/** True once the line may be dialled: the session list is in, or `REMOTE_WAIT_MS` went by without it. */
 let remoteReady = false;
+/** While the line waits for the session list: when the wait began, the text shown, the timer that ends it. */
+let remoteWaitSince: number | null = null;
+let remoteWaitMessage: string | null = null;
+let remoteWaitTimer: NodeJS.Timeout | null = null;
 
 function deviceId(): string {
   const f = join(paths.home, "remote-device-id");
@@ -1009,12 +1060,34 @@ function syncRemote(): void {
   if (key && key === cloudKey) return;
   if (key && !remoteReady) {
     // Pending commands arrive on connect; running them before the sessions load would fail them.
-    cloud?.stop();
-    cloud = null;
-    cloudKey = "";
-    sources.setRemote({ conn: "connecting", message: "waiting for sessions to load", lastSyncAt: null, hasToken: true });
-    return;
+    if (remoteWaitSince === null) {
+      remoteWaitSince = Date.now();
+      remoteWaitTimer = setTimeout(() => {
+        remoteWaitTimer = null;
+        syncRemote();
+      }, REMOTE_WAIT_MS);
+    }
+    const agents = sources.sourceHealth("agents");
+    const wait = remoteWait(agents.health, agents.error, Date.now() - remoteWaitSince);
+    if (!wait.connect) {
+      cloud?.stop();
+      cloud = null;
+      cloudKey = "";
+      // Only on a change: setRemote emits a state, whose callback calls this again.
+      if (wait.message !== remoteWaitMessage) {
+        remoteWaitMessage = wait.message;
+        sources.setRemote({ conn: "connecting", message: wait.message, lastSyncAt: null, hasToken: true });
+      }
+      return;
+    }
+    remoteReady = true;
+    if (agents.health !== "ok")
+      console.log(`remote: no session list after ${REMOTE_WAIT_MS / 1000} s (claude agents: ${agents.error ?? agents.health}); connecting anyway`);
   }
+  if (remoteWaitTimer) clearTimeout(remoteWaitTimer);
+  remoteWaitTimer = null;
+  remoteWaitSince = null;
+  remoteWaitMessage = null;
   cloud?.stop();
   cloud = null;
   cloudKey = key;
@@ -1045,7 +1118,7 @@ function syncRemote(): void {
     onClients: (c) => sources.setRemoteClients(c),
   });
   cloud.start();
-  if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
+  if (latest && sessionsLoaded) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
 }
 
 /** Stop a background session (no confirmation: callers ask first). */
@@ -1809,12 +1882,14 @@ function registerIpc(): void {
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown, account?: unknown) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
       // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
       const dir = chosenFolder(isRemote(e), cwd);
-      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
+      // Another connected account (two or more): its workspace is looked in. Anything else is dropped.
+      const as = isMulti(getConfig()) && getConfig().accounts.some((a) => a.login === account) ? (account as string) : undefined;
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd, as) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
@@ -2245,6 +2320,55 @@ function registerIpc(): void {
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
+  // Working hours (issue #64) stay on this Mac: DECK_ACCESS blocks both, and main refuses a remote call too.
+  reg.handle(CH.hoursActivity, async (e, ids: unknown, since: unknown) => {
+    if (isRemote(e)) return {};
+    const raw = await sources.hoursActivity(
+      Array.isArray(ids) ? ids : [],
+      typeof since === "number" && Number.isFinite(since) ? since : 0,
+    );
+    // Only sessions with no recorded account need their folder's origin.
+    const recorded = new Map(
+      Object.entries(raw).map(([id, a]) => [
+        id,
+        sessionAccounts.get({ sessionId: id, key: a.key }),
+      ]),
+    );
+    const repos = await hoursOrigins(
+      Object.entries(raw)
+        .filter(([id, a]) => !recorded.get(id) && a.cwd)
+        .map(([, a]) => a.cwd!),
+    );
+    const out: Record<string, SessionActivity> = {};
+    for (const [id, a] of Object.entries(raw))
+      out[id] = {
+        spans: a.spans,
+        account: hoursAccount(
+          {
+            recorded: recorded.get(id) ?? null,
+            origin: a.cwd ? (repos.get(a.cwd) ?? null) : null,
+            ticket: a.ticket,
+          },
+          getConfig(),
+        ),
+      };
+    return out;
+  });
+  reg.handle(CH.hoursExport, async (e, csv: unknown, name: unknown) => {
+    if (isRemote(e) || typeof csv !== "string" || csv.length > 5_000_000)
+      return null;
+    const file =
+      typeof name === "string" && /^[\w.-]{1,80}\.csv$/.test(name)
+        ? name
+        : "hours.csv";
+    const r = await dialog.showSaveDialog(win!, {
+      defaultPath: join(app.getPath("downloads"), file),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, csv);
+    return r.filePath;
+  });
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
   reg.handle(CH.setSettings, (e, s: unknown) =>
     sources.setSettings(

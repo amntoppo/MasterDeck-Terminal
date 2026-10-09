@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt } from './startFolder'
+import { adoptFresh, folderKind, folderOf, refindOnAccount, startChoice, swapPrompt } from './startFolder'
 import type { DraftAssign } from './types'
 
 const draft = (p: Partial<DraftAssign>): DraftAssign => ({ issue: 7, repo: 'globex/app', name: 'app-7-x', cwd: '/code/globex', prompt: 'p', summary: 's', title: 't', url: 'u', proposalId: null, ...p })
@@ -87,5 +87,23 @@ describe('startChoice (what Start sends for a draft from master\'s proposal)', (
     expect(startChoice(d, { ...same, override: true }, 'opus')).toEqual({ edited: true, model: 'opus' })
     expect(startChoice(d, { ...same, permissionMode: 'plan' }, 'opus')).toEqual({ edited: true, model: 'opus' })
     expect(startChoice(d, { ...same, permissionMode: '' }, 'opus')).toEqual({ edited: false, model: undefined })
+  })
+})
+
+describe('issue #61', () => {
+  it("carries the issue's own repository when its code lives in another", () => {
+    expect(folderOf(draft({ cwd: '/code/api', found: true, checkoutOf: 'acme/api', filedIn: 'globex/app' }))).toEqual({
+      cwd: '/code/api', found: true, checkoutOf: 'acme/api', filedIn: 'globex/app',
+    })
+    expect(folderOf(draft({ found: true, checkoutOf: 'globex/app' }))).not.toHaveProperty('filedIn')
+  })
+  it("another account looks again, unless the folder is the user's, a held start's or a proposal's own", () => {
+    const found = { cwd: '/code/globex/app', workspace: '/code/globex', found: true, checkoutOf: 'globex/app' }
+    const missing = { cwd: '/code/globex', workspace: '/code/globex', found: false, checkoutOf: 'globex/app' }
+    expect([refindOnAccount(found, false, false), refindOnAccount(missing, false, false)]).toEqual([true, true])
+    expect(refindOnAccount(found, true, false)).toBe(false)
+    expect(refindOnAccount(found, false, true)).toBe(false)
+    expect(refindOnAccount({ cwd: '/somewhere' }, false, false)).toBe(false)
+    expect(refindOnAccount(null, false, false)).toBe(false)
   })
 })

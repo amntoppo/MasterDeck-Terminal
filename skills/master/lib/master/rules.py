@@ -54,8 +54,9 @@ def _src(prefix: str, repo: "str | None", n: int) -> str:
 
 def assign_prompt(i: dict, where: "dict | None" = None) -> str:
     """The first message of a ticket's session. `where` (`checkout.resolve`) with a checkout found:
-    step 1 says the folder is a checkout of the issue's repository; otherwise the text is the one
-    it always was (tests pin it against stored copies)."""
+    step 1 says the folder is a checkout of the issue's repository; for an issue whose code lives
+    in another one (Setup's "code lives in"), it names that one, checkout found or not; otherwise
+    the text is the one it always was (tests pin it against stored copies)."""
     n = i["number"]
     repo = refs.stored(i.get("repo"))
     lab, full = refs.label(repo, n), refs.ref(repo, n)
@@ -66,7 +67,13 @@ def assign_prompt(i: dict, where: "dict | None" = None) -> str:
         f"Set up only — do not plan, brainstorm or write code yet (MasterDeck links this session to {full}):\n"
         # The issue may be filed in one repository (a tracker) and built in another: no question
         # asked, the session goes to the other repository in the same workspace.
-        + (f"1. Read the issue. This folder is a checkout of {where['repo']}, where the issue is filed. If the work "
+        + (f"1. Read the issue. This folder is a checkout of {where['repo']}, where the code of {where['filedIn']} "
+           f"issues lives. Work in a git worktree here {worktree}"
+           if where and where["found"] and where.get("filedIn") else
+           f"1. Read the issue. Its code lives in {where['repo']} (it is filed in {where['filedIn']}): find that "
+           f"repository's checkout under {where['workspace']} and work in a git worktree there {worktree}"
+           if where and where.get("filedIn") else
+           f"1. Read the issue. This folder is a checkout of {where['repo']}, where the issue is filed. If the work "
            f"belongs in another repository (the CLAUDE.md in {where['workspace']} may say which), use that repository "
            f"under {where['workspace']} instead; otherwise work in a git worktree here {worktree}"
            if where and where["found"] else
@@ -85,15 +92,16 @@ def assign_prompt(i: dict, where: "dict | None" = None) -> str:
     )
 
 
-def _assign(i: dict, cwd: "str | None" = None) -> dict:
+def _assign(i: dict, cwd: "str | None" = None, account: "str | None" = None) -> dict:
     """`cwd`: a folder the user chose (the Start dialog); else `checkout.resolve` picks it. Reads the
-    filesystem (the workspace is looked through for the repository's checkout)."""
+    filesystem (the workspace is looked through for the repository's checkout). `account`: the one
+    picked in the Start dialog (its workspace is looked in); else `config.start_account`'s."""
     n = i["number"]
     repo = refs.stored(i.get("repo"))
-    where = checkout.resolve(repo, cwd)
+    where = checkout.resolve(repo, cwd, account=account)
     prompt = assign_prompt(i, where)
     sp = {"name": spawn_name(i), "cwd": where["cwd"], "prompt": prompt}
-    acct = config.account_for_repo(repo)  # two or more accounts only
+    acct = (account or config.start_account(repo)) if config.is_multi() else None  # two or more accounts only
     if acct:
         sp["account"] = acct
     return {"kind": "ASSIGN", "issue": n, "repo": repo, "source": _src("issue", repo, n),

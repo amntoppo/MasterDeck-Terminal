@@ -463,8 +463,12 @@ export interface DraftAssign {
   workspace?: string;
   /** `cwd` is a checkout of `checkoutOf`; false: none was found and `cwd` is the workspace (or a folder the user chose that is not one). */
   found?: boolean;
-  /** owner/name of the ticket's repository. */
+  /** owner/name of the repository looked for: the ticket's, or the one its code lives in (`filedIn` set). */
   checkoutOf?: string;
+  /** The ticket's own repository, when Setup says its code lives in `checkoutOf`. */
+  filedIn?: string;
+  /** The account the session runs as, whose workspace was looked in (two or more accounts; null with one). */
+  account?: string | null;
   /** The prompt as it is without a checkout: a system prompt equal to it (or to `prompt`) is MasterDeck's own text. */
   genericPrompt?: string;
   /** Not found, and the search stopped at a limit after `searched` folders. */
