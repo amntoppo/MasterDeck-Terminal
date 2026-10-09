@@ -18,6 +18,7 @@ Start here, then read what the task needs:
 | [docs/REMOTE.md](docs/REMOTE.md) | Account, CloudSync, browser bridge, web app, instant typing, remote indicator, message tables |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Build/install/release, web deploy, isolated E2E recipe, measuring upload, troubleshooting |
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
+| [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
@@ -58,12 +59,6 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   they stay for use by hand. `skills/master/` is also the `master` CLI (Python,
   `lib/master/`) that the app calls for the ledger, snapshot, board, config and spawning.
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
-- `site/` — the marketing website on https://masterdeck.dev (Astro, static; its own `package.json`).
-  `src/pages/` (Home, Features, Get started, Download/Changelog, 404), one stylesheet
-  `src/styles/global.css`, the behaviour in `src/scripts/site.ts` (scroll reveals, hero terminal,
-  the draggable workflow playground), the screen placeholders in `public/screens/` listed in
-  `src/data/screens.ts`, the changelog in `src/data/releases.json` (`npm run releases`). Deployed as
-  two Workers (`wrangler.jsonc`, `www/wrangler.jsonc`): [OPERATIONS § Website](docs/OPERATIONS.md#website-masterdeckdev).
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
 - `.github/workflows/ci.yml` — Python tests, typecheck, vitest, DMG/EXE builds; tags publish a release.
@@ -80,10 +75,6 @@ npm run build        # electron-vite build → out/
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
 npm run dev:web      # web app dev server (MD_API=http://localhost:8787 for a local backend)
 npm run deploy:web   # build:web + wrangler deploy -c web/wrangler.jsonc (only when asked)
-
-cd ../site
-npm run dev          # the website (masterdeck.dev) with hot reload
-npm run deploy       # releases + build + wrangler deploy of masterdeck.dev and the www redirect (only when asked)
 
 cd ..
 PYTHONPATH=skills/master/lib python3 -m pytest skills/master/tests -q   # master CLI, ~226 tests
@@ -372,19 +363,13 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-10)
 
-- **The website, masterdeck.dev** (issue #89) is built on branch
-  `worktree-MasterDeck-Terminal-89-website`: `site/` (Astro), four pages plus a 404, light and dark,
-  scroll reveals, a typing master-agent terminal, a draggable workflow playground, drawn placeholder
-  screens in one place (`src/data/screens.ts`), Open Graph images per page, sitemap and robots.
-  **Live** since 2026-10-10: `npm run deploy` in `site/` deployed the Workers `masterdeck-site`
-  (masterdeck.dev) and `masterdeck-www` (301 to the bare domain); see OPERATIONS. Not pushed, not
-  merged: the deployed site is this branch. Checked: the build, Lighthouse 100 for
-  performance, accessibility, best practices and SEO on every page (mobile and desktop), screenshots
-  at 1440 and 390 px in both themes, every link and anchor, both Workers under `wrangler dev`, and
-  after the deploy every page, the 404, the trailing-slash redirect and the www 301 over HTTPS.
-  `http://` is served, not redirected: Always Use HTTPS is a zone setting (TODO).
-  Agent loops (#82) are shown as "coming soon": change the copy in `index.astro`, `features.astro`
-  and `Playground.astro` when they ship.
+- **The website, masterdeck.dev** (issue #89) lives in its own repository,
+  [amntoppo/Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (private, `main`;
+  checkout `~/Documents/personal/Masterdeck-Website`): Astro, deployed with `npm run deploy` there as
+  the Workers `masterdeck-site` (masterdeck.dev) and `masterdeck-www` (301 to the bare domain). Live
+  since 2026-10-10. Built first as `site/` on branch `worktree-MasterDeck-Terminal-89-website`
+  (bbebbb4), then moved out. Its README has the deploy, the images and the open points. Agent loops
+  (#82) show as "coming soon" there: update the site when they ship.
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so

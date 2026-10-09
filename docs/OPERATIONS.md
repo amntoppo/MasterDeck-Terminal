@@ -70,45 +70,11 @@ then needs `APP_ORIGIN=http://localhost:5175`).
 
 ## Website (masterdeck.dev)
 
-The marketing site is `site/` (Astro, static). It is separate from the app: its own `package.json`,
-no shared code. CI builds it (job `site`); deploys are manual.
-
-```bash
-cd site
-npm install
-npm run dev          # http://localhost:4321, hot reload
-npm run build        # → dist/
-npm run deploy       # releases.json from GitHub, build, then wrangler deploy of both Workers
-```
-
-`npm run deploy` is the one command. It refreshes `src/data/releases.json` from GitHub's releases
-API (the file is committed, so a build without network still has a changelog; `GITHUB_TOKEN` lifts
-the rate limit), builds, and deploys two Workers with wrangler (logged in: `npx wrangler login` once):
-
-| Worker | Config | Domain | What |
-|---|---|---|---|
-| `masterdeck-site` | `site/wrangler.jsonc` | `masterdeck.dev` | Static assets from `dist/` (`html_handling: auto-trailing-slash`, `404.html` for unknown paths), headers from `public/_headers` |
-| `masterdeck-www` | `site/www/wrangler.jsonc` | `www.masterdeck.dev` | A five-line script: 301 to `https://masterdeck.dev` with the same path and query |
-
-Both use `custom_domain` routes, so the first deploy creates the DNS records and the certificates
-(the zone `masterdeck.dev` is in the same Cloudflare account as `app.masterdeck.dev`). Workers
-static assets instead of Pages: wrangler cannot attach a custom domain to a Pages project, a Worker
-route can, and `app.masterdeck.dev` is deployed the same way. The bare domain never runs a script
-(only `www` does), so its requests do not count against the Workers request limit.
-
-- **Screens.** `site/public/screens/*.svg` are drawn placeholders of the app's views (made by
-  `node scripts/screens.mjs public/screens`). Every page takes them from `src/data/screens.ts`: to
-  use a real screenshot, put it in `public/screens/`, change its `src`, `width` and `height` there,
-  and run `npm run og` (the link previews embed them).
-- **Link previews.** `npm run og` renders `public/og/<page>.png` (1200×630), `favicon.svg` and
-  `apple-touch-icon.png`; the PNGs are committed.
-- **First deploy, 2026-10-10.** A DNS lookup made before the first deploy is cached as "no such
-  domain" (by the Mac and by the router) for up to 30 minutes: check with `dig masterdeck.dev
-  @1.1.1.1` or `curl --resolve masterdeck.dev:443:<ip>` rather than the local resolver.
-- **Checks before a deploy:** `npm run build`, then `npx astro preview` and Lighthouse on each page
-  (performance, accessibility, best practices and SEO were 100 on all four pages, mobile and
-  desktop, 2026-10-10). `npx wrangler dev` (add `--inspector-port 9331` when a second one runs)
-  serves the built site as the Worker does; `npx wrangler dev -c www/wrangler.jsonc` the redirect.
+The site is its own repository, [amntoppo/Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+(checkout `~/Documents/personal/Masterdeck-Website`). `npm run deploy` there refreshes the changelog
+from this repository's releases, builds, and deploys the Workers `masterdeck-site` (masterdeck.dev)
+and `masterdeck-www` (301 to the bare domain). Its README has the details. After a release, deploy
+the site again so the Download page and changelog show it.
 
 ## Backend deploy (other repo, for reference)
 

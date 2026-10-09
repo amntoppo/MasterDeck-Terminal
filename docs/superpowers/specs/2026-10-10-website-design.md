@@ -1,5 +1,8 @@
 # masterdeck.dev: the developer website (issue #89)
 
+> Moved: the site and this design live in [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+> (`docs/design.md`) since 2026-10-10. Paths below are as they were in `site/`.
+
 ## Goal
 
 A public, multi-page marketing site on https://masterdeck.dev that tells developers what MasterDeck

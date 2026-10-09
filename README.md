@@ -198,7 +198,6 @@ Layout:
 app/            Electron + React + xterm.js app (main, preload, renderer, shared; src/web = web app)
 skills/         the Claude Code skills MasterDeck installs (master holds the CLI in lib/)
 docs/           GUIDE.md (features), ARCHITECTURE.md, REMOTE.md, OPERATIONS.md, TODO.md
-site/           the website, masterdeck.dev (Astro; npm run dev / npm run deploy)
 ```
 
 The backend for remote access (Cloudflare Worker at `dev.masterdeck.dev`) lives in a separate
