@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTokens, newFileTally, tallyLines, tokenSum, tokensBetween, totalOf } from './tokens'
+import { formatTokens, lineTime, newFileTally, SPAN_GRAIN, tallyLines, tokenSum, tokensBetween, totalOf } from './tokens'
 
 const line = (id: string, ts: string, u: Record<string, number>) => JSON.stringify({ timestamp: ts, message: { id, role: 'assistant', usage: u } })
 const U = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000 }
@@ -27,5 +27,26 @@ describe('tokens', () => {
     expect(formatTokens(12_345)).toBe('12k')
     expect(formatTokens(32_169_536)).toBe('32.2M')
     expect(formatTokens(2_500_000_000)).toBe('2.50B')
+  })
+  it('keeps activity spans: lines within the grain share one, a later one opens another', () => {
+    const t = newFileTally()
+    const l = (iso: string) => JSON.stringify({ type: 'user', timestamp: iso })
+    tallyLines(t, [l('2026-10-01T10:00:00Z'), line('m', '2026-10-01T10:04:00Z', U), '{"type":"summary"}', l('2026-10-01T10:02:00Z'), l('2026-10-01T10:20:00Z')])
+    expect(t.spans).toEqual([
+      [Date.parse('2026-10-01T10:00:00Z'), Date.parse('2026-10-01T10:04:00Z')],
+      [Date.parse('2026-10-01T10:20:00Z'), Date.parse('2026-10-01T10:20:00Z')],
+    ])
+    expect(Date.parse('2026-10-01T10:20:00Z') - Date.parse('2026-10-01T10:04:00Z')).toBeGreaterThan(SPAN_GRAIN)
+  })
+  it('takes a line’s own time, not one nested in a tool result', () => {
+    expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, timestamp: '2026-10-01T10:00:00Z' }))).toBe(Date.parse('2026-10-01T10:00:00Z'))
+    expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, x: { timestamp: '2020-01-02T00:00:00Z' } }))).toBeNaN()
+    expect(lineTime('{"type":"summary"}')).toBeNaN()
+    // Its only "timestamp" is nested (a file history snapshot): no time, and no span.
+    const snap = JSON.stringify({ type: 'file-history-snapshot', snapshot: { timestamp: '2020-01-01T00:00:00Z' } })
+    expect(lineTime(snap)).toBeNaN()
+    const t = newFileTally()
+    tallyLines(t, [snap])
+    expect(t.spans).toEqual([])
   })
 })

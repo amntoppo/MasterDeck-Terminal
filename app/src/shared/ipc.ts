@@ -11,6 +11,7 @@ import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
+import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { HookEntry } from "./workflow";
@@ -210,6 +211,8 @@ export const CH = {
   accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
+  hoursActivity: "costs:hoursActivity",
+  hoursExport: "costs:hoursExport",
   dismissStopped: "session:dismissStopped",
   boardOpen: "board:open",
   boardRepos: "board:repos",
@@ -434,6 +437,10 @@ export interface DeckApi {
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
+  /** When each of these sessions was active since `since` (epoch ms; sessions with nothing since left out), and the account its time goes to (the Costs view's Hours; the window only). */
+  hoursActivity(sessionIds: string[], since: number): Promise<Record<string, SessionActivity>>;
+  /** Save this CSV where the user picks (a save dialog, `name` its suggested file name); the path, or null when cancelled. */
+  hoursExport(csv: string, name: string): Promise<string | null>;
   dismissStopped(): Promise<void>;
   /**
    * Who can be assigned an issue of this repository (none: the primary issue repo), read as the
