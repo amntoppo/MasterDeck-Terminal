@@ -201,7 +201,11 @@ hash=$( { printf '%s' "$tail" | jq -r 'gsub("[0-9]+(\\\\.[0-9]+)? ?m?s\\\\b"; ""
 res=$(jq -n --argjson ran "$ran" --argjson passed "$passed" --argjson said "$said" --argjson exit "$ec" --argjson tail "$tail" --arg hash "$hash" --argjson ms "$ms" '{ran: $ran, passed: $passed, said: $said, exit: $exit, tail: $tail, hash: $hash, ms: $ms}')
 out=$(jq -nc --argjson file "$cur" --argjson defs "$defs" --argjson result "$res" --argjson now "$(date +%s)000" --arg sid "$sid" --arg progress "$LD/$sid-" '{file: $file, defs: $defs, result: $result, now: $now, sid: $sid, progress: $progress} | ${DECIDE.replace(/'/g, `'\\''`)}' 2>/dev/null) || exit 0
 [ -n "$out" ] || exit 0
-printf '%s' "$out" | jq -c '.file' > "$L.$$.tmp" 2>/dev/null && mv "$L.$$.tmp" "$L" || { rm -f "$L.$$.tmp"; exit 0; }
+printf '%s' "$out" | jq -c '.file' > "$L.$$.tmp" 2>/dev/null || { rm -f "$L.$$.tmp"; exit 0; }
+# Stop loop or Run 5 more while the check ran (the loop no longer open, or a new start): the
+# user's write stands, and this round is not counted.
+jq -e --argjson e "$e" 'any(.loops[]?; .id? == $e.id and .state? == "open" and .startedAt? == $e.startedAt)' "$L" >/dev/null 2>&1 || { rm -f "$L.$$.tmp"; exit 0; }
+mv "$L.$$.tmp" "$L" || { rm -f "$L.$$.tmp"; exit 0; }
 for id in $(printf '%s' "$out" | jq -r '.opened[]?'); do
   case "$id" in ""|*[!a-z0-9-]*) continue;; esac
   : > "$LD/$sid-$id.md"

@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -407,6 +407,28 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
     expect(readFileSync(join(t.home, 'workflows', 'loops', `${SID}-lb.md`), 'utf8')).toBe('')
     // The next turn end checks B.
     expect(t.answer().reason).toContain('↻ Loop "B": iteration 1/10.')
+  })
+
+  it('a Stop loop or Run 5 more during the check is kept: the hook writes nothing', async () => {
+    for (const change of [
+      (l: Record<string, unknown>) => ({ ...l, state: 'stopped', reason: 'stopped by you', endedAt: 1 }),
+      (l: Record<string, unknown>) => ({ ...l, startedAt: (l.startedAt as number) + 1, extra: 5 }),
+    ]) {
+      const t = setup({ loops: [def({ check: { command: 'sleep 2; exit 1' } as CompiledLoop['check'] })] })
+      const p = spawn(BASH, [t.script], { cwd: t.repo })
+      let out = ''
+      p.stdout.on('data', (b) => (out += b))
+      p.stdin.end(JSON.stringify({ session_id: SID, cwd: t.repo, last_assistant_message: 'x' }))
+      await new Promise((r) => setTimeout(r, 700))
+      const changed = { loops: [change(t.loops()[0])] }
+      writeFileSync(t.L, JSON.stringify(changed))
+      const code = await new Promise((r) => p.on('close', r))
+      expect(code).toBe(0)
+      expect(out).toBe('')
+      expect(JSON.parse(readFileSync(t.L, 'utf8'))).toEqual(changed)
+      expect(t.runs()).toEqual([])
+      expect(readdirSync(join(t.home, 'workflows', 'loops')).filter((n) => n.endsWith('.tmp'))).toEqual([])
+    }
   })
 
   it('writes only under workflows/loops and runs.jsonl', () => {

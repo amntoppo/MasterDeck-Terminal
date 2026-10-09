@@ -329,7 +329,9 @@ nothing said, the check is not run. The decision is one jq program (`DECIDE`): m
 `limits.iterations` + `extra` (Run 5 more) reached; else the time limit; else stall (the last N
 hashes of the output tail, durations taken out, plus `git rev-parse HEAD` and `git status
 --porcelain`, equal). It writes the loop file (temp + rename; history keeps 50 entries, a tail is
-at most 40 lines / 4 KB), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`) and
+at most 40 lines / 4 KB; just before the rename it reads the file again and writes nothing, and
+answers nothing, when the loop is no longer open or has a new `startedAt`: a Stop loop or Run 5
+more during the check stands), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`) and
 answers: an open loop blocks the stop with `↻ Loop "<name>": iteration n/max[, m min left].`, the
 check's output or "not done yet", the round's plan and the progress file's path; a loop that ends
 opens the loops of its step whose `after` names it by that outcome or by a plain arrow (fresh, with

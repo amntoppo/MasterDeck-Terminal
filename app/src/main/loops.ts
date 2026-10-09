@@ -105,8 +105,10 @@ export class LoopStore {
     return { sid, file, k }
   }
 
-  // ponytail: a write here and the hook's write at the same turn end can cross (last rename
-  // wins). Both are rare and quick; a lock file shared with loop.sh is the upgrade path.
+  // The hook reads the file again just before its rename and drops its round when the loop is no
+  // longer open or has a new start, so a Stop loop or Run 5 more during a check stands.
+  // ponytail: what is left is the moment between that read and the rename (last rename wins); a
+  // lock file shared with loop.sh is the upgrade path.
   private write(sid: string, file: LoopFile): void {
     const f = this.fileOf(sid)
     mkdirSync(this.dir, { recursive: true })
