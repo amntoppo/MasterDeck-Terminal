@@ -448,7 +448,6 @@ export function SessionDetails({
           )}
         </div>
         <div className="d-actions">
-
           <button
             className={`btn ${(stats?.contextPct ?? 0) >= state.settings.contextWarnPct ? "danger" : ""}`}
             title="Types /compact into the session"

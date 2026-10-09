@@ -627,7 +627,7 @@ const sources = new Sources(
             .map((s) => s.sessionId),
         ),
       );
-    // The MasterDeck mod (mods/masterdeck) reads band/<id>.json and writes mods/<id>.json.
+    // MasterDeck's mods (mods/) read band/<id>.json and boards/<key>.json; the core writes mods/<id>.json.
     if (sources.isHealthy("agents")) {
       const live = state.sessions.filter((s) => s.state !== "done");
       const boardKeys = new Set<string>();
