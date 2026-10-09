@@ -818,6 +818,32 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow:hover .srow-star, .srow-star.on, .srow-star:focus-visible { visibility: visible; }
 .srow-star.on { color: var(--amber); }
 .srow-star:hover { color: var(--amber); }
+/* The Sessions column's filters: closed, one sticky line, so a filtered list always says so; open,
+   it scrolls with the list, so the matches are never under it (a phone's keyboard leaves little room). */
+.sfilter { position: sticky; top: -6px; z-index: 2; background: var(--bg-2); margin: 0 -8px 6px; padding: 4px 14px 4px; border-bottom: 1px solid var(--line); }
+.sfilter.open { position: static; }
+.sfilter-line { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; }
+.sfilter-toggle { display: inline-flex; align-items: center; gap: 4px; flex: none; background: none; border: none; padding: 0; cursor: pointer; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sfilter-toggle:hover { color: var(--text); }
+.sfilter-toggle .mark { width: auto; }
+.sfilter-toggle .count { background: var(--accent); color: #0b1020; border-radius: 8px; padding: 0 6px; font-size: 10px; letter-spacing: 0; }
+/* Each chip keeps a readable width; more than fit scroll sideways, so the bar stays one line. */
+.sfilter-chips { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.sfilter-chips::-webkit-scrollbar { display: none; }
+.sfilter-chip { flex: none; max-width: 110px; padding: 0 2px 0 7px; gap: 2px; font-size: 10.5px; }
+.sfilter-chip-text { overflow: hidden; text-overflow: ellipsis; }
+.sfilter-chip button { flex: none; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 0 3px; }
+.sfilter-chip button:hover { color: var(--red); }
+.sfilter-clear { flex: none; }
+.sfilter-body { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 4px; }
+.sfilter-search { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 12px; padding: 4px 8px; }
+.sfilter-search:focus { outline: none; border-color: var(--accent); }
+.sfilter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sfilter-group .chip { font-size: 11px; padding: 1px 7px; }
+.sfilter-group .chip.btnlike:not(.on) { border-color: var(--line); background: var(--bg); }
+.sfilter-label { width: 52px; flex: none; font-size: 10.5px; color: var(--faint); }
+.sfilter-empty { padding: 10px 14px; }
+.sidebar .row.held { cursor: default; }
 .section-head.lane-starred { color: var(--amber); }
 .d-star { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; }
 .d-star:hover { color: var(--text); }
