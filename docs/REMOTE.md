@@ -60,9 +60,14 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
 
 - `syncRemote()` runs at startup, on account changes, on a `remoteEnabled` flip and on the first
   state with healthy agents. Key = `url + token` when `settings.remoteEnabled` and a token exist.
-- **Waits for sessions**: until `remoteReady` (first state where `sources.isHealthy("agents")`)
-  it shows `connecting · "waiting for sessions to load"` and does not dial, so pending commands
-  find their sessions. (If `claude agents` never succeeds it stays there — see TODO.)
+- **Waits for sessions**: until `remoteReady` it shows `connecting · "waiting for sessions to load"`
+  and does not dial, so pending commands find their sessions. When `claude agents` fails the text
+  adds the reason (`…: claude agents failed: <first line of the error, ≤ 120 chars>`), kept current
+  from the state callback. `remoteReady` is set by `remoteWait` (`shared/remoteSnapshot.ts`): as
+  soon as agents is healthy, or after `REMOTE_WAIT_MS` (60 s, a timer started with the wait) without
+  it, when it connects anyway and logs one line. Until the first healthy session list
+  (`sessionsLoaded`) `RemoteCommands` gets no state, so a command is answered transiently ("still
+  loading", retried for a minute by `CloudSync`, never written to `remote-done.json`).
 - Each (re)start clears external items (`sources.setExternalItems([])`).
 - On `open`: `hello {deviceId, appVersion, protocol: 3, macPublicKey?}`. No `welcome` within 15 s
   → terminate and redial. Ping every 30 s; nothing received for 2 × ping → terminate.

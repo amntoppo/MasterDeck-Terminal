@@ -2475,6 +2475,11 @@ export class Sources {
   isHealthy(name: string): boolean {
     return this.health[name] === "ok";
   }
+
+  /** A source's health and, when it failed, why. */
+  sourceHealth(name: string): { health: SourceHealth | undefined; error: string | undefined } {
+    return { health: this.health[name], error: this.errors[name] };
+  }
 }
 
 /** A session that MasterDeck runs monitors for waits on them (shown like a monitor of its own). */
