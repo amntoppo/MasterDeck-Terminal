@@ -463,6 +463,20 @@ here (needs `hooks.queue`).
   prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
   (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
   from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
+- Create with Claude's settings bar (#68; `renderer/.../TicketSettingsBar.tsx`, `shared/ticketSettings.ts`):
+  the panel holds `TicketSession.settings` (repo, board, status, assignees, labels, milestone, sprint
+  and its field), started by `settingsFrom` (the dialog's draft, else `ticketDefaults` of the + column,
+  the tab's filters and sprint; no board, status or sprint for an account with none) and changed by
+  `changeSettings` (another repository drops labels and milestone, another board keeps only the
+  status and sprint it has; sprints follow the board: `boardSprints`, none on a `sprintless` one).
+  Every change calls `ticketBuilderPrepare` again, which rewrites `context.json` with `settings` (no
+  new channel). `pumpTicketDir` re-reads it at each request: `readSettings` checks it (no `settings`:
+  the flags pass as before; `settings` that fail the check refuse the create, never drop the bar) and `enforceSettings` replaces all seven flags with the bar's,
+  so the bar wins over anything the session passed; the answer carries `applied` (what was used)
+  and, when a passed flag differed, `overridden` and a `note`. The briefing tells Claude to leave
+  those flags out and, when the chat asks for another value, to say the bar's applies and that the
+  user can change it there (the one way a conflict is handled). New chat keeps the bar; a + on
+  another column (or the dialog) starts it again from there.
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).

@@ -512,6 +512,17 @@ fixes it, and move the item here to "Recently done".
 - **The phone API `session.start` has no `peers`.** A session started from a phone cannot be linked at
   start; it can be linked after, from its details.
 
+## Create with Claude settings bar: open points (2026-10-09, issue #68)
+
+- **Not run against GitHub.** A ticket created through the bar (assignees, labels, milestone,
+  sprint) was checked with fake creates only; the first real one is the user's.
+- **The bar is per session in memory.** Closing the app (or the tab) loses its edits; it starts again
+  from where the + was clicked. Persist it per tab if that is missed.
+- **One bar for every ticket.** "Split this into tickets" in different repositories means changing the
+  bar between them; per-ticket values would need the bar to hold a list.
+- **Labels or a milestone the repository lacks** (from the tab's filters) are only caught by
+  `gh issue create` failing; the bar does not drop them once the repository's labels load.
+
 ## Working hours: open points (2026-10-09, issue #64)
 
 - **Several machines.** The estimate covers this Mac only. The user wants an account's time from
@@ -533,6 +544,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |
 | The web app's Start dialog has **Choose folder…** (issue #62): a pick of the workspace and the repositories MasterDeck found (`RepoPicker` `listOnly`, no typed path; fits the phone at 390 px), and main takes a browser's folder for the draft only when it is one of them, as real paths (`chosenFolder(remote, cwd, known)`, `workspaceFolders()` in `main/index.ts`); anything else is refused with a message and the dialog keeps its folder (it was dropped silently) | branch `worktree-MasterDeck-Terminal-62-web-folder-choice` | — |
 | Notes in Markdown (issue #65): a note's text is drawn as Markdown (`MarkdownView` with `html={false}`: every tag is text, https links only, opened in the browser), **Write / Preview / Side by side** in the editor, previews in the list, Details and on the card read the Markdown as one plain line; the window refuses navigation away from the app; sessions can add to notes with the `masterdeck-notes` skill (`note.sh new / ticket / append`, `main/noteRequests.ts`, answers carry an id, never a note's text) | branch `worktree-MasterDeck-Terminal-65-notes-markdown` (not merged) | — |
