@@ -363,13 +363,12 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-10)
 
-- **MasterDeck has its own icon** (branch `feat/app-icon`, from `main`, not merged): the mark from
-  masterdeck.dev on a dark tile, as the app icon (`app/build/icon.icns` / `icon.ico`, picked up by
-  electron-builder; the Dock in `npm run dev`) and on app.masterdeck.dev (favicon, home-screen icons,
-  web manifest). Made by `app/scripts/icons.mjs`. Checked: typecheck, `build:web` (icons in
-  `out/web`), a `--mac dir` package whose bundle carries the new `icon.icns`. Not checked: Windows,
-  the web app deployed, the installed app in the Dock (not installed yet).
-
+- **MasterDeck has its own icon** (merged to `main` 3ce574c, not pushed; installed locally and the
+  web app deployed, 2026-10-10): the mark from masterdeck.dev on a dark tile, as the app icon
+  (`app/build/icon.icns` / `icon.ico`, picked up by electron-builder; the Dock in `npm run dev`) and
+  on app.masterdeck.dev (favicon, home-screen icons, web manifest). Made by `app/scripts/icons.mjs`.
+  Checked: typecheck, `build:web`, the installed bundle's `icon.icns`, the live web app serving the
+  icons and manifest. Not checked: Windows (the `.ico` reaches users with the next release).
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so
