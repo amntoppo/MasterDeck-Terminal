@@ -359,7 +359,7 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-09)
 
 - **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
-  (not merged, not pushed, not installed): a **Filters** line in the Sessions column, closed by
+  (PR #76, draft, not merged; installed locally 2026-10-09): a **Filters** line in the Sessions column, closed by
   default, with chips, Clear all and an empty state; status, account (two or more accounts), repo,
   starred and a name search, kept in localStorage. Logic in `shared/sessionFilter.ts`, UI in
   `SessionFilterBar.tsx`. Checked: typecheck, vitest, and the isolated app with a stand-in `claude`
