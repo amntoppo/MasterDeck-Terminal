@@ -82,6 +82,7 @@ import {
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
 import { NotesStore } from "./notes";
+import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -243,7 +244,7 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
-// tabs that subscribed).
+// tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
@@ -533,6 +534,8 @@ let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
   deckHooks.pumpQueue();
+  // Sessions adding to the notes (the masterdeck-notes skill's note.sh). They get the note's id back, never its text.
+  pumpNoteRequests(deckHooks.dir, notes);
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
   const m = mtimeMs(paths.claudeSettings);
   if (m !== settingsSeen) {
@@ -3067,6 +3070,13 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  // The window never leaves the app: a link dropped on it (or any other navigation) opens in the
+  // browser instead. A reload of the same page still goes through.
+  win.webContents.on("will-navigate", (e, url) => {
+    if (url === win?.webContents.getURL()) return;
+    e.preventDefault();
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   if (process.env.ELECTRON_RENDERER_URL)
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);

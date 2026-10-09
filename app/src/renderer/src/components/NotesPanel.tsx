@@ -4,9 +4,10 @@ import { NoteEditor, blankDraft, draftOf, noteTargetKey, type NoteDraft, type No
 import { ticketLabel } from '@shared/ticket'
 import { formatAgo } from '@shared/format'
 import type { AppState } from '@shared/types'
-import { deck, useNow } from '../deck'
+import { deck, load, save, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
-import { ticketNote, type NotesList } from '../notes'
+import { NOTE_VIEWS, WIDE_QUERY, noteView, ticketNote, type NoteView, type NotesList } from '../notes'
+import { MarkdownView } from './MarkdownView'
 
 /** {}: the list only. `fresh` is a timestamp, so asking twice for a new note is two requests. */
 export type NotesTarget = NoteTarget
@@ -16,6 +17,27 @@ export type NotesTarget = NoteTarget
  * closes goes on being saved, and is in the editor again when the panel opens.
  */
 const editor = new NoteEditor({ save: (i) => deck().notesSave(i), get: (id) => deck().notesGet(id) })
+
+const VIEW_KEY = 'masterdeck.notesView'
+const VIEW_LABEL: Record<NoteView, [string, string]> = {
+  write: ['Write', 'The Markdown text, as it is saved'],
+  preview: ['Preview', 'The note rendered'],
+  both: ['Side by side', 'Text and preview next to each other'],
+}
+
+/** A window wide enough for text and preview side by side (never the phone). */
+function useWide(): boolean {
+  const q = () => typeof matchMedia === 'function' && matchMedia(WIDE_QUERY).matches
+  const [wide, setWide] = useState(q)
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return
+    const mq = matchMedia(WIDE_QUERY)
+    const on = () => setWide(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return wide
+}
 
 interface Props {
   notes: NotesList
@@ -36,6 +58,25 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
   // An answer that comes after the panel closed must not open it again.
   const open = useRef(true)
   const { draft, clash, status, refused, stayed } = editor
+  const wide = useWide() && !phone
+  // Per viewer: the window and each browser remember their own.
+  const [picked, setPicked] = useState<NoteView>(() => {
+    const v = load<NoteView>(VIEW_KEY, 'write')
+    return NOTE_VIEWS.includes(v) ? v : 'write'
+  })
+  // A note opened blank (New note, a card's "Add a note") starts in Write: a preview of nothing has no
+  // place to type. The remembered choice is left as it is for the next note.
+  const [blankOpen, setBlankOpen] = useState(false)
+  const openKey = draft ? editor.key : null
+  useEffect(() => setBlankOpen(!!draft && !draft.body.trim()), [openKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const view = blankOpen && picked === 'preview' ? 'write' : noteView(picked, wide)
+  const pick = (v: NoteView) => {
+    // Leaving the text for the preview is a pause in typing: it is saved now, not 2 s later.
+    if (v === 'preview') void editor.saveNow()
+    setBlankOpen(false)
+    setPicked(v)
+    save(VIEW_KEY, v)
+  }
 
   useEffect(() => {
     open.current = true
@@ -155,7 +196,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
   const editing = !!draft
   return (
     <aside
-      className={`notes-panel ${phone ? 'phone' : ''} ${editing ? 'editing' : ''}`}
+      className={`notes-panel ${phone ? 'phone' : ''} ${editing ? 'editing' : ''} ${editing && view === 'both' ? 'wide' : ''}`}
       aria-label="Notes"
       onKeyDown={(e) => {
         if (e.key !== 'Escape') return
@@ -223,16 +264,25 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
               onBlur={() => editor.saveNow()}
             />
           )}
-          <textarea
-            className="notes-body"
-            placeholder={draft.ticket ? 'What is this ticket waiting for?' : 'Write here'}
-            aria-label="Note"
-            value={draft.body}
-            maxLength={NOTE_BODY_MAX}
-            autoFocus={!phone}
-            onChange={(e) => editor.edit({ body: e.target.value })}
-            onBlur={() => editor.saveNow()}
-          />
+          <div className={`notes-pane ${view}`}>
+            {view !== 'preview' && (
+              <textarea
+                className="notes-body"
+                placeholder={draft.ticket ? 'What is this ticket waiting for? (Markdown works)' : 'Write here (Markdown works)'}
+                aria-label="Note"
+                value={draft.body}
+                maxLength={NOTE_BODY_MAX}
+                autoFocus={!phone}
+                onChange={(e) => editor.edit({ body: e.target.value })}
+                onBlur={() => editor.saveNow()}
+              />
+            )}
+            {view !== 'write' && (
+              <div className="notes-preview" tabIndex={0} aria-label="Note, rendered">
+                {draft.body.trim() ? <MarkdownView text={draft.body} html={false} /> : <span className="muted">Nothing to preview yet.</span>}
+              </div>
+            )}
+          </div>
           {clash && (
             <div className="notes-clash" role="alert">
               {clash.kind === 'changed' ? 'Changed elsewhere.' : 'Deleted elsewhere.'}
@@ -261,6 +311,13 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
             </div>
           )}
           <footer className="notes-foot">
+            <div className="seg" role="group" aria-label="Note view">
+              {NOTE_VIEWS.filter((v) => v !== 'both' || wide).map((v) => (
+                <button key={v} type="button" className={view === v ? 'on' : undefined} aria-pressed={view === v} title={VIEW_LABEL[v][1]} onClick={() => pick(v)}>
+                  {VIEW_LABEL[v][0]}
+                </button>
+              ))}
+            </div>
             <span className="muted" aria-live="polite">
               {status}
             </span>
