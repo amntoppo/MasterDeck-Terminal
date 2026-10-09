@@ -94,7 +94,7 @@ import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
-import { REMOTE_WAIT_MS, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
   externalAnswerAllowed,
   optionMessage,
@@ -595,15 +595,16 @@ const sources = new Sources(
     }
     void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
+    // The session list is in: commands that waited while MasterDeck was closed can run now.
+    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
-      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+      // Not before the session list: an empty one would wipe what the phone and web still show.
+      if (sessionsLoaded) cloud?.push(toRemoteSnapshot(state, app.getVersion()));
     } catch (e) {
       console.error(`remote snapshot: ${String(e)}`);
     }
     try {
-      // The session list is in: commands that waited while MasterDeck was closed can run now.
-      if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
       if (
         // While waiting: dial once the list is in or the wait is over, and keep the reason current.
         (!remoteReady && remoteWaitSince !== null) ||
@@ -958,8 +959,13 @@ bridge = new BrowserBridge({
 });
 const remoteCommands = new RemoteCommands(
   {
-    // No state before the first session list: a command is then answered "still loading" (retried), never failed.
+    // No state before the first session list: a command is answered "still loading" (retried) while it
+    // loads, and fails at once with the reason while `claude agents` fails.
     state: () => (sessionsLoaded ? latest : null),
+    notLoaded: () => {
+      const a = sources.sourceHealth("agents");
+      return !sessionsLoaded && a.health === "error" ? `MasterDeck has no session list: ${agentsFailure(a.error)}` : null;
+    },
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
@@ -1074,7 +1080,7 @@ function syncRemote(): void {
     onClients: (c) => sources.setRemoteClients(c),
   });
   cloud.start();
-  if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
+  if (latest && sessionsLoaded) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
 }
 
 /** Stop a background session (no confirmation: callers ask first). */

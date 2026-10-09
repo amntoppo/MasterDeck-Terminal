@@ -9,6 +9,11 @@ import type { AppState, CliResult, DraftAssign, Session } from '@shared/types'
 
 export interface RemoteDeps {
   state(): AppState | null
+  /**
+   * While `state()` is null: why the session list cannot load (`claude agents` fails), a final
+   * answer; null while it is only loading (answered transiently, run again later).
+   */
+  notLoaded?(): string | null
   /** The inbox's act + sources.changed(), as the inboxAct IPC handler does. */
   inboxAct(itemId: string, type: string, payload: Record<string, unknown>): Promise<CliResult>
   draftAssign(t: Ticket): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>
@@ -110,7 +115,11 @@ export class RemoteCommands {
 
   private async exec(cmd: Command): Promise<RemoteOutcome> {
     const st = this.deps.state()
-    if (!st) return { ok: false, transient: true, message: LOADING }
+    if (!st) {
+      // A failing `claude agents` is answered at once: a transient answer would hold CloudSync's queue a minute per command.
+      const why = this.deps.notLoaded?.() ?? null
+      return why ? { ok: false, message: why } : { ok: false, transient: true, message: LOADING }
+    }
     const by = `remote:${cmd.by}`.slice(0, 40)
     const session = (key: string) => st.sessions.find((s) => s.key === key)
     switch (cmd.type) {

@@ -181,7 +181,7 @@ export const REMOTE_WAIT_MS = 60_000
 /**
  * Whether the line to the backend may be dialled yet. It waits for the session list so commands
  * queued while the Mac was off do not run (and fail) before sessions are known, but not for ever:
- * after `REMOTE_WAIT_MS` it connects anyway (commands are answered "still loading" until the list is in).
+ * after `REMOTE_WAIT_MS` it connects anyway (commands are then answered with `agentsFailure`).
  */
 export function remoteWait(
   agents: SourceHealth | undefined,
@@ -190,7 +190,15 @@ export function remoteWait(
 ): { connect: true } | { connect: false; message: string } {
   if (agents === 'ok' || waitedMs >= REMOTE_WAIT_MS) return { connect: true }
   if (agents !== 'error') return { connect: false, message: 'waiting for sessions to load' }
+  return { connect: false, message: `waiting for sessions to load: ${agentsFailure(agentsError)}` }
+}
+
+/**
+ * Why `claude agents` failed, short: the first line of the source's error (which already starts
+ * with "claude agents"), at most 120 characters.
+ */
+export function agentsFailure(agentsError: string | undefined): string {
   const why = (agentsError ?? '').trim().split('\n')[0].trim()
-  const short = why.length > 120 ? `${why.slice(0, 119)}…` : why
-  return { connect: false, message: `waiting for sessions to load: claude agents failed${short ? `: ${short}` : ''}` }
+  if (!why || /^claude agents:?$/.test(why)) return 'claude agents failed'
+  return why.length > 120 ? `${why.slice(0, 119)}…` : why
 }

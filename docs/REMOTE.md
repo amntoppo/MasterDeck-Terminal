@@ -58,16 +58,19 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
 
 ### Lifecycle
 
-- `syncRemote()` runs at startup, on account changes, on a `remoteEnabled` flip and on the first
-  state with healthy agents. Key = `url + token` when `settings.remoteEnabled` and a token exist.
+- `syncRemote()` runs at startup, on account changes, on a `remoteEnabled` flip, on every state
+  while it waits for sessions (below) and from the wait's timer. Key = `url + token` when `settings.remoteEnabled` and a token exist.
 - **Waits for sessions**: until `remoteReady` it shows `connecting · "waiting for sessions to load"`
   and does not dial, so pending commands find their sessions. When `claude agents` fails the text
-  adds the reason (`…: claude agents failed: <first line of the error, ≤ 120 chars>`), kept current
-  from the state callback. `remoteReady` is set by `remoteWait` (`shared/remoteSnapshot.ts`): as
+  adds the reason (`…: claude agents: <first line of the error>`, ≤ 120 chars, `agentsFailure`),
+  set again only when it changes (`setRemote` emits a state, whose callback calls `syncRemote`). `remoteReady` is set by `remoteWait` (`shared/remoteSnapshot.ts`): as
   soon as agents is healthy, or after `REMOTE_WAIT_MS` (60 s, a timer started with the wait) without
   it, when it connects anyway and logs one line. Until the first healthy session list
-  (`sessionsLoaded`) `RemoteCommands` gets no state, so a command is answered transiently ("still
-  loading", retried for a minute by `CloudSync`, never written to `remote-done.json`).
+  (`sessionsLoaded`) no snapshot is pushed (an empty session list would wipe what the phone and web
+  still show) and `RemoteCommands` gets no state: while agents is only loading a command is answered
+  transiently ("still loading", re-run for a minute by `CloudSync`, not written to
+  `remote-done.json`); while it is in `error` it fails at once and finally (`notLoaded`: "MasterDeck
+  has no session list: claude agents: …"), so a queue of commands does not hold the line a minute each.
 - Each (re)start clears external items (`sources.setExternalItems([])`).
 - On `open`: `hello {deviceId, appVersion, protocol: 3, macPublicKey?}`. No `welcome` within 15 s
   → terminate and redial. Ping every 30 s; nothing received for 2 × ping → terminate.
