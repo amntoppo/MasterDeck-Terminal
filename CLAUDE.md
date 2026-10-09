@@ -384,6 +384,11 @@ buttons; it does not go through macOS window drag regions.
   `Resources/mods`. Not checked: the reload item with real sessions, an update over the user's
   copy, Windows. Open points: TODO ("Mods install (#93)").
 
+- **masterdeck.dev** is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+  (deploy and search-engine notes in its README; OPERATIONS § Website). For search: structured data,
+  IndexNow on deploy, and this repository's website field, topics, README and release notes link to
+  it. Google Search Console is still to be set up by hand (TODO).
+
 - **MasterDeck has its own icon** (merged to `main` 3ce574c and pushed; installed locally and the
   web app deployed, 2026-10-10): the mark from masterdeck.dev on a dark tile, as the app icon
   (`app/build/icon.icns` / `icon.ico`, picked up by electron-builder; the Dock in `npm run dev`) and

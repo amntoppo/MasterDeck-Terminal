@@ -1,7 +1,8 @@
 # MasterDeck
 
 A desktop app for people who run many [Claude Code](https://claude.com/claude-code) sessions at once.
-It runs on macOS and Windows.
+It runs on macOS and Windows. Website: **[masterdeck.dev](https://masterdeck.dev)**: features,
+[getting started](https://masterdeck.dev/docs/) and [downloads](https://masterdeck.dev/download/).
 
 - **One window.** Every session is a tab with its real `claude` terminal. The **master-agent** is
   pinned on the right: a Claude session that watches the others and your GitHub.
