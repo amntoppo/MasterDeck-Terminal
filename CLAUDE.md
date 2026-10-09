@@ -402,6 +402,12 @@ buttons; it does not go through macOS window drag regions.
   indicator's card over the panel (nothing was connected), the real web app over the real bridge, a
   real phone, Windows. The Python suite was not run again for the final fixes (no Python changed).
   Open points are in TODO ("Notes: open points").
+- **Remote no longer waits for ever for the session list** (issue #8, branch
+  `worktree-MasterDeck-Terminal-8-remote-waiting`, not merged; 2026-10-09): the
+  status names the `claude agents` error, and after 60 s the line connects anyway (`remoteWait`,
+  `REMOTE_WAIT_MS`); until the first session list no snapshot is sent and commands are answered
+  "still loading" (agents loading) or fail at once with its error (agents failing). PR #77; the
+  first version is installed locally. Checked: typecheck, vitest. Not checked: the isolated app against a local backend with a failing `claude`.
 - **Where things stand:** `main` is pushed and released as **v0.8.2** (2026-10-06; v0.8.0 and v0.8.1 had no Windows build): several GitHub
   accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the
   Board's repository view with assignable users per repository (plan K, merge e75ec9c) and a
