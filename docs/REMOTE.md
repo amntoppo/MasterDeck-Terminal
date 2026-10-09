@@ -262,7 +262,8 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   first. Measured before patches: the bridge sent the full AppState to each tab up to every
   500 ms, 134 MB / 3 min.
 - Notes travel here and nowhere else remote (never in the snapshot of §2): `notesList` answers
-  titles and 120-character previews, `notes:changed` carries the same for one note to tabs that
+  titles and 120-character previews (the note's Markdown read as plain words, `notePreview`; its text
+  is Markdown source since #65, drawn by the tab itself), `notes:changed` carries the same for one note to tabs that
   subscribed, and a note's whole text goes only as the answer of `notesGet` or in the conflict
   answer of `notesSave`. `notesDelete` from a tab skips the Mac's native confirmation (the web app
   asked with `webConfirm`). Details: [ARCHITECTURE § Notes](ARCHITECTURE.md).

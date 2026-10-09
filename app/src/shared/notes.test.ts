@@ -76,6 +76,13 @@ describe('list helpers', () => {
     expect(m.preview.startsWith('first second x')).toBe(true)
     expect(m.preview.length).toBe(120)
   })
+  it('the preview reads the Markdown: marks, addresses and tags are gone, the words stay', () => {
+    const body = '# Plan\n\n- [x] **ship** it\n- [ ] read [the docs](https://example.com/d)\n\n<b>bold?</b> `code`'
+    expect(noteMeta(note({ body })).preview).toBe('Plan ☑ ship it · ☐ read the docs <b>bold?</b> code')
+  })
+  it('a plain-text note keeps its text in the preview', () => {
+    expect(noteMeta(note({ body: 'call Sam at 3\nthen 2 * 3 = 6' })).preview).toBe('call Sam at 3 then 2 * 3 = 6')
+  })
   it('sorts newest edit first', () => {
     expect(sortNotes([meta('n-' + '1'.repeat(32), 5), meta('n-' + '2'.repeat(32), 9)]).map((m) => m.updated)).toEqual([9, 5])
   })
