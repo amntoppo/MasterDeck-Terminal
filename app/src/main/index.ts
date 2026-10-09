@@ -2415,6 +2415,12 @@ function registerIpc(): void {
       ? forCard(t.repo, t.number).github.issueBody(t)
       : { ok: false, message: "bad ticket" };
   });
+  reg.handle(CH.issueSubIssues, (_e, ticket: unknown) => {
+    const t = asTicket(ticket);
+    return t
+      ? forCard(t.repo, t.number).github.subIssues(t)
+      : { ok: false, message: "bad ticket" };
+  });
   // The Assign popup's people: the card's repository's, read as that repository's account (also
   // from the web: a read; the repository is checked in AssignableUsers.get).
   reg.handle(CH.assignableUsers, (_e, repo: unknown) => assignableUsers.get(repo));
