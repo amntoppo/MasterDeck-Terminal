@@ -1331,6 +1331,14 @@ export function flowTriggerCommand(
   lines.push(
     `d=${q(dir)}; f="$d/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$d/workflow.json"; [ -f "$f" ] || exit 0`,
   );
+  // S6: while a loop is open, the loop hook owns the session's stops; the turn-end plan waits.
+  // ponytail: Stop hooks run side by side, so on the turn that closes a loop this may still read
+  // it open and skip: its plan then runs at the next turn end. Upgrade path: the loop hook hands
+  // over the turn-end plan itself when it closes a loop.
+  if (t.id === "turn-end")
+    lines.push(
+      `L="$d/workflows/loops/$sid.json"; [ -f "$L" ] && jq -e '[.loops[]? | select(.state? == "open")] | length > 0' "$L" >/dev/null 2>&1 && exit 0`,
+    );
   // Command triggers: the steps whose pattern the command matches (a bad pattern matches nothing).
   const pick =
     t.id === "command-before" || t.id === "command-after"

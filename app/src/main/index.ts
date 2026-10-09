@@ -1683,6 +1683,12 @@ const syncWorkflowHooks = () => {
   const customs = workflows().triggers();
   setCustomTriggers(customs);
   setMonitors(workflows().monitors());
+  // The loop hook's script first, so its Stop hook entry never points at a missing file.
+  try {
+    workflows().setupLoopHook();
+  } catch (e) {
+    return { ok: false, message: `could not write the loop hook: ${String(e)}` };
+  }
   return installWorkflowHooks(
     paths.claudeSettings,
     paths.home,

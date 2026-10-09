@@ -538,6 +538,13 @@ fixes it, and move the item here to "Recently done".
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 
+## Workflow loops: open points (2026-10-10, issue #82)
+
+- **The turn-end plan can wait one turn after a loop closes.** Stop hooks run side by side, so on
+  the turn that closes a loop the turn-end trigger may still read the loop open and skip; its plan
+  then runs at the next turn end (`ponytail:` in `flowTriggerCommand`). Upgrade: the loop hook hands
+  over the turn-end plan itself when it closes a loop.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done

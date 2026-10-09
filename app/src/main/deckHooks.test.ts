@@ -124,6 +124,31 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     expect(run('Stop', { session_id: SID })).toBe('')
     expect(d.queueRequests()).toEqual([])
   }, 20_000)
+  const loopFile = (home: string, state: string) => {
+    mkdirSync(join(home, 'workflows', 'loops'), { recursive: true })
+    writeFileSync(join(home, 'workflows', 'loops', `${SID}.json`), JSON.stringify({ loops: [{ id: 'lp', state }] }))
+  }
+  it('the queue waits while a workflow loop is open', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'open')
+    // MasterDeck running: no request either (the loop hook owns this stop).
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(d.queueRequests()).toEqual([])
+    stale()
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(readQueue(SID, queues)).toEqual(['a'])
+    // /queue still adds while the loop runs.
+    expect(JSON.parse(run('UserPromptSubmit', { session_id: SID, prompt: '/queue b' })).reason).toBe('Queued #2: b')
+  }, 20_000)
+  it('the queue goes on when the loop is over', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'met')
+    stale()
+    expect(JSON.parse(run('Stop', { session_id: SID }))).toEqual(queueAnswer('a', 0))
+    expect(readQueue(SID, queues)).toEqual([])
+  }, 20_000)
   it('MasterDeck alive but silent: the hook takes its request back and drains, once', () => {
     const { d, queues, run } = setup()
     editQueue(SID, { op: 'add', text: 'a' }, queues)

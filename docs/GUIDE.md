@@ -369,6 +369,7 @@ checkout whose branch was once linked to a ticket does not link it.
   installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them. Sessions already
   running when MasterDeck took the queue skill's hooks out keep using those (Claude Code reads hooks
   when a session starts), and MasterDeck's hook stays out of `/queue` for them until they end.
+  While a workflow loop runs, queued prompts wait until it ends (`/queue` still adds to the list).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you

@@ -67,17 +67,25 @@ def set: type == "string" and test("\\S");
  *   claimed: the hook takes the request back by renaming it itself and drains one item; claimed:
  *   it waits until 7s after its start for the answer. One rename wins, so exactly one of them
  *   takes the item. Deadlines are by the clock: at most ~7s, under the 10s hook timeout.
+ *   While a workflow loop is open (`<loopsDir>/<session id>.json`, #82) it hands nothing over: the
+ *   loop hook owns those stops, and the queue goes on once the loop is over.
  * - `queue-off` (the queue skill's hooks installed by hand): both leave /queue to those hooks.
  * - `legacy-sids` (one session id a line, or `*`): sessions alive when the migration took the queue
  *   skill's hooks out still run them (Claude Code reads hooks at session start), so the hook does no
  *   queue work for them (markLegacy, pruneLegacy).
  * - The rest: one line in `events.jsonl`.
  */
-export function hookScript(dir: string, queueDir: string, configPath = join(dir, 'config.json')): string {
+export function hookScript(
+  dir: string,
+  queueDir: string,
+  configPath = join(dir, 'config.json'),
+  loopsDir = join(dir, '..', 'workflows', 'loops'),
+): string {
   const esc = (p: string) => p.replace(/'/g, `'\\''`)
   return `#!/bin/bash
 # MasterDeck hook: written by MasterDeck at each launch; edits are overwritten.
 D='${esc(dir)}'
+LD='${esc(loopsDir)}'
 Q='${esc(queueDir)}'
 C='${esc(configPath)}'
 ev="$1"
@@ -159,6 +167,8 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
     printf '{"at":%s000,"event":"Stop","data":{"session_id":"%s"}}\\n' "$now" "$sid" >> "$D/events.jsonl"
     case "$sid" in *[!0-9a-fA-F-]*|'') exit 0 ;; esac
     [ -f "$D/queue-off" ] && exit 0
+    # A workflow loop is open: its hook decides this stop, and the queue waits until it is over.
+    [ -f "$LD/$sid.json" ] && jq -e '[.loops[]? | select(.state? == "open")] | length > 0' "$LD/$sid.json" >/dev/null 2>&1 && exit 0
     legacy && exit 0
     f="$Q/$sid.jsonl"
     [ -s "$f" ] || exit 0
@@ -220,6 +230,9 @@ export class DeckHooks {
   private masterListed: string[] = []
   private masterNew = new Map<string, number>()
 
+  /** Where the workflow loops are (`<home>/workflows/loops`): the queue waits for an open one. */
+  private loops: string
+
   constructor(
     home: string,
     private queues = queueDir(),
@@ -227,6 +240,7 @@ export class DeckHooks {
     private config = join(home, 'deck', 'config.json'),
   ) {
     this.dir = join(home, 'deck')
+    this.loops = join(home, 'workflows', 'loops')
     this.script = join(this.dir, 'hook.sh')
     this.follow = { path: join(this.dir, 'events.jsonl'), offset: 0, rest: '' }
   }
@@ -234,7 +248,7 @@ export class DeckHooks {
   /** Write the script (every launch: it follows this version) and the folders it uses. */
   setup(): void {
     for (const d of ['', 'pending', 'answers', 'context', 'peers', 'watch-requests', 'watch-answers', 'queue-requests', 'queue-answers']) mkdirSync(join(this.dir, d), { recursive: true })
-    writeFileSync(this.script, hookScript(this.dir, this.queues, this.config))
+    writeFileSync(this.script, hookScript(this.dir, this.queues, this.config, this.loops))
     chmodSync(this.script, 0o755)
     try {
       if (statSync(this.follow.path).size > EVENTS_MAX) truncateSync(this.follow.path, 0)

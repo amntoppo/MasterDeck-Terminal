@@ -209,6 +209,36 @@ describe.skipIf(process.platform === "win32")("flow hooks", () => {
       [SID, "turn-end"],
     ]);
   }, 20_000);
+  it("turn-end does not fire while a loop is open", () => {
+    const flow: Flow = {
+      nodes: [T("s", "turn-end"), I("j", "Run the linter.")],
+      edges: [e("s", "j")],
+    };
+    const dir = setup({ ...compileFlow(flow) });
+    const stop = flowTriggerCommand(trig("turn-end"), dir, "m");
+    const loops = join(dir, "workflows", "loops");
+    mkdirSync(loops, { recursive: true });
+    const file = (state: string) =>
+      writeFileSync(
+        join(loops, `${SID}.json`),
+        JSON.stringify({ loops: [{ id: "lp", state }] }),
+      );
+    file("open");
+    expect(run(stop, dir, { session_id: SID, stop_hook_active: false })).toBe(
+      "",
+    );
+    expect(existsSync(join(dir, "workflows", "runs.jsonl"))).toBe(false);
+    // Over (or a file that is not one): the turn-end plan runs again.
+    file("met");
+    expect(
+      JSON.parse(run(stop, dir, { session_id: SID, stop_hook_active: false }))
+        .reason,
+    ).toContain("Run the linter.");
+    writeFileSync(join(loops, `${SID}.json`), "{not json");
+    expect(
+      run(stop, dir, { session_id: SID, stop_hook_active: false }),
+    ).not.toBe("");
+  }, 20_000);
   it("a built-in left out of the workflow skips its hook", () => {
     const on = setup({ builtins: ["pr-watch"] });
     const cmd = guardedBuiltin("pr-watch", `jq -c '{got: .session_id}'`, on);

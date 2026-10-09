@@ -17,6 +17,7 @@ import {
   type CustomStep,
   type HookEntry,
 } from "@shared/workflow";
+import { loopScript, loopScriptPath } from "@shared/loopHook";
 import {
   compileFlow,
   parseCustomTrigger,
@@ -348,6 +349,24 @@ export class WorkflowStore {
       } catch {
         /* none yet */
       }
+  }
+
+  /**
+   * Write the loop hook (`workflows/loop.sh`, run by its Stop hook entry) when its text is not
+   * what this MasterDeck generates: an unchanged file is left alone.
+   */
+  setupLoopHook(): void {
+    const file = loopScriptPath(this.home);
+    const text = loopScript(this.home);
+    let cur: string | null = null;
+    try {
+      cur = readFileSync(file, "utf8");
+    } catch {
+      /* not written yet */
+    }
+    if (cur === text) return;
+    writeAtomic(file, text);
+    chmodSync(file, 0o755);
   }
 
   templates(): WorkflowTemplate[] {

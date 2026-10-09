@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { guardedBuiltin } from '@shared/flow'
+import { LOOP_MARK, loopCommand } from '@shared/loopHook'
 import { hookStatus, installDeckHooks, installReviewGate, installWorkflowHooks, LEGACY_COMMANDS, migrateLegacyHooks, reviewGateCommand } from './hooks'
 
 const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook'
@@ -176,6 +177,11 @@ describe.skipIf(process.platform === 'win32')('installWorkflowHooks', () => {
     writeFileSync(p, JSON.stringify(s))
     const count = () => readdirSync(backups).length
     const before = count()
+    // Backups are named by the millisecond: under a busy suite both installs can share one.
+    const ms = Date.now()
+    while (Date.now() === ms) {
+      // wait for the next millisecond
+    }
     installWorkflowHooks(p, backups, d, true)
     expect(count()).toBe(before + 1)
     const text = readFileSync(p, 'utf8')
@@ -184,5 +190,46 @@ describe.skipIf(process.platform === 'win32')('installWorkflowHooks', () => {
     expect(count()).toBe(before + 1)
     expect(readFileSync(p, 'utf8')).toBe(text)
     expect(JSON.parse(text).model).toBe('x')
+  })
+
+  const loopEntries = (p: string) =>
+    (JSON.parse(readFileSync(p, 'utf8')).hooks?.Stop ?? [])
+      .flatMap((m: { hooks: { command: string; timeout?: number }[] }) => m.hooks)
+      .filter((h: { command: string }) => h.command.includes(LOOP_MARK))
+
+  it('installs the loop Stop hook with a 600 s timeout', () => {
+    const d = mkdtempSync(join(tmpdir(), 'wfh-'))
+    const p = join(d, 'settings.json')
+    writeFileSync(p, '{}')
+    installWorkflowHooks(p, join(d, 'backups'), d, true)
+    expect(loopEntries(p)).toEqual([{ type: 'command', command: loopCommand(d), timeout: 600 }])
+    // The trigger hooks keep their 10 s.
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    const turnEnd = s.hooks.Stop.flatMap((m: { hooks: object[] }) => m.hooks).find((h: { command: string }) => h.command.includes('trigger-turn-end'))
+    expect(turnEnd.timeout).toBe(10)
+  })
+
+  it('a second install with nothing changed does not write settings.json', () => {
+    const d = mkdtempSync(join(tmpdir(), 'wfh-'))
+    const p = join(d, 'settings.json')
+    const backups = join(d, 'backups')
+    writeFileSync(p, '{}')
+    installWorkflowHooks(p, backups, d, true)
+    const n = readdirSync(backups).length
+    const at = statSync(p).mtimeMs
+    const text = readFileSync(p, 'utf8')
+    installWorkflowHooks(p, backups, d, true)
+    expect(readdirSync(backups).length).toBe(n)
+    expect(statSync(p).mtimeMs).toBe(at)
+    expect(readFileSync(p, 'utf8')).toBe(text)
+  })
+
+  it('turning workflows off removes the loop hook', () => {
+    const d = mkdtempSync(join(tmpdir(), 'wfh-'))
+    const p = join(d, 'settings.json')
+    writeFileSync(p, '{}')
+    installWorkflowHooks(p, join(d, 'backups'), d, true)
+    installWorkflowHooks(p, join(d, 'backups'), d, false)
+    expect(loopEntries(p)).toEqual([])
   })
 })

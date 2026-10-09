@@ -19,6 +19,7 @@ import {
   type CustomTrigger,
 } from "@shared/flow";
 import { DECK_EVENTS } from "@shared/deckHooks";
+import { LOOP_MARK, loopCommand } from "@shared/loopHook";
 
 /**
  * Claude Code hooks MasterDeck installs into ~/.claude/settings.json: its own deck hook
@@ -268,6 +269,7 @@ export function installWorkflowHooks(
       matcher: string | undefined;
       cmd: string;
       mark: string;
+      timeout?: number;
     }[] = on
       ? [
           ...HOOK_TRIGGERS.map((t) => ({
@@ -288,6 +290,15 @@ export function installWorkflowHooks(
               mark,
             };
           }),
+          // The loop hook (#82) runs a loop's check, which may take minutes (S4: up to 9). Its
+          // mark starts with STEP_MARK, so the removal and the "up to date" check cover it.
+          {
+            event: "Stop",
+            matcher: undefined,
+            cmd: loopCommand(dir),
+            mark: LOOP_MARK,
+            timeout: 600,
+          },
         ]
       : [];
     const current = Object.values(s.hooks ?? {})
@@ -303,7 +314,7 @@ export function installWorkflowHooks(
     )
       return { ok: true, message: "workflow saved" };
     for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK);
-    for (const w of want) add(s, w.event, w.matcher, w.cmd, w.mark, 10);
+    for (const w of want) add(s, w.event, w.matcher, w.cmd, w.mark, w.timeout ?? 10);
     write(settingsPath, backupDir, s);
     return { ok: true, message: "workflow saved" };
   } catch (e) {
