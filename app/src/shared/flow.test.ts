@@ -531,9 +531,24 @@ describe("compiling loops", () => {
         plan: "1. B\n2. Then: C",
         met: "1. D",
         limit: "",
+        then: "",
         after: null,
       },
     ]);
+  });
+
+  it("a loop knows the blocks its then arrows lead to, but not the loops", () => {
+    const flow = fixFlow();
+    flow.nodes.push(
+      I("after", "Open the PR."),
+      I("x1", "x"),
+      L("lx", ["x1"], { name: "X", ...check("true") }),
+    );
+    flow.edges.push(e("lp", "after"), e("lp", "lx"));
+    const lp = compileFlow(flow).steps[0].loops!.find((l) => l.id === "lp")!;
+    // The loop behind the then arrow is opened by the hook (its `after`), not told as text.
+    expect(lp.then).toBe("1. Open the PR.");
+    expect(compileFlow(fixFlow()).steps[0].loops![0].then).toBe("");
   });
 
   it("the step id changes when the loop changes", () => {

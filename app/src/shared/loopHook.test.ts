@@ -17,6 +17,7 @@ const def = ({ check, agentDone, limits, ...over }: Partial<CompiledLoop> = {}):
   plan: '1. Run the tests and fix what fails.',
   met: '',
   limit: '',
+  then: '',
   after: null,
   ...over,
   check: { command: 'false', output: '', outputMode: 'match', timeoutMin: 5, ...check },
@@ -165,6 +166,23 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     // A finished run of the next loop is replaced by a fresh one.
     const again = decide(base({ d: then, e: { iteration: 9 }, extra: [entry({ id: 'lb', state: 'met', iteration: 4 })] }))
     expect(again.file.loops[1]).toMatchObject({ id: 'lb', state: 'open', iteration: 0 })
+  })
+  it('a closed loop hands over its branch, then what comes after it, then the next loop', () => {
+    // Only a then arrow's blocks: the stop is blocked so the session does them.
+    const only = decide(base({ d: [def({ then: '3. Open the PR.' })], r: { passed: true, exit: 0 } }))
+    expect(only.answer.reason).toBe('Loop "Fix" is done: criterion met after 1 iteration.\nAfter the loop:\n3. Open the PR.')
+    const d = [
+      def({ met: '2.met.1. Push.', then: '3. Open the PR.' }),
+      def({ id: 'lb', name: 'B', plan: '1. Lint.', after: { loop: 'lp', via: 'then' } }),
+    ]
+    const all = decide(base({ d, r: { passed: true, exit: 0 } }))
+    const r: string = all.answer.reason
+    expect(r.indexOf('Now:\n2.met.1. Push.')).toBeGreaterThan(0)
+    expect(r.indexOf('After the loop:\n3. Open the PR.')).toBeGreaterThan(r.indexOf('2.met.1. Push.'))
+    expect(r.indexOf('Then the loop "B" starts')).toBeGreaterThan(r.indexOf('3. Open the PR.'))
+    // A session file from before the field: no then text, the stop goes through.
+    const { then: _, ...old } = def()
+    expect(decide(base({ d: [old as CompiledLoop], r: { passed: true, exit: 0 } })).answer).toBeNull()
   })
 })
 

@@ -326,8 +326,9 @@ at most 40 lines / 4 KB), one `runs.jsonl` line (`trigger: "loop"`, `iteration`,
 answers: an open loop blocks the stop with `↻ Loop "<name>": iteration n/max[, m min left].`, the
 check's output or "not done yet", the round's plan and the progress file's path; a loop that ends
 opens the loops of its step whose `after` names it by that outcome or by a plain arrow (fresh, with
-empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>` plus
-each next loop's round, or, with no branch and no next loop, lets the stop through. A `stopped`
+empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>`, then
+`After the loop: <then>` (the blocks its plain arrows lead to: `CompiledLoop.then`, loops left out
+as they open themselves), then each next loop's round; with none of these it lets the stop through. A `stopped`
 loop, a missing or unreadable loop file, or no jq lets the stop through; a loop its workflow no
 longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `runs.jsonl`.
 

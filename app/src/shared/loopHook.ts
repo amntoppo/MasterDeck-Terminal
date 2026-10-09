@@ -34,7 +34,8 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
  * First match wins: met, the iteration limit (`limits.iterations` plus the `extra` that Run 5 more
  * adds), the time limit, the stall limit (the last `stall` hashes equal: check output with
  * durations taken out, and the git fingerprint), else the loop goes on. A loop that closes opens
- * the loops of its step that come after it by that outcome or by a plain arrow (S11).
+ * the loops of its step that come after it by that outcome or by a plain arrow (S11), and hands
+ * over, in order, its met or limit branch, what its plain arrows lead to, and the loops it opened.
  */
 export const DECIDE = String.raw`
 def plural($n; $w): "\($n) \($w)\(if $n == 1 then "" else "s" end)";
@@ -91,10 +92,12 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
            systemMessage: "↻ loop \($n)/\($max)"}
         else
           (if $d.state == "met" then $def.met else $def.limit end) as $branch
-          | if ($branch | set) or ($next | length) > 0 then
+          | ($def.then // "") as $then
+          | if ($branch | set) or ($then | set) or ($next | length) > 0 then
               {decision: "block",
                reason: ("Loop \"\($def.name)\" is \(if $d.state == "met" then "done" else "over" end): \($d.reason)."
                  + (if $branch | set then " Now:\n\($branch)" else "" end)
+                 + (if $then | set then "\nAfter the loop:\n\($then)" else "" end)
                  + ([$next[] | "\nThen the loop \"\(.name)\" starts (MasterDeck checks it each time you finish a turn). Each round:\n\(.plan)\nAdd a note of what you tried to \($in.progress)\(.id).md."] | join(""))),
                systemMessage: "↻ loop \"\($def.name)\": \($d.reason)"}
             else null end

@@ -921,6 +921,11 @@ export interface CompiledLoop {
   met: string;
   limit: string;
   /**
+   * What its plain arrows lead to, however it ended ("" when nothing): blocks only, as the loops
+   * there are opened by the hook (`after`) and told by their own text.
+   */
+  then: string;
+  /**
    * The loop whose arrow leads here (through blocks that are not loops), and which arrow; null
    * for a loop the trigger starts. Only those are armed when the trigger fires; the loop hook
    * opens the others when the loop before them closes.
@@ -1125,6 +1130,13 @@ export function compileFlow(
               limit: planFrom(
                 flow,
                 targets(flow, b.id, "limit"),
+                extraMonitors,
+              ).join("\n"),
+              then: planFrom(
+                flow,
+                targets(flow, b.id, "then").filter(
+                  (id) => byId.get(id)?.kind !== "loop",
+                ),
                 extraMonitors,
               ).join("\n"),
               after: place(b.id).after,
