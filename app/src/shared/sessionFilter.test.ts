@@ -8,6 +8,10 @@ import {
   cleanFilter,
   folderChoices,
   folderLabel,
+  folderLabels,
+  filterSessions,
+  parkedForced,
+  shellsShown,
   isFiltered,
   matches,
   sessionFolder,
@@ -75,6 +79,10 @@ describe('matches', () => {
     expect(matches(x, f({ q: 'login board' }), ctx())).toBe(false)
     expect(matches(x, f({ q: '   ' }), ctx())).toBe(true)
   })
+  it("searches the session's repository folder too", () => {
+    const x = s('a', { name: 'fix', cwd: '/w/acme/.claude/worktrees/acme-74' })
+    expect(matches(x, f({ q: 'acme fix' }), ctx())).toBe(true)
+  })
   it('combines kinds: every one must match', () => {
     const fl = f({ status: ['working'], starred: true, q: 'a' })
     expect(matches(s('a'), fl, ctx({ stars: ['a'] }))).toBe(true)
@@ -96,6 +104,40 @@ describe('activeChips', () => {
     expect(activeChips(f({ accounts: ['ann'] }), false)).toEqual([])
     expect(isFiltered(f({ accounts: ['ann'] }), false)).toBe(false)
     expect(isFiltered(f({ accounts: ['ann'] }), true)).toBe(true)
+  })
+})
+
+describe('folderLabels', () => {
+  it('uses the last part, and more parts where two would read the same', () => {
+    const m = folderLabels(['/a/app', '/b/app', '/w/web'])
+    expect([...m.values()]).toEqual(['a/app', 'b/app', 'web'])
+  })
+  it('gives folder chips that label and the whole path as their title', () => {
+    const [c] = activeChips(f({ folders: ['/a/app'] }), true, folderLabels(['/a/app', '/b/app']))
+    expect([c.label, c.title]).toEqual(['a/app', '/a/app'])
+  })
+})
+
+describe('the column', () => {
+  const list = [s('a'), s('b'), s('c')]
+  it('lists every session, the same array, with no filter on', () => {
+    expect(filterSessions(list, NO_FILTER, ctx())).toBe(list)
+    expect(filterSessions(list, f({ accounts: ['ann'] }), ctx({ multi: false }))).toBe(list)
+  })
+  it('lists only what matches, in order (Cleanup acts on this list only)', () => {
+    expect(filterSessions(list, f({ status: ['you', 'idle'] }), ctx()).map((x) => x.key)).toEqual(['b', 'c'])
+  })
+  it('opens the Parked fold only for a Parked status filter', () => {
+    expect(parkedForced(f({ status: ['parked'] }))).toBe(true)
+    expect(parkedForced(f({ status: ['idle'] }))).toBe(false)
+  })
+  it('hides shells under a status, repo, account or star filter, and searches their label', () => {
+    const tabs = [{ label: 'zsh tracker' }, { label: 'starting web' }]
+    expect(shellsShown(tabs, NO_FILTER, true)).toBe(tabs)
+    expect(shellsShown(tabs, f({ status: ['idle'] }), true)).toEqual([])
+    expect(shellsShown(tabs, f({ starred: true }), true)).toEqual([])
+    expect(shellsShown(tabs, f({ accounts: ['ann'] }), false)).toBe(tabs)
+    expect(shellsShown(tabs, f({ q: 'web' }), true)).toEqual([{ label: 'starting web' }])
   })
 })
 

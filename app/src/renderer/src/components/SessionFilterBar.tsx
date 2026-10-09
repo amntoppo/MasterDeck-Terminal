@@ -1,9 +1,10 @@
 import { LANES } from "@shared/tasks";
+import { useId } from "react";
 import {
   NO_FILTER,
   accountTitle,
   activeChips,
-  folderLabel,
+  folderLabels,
   toggled,
   type SessionFilter,
 } from "@shared/sessionFilter";
@@ -30,7 +31,9 @@ export function SessionFilterBar({
   accounts: string[];
   folders: string[];
 }) {
-  const chips = activeChips(filter, multi);
+  const labels = folderLabels(folders);
+  const chips = activeChips(filter, multi, labels);
+  const bodyId = useId();
   const pick = (key: string, on: boolean, label: string, title: string | undefined, toggle: () => void) => (
     <button
       key={key}
@@ -48,6 +51,7 @@ export function SessionFilterBar({
         <button
           className="sfilter-toggle"
           aria-expanded={open}
+          aria-controls={bodyId}
           onClick={() => onOpen(!open)}
           title={open ? "Hide the filters" : "Filter the sessions"}
         >
@@ -57,7 +61,7 @@ export function SessionFilterBar({
         <span className="sfilter-chips">
           {!open &&
             chips.map((c) => (
-              <span key={c.id} className="chip sfilter-chip" title={c.label}>
+              <span key={c.id} className="chip sfilter-chip" title={c.title ?? c.label}>
                 <span className="sfilter-chip-text">{c.label}</span>
                 <button
                   aria-label={`Remove filter ${c.label}`}
@@ -76,7 +80,7 @@ export function SessionFilterBar({
         )}
       </div>
       {open && (
-        <div className="sfilter-body">
+        <div className="sfilter-body" id={bodyId}>
           <input
             className="sfilter-search"
             type="search"
@@ -84,7 +88,11 @@ export function SessionFilterBar({
             aria-label="Search session names"
             value={filter.q}
             onChange={(e) => onFilter({ ...filter, q: e.target.value })}
-            onKeyDown={(e) => e.key === "Escape" && filter.q && (e.stopPropagation(), onFilter({ ...filter, q: "" }))}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape" || !filter.q) return;
+              e.stopPropagation();
+              onFilter({ ...filter, q: "" });
+            }}
           />
           <div className="sfilter-group" role="group" aria-label="Status">
             <span className="sfilter-label">Status</span>
@@ -108,7 +116,7 @@ export function SessionFilterBar({
             <div className="sfilter-group" role="group" aria-label="Repository or folder">
               <span className="sfilter-label">Repo</span>
               {folders.map((d) =>
-                pick(d, filter.folders.includes(d), folderLabel(d), d, () =>
+                pick(d, filter.folders.includes(d), labels.get(d) ?? d, d, () =>
                   onFilter({ ...filter, folders: toggled(filter.folders, d) }),
                 ),
               )}

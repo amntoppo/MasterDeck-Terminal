@@ -811,8 +811,10 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow:hover .srow-star, .srow-star.on, .srow-star:focus-visible { visibility: visible; }
 .srow-star.on { color: var(--amber); }
 .srow-star:hover { color: var(--amber); }
-/* The Sessions column's filters: one line when closed (sticky, so a filtered list always says so). */
+/* The Sessions column's filters: closed, one sticky line, so a filtered list always says so; open,
+   it scrolls with the list, so the matches are never under it (a phone's keyboard leaves little room). */
 .sfilter { position: sticky; top: -6px; z-index: 2; background: var(--bg-2); margin: 0 -8px 6px; padding: 4px 14px 4px; border-bottom: 1px solid var(--line); }
+.sfilter.open { position: static; }
 .sfilter-line { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; }
 .sfilter-toggle { display: inline-flex; align-items: center; gap: 4px; flex: none; background: none; border: none; padding: 0; cursor: pointer; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .sfilter-toggle:hover { color: var(--text); }
@@ -834,6 +836,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .sfilter-group .chip.btnlike:not(.on) { border-color: var(--line); background: var(--bg); }
 .sfilter-label { width: 52px; flex: none; font-size: 10.5px; color: var(--faint); }
 .sfilter-empty { padding: 10px 14px; }
+.sidebar .row.held { cursor: default; }
 .section-head.lane-starred { color: var(--amber); }
 .d-star { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; }
 .d-star:hover { color: var(--text); }

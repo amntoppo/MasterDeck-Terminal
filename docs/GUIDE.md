@@ -370,14 +370,19 @@ checkout whose branch was once linked to a ticket does not link it.
   group. Stopping it, or it ending, takes the star off. Stars are kept across restarts (per
   window: the web app keeps its own). With nothing starred the section is hidden.
 - **Filter the sessions:** the **Filters** line above the session groups is closed by default;
-  click it to open the search (on the session name or its ticket, every word must match) and the
+  click it to open the search (on the session name, its ticket and its repository's folder, every
+  word must match) and the
   choices: **Status** (the column's groups, and Parked), **Account** (only with two or more
   accounts; "gh's active account" for a session started without one), **Repo** (the folder each
   session runs in; a session in a worktree counts under its repository) and **★ Starred only**.
   Within one kind any picked value matches; different kinds must all match. Closed, the line shows
   how many filters are on and a chip for each (× removes it; more than fit scroll sideways), and
-  **Clear all**. When nothing matches, the column says so with **Clear filters**. Picking Parked
-  opens the Parked fold. Cleanup offers only the sessions the filters show. The filters and
+  **Clear all**; closed, the line stays at the top while the list scrolls. When nothing matches,
+  the column says so with **Clear filters**. Picking Parked opens the Parked fold (it stays open
+  while that filter is on). Shells and starting sessions show only when no status, account, repo
+  or star filter is on, and the search looks at their names. A folder chip shows as many parts of
+  the path as it takes to tell two folders of one name apart. Cleanup offers only the sessions the
+  filters show. The filters and
   whether the line is open are kept across restarts (per window: the web app keeps its own).
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
   Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.

@@ -54,6 +54,24 @@ export function folderLabel(folder: string): string {
   return folder.split('/').filter(Boolean).pop() ?? folder
 }
 
+/**
+ * Chip text for each folder: its last part, or as many parts as it takes to tell it from the
+ * others (`a/app`, `b/app`).
+ */
+export function folderLabels(folders: string[]): Map<string, string> {
+  const parts = new Map(folders.map((d) => [d, d.split('/').filter(Boolean)]))
+  const out = new Map<string, string>()
+  for (const [d, p] of parts) {
+    let n = 1
+    const tail = (q: string[], k: number) => q.slice(-k).join('/')
+    while (n < p.length && [...parts].some(([o, q]) => o !== d && tail(q, n) === tail(p, n))) n++
+    out.set(d, tail(p, n) || d)
+  }
+  return out
+}
+
+const searchWords = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean)
+
 function accountOf(s: Filterable): string | null {
   return s.ghActive ? GH_ACTIVE : (s.account ?? null)
 }
@@ -66,9 +84,10 @@ export function matches(s: Filterable, f: SessionFilter, ctx: FilterContext): bo
     if (!a || !f.accounts.includes(a)) return false
   }
   if (f.folders.length && !f.folders.includes(sessionFolder(s.cwd))) return false
-  const words = f.q.toLowerCase().split(/\s+/).filter(Boolean)
+  const words = searchWords(f.q)
   if (words.length) {
-    const text = `${s.name} ${s.ticket ?? ''}`.toLowerCase()
+    // The name, the ticket and the repository's folder: "acme" or "tracker" finds its sessions too.
+    const text = `${s.name} ${s.ticket ?? ''} ${folderLabel(sessionFolder(s.cwd))}`.toLowerCase()
     if (!words.every((w) => text.includes(w))) return false
   }
   return true
@@ -78,6 +97,8 @@ export function matches(s: Filterable, f: SessionFilter, ctx: FilterContext): bo
 export interface FilterChip {
   id: string
   label: string
+  /** The whole value when the label is short for it (a folder's path). */
+  title?: string
   without: SessionFilter
 }
 
@@ -87,8 +108,8 @@ export function accountTitle(a: string): string {
   return a === GH_ACTIVE ? "gh's active account" : `@${a}`
 }
 
-/** The filters that are on (the count on the toggle and the chips under it). */
-export function activeChips(f: SessionFilter, multi: boolean): FilterChip[] {
+/** The filters that are on (the count on the toggle and the chips under it); `labels` from `folderLabels`. */
+export function activeChips(f: SessionFilter, multi: boolean, labels?: Map<string, string>): FilterChip[] {
   const out: FilterChip[] = []
   if (f.q.trim()) out.push({ id: 'q', label: `“${f.q.trim()}”`, without: { ...f, q: '' } })
   if (f.starred) out.push({ id: 'starred', label: '★ Starred', without: { ...f, starred: false } })
@@ -98,12 +119,33 @@ export function activeChips(f: SessionFilter, multi: boolean): FilterChip[] {
     for (const a of f.accounts)
       out.push({ id: `account:${a}`, label: accountTitle(a), without: { ...f, accounts: f.accounts.filter((x) => x !== a) } })
   for (const d of f.folders)
-    out.push({ id: `folder:${d}`, label: folderLabel(d), without: { ...f, folders: f.folders.filter((x) => x !== d) } })
+    out.push({ id: `folder:${d}`, label: labels?.get(d) ?? folderLabel(d), title: d, without: { ...f, folders: f.folders.filter((x) => x !== d) } })
   return out
 }
 
 export function isFiltered(f: SessionFilter, multi: boolean): boolean {
   return activeChips(f, multi).length > 0
+}
+
+/** The sessions the filters let through, in the given order (the list itself when none is on). */
+export function filterSessions<T extends Filterable>(list: T[], f: SessionFilter, ctx: FilterContext): T[] {
+  return isFiltered(f, ctx.multi) ? list.filter((s) => matches(s, f, ctx)) : list
+}
+
+/** Filtering for Parked asks to see them: the fold is open, and its header does not close it. */
+export function parkedForced(f: SessionFilter): boolean {
+  return f.status.includes('parked')
+}
+
+/**
+ * Shells and starting sessions have no status, account, repository or star: any of those filters
+ * hides them, and the search looks at their label.
+ */
+export function shellsShown<T extends { label: string }>(tabs: T[], f: SessionFilter, multi: boolean): T[] {
+  const kinds = f.starred || f.status.length > 0 || f.folders.length > 0 || (multi && f.accounts.length > 0)
+  if (kinds) return []
+  const words = searchWords(f.q)
+  return words.length ? tabs.filter((t) => words.every((w) => t.label.toLowerCase().includes(w))) : tabs
 }
 
 /** Add a value to a list, or take it out. */

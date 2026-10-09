@@ -18,10 +18,12 @@ import { LANES, laneOf, type Lane } from "@shared/tasks";
 import {
   accountChoicesFor,
   cleanFilter,
+  filterSessions,
   folderChoices,
   isFiltered,
-  matches,
   NO_FILTER,
+  parkedForced,
+  shellsShown,
   type SessionFilter,
 } from "@shared/sessionFilter";
 import { SessionFilterBar } from "./SessionFilterBar";
@@ -221,25 +223,28 @@ export function Sidebar({
   // The lane a row is listed under: Parked for a suspended session, whatever its status says.
   const laneFor = (s: Session): Lane =>
     s.state === "suspended" ? "parked" : laneOf(statusOf(s).key);
-  const visible = filtered
-    ? sessions.filter((s) =>
-        matches(
-          {
+  // The rows keep the sessions themselves; only the keys come back from the filter.
+  const kept = filtered
+    ? new Set(
+        filterSessions(
+          sessions.map((s) => ({
             ...s,
             ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
             lane: laneFor(s),
-          },
+          })),
           filter,
           { stars, multi },
-        ),
+        ).map((s) => s.key),
       )
-    : sessions;
+    : null;
+  const visible = kept ? sessions.filter((s) => kept.has(s.key)) : sessions;
+  const shells = shellsShown(others ?? [], filter, multi);
   const allLive = sessions.filter((s) => s.state !== "suspended");
   const live = visible.filter((s) => s.state !== "suspended");
   const { starred, rest: unstarred } = splitStarred(live, stars);
   const suspended = visible.filter((s) => s.state === "suspended");
-  // Filtering for Parked asks to see them: open the fold.
-  const parkedOpen = showSuspended || (filtered && filter.status.includes("parked"));
+  const parkedHeld = parkedForced(filter);
+  const parkedOpen = showSuspended || parkedHeld;
 
   // Cleanup: rows become selectable (merged ones picked); Stop ends the picked sessions.
   const [picked, setPicked] = useState<Set<string> | null>(null);
@@ -515,13 +520,13 @@ export function Sidebar({
             }}
           />
         )}
-        {others && others.length > 0 && (
+        {shells.length > 0 && (
           <div className="section">
             <div className="section-head">
               Shells &amp; starting{" "}
-              <span className="count">{others.length}</span>
+              <span className="count">{shells.length}</span>
             </div>
-            {others.map((t) => (
+            {shells.map((t) => (
               <div
                 key={t.id}
                 className={`srow ${t.active ? "active" : ""}`}
@@ -555,8 +560,9 @@ export function Sidebar({
         {suspended.length > 0 && (
           <div className="section">
             <div
-              className="row"
-              onClick={() => setShowSuspended(!showSuspended)}
+              className={`row ${parkedHeld ? "held" : ""}`}
+              onClick={() => !parkedHeld && setShowSuspended(!showSuspended)}
+              title={parkedHeld ? "Open while the Parked filter is on" : undefined}
             >
               <span className="mark">{parkedOpen ? "▾" : "▸"}</span>
               <span className="label sub">Parked · {suspended.length}</span>
