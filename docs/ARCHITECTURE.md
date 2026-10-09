@@ -512,9 +512,11 @@ Preview is `shared/markdown.ts` (`parseMarkdown` → a tree; `safeHref` / `safeI
 drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the text; the CSP's
 `img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. A PR
 review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
-`master checkout`. For web callers main drops only the `cwd` argument of `draftAssign`
-(`chosenFolder` in `main/remoteGuards.ts`; from the window it must be an absolute, existing folder);
-an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
+`master checkout`. The `cwd` argument of `draftAssign` is checked by `chosenFolder`
+(`main/remoteGuards.ts`): from the window it must be an absolute, existing folder; from a browser
+it must be one of `workspaceFolders()` in `main/index.ts` (the workspace and `Ops.repos()`, the
+list `workspaceRepos` gives the web app's `RepoPicker`), compared as real paths, and anything else
+is refused with a message (the dialog keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
 window, as `cwd` always was. Which account the session runs as is not part of this:
 `config.account_for_repo` / `defaultAccount` as before.
 
@@ -832,7 +834,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   the visible view; on the web all output goes through `predictiveEcho`).
 - Web gating: `web.ts` — `isWeb()` (`deck().platform === 'web'`), `can(method)`, `WEB_VIEWS`,
   `screenOk`, `shortcutOk`, `actionOk`, `keyPlatform`. `webConfirm.ts` + `WebConfirm.tsx` replace
-  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker.
+  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker (`listOnly`: the workspace repositories and no typed path, for the Start dialog).
 - One stylesheet: `styles.css` (the web adds `src/web/web.css`).
 - Phone layout (web only): `web.ts` `isPhone()` / `usePhone()` = `isWeb() && matchMedia(PHONE_QUERY)`
   (`(max-width: 760px)`), so Electron never gets it. App adds `phone ps-list|main|master` to `.app`

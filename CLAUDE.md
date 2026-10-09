@@ -359,6 +359,15 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-09)
 
+- **The web app's Start dialog has Choose folder… (#62)** (branch
+  `worktree-MasterDeck-Terminal-62-web-folder-choice`, not merged, not installed): a pick of the
+  workspace and its repositories (`RepoPicker` `listOnly`), and `chosenFolder(remote, cwd, known)`
+  takes a browser's folder only when it is one of `workspaceFolders()` (real paths), else refuses
+  with a message. Checked: typecheck, vitest, the guard's tests (allowed, refused, a link out of the
+  workspace), and the dev preview at 390 x 844 (the pick, the folder line after it, a refusal
+  keeping the folder). Not checked: the real web app over the bridge, a start from the web, a real
+  phone. An `assign` request's own `cwd` is still not checked (TODO).
+
 - **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
   (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
   ticket from session activity on this Mac (idle gap 1 h by default, an account counts a minute once,

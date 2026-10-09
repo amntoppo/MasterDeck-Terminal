@@ -287,6 +287,13 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   Account actions, browser approval/revoke, editor buttons, folder picker (replaced by
   `RepoPicker`), native dialogs (replaced by `webConfirm`). `openExternal` on the web opens only
   `https://` URLs.
+- What folder a browser may choose for a ticket's session (the Start dialog's **Choose folder…**):
+  only one of the folders MasterDeck found itself, the workspace and its repositories
+  (`workspaceRepos`: `workspaceFolders()` in `main/index.ts`, `Ops.repos()`), picked from
+  `RepoPicker` with `listOnly` (no typed path). Main checks the draft's `cwd` again
+  (`chosenFolder(remote, cwd, known)` in `main/remoteGuards.ts`, real paths, so a link in the
+  workspace cannot lead out of it) and refuses anything else with a message: no draft, nothing
+  starts. The + menu's New session keeps its typed path, as before.
 - Build/serve/deploy: `npm run build:web` (→ `app/out/web`, `MD_API` default
   `https://dev.masterdeck.dev`, must be https for production), `npm run dev:web` (Vite;
   `MD_API=http://localhost:8787` adds the local backend to the CSP; `/?preview` shows the app on fixture data

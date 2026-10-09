@@ -1838,6 +1838,18 @@ function liveDirs(): string[] {
   return dirs;
 }
 
+/**
+ * The workspace and the repositories MasterDeck found in it (`Ops.repos()`): the + menu's and the
+ * web app's folder pick, and the only folders a browser may choose for a ticket's session.
+ */
+function workspaceFolders(): string[] {
+  const seen = new Set<string>();
+  return [paths.masterWorkspace, ...ops.repos()]
+    .filter((p) => typeof p === "string" && p && existsSync(p))
+    .map((p) => resolve(p))
+    .filter((p) => !seen.has(p) && seen.add(p));
+}
+
 function registerIpc(): void {
   reg.handle(CH.getState, () => latest);
   reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
@@ -1847,8 +1859,8 @@ function registerIpc(): void {
     (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
-      const dir = chosenFolder(isRemote(e), cwd);
+      // The window's must be a real folder; a browser's one of the folders MasterDeck found (its pick).
+      const dir = chosenFolder(isRemote(e), cwd, isRemote(e) ? workspaceFolders() : []);
       return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
     },
   );
@@ -2165,14 +2177,9 @@ function registerIpc(): void {
     return meta;
   });
   // The + menu: the workspace and its repos, to open a terminal or a session in.
-  reg.handle(CH.workspaceRepos, () => {
-    const seen = new Set<string>();
-    return [paths.masterWorkspace, ...ops.repos()]
-      .filter((p) => typeof p === "string" && p && existsSync(p))
-      .map((p) => resolve(p))
-      .filter((p) => !seen.has(p) && seen.add(p))
-      .map((p) => ({ name: basename(p), path: p }));
-  });
+  reg.handle(CH.workspaceRepos, () =>
+    workspaceFolders().map((p) => ({ name: basename(p), path: p })),
+  );
   // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
   reg.handle(CH.startClaude, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as {

@@ -16,6 +16,7 @@ import { AccountBadge, AccountSelect } from "./AccountBits";
 import { TrustNote, useTrust } from "./TrustFix";
 import { MarkdownView } from "./MarkdownView";
 import { PeerPicker } from "./PeerPicker";
+import { RepoPicker } from "./RepoPicker";
 import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { deck, load, save } from "../deck";
 import { can } from "../web";
@@ -139,17 +140,35 @@ export function AssignDialog({
     learn(d);
     setSystem((cur) => swapped(cur, known, d.prompt));
   };
+  // The web app cannot open the Mac's folder window: it picks one of the workspace's repositories,
+  // the only folders the Mac accepts from a browser.
+  const [picking, setPicking] = useState(false);
   const choose = async () => {
+    if (!can("pickFolder")) return setPicking(true);
     const p = await deck().pickFolder(folder?.cwd);
-    if (!p) return;
+    if (p) await chooseFolder(p);
+  };
+  const chooseFolder = async (p: string) => {
+    const was = folder;
+    const wasChosen = chosen;
     chosenPath.current = p;
     setChosen(true);
     // Nothing is known of the new folder yet, its trust included (asked about at once).
     setFolder((cur) => ({ ...cur, cwd: p, found: undefined, trusted: undefined }));
     setAnyway(false);
+    setError(null);
     // The same resolver says whether it is a checkout of the repository, and words the prompt for it.
     const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
-    if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
+    if (chosenPath.current !== p) return;
+    if (!r.ok) {
+      // Refused (from a browser, a folder the Mac does not know): the session would not start there.
+      chosenPath.current = wasChosen ? (was?.cwd ?? null) : null;
+      setChosen(wasChosen);
+      setFolder(was);
+      setError(r.message);
+      return;
+    }
+    if (r.draft.cwd !== p) return;
     setFolder(folderOf(r.draft));
     swapPrompt(r.draft);
   };
@@ -618,7 +637,7 @@ export function AssignDialog({
                 folder={folder ?? { cwd: draft.cwd }}
                 chosen={chosen}
                 account={isMulti(state.config) ? account : null}
-                onChoose={can("pickFolder") ? choose : undefined}
+                onChoose={choose}
               />
               {/* Nothing for a trusted folder, or one nothing is known about. */}
               {(trust.trusted === false || trust.opened) && (
@@ -947,13 +966,23 @@ export function AssignDialog({
         )}
       </div>
     </div>
+    {picking && (
+      <RepoPicker
+        start={folder?.cwd}
+        listOnly
+        onDone={(p) => {
+          setPicking(false);
+          if (p) void chooseFolder(p);
+        }}
+      />
+    )}
     </>
   );
 }
 
 /**
  * Where the session starts and as whom. No checkout of the ticket's repository in its account's
- * workspace is said plainly; it never blocks the start. `onChoose` absent (the web app): no picker.
+ * workspace is said plainly; it never blocks the start. `onChoose` absent: no Choose folder….
  */
 function StartFolderLine({
   folder,
