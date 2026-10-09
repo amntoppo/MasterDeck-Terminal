@@ -356,8 +356,16 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-06)
+## Current state and next steps (2026-10-09)
 
+- **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
+  (not merged, not pushed, not installed): a **Filters** line in the Sessions column, closed by
+  default, with chips, Clear all and an empty state; status, account (two or more accounts), repo,
+  starred and a name search, kept in localStorage. Logic in `shared/sessionFilter.ts`, UI in
+  `SessionFilterBar.tsx`. Checked: typecheck, vitest, and the isolated app with a stand-in `claude`
+  listing five fake sessions and two fictional accounts (open/close, picking, AND across kinds, the
+  empty state, chip ×, Clear all, kept after a restart). Not checked: the web app, a phone, Windows,
+  real sessions with recorded accounts.
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
   this line): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the

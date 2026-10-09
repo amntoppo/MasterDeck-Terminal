@@ -14,7 +14,17 @@ import { NewMenu, type NewAction } from "./NewMenu";
 import { StatusDialog } from "./StatusDialog";
 import { SessionMenu } from "./SessionMenu";
 import { attentionFor, sessionStatus } from "@shared/review";
-import { LANES, laneOf } from "@shared/tasks";
+import { LANES, laneOf, type Lane } from "@shared/tasks";
+import {
+  accountChoicesFor,
+  cleanFilter,
+  folderChoices,
+  isFiltered,
+  matches,
+  NO_FILTER,
+  type SessionFilter,
+} from "@shared/sessionFilter";
+import { SessionFilterBar } from "./SessionFilterBar";
 import { canStop, cleanupDefaults } from "@shared/cleanup";
 import { formatAgo, formatGhCache, formatRefreshed } from "@shared/format";
 import type { InboxEntry, InboxKind } from "@shared/inbox";
@@ -83,6 +93,8 @@ export interface ColumnTab {
 export type SessionAction = "summary" | "close-tab";
 
 const ORDER_KEY = "sessionOrder";
+const FILTER_KEY = "sessionFilter";
+const FILTER_OPEN_KEY = "sessionFilterOpen";
 /** When each starred session was first missing from the list (see pruneStars). */
 const starsMissingSince = new Map<string, number>();
 
@@ -183,21 +195,57 @@ export function Sidebar({
       attentionFor(s, state.proposals),
       state.manualStatus[s.key],
     );
-  const live = sessions.filter((s) => s.state !== "suspended");
   // Starred: pinned above the status groups, whatever their status; an ended one loses its star.
   const stars = useStars();
   useEffect(
     () => setStars(pruneStars(stars, state.sessions, starsMissingSince)),
     [stars, state.sessions],
   );
+  // Filters (kept across restarts): everything below lists only the sessions that match.
+  const [filter, setFilterState] = useState<SessionFilter>(() =>
+    cleanFilter(load<unknown>(FILTER_KEY, NO_FILTER)),
+  );
+  const [filterOpen, setFilterOpenState] = useState(() =>
+    load<boolean>(FILTER_OPEN_KEY, false) === true,
+  );
+  const setFilter = (f: SessionFilter) => {
+    setFilterState(f);
+    save(FILTER_KEY, f);
+  };
+  const setFilterOpen = (o: boolean) => {
+    setFilterOpenState(o);
+    save(FILTER_OPEN_KEY, o);
+  };
+  const multi = isMulti(state.config);
+  const filtered = isFiltered(filter, multi);
+  // The lane a row is listed under: Parked for a suspended session, whatever its status says.
+  const laneFor = (s: Session): Lane =>
+    s.state === "suspended" ? "parked" : laneOf(statusOf(s).key);
+  const visible = filtered
+    ? sessions.filter((s) =>
+        matches(
+          {
+            ...s,
+            ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
+            lane: laneFor(s),
+          },
+          filter,
+          { stars, multi },
+        ),
+      )
+    : sessions;
+  const allLive = sessions.filter((s) => s.state !== "suspended");
+  const live = visible.filter((s) => s.state !== "suspended");
   const { starred, rest: unstarred } = splitStarred(live, stars);
-  const suspended = sessions.filter((s) => s.state === "suspended");
+  const suspended = visible.filter((s) => s.state === "suspended");
+  // Filtering for Parked asks to see them: open the fold.
+  const parkedOpen = showSuspended || (filtered && filter.status.includes("parked"));
 
   // Cleanup: rows become selectable (merged ones picked); Stop ends the picked sessions.
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [stopping, setStopping] = useState(false);
   const startCleanup = () =>
-    setPicked(cleanupDefaults(sessions, state.prStage));
+    setPicked(cleanupDefaults(visible, state.prStage));
   const togglePick = (key: string) =>
     setPicked((p) => {
       if (!p) return p;
@@ -206,8 +254,9 @@ export function Sidebar({
       else n.add(key);
       return n;
     });
+  // Only what is listed: a filter never hides a session that is about to be stopped.
   const toStop = picked
-    ? sessions.filter((s) => picked.has(s.key) && canStop(s))
+    ? visible.filter((s) => picked.has(s.key) && canStop(s))
     : [];
   const stopPicked = async () => {
     const n = toStop.length;
@@ -398,9 +447,32 @@ export function Sidebar({
             ))}
         </div>
 
-        {live.length === 0 && !others?.length && (
+        {sessions.length > 0 && (
+          <SessionFilterBar
+            filter={filter}
+            onFilter={setFilter}
+            open={filterOpen}
+            onOpen={setFilterOpen}
+            multi={multi}
+            accounts={accountChoicesFor(
+              state.config.accounts.map((a) => a.login),
+              sessions,
+              filter.accounts,
+            )}
+            folders={folderChoices(sessions, filter.folders)}
+          />
+        )}
+        {allLive.length === 0 && !others?.length && (
           <div className="empty" style={{ padding: "10px 14px" }}>
             No live sessions. Start one from the board, or open a shell.
+          </div>
+        )}
+        {filtered && sessions.length > 0 && visible.length === 0 && (
+          <div className="empty sfilter-empty">
+            No sessions match the filters.{" "}
+            <button className="link-btn" onClick={() => setFilter(NO_FILTER)}>
+              Clear filters
+            </button>
           </div>
         )}
         {starred.length > 0 && (
@@ -486,10 +558,10 @@ export function Sidebar({
               className="row"
               onClick={() => setShowSuspended(!showSuspended)}
             >
-              <span className="mark">{showSuspended ? "▾" : "▸"}</span>
+              <span className="mark">{parkedOpen ? "▾" : "▸"}</span>
               <span className="label sub">Parked · {suspended.length}</span>
             </div>
-            {showSuspended && suspended.map((s) => rowFor(s))}
+            {parkedOpen && suspended.map((s) => rowFor(s))}
           </div>
         )}
         {menu && (
@@ -554,7 +626,7 @@ export function Sidebar({
                   setPicked(
                     toStop.length
                       ? new Set()
-                      : new Set(sessions.filter(canStop).map((s) => s.key)),
+                      : new Set(visible.filter(canStop).map((s) => s.key)),
                   )
                 }
               >

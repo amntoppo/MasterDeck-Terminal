@@ -10,7 +10,7 @@ One window for all your Claude Code sessions, laid out as a command center:
 - **Terminals:**
   - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
-    sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
+    sessions starting, and Parked; a **Filters** line above the groups narrows the list. Click one to open its terminal. **Split** shows two terminals
     side by side; **+** opens the new-terminal / new-session menu.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
@@ -369,6 +369,16 @@ checkout whose branch was once linked to a ticket does not link it.
   stays there whatever its status; its row still shows the status. Unstar it to send it back to its
   group. Stopping it, or it ending, takes the star off. Stars are kept across restarts (per
   window: the web app keeps its own). With nothing starred the section is hidden.
+- **Filter the sessions:** the **Filters** line above the session groups is closed by default;
+  click it to open the search (on the session name or its ticket, every word must match) and the
+  choices: **Status** (the column's groups, and Parked), **Account** (only with two or more
+  accounts; "gh's active account" for a session started without one), **Repo** (the folder each
+  session runs in; a session in a worktree counts under its repository) and **★ Starred only**.
+  Within one kind any picked value matches; different kinds must all match. Closed, the line shows
+  how many filters are on and a chip for each (× removes it; more than fit scroll sideways), and
+  **Clear all**. When nothing matches, the column says so with **Clear filters**. Picking Parked
+  opens the Parked fold. Cleanup offers only the sessions the filters show. The filters and
+  whether the line is open are kept across restarts (per window: the web app keeps its own).
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
   Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
 - **Session status:** the column and the Details tab show one status, first match wins:
