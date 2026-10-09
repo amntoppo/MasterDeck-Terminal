@@ -219,6 +219,109 @@ claude --bg -n probe-$(date +%s) --model haiku "Reply with OK and wait."
 - Stop it with `claude stop <bgId>` when done, remove `$P`, and delete only the transcript folder
   that run created under `~/.claude/projects/` (name it exactly; never a glob).
 
+## Meetings: capture
+
+How MasterDeck records a meeting on macOS (issue #102; spec §1-§2 in the backend repo). This comes
+from Electron 44.4.5's `electron.d.ts` and the Electron docs. **Nothing here has been run on a real
+Mac yet**: a real capture needs the user's grants, so it is checked by the user (list below).
+
+**Two streams, both from a hidden capture window**, never at startup:
+
+- **You**: `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })`.
+  Permission: Microphone. Ask with `systemPreferences.askForMediaAccess('microphone')` (main,
+  after consent); read with `getMediaAccessStatus('microphone')` (never prompts). Needs
+  `NSMicrophoneUsageDescription` in `mac.extendInfo`, or macOS kills the app on access.
+- **Others** (the sound the Mac plays): `navigator.mediaDevices.getDisplayMedia({ video: true,
+  audio: true })`, answered in main by `setDisplayMediaRequestHandler` with `audio: 'loopback'`.
+
+**What `loopback` is on macOS in Electron 44.** The `Streams.audio` comment in `electron.d.ts` still
+says "only supported on Windows"; that comment is out of date. The desktopCapturer docs say:
+
+- **macOS 14.2+**: since Electron 39 Chromium captures loopback with Apple's **Core Audio tap**
+  (feature `MacCatapLoopbackAudioForScreenShare`, on by default). Permission: **System Audio
+  Recording Only** (Privacy & Security → Screen & System Audio Recording, the lower list), for the
+  responsible process. It needs `NSAudioCaptureUsageDescription` in Info.plist. Without the key, or
+  without the grant, the audio track is silent or `ended`, **with no error**.
+  No feature switch is needed. `app.commandLine.appendSwitch('disable-features',
+  'MacCatapLoopbackAudioForScreenShare')` falls back to the older ScreenCaptureKit path (full
+  Screen Recording permission). That works up to Electron 44 only: Chromium M155 / Electron 45
+  removed the feature, and the switch then does nothing. Do not use it.
+- **macOS 13 to 14.1**: ScreenCaptureKit carries the system audio. Permission: **Screen & System
+  Audio Recording** (the full one).
+- **macOS 12 and older**: no system audio. Meetings records only the microphone and says so.
+
+**A video source must be given.** `getDisplayMedia` refuses `video: false`, and the handler must
+answer with a video source. Use the capture window's own frame (`video: request.frame`): it is a tab
+capture of a blank page and needs no Screen Recording grant on 14.2+. That this pairs with
+`loopback` is **not yet checked**. If it does not, use `desktopCapturer.getSources({ types:
+['screen'], thumbnailSize: { width: 0, height: 0 } })`, `video: sources[0]`. That one asks for
+Screen Recording too. In the window, stop and remove the video track at once and keep the audio.
+
+```ts
+// main/meetings/capture.ts — the capture window's own partition, so the main window never gets this.
+const ses = session.fromPartition('meetings-capture')
+ses.setDisplayMediaRequestHandler(
+  (request, callback) => {
+    // Only our capture window, only while consent holds; anything else is refused.
+    if (!captureWin || request.frame !== captureWin.webContents.mainFrame || !consentOk()) {
+      return callback({}) // no streams = denied
+    }
+    callback({ video: request.frame, audio: 'loopback' })
+  },
+  { useSystemPicker: false }, // true (macOS 15+) shows Apple's picker and skips this handler
+)
+ses.setPermissionRequestHandler((wc, permission, cb, details) =>
+  cb(wc === captureWin?.webContents && consentOk() && (permission === 'media' || permission === 'display-capture')))
+```
+
+```ts
+// capture.html's script
+const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+for (const t of sys.getVideoTracks()) { t.stop(); sys.removeTrack(t) }
+const [others] = sys.getAudioTracks() // missing or readyState 'ended' = no system audio grant
+const you = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })
+```
+
+- `useSystemPicker` stays `false`. It is experimental (macOS 15+), and Apple's picker asks the
+  user to pick a screen or window: that is wrong for a meeting.
+- `loopbackWithMute` mutes the Mac's speakers while recording. Never use it.
+- **No API reads the System Audio Recording grant.** `getMediaAccessStatus('screen')` reports the
+  Screen Recording grant only, and `askForMediaAccess` takes `microphone` or `camera` only. So
+  setup's **Allow** for "Sound from the Mac" runs a 1-second capture, which brings up the prompt.
+  The status is that probe: an audio track that is live and not silent while something plays.
+  The spec's `getMediaAccessStatus('screen')` holds only for the 13-14.1 path.
+- `npm run dev` / `npx electron .` run under the terminal. macOS asks for, and records the grant
+  against, the terminal app (the responsible process), and reads the plist keys from the
+  terminal's Info.plist. Test permissions only with the packaged app.
+
+**Ad-hoc signing.** Grants are keyed to the code signature, and an ad-hoc signature changes with
+every build. A rebuild or an update may ask again, or show "granted" and capture silence. To start
+over (the user does this, never a test or an agent):
+
+```bash
+tccutil reset Microphone io.github.amntoppo.masterdeck
+tccutil reset AudioCapture io.github.amntoppo.masterdeck    # System Audio Recording Only (14.2+)
+tccutil reset ScreenCapture io.github.amntoppo.masterdeck   # Screen & System Audio Recording
+```
+
+A Developer ID signature removes this (TODO: signing).
+
+**Fallback, if loopback fails on a real Mac.** A small Swift helper with its own Core Audio
+process tap (`CATapDescription` + `AudioHardwareCreateProcessTap`, an aggregate device, macOS
+14.2+). It writes 16 kHz mono PCM to a pipe, and the rest of the design stays the same.
+Permission: System Audio Recording Only. It needs `NSAudioCaptureUsageDescription` in the app's
+Info.plist, and the helper must be signed inside the bundle, so macOS counts MasterDeck as the
+responsible process.
+
+**Checked by the user** (on the packaged app, after Task 5):
+
+- The microphone prompt appears on **Allow microphone**, and the status turns granted.
+- On macOS 14.2+, **Allow** for the Mac's sound shows the System Audio Recording prompt (not the
+  Screen Recording one), and the next capture has a live, non-silent system track while audio plays.
+- `video: request.frame` + `loopback` gives an audio track (else switch to the `getSources` shape).
+- After a rebuild and reinstall: whether the grants survive, and what the silent-track message says.
+- The speakers keep playing during a recording.
+
 ## Measuring upload
 
 What the Mac sends to the backend (CloudSync + browser bridge share the main process socket):
