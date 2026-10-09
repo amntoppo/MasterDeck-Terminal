@@ -145,6 +145,7 @@ import {
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { LoopStore } from "./loops";
+import { LoopQueue } from "./loopQueue";
 import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
 import {
@@ -638,6 +639,11 @@ const sources = new Sources(
       console.error(`PR watch: ${String(e)}`);
     }
     void linkedSteps.deliver(state.sessions);
+    try {
+      pumpLoopQueue(state);
+    } catch (e) {
+      console.error(`queue after a loop: ${String(e)}`);
+    }
     emit(CH.state, state);
     // The session list is in: commands that waited while MasterDeck was closed can run now.
     if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
@@ -1729,6 +1735,38 @@ async function nudgeLoop(
   if (!s || s.state !== "idle") return { ok: true, message: busy };
   return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
 }
+/**
+ * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
+ * after a loop closed on an idle session).
+ */
+async function sendNextQueued(s: Session): Promise<CliResult> {
+  const next = shiftQueue(s.sessionId);
+  if (next === null) return { ok: false, message: "the queue is empty" };
+  const masterUp =
+    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const r = await sender.send(s, next, !!masterUp);
+  // Not sent: back to the front, so the Stop hook still runs it later.
+  if (!r.ok) unshiftQueue(s.sessionId, next);
+  return r;
+}
+/**
+ * The queue after a loop (#82): the deck hook's Stop skipped the turn that closed the loop (it saw
+ * the loop open), so a session left idle with prompts queued gets the next one here, once.
+ */
+const loopQueue = new LoopQueue();
+function pumpLoopQueue(state: AppState): void {
+  if (process.platform === "win32") return;
+  for (const s of loopQueue.tick(
+    state.loops,
+    state.sessions,
+    (sid) => (deckHooks.ownsQueue(sid) ? readQueue(sid).length : 0),
+    (sid) => deckHooks.queueServedAt(sid),
+    Date.now(),
+  ))
+    void sendNextQueued(s).then((r) => {
+      if (!r.ok) console.error(`queue after a loop: ${r.message}`);
+    });
+}
 /** The window's ask before Stop loop (Details, Needs you): a stopped loop cannot be given more. */
 async function confirmLoopStop(name: string): Promise<boolean> {
   const choice = await dialog.showMessageBox(win!, {
@@ -2013,14 +2051,7 @@ function registerIpc(): void {
   reg.handle(CH.queueSendNext, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
-    const next = shiftQueue(s.sessionId);
-    if (next === null) return { ok: false, message: "the queue is empty" };
-    const masterUp =
-      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    const r = await sender.send(s, next, !!masterUp);
-    // Not sent: back to the front, so the Stop hook still runs it later.
-    if (!r.ok) unshiftQueue(s.sessionId, next);
-    return r;
+    return sendNextQueued(s);
   });
   reg.handle(CH.getSettings, () => sources.getSettings());
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {

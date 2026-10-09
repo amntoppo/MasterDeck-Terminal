@@ -237,7 +237,15 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `hooks.ts` `hookStatus().foreignQueue` sees the queue skill's own hooks in settings.json; worked
   out again whenever settings.json's mtime changes) leaves `/queue`
   to those hooks. While a workflow loop is open (`<home>/workflows/loops/<sid>.json`, passed in as
-  `hookScript`'s `loopsDir`), Stop hands nothing over: the queue waits until the loop is over.
+  `hookScript`'s `loopsDir`), Stop hands nothing over: the queue waits until the loop is over. Stop
+hooks run side by side, so on the turn that closes the loop the deck hook usually still reads it
+open and skips; when that stop goes through, the session is left idle with prompts queued.
+`main/loopQueue.ts` (`LoopQueue`, ticked from the state callback in `main/index.ts`) notices a
+session's open loop going away, waits up to 2 minutes for the session to be `idle`, and then, once
+per closing, sends its next queued prompt as **Send next** does (`sendNextQueued`: `shiftQueue`,
+`Sender`, back to the front when the send fails), only while the deck hook owns the session's queue
+(`DeckHooks.ownsQueue`: no `queue-off`, not a legacy session) and when `pumpQueue` served the
+session no prompt since the closing (`queueServedAt`; 30 s slack).
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
 - Master reports guard: `installDeckHooks` also registers `"<home>/deck/hook.sh" MasterReport` as a
   PreToolUse hook on `SendMessage` (marker `/deck/hook.sh" MasterReport`, timeout 10 s; part of

@@ -229,6 +229,8 @@ export class DeckHooks {
   private masterSids: string | null = null
   private masterListed: string[] = []
   private masterNew = new Map<string, number>()
+  /** When each session was last answered a queued prompt (`pumpQueue`), by session id. */
+  private served = new Map<string, number>()
 
   /** Where the workflow loops are (`<home>/workflows/loops`): the queue waits for an open one. */
   private loops: string
@@ -408,6 +410,7 @@ export class DeckHooks {
       const items = readQueue(r.sid, this.queues)
       this.answerQueue(r.id, items.length ? queueAnswer(items[0], items.length - 1) : {})
       if (!items.length) continue
+      this.served.set(r.sid, now)
       // Alive: it will read the answer. Gone: the hook removes its answer right after reading it,
       // so an answer still there was never read. Checked in this order, the file can't change after.
       const unread = join(this.dir, 'queue-answers', `${r.id}.json`)
@@ -421,6 +424,23 @@ export class DeckHooks {
     } catch {
       // none yet
     }
+  }
+
+  /** When MasterDeck last answered this session's Stop with a queued prompt (this run only). */
+  queueServedAt(sessionId: string): number | undefined {
+    return this.served.get(sessionId)
+  }
+
+  /** Whether this hook does the session's queue: not with queue-off, nor for a legacy session. */
+  ownsQueue(sessionId: string): boolean {
+    if (existsSync(join(this.dir, 'queue-off'))) return false
+    try {
+      const ids = readFileSync(join(this.dir, 'legacy-sids'), 'utf8').split('\n')
+      if (ids.includes('*') || ids.includes(sessionId)) return false
+    } catch {
+      // no legacy sessions
+    }
+    return true
   }
 
   /** Take this Stop: false when the hook took it back first (it drains the queue itself then). */
