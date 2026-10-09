@@ -2250,19 +2250,23 @@ function registerIpc(): void {
   reg.handle(CH.hoursActivity, async (e, ids: unknown) => {
     if (isRemote(e)) return {};
     const raw = await sources.hoursActivity(Array.isArray(ids) ? ids : []);
-    const out: Record<string, SessionActivity> = {};
-    for (const [id, a] of Object.entries(raw))
-      out[id] = {
-        spans: a.spans,
-        account: hoursAccount(
-          {
-            recorded: sessionAccounts.get({ sessionId: id, key: a.key }),
-            origin: a.cwd ? await originNow(a.cwd) : null,
-          },
-          getConfig(),
-        ),
-      };
-    return out;
+    // One origin lookup per folder, all at once (originNow caches them).
+    const entries = await Promise.all(
+      Object.entries(raw).map(async ([id, a]): Promise<[string, SessionActivity]> => [
+        id,
+        {
+          spans: a.spans,
+          account: hoursAccount(
+            {
+              recorded: sessionAccounts.get({ sessionId: id, key: a.key }),
+              origin: a.cwd ? await originNow(a.cwd) : null,
+            },
+            getConfig(),
+          ),
+        },
+      ]),
+    );
+    return Object.fromEntries(entries);
   });
   reg.handle(CH.hoursExport, async (e, csv: unknown, name: unknown) => {
     if (isRemote(e) || typeof csv !== "string" || csv.length > 5_000_000)

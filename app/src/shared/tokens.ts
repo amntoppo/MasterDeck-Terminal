@@ -78,6 +78,22 @@ export function newFileTally(): FileTally {
   return { offset: 0, rest: '', byDay: {}, recent: [], spans: [] }
 }
 
+/**
+ * A transcript line's own time (epoch ms; NaN without one). Most lines carry one "timestamp" key and
+ * are not parsed; a line with more (a tool result holding JSON) is, so a nested one never counts.
+ */
+export function lineTime(line: string): number {
+  const ts = STAMP.exec(line)
+  if (!ts) return NaN
+  if (line.indexOf('"timestamp":"', ts.index + 1) < 0) return Date.parse(ts[1])
+  try {
+    const d = JSON.parse(line) as { timestamp?: unknown }
+    return typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN
+  } catch {
+    return NaN
+  }
+}
+
 /** One moment of activity: it widens the last span when close to it, else opens one. */
 export function addMoment(spans: Span[], at: number): void {
   const last = spans[spans.length - 1]
@@ -92,8 +108,7 @@ export function tallyLines(t: FileTally, lines: string[]): void {
   const spans = (t.spans ??= [])
   for (const line of lines) {
     // Any line with a time is activity: a prompt, a reply, a tool run.
-    const ts = STAMP.exec(line)
-    const when = ts ? Date.parse(ts[1]) : NaN
+    const when = lineTime(line)
     if (Number.isFinite(when)) addMoment(spans, when)
     if (!line.includes('"usage"')) continue
     let d: Record<string, unknown>

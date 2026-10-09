@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTokens, newFileTally, SPAN_GRAIN, tallyLines, tokenSum, tokensBetween, totalOf } from './tokens'
+import { formatTokens, lineTime, newFileTally, SPAN_GRAIN, tallyLines, tokenSum, tokensBetween, totalOf } from './tokens'
 
 const line = (id: string, ts: string, u: Record<string, number>) => JSON.stringify({ timestamp: ts, message: { id, role: 'assistant', usage: u } })
 const U = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000 }
@@ -37,5 +37,10 @@ describe('tokens', () => {
       [Date.parse('2026-10-01T10:20:00Z'), Date.parse('2026-10-01T10:20:00Z')],
     ])
     expect(Date.parse('2026-10-01T10:20:00Z') - Date.parse('2026-10-01T10:04:00Z')).toBeGreaterThan(SPAN_GRAIN)
+  })
+  it('takes a line’s own time, not one nested in a tool result', () => {
+    expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, timestamp: '2026-10-01T10:00:00Z' }))).toBe(Date.parse('2026-10-01T10:00:00Z'))
+    expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, x: { timestamp: '2020-01-02T00:00:00Z' } }))).toBeNaN()
+    expect(lineTime('{"type":"summary"}')).toBeNaN()
   })
 })
