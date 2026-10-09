@@ -1,7 +1,7 @@
 # MasterDeck
 
 A desktop app for people who run many [Claude Code](https://claude.com/claude-code) sessions at once.
-It runs on macOS and Windows.
+It runs on macOS and Windows. Website: [masterdeck.dev](https://masterdeck.dev).
 
 - **One window.** Every session is a tab with its real `claude` terminal. The **master-agent** is
   pinned on the right: a Claude session that watches the others and your GitHub.
@@ -198,6 +198,7 @@ Layout:
 app/            Electron + React + xterm.js app (main, preload, renderer, shared; src/web = web app)
 skills/         the Claude Code skills MasterDeck installs (master holds the CLI in lib/)
 docs/           GUIDE.md (features), ARCHITECTURE.md, REMOTE.md, OPERATIONS.md, TODO.md
+site/           the website, masterdeck.dev (Astro; npm run dev / npm run deploy)
 ```
 
 The backend for remote access (Cloudflare Worker at `dev.masterdeck.dev`) lives in a separate

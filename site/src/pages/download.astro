@@ -1,0 +1,112 @@
+---
+import { marked } from 'marked'
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import Install from '../components/Install.astro'
+import { LATEST, RELEASES, REPO } from '../data/site'
+import releases from '../data/releases.json'
+
+type Release = (typeof releases)[number]
+const latest: Release | undefined = releases[0]
+const asset = (test: (name: string) => boolean) => latest?.assets.find((a) => test(a.name))
+const mb = (n?: number) => (n ? `${Math.round(n / 1e6)} MB` : '')
+const macArm = asset((n) => n.endsWith('-arm64.dmg'))
+const macIntel = asset((n) => n.endsWith('.dmg') && !n.endsWith('-arm64.dmg'))
+const win = asset((n) => n.endsWith('.exe'))
+const version = latest?.tag.replace(/^v/, '') ?? ''
+
+// Release notes are Markdown from GitHub. Raw HTML in them is shown as text, and their headings
+// sit under the version's own heading.
+const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+marked.use({
+  renderer: {
+    html: ({ text }) => escape(text),
+    heading({ tokens, depth }) {
+      const level = Math.min(6, depth + 1)
+      return `<h${level}>${this.parser.parseInline(tokens)}</h${level}>`
+    },
+  },
+})
+const notes = releases.map((r) => ({ ...r, html: marked.parse(r.body || '_No notes for this release._', { async: false }) as string }))
+const fmt = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+---
+<Base
+  title="Download"
+  og="download"
+  description={`Download MasterDeck ${latest?.tag ?? ''} for macOS (Apple silicon and Intel) or Windows, and read the changelog of every release.`}
+>
+  <section class="page-hero">
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+    <div class="wrap">
+      <span class="eyebrow" data-reveal>Download{latest && ` · ${latest.tag}`}</span>
+      <h1 class="h-xl" data-split>Get <span class="grad">MasterDeck.</span></h1>
+      <p class="lede" data-reveal style="--i: 2">
+        Free and open source. {latest && <>Version {version}, released {fmt(latest.date)}.</>} You need Claude Code, the GitHub CLI, Python 3.9+, git and jq; <a href="/docs/#requirements">Setup checks them</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 8px">
+    <div class="wrap">
+      <div class="dl-grid">
+        <div class="dl" data-os="mac-arm" data-reveal>
+          <span class="yours">Your Mac, probably</span>
+          <Icon name="apple" />
+          <h2>macOS · Apple silicon</h2>
+          <p>M1 and later. {mb(macArm?.size)}</p>
+          <a class="btn btn-primary" href={macArm?.url ?? LATEST}><Icon name="download" />Download .dmg</a>
+        </div>
+        <div class="dl" data-os="mac-intel" data-reveal style="--i: 1">
+          <span class="yours">Your Mac</span>
+          <Icon name="apple" />
+          <h2>macOS · Intel</h2>
+          <p>Macs with an Intel processor. {mb(macIntel?.size)}</p>
+          <a class="btn" href={macIntel?.url ?? LATEST}><Icon name="download" />Download .dmg</a>
+        </div>
+        <div class="dl" data-os="win" data-reveal style="--i: 2">
+          <span class="yours">Your PC</span>
+          <Icon name="windows" />
+          <h2>Windows</h2>
+          <p>Windows 10 and 11, 64-bit. {mb(win?.size)}</p>
+          <a class="btn" href={win?.url ?? LATEST}><Icon name="download" />Download .exe</a>
+        </div>
+      </div>
+
+      <div style="margin-top: 40px; display: grid; gap: 14px" data-reveal>
+        <h2 class="h-md">Or install from Terminal (macOS)</h2>
+        <p class="muted">Picks the right build for your Mac, installs it in /Applications, and needs no Open Anyway step. Run it again to update.</p>
+        <Install />
+        <p class="muted" style="font-size: 14.5px">
+          The builds are not signed by Apple or Microsoft. A DMG from the browser: <b>System Settings → Privacy & Security → Open
+          Anyway</b>. On Windows: <b>More info → Run anyway</b>. Prefer to build it yourself? <a href={REPO}>The source is on GitHub</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="changelog" style="padding-top: 0">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow" data-reveal>Changelog</span>
+        <h2 class="h-lg" data-reveal style="--i: 1">What’s new.</h2>
+        <p class="lede" data-reveal style="--i: 2">Every release, newest first. Builds for older versions are on <a href={RELEASES}>GitHub Releases</a>.</p>
+      </div>
+      <div class="timeline">
+        {
+          notes.map((r, i) => (
+            <article class="release" id={r.tag} data-reveal>
+              <div class="release-meta">
+                <b>{r.tag}</b>
+                <time datetime={r.date}>{fmt(r.date)}</time>
+                {i === 0 && <span class="badge latest">Latest</span>}
+                <a href={r.url} style="font-size: 14px">On GitHub →</a>
+              </div>
+              <div class="release-body" set:html={r.html} />
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+</Base>

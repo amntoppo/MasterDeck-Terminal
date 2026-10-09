@@ -1,0 +1,14 @@
+// masterdeck.dev: the static site as a Workers static-assets project (deploy: npm run deploy).
+// Like app.masterdeck.dev (app/web/wrangler.jsonc): `wrangler deploy` attaches the custom domain and
+// its certificate itself, which Pages cannot do from wrangler. www is a separate redirect Worker
+// (www/wrangler.jsonc), so requests to the bare domain never run a script.
+{
+  "name": "masterdeck-site",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "masterdeck.dev", "custom_domain": true }]
+}

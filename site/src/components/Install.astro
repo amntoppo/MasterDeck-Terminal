@@ -1,0 +1,13 @@
+---
+import Icon from './Icon.astro'
+import { INSTALL } from '../data/site'
+---
+<div class="install">
+  <code class="cmd"><span class="prompt">$ </span>{INSTALL}</code>
+  <button class="copy-btn" type="button" data-copy={INSTALL} aria-label="Copy the install command">
+    <Icon name="copy" /><span>Copy</span>
+  </button>
+</div>
+<style>
+  .copy-btn :global(svg) { width: 14px; height: 14px; }
+</style>

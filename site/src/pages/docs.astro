@@ -1,0 +1,115 @@
+---
+import Base from '../layouts/Base.astro'
+import Code from '../components/Code.astro'
+import Install from '../components/Install.astro'
+import { GUIDE, README, RELEASES, REPO, WEB_APP } from '../data/site'
+
+const TOC = [
+  ['requirements', 'Requirements'],
+  ['install', 'Install'],
+  ['first-run', 'First run'],
+  ['github', 'Connect GitHub and a board'],
+  ['first-session', 'Your first session'],
+  ['remote', 'From a browser or phone'],
+  ['config', 'Where settings live'],
+  ['more', 'Next steps'],
+]
+---
+<Base
+  title="Get started"
+  og="docs"
+  description="Install MasterDeck on macOS or Windows, run Setup, connect your GitHub accounts and board, and start your first Claude Code session from a ticket."
+>
+  <section class="page-hero">
+    <div class="bg-grid"></div>
+    <div class="wrap">
+      <span class="eyebrow" data-reveal>Get started</span>
+      <h1 class="h-xl" data-split>From install to <span class="grad">first session.</span></h1>
+      <p class="lede" data-reveal style="--i: 2">About ten minutes, most of it ticking repositories. Everything here is also in the <a href={README}>README</a>.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 16px">
+    <div class="wrap docs">
+      <nav class="toc" aria-label="On this page">
+        <b>On this page</b>
+        {TOC.map(([id, label]) => <a href={`#${id}`}>{label}</a>)}
+      </nav>
+      <article class="prose">
+        <h2 id="requirements">Requirements</h2>
+        <table>
+          <thead><tr><th>Tool</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a></td><td><code>claude</code> on your PATH and logged in. MasterDeck runs your sessions with it.</td></tr>
+            <tr><td><a href="https://cli.github.com">GitHub CLI</a></td><td><code>gh</code>, logged in with the <code>project</code> scope, for issues, PRs and boards.</td></tr>
+            <tr><td>Python 3.9+</td><td>The <code>master</code> CLI that keeps the ledger, board and config (<code>python3</code>; <code>python</code> on Windows).</td></tr>
+            <tr><td><code>git</code> and <code>jq</code></td><td>Branches, worktrees and the hooks.</td></tr>
+          </tbody>
+        </table>
+        <p>Missing something? Setup checks each tool and can install the missing ones for you (Homebrew on macOS, winget on Windows).</p>
+
+        <h2 id="install">Install</h2>
+        <h3>macOS (Apple silicon and Intel)</h3>
+        <p>Run this in Terminal. It downloads the right build from the latest release, puts it in <code>/Applications</code> and opens it. Run it again to update.</p>
+        <Install />
+        <div class="callout">
+          <b>Why a script?</b> The app is not signed by Apple. A DMG downloaded in a browser is blocked until you allow it in
+          <b>System Settings → Privacy & Security → Open Anyway</b>; a download by <code>curl</code> is not.
+        </div>
+        <p>Prefer the DMG? Get <code>MasterDeck-&lt;version&gt;-arm64.dmg</code> (Apple silicon) or <code>MasterDeck-&lt;version&gt;.dmg</code> (Intel) from the <a href="/download/">download page</a>.</p>
+        <h3>Windows</h3>
+        <p>Run <code>MasterDeck Setup &lt;version&gt;.exe</code> from the <a href="/download/">download page</a>. It is not signed, so SmartScreen asks you to confirm: <b>More info</b>, then <b>Run anyway</b>.</p>
+        <h3>From source</h3>
+        <Code code={`git clone ${REPO}.git\ncd MasterDeck-Terminal/app\nnpm install\nnpm run dev`} />
+
+        <h2 id="first-run">First run</h2>
+        <p>MasterDeck copies its skills into <code>~/.claude/skills/</code> (it never overwrites a skill folder you already have), then opens <b>Setup</b>:</p>
+        <ol class="setup">
+          <li><b>Tools</b>Each of <code>claude</code>, <code>gh</code>, Python, <code>git</code> and <code>jq</code> is checked. <b style="display:inline">Install now</b> opens a Claude session that installs what is missing; you approve each step.</li>
+          <li><b>GitHub accounts</b>Every account <code>gh</code> is logged in to, each with a switch. Connect the ones MasterDeck should use and pick a primary. <b style="display:inline">Add an account…</b> runs <code>gh auth login --web</code> right there.</li>
+          <li><b>Repos & boards</b>Tick the repositories whose issues you work on and the project boards that track them, and pick the primary repository.</li>
+          <li><b>Preferences</b>The folder your repositories are in, whether to run a master-agent, and notifications.</li>
+        </ol>
+        <p><b>Skip for now</b> leaves GitHub unset: sessions still work, and the Board and PRs views offer <b>Connect your GitHub</b> later. Settings (⚙) → <b>Set up MasterDeck</b> opens the same steps again.</p>
+
+        <h2 id="github">Connect GitHub and a board</h2>
+        <p>MasterDeck uses your own <code>gh</code> login. Log in once, with the <code>project</code> scope so it can read and move board cards:</p>
+        <Code code={`gh auth login\ngh auth refresh -s project`} />
+        <p>Then in Setup → <b>Repos & boards</b>, one read lists every organization <code>gh</code> can reach, with its repositories and project boards. MasterDeck reads each board’s statuses and guesses which means ready, in progress, PR raised and done; correct a guess if it is wrong.</p>
+        <div class="callout"><b>No GitHub project?</b> Tick repositories only. The Board shows their issues in Todo / In Dev / PR Raised / Done, worked out by MasterDeck, and <b>Create a GitHub board</b> makes a real one from them when you want it.</div>
+        <h3>Several accounts</h3>
+        <p>Log in to each with <code>gh auth login</code> and connect them in Setup. Each gets a name and email for its commits and, optionally, its own workspace folder. MasterDeck never changes <code>gh</code>’s active account.</p>
+
+        <h2 id="first-session">Your first session</h2>
+        <ol>
+          <li>Open the <b>Board</b> and click a ticket with no session (○).</li>
+          <li>The <b>Start</b> dialog says where the session will start (your checkout of the ticket’s repository), the account, model, permission mode and workflow. Optionally create a worktree first.</li>
+          <li>Press <b>Start</b>. The tab opens by itself, the session is linked to the issue and the card moves to In Dev.</li>
+        </ol>
+        <p>If Claude Code has never been opened in that folder it asks you to trust it first: <b>Open Claude there…</b> shows its prompt, and the Start dialog comes back once you accept.</p>
+        <p>The <b>master-agent</b> (the column on the right, <kbd>⌘⇧M</kbd>) can do this for you: press <b>Start master</b> and it sweeps your issues and PRs and proposes sessions in <b>Needs you</b> for you to approve.</p>
+
+        <h2 id="remote">From a browser or phone</h2>
+        <p>Optional, and off by default.</p>
+        <ol>
+          <li>In the desktop app, sign in under <b>Settings → Account</b>, then switch on <b>Connect to the backend</b> under <b>Settings → Remote</b>.</li>
+          <li>Open <a href={WEB_APP}>app.masterdeck.dev</a> and sign in with the same account.</li>
+          <li>Your Mac asks whether to allow the browser, with three words. Allow it only if the browser shows the same three.</li>
+        </ol>
+        <p>Everything between the browser and your Mac is end-to-end encrypted. On a phone you get a tab bar and a quick-key bar under the terminal. The Mac must be on with MasterDeck running.</p>
+
+        <h2 id="config">Where settings live</h2>
+        <p>Setup writes one file, <code>~/.claude/master/config.json</code>, which the app, the <code>master</code> CLI and the skills all read. MasterDeck’s own data (costs, tokens, notes, workflows) is under <code>~/.claude/masterdeck/</code>.</p>
+        <Code code={`# print the current config\n~/.claude/skills/master/master config show`} />
+
+        <h2 id="more">Next steps</h2>
+        <ul>
+          <li><a href="/features/">Features</a>: what each part of MasterDeck does.</li>
+          <li><a href={GUIDE}>The user guide</a>: every feature in detail, keyboard shortcuts and Windows notes.</li>
+          <li><a href={RELEASES}>Releases</a>: builds for every version.</li>
+          <li><a href={`${REPO}/issues`}>Issues</a>: a bug, a question or an idea.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+</Base>

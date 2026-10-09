@@ -538,12 +538,25 @@ fixes it, and move the item here to "Recently done".
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 
+## Website: open points (2026-10-10, issue #89)
+
+- **Real screenshots.** `site/public/screens/*.svg` are drawn placeholders. Take real ones (the
+  isolated app with fixture data, fictional `acme` org, 1440×900), put them in `site/public/screens/`,
+  change `src`/`width`/`height` in `site/src/data/screens.ts`, run `npm run og`, and delete
+  `site/scripts/screens.mjs` once none is drawn.
+- **Agent loops (#82)** are "coming soon" on the site (Home's playground, Features): update the copy
+  when they ship.
+- **The README rewrite** (its own ticket) should reuse the site's pitch and the same screens.
+- **No analytics.** Cloudflare Web Analytics (no cookies) can be switched on for the zone without
+  code; decide first.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| The website on masterdeck.dev (issue #89): `site/` (Astro), Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker | branch `worktree-MasterDeck-Terminal-89-website` | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |

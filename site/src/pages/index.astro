@@ -1,0 +1,257 @@
+---
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import Shot from '../components/Shot.astro'
+import Install from '../components/Install.astro'
+import Playground from '../components/Playground.astro'
+import { SCREENS } from '../data/screens'
+import { REPO } from '../data/site'
+import releases from '../data/releases.json'
+
+const latest = releases[0]
+const TERM = [
+  { t: '› /master', pause: 500 },
+  { t: 'Sweeping 4 repos, 1 board, 9 sessions…', c: 'dim', pause: 700 },
+  { t: '● api-41  waiting on a permission prompt', c: 'amb' },
+  { t: '✓ web-77  PR #212 merged · card → Dev Done', c: 'ok' },
+  { t: '⟳ docs-55  2 review comments sent to the session', c: 'pur' },
+  { t: '◐ PROPOSE  acme/api#58 “Rate-limit webhooks” → new session', c: 'acc', pause: 900 },
+  { t: '› yes, start #58', pause: 600 },
+  { t: '✓ Started api-58 in ~/code/api · worktree api-58-rate-limit', c: 'ok' },
+]
+
+const TOUR = [
+  {
+    key: 'sessions',
+    title: 'Every session, one window',
+    text: 'Each Claude Code session is a tab with its real terminal, grouped by what it needs: waiting on you, working, in review, idle, merged.',
+    points: ['Split two terminals side by side', 'Details: ticket, PR, diff, tokens, context', 'Background sessions keep running when you close a tab'],
+  },
+  {
+    key: 'board',
+    title: 'Your board, wired to your sessions',
+    text: 'Your GitHub Project as a Kanban board. Click a ticket to start a session for it; MasterDeck moves the card as the work moves.',
+    points: ['In Dev when the session starts, PR Raised on the PR', 'No board? Columns worked out from your issues', 'Assign, filter by person, sprint and repository'],
+  },
+  {
+    key: 'workflow',
+    title: 'Draw what your sessions do',
+    text: 'A canvas of triggers, skills and built-ins. After a push run the tests; if they fail fix them, if they pass post the preview.',
+    points: ['Build with Claude: describe it, get a workflow', 'Custom triggers on any hook, tool or command', 'Agent loops that run until a goal is met (coming soon)'],
+  },
+  {
+    key: 'costs',
+    title: 'Know what every ticket costs',
+    text: 'Spend and tokens per day, per ticket and per session, from Claude Code’s own status line, with a budget per ticket.',
+    points: ['14-day chart, USD or tokens', 'Context warnings with one-click Compact', 'Hours per account and ticket, exported as CSV'],
+  },
+] as const
+---
+<Base title="MasterDeck" description="MasterDeck is the command center for Claude Code: every session in one window, with your GitHub board, PRs, workflows and costs. Free and open source for macOS and Windows.">
+  <section class="hero">
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+    <div class="wrap hero-inner">
+      <a class="pill" href="/download/#changelog" data-reveal>
+        <b>New</b> {latest ? `MasterDeck ${latest.tag} is out: see what’s new` : 'See what’s new'} <span aria-hidden="true">→</span>
+      </a>
+      <h1 class="h-xl" data-split>Run every Claude Code session. <span class="grad">Stay in command.</span></h1>
+      <p class="lede" data-reveal style="--i: 2">
+        MasterDeck puts all your Claude Code sessions in one window, next to your GitHub board, PRs and costs, with a
+        master-agent that watches them. Nothing waits on you without you knowing.
+      </p>
+      <div class="btn-row" data-reveal style="--i: 3; justify-content: center">
+        <a class="btn btn-primary" href="/download/"><Icon name="download" />Download for free</a>
+        <a class="btn" href="/docs/">Get started <Icon name="arrow" /></a>
+      </div>
+      <div data-reveal style="--i: 4; max-width: 100%"><Install /></div>
+      <p class="hero-note" data-reveal style="--i: 5">Open source · macOS and Windows · runs on your machine, with your own Claude Code</p>
+    </div>
+    <div class="wrap hero-stage">
+      <div class="hero-window" data-reveal="zoom" style="--i: 3">
+        <Shot screen="sessions" eager />
+      </div>
+      <div class="hero-float window" data-reveal="right" style="--i: 6">
+        <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>master-agent</span></div>
+        <div class="term" data-term={JSON.stringify(TERM)} aria-label="master-agent sweeping sessions and proposing work" role="img">
+          {TERM.map((l) => <div class={`l ${l.c ?? ''}`}>{l.t}</div>)}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="wrap strip" data-reveal>
+      <span><Icon name="terminal" />Claude Code</span>
+      <span><Icon name="github" />GitHub Projects</span>
+      <span><Icon name="pr" />gh CLI</span>
+      <span><Icon name="flow" />git worktrees</span>
+      <span><Icon name="apple" />macOS</span>
+      <span><Icon name="windows" />Windows</span>
+    </div>
+  </section>
+
+  <section class="section" id="why">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow" data-reveal>Why MasterDeck</span>
+        <h2 class="h-lg" data-reveal style="--i: 1">Ten sessions is a team. <span class="muted">Run it like one.</span></h2>
+        <p class="lede" data-reveal style="--i: 2">
+          Claude Code is great at one task. At five or ten at once you lose track: which one is stuck on a prompt, which PR got a
+          review, which ticket burned $40. MasterDeck keeps the whole picture in one place.
+        </p>
+      </div>
+      <div class="bento">
+        <article class="card wide" data-reveal>
+          <div class="ico"><Icon name="bell" /></div>
+          <h3>Needs you, first</h3>
+          <p>Sessions on a prompt, questions, failing CI, idle work, context and budget warnings. Each with a one-click action.</p>
+          <div class="art" aria-hidden="true">
+            <ul class="needs">
+              <li><span class="dot" style="background: var(--amber)"></span><span>api-41 · allow <code>npm test</code>?</span><span class="act">Open</span></li>
+              <li><span class="dot" style="background: var(--red)"></span>web-77 · CI failed on lint<span class="act">Send fix</span></li>
+              <li><span class="dot" style="background: var(--accent)"></span>docs-55 · asks which branch<span class="act">Reply</span></li>
+            </ul>
+          </div>
+        </article>
+        <article class="card wide" data-reveal style="--i: 1">
+          <div class="ico"><Icon name="spark" /></div>
+          <h3>A master-agent that watches the rest</h3>
+          <p>
+            A Claude session pinned on the right sweeps your issues, PRs and sessions and proposes work. Nothing is sent or started
+            without your yes.
+          </p>
+          <div class="art" aria-hidden="true">
+            <ul class="needs">
+              <li><span class="dot" style="background: var(--purple, var(--accent-2))"></span>PROPOSE · start acme/api#58<span class="act">Approve</span></li>
+              <li><span class="dot" style="background: var(--green)"></span>web-77 · PR merged → Dev Done<span class="act">Done</span></li>
+              <li><span class="dot" style="background: var(--accent-2)"></span>docs-55 · review comments relayed<span class="act">View</span></li>
+            </ul>
+          </div>
+        </article>
+        <article class="card" data-reveal>
+          <div class="ico"><Icon name="board" /></div>
+          <h3>Board that moves itself</h3>
+          <p>Cards go to In Dev, PR Raised and Dev Done as sessions start, open PRs and merge.</p>
+        </article>
+        <article class="card" data-reveal style="--i: 1">
+          <div class="ico"><Icon name="pr" /></div>
+          <h3>PRs handed back</h3>
+          <p>Review comments, conflicts and merges of a session’s PR are sent to that session. A self-review runs before the first PR.</p>
+        </article>
+        <article class="card" data-reveal style="--i: 2">
+          <div class="ico"><Icon name="flow" /></div>
+          <h3>Workflows you draw</h3>
+          <p>Triggers, skills and built-ins on a canvas, or describe one and let Claude build it.</p>
+        </article>
+        <article class="card" data-reveal>
+          <div class="ico"><Icon name="dollar" /></div>
+          <h3>Costs per ticket</h3>
+          <p>Spend and tokens per day, ticket and session, budgets per ticket, and an hours estimate.</p>
+        </article>
+        <article class="card" data-reveal style="--i: 1">
+          <div class="ico"><Icon name="users" /></div>
+          <h3>Several GitHub accounts</h3>
+          <p>Work and side projects side by side. Each session runs as its account, with its own token and commits.</p>
+        </article>
+        <article class="card" data-reveal style="--i: 2">
+          <div class="ico"><Icon name="globe" /></div>
+          <h3>From your phone</h3>
+          <p>Optional: the same sessions and live terminals at app.masterdeck.dev, end-to-end encrypted to your Mac.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="tour" style="padding-top: 0">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow" data-reveal>A tour</span>
+        <h2 class="h-lg" data-reveal style="--i: 1">From ticket to merged PR, <span class="grad">in one place.</span></h2>
+      </div>
+      <div class="tour">
+        <div class="tour-steps">
+          {
+            TOUR.map((t, i) => (
+              <div class="tour-step" data-tour-step>
+                <span class="num">0{i + 1} / 04</span>
+                <h3>{t.title}</h3>
+                <p>{t.text}</p>
+                <ul>{t.points.map((p) => <li>{p}</li>)}</ul>
+                <div class="mobile-shot"><Shot screen={t.key} /></div>
+              </div>
+            ))
+          }
+        </div>
+        <div class="tour-media" aria-hidden="true">
+          <div class="window tour-frame">
+            <div class="window-bar"><i></i><i></i><i></i><span>MasterDeck</span></div>
+            {TOUR.map((t, i) => <img data-tour-shot class={i === 0 ? 'on' : ''} src={SCREENS[t.key].src} alt="" width="1440" height="900" loading="lazy" decoding="async" />)}
+          </div>
+          <div class="tour-dots">{TOUR.map(() => <span data-tour-dot></span>)}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="workflows" style="padding-top: 0">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow" data-reveal>Workflows</span>
+        <h2 class="h-lg" data-reveal style="--i: 1">Teach every session your way of shipping.</h2>
+        <p class="lede" data-reveal style="--i: 2">
+          Join triggers, skills and MasterDeck’s built-ins with arrows: then, if it worked, if it failed. Go on, drag the blocks.
+        </p>
+      </div>
+      <div data-reveal="zoom"><Playground /></div>
+    </div>
+  </section>
+
+  <section class="section" id="how" style="padding-top: 0">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow" data-reveal>Get going</span>
+        <h2 class="h-lg" data-reveal style="--i: 1">Three minutes to your first session.</h2>
+      </div>
+      <div class="steps">
+        <div class="step" data-reveal>
+          <h3>Install</h3>
+          <p>One command on macOS, or the installer on Windows. MasterDeck adds its skills to <code>~/.claude/skills</code>.</p>
+        </div>
+        <div class="step" data-reveal style="--i: 1">
+          <h3>Connect GitHub</h3>
+          <p>Setup checks your tools, connects your <code>gh</code> accounts and lets you tick repositories and boards.</p>
+        </div>
+        <div class="step" data-reveal style="--i: 2">
+          <h3>Start from a ticket</h3>
+          <p>Click a card. The session starts in the repository’s checkout, linked to the issue, and the card moves.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="wrap">
+      <div class="principles" data-reveal>
+        <div><b>Nothing without your yes</b><span>Proposals wait for approval. Sessions never get text on a permission prompt.</span></div>
+        <div><b>Never merges for you</b><span>No force-push, no merge, no <code>--dangerously-skip-permissions</code>.</span></div>
+        <div><b>Local first</b><span>Your tokens and code stay on your machine. Remote is off until you turn it on.</span></div>
+        <div><b>Open source</b><span>Read every line on GitHub. Issues and pull requests welcome.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="cta" data-reveal="zoom">
+        <span class="eyebrow">Free and open source</span>
+        <h2 class="h-lg">Take command of your sessions.</h2>
+        <p class="lede">Download MasterDeck for macOS or Windows, or build it from source.</p>
+        <div class="btn-row" style="justify-content: center">
+          <a class="btn btn-primary" href="/download/"><Icon name="download" />Download</a>
+          <a class="btn" href={REPO}><Icon name="github" />Star on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

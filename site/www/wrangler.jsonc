@@ -1,0 +1,7 @@
+// www.masterdeck.dev → https://masterdeck.dev (same path and query), deployed with the site.
+{
+  "name": "masterdeck-www",
+  "main": "redirect.js",
+  "compatibility_date": "2026-09-01",
+  "routes": [{ "pattern": "www.masterdeck.dev", "custom_domain": true }]
+}
