@@ -17,6 +17,7 @@ import {
   type CustomStep,
   type HookEntry,
 } from "@shared/workflow";
+import { loopScript, loopScriptPath } from "@shared/loopHook";
 import {
   compileFlow,
   parseCustomTrigger,
@@ -350,6 +351,24 @@ export class WorkflowStore {
       }
   }
 
+  /**
+   * Write the loop hook (`workflows/loop.sh`, run by its Stop hook entry) when its text is not
+   * what this MasterDeck generates: an unchanged file is left alone.
+   */
+  setupLoopHook(): void {
+    const file = loopScriptPath(this.home);
+    const text = loopScript(this.home);
+    let cur: string | null = null;
+    try {
+      cur = readFileSync(file, "utf8");
+    } catch {
+      /* not written yet */
+    }
+    if (cur === text) return;
+    writeAtomic(file, text);
+    chmodSync(file, 0o755);
+  }
+
   templates(): WorkflowTemplate[] {
     const out: WorkflowTemplate[] = [
       { id: DEFAULT_TEMPLATE, name: "Default", flow: this.defaultDoc().flow },
@@ -571,7 +590,10 @@ export class WorkflowStore {
           if (
             typeof r.sid !== "string" ||
             typeof r.at !== "number" ||
-            typeof r.trigger !== "string"
+            typeof r.trigger !== "string" ||
+            // A loop's rounds (loop.sh) are not a workflow step: the line stays on the step
+            // that armed the loop.
+            r.trigger === "loop"
           )
             continue;
           last.set(r.sid, {

@@ -197,6 +197,7 @@ import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
 import type { PeerStore } from "./peers";
+import type { LoopStore } from "./loops";
 import { adjacency } from "@shared/peers";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
 import {
@@ -299,6 +300,8 @@ export class Sources {
   private worktreeScans: Record<string, WorktreeScan> = {};
   /** MasterDeck's own hook (permission requests, notifications, errors, compactions). */
   private deck: DeckHooks | null = null;
+  /** Workflow loops' files (written by the hooks, outside the app). */
+  private loopStore: LoopStore | null = null;
   private hookRequests: HookRequest[] = [];
   /** Requests whose session was seen waiting on a prompt since they came. */
   private seenBlocked = new Set<string>();
@@ -929,6 +932,16 @@ export class Sources {
     this.writeTicketContext(this.lastSessions);
   }
 
+  setLoopStore(store: LoopStore): void {
+    this.loopStore = store;
+    this.emit();
+  }
+
+  /** A loop file changed (a turn end, an arming, Stop loop, Run 5 more): show it now. */
+  pollLoops(): void {
+    if (this.loopStore?.changed()) this.emit();
+  }
+
   setPeerStore(store: PeerStore): void {
     this.peerStore = store;
     store.onChange(() => {
@@ -1192,7 +1205,12 @@ export class Sources {
     this.timers.push(setInterval(() => void this.pollAgents(), AGENTS_MS));
     this.timers.push(setInterval(() => void this.pollDetails(), DETAIL_MS));
     this.timers.push(setInterval(() => void this.pollMenus(), MENUS_MS));
-    this.timers.push(setInterval(() => this.pollDeck(), 1_000));
+    this.timers.push(
+      setInterval(() => {
+        this.pollDeck();
+        this.pollLoops();
+      }, 1_000),
+    );
     this.timers.push(
       setInterval(() => this.writeTicketContext(this.lastSessions), 60_000),
     );
@@ -2385,6 +2403,12 @@ export class Sources {
     );
     const m = deriveMaster(sessions);
     const masterAs = "session" in m ? this.masterAccountOf(m.session) : undefined;
+    const loops = this.loopStore
+      ? this.loopStore.views(
+          sessions.map((s) => s.sessionId),
+          now,
+        )
+      : {};
     const items = collectItems({
       sessions,
       proposals: this.proposals.filter((p) => !answered.has(p.id)),
@@ -2404,6 +2428,7 @@ export class Sources {
         : undefined,
       accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
       modsReload: this.modsReloadOf?.(sessions) ?? null,
+      loops,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -2444,6 +2469,7 @@ export class Sources {
           .map((s) => [s.sessionId, this.schedulesOf(s.sessionId, now)] as const)
           .filter((e) => e[1].length > 0),
       ),
+      loops,
       hookInfo,
       sessionWorktrees: Object.fromEntries(
         sessions

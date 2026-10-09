@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { allowed, collectItems, inboxNotice, type InboxInput } from './inbox'
+import { allowed, collectItems, inboxNotice, LOOP_PAUSED_MS, PRIORITY, RESOLVED_BECAUSE, type InboxInput } from './inbox'
+import type { LoopView } from './loops'
 import { DEFAULT_SETTINGS } from './settings'
 import { MOD_VERSION } from './modBand'
 import { parseTicket } from './ticket'
@@ -193,5 +194,134 @@ describe('external items', () => {
     const items = collectItems(input({ sessions: [sess('a')], external: [ext({ id: 'e-gone', sessionKey: 'gone' }), ext({ id: 'e-known', sessionKey: 'a' })] }))
     expect(items.find((x) => x.id === 'e-gone')?.sessionKey).toBeNull()
     expect(items.find((x) => x.id === 'e-known')?.sessionKey).toBe('a')
+  })
+})
+
+describe('loop items', () => {
+  const view = (o: Partial<LoopView> = {}): LoopView => ({
+    id: 'fix',
+    name: 'Fix the tests',
+    state: 'limit',
+    iteration: 10,
+    max: 10,
+    startedAt: 5000,
+    minutes: 0,
+    reason: 'stopped after 10 iterations: the check still fails',
+    endedAt: 9000,
+    lastCheck: null,
+    ...o,
+  })
+  const s = sess('a', { name: 'api-work', issue: 7 })
+  const loopItems = (o: Partial<InboxInput>) => collectItems(input(o)).filter((i) => i.kind === 'loop')
+
+  it('a loop at its limit is an item: Run 5 more, Leave it, Open', () => {
+    const [i] = loopItems({ sessions: [s], loops: { 'id-a': [view()] } })
+    expect(i).toMatchObject({
+      id: 'loop:id-a:fix:5000',
+      kind: 'loop',
+      sessionKey: 'a',
+      ticket: { repo: null, number: 7 },
+      title: 'api-work',
+      body: 'Fix the tests: stopped after 10 iterations: the check still fails',
+      detail: { type: 'loop', loopId: 'fix', reason: 'stopped after 10 iterations: the check still fails' },
+    })
+    expect(i.actions).toEqual([
+      { type: 'loop-more', label: 'Run 5 more', primary: true },
+      { type: 'dismiss', label: 'Leave it' },
+      { type: 'open', label: 'Open' },
+    ])
+    expect(allowed(i, 'loop-more')).toBe(true)
+    expect(i.priority).toBeLessThan(PRIORITY.blocked)
+    expect(i.priority).toBeGreaterThan(PRIORITY.ci)
+    // Its notification can run 5 more by itself.
+    expect(inboxNotice({ item: i, state: 'open', firstSeen: 0, lastSeen: 0 })).toMatchObject({
+      title: 'api-work: loop stopped at its limit',
+      action: { type: 'loop-more' },
+    })
+  })
+
+  it('none for an open, met or stopped loop, a session that ended, or one not listed', () => {
+    for (const state of ['open', 'met', 'stopped'] as const)
+      expect(loopItems({ sessions: [s], loops: { 'id-a': [view({ state })] } })).toEqual([])
+    expect(loopItems({ sessions: [sess('a', { state: 'done' })], loops: { 'id-a': [view()] } })).toEqual([])
+    expect(loopItems({ sessions: [s], loops: { 'id-b': [view()] } })).toEqual([])
+    // Loops absent (still loading, or no loop store): nothing.
+    expect(loopItems({ sessions: [s] })).toEqual([])
+  })
+
+  it('a loop at its limit again after Run 5 more is a new item (its new start)', () => {
+    const [a] = loopItems({ sessions: [s], loops: { 'id-a': [view()] } })
+    const [b] = loopItems({ sessions: [s], loops: { 'id-a': [view({ startedAt: 8000 })] } })
+    expect(a.id).not.toBe(b.id)
+  })
+
+  it('without a reason the body says it stopped at a limit; when it goes, the loop runs again', () => {
+    const [i] = loopItems({ sessions: [s], loops: { 'id-a': [view({ reason: null })] } })
+    expect(i.body).toBe('Fix the tests: stopped at a limit')
+    expect(RESOLVED_BECAUSE.loop).toBe('the loop is running again')
+  })
+})
+
+describe('a loop paused on an idle session', () => {
+  const view = (o: Partial<LoopView> = {}): LoopView => ({
+    id: 'fix',
+    name: 'Fix the tests',
+    state: 'open',
+    iteration: 3,
+    max: 10,
+    startedAt: 5000,
+    minutes: 0,
+    reason: null,
+    endedAt: null,
+    lastCheck: null,
+    ...o,
+  })
+  const quiet = NOW - LOOP_PAUSED_MS
+  const paused = (o: Partial<InboxInput>) => collectItems(input(o)).filter((i) => i.kind === 'loop-paused')
+  const s = sess('a', { name: 'api-work', issue: 7 })
+
+  it('an open loop whose session has been idle 5 minutes: Continue, Stop loop, Open', () => {
+    const [i] = paused({ sessions: [s], loops: { 'id-a': [view()] }, lastActivity: { 'id-a': quiet } })
+    expect(LOOP_PAUSED_MS).toBe(5 * 60_000)
+    expect(i).toMatchObject({
+      id: `loop-paused:id-a:fix:${quiet}`,
+      sessionKey: 'a',
+      ticket: { repo: null, number: 7 },
+      title: 'api-work',
+      body: 'Fix the tests: paused at iteration 3/10. The session went quiet before the loop was over.',
+      detail: { type: 'loop', loopId: 'fix', reason: null },
+    })
+    expect(i.actions).toEqual([
+      { type: 'loop-continue', label: 'Continue', primary: true },
+      { type: 'loop-stop', label: 'Stop loop' },
+      { type: 'open', label: 'Open' },
+    ])
+    expect(allowed(i, 'loop-continue')).toBe(true)
+    expect(allowed(i, 'loop-stop')).toBe(true)
+    expect(i.priority).toBe(PRIORITY['loop-paused'])
+    expect(inboxNotice({ item: i, state: 'open', firstSeen: 0, lastSeen: 0 })).toMatchObject({
+      title: 'api-work: loop paused',
+      action: { type: 'loop-continue' },
+    })
+    expect(RESOLVED_BECAUSE['loop-paused']).toBe('the loop went on or ended')
+  })
+
+  it('none while the session works, waits on a prompt or its own watch, before 5 minutes, or for a closed loop', () => {
+    const loops = { 'id-a': [view()] }
+    const at = { 'id-a': quiet }
+    expect(paused({ sessions: [sess('a', { state: 'working' })], loops, lastActivity: at })).toEqual([])
+    expect(paused({ sessions: [sess('a', { state: 'needs-input' })], loops, lastActivity: at })).toEqual([])
+    expect(paused({ sessions: [sess('a', { state: 'done' })], loops, lastActivity: at })).toEqual([])
+    expect(paused({ sessions: [sess('a', { waitingOn: 'a Monitor' })], loops, lastActivity: at })).toEqual([])
+    expect(paused({ sessions: [s], loops, lastActivity: { 'id-a': quiet + 1 } })).toEqual([])
+    expect(paused({ sessions: [s], loops })).toEqual([])
+    for (const state of ['met', 'limit', 'stopped'] as const)
+      expect(paused({ sessions: [s], loops: { 'id-a': [view({ state })] }, lastActivity: at })).toEqual([])
+  })
+
+  it('a new quiet spell is a new item', () => {
+    const [a] = paused({ sessions: [s], loops: { 'id-a': [view()] }, lastActivity: { 'id-a': quiet } })
+    const [b] = paused({ sessions: [s], loops: { 'id-a': [view()] }, lastActivity: { 'id-a': quiet - 1000 } })
+    expect(a.id).not.toBe(b.id)
   })
 })
