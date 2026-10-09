@@ -159,6 +159,7 @@ const KIND_LABEL: Record<FlowNode["kind"], string> = {
   notify: "Notify",
   builtin: "Built-in",
   monitor: "Monitor",
+  loop: "Loop",
 };
 
 function blockTitle(
@@ -181,6 +182,9 @@ function blockTitle(
       return (
         findMonitor(n.monitor, mons)?.name ?? `Unknown monitor ${n.monitor}`
       );
+    // ponytail: drawn as a plain block until the Loop frame lands on the canvas (Plan L, Task 7).
+    case "loop":
+      return n.name;
   }
 }
 
@@ -243,6 +247,8 @@ const EDGE_COLOR: Record<EdgeKind, string> = {
   then: "var(--accent)",
   ok: "var(--green)",
   fail: "var(--red)",
+  met: "var(--green)",
+  limit: "var(--amber)",
 };
 
 /** An arrow: "then" solid; outcome arrows dashed, green or red, with their label. */

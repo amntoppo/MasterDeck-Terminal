@@ -12,6 +12,7 @@ import {
   flowTriggerCommand,
   guardedBuiltin,
   makesCycle,
+  newLoop,
   parseFlow,
   type EdgeKind,
   type Flow,
@@ -217,4 +218,195 @@ describe.skipIf(process.platform === "win32")("flow hooks", () => {
       }),
     ).not.toBe("");
   }, 20_000);
+});
+
+describe("loops", () => {
+  const L = (id: string, members: string[], extra: object = {}) => ({
+    ...newLoop(id, 0, 0),
+    members,
+    ...extra,
+  });
+  const loopOf = (f: Flow, id: string) =>
+    f.nodes.find((n) => n.id === id) as Extract<FlowNode, { kind: "loop" }>;
+
+  it("parses a loop with its fields clamped", () => {
+    const low = loopOf(
+      parseFlow({
+        nodes: [
+          L("lp", [], {
+            name: "n".repeat(80),
+            w: 10,
+            h: 10,
+            check: {
+              command: "c".repeat(600),
+              output: "o".repeat(400),
+              outputMode: "no-match",
+              timeoutMin: 0,
+            },
+            agentDone: { on: true, goal: "g".repeat(1200) },
+            limits: { iterations: 0, minutes: -1, stall: 1 },
+          }),
+        ],
+        edges: [],
+      }),
+      "lp",
+    );
+    expect(low.name).toHaveLength(60);
+    expect(low.check.command).toHaveLength(500);
+    expect(low.check.output).toHaveLength(300);
+    expect(low.check.outputMode).toBe("no-match");
+    expect(low.check.timeoutMin).toBe(1);
+    expect(low.agentDone).toEqual({ on: true, goal: "g".repeat(1000) });
+    expect(low.limits).toEqual({ iterations: 1, minutes: 0, stall: 2 });
+    expect([low.w, low.h]).toEqual([200, 120]);
+    const high = loopOf(
+      parseFlow({
+        nodes: [
+          L("lp", [], {
+            w: 9000,
+            h: 9000,
+            check: {
+              command: "npm test",
+              output: "",
+              outputMode: "x",
+              timeoutMin: 20,
+            },
+            limits: { iterations: 500, minutes: 2000, stall: 40 },
+          }),
+        ],
+        edges: [],
+      }),
+      "lp",
+    );
+    expect(high.check).toEqual({
+      command: "npm test",
+      output: "",
+      outputMode: "match",
+      timeoutMin: 9,
+    });
+    expect(high.limits).toEqual({ iterations: 100, minutes: 1440, stall: 10 });
+    expect([high.w, high.h]).toEqual([2000, 1500]);
+    // Junk fields fall back to a new loop's.
+    const junk = loopOf(
+      parseFlow({ nodes: [{ id: "lp", kind: "loop" }] }),
+      "lp",
+    );
+    expect(junk).toEqual({ ...newLoop("lp", 0, 0), members: [] });
+  });
+
+  it("keeps only members that exist and may be in a loop", () => {
+    const f = parseFlow({
+      nodes: [
+        T("t", "after-push"),
+        { id: "b", ...at, kind: "builtin", builtin: "pr-watch" },
+        I("a", "Run the tests."),
+        S("s", "fix"),
+        { id: "nt", ...at, kind: "notify", text: "Ping." },
+        L("inner", []),
+        L("lp", ["t", "b", "missing", "inner", "a", "s", "nt", "a"]),
+      ],
+      edges: [],
+    });
+    expect(loopOf(f, "lp").members).toEqual(["a", "s", "nt"]);
+  });
+
+  it("a block is in one loop only", () => {
+    const f = parseFlow({
+      nodes: [I("a", "x"), I("b", "y"), L("one", ["a"]), L("two", ["a", "b"])],
+      edges: [],
+    });
+    expect(loopOf(f, "one").members).toEqual(["a"]);
+    expect(loopOf(f, "two").members).toEqual(["b"]);
+  });
+
+  it("no loop in a loop", () => {
+    const f = parseFlow({
+      nodes: [L("outer", ["inner"]), L("inner", ["outer"])],
+      edges: [],
+    });
+    expect(loopOf(f, "outer").members).toEqual([]);
+    expect(loopOf(f, "inner").members).toEqual([]);
+  });
+
+  const framed = (edges: ReturnType<typeof e>[]) =>
+    parseFlow({
+      nodes: [
+        T("t", "after-push"),
+        I("a", "Run the tests."),
+        I("b", "Fix the cause."),
+        I("out", "Open the PR."),
+        L("lp", ["a", "b"]),
+      ],
+      edges,
+    }).edges.map((x) => `${x.from}>${x.to}:${x.kind}`);
+
+  it("an arrow from outside into a member points at the loop", () => {
+    expect(framed([e("t", "a"), e("t", "b"), e("t", "lp")])).toEqual([
+      "t>lp:then",
+    ]);
+  });
+
+  it("an arrow from a member to outside is dropped", () => {
+    // Out of the frame, into its own frame, and the frame into its own member.
+    expect(framed([e("a", "out"), e("b", "lp"), e("lp", "a")])).toEqual([]);
+  });
+
+  it("arrows between members are kept", () => {
+    expect(framed([e("a", "b", "fail")])).toEqual(["a>b:fail"]);
+  });
+
+  it("met and limit arrows only leave a loop", () => {
+    expect(
+      framed([e("t", "lp", "met"), e("a", "b", "limit"), e("lp", "out", "met")]),
+    ).toEqual(["t>lp:then", "a>b:then", "lp>out:met"]);
+    expect(framed([e("lp", "out", "limit")])).toEqual(["lp>out:limit"]);
+    expect(framed([e("lp", "out", "ok")])).toEqual(["lp>out:then"]);
+    expect(framed([e("lp", "out", "fail")])).toEqual(["lp>out:then"]);
+  });
+
+  it("makesCycle treats the frame as one node", () => {
+    const flow = parseFlow({
+      nodes: [
+        T("t", "after-push"),
+        I("a", "Run the tests."),
+        I("b", "Fix the cause."),
+        I("out", "Open the PR."),
+        L("lp", ["a", "b"]),
+      ],
+      edges: [e("t", "lp"), e("a", "b"), e("lp", "out", "met")],
+    });
+    // Back into a member from the loop's met target: around the frame.
+    expect(makesCycle(flow, "out", "a")).toBe(true);
+    expect(makesCycle(flow, "out", "lp")).toBe(true);
+    // Inside the frame, members are ordinary blocks.
+    expect(makesCycle(flow, "b", "a")).toBe(true);
+    expect(makesCycle(flow, "a", "b")).toBe(false);
+    // The frame into its own member (or a member into its frame) is no arrow at all.
+    expect(makesCycle(flow, "lp", "a")).toBe(true);
+    expect(makesCycle(flow, "a", "lp")).toBe(true);
+    expect(makesCycle(flow, "t", "a")).toBe(false);
+  });
+
+  it("an old reader drops the loop", () => {
+    // S1: a MasterDeck from before loops drops the unknown node; the members stay as blocks no
+    // trigger reaches, so nothing runs and the check says so.
+    const raw = {
+      nodes: [
+        T("t", "after-push"),
+        I("a", "Run the tests."),
+        I("b", "Fix the cause."),
+        L("lp", ["a", "b"]),
+      ],
+      edges: [e("t", "lp"), e("a", "b")],
+    };
+    const old = parseFlow({
+      ...raw,
+      nodes: raw.nodes.filter((n) => n.kind !== "loop"),
+    });
+    expect(old.nodes.map((n) => n.id)).toEqual(["t", "a", "b"]);
+    expect(old.edges.map((x) => x.id)).toEqual([edgeId("a", "b")]);
+    const { steps, problems } = compileFlow(old);
+    expect(steps).toEqual([]);
+    expect(problems.map((p) => p.node)).toEqual(["a", "b"]);
+  });
 });

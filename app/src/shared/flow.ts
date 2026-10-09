@@ -310,7 +310,49 @@ export type FlowNode =
       monitor: string;
       args: string;
       instructions: string;
+    }
+  /** A frame of blocks the session repeats until its criterion is met or a limit is hit (#82). */
+  | {
+      id: string;
+      x: number;
+      y: number;
+      kind: "loop";
+      name: string;
+      members: string[];
+      w: number;
+      h: number;
+      check: {
+        command: string;
+        output: string;
+        outputMode: "match" | "no-match";
+        timeoutMin: number;
+      };
+      agentDone: { on: boolean; goal: string };
+      limits: { iterations: number; minutes: number; stall: number };
     };
+
+/** The blocks a loop may repeat: what the session does itself (no triggers, built-ins or loops). */
+export const LOOP_MEMBER_KINDS = [
+  "skill",
+  "instruction",
+  "monitor",
+  "notify",
+] as const;
+
+/** A new, empty Loop frame. */
+export const newLoop = (id: string, x: number, y: number): FlowNode => ({
+  id,
+  x,
+  y,
+  kind: "loop",
+  name: "Loop",
+  members: [],
+  w: 420,
+  h: 200,
+  check: { command: "", output: "", outputMode: "match", timeoutMin: 5 },
+  agentDone: { on: false, goal: "" },
+  limits: { iterations: 10, minutes: 0, stall: 0 },
+});
 
 /**
  * A monitor: a script whose every output line is an event that wakes the session (Claude Code's
@@ -379,7 +421,8 @@ export function monitorText(
   );
 }
 
-export type EdgeKind = "then" | "ok" | "fail";
+/** `met` / `limit` leave a loop: when its criterion is met, or when a limit stopped it. */
+export type EdgeKind = "then" | "ok" | "fail" | "met" | "limit";
 export interface FlowEdge {
   id: string;
   from: string;
@@ -395,6 +438,8 @@ export const EDGE_LABEL: Record<EdgeKind, string> = {
   then: "then",
   ok: "if it worked",
   fail: "if it failed",
+  met: "when met",
+  limit: "at the limit",
 };
 
 export const newNodeId = (): string =>
@@ -408,6 +453,8 @@ const str = (v: unknown, max: number): string =>
   typeof v === "string" ? v.slice(0, max) : "";
 const num = (v: unknown, d: number): number =>
   typeof v === "number" && Number.isFinite(v) ? Math.round(v) : d;
+const clamp = (v: number, lo: number, hi: number): number =>
+  Math.min(hi, Math.max(lo, v));
 const ID = /^[a-z0-9-]{1,24}$/;
 
 /** A flow from JSON: unknown blocks, bad fields and arrows to nothing are dropped. */
@@ -462,6 +509,39 @@ export function parseFlow(raw: unknown): Flow {
         args: str(r.args, 300),
         instructions: str(r.instructions, 2000),
       };
+    else if (r.kind === "loop") {
+      const check = obj(r.check);
+      const done = obj(r.agentDone);
+      const lim = obj(r.limits);
+      const stall = num(lim.stall, 0);
+      n = {
+        id,
+        x,
+        y,
+        kind: "loop",
+        name: str(r.name, 60) || "Loop",
+        // Checked against the kept blocks below, once every block is known.
+        members: (Array.isArray(r.members) ? r.members : [])
+          .map((m) => str(m, 24))
+          .filter((m) => ID.test(m)),
+        w: clamp(num(r.w, 420), 200, 2000),
+        h: clamp(num(r.h, 200), 120, 1500),
+        check: {
+          command: str(check.command, 500),
+          output: str(check.output, 300),
+          outputMode: check.outputMode === "no-match" ? "no-match" : "match",
+          // The hook has 10 minutes in all; the check gets at most 9 of them.
+          timeoutMin: clamp(num(check.timeoutMin, 5), 1, 9),
+        },
+        agentDone: { on: done.on === true, goal: str(done.goal, 1000) },
+        limits: {
+          iterations: clamp(num(lim.iterations, 10), 1, 100),
+          minutes: clamp(num(lim.minutes, 0), 0, 24 * 60),
+          // 0 is off; one identical round is no stall, so on starts at 2.
+          stall: stall <= 0 ? 0 : clamp(stall, 2, 10),
+        },
+      };
+    }
     if (!n) continue;
     seen.add(id);
     nodes.push(n);
@@ -473,34 +553,90 @@ export function parseFlow(raw: unknown): Flow {
       n.kind !== "builtin" ||
       (!builtins.has(n.builtin) && builtins.add(n.builtin)),
   );
+  // A loop's members: blocks that exist and may repeat, each in the first loop that lists it.
+  const memberOf = new Map<string, string>();
+  for (const n of kept) {
+    if (n.kind !== "loop") continue;
+    n.members = n.members.filter((m) => {
+      const b = kept.find((k) => k.id === m);
+      if (
+        !b ||
+        memberOf.has(m) ||
+        !(LOOP_MEMBER_KINDS as readonly string[]).includes(b.kind)
+      )
+        return false;
+      memberOf.set(m, n.id);
+      return true;
+    });
+  }
   const ids = new Set(kept.map((n) => n.id));
   const edges: FlowEdge[] = [];
   const pairs = new Set<string>();
   for (const r of Array.isArray(o.edges) ? o.edges.map(obj) : []) {
     const from = str(r.from, 24);
-    const to = str(r.to, 24);
-    if (
-      !ids.has(from) ||
-      !ids.has(to) ||
-      from === to ||
-      pairs.has(`${from}>${to}`)
-    )
-      continue;
+    let to = str(r.to, 24);
+    if (!ids.has(from) || !ids.has(to)) continue;
+    // Leaving a loop goes through its met / limit arrows: a member's arrow out of its frame
+    // (its own frame included) is dropped. Entering one starts it at its top: an arrow into a
+    // member from outside points at the loop.
+    const inLoop = memberOf.get(from);
+    if (inLoop && memberOf.get(to) !== inLoop) continue;
+    const toLoop = memberOf.get(to);
+    if (toLoop && toLoop !== inLoop) to = toLoop;
+    if (from === to || pairs.has(`${from}>${to}`)) continue;
     if (kept.find((n) => n.id === to)?.kind === "trigger") continue;
-    const fromTrigger = kept.find((n) => n.id === from)?.kind === "trigger";
+    const fromKind = kept.find((n) => n.id === from)?.kind;
     const kind: EdgeKind =
-      !fromTrigger && (r.kind === "ok" || r.kind === "fail") ? r.kind : "then";
+      fromKind === "loop"
+        ? r.kind === "met" || r.kind === "limit"
+          ? r.kind
+          : "then"
+        : fromKind !== "trigger" && (r.kind === "ok" || r.kind === "fail")
+          ? r.kind
+          : "then";
     pairs.add(`${from}>${to}`);
     edges.push({ id: edgeId(from, to), from, to, kind });
   }
   return { nodes: kept, edges };
 }
 
-/** Whether an arrow from→to would close a loop. */
+/** Each loop member's loop id. */
+export function frameOf(flow: Flow): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const n of flow.nodes)
+    if (n.kind === "loop")
+      for (const m of n.members) if (!out.has(m)) out.set(m, n.id);
+  return out;
+}
+
+/**
+ * Whether an arrow from→to would close a cycle. A Loop frame counts as one node (its repeating is
+ * the hook's, not the graph's), so the graph stays acyclic; between members of one frame they are
+ * ordinary blocks.
+ */
 export function makesCycle(flow: Flow, from: string, to: string): boolean {
+  const frame = frameOf(flow);
+  const inFrame = frame.get(from);
+  if (inFrame && inFrame === frame.get(to))
+    return walksTo(flow, new Map(), from, to);
+  const fromF = frame.get(from) ?? from;
+  const toF = frame.get(to) ?? to;
+  // A frame and its own member (or a block and itself): never an arrow.
+  if (fromF === toF) return true;
+  return walksTo(flow, frame, fromF, toF);
+}
+
+function walksTo(
+  flow: Flow,
+  frame: Map<string, string>,
+  from: string,
+  to: string,
+): boolean {
   const next = new Map<string, string[]>();
-  for (const e of flow.edges)
-    next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  for (const e of flow.edges) {
+    const a = frame.get(e.from) ?? e.from;
+    next.set(a, [...(next.get(a) ?? []), frame.get(e.to) ?? e.to]);
+  }
   const stack = [to];
   const seen = new Set<string>();
   while (stack.length) {
