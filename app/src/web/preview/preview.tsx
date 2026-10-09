@@ -77,6 +77,15 @@ function previewDeck(noBoard: boolean): DeckApi {
       ],
     }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
+    // Session details → Mods: switch in the fixture, as the Mac would after its next state.
+    modSet: (key: string, mod: string, on: boolean) => {
+      const off = new Set(state.modOff?.[key] ?? [])
+      if (on) off.delete(mod)
+      else off.add(mod)
+      state.modOff = { ...state.modOff, [key]: [...off].sort() }
+      for (const cb of stateCbs) cb({ ...state })
+      return ok
+    },
     // The Start dialog: a draft with no checkout found, so its folder line shows at phone width. A
     // chosen folder must be one of `repos`, as the Mac's guard (`chosenFolder`) answers a browser.
     draftAssign: (t: { number: number; repo: string | null }, title?: string, url?: string, cwd?: string) =>

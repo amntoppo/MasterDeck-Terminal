@@ -881,6 +881,14 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .details { flex: 1; overflow-y: auto; }
 .dsec { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .dsec:last-child { border-bottom: none; }
+.d-tabs { padding: 10px 16px 0; display: flex; }
+.d-tabs .seg { flex: none; }
+.d-tabs .seg button { white-space: nowrap; padding: 5px 14px; }
+.d-mods { display: flex; flex-direction: column; gap: 10px; }
+.d-mod { display: flex; align-items: center; gap: 12px; }
+.d-mod-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.d-mod-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.switch:disabled { opacity: .45; cursor: default; }
 .eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .eyebrow.bad { color: var(--red); }
 .d-row { display: flex; align-items: center; gap: 8px; }

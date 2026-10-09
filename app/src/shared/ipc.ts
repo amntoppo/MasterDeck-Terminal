@@ -164,6 +164,7 @@ export const CH = {
   linkSession: "session:link",
   peersSet: "peers:set",
   peersSync: "peers:sync",
+  modSet: "mod:set",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
@@ -572,6 +573,8 @@ export interface DeckApi {
   peersSet(a: string, b: string, on: boolean): Promise<CliResult>;
   /** Linked sessions → Sync now: summarize this session and refresh what its peers see. */
   peersSync(sessionKey: string): Promise<CliResult>;
+  /** Session details → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
+  modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
   /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
   boardRepos(repos: string[]): void;
