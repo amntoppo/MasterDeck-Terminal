@@ -26,9 +26,9 @@ export interface HoursSession {
 
 export interface HoursOptions {
   idleGapMs: number
-  /** YYYY-MM-DD (local), inclusive. */
-  from: string
-  to: string
+  /** [from, to) in epoch ms: time outside it is cut off. */
+  from: number
+  to: number
 }
 
 export interface HoursRow {
@@ -137,11 +137,12 @@ export function estimateHours(sessions: HoursSession[], opts: HoursOptions): Hou
     byTicket.set(acct, tickets)
     tickets.set(s.ticket, [...(tickets.get(s.ticket) ?? []), ...work])
   }
-  const inRange = (d: string) => d >= opts.from && d <= opts.to
+  // Cut to the range after the gaps are filled: a gap that starts before it still counts inside it.
+  const inRange = (spans: Span[]): Span[] => spans.flatMap(([a, b]): Span[] => (b > opts.from && a < opts.to ? [[Math.max(a, opts.from), Math.min(b, opts.to)]] : []))
   // Union (gap 0): sessions working at the same minute count it once.
   const rows = (spans: Span[], account: string, ticket: string | null): HoursRow[] =>
-    Object.entries(minutesByDay(mergeSpans(spans, 0)))
-      .filter(([d, m]) => inRange(d) && m > 0)
+    Object.entries(minutesByDay(inRange(mergeSpans(spans, 0))))
+      .filter(([, m]) => m > 0)
       .map(([day, minutes]) => ({ day, account: valOf(account), ticket, minutes }))
   const accounts = [...byAccount].flatMap(([a, spans]) => rows(spans, a, null))
   const tickets = [...byTicket].flatMap(([a, m]) => [...m].flatMap(([t, spans]) => rows(spans, a, t)))

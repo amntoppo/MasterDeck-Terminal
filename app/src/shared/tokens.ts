@@ -1,9 +1,10 @@
-import { dayOf } from './costs'
+import { bucketShare, hourOf } from './timeline'
 
 /**
  * Tokens a session used, summed from its transcripts: every assistant message carries a `usage`
  * block. Claude Code writes a message more than once as it streams (same message id, same usage),
- * so each id counts once. Tokens are kept per day (the message's own timestamp), like costs.
+ * so each id counts once. Tokens are kept per local clock hour of the message's own timestamp, like
+ * costs (`YYYY-MM-DDTHH`; a tally from before #88 has days, see shared/timeline.ts).
  */
 
 export interface Tokens {
@@ -15,6 +16,7 @@ export interface Tokens {
   cacheRead: number
 }
 
+/** Bucket (YYYY-MM-DDTHH, or YYYY-MM-DD) → tokens. The name is from when buckets were days. */
 export type TokensByDay = Record<string, Tokens>
 
 export const NO_TOKENS: Tokens = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 }
@@ -27,10 +29,25 @@ export function tokenSum(t: Tokens): number {
   return t.input + t.output + t.cacheWrite + t.cacheRead
 }
 
+/** Tokens of the days [from, to] (YYYY-MM-DD, inclusive). */
 export function tokensBetween(byDay: TokensByDay | undefined, from: string, to: string): Tokens {
   let t = NO_TOKENS
-  for (const [d, v] of Object.entries(byDay ?? {})) if (d >= from && d <= to) t = addTokens(t, v)
+  for (const [b, v] of Object.entries(byDay ?? {})) if (b.slice(0, 10) >= from && b.slice(0, 10) <= to) t = addTokens(t, v)
   return t
+}
+
+/** Tokens in [from, to) (epoch ms); a bucket the range cuts through gives its share, rounded. */
+export function tokensIn(byDay: TokensByDay | undefined, from: number, to: number, now: number): Tokens {
+  const t = { ...NO_TOKENS }
+  for (const [b, v] of Object.entries(byDay ?? {})) {
+    const f = bucketShare(b, from, to, now)
+    if (f === 0) continue
+    t.input += v.input * f
+    t.output += v.output * f
+    t.cacheWrite += v.cacheWrite * f
+    t.cacheRead += v.cacheRead * f
+  }
+  return { input: Math.round(t.input), output: Math.round(t.output), cacheWrite: Math.round(t.cacheWrite), cacheRead: Math.round(t.cacheRead) }
 }
 
 export function formatTokens(n: number | null): string {
@@ -123,8 +140,8 @@ export function tallyLines(t: FileTally, lines: string[]): void {
       t.recent.push(id)
       if (t.recent.length > RECENT) t.recent.splice(0, t.recent.length - RECENT)
     }
-    const day = dayOf(Number.isFinite(at) ? at : Date.now())
-    t.byDay[day] = addTokens(t.byDay[day] ?? NO_TOKENS, {
+    const hour = hourOf(Number.isFinite(at) ? at : Date.now())
+    t.byDay[hour] = addTokens(t.byDay[hour] ?? NO_TOKENS, {
       input: n(u.input_tokens),
       output: n(u.output_tokens),
       cacheWrite: n(u.cache_creation_input_tokens),

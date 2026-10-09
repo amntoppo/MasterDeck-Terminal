@@ -5,10 +5,10 @@ import { mergeByDay, newFileTally, tallyLines, type FileTally, type Span, type T
 import type { TranscriptIndex } from './files'
 
 const CHUNK = 4 * 1024 * 1024
-const VERSION = 2
+const VERSION = 3
 
 /**
- * Tokens per session and day, from its transcript and its subagents' transcripts. Each file's
+ * Tokens per session and hour, from its transcript and its subagents' transcripts. Each file's
  * tally is saved (~/.claude/masterdeck/tokens.json), so after the first pass only new lines are
  * read. Reads are async and in chunks: hundreds of MB of history must not freeze the app.
  */
@@ -24,7 +24,7 @@ export class TokenIndex {
   ) {
     try {
       const raw = JSON.parse(readFileSync(cachePath, 'utf8'))
-      // Version 1 had no activity spans: read every transcript again once.
+      // Version 1 had no activity spans, 2 counted tokens per day, not hour: read every transcript again once.
       if (raw && typeof raw === 'object' && raw.version === VERSION && raw.files && typeof raw.files === 'object') this.files = raw.files
     } catch {
       // first run: start empty
@@ -94,7 +94,7 @@ export class TokenIndex {
     return next
   }
 
-  /** Tokens per day for each of these sessions. */
+  /** Tokens per hour for each of these sessions. */
   refresh(sessionIds: string[]): Promise<Record<string, TokensByDay>> {
     return this.read(sessionIds, (ts) => mergeByDay(ts.map((t) => t.byDay)))
   }

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { parseTicket, ticketKey, ticketLabel } from '@shared/ticket'
 import { accountTotals, DEFAULT_IDLE_GAP_MIN, estimateHours, formatHours, hoursCsv, IDLE_GAPS_MIN, UNKNOWN_ACCOUNT, type HoursSession, type SessionActivity } from '@shared/hours'
+import { dayOf } from '@shared/costs'
 import { deck, load, save } from '../deck'
 import type { AppState } from '@shared/types'
 
 interface Props {
   state: AppState
-  /** YYYY-MM-DD, inclusive. */
-  from: string
-  to: string
+  /** [from, to) in epoch ms (the Costs time filter); 0: from the start. */
+  from: number
+  to: number
 }
 
 /**
@@ -29,8 +30,9 @@ export function HoursView({ state, from, to }: Props) {
   const [saved, setSaved] = useState<string | null>(null)
   const book = state.costBook
   const bookIds = Object.keys(book).sort().join(',')
-  // Activity that can reach the range: from its first midnight, less the longest idle gap that could fill into it.
-  const since = from === '0000-00-00' ? 0 : new Date(`${from}T00:00:00`).getTime() - Math.max(...IDLE_GAPS_MIN) * 60_000
+  // Activity that can reach the range: from its start, less the longest idle gap that could fill into
+  // it, down to the hour (so a sliding "Last 1 hour" asks again once an hour, not every minute).
+  const since = from === 0 ? 0 : Math.floor((from - Math.max(...IDLE_GAPS_MIN) * 60_000) / 3_600_000) * 3_600_000
   useEffect(() => {
     let alive = true
     const read = () =>
@@ -73,7 +75,7 @@ export function HoursView({ state, from, to }: Props) {
       return n
     })
   const exportCsv = async () => {
-    const name = `hours-${from === '0000-00-00' ? 'all' : from}-to-${to}.csv`
+    const name = `hours-${from === 0 ? 'all' : dayOf(from)}-to-${dayOf(to - 1)}.csv`
     const path = await deck().hoursExport(hoursCsv(result), name)
     if (path) setSaved(path)
   }

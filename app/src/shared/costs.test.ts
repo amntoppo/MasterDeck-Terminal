@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dailySpend, dayOf, pruneBook, recordCosts, sessionSpendBetween, sessionTotal, sumBetween, ticketSpend, validBook, type CostBook } from './costs'
+import { bucketSpend, dailySpend, dayOf, pruneBook, recordCosts, sessionSpendBetween, sessionSpendIn, sessionTotal, spendIn, sumBetween, ticketSpend, validBook, type CostBook } from './costs'
 
 const e = (sessionId: string, cost: number, issue: number | null = 7) => ({ sessionId, name: sessionId, key: sessionId, issue, cost })
 
@@ -57,5 +57,37 @@ describe('costs', () => {
     expect(ticketSpend(b)).toEqual({ 'acme/tracker#7': 106 })
     expect(sessionSpendBetween(b.old, '0000-00-00', '2026-09-25')).toBe(104)
     expect(sessionSpendBetween(b.old, '2026-09-01', '2026-09-25')).toBe(4)
+  })
+
+  it('keeps spend per hour and sums any range in ms, a running hour only up to now', () => {
+    const b: CostBook = {}
+    const t = (h: number, m = 0) => new Date(2026, 9, 9, h, m).getTime()
+    recordCosts(b, [e('a', 1)], '2026-10-09T09')
+    recordCosts(b, [e('a', 4)], '2026-10-09T13')
+    recordCosts(b, [e('a', 5)], '2026-10-09T14')
+    expect(bucketSpend(b)).toEqual({ '2026-10-09T09': 1, '2026-10-09T13': 3, '2026-10-09T14': 1 })
+    expect(dailySpend(b)).toEqual({ '2026-10-09': 5 })
+    const now = t(14, 30)
+    // Last hour at 14:30: half of 13:00 (13:30 to 14:00) and all of 14:00 so far.
+    expect(sessionSpendIn(b.a, now - 3_600_000, now, now)).toBeCloseTo(2.5)
+    expect(spendIn(bucketSpend(b), t(0), now, now)).toBeCloseTo(5)
+    expect(spendIn(bucketSpend(b), t(10), t(13), now)).toBe(0)
+    expect(sessionSpendBetween(b.a, '2026-10-09', '2026-10-09')).toBe(5)
+  })
+  it('reads a day kept before hours as that whole day', () => {
+    const b: CostBook = { a: { name: 'a', key: 'a', issue: null, days: { '2026-10-08': 2, '2026-10-09T10': 3 } } }
+    const now = new Date(2026, 9, 9, 12).getTime()
+    expect(sessionSpendIn(b.a, new Date(2026, 9, 8).getTime(), new Date(2026, 9, 9).getTime(), now)).toBe(2)
+    expect(sessionSpendIn(b.a, new Date(2026, 9, 8, 12).getTime(), new Date(2026, 9, 9).getTime(), now)).toBeCloseTo(1)
+    expect(sessionSpendIn(b.a, new Date(2026, 9, 9).getTime(), now, now)).toBe(1)
+  })
+  it('pruning folds hours older than a month into their day', () => {
+    const b: CostBook = {}
+    recordCosts(b, [e('a', 1)], '2026-08-01T09')
+    recordCosts(b, [e('a', 3)], '2026-08-01T15')
+    recordCosts(b, [e('a', 4)], '2026-10-09T10')
+    pruneBook(b, '2026-10-10')
+    expect(b.a.days).toEqual({ '2026-08-01': 3, '2026-10-09T10': 4 })
+    expect(dailySpend(b)).toEqual({ '2026-08-01': 3, '2026-10-09': 1 })
   })
 })

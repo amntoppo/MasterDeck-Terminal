@@ -383,7 +383,20 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .bar-fill { width: 70%; background: var(--accent); border-radius: 4px 4px 0 0; opacity: .75; }
 .bar-fill.today { background: var(--green); opacity: 1; }
 .bar-val { font-size: 9.5px; color: var(--muted); white-space: nowrap; }
-.bar-day { font-size: 10px; color: var(--faint); margin-bottom: -18px; }
+.bar-day { font-size: 10px; color: var(--faint); margin-bottom: -18px; white-space: nowrap; }
+.bars.dense { gap: 2px; }
+.bars.dense .bar-fill { width: 85%; }
+/* The Costs time filter (#88): a preset list, and a custom range form under it. */
+.range-pick { position: relative; display: flex; align-items: center; gap: 4px; flex: none; }
+.range-pick select { font: inherit; font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; max-width: 220px; }
+.range-form { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 260px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.range-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
+.range-form input { font: inherit; font-size: 12px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; color-scheme: dark; }
+.range-form input:focus { border-color: var(--accent); outline: none; }
+.range-err { color: var(--red); font-size: 11.5px; }
+.range-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.costs-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 64px 16px; text-align: center; }
+.costs-empty strong { font-size: 15px; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; user-select: text; }
 .tbl th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 6px 8px; border-bottom: 1px solid var(--line); }

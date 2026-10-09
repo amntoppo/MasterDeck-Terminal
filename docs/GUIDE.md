@@ -535,13 +535,24 @@ creation.
 - **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the
   split on hover), and the Costs view shows tokens next to spend: per day, per ticket and per
   session. They are summed from the session's transcript and its subagents', counting each message
-  once, by the day it was sent. The first Costs view reads your history once (a few seconds, in the
+  once, by the hour it was sent. The first Costs view reads your history once (a few seconds, in the
   background); after that only new lines are read (`~/.claude/masterdeck/tokens.json`). Cache reads
   are usually most of the total.
-- **Costs view ($):** spend today, 7 and 30 days, a 14-day bar chart, and tables per ticket and per
-  session. The data is the status line's cumulative cost, recorded per session per day in
-  `~/.claude/masterdeck/costs.json`. Spend a session had before MasterDeck first saw it counts as a
-  baseline: it's in All time and ticket totals, but not in any day. **USD / Tokens** (top right)
+- **Costs view ($):** the total for the chosen period, the sessions and tickets that spent in it, a
+  bar chart and tables per ticket and per session. **The time filter** (top right) picks the period:
+  Last 1 hour, Last 5 hours, Last 12 hours, Today, Yesterday, Last 7 days (the default), Last 30
+  days, All time, or **Custom…**, a From and To date and time (the To minute counts; an end before
+  the start is refused). Today and Yesterday follow your Mac's time zone. The list shows the period
+  ("Last 7 days", or a custom "3 Oct – 9 Oct", with times when it has any; ✎ changes it), and the
+  choice is remembered across restarts. Everything but the **All time** column follows it; the
+  chart has a bar per hour (up to two days), per day (up to two months), per week, then per month.
+  A period with nothing in it says **No costs in this period**. The data is the status line's
+  cumulative cost, recorded per session per hour in `~/.claude/masterdeck/costs.json` (kept per day
+  once a month old, and from before this version). A period that starts or ends inside a clock hour
+  gets that hour's share by time (so Last 1 hour is an estimate within the hour); spend a session
+  had when MasterDeck first saw it today counts in that hour. Spend a session had before MasterDeck
+  first saw it on an earlier day counts as a baseline: it's in All time and ticket totals, but not
+  in any period. **USD / Tokens** (top right)
   switches the whole view to tokens: the figures, the chart and both tables (sorted by tokens), with
   dollars as the second figure. The choice is remembered.
 - **Hours (Costs view, desktop only):** the third choice beside USD / Tokens: an *estimate* of how
@@ -556,7 +567,7 @@ creation.
   ticket's repository (a removed worktree), else (with one account) that account; anything else is
   listed as **unknown account**. A resumed session is one session: the gap across the resume is
   filled like any other. All of a session's time goes to the ticket it is linked to now. The numbers
-  refresh every minute while the tab is open. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
+  refresh every minute while the tab is open; the time filter cuts them to its period. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
   per account and day, then its tickets) where you choose. Only this Mac's sessions are counted, and
   only sessions the Costs view knows (those with a status line record). Nothing of it goes to the
   web app, a phone or the API.

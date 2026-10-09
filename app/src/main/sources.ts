@@ -90,6 +90,7 @@ import {
   type CostBook,
   type CostEntry,
 } from "@shared/costs";
+import { hourOf } from "@shared/timeline";
 import { addBurnPoint, summarize, type BurnPoint } from "@shared/sprintSummary";
 import {
   DEFAULT_SETTINGS,
@@ -1046,7 +1047,7 @@ export class Sources {
     this.allStats = next;
     const midnight = new Date(now);
     midnight.setHours(0, 0, 0, 0);
-    if (recordCosts(this.costBook, entries, dayOf(now), midnight.getTime()))
+    if (recordCosts(this.costBook, entries, hourOf(now), midnight.getTime()))
       this.costDirty = true;
     if (this.costDirty) {
       pruneBook(this.costBook, dayOf(now));

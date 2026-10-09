@@ -822,8 +822,8 @@ The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per Gi
 and ticket. `TokenIndex` (`main/tokens.ts`) keeps, next to each transcript file's tokens, its
 activity `spans`: every line with a top-level `timestamp` (the line is parsed; a nested one never
 counts) widens the last span when within `SPAN_GRAIN` (5 min) of it, else opens one (`addMoment`,
-`shared/tokens.ts`). The cache is `tokens.json` version 2; a version 1 file is dropped and every
-transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
+`shared/tokens.ts`). The cache is `tokens.json` version 3 (hours, #88); an older file is dropped
+and every transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
 re-asks every minute) answers `{spans, account}` for each session active since `since`:
 `Sources.hoursActivity` gives the spans, key, folder and ticket, main's handler the account
 (`hoursAccount`: recorded in `session-accounts.json` and still connected, else the account of the
@@ -838,6 +838,26 @@ so an account counts a minute once and each ticket gets its full time. `hoursCsv
 `date,account,ticket,minutes`; `CH.hoursExport` saves it through a save dialog. Both channels are
 `blocked` in `DECK_ACCESS` and refuse a remote call: nothing reaches `AppState`, the snapshot or
 the web.
+
+### The Costs time filter (issue #88)
+
+`shared/timeline.ts` holds the presets (`PRESETS`, `RangeChoice`, `parseRange` for the saved value),
+`resolveRange(choice, now)` to `[from, to)` epoch ms in local time (Last 7/30 days start at the
+midnight 6/29 days back, as before), `rangeLabel`, the custom range's input values (`customRange`:
+the To minute is included, an end before the start is an error) and `chartBars` (hours up to 48 h,
+days up to 62 days, weeks from Monday, then months). The choice is in the renderer's localStorage
+(`costsRange`), like `costsUnit`. Costs and tokens are kept per **local clock hour**, bucket key
+`YYYY-MM-DDTHH` (`hourOf`): `Sources.scanAllStats` records the cost book under the hour
+(`recordCosts`), `tallyLines` counts tokens under the message's hour, and `TokenIndex`'s cache is
+version 3 (every transcript is read again once). Day keys (`YYYY-MM-DD`) stay valid: books from
+before #88, and hours older than 35 days, which `pruneBook` folds into their day (max of the
+cumulative cost) so the book in `AppState` stays small. `bucketShare(key, from, to, now)` is the one
+rule for a range: the part of a bucket inside it by time, the running hour only up to `now`
+(`spendIn`, `sessionSpendIn`, `tokensIn`); the day-string helpers (`dailySpend`,
+`sessionSpendBetween`, `tokensBetween`) read hour keys by their day. `CostsView` computes every
+figure from `[from, to)`; the ticket table's All time column stays all-time (the budget check).
+`HoursView` takes the same `from`/`to`: `estimateHours` cuts the joined spans to it before the
+per-day split.
 
 ## Shared modules (`shared/`)
 
@@ -939,7 +959,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 |---|---|
 | `settings.json` | `Settings` |
 | `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs, the repository view's issues (`repoIssues`) |
-| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 2: per transcript file, tokens per day and activity `spans`), status line output per session |
+| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 3: per transcript file, tokens per local hour and activity `spans`); the cost book keeps each session's highest cumulative cost per hour (per day once 35 days old), status line output per session |
 | `statusline_tee.py` | installed status line tee (settings.json points here) |
 | `inbox.json`, `inbox-events.jsonl` | Needs you state and event log |
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |

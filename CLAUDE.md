@@ -360,7 +360,13 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-09)
+## Current state and next steps (2026-10-10)
+
+- **Costs time filter** (issue #88) is on branch `worktree-MasterDeck-Terminal-88-costs-timeline`
+  (not merged, not installed): presets and a custom range in the Costs view, costs and tokens kept
+  per local hour (`shared/timeline.ts`; ARCHITECTURE "The Costs time filter"). Checked: typecheck,
+  vitest, and the web preview (`/?preview` now has fixture cost history) at 1400 px and 390 px.
+  Open points are in TODO ("Costs time filter").
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so
