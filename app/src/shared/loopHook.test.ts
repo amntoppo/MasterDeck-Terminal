@@ -145,6 +145,19 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     expect(decide(base({ d, e: { iteration: 2, history: [h('h0', 1), h('h1', 2)], startedAt: NOW } })).file.loops[0].state).toBe('open')
   })
 
+  it('after Run 5 more (stallFrom), only fresh rounds count toward the stall limit', () => {
+    const h = (hash: string, n: number) => ({ n, hash })
+    const d = [def({ limits: { iterations: 10, minutes: 0, stall: 3 } })]
+    // Stalled at 3, given 5 more: the old rounds are all the same hash, the new one too.
+    const e = { iteration: 3, extra: 5, stallFrom: 3, history: [h('h1', 1), h('h1', 2), h('h1', 3)] }
+    const one = decide(base({ d, e }))
+    expect(one.file.loops[0]).toMatchObject({ state: 'open', iteration: 4 })
+    const two = decide({ ...base({ d }), file: one.file })
+    expect(two.file.loops[0].state).toBe('open')
+    const three = decide({ ...base({ d }), file: two.file })
+    expect(three.file.loops[0]).toMatchObject({ state: 'limit', iteration: 6, reason: 'stopped: no progress in 3 iterations' })
+  })
+
   it('opens the loop after this one by its outcome or a plain arrow, not the other', () => {
     const d = [
       def({ met: '2.met.1. Repeat until the loop "B" is done.' }),

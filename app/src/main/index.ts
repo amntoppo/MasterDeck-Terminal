@@ -144,6 +144,8 @@ import {
   writeRemoved,
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
+import { LoopStore } from "./loops";
+import { loopNudge } from "@shared/loops";
 import { Summaries } from "./summary";
 import {
   DEFAULT_TEMPLATE,
@@ -1674,6 +1676,29 @@ function clearDraft(): void {
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
 let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
+/** Workflow loops (`workflows/loops/`): names and limits from each session's compiled workflow. */
+const loopStore = new LoopStore(paths.home, (sid) =>
+  workflows()
+    .compiledFor(sid)
+    .flatMap((s) => s.loops ?? []),
+);
+sources.setLoopStore(loopStore);
+
+/**
+ * Run 5 more's nudge (the Details action and the Needs-you one): MasterDeck's own fixed text, so
+ * the loop's next round happens. Only an idle session gets it; a busy one meets the reopened loop
+ * at its next turn end anyway.
+ */
+async function nudgeLoop(
+  sessionId: string,
+  name: string,
+  remote: boolean,
+): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.sessionId === sessionId);
+  if (!s || s.state !== "idle")
+    return { ok: true, message: "5 more iterations; the loop goes on at the next turn end" };
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+}
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
@@ -2791,6 +2816,22 @@ function registerIpc(): void {
       return { ok: false, message: "no such trigger" };
     syncWorkflowHooks();
     return { ok: true, message: "trigger deleted" };
+  });
+  // Workflow loops: ids are checked by the store (session id, loop id shapes); the state shows
+  // the change at once.
+  reg.handle(CH.workflowLoopHistory, (_e, sid: unknown, id: unknown) =>
+    loopStore.history(sid, id),
+  );
+  reg.handle(CH.workflowLoopStop, (_e, sid: unknown, id: unknown) => {
+    const r = loopStore.stop(sid, id);
+    if (r.ok) sources.pollLoops();
+    return r;
+  });
+  reg.handle(CH.workflowLoopMore, async (e, sid: unknown, id: unknown) => {
+    const r = loopStore.more(sid, id);
+    if (!r.ok) return r;
+    sources.pollLoops();
+    return nudgeLoop(sid as string, r.name ?? "loop", isRemote(e));
   });
   reg.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;

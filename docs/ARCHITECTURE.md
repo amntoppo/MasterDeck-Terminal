@@ -306,7 +306,8 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 
 `main/workflow.ts` `WorkflowStore` under `<home>`: `workflow.json` (Default), `workflows/templates/`,
 `workflows/sessions/<sessionId>.json` (each session's copy), `workflows/triggers/` (custom
-triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.jsonl`,
+triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.jsonl`, `workflows/loop.sh`,
+`workflows/loops/` (`<sid>.json`, the loops; `<sid>-<loop id>.md`, their progress files),
 `workflows/pending.json`. The flow model, compiler and checks are `shared/flow.ts`,
 `shared/flowBuilder.ts` (builder drafts in `<home>/workflow-builder/`), `shared/flowTrack.ts`
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
@@ -340,6 +341,21 @@ longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `r
 While a loop is open the loop hook owns the session's stops: the turn-end trigger's hook and the
 deck hook's queue (Stop) exit at once when `workflows/loops/<sid>.json` has an open loop, and go on
 once it is over.
+`main/loops.ts` `LoopStore` reads the loop files (cached by mtime; `parseLoopFile` in
+`shared/loops.ts` drops junk entries and never throws) into `AppState.loops`: by session id, at
+most 3 loops each, newest first, closed ones for 24 h, the check's tail cut to 1 KB, names and
+limits from the session's compiled workflow (`loopViews`; `LoopView.minutes` is the time limit, so
+nothing in the state ticks). The files change from the hooks, outside the app: the 1 s deck poll
+also asks `LoopStore.changed()` (the folder's names and mtimes) and rebuilds the state when they
+moved. Its two writes (temp file + rename): **Stop loop** (`stop`: only an open loop, `state:
+"stopped"`, reason `stopped by you`, `endedAt`) and **Run 5 more** (`more`: only a `limit` loop,
+and only while no other loop of the session is open: `extra += 5`, `state: "open"`, `startedAt`
+reset to now so a time limit is not hit again at once, and `stallFrom` set to the iteration, so
+`DECIDE` counts only later rounds toward the stall limit). Run 5 more also types
+`Continue the loop "<name>".` (`loopNudge`: fixed text, the name cleaned of control characters and
+a leading `/` or `!`) into the session through `Sender` when it is idle (`nudgeLoop` in
+`main/index.ts`, shared with the Needs-you action); a busy session meets the reopened loop at its
+next turn end.
 
 ### Notes
 
@@ -838,6 +854,11 @@ waits, and writes nothing if accounts appeared meanwhile.
 - Create a GitHub board: `boardCreatePlan(account?)` (a read), `boardCreate({account?, title})`, `boardCreateRetry(account?)` and the event `onBoardCreateProgress` (`board:createProgress`, sent to the Mac's window only). All four are `blocked` in `DECK_ACCESS`, and the handlers refuse a remote caller as well: the confirmation is main's native dialog, and the usual fix (the `project` scope) needs a terminal on the Mac.
 - Assign popup: `assignableUsers(repo)` (`issue:assignable`, invoke, `remote` in `DECK_ACCESS`: a read, the repository is checked in `AssignableUsers.get`).
 - Description and sub-issues of a ticket (Assign popup, Start dialog): `issueBody(ticket)` (`issue:body`) and `issueSubIssues(ticket)` (`issue:subIssues`), both invokes, `remote` in `DECK_ACCESS` (reads), routed `forCard`. `GitHub.subIssues` reads `repos/<repo>/issues/<n>/sub_issues?per_page=100` (GitHub allows 100 sub-issues per issue, so one page), cached 5 minutes, flattened by `SUB_ISSUES_JQ` and parsed by `parseSubIssues` (`shared/subIssues.ts`; a sub-issue in another repository keeps its owner/name, a URL that is not github.com is dropped). `SubIssues.tsx` reads them when the popup opens and gives each its column from `state.board` (or the repository view) by `ticketKey`, else Open / Closed (`subIssueRows`); "done" is closed, as GitHub counts it (`subIssueProgress`). Nothing about sub-issues enters `AppState`.
+- Workflow loops: `workflowLoopHistory(sid, loopId)` (`workflow:loopHistory`: every round and the
+  last 64 KB of the progress file), `workflowLoopStop` (`workflow:loopStop`) and `workflowLoopMore`
+  (`workflow:loopMore`), invokes, `remote` in `DECK_ACCESS`. `LoopStore` checks the session id
+  (`validSessionId`) and the loop id (`^[a-z0-9-]{1,24}$`) and refuses a stop of a loop that is not
+  open and more for one not at a limit; the web cannot type anything: the nudge is MasterDeck's text.
 - Repository view: `boardRepos(repos)` (`board:repos`, fire-and-forget, `remote` in `DECK_ACCESS`: it is a read, and main checks the list with `cleanRepos`).
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
@@ -955,6 +976,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
 | `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, `ticket-links.json` |
 | `watches`, `schedules` | `Watches.info()` + `PrWatch.info()` (`pr:<url>` rows), transcripts |
+| `loops` | `LoopStore.views()` over `workflows/loops/<sid>.json` (3 per session, closed ones for 24 h, tail 1 KB) |
 | `sources`, `errors`, `missingBinaries`, `ghCache` | health of each poll, `readGhCacheStatus()` |
 | `settings`, `config`, `skills`, `hooks`, `statuslineInstalled`, `masterWorkspace` | `settings.json`, `~/.claude/master/config.json`, `syncSkills`, `hookStatus` |
 | `stoppedByRestart`, `restoring` | `running-sessions.json` |
@@ -987,7 +1009,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by` |
-| `workflow.json`, `workflows/` | workflows (see above) |
+| `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |

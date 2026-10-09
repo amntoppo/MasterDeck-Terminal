@@ -154,6 +154,9 @@ export const CH = {
   workflowTemplateDelete: "workflow:templateDelete",
   sessionWorkflowGet: "workflow:sessionGet",
   workflowStatus: "workflow:status",
+  workflowLoopHistory: "workflow:loopHistory",
+  workflowLoopStop: "workflow:loopStop",
+  workflowLoopMore: "workflow:loopMore",
   workflowBuilderPrepare: "workflow:builderPrepare",
   workflowDraft: "workflow:draft",
   workflowDraftGet: "workflow:draftGet",
@@ -542,6 +545,15 @@ export interface DeckApi {
   workflowTriggerDelete(id: string): Promise<CliResult>;
   /** What a session's workflow last did (the Workflow line in Details). */
   workflowStatus(sessionId: string): Promise<WorkflowStatus | null>;
+  /** A workflow loop's every round and the end of its progress file. */
+  workflowLoopHistory(
+    sessionId: string,
+    loopId: string,
+  ): Promise<import("./loops").LoopHistory>;
+  /** Stop a running workflow loop (the session's next turn end lets it finish). */
+  workflowLoopStop(sessionId: string, loopId: string): Promise<CliResult>;
+  /** Give a loop stopped at a limit 5 more iterations, and nudge the session if it is idle. */
+  workflowLoopMore(sessionId: string, loopId: string): Promise<CliResult>;
   /** A session's own workflow; null while it follows the default. */
   sessionWorkflowGet(sessionId: string): Promise<WorkflowDoc | null>;
   /** Change a session's workflow (`from`: the template it now comes from, if one was applied). */

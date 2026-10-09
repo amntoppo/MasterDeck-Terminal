@@ -218,6 +218,8 @@ export interface AppState {
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */
   schedules: Record<string, ScheduleInfo[]>;
+  /** Workflow loops by session id (shared/loops: at most 3 each, closed ones for a day). */
+  loops: Record<string, import("./loops").LoopView[]>;
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;

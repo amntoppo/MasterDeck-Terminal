@@ -33,7 +33,7 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
  *
  * First match wins: met, the iteration limit (`limits.iterations` plus the `extra` that Run 5 more
  * adds), the time limit, the stall limit (the last `stall` hashes equal: check output with
- * durations taken out, and the git fingerprint), else the loop goes on. A loop that closes opens
+ * durations taken out, and the git fingerprint; only rounds after `stallFrom`, which Run 5 more sets), else the loop goes on. A loop that closes opens
  * the loops of its step that come after it by that outcome or by a plain arrow (S11), and hands
  * over, in order, its met or limit branch, what its plain arrows lead to, and the loops it opened.
  */
@@ -63,13 +63,16 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
       | ($def.limits.stall // 0) as $stall
       | {n: $n, at: $in.now, ms: $r.ms, passed: $r.passed, said: $r.said, exit: $r.exit, tail: $r.tail, hash: $r.hash} as $h
       | ((($e.history // []) + [$h]) | .[-50:]) as $hist
+      # Rounds before Run 5 more (stallFrom) never count toward the stall limit: a loop given more
+      # gets its own rounds before it can be stopped for no progress again.
+      | [$hist[] | select((.n // 0) > ($e.stallFrom // 0))] as $since
       | (if $cmd and $r.ran and ($r.passed | not) then "\u0060\($def.check.command)\u0060 still failing"
          elif $agent and ($r.said | not) then "the agent has not said LOOP DONE"
          else "the criterion not met" end) as $what
       | (if $met then {state: "met", reason: "criterion met after \(plural($n; "iteration"))"}
          elif $n >= $max then {state: "limit", reason: "stopped: \($n)/\($max) iterations, \($what)"}
          elif $mins > 0 and $elapsed >= $mins * 60000 then {state: "limit", reason: "stopped: time limit (\($mins) min)"}
-         elif $stall > 0 and ($hist | length) >= $stall and ($hist | .[(length - $stall):] | map(.hash) | unique | length) == 1
+         elif $stall > 0 and ($since | length) >= $stall and ($since | .[(length - $stall):] | map(.hash) | unique | length) == 1
            then {state: "limit", reason: "stopped: no progress in \($stall) iterations"}
          else {state: "open", reason: null} end) as $d
       | ($e + {iteration: $n, history: $hist, lastCheck: $h} + $d) as $out
