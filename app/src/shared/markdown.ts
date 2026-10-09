@@ -5,7 +5,8 @@
  * bold, italic, strikethrough, links and images. Raw HTML is not run: `<img>` and `<br>` are read
  * as what they mean, comments are dropped, anything else stays text. Links and images keep only
  * addresses that are safe to open (`safeHref`, `safeImage`). With `html: false` (the user's notes) no
- * tag is read at all: `<img>`, `<br>` and comments stay the text they are.
+ * tag is read at all: `<img>`, `<br>` and comments stay the text they are, and an image is a link to
+ * it (nothing is fetched by opening a note).
  */
 
 export interface MarkdownOptions {
@@ -92,7 +93,9 @@ export function parseInline(src: string, depth = 0, html = true): Inline[] {
       push({ t: 'code', v: m[2].replace(/\n/g, ' ').replace(/^ (.*) $/, '$1') })
     } else if (ch === '!' && (m = IMAGE.exec(rest))) {
       const s = safeImage(m[2])
-      if (s) push({ t: 'image', src: s, alt: m[1] })
+      // A note never loads an address by itself (its text may come from a session): the image is a link to it.
+      if (s && !html) push({ t: 'link', href: s, c: [{ t: 'text', v: m[1] || 'image' }] })
+      else if (s) push({ t: 'image', src: s, alt: m[1] })
       // A note shows what was typed; an issue only the words.
       else text(html ? m[1] || m[2] : m[0])
     } else if (ch === '[' && (m = LINK.exec(rest))) {

@@ -639,8 +639,10 @@ A place for what you would otherwise keep in another app: your own notes, and on
 - **Markdown:** write a note in Markdown (`# headings`, `- lists`, `- [ ] tasks`, `[links](https://…)`,
   `` `code` ``, `**bold**`, `_italic_`, tables, quotes) and see it rendered. Under the text, **Write**
   shows the text you edit, **Preview** the note rendered, and **Side by side** (in a window at least
-  1000 px wide) both, with the panel twice as wide. Each window and browser remembers its choice. In the
-  preview a link opens in your browser, never in MasterDeck, and only `https://` links are links. HTML
+  1000 px wide) both, with the panel twice as wide. Each window and browser remembers its choice (a
+  new, empty note always opens in **Write**). In the
+  preview a link opens in your browser, never in MasterDeck, and only `https://` links are links. An
+  image (`![name](https://…)`) shows as a link to it: opening a note never loads anything. HTML
   in a note is never run or drawn: `<b>`, `<img>`, `<script>` and the like show as the text you typed.
   The list, a ticket's **Details** and the hover text of a card's note mark show the start of a note
   as plain words (the marks left out). Nothing about the stored note changed: a note written before

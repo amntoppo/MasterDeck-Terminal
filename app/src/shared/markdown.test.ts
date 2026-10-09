@@ -194,10 +194,17 @@ describe('html: false (notes)', () => {
     // What was typed stays on screen, whole.
     expect(text('[bad](javascript:alert(1)) ![i](file:///x)')).toBe('[bad](javascript:alert(1)) ![i](file:///x)')
   })
-  it('Markdown images with an https address still show (only tags are text)', () => {
-    expect(nodes(notes('![pic](https://example.com/p.png)')).some((n) => n.t === 'image')).toBe(true)
+  it('an image is a link to it: opening a note fetches nothing', () => {
+    const all = nodes(notes('![pic](https://example.com/p.png) ![](https://example.com/q.png)'))
+    expect(all.some((n) => n.t === 'image')).toBe(false)
+    expect(all.filter((n) => n.t === 'link')).toEqual([
+      { t: 'link', href: 'https://example.com/p.png', c: [{ t: 'text', v: 'pic' }] },
+      { t: 'link', href: 'https://example.com/q.png', c: [{ t: 'text', v: 'image' }] },
+    ])
+    // An issue's description still shows its images.
+    expect(nodes(parseMarkdown('![pic](https://example.com/p.png)')).some((n) => n.t === 'image')).toBe(true)
   })
-  it('the rest of Markdown is read as before', () => {
+  it('the rest of Markdown is read as in an issue', () => {
     const src = '## Todo\n\n- [ ] one\n- [x] **two**\n\n```\n<b>x</b>\n```'
     expect(notes(src)).toEqual(parseMarkdown(src))
   })

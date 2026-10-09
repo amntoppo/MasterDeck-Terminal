@@ -443,14 +443,16 @@ fixes it, and move the item here to "Recently done".
 - **P3 · No history and no export.** No earlier versions of a note, and no export (the files in
   `~/.claude/masterdeck/notes/` are plain JSON).
 - **P3 · Markdown in notes (#65): open points.** (a) A task list's boxes in the preview cannot be
-  ticked: change `[ ]` in the text. (b) Images with an `https://` address load in the preview (as in
-  an issue's description), so a note can make the window fetch an address; only tags are text. (c)
+  ticked: change `[ ]` in the text. (b) An image in a note is a link, never drawn (nothing is fetched
+  on opening a note): a picture pasted into a note is not shown. (c)
   Details and the card's hover show the plain one-line preview, not rendered Markdown (the full text
   is never in the list). (d) The preview parses the whole text on every key; fine at 50,000
   characters, not measured on a slow phone.
 - **P3 · Sessions writing notes (#65): open points.** (a) Any process of the user's can write a
   request (as it can write the notes folder itself); there is no switch to turn it off. (b) A
-  session cannot read a note, also not one it made, and cannot replace or delete text. (c) Not on
+  session cannot read a note, also not one it made, and cannot replace or delete text. Not a wall: a
+  session runs as the user and can read the notes folder's files, and the 50,000-character refusal
+  tells it something about a note's length. (c) Not on
   Windows (bash and the deck folder are macOS-only today). (d) A note does not say which session
   wrote it; the session can say so in its text. (e) The skill names its script by
   `~/.claude/skills/...`: with `MASTERDECK_SKILLS_DIR` elsewhere the path in SKILL.md is wrong.

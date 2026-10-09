@@ -120,9 +120,15 @@ export function notePreview(body: string): string {
   return markdownText(body.slice(0, 4000)).slice(0, NOTE_PREVIEW)
 }
 
+// A note is replaced (never changed) on every save, so its object names one version: the list and every
+// search reuse the preview instead of parsing up to 4000 characters per note each time.
+const previews = new WeakMap<Note, string>()
+
 export function noteMeta(n: Note): NoteMeta {
   const { body, ...rest } = n
-  return { ...rest, preview: notePreview(body) }
+  let preview = previews.get(n)
+  if (preview === undefined) previews.set(n, (preview = notePreview(body)))
+  return { ...rest, preview }
 }
 
 export const sortNotes = (metas: NoteMeta[]): NoteMeta[] =>

@@ -14,8 +14,9 @@ export type NoteRequest =
 /** A request file larger than this is refused unread (a note is 50,000 characters at most). */
 export const NOTE_REQUEST_MAX_BYTES = 256 * 1024
 
-// As GitHub names them (an owner has no dot); a name of only dots is no repository.
-const TICKET_ARG = /^(?:([A-Za-z0-9-]{1,39}\/(?!\.{1,2}#)[A-Za-z0-9._-]{1,100}))?#?([1-9][0-9]{0,8})$/
+// As GitHub names them (an owner has no dot); a name of only dots is no repository. After a repository
+// the `#` is required: without it `acme/api2` would read as acme/api#2.
+const TICKET_ARG = /^(?:([A-Za-z0-9-]{1,39}\/(?!\.{1,2}#)[A-Za-z0-9._-]{1,100})#|#?)([1-9][0-9]{0,8})$/
 
 /**
  * A session's text as a note can hold it: terminal colours and other control characters (tool

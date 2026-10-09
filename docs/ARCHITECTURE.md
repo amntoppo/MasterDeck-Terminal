@@ -329,12 +329,13 @@ through the `notes:*` handlers. A note's full text travels to a web tab in two a
 that tried to save over it (so the editor can offer Reload). The list (`notes:list`) and
 `notes:changed` carry `NoteMeta`, which has a 120-character `preview` instead of the text: the note's
 Markdown read as one plain line (`notePreview` → `markdownText` in `shared/markdown.ts`, from the first
-4000 characters). `notes:search` runs in main and returns ids.
+4000 characters; kept per note object in a WeakMap, since a save replaces the object). `notes:search` runs in main and returns ids.
 
 A note's body is Markdown source, stored as typed. It is drawn by `MarkdownView` with `html={false}`:
 `parseMarkdown(text, { html: false })` builds a tree of blocks and inlines, React draws elements from
 it, and no HTML is ever built from the text. In that mode no tag is read at all (`<img>`, `<br>`, comments
-stay text, unlike an issue's description); links and images keep `https://` addresses only (`safeHref`,
+stay text, unlike an issue's description), and an image is drawn as a link to it, so opening a note
+never fetches an address (its text may come from a session); links keep `https://` addresses only (`safeHref`,
 `safeImage`); a click goes to `deck.openExternal` (the window: `shell.openExternal`, https only; the
 web: `window.open`, https only). The window also refuses any navigation away from the app
 (`will-navigate`: an https address opens in the browser instead). The editor's Write / Preview / Side by
@@ -350,7 +351,9 @@ tick, files over 256 KB refused, `parseNoteRequest` (`shared/noteRequest.ts`: th
 names it, ids `n-…` only, control characters and terminal colours stripped), then `NotesStore.save`
 (new) or `NotesStore.append` (the text as a new paragraph at the end; a ticket's note is made when
 there is none; refused past 50,000 characters). The answer carries the note's id and a sentence,
-never a note's text: a session can write, not read. Leftovers older than a minute are swept. Not on
+never a note's text: the app never hands a session a note. That is the app's rule, not a wall: a
+session runs as the user and can read `<home>/notes/` like any file, and a refusal past 50,000
+characters says something about a note's length. Leftovers older than a minute are swept. Not on
 Windows (the deck hook folder and the pump run on macOS only).
 
 The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted

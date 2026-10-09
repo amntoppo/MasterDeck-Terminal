@@ -55,7 +55,11 @@ export function pumpNoteRequests(deckDir: string, store: Store, now = Date.now()
       continue
     }
     const id = n.slice(0, -5)
-    if (!ID.test(id)) continue
+    if (!ID.test(id)) {
+      // Not a name note.sh makes: never read, removed once old so it is not listed every second.
+      if (stale(path, now)) rmSync(path, { force: true })
+      continue
+    }
     if (done >= PER_TICK) break
     const taken = join(req, `${id}.taken`)
     try {

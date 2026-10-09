@@ -64,10 +64,16 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
     const v = load<NoteView>(VIEW_KEY, 'write')
     return NOTE_VIEWS.includes(v) ? v : 'write'
   })
-  const view = noteView(picked, wide)
+  // A note opened blank (New note, a card's "Add a note") starts in Write: a preview of nothing has no
+  // place to type. The remembered choice is left as it is for the next note.
+  const [blankOpen, setBlankOpen] = useState(false)
+  const openKey = draft ? editor.key : null
+  useEffect(() => setBlankOpen(!!draft && !draft.body.trim()), [openKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const view = blankOpen && picked === 'preview' ? 'write' : noteView(picked, wide)
   const pick = (v: NoteView) => {
     // Leaving the text for the preview is a pause in typing: it is saved now, not 2 s later.
     if (v === 'preview') void editor.saveNow()
+    setBlankOpen(false)
     setPicked(v)
     save(VIEW_KEY, v)
   }

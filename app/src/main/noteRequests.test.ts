@@ -94,19 +94,19 @@ describe('pumpNoteRequests', () => {
     mkdirSync(join(deck, 'note-requests'), { recursive: true })
     const old = join(deck, 'note-answers', '9-9-9.json')
     const body = join(deck, 'note-requests', '9-9-9.body')
-    writeFileSync(old, '{}')
-    writeFileSync(body, 'x')
+    const odd = join(deck, 'note-requests', 'weird.json')
+    for (const f of [old, body, odd]) writeFileSync(f, '{}')
     const t = new Date(Date.now() - 120_000)
-    utimesSync(old, t, t)
-    utimesSync(body, t, t)
+    for (const f of [old, body, odd]) utimesSync(f, t, t)
     pumpNoteRequests(deck, store)
-    expect(existsSync(old)).toBe(false)
-    expect(existsSync(body)).toBe(false)
+    for (const f of [old, body, odd]) expect(existsSync(f), f).toBe(false)
+    expect(store.list()).toEqual([])
   })
 })
 
 // The skill's script against this pump: a request, its answer, and what the script prints.
-describe('note.sh', () => {
+// The deck folder and its pump run on macOS only, like the hook script's tests.
+describe.skipIf(process.platform === 'win32')('note.sh', () => {
   const script = resolve(__dirname, '../../../skills/masterdeck-notes/scripts/note.sh')
   const run = (args: string[], input: string, pump = true) =>
     new Promise<{ code: number | null; out: string; err: string }>((done) => {

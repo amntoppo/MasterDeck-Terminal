@@ -17,6 +17,8 @@ describe('parseNoteRequest', () => {
     expect(ok({ op: 'new', arg: ' Plan ', body: '- a\n' })).toEqual({ op: 'new', title: 'Plan', text: '- a' })
     expect(ok({ op: 'ticket', arg: 'acme/web#12', body: 'x' })).toEqual({ op: 'ticket', repo: 'acme/web', number: 12, text: 'x' })
     expect(ok({ op: 'ticket', arg: '#7', body: 'x' })).toEqual({ op: 'ticket', repo: null, number: 7, text: 'x' })
+    expect(ok({ op: 'ticket', arg: '7', body: 'x' })).toMatchObject({ repo: null, number: 7 })
+    expect(ok({ op: 'ticket', arg: 'acme/api2#5', body: 'x' })).toMatchObject({ repo: 'acme/api2', number: 5 })
     const id = 'n-' + 'a'.repeat(32)
     expect(ok({ op: 'append', arg: id, body: 'x' })).toEqual({ op: 'append', id, text: 'x' })
   })
@@ -27,6 +29,8 @@ describe('parseNoteRequest', () => {
     expect(err({ op: 'ticket', arg: 'acme/web#0', body: 'x' })).toMatch(/owner\/name#12/)
     expect(err({ op: 'ticket', arg: '../etc#1', body: 'x' })).toMatch(/owner\/name#12/)
     expect(err({ op: 'ticket', arg: 'acme/..#1', body: 'x' })).toMatch(/owner\/name#12/)
+    // A repository name ending in digits is never cut into a name and a number.
+    for (const arg of ['acme/api2', 'acme/widgets12', 'acme/v1.2']) expect(err({ op: 'ticket', arg, body: 'x' }), arg).toMatch(/owner\/name#12/)
     // A ticket's note is reached by its ticket, and a path is never an id.
     expect(err({ op: 'append', arg: 't-acme~web~12', body: 'x' })).toMatch(/id/)
     expect(err({ op: 'append', arg: '../x', body: 'x' })).toMatch(/id/)
