@@ -15,6 +15,8 @@ import { SPAN_GRAIN, type Span } from './tokens'
 
 export interface HoursSession {
   id: string
+  /** Session.key (the background id): the same across a resume, which gives a new id. */
+  key: string
   /** GitHub login; null: unknown account. */
   account: string | null
   /** ticketKey; null: no ticket. */
@@ -44,6 +46,14 @@ export interface HoursResult {
   tickets: HoursRow[]
 }
 
+/** What main's state knows of a session for the estimate, before its account is worked out. */
+export interface HoursSource {
+  spans: Span[]
+  key: string
+  cwd: string | null
+  ticket: { repo: string | null } | null
+}
+
 /** What main answers per session for the estimate (CH.hoursActivity). */
 export interface SessionActivity {
   spans: Span[]
@@ -52,13 +62,16 @@ export interface SessionActivity {
 
 /**
  * The account a session's time goes to: the one recorded at its start, else the account of its
- * folder's repository, else the only account. Never the primary as a guess with two or more: that
- * would put time under the wrong organisation; such a session is an unknown account.
+ * folder's repository, else of its ticket's repository (a removed worktree has no origin to read),
+ * else the only account. Never the primary as a guess with two or more: that would put time under
+ * the wrong organisation; such a session is an unknown account.
  */
-export function hoursAccount(o: { recorded: string | null; origin: string | null }, c: AppConfig): string | null {
+export function hoursAccount(o: { recorded: string | null; origin: string | null; ticket?: { repo: string | null } | null }, c: AppConfig): string | null {
   if (o.recorded && c.accounts.some((a) => a.login === o.recorded)) return o.recorded
   const byRepo = o.origin ? matchRepo(o.origin, c) : null
-  return byRepo ?? (c.accounts.length === 1 ? c.accounts[0].login : null)
+  // A ticket's null repo is the primary issue repo, which matchRepo reads that way.
+  const byTicket = o.ticket ? matchRepo(o.ticket.repo, c) : null
+  return byRepo ?? byTicket ?? (c.accounts.length === 1 ? c.accounts[0].login : null)
 }
 
 export const IDLE_GAPS_MIN = [15, 30, 60, 120] as const
@@ -104,9 +117,17 @@ const valOf = (k: string) => (k === NONE ? null : k)
 export function estimateHours(sessions: HoursSession[], opts: HoursOptions): HoursResult {
   // Spans are stored joined within SPAN_GRAIN: a smaller gap could not be told apart.
   const gap = Math.max(opts.idleGapMs, SPAN_GRAIN)
+  // A resume gives a session a new id but keeps its key: the gap across a resume is filled like any
+  // other, so its spans are taken together (per account and ticket, which a resume keeps too).
+  const grouped = new Map<string, HoursSession>()
+  for (const s of sessions) {
+    const g = `${s.key}\u0000${keyOf(s.account)}\u0000${keyOf(s.ticket)}`
+    const had = grouped.get(g)
+    grouped.set(g, had ? { ...had, spans: [...had.spans, ...s.spans] } : s)
+  }
   const byAccount = new Map<string, Span[]>()
   const byTicket = new Map<string, Map<string, Span[]>>()
-  for (const s of sessions) {
+  for (const s of grouped.values()) {
     // A session's working time: its activity with the idle gaps filled in.
     const work = mergeSpans(s.spans, gap)
     const acct = keyOf(s.account)

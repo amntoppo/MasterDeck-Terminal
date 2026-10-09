@@ -498,6 +498,8 @@ fixes it, and move the item here to "Recently done".
 - **No Hours on the web app or a phone** (`DECK_ACCESS` blocks both channels); open them over the
   encrypted bridge if the user wants it there.
 - **Commit times are not used**; add them only if turns prove too coarse.
+- **`hoursOrigins` (main/index.ts) has no test**: the pool of four, the skipped missing folder and its
+  own cache were checked by reading only; move it to a module with a fake runner if it grows.
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 

@@ -435,8 +435,8 @@ export interface DeckApi {
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
-  /** When each of these sessions was active, and the account its time goes to (the Costs view's Hours; the window only). */
-  hoursActivity(sessionIds: string[]): Promise<Record<string, SessionActivity>>;
+  /** When each of these sessions was active since `since` (epoch ms; sessions with nothing since left out), and the account its time goes to (the Costs view's Hours; the window only). */
+  hoursActivity(sessionIds: string[], since: number): Promise<Record<string, SessionActivity>>;
   /** Save this CSV where the user picks (a save dialog, `name` its suggested file name); the path, or null when cancelled. */
   hoursExport(csv: string, name: string): Promise<string | null>;
   dismissStopped(): Promise<void>;

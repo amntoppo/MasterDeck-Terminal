@@ -277,6 +277,40 @@ function originOf(cwd: string): string | null {
   if (!originLookups.has(cwd)) void originNow(cwd).then(() => sources.changed());
   return origins.get(cwd) ?? null;
 }
+/**
+ * The origin repository of each folder, for the Costs view's Hours: answered from the state's
+ * lookups when they have it, else from git, four at a time, kept in a cache of its own so past
+ * sessions' folders never push live ones out of `origins`. A folder that is gone is not asked.
+ */
+const hoursRepos = new Map<string, string | null>();
+async function hoursOrigins(
+  dirs: string[],
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const ask: string[] = [];
+  for (const d of new Set(dirs)) {
+    if (origins.has(d)) out.set(d, origins.get(d) ?? null);
+    else if (hoursRepos.has(d)) out.set(d, hoursRepos.get(d) ?? null);
+    else if (existsSync(d)) ask.push(d);
+  }
+  const POOL = 4;
+  for (let i = 0; i < ask.length; i += POOL)
+    await Promise.all(
+      ask.slice(i, i + POOL).map(async (d) => {
+        const r = await run("git", ["remote", "get-url", "origin"], {
+          cwd: d,
+          timeoutMs: 5_000,
+        });
+        const repo = r.code === 0 ? repoFromRemote(r.stdout) : null;
+        // ponytail: past HOURS_REPOS_MAX folders the cache starts again; an LRU if it ever matters.
+        if (hoursRepos.size >= HOURS_REPOS_MAX) hoursRepos.clear();
+        hoursRepos.set(d, repo);
+        out.set(d, repo);
+      }),
+    );
+  return out;
+}
+const HOURS_REPOS_MAX = 2000;
 /** A session's account: recorded at start, its spawn proposal's, its folder's repo, the primary. */
 function accountOfSession(
   s: { sessionId: string; key: string; name: string },
@@ -2247,26 +2281,38 @@ function registerIpc(): void {
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
   // Working hours (issue #64) stay on this Mac: DECK_ACCESS blocks both, and main refuses a remote call too.
-  reg.handle(CH.hoursActivity, async (e, ids: unknown) => {
+  reg.handle(CH.hoursActivity, async (e, ids: unknown, since: unknown) => {
     if (isRemote(e)) return {};
-    const raw = await sources.hoursActivity(Array.isArray(ids) ? ids : []);
-    // One origin lookup per folder, all at once (originNow caches them).
-    const entries = await Promise.all(
-      Object.entries(raw).map(async ([id, a]): Promise<[string, SessionActivity]> => [
+    const raw = await sources.hoursActivity(
+      Array.isArray(ids) ? ids : [],
+      typeof since === "number" && Number.isFinite(since) ? since : 0,
+    );
+    // Only sessions with no recorded account need their folder's origin.
+    const recorded = new Map(
+      Object.entries(raw).map(([id, a]) => [
         id,
-        {
-          spans: a.spans,
-          account: hoursAccount(
-            {
-              recorded: sessionAccounts.get({ sessionId: id, key: a.key }),
-              origin: a.cwd ? await originNow(a.cwd) : null,
-            },
-            getConfig(),
-          ),
-        },
+        sessionAccounts.get({ sessionId: id, key: a.key }),
       ]),
     );
-    return Object.fromEntries(entries);
+    const repos = await hoursOrigins(
+      Object.entries(raw)
+        .filter(([id, a]) => !recorded.get(id) && a.cwd)
+        .map(([, a]) => a.cwd!),
+    );
+    const out: Record<string, SessionActivity> = {};
+    for (const [id, a] of Object.entries(raw))
+      out[id] = {
+        spans: a.spans,
+        account: hoursAccount(
+          {
+            recorded: recorded.get(id) ?? null,
+            origin: a.cwd ? (repos.get(a.cwd) ?? null) : null,
+            ticket: a.ticket,
+          },
+          getConfig(),
+        ),
+      };
+    return out;
   });
   reg.handle(CH.hoursExport, async (e, csv: unknown, name: unknown) => {
     if (isRemote(e) || typeof csv !== "string" || csv.length > 5_000_000)

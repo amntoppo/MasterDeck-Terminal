@@ -129,7 +129,8 @@ import {
   type RestoreEntry,
   type RestoreFile,
 } from "@shared/restore";
-import { totalOf, type Span, type Tokens, type TokensByDay } from "@shared/tokens";
+import { totalOf, type Tokens, type TokensByDay } from "@shared/tokens";
+import type { HoursSource } from "@shared/hours";
 import {
   pastByIssue,
   type PastSession,
@@ -507,20 +508,29 @@ export class Sources {
     );
   }
 
-  /** When these sessions were active (the Costs view's Hours), with each one's key and folder to find its account. */
+  /**
+   * When these sessions were active since `since` (the Costs view's Hours), with what finds each
+   * one's account: its key, folder and ticket. A session with nothing since then is left out.
+   */
   async hoursActivity(
     sessionIds: string[],
-  ): Promise<Record<string, { spans: Span[]; key: string; cwd: string | null }>> {
+    since: number,
+  ): Promise<Record<string, HoursSource>> {
     const ids = sessionIds.filter(
       (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
     );
     const spans = await this.tokenIndex.activity(ids);
-    const out: Record<string, { spans: Span[]; key: string; cwd: string | null }> = {};
-    for (const [id, s] of Object.entries(spans))
+    const out: Record<string, HoursSource> = {};
+    for (const [id, all] of Object.entries(spans)) {
+      const s = all.filter(([, end]) => end >= since);
+      if (!s.length) continue;
+      const rec = this.costBook[id];
       out[id] = {
         spans: s,
+        ticket:
+          rec && rec.issue !== null ? { repo: rec.issueRepo ?? null } : null,
         key:
-          this.costBook[id]?.key ??
+          rec?.key ??
           this.rawSessions.find((x) => x.sessionId === id)?.key ??
           id.slice(0, 8),
         cwd:
@@ -529,6 +539,7 @@ export class Sources {
           this.transcriptInfo(id)?.cwd ??
           null,
       };
+    }
     return out;
   }
 

@@ -766,15 +766,20 @@ waits, and writes nothing if accounts appeared meanwhile.
 
 The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day
 and ticket. `TokenIndex` (`main/tokens.ts`) keeps, next to each transcript file's tokens, its
-activity `spans`: every line with a `timestamp` widens the last span when within `SPAN_GRAIN`
-(5 min) of it, else opens one (`addMoment`, `shared/tokens.ts`). The cache is `tokens.json` version
-2; a version 1 file is dropped and every transcript read again once. `CH.hoursActivity` (the
-book's session ids) answers `{spans, account}` per session: `Sources.hoursActivity` gives the
-spans, key and folder, main's handler the account (`hoursAccount`: recorded in
-`session-accounts.json` and still connected, else the account of the folder's origin repository,
-else the only account; else `null`, "unknown account"; never the primary as a guess).
-`shared/hours.ts` `estimateHours` is pure: a session's spans joined across gaps up to the idle gap
-(at least `SPAN_GRAIN`), then a union per account and per (account, ticket), cut at local midnight;
+activity `spans`: every line with a top-level `timestamp` (the line is parsed; a nested one never
+counts) widens the last span when within `SPAN_GRAIN` (5 min) of it, else opens one (`addMoment`,
+`shared/tokens.ts`). The cache is `tokens.json` version 2; a version 1 file is dropped and every
+transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
+re-asks every minute) answers `{spans, account}` for each session active since `since`:
+`Sources.hoursActivity` gives the spans, key, folder and ticket, main's handler the account
+(`hoursAccount`: recorded in `session-accounts.json` and still connected, else the account of the
+folder's origin repository, else of the ticket's repository, else the only account; else `null`,
+"unknown account"; never the primary as a guess). Origins come from `hoursOrigins`: the state's
+`origins` when known, else `git remote` four at a time for folders that still exist, in a cache of
+its own (`hoursRepos`) so past folders never evict live ones. `shared/hours.ts` `estimateHours` is
+pure: a session's spans (grouped by key, account and ticket, so a resume's new id fills its gap)
+joined across gaps up to the idle gap (at least `SPAN_GRAIN`), then a union per account and per
+(account, ticket), cut at local midnight;
 so an account counts a minute once and each ticket gets its full time. `hoursCsv` writes
 `date,account,ticket,minutes`; `CH.hoursExport` saves it through a save dialog. Both channels are
 `blocked` in `DECK_ACCESS` and refuse a remote call: nothing reaches `AppState`, the snapshot or

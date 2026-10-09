@@ -71,24 +71,19 @@ export type Span = [number, number]
 export const SPAN_GRAIN = 5 * 60_000
 
 const RECENT = 64
-const STAMP = /"timestamp":"([^"]{10,40})"/
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 
 export function newFileTally(): FileTally {
   return { offset: 0, rest: '', byDay: {}, recent: [], spans: [] }
 }
 
-/**
- * A transcript line's own time (epoch ms; NaN without one). Most lines carry one "timestamp" key and
- * are not parsed; a line with more (a tool result holding JSON) is, so a nested one never counts.
- */
+/** A parsed transcript line's own time (epoch ms; NaN without one): the top-level key only. */
+const ownTime = (d: Record<string, unknown>): number => (typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN)
+
+/** A transcript line's own time; a "timestamp" nested in it (a tool result, a file snapshot) never counts. */
 export function lineTime(line: string): number {
-  const ts = STAMP.exec(line)
-  if (!ts) return NaN
-  if (line.indexOf('"timestamp":"', ts.index + 1) < 0) return Date.parse(ts[1])
   try {
-    const d = JSON.parse(line) as { timestamp?: unknown }
-    return typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN
+    return ownTime(JSON.parse(line))
   } catch {
     return NaN
   }
@@ -107,16 +102,18 @@ export function addMoment(spans: Span[], at: number): void {
 export function tallyLines(t: FileTally, lines: string[]): void {
   const spans = (t.spans ??= [])
   for (const line of lines) {
-    // Any line with a time is activity: a prompt, a reply, a tool run.
-    const when = lineTime(line)
-    if (Number.isFinite(when)) addMoment(spans, when)
-    if (!line.includes('"usage"')) continue
+    // Parsed once, for its time and its usage: a nested "timestamp" must not pass for the line's own.
+    if (!line.includes('"timestamp"') && !line.includes('"usage"')) continue
     let d: Record<string, unknown>
     try {
       d = JSON.parse(line)
     } catch {
       continue
     }
+    // Any line with a time is activity: a prompt, a reply, a tool run.
+    const at = ownTime(d)
+    if (Number.isFinite(at)) addMoment(spans, at)
+    if (!line.includes('"usage"')) continue
     const m = d.message as Record<string, unknown> | undefined
     const u = m && typeof m === 'object' ? (m.usage as Record<string, unknown> | undefined) : undefined
     if (!u || typeof u !== 'object') continue
@@ -126,7 +123,6 @@ export function tallyLines(t: FileTally, lines: string[]): void {
       t.recent.push(id)
       if (t.recent.length > RECENT) t.recent.splice(0, t.recent.length - RECENT)
     }
-    const at = typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN
     const day = dayOf(Number.isFinite(at) ? at : Date.now())
     t.byDay[day] = addTokens(t.byDay[day] ?? NO_TOKENS, {
       input: n(u.input_tokens),

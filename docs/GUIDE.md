@@ -519,9 +519,11 @@ creation.
   or the session worked on its own. An account counts each minute once, however many of its sessions
   were active then; a ticket gets its full time, so two tickets worked from 10:00 to 11:00 show 1 h
   each and 1 h for the account. A session with no ticket counts for its account only. A session's
-  account is the one it was started as, else the account of its folder's repository, else (with one
-  account) that account; anything else is listed as **unknown account**. Click a day to see its
-  tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
+  account is the one it was started as, else the account of its folder's repository, else of its
+  ticket's repository (a removed worktree), else (with one account) that account; anything else is
+  listed as **unknown account**. A resumed session is one session: the gap across the resume is
+  filled like any other. All of a session's time goes to the ticket it is linked to now. The numbers
+  refresh every minute while the tab is open. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
   per account and day, then its tickets) where you choose. Only this Mac's sessions are counted, and
   only sessions the Costs view knows (those with a status line record). Nothing of it goes to the
   web app, a phone or the API.

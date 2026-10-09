@@ -29,20 +29,27 @@ export function HoursView({ state, from, to }: Props) {
   const [saved, setSaved] = useState<string | null>(null)
   const book = state.costBook
   const bookIds = Object.keys(book).sort().join(',')
+  // Activity that can reach the range: from its first midnight, less the longest idle gap that could fill into it.
+  const since = from === '0000-00-00' ? 0 : new Date(`${from}T00:00:00`).getTime() - Math.max(...IDLE_GAPS_MIN) * 60_000
   useEffect(() => {
     let alive = true
-    void deck()
-      .hoursActivity(bookIds ? bookIds.split(',') : [])
-      .then((a) => alive && setActivity(a))
+    const read = () =>
+      void deck()
+        .hoursActivity(bookIds ? bookIds.split(',') : [], since)
+        .then((a) => alive && setActivity(a))
+    read()
+    // Live sessions keep working while the tab is open.
+    const timer = setInterval(read, 60_000)
     return () => {
       alive = false
+      clearInterval(timer)
     }
-  }, [bookIds])
+  }, [bookIds, since])
 
   const result = useMemo(() => {
     const sessions: HoursSession[] = Object.entries(activity ?? {}).map(([id, a]) => {
       const rec = book[id]
-      return { id, account: a.account, ticket: rec && rec.issue !== null ? ticketKey(rec.issueRepo, rec.issue) : null, spans: a.spans }
+      return { id, key: rec?.key ?? id, account: a.account, ticket: rec && rec.issue !== null ? ticketKey(rec.issueRepo, rec.issue) : null, spans: a.spans }
     })
     return estimateHours(sessions, { idleGapMs: gapMin * 60_000, from, to })
   }, [activity, book, gapMin, from, to])
@@ -145,7 +152,8 @@ export function HoursView({ state, from, to }: Props) {
       </table>
       <p className="muted hours-rules">
         A minute worked on two tickets counts for each ticket and once for the account, so a day's tickets can add up to more than its total. Time in a session with no ticket counts for
-        the account only.
+        the account only; a session's time all goes to the ticket it is linked to now, also from before the link. Only sessions MasterDeck recorded costs for are counted: one that ran
+        while MasterDeck was closed, or without its status line, is missing.
       </p>
     </>
   )

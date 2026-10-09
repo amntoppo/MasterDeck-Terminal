@@ -8,7 +8,7 @@ const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTi
 const span = (day: number, h1: number, m1: number, h2: number, m2: number): Span => [at(day, h1, m1), at(day, h2, m2)]
 const HOUR = 60 * 60_000
 const ALL = { idleGapMs: HOUR, from: '0000-00-00', to: '9999-99-99' }
-const s = (id: string, account: string | null, ticket: string | null, spans: Span[]): HoursSession => ({ id, account, ticket, spans })
+const s = (id: string, account: string | null, ticket: string | null, spans: Span[], key = id): HoursSession => ({ id, key, account, ticket, spans })
 
 describe('mergeSpans', () => {
   it('joins spans within the gap, in order', () => {
@@ -78,6 +78,15 @@ describe('estimateHours', () => {
     expect(r.tickets).toEqual([{ day: '2026-10-02', account: 'alice', ticket: 'acme/web#12', minutes: 60 }])
   })
 
+  it('fills the gap across a resume (a new id, the same key)', () => {
+    const r = estimateHours([s('id-1', 'alice', 'acme/web#12', [span(1, 9, 0, 10, 0)], 'bg1'), s('id-2', 'alice', 'acme/web#12', [span(1, 10, 20, 11, 0)], 'bg1')], ALL)
+    expect(r.accounts[0].minutes).toBe(120)
+    expect(r.tickets[0].minutes).toBe(120)
+    // Two different sessions with the same gap between them do not fill it.
+    const apart = estimateHours([s('id-1', 'alice', null, [span(1, 9, 0, 10, 0)]), s('id-2', 'alice', null, [span(1, 10, 20, 11, 0)])], ALL)
+    expect(apart.accounts[0].minutes).toBe(100)
+  })
+
   it('a lone line adds nothing', () => {
     expect(estimateHours([s('a', 'alice', null, [[at(1, 10), at(1, 10)]])], ALL).accounts).toEqual([])
   })
@@ -102,6 +111,10 @@ describe('hoursAccount', () => {
     expect(hoursAccount({ recorded: null, origin: 'initech/x' }, two)).toBeNull()
     expect(hoursAccount({ recorded: null, origin: null }, two)).toBeNull()
     expect(hoursAccount({ recorded: null, origin: null }, one)).toBe('alice')
+    // A removed worktree has no origin: the ticket's repository decides, also the primary issue repo (null).
+    expect(hoursAccount({ recorded: null, origin: null, ticket: { repo: 'globex/app' } }, two)).toBe('bob-work')
+    expect(hoursAccount({ recorded: null, origin: null, ticket: { repo: null } }, two)).toBe('alice')
+    expect(hoursAccount({ recorded: null, origin: 'acme/tracker', ticket: { repo: 'globex/app' } }, two)).toBe('alice')
   })
 })
 

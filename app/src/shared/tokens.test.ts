@@ -42,5 +42,11 @@ describe('tokens', () => {
     expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, timestamp: '2026-10-01T10:00:00Z' }))).toBe(Date.parse('2026-10-01T10:00:00Z'))
     expect(lineTime(JSON.stringify({ toolUseResult: { timestamp: '2020-01-01T00:00:00Z' }, x: { timestamp: '2020-01-02T00:00:00Z' } }))).toBeNaN()
     expect(lineTime('{"type":"summary"}')).toBeNaN()
+    // Its only "timestamp" is nested (a file history snapshot): no time, and no span.
+    const snap = JSON.stringify({ type: 'file-history-snapshot', snapshot: { timestamp: '2020-01-01T00:00:00Z' } })
+    expect(lineTime(snap)).toBeNaN()
+    const t = newFileTally()
+    tallyLines(t, [snap])
+    expect(t.spans).toEqual([])
   })
 })
