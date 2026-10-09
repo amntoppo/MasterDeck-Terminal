@@ -43,6 +43,8 @@ function previewDeck(noBoard: boolean): DeckApi {
     return { ok: true as const, meta }
   }
   const ok = { ok: true, message: 'preview: nothing was sent' }
+  // The folders the Mac found: the workspace and its repositories (a long path to see the phone width).
+  const repos = ['/Users/dev/acme', '/Users/dev/acme/web', '/Users/dev/acme/api', '/Users/dev/acme/clients/mobile-app-with-a-long-folder-name'].map((path) => ({ name: path.split('/').pop() ?? path, path }))
   const calls: Record<string, Fn> = {
     getState: () => state,
     getSettings: () => state.settings,
@@ -55,7 +57,7 @@ function previewDeck(noBoard: boolean): DeckApi {
     janitor: () => [],
     standupCommits: () => [],
     tokensByDay: () => ({}),
-    workspaceRepos: () => [{ name: 'web', path: '/Users/dev/acme/web' }],
+    workspaceRepos: () => repos,
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,
     sessionWorkflowGet: () => null,
@@ -75,11 +77,15 @@ function previewDeck(noBoard: boolean): DeckApi {
       ],
     }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
-    // The Start dialog: a draft with no checkout found, so its folder line shows at phone width.
-    draftAssign: (t: { number: number; repo: string | null }, title?: string, url?: string) => ({
-      ok: true,
-      draft: { issue: t.number, repo: t.repo, name: `${t.number}-preview`, cwd: '/Users/dev/acme', prompt: `You own #${t.number} (${title ?? ''}). ${url ?? ''}`, summary: '', title: title ?? '', url: url ?? '', proposalId: null, workspace: '/Users/dev/acme', found: false, checkoutOf: t.repo ?? 'acme/web' },
-    }),
+    // The Start dialog: a draft with no checkout found, so its folder line shows at phone width. A
+    // chosen folder must be one of `repos`, as the Mac's guard (`chosenFolder`) answers a browser.
+    draftAssign: (t: { number: number; repo: string | null }, title?: string, url?: string, cwd?: string) =>
+      cwd && !repos.some((r) => r.path === cwd)
+        ? { ok: false, message: `From the web app a session starts only in one of the workspace's repositories: ${cwd} is not one.` }
+        : {
+            ok: true,
+            draft: { issue: t.number, repo: t.repo, name: `${t.number}-preview`, cwd: cwd ?? '/Users/dev/acme', prompt: `You own #${t.number} (${title ?? ''}). ${url ?? ''}`, summary: '', title: title ?? '', url: url ?? '', proposalId: null, workspace: '/Users/dev/acme', found: cwd ? cwd.endsWith('/web') : false, checkoutOf: t.repo ?? 'acme/web' },
+          },
   }
   const local: Record<string, unknown> = {
     notesList: async () => sortNotes([...notes.values()].map(noteMeta)),

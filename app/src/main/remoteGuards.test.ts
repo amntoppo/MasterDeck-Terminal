@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { afterAll, describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, worktreeFolder } from './remoteGuards'
 it('remote save keeps current remoteEnabled and passes other keys', () => {
@@ -14,16 +15,44 @@ it('non-object payload keeps every current setting', () => {
 it('keeps only known dirs, normalising trailing slashes', () => {
   expect(knownDirsOnly(['/etc', '/w/repo/', '/w/other'], ['/w/repo', '/w/other'])).toEqual([resolve('/w/repo'), resolve('/w/other')])
 })
-it('a chosen folder counts only from the Mac\'s own window, and must be a folder that is there', () => {
+it('a chosen folder from the Mac\'s own window must be a folder that is there', () => {
   expect(chosenFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
-  // A browser's is dropped (not an error: the draft is made without it).
-  expect(chosenFolder(true, tmpdir())).toEqual({ ok: true })
-  expect(chosenFolder(true, 'relative/x')).toEqual({ ok: true })
-  for (const none of [undefined, null, '']) expect(chosenFolder(false, none)).toEqual({ ok: true })
+  for (const none of [undefined, null, '']) for (const remote of [false, true]) expect(chosenFolder(remote, none)).toEqual({ ok: true })
   expect(chosenFolder(false, 'relative/x')).toEqual({ ok: false, message: 'not a folder on this Mac: relative/x' })
   expect(chosenFolder(false, `${tmpdir()}/no-such-folder-here`)).toMatchObject({ ok: false })
   expect(chosenFolder(false, __filename)).toMatchObject({ ok: false })
   expect(chosenFolder(false, 3)).toEqual({ ok: false, message: 'not a folder on this Mac' })
+})
+describe('a chosen folder from a browser', () => {
+  // ws/repo and ws/other are workspace repositories; ws/out is a link to a folder outside the workspace.
+  const top = realpathSync(mkdtempSync(join(tmpdir(), 'md-chosen-')))
+  const ws = join(top, 'ws')
+  const repo = join(ws, 'repo')
+  const outside = join(top, 'outside')
+  for (const d of [repo, join(ws, 'other'), outside]) mkdirSync(d, { recursive: true })
+  symlinkSync(outside, join(ws, 'out'))
+  symlinkSync(repo, join(top, 'repo-link'))
+  const known = [repo, join(ws, 'other')]
+  afterAll(() => rmSync(top, { recursive: true, force: true }))
+
+  it('is allowed when it is one of the workspace repositories', () => {
+    expect(chosenFolder(true, repo, known)).toEqual({ ok: true, cwd: repo })
+    expect(chosenFolder(true, `${repo}/`, known)).toEqual({ ok: true, cwd: repo })
+    // Another spelling of the same folder: the repository as MasterDeck found it.
+    expect(chosenFolder(true, join(top, 'repo-link'), known)).toEqual({ ok: true, cwd: repo })
+  })
+  it('is refused when it is anything else', () => {
+    const no = { ok: false, message: expect.stringContaining('only in one of the workspace\'s repositories') }
+    for (const bad of [ws, outside, tmpdir(), join(ws, 'missing'), 'relative/x', 'repo', `${ws}/repo/..`])
+      expect(chosenFolder(true, bad, known)).toEqual(no)
+    expect(chosenFolder(true, repo)).toEqual(no)
+    expect(chosenFolder(true, 3, known)).toEqual({ ok: false, message: 'not a folder on this Mac' })
+  })
+  it('is refused when a link leads out of the workspace', () => {
+    expect(chosenFolder(true, join(ws, 'out'), known)).toMatchObject({ ok: false })
+    // Even listed by name: the link's target is not a known repository.
+    expect(chosenFolder(true, join(ws, 'out'), [...known, outside + '-not'])).toMatchObject({ ok: false })
+  })
 })
 it('claude is opened only from the Mac\'s own window, in a folder that is there', () => {
   expect(claudeFolder(false, tmpdir())).toEqual({ ok: true, cwd: tmpdir() })
