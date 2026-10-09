@@ -286,7 +286,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
-  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told).
+  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told). On merge/close it also calls `deps.ended(url)` → `Sources.prEnded`, which reads that PR again past the gh cache so the session's lane (`prStage`) moves at once, not on the next review poll. Its messages, like `[MasterDeck monitor: …]` lines, are not the user writing (`isUserWords` in `shared/ask.ts`): the "merged" message arrives after the merge and would otherwise turn Merged into Rework.
   With two or more accounts each watched PR keeps its session's account (`PrWatchEntry.account`) and `poll` reads each account's PRs with that account's runner, so "me" (`viewer`) is that account.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
   `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join

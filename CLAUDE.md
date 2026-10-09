@@ -362,6 +362,12 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-09)
 
+- **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
+  installed): the PR watch's "merged" message counted as the user writing after the merge, so
+  watched sessions showed Rework; `isUserWords` skips `[MasterDeck …]` messages, and the watch's
+  merge reaches `Sources.prLive` at once (`prEnded`). Checked: typecheck, vitest (`ask`, `prWatch`
+  tests). Not checked: a real merge in the installed app.
+
 - **Create with Claude's settings bar** (issue #68) is built on branch
   `worktree-MasterDeck-Terminal-68-ticket-settings`: not merged, not pushed, **not installed** (the
   rebuild and relaunch of the real app waits for the user's word). A bar below the chat, collapsed
