@@ -41,6 +41,7 @@ import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
 import { AccountBadge } from "./AccountBits";
 import { isMulti } from "@shared/accounts";
+import { rowLoop } from "@shared/loops";
 import { heldForTrust, isNotTrusted } from "@shared/trust";
 import { TrustNote, useTrust } from "./TrustFix";
 
@@ -296,6 +297,7 @@ export function Sidebar({
         status={status}
         starred={stars.includes(s.key)}
         onStar={() => toggleStar(s.key)}
+        loop={rowLoop(state.loops?.[s.sessionId], now)}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
       />
@@ -774,6 +776,8 @@ const KIND_TAG: Record<InboxKind, string> = {
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
+  loop: "LOOP",
+  "loop-paused": "LOOP",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -911,7 +915,7 @@ function InboxCard({
 }
 
 /** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
-function SessionRow({
+export function SessionRow({
   s,
   active,
   now,
@@ -920,6 +924,7 @@ function SessionRow({
   pick,
   starred,
   onStar,
+  loop,
   dragging,
   dropBefore,
   ...drag
@@ -934,6 +939,8 @@ function SessionRow({
   /** Starred or not, and its toggle; absent (Cleanup) shows no star. */
   starred?: boolean;
   onStar?: () => void;
+  /** Its workflow loop's badge and line (`rowLoop`); none without a loop to show. */
+  loop?: { badge: string; line: string } | null;
   dragging?: boolean;
   dropBefore?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -974,6 +981,14 @@ function SessionRow({
           )}
           <AccountBadge login={s.account} ghActive={s.ghActive} />
         </span>
+        {loop && (
+          <span
+            className={`srow-loop ${loop.badge.endsWith("!") ? "limit" : loop.badge.endsWith("✓") ? "met" : ""}`}
+            title={loop.line}
+          >
+            {loop.badge}
+          </span>
+        )}
         {onStar && (
           <button
             className={`srow-star ${starred ? "on" : ""}`}
@@ -1372,6 +1387,10 @@ function ExtraCard({
   const kind =
     i.kind === "account"
       ? "GITHUB"
+      : i.kind === "loop"
+      ? "LOOP AT ITS LIMIT"
+      : i.kind === "loop-paused"
+      ? "LOOP PAUSED"
       : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
@@ -1383,14 +1402,29 @@ function ExtraCard({
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
     (a) =>
-      a.type === "continue" || a.type === "compact" || a.type === "login",
+      a.type === "continue" ||
+      a.type === "compact" ||
+      a.type === "login" ||
+      a.type === "loop-more" ||
+      a.type === "loop-continue",
   );
+  const leave = i.actions.find((a) => a.type === "dismiss");
+  const stopLoop = i.actions.find((a) => a.type === "loop-stop");
+  const askStop = async () => {
+    // A stopped loop cannot be given more: the web asks here, the window natively in main.
+    const ask = "Stop the loop? The session does not go on with it, and it can't be given more.";
+    if (!(await webConfirm(ask, { confirmLabel: "Stop loop", danger: true }))) return;
+    await act("loop-stop");
+  };
   return (
     <div
       className={`card ${onDetails ? "clickable" : ""}`}
       style={{
         ["--kind" as string]:
-          i.kind === "idle" || i.kind === "waiting"
+          i.kind === "idle" ||
+          i.kind === "waiting" ||
+          i.kind === "loop" ||
+          i.kind === "loop-paused"
             ? "var(--amber)"
             : "var(--red)",
       }}
@@ -1414,6 +1448,24 @@ function ExtraCard({
         {owner && (
           <button className="btn" onClick={() => onOpenSession(owner)}>
             {i.detail.type === "budget" ? `Open ${owner.name}` : "Open"}
+          </button>
+        )}
+        {leave && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => void deck().inboxAct(i.id, "dismiss")}
+          >
+            {leave.label}
+          </button>
+        )}
+        {stopLoop && (
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={() => void askStop()}
+          >
+            {stopLoop.label}
           </button>
         )}
         {primary && (

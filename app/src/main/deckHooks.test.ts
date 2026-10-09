@@ -124,6 +124,31 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     expect(run('Stop', { session_id: SID })).toBe('')
     expect(d.queueRequests()).toEqual([])
   }, 20_000)
+  const loopFile = (home: string, state: string) => {
+    mkdirSync(join(home, 'workflows', 'loops'), { recursive: true })
+    writeFileSync(join(home, 'workflows', 'loops', `${SID}.json`), JSON.stringify({ loops: [{ id: 'lp', state }] }))
+  }
+  it('the queue waits while a workflow loop is open', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'open')
+    // MasterDeck running: no request either (the loop hook owns this stop).
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(d.queueRequests()).toEqual([])
+    stale()
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(readQueue(SID, queues)).toEqual(['a'])
+    // /queue still adds while the loop runs.
+    expect(JSON.parse(run('UserPromptSubmit', { session_id: SID, prompt: '/queue b' })).reason).toBe('Queued #2: b')
+  }, 20_000)
+  it('the queue goes on when the loop is over', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'met')
+    stale()
+    expect(JSON.parse(run('Stop', { session_id: SID }))).toEqual(queueAnswer('a', 0))
+    expect(readQueue(SID, queues)).toEqual([])
+  }, 20_000)
   it('MasterDeck alive but silent: the hook takes its request back and drains, once', () => {
     const { d, queues, run } = setup()
     editQueue(SID, { op: 'add', text: 'a' }, queues)
@@ -212,6 +237,25 @@ describe('pumpQueue (MasterDeck answers a Stop)', () => {
     d.pumpQueue()
     expect(JSON.parse(readFileSync(answer(id), 'utf8'))).toEqual(queueAnswer('a', 1))
     expect(readQueue(SID, queues)).toEqual(['b'])
+  })
+  it('remembers when it served a session a prompt (the loop queue asks)', () => {
+    const { d, request } = setup()
+    expect(d.queueServedAt(SID)).toBeUndefined()
+    request(process.pid)
+    const t = Date.now()
+    d.pumpQueue(t)
+    expect(d.queueServedAt(SID)).toBe(t)
+  })
+  it('ownsQueue: not with queue-off or for a legacy session', () => {
+    const { d } = setup()
+    expect(d.ownsQueue(SID)).toBe(true)
+    d.setQueueOff(true)
+    expect(d.ownsQueue(SID)).toBe(false)
+    d.setQueueOff(false)
+    d.markLegacy()
+    expect(d.ownsQueue(SID)).toBe(false)
+    d.pruneLegacy(new Set(['5d1bc2b2-2edb-4304-91fd-6633dc9bd935']))
+    expect(d.ownsQueue(SID)).toBe(true)
   })
   it('a hook that is gone (dead pid, or older than its wait) loses nothing', () => {
     const { d, queues, request, answer } = setup()

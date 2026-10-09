@@ -271,6 +271,24 @@ checkout whose branch was once linked to a ticket does not link it.
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
     change it. Select a block or an arrow and its settings open in a card over the canvas (click
     the canvas or × to close it); Delete removes the selection. **Tidy up** lines the blocks up.
+  - **Loop:** a frame (under Actions) whose blocks the session repeats until the loop is done.
+    Drag skills, instructions, monitors or notifications into it (a trigger, a built-in or another
+    loop stays outside); drag one out to take it out. Move the frame by its header (its blocks
+    move with it) and resize it from its bottom-right corner. Its card sets what ends it: a
+    **check command** (passes when it exits with 0, or when its output matches or no longer
+    matches a pattern, within a time limit of 1 to 9 minutes), **the agent says it's done** (with
+    the goal it works toward; it ends its turn with a line starting `LOOP DONE:`), or both; and
+    its limits: **max iterations** (1 to 100), **max minutes**, and **rounds with no progress**
+    (3 on a new loop; 0 turns it off).
+    Arrows into a block in the frame go to the frame (a loop starts at its top); blocks in it lead
+    only to each other. Leave it with the toolbar's arrow kinds while the frame is selected: **when
+    met** (green) and **at the limit** (amber); *then* goes on either way. One loop runs at a time,
+    on the main path: put loops one after another, not side by side or inside an "if it
+    worked/failed" branch. While a loop runs, the session can't end its turn until the loop is
+    over (MasterDeck checks at each turn end and tells it to go on); **Stop loop** in the
+    session's Details ends it. Your *When the session finishes a turn* steps wait while a loop runs and come
+    with the message that ends the last loop. On a session's own workflow the frame's header shows where it is
+    (`3/10 · last check failed`).
   - Drag the palette's right edge to make it wider or narrower (remembered; double-click resets).
   - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
     count in the toolbar; click the count to step through them.
@@ -287,7 +305,9 @@ checkout whose branch was once linked to a ticket does not link it.
   builder to resize it (double-click resets it). The session runs with your project settings
   only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
   doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
-  The first time, Claude may ask you to trust its folder.
+  The first time, Claude may ask you to trust its folder. It can draft loops too ("after a push:
+  until `npm test` passes, fix the failing tests; at most 8 rounds"), and the check reports a block
+  it put in a loop that can't repeat there instead of leaving it out quietly.
 - **Custom triggers:** besides the built-in triggers, a workflow can use triggers of your own: a
   Claude Code hook event (before a tool, after it, or when you send a prompt), the tool it applies
   to (e.g. `Bash`, `Edit|Write`), a regular expression on the command, the file path or the prompt,
@@ -321,7 +341,19 @@ checkout whose branch was once linked to a ticket does not link it.
   hooks' log, with what the workflow does there (built-ins and the plan's first lines; click for
   all of it). It pulses as **running** while the session works on that step (since its last turn
   end) or waits on the watch a built-in started there, else it shows how long ago; *Next* lists
-  the points still ahead. A session keeps the hooks it started with (Claude Code reads them once),
+  the points still ahead. Above it, each of the session's workflow loops has a line: while one
+  runs, `↻ Fix the tests · iteration 3/10 · 12 min · last check failed` (pulsing); once it is over,
+  how it ended (`done: …`, the limit it hit, or `stopped by you`). **Stop loop** (while it runs, after
+  a confirm: a stopped loop can't be given more) lets the session end its turn at the next turn end.
+  **History** lists every round, newest first (at most 50): its time, how long the check took,
+  passed / failed / no check, *said done* when the session claimed it, and the check's output
+  (click a round to unfold it), and under it what the session said it tried that round; then the
+  loop's progress, every round's line, drawn as Markdown with every tag shown as text. A session in
+  a loop ends each round with a line starting `PROGRESS:` that says what it tried; MasterDeck keeps
+  those lines and shows the last three to the session at each round (the session writes no file for
+  them). The session row in the list shows `↻ 3/10` while a loop runs, and `↻ ✓` (met) or
+  `↻ !` (at a limit) for an hour after; hover it for the same line. On a phone the badge and the
+  Details line are the same. A session keeps the hooks it started with (Claude Code reads them once),
   so this works for sessions older than a workflow change too. **Edit** opens the same editor
   as the Workflow window, full size, for that session only, with **Use a template… → Apply** and
   **Save as template**. Changing the Default or a template doesn't change sessions that already have
@@ -370,6 +402,9 @@ checkout whose branch was once linked to a ticket does not link it.
   installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them. Sessions already
   running when MasterDeck took the queue skill's hooks out keep using those (Claude Code reads hooks
   when a session starts), and MasterDeck's hook stays out of `/queue` for them until they end.
+  While a workflow loop runs, queued prompts wait until it ends (`/queue` still adds to the list);
+  then the next one goes in, also when the loop ended and left the session idle (MasterDeck types it
+  in, as **Send next** does, once).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you
@@ -431,6 +466,19 @@ checkout whose branch was once linked to a ticket does not link it.
   how. It is saved in `~/.claude/masterdeck/inbox.json`; every addition, action and resolution is
   appended to `inbox-events.jsonl`, and notifications come from those events. The PRs view's
   "Needs its session" list is the same inbox.
+- **A workflow loop at its limit:** when a loop ends at a limit (iterations, time, or no progress)
+  without its criterion met, a **LOOP AT ITS LIMIT** card names the session, the loop and why it
+  stopped. **Run 5 more** opens the loop again with five more iterations and, if the session is
+  idle, types MasterDeck's own `Continue the loop "<name>".` into it (also from the notification and
+  the web app). **Leave it** dismisses the card; **Open** opens the session. The card closes by
+  itself once the loop runs again, and a loop that reaches its limit again is a new card. The card
+  has no **Stop loop**: the loop is already over.
+- **A workflow loop that paused:** a loop still running on a session that has been idle for 5
+  minutes (Claude Code ends a turn after eight blocked stops in a row, or the session simply
+  stopped) shows a **LOOP PAUSED** card with the loop and its round. **Continue** types
+  MasterDeck's own `Continue the loop "<name>".` into the session (also from the notification and
+  the web app); **Stop loop** ends the loop (after a confirm); **Open** opens the session. The card
+  closes by itself once the session works again or the loop ends.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it

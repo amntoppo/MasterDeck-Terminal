@@ -1128,6 +1128,33 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .fe-label { position: absolute; pointer-events: none; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--bg-2); border: 1px solid currentColor; }
 .fe-ok { color: var(--green); }
 .fe-fail { color: var(--red); }
+.fe-met { color: var(--green); }
+.fe-limit { color: var(--amber); }
+.flow-kinds button.k-met.on { color: var(--green); }
+.flow-kinds button.k-limit.on { color: var(--amber); }
+.fp-loop { border-left-color: #4fd1c5; }
+.fs-chip.fb-loop { border-color: #4fd1c5; }
+.fs-check { display: flex; align-items: center; gap: 6px; }
+/* A Loop frame: drawn under its blocks; only its header, handles and corner take the pointer, so
+   the blocks and arrows inside it stay clickable. */
+.react-flow__node-frame { pointer-events: none !important; }
+.ff { width: 100%; height: 100%; box-sizing: border-box; border: 1.5px dashed #4fd1c5; border-radius: 12px; background: color-mix(in srgb, #4fd1c5 6%, transparent); position: relative; }
+.ff.sel { border-style: solid; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+.ff.bad { border-color: var(--red); }
+.ff-head { pointer-events: all; cursor: grab; display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; color: var(--text); border-bottom: 1px dashed color-mix(in srgb, #4fd1c5 50%, transparent); background: color-mix(in srgb, #4fd1c5 14%, var(--bg-2)); border-radius: 11px 11px 0 0; }
+.ff-head:active { cursor: grabbing; }
+.ff-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ff-live { color: var(--muted); font-weight: 500; }
+.ff-live.st-open { color: #4fd1c5; }
+.ff-live.st-met { color: var(--green); }
+.ff-live.st-limit { color: var(--amber); }
+.ff.live { animation: ff-pulse 2s ease-in-out infinite; }
+@keyframes ff-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, #4fd1c5 25%, transparent); } }
+.ff:hover .fb-x, .ff.sel .fb-x { opacity: 1; }
+.ff-empty { position: absolute; inset: 40px 0 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); pointer-events: none; }
+.ff .fh { pointer-events: all; }
+.ff-resize { pointer-events: all; width: 14px !important; height: 14px !important; border: none !important; background: linear-gradient(135deg, transparent 50%, #4fd1c5 50%) !important; border-radius: 3px; cursor: nwse-resize; }
+@media (prefers-reduced-motion: reduce) { .ff.live { animation: none; } }
 
 .flow-side { border-left: 1px solid var(--line); overflow: auto; background: var(--bg-2); }
 .fs-form { padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 6px; }
@@ -1188,6 +1215,34 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .wfw-line { font-size: 12px; line-height: 1.45; color: var(--text); word-break: break-word; }
 .wfw-next { font-size: 11.5px; margin-top: 6px; }
 .wfw-builtin { color: var(--purple); font-weight: 600; }
+/* Workflow loops in Details (#82): the line, Stop loop / History, and the history panel. */
+.wfl { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.wfl-row { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); min-width: 0; }
+.wfl-row.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.wfl-row.st-limit { border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
+.wfl-top { display: flex; gap: 10px; align-items: flex-start; }
+.wfl-line { font-size: 12.5px; line-height: 1.45; word-break: break-word; min-width: 0; }
+.wfl-row.on .wfl-line { color: var(--accent); font-weight: 600; }
+.wfl-acts { display: flex; gap: 14px; margin: 4px 0 0 19px; }
+.wfl-acts .link-btn { font-size: 11.5px; }
+.link-btn.danger { color: var(--red); }
+.link-btn:disabled { opacity: .5; cursor: default; }
+.wfl-msg { font-size: 11.5px; }
+.wfl-hist { margin: 8px 0 2px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; }
+.wfl-round { border-top: 1px solid var(--line); padding-top: 3px; min-width: 0; }
+.wfl-round summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.wfl-round summary b { font-family: var(--mono); font-size: 11px; }
+.wfl-round pre { margin: 4px 0 2px; padding: 6px 8px; max-height: 180px; overflow: auto; background: var(--bg-3); color: var(--text); border-radius: 6px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+.wfl-check.passed { color: var(--green); }
+.wfl-check.failed { color: var(--red); }
+.wfl-check.no-check { color: var(--muted); }
+.wfl-said { color: var(--purple); }
+.wfl-round-prog { flex-basis: 100%; color: var(--text); overflow-wrap: anywhere; }
+.wfl-prog-head { margin-top: 8px; }
+.wfl-prog { max-height: 260px; overflow: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.srow-loop { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 9px; color: var(--accent); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
+.srow-loop.met { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, transparent); }
+.srow-loop.limit { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 50%, transparent); }
 /* Workflow builder (a Claude session on the right of the Workflow window) and its drafts */
 .wf-editor { gap: 10px; }
 .wf-canvas { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }

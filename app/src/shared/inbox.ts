@@ -15,6 +15,7 @@ import type { ExternalItem } from "./remote";
 import type { GhAccountStatus } from "./accounts";
 import type { ScreenMenu } from "./ask";
 import { heldForTrust, trustLine } from "./trust";
+import type { LoopView } from "./loops";
 
 /**
  * Needs you, as one inbox: every item the user may act on, built in one place (the main process)
@@ -37,7 +38,9 @@ export type InboxKind =
   | "waiting" // blocked on a prompt for a while (another terminal)
   | "external" // asked through the remote API
   | "account" // a GitHub account whose token fails
-  | "error"; // its turn ended on an API error (rate limit, overload…)
+  | "error" // its turn ended on an API error (rate limit, overload…)
+  | "loop" // a workflow loop ended at a limit
+  | "loop-paused"; // a workflow loop still open on a session that went quiet
 
 export type InboxActionType =
   | "reply" // text typed into the session
@@ -51,6 +54,11 @@ export type InboxActionType =
   | "start" // open the Start dialog (the renderer does it)
   | "login" // run gh auth login for an account (the renderer opens it)
   | "trust" // open claude in a folder it was not allowed to work in (the renderer opens it)
+  | "loop-more" // a loop that ended at a limit gets 5 more iterations (and the nudge)
+  | "loop-continue" // a paused loop: MasterDeck's own "Continue the loop" typed into the idle session
+  | "loop-stop" // a paused loop is stopped (as Stop loop in Details)
+  // Leave it: listed where the card shows it as a button; the store dismisses, as for every item.
+  | "dismiss"
   | "open"; // open the session (the renderer does it)
 
 export interface InboxAction {
@@ -67,7 +75,8 @@ export type InboxDetail =
   | { type: "budget"; spend: number; cap: number }
   | { type: "offer"; offer: PrOffer }
   | { type: "external"; item: ExternalItem }
-  | { type: "account"; login: string };
+  | { type: "account"; login: string }
+  | { type: "loop"; loopId: string; reason: string | null };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -120,6 +129,8 @@ export const PRIORITY: Record<InboxKind, number> = {
   external: 85,
   question: 90,
   blocked: 80,
+  loop: 72,
+  "loop-paused": 71,
   ci: 70,
   proposal: 60,
   review: 50,
@@ -148,7 +159,12 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   error: "working again",
   external: "answered elsewhere",
   account: "logged in again",
+  loop: "the loop is running again",
+  "loop-paused": "the loop went on or ended",
 };
+
+/** An open loop's session quiet this long is a "loop paused" item. */
+export const LOOP_PAUSED_MS = 5 * 60_000;
 
 /** Actions an item of this kind takes (besides dismiss and snooze, which every item takes). */
 export function allowed(item: InboxItem, type: string): boolean {
@@ -193,6 +209,8 @@ export interface InboxInput {
   ghAccounts?: GhAccountStatus[];
   /** accountNotices: gh's active account is not the primary, master-agent not started as it. */
   accountNotices?: { id: string; text: string }[];
+  /** Workflow loops by session id (`AppState.loops`): one that ended at a limit is an item. */
+  loops?: Record<string, LoopView[]>;
   now: number;
 }
 
@@ -372,6 +390,60 @@ export function collectItems(x: InboxInput): InboxItem[] {
     });
   }
 
+  // A loop that ended at a limit: run it 5 more, or leave it. Its start is in the id, so one that
+  // reaches a limit again after Run 5 more (a new start) is a new item.
+  const bySessionId = new Map(x.sessions.map((s) => [s.sessionId, s]));
+  for (const [sid, views] of Object.entries(x.loops ?? {})) {
+    const s = bySessionId.get(sid);
+    if (!s || s.state === "done") continue;
+    for (const v of views) {
+      if (v.state !== "limit") continue;
+      out.push({
+        id: `loop:${sid}:${v.id}:${v.startedAt}`,
+        kind: "loop",
+        priority: PRIORITY.loop,
+        sessionKey: s.key,
+        ticket: sessionTicket(s),
+        title: s.name,
+        body: `${v.name}: ${v.reason ?? "stopped at a limit"}`,
+        actions: [
+          { type: "loop-more", label: "Run 5 more", primary: true },
+          { type: "dismiss", label: "Leave it" },
+          { type: "open", label: "Open" },
+        ],
+        detail: { type: "loop", loopId: v.id, reason: v.reason },
+      });
+    }
+  }
+
+  // A loop still open on a session that went quiet: Claude Code ends a turn after eight Stop-hook
+  // blocks in a row without a tool call (or the session just stopped), and nothing wakes it.
+  // Its quiet spell is in the id, so the next one is a new item; it goes once the session works
+  // again or the loop closes.
+  for (const [sid, views] of Object.entries(x.loops ?? {})) {
+    const s = bySessionId.get(sid);
+    const last = x.lastActivity[sid];
+    if (!s || s.state !== "idle" || s.waitingOn || s.busyWith) continue;
+    if (last === undefined || x.now - last < LOOP_PAUSED_MS) continue;
+    const v = views.find((w) => w.state === "open");
+    if (!v) continue;
+    out.push({
+      id: `loop-paused:${sid}:${v.id}:${last}`,
+      kind: "loop-paused",
+      priority: PRIORITY["loop-paused"],
+      sessionKey: s.key,
+      ticket: sessionTicket(s),
+      title: s.name,
+      body: `${v.name}: paused at iteration ${v.iteration}/${v.max}. The session went quiet before the loop was over.`,
+      actions: [
+        { type: "loop-continue", label: "Continue", primary: true },
+        { type: "loop-stop", label: "Stop loop" },
+        { type: "open", label: "Open" },
+      ],
+      detail: { type: "loop", loopId: v.id, reason: v.reason },
+    });
+  }
+
   const cap = x.settings.budgetPerTicketUsd;
   if (cap > 0)
     for (const [k, spend] of Object.entries(ticketSpend(x.costBook))) {
@@ -499,6 +571,8 @@ const RUNS_IN_MAIN = new Set<InboxActionType>([
   "compact",
   "approve",
   "send",
+  "loop-more",
+  "loop-continue",
 ]);
 
 export function inboxNotice(e: InboxEntry): InboxNotice | null {
@@ -529,7 +603,11 @@ export function inboxNotice(e: InboxEntry): InboxNotice | null {
                     ? `${i.title} stopped on an error`
                     : i.kind === "waiting"
                       ? `${i.title} is waiting`
-                      : i.title;
+                      : i.kind === "loop"
+                        ? `${i.title}: loop stopped at its limit`
+                        : i.kind === "loop-paused"
+                          ? `${i.title}: loop paused`
+                          : i.title;
   const action =
     i.actions.find((a) => a.primary && RUNS_IN_MAIN.has(a.type)) ?? null;
   return {

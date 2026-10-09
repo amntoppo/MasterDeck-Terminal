@@ -1,6 +1,29 @@
 [masterdeck.dev](https://masterdeck.dev) · [Get started](https://masterdeck.dev/docs/) · [All downloads](https://masterdeck.dev/download/)
 
-## What's new in 0.8.2
+## What's new in 0.9.0
+
+- **Agent loops in workflows.** Put a **Loop** frame on the Workflow canvas: the session repeats
+  its blocks until a check passes (`npm test`, or any command), Claude says it's done, or both,
+  with limits on rounds, time and rounds without progress. Details shows the round and its
+  history, the session row gets a `↻ 3/10` badge, and Needs you asks at the limit (**Run 5 more**).
+- **Notes.** A Notes panel on the rail for your own notes and one note per ticket, in Markdown
+  with a preview; sessions can add to them.
+- **A better Start dialog.** Create a worktree before the session starts, pick the permission mode,
+  remember your choices per repository, and see the ticket's description and sub-issues. From the
+  web app too, with **Choose folder…**.
+- **Create with Claude settings bar.** Fix the repository, people, column, sprint, labels and
+  milestone below the chat; every ticket Claude creates follows them.
+- **Linked sessions.** Link running sessions so each knows what the others are doing.
+- **Sessions column.** Star sessions to keep them at the top, filter by status, account, repo or
+  name, and the session name always shows.
+- **Working hours.** Costs → Hours estimates time per GitHub account, day and ticket, with CSV export.
+- **Claude Code mods.** MasterDeck's mods show a session's ticket, alerts, board and an `/md-loop`
+  command inside Claude Code, each switched per session.
+- **Fixes.** Sessions move to Merged when their PR merges (not Rework); Remote says why it is
+  waiting and no longer waits for ever for the session list.
+- **MasterDeck's own icon**, in the app and on the web.
+
+## In 0.8.2
 
 - **Windows build.** 0.8.0 and 0.8.1 shipped without the Windows installer; 0.8.2 has both. A
   session's account written by master in the same instant as the app's own write is no longer

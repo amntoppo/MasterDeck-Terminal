@@ -130,6 +130,10 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.workflowTriggerDelete, id),
   workflowDraftDiscard: () => ipcRenderer.invoke(CH.workflowDraftDiscard),
   workflowStatus: (sid) => ipcRenderer.invoke(CH.workflowStatus, sid),
+  workflowLoopHistory: (sid, id) =>
+    ipcRenderer.invoke(CH.workflowLoopHistory, sid, id),
+  workflowLoopStop: (sid, id) => ipcRenderer.invoke(CH.workflowLoopStop, sid, id),
+  workflowLoopMore: (sid, id) => ipcRenderer.invoke(CH.workflowLoopMore, sid, id),
   sessionWorkflowGet: (sid) => ipcRenderer.invoke(CH.sessionWorkflowGet, sid),
   sessionWorkflowSave: (sid, steps, from) =>
     ipcRenderer.invoke(CH.sessionWorkflowSave, sid, steps, from ?? null),

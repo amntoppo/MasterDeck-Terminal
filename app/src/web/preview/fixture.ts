@@ -164,6 +164,7 @@ export function fixtureState(noBoard = false): AppState {
     sessionPrs: { [SESSIONS[0].sessionId]: ['https://github.com/acme/web/pull/131'] },
     watches: [],
     schedules: {},
+    loops: {},
     sources: { agents: 'ok', github: 'ok' },
     errors: [],
     lastSnapshotAt: new Date(now - 2 * min).toISOString(),

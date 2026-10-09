@@ -1,8 +1,16 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectHooks, listSkills } from "./workflow";
+import { loopScript } from "@shared/loopHook";
+import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 
 describe("collectHooks", () => {
   it("reads user, project (each repo once) and enabled plugin hooks", () => {
@@ -113,5 +121,25 @@ describe("collectHooks", () => {
       ["superpowers:brainstorming", "plugin superpowers"],
       ["gr-up", "project repo"],
     ]);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("the loop hook script", () => {
+  it("setup writes loop.sh, executable, and rewrites it only when its text changed", () => {
+    const home = mkdtempSync(join(tmpdir(), "wfl-"));
+    const store = new WorkflowStore(home);
+    const f = join(home, "workflows", "loop.sh");
+    store.setupLoopHook();
+    expect(readFileSync(f, "utf8")).toBe(loopScript(home));
+    expect(statSync(f).mode & 0o777).toBe(0o755);
+    // Unchanged text: left alone (an old mtime stays old).
+    utimesSync(f, 1000, 1000);
+    store.setupLoopHook();
+    expect(statSync(f).mtimeMs).toBe(1000 * 1000);
+    // Changed (an older MasterDeck's script): rewritten.
+    writeFileSync(f, "old");
+    store.setupLoopHook();
+    expect(readFileSync(f, "utf8")).toBe(loopScript(home));
+    expect(statSync(f).mode & 0o777).toBe(0o755);
   });
 });

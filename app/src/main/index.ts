@@ -146,6 +146,9 @@ import {
   writeRemoved,
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
+import { LoopStore } from "./loops";
+import { LoopQueue } from "./loopQueue";
+import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
 import {
   DEFAULT_TEMPLATE,
@@ -670,6 +673,11 @@ const sources = new Sources(
       console.error(`PR watch: ${String(e)}`);
     }
     void linkedSteps.deliver(state.sessions);
+    try {
+      pumpLoopQueue(state);
+    } catch (e) {
+      console.error(`queue after a loop: ${String(e)}`);
+    }
     emit(CH.state, state);
     // The session list is in: commands that waited while MasterDeck was closed can run now.
     if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
@@ -1309,6 +1317,36 @@ async function runInboxAction(
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
+    case "loop-more": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const r = loopStore.more(s.sessionId, d.loopId);
+      if (!r.ok) return r;
+      sources.pollLoops();
+      return nudgeLoop(s.sessionId, r.name ?? "loop", remote);
+    }
+    case "loop-continue": {
+      // A paused loop: the same fixed text as Run 5 more's nudge, typed only into an idle session.
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      if (v?.state !== "open") return { ok: false, message: "the loop is not running" };
+      return nudgeLoop(s.sessionId, v.name, remote, "the session is working; the loop goes on at its next turn end");
+    }
+    case "loop-stop": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      // From a browser the web UI asked first; the window asks here.
+      if (v && !remote && !(await confirmLoopStop(v.name)))
+        return { ok: false, message: "cancelled" };
+      const r = loopStore.stop(s.sessionId, d.loopId);
+      if (r.ok) sources.pollLoops();
+      return r;
+    }
     case "login": {
       if (d.type !== "account")
         return { ok: false, message: "not a GitHub account item" };
@@ -1708,6 +1746,73 @@ function clearDraft(): void {
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
 let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
+/** Workflow loops (`workflows/loops/`): names and limits from each session's compiled workflow. */
+const loopStore = new LoopStore(paths.home, (sid) =>
+  workflows()
+    .compiledFor(sid)
+    .flatMap((s) => s.loops ?? []),
+);
+sources.setLoopStore(loopStore);
+
+/**
+ * Run 5 more's nudge (the Details action and the Needs-you one): MasterDeck's own fixed text, so
+ * the loop's next round happens. Only an idle session gets it; a busy one meets the reopened loop
+ * at its next turn end anyway.
+ */
+async function nudgeLoop(
+  sessionId: string,
+  name: string,
+  remote: boolean,
+  busy = "5 more iterations; the loop goes on at the next turn end",
+): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.sessionId === sessionId);
+  if (!s || s.state !== "idle") return { ok: true, message: busy };
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+}
+/**
+ * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
+ * after a loop closed on an idle session).
+ */
+async function sendNextQueued(s: Session): Promise<CliResult> {
+  const next = shiftQueue(s.sessionId);
+  if (next === null) return { ok: false, message: "the queue is empty" };
+  const masterUp =
+    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const r = await sender.send(s, next, !!masterUp);
+  // Not sent: back to the front, so the Stop hook still runs it later.
+  if (!r.ok) unshiftQueue(s.sessionId, next);
+  return r;
+}
+/**
+ * The queue after a loop (#82): the deck hook's Stop skipped the turn that closed the loop (it saw
+ * the loop open), so a session left idle with prompts queued gets the next one here, once.
+ */
+const loopQueue = new LoopQueue();
+function pumpLoopQueue(state: AppState): void {
+  if (process.platform === "win32") return;
+  for (const s of loopQueue.tick(
+    state.loops,
+    state.sessions,
+    (sid) => (deckHooks.ownsQueue(sid) ? readQueue(sid).length : 0),
+    (sid) => deckHooks.queueServedAt(sid),
+    Date.now(),
+  ))
+    void sendNextQueued(s).then((r) => {
+      if (!r.ok) console.error(`queue after a loop: ${r.message}`);
+    });
+}
+/** The window's ask before Stop loop (Details, Needs you): a stopped loop cannot be given more. */
+async function confirmLoopStop(name: string): Promise<boolean> {
+  const choice = await dialog.showMessageBox(win!, {
+    type: "warning",
+    buttons: ["Cancel", "Stop loop"],
+    defaultId: 0,
+    cancelId: 0,
+    message: `Stop the loop “${name}”?`,
+    detail: "The session finishes its turn and the loop does not go on.",
+  });
+  return choice.response === 1;
+}
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
@@ -1717,6 +1822,12 @@ const syncWorkflowHooks = () => {
   const customs = workflows().triggers();
   setCustomTriggers(customs);
   setMonitors(workflows().monitors());
+  // The loop hook's script first, so its Stop hook entry never points at a missing file.
+  try {
+    workflows().setupLoopHook();
+  } catch (e) {
+    return { ok: false, message: `could not write the loop hook: ${String(e)}` };
+  }
   return installWorkflowHooks(
     paths.claudeSettings,
     paths.home,
@@ -1974,14 +2085,7 @@ function registerIpc(): void {
   reg.handle(CH.queueSendNext, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
-    const next = shiftQueue(s.sessionId);
-    if (next === null) return { ok: false, message: "the queue is empty" };
-    const masterUp =
-      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    const r = await sender.send(s, next, !!masterUp);
-    // Not sent: back to the front, so the Stop hook still runs it later.
-    if (!r.ok) unshiftQueue(s.sessionId, next);
-    return r;
+    return sendNextQueued(s);
   });
   reg.handle(CH.getSettings, () => sources.getSettings());
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
@@ -2819,6 +2923,29 @@ function registerIpc(): void {
       return { ok: false, message: "no such trigger" };
     syncWorkflowHooks();
     return { ok: true, message: "trigger deleted" };
+  });
+  // Workflow loops: ids are checked by the store (session id, loop id shapes); the state shows
+  // the change at once.
+  reg.handle(CH.workflowLoopHistory, (_e, sid: unknown, id: unknown) =>
+    loopStore.history(sid, id),
+  );
+  reg.handle(CH.workflowLoopStop, async (e, sid: unknown, id: unknown) => {
+    // A stopped loop cannot be given more: ask, as Stop session does. From a browser the web UI
+    // asked first; no native dialog on the Mac.
+    const v = validSessionId(sid) && validLoopId(id)
+      ? latest?.loops?.[sid]?.find((x) => x.id === id && x.state === "open")
+      : undefined;
+    if (v && !isRemote(e) && !(await confirmLoopStop(v.name)))
+      return { ok: false, message: "cancelled" };
+    const r = loopStore.stop(sid, id);
+    if (r.ok) sources.pollLoops();
+    return r;
+  });
+  reg.handle(CH.workflowLoopMore, async (e, sid: unknown, id: unknown) => {
+    const r = loopStore.more(sid, id);
+    if (!r.ok) return r;
+    sources.pollLoops();
+    return nudgeLoop(sid as string, r.name ?? "loop", isRemote(e));
   });
   reg.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
