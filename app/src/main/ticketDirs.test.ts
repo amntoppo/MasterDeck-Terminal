@@ -109,12 +109,16 @@ describe('pumpTicketDir with a settings bar', () => {
     expect(answer.overridden.map((o: { field: string }) => o.field)).toEqual(['repo', 'assignees', 'milestone'])
     expect(answer.note).toContain('settings bar')
   })
-  it('without a bar (or a bad one) the flags pass as before', async () => {
-    for (const s of [undefined, { repo: 'not a repo' }]) {
-      const { seen, answer } = await run(['--title', 'T', '--repo', 'acme/api'], s)
-      expect(seen[0]).toMatchObject({ repo: 'acme/api' })
-      expect(answer.applied).toBeUndefined()
-    }
+  it('without a bar the flags pass as before', async () => {
+    const { seen, answer } = await run(['--title', 'T', '--repo', 'acme/api'], undefined)
+    expect(seen[0]).toMatchObject({ repo: 'acme/api' })
+    expect(answer.applied).toBeUndefined()
+  })
+  it('a bar that cannot be read refuses the create instead of dropping the bar', async () => {
+    const { seen, answer } = await run(['--title', 'T', '--repo', 'acme/api'], { repo: 'not a repo' })
+    expect(seen).toEqual([])
+    expect(answer).toMatchObject({ ok: false })
+    expect(answer.error).toContain('settings bar')
   })
 })
 

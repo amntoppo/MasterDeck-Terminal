@@ -141,7 +141,10 @@ export async function pumpTicketDir(dir: string, create: CreateFn): Promise<void
           const picked = typeof ctx.account === 'string' ? ctx.account : null
           const bar = readSettings(ctx.settings)
           const { req, overridden } = bar ? enforceSettings({ ...p, body }, bar) : { req: { ...p, body }, overridden: [] }
-          const made = await create(req, picked)
+          // A bar that is there but unreadable is refused, never silently dropped: the user expects it to apply.
+          const made = ctx.settings !== undefined && !bar
+            ? { ok: false, error: 'create: the settings bar could not be read; change a value in it and try again' }
+            : await create(req, picked)
           answer = {
             ...made,
             ...(bar ? { applied: { repo: req.repo, project: req.project ?? '', status: req.status ?? '', assignees: req.assignees, labels: req.labels, milestone: req.milestone ?? '', sprint: req.sprint ?? '' } } : {}),

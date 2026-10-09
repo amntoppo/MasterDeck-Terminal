@@ -444,8 +444,8 @@ here (needs `hooks.queue`).
   `changeSettings` (another repository drops labels and milestone, another board keeps only the
   status and sprint it has; sprints follow the board: `boardSprints`, none on a `sprintless` one).
   Every change calls `ticketBuilderPrepare` again, which rewrites `context.json` with `settings` (no
-  new channel). `pumpTicketDir` re-reads it at each request: `readSettings` checks it (a bad repo:
-  no bar, the flags pass as before) and `enforceSettings` replaces all seven flags with the bar's,
+  new channel). `pumpTicketDir` re-reads it at each request: `readSettings` checks it (no `settings`:
+  the flags pass as before; `settings` that fail the check refuse the create, never drop the bar) and `enforceSettings` replaces all seven flags with the bar's,
   so the bar wins over anything the session passed; the answer carries `applied` (what was used)
   and, when a passed flag differed, `overridden` and a `note`. The briefing tells Claude to leave
   those flags out and, when the chat asks for another value, to say the bar's applies and that the
