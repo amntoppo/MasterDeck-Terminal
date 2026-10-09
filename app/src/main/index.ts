@@ -3256,6 +3256,12 @@ if (process.platform === "win32")
 
 app.whenReady().then(async () => {
   app.setName("MasterDeck");
+  // A packaged app takes its icon from the bundle (build/icon.icns); `npm run dev` would show
+  // Electron's, so the Dock gets the same icon from the source tree.
+  if (!app.isPackaged && process.platform === "darwin") {
+    const devIcon = join(__dirname, "../../build/icon.png");
+    if (existsSync(devIcon)) app.dock?.setIcon(devIcon);
+  }
   // Token and identity must agree. Judged by the token FILE (not by decrypting it), so a transient
   // Keychain error never signs the user out: a legacy pasted token (no identity) is removed, and an
   // identity whose token file is gone is cleared.

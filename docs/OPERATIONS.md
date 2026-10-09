@@ -38,6 +38,11 @@ open /Applications/MasterDeck.app
 - Packaging config: `app/electron-builder.yml` (appId `io.github.amntoppo.masterdeck`, ad-hoc
   signature `identity: "-"`, no hardened runtime, node-pty unpacked from asar, `statusline_tee.py`
   and `../skills` as extra resources without tests/caches).
+- Icons: `app/build/icon.icns` (macOS, also the DMG), `icon.ico` (Windows), `icon.png` / `icon.svg`
+  (the source tile; `npm run dev` puts it in the Dock), and the web app's `src/web/public/favicon.svg`,
+  `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` and `manifest.webmanifest`. All are made by
+  `node scripts/icons.mjs` (macOS: it calls `iconutil`) from the mark masterdeck.dev uses, and committed.
+  A Mac may keep showing the old icon of a replaced app until the Dock restarts (`killall Dock`).
 - Smoke: `MASTERDECK_NO_SKILLS=1 MASTERDECK_SMOKE=1 MASTERDECK_USER_DATA=$(mktemp -d)
   dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` → `SMOKE OK sessions=… issues=…`.
 
