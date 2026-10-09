@@ -20,6 +20,14 @@ extraResources:
       - "!**/tests/**"
       - "!**/__pycache__/**"
       - "!**/.pytest_cache/**"
+  # MasterDeck's Claude Code mods, copied into ~/.claude/masterdeck/mods (a local-folder marketplace).
+  - from: ../mods
+    to: mods
+    filter:
+      - "**/*"
+      - "!**/*.test.ts"
+      - "!shared/**"
+      - "!sync-shared.sh"
 npmRebuild: true
 mac:
   category: public.app-category.developer-tools

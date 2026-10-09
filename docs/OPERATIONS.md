@@ -112,6 +112,11 @@ npx electron . --remote-debugging-port=9333
 - Native dialogs: with `--inspect=127.0.0.1:9334` you can stub `dialog.*` / `shell.openExternal`
   in main for the run.
 - The isolated app still lists the user's real sessions: never Reply, Stop or answer their items.
+- **Mods (Setup / Settings → Mods)**: `claude plugin` writes Claude Code's own settings, so an
+  isolated app refuses to install mods unless `CLAUDE_CONFIG_DIR=$E2E/claudecfg` is set (then the
+  real `claude` writes `$E2E/claudecfg/settings.json` and `plugins/` only; checked 2026-10-10 with
+  Install and Remove). With it set, `claude agents` lists no sessions, so never press **Reload idle
+  sessions** in a run that does list real ones: it types `/reload-plugins` into them.
 - **Never give the app itself a temp `HOME` on macOS**: without the login keychain there, startup
   stops on a system keychain dialog (on the user's screen) and the window never opens. To keep it
   off the real `~/.claude.json`, set `CLAUDE_CONFIG_DIR=$E2E/claudecfg` instead: `master trust`,

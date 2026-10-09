@@ -567,16 +567,12 @@ fixes it, and move the item here to "Recently done".
 
 See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
 
-- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
-  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
-  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
-  `mods/` in the app (electron-builder `extraResources`).
 - **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
   `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
   masterdeck@masterdeck --scope user` (settings.json backed up first as
   `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
   nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
-  Updating the copy is by hand until the app installs it.
+  An app with #93 replaces that hand copy at launch (no marker) and reads it as installed.
 - **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
   `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
   `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
@@ -595,7 +591,15 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
   the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
   checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
-  it. Setup should add `prependPlugins` with the install (backup, atomic).
+  it. MasterDeck's install adds it now (#93) and says where it is ignored.
+- **Mods install (#93): open points.** Checked with the real `claude` 2.1.296 against a temp
+  `CLAUDE_CONFIG_DIR` in the isolated app (Install, Remove, the backups) and the packaged build's
+  `Resources/mods`; not checked: the Needs-you reload item with real sessions (the isolated app
+  listed none), an app update over an installed copy on the user's machine, Windows (`--json` lines
+  and paths), a managed settings file or a Team plan for real (`prependNote` is unit-tested only).
+  A session whose Claude Code is older than 2.1.287 never sends a heartbeat, so after an install it
+  stays in the reload item until dismissed. The swap of `<home>/mods` leaves a moment with no folder
+  (`ponytail:` in `syncModsFolder`). The isolated app installs mods only with `CLAUDE_CONFIG_DIR` set.
 - **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
   yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
   (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
@@ -605,9 +609,6 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
   account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
   account). A board file per account and its own current sprint needs a read per account.
-- **Updating the mods needs a reload in every running session** (the copy under
-  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
-  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
   a change bumps `v` in both.
@@ -620,6 +621,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |
 | MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | branch `feat/app-icon` | — |
 | The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
 | Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |

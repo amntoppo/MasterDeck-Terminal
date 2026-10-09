@@ -224,13 +224,7 @@ function remove(s: Settings, event: string, mark: string): void {
 }
 
 function write(settingsPath: string, backupDir: string, s: Settings): void {
-  if (existsSync(settingsPath)) {
-    mkdirSync(backupDir, { recursive: true });
-    copyFileSync(
-      settingsPath,
-      join(backupDir, `settings.backup.${Date.now()}.json`),
-    );
-  }
+  backupSettings(settingsPath, backupDir);
   // Follow a symlink so a dotfiles link stays a link.
   const target = existsSync(settingsPath)
     ? realpathSync(settingsPath)
@@ -240,6 +234,22 @@ function write(settingsPath: string, backupDir: string, s: Settings): void {
   writeFileSync(tmp, JSON.stringify(s, null, 2) + "\n");
   renameSync(tmp, target);
 }
+
+/** A copy of settings.json in backupDir (`settings.backup.<ms>[.<tag>].json`), when it exists:
+ * before every write, and before MasterDeck has the claude CLI change it (main/mods.ts). */
+export function backupSettings(settingsPath: string, backupDir: string, tag?: string): string | null {
+  if (!existsSync(settingsPath)) return null;
+  mkdirSync(backupDir, { recursive: true });
+  // Two in the same millisecond (an install's steps) must not overwrite each other.
+  const base = join(backupDir, `settings.backup.${Date.now()}${tag ? `.${tag}` : ""}`);
+  let to = `${base}.json`;
+  for (let i = 2; existsSync(to); i++) to = `${base}-${i}.json`;
+  copyFileSync(settingsPath, to);
+  return to;
+}
+
+/** settings.json read and written the way every MasterDeck install does (main/mods.ts too). */
+export { read as readSettings, write as writeSettings };
 
 /**
  * The workflow hooks: one per trigger, reading each session's own workflow (or the default) from

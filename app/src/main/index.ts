@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -145,6 +146,7 @@ import {
   syncSkills,
   writeRemoved,
 } from "./skills";
+import { ModsInstaller } from "./mods";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { Summaries } from "./summary";
 import {
@@ -246,6 +248,48 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
 const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
+// MasterDeck's mods in Claude Code (Setup / Settings → Mods): its folder, install and uninstall.
+const mods = new ModsInstaller({
+  run,
+  claude: () => claudeBin,
+  bundled: paths.bundledMods,
+  folder: paths.modsDir,
+  settings: paths.modsSettings,
+  refused: paths.modsSettings
+    ? null
+    : "This test app keeps Claude Code's settings apart: set CLAUDE_CONFIG_DIR to try mods in it.",
+  backupDir: paths.home,
+  installedFile: join(paths.home, "mods-installed.json"),
+});
+let modsStatus: ModsStatus = MODS_OFF;
+let modsReadAt = 0;
+/** What of the mods settings.json has, read again at most every 30 s (it changes by hand too). */
+function modsNow(fresh = false): ModsStatus {
+  if (fresh || Date.now() - modsReadAt > 30_000) {
+    modsStatus = mods.status();
+    modsReadAt = Date.now();
+  }
+  return modsStatus;
+}
+/** Running sessions on older mods (or none, started before the install). */
+const modsOffer = (sessions: Session[]) =>
+  modsReloadOffer(sessions, deckHooks.modBeats(), modsNow().state === "installed", mods.installedAt());
+/** Type /reload-plugins into each idle session the offer names, one after another. */
+async function reloadMods(): Promise<CliResult> {
+  const offer = latest ? modsOffer(latest.sessions) : null;
+  const idle = (offer?.idle ?? []).flatMap((k) => latest?.sessions.find((s) => s.key === k) ?? []);
+  if (!idle.length) return { ok: false, message: "No idle session runs older mods." };
+  const failed: string[] = [];
+  // Never relayed through master-agent: its message would not run the command.
+  for (const s of idle) {
+    const r = await sender.send(s, "/reload-plugins", false);
+    if (!r.ok) failed.push(r.message);
+  }
+  const done = idle.length - failed.length;
+  return failed.length
+    ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
+    : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
+}
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -657,6 +701,7 @@ const sources = new Sources(
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
     state.modCatalog = catalog;
+    state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -1291,6 +1336,8 @@ async function runInboxAction(
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "reload":
+      return d.type === "mods" ? reloadMods() : { ok: false, message: "not a mods item" };
     case "trust": {
       const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
       if (!held) return { ok: false, message: "not a start Claude Code refused" };
@@ -2905,6 +2952,15 @@ function registerIpc(): void {
     sources.changed();
     return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
   });
+  // Setup / Settings → Mods. Fixed claude commands only (the web asked with webConfirm first).
+  const modsChanged = (r: CliResult): CliResult => {
+    modsNow(true);
+    sources.changed();
+    return r;
+  };
+  reg.handle(CH.modsInstall, async () => modsChanged(await mods.install()));
+  reg.handle(CH.modsUninstall, async () => modsChanged(await mods.uninstall()));
+  reg.handle(CH.modsReload, () => reloadMods());
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200
       ? peerSync.syncNow(key)
@@ -3353,6 +3409,17 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
+  // MasterDeck's mods: its folder is the marketplace Claude Code reads in place, so this version's
+  // mods reach every session at its next reload (Needs you offers one for idle sessions).
+  if (!SMOKE) {
+    const r = mods.syncFolder();
+    if (r.error) console.error(r.error);
+  }
+  sources.setModsReload(modsOffer);
+  void mods.refresh().then(() => {
+    modsNow(true);
+    sources.changed();
+  });
   // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
   // that work itself now; the skills stay for use by hand.
   if (

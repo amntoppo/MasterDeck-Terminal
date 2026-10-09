@@ -944,6 +944,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .f-col { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .set-ctl .user-code { font-family: var(--mono); font-size: 36px; letter-spacing: .15em; font-weight: 600; background: var(--bg-3); padding: 8px 16px; border-radius: 8px; }
 .f-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.mods-panel { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .input { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); border-radius: 7px; padding: 6px 10px; font: inherit; font-size: 12.5px; outline: none; }
 .input:focus { border-color: var(--accent); }
 .input.narrow { width: 90px; }

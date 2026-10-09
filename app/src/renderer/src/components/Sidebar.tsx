@@ -774,6 +774,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
+  mods: "MODS",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -1372,6 +1373,8 @@ function ExtraCard({
   const kind =
     i.kind === "account"
       ? "GITHUB"
+      : i.kind === "mods"
+      ? "MODS"
       : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
@@ -1383,14 +1386,14 @@ function ExtraCard({
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
     (a) =>
-      a.type === "continue" || a.type === "compact" || a.type === "login",
+      a.type === "continue" || a.type === "compact" || a.type === "login" || a.type === "reload",
   );
   return (
     <div
       className={`card ${onDetails ? "clickable" : ""}`}
       style={{
         ["--kind" as string]:
-          i.kind === "idle" || i.kind === "waiting"
+          i.kind === "idle" || i.kind === "waiting" || i.kind === "mods"
             ? "var(--amber)"
             : "var(--red)",
       }}

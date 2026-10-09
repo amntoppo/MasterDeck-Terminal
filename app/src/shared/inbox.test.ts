@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { allowed, collectItems, inboxNotice, type InboxInput } from './inbox'
 import { DEFAULT_SETTINGS } from './settings'
+import { MOD_VERSION } from './modBand'
 import { parseTicket } from './ticket'
 import type { ExternalItem } from './remote'
 import type { Pr, Proposal, Session } from './types'
@@ -46,6 +47,17 @@ describe('collectItems', () => {
     const items = collectItems(input({ accountNotices: [{ id: 'gh-active:bob-work:alice', text: 'switch' }] }))
     expect(items.map((i) => [i.id, i.kind, i.actions.length, i.body])).toEqual([['notice:gh-active:bob-work:alice', 'account', 0, 'switch']])
     expect(allowed(items[0], 'login')).toBe(false)
+  })
+  it('sessions on older mods: one item per mods version, Reload only while one is idle', () => {
+    const [item] = collectItems(input({ modsReload: { keys: ['a', 'b'], idle: ['a'] } }))
+    expect([item.id, item.kind, item.sessionKey, item.actions]).toEqual([`mods:${MOD_VERSION}`, 'mods', null, [{ type: 'reload', label: 'Reload the idle session', primary: true }]])
+    expect(item.detail).toEqual({ type: 'mods', keys: ['a', 'b'], idle: ['a'] })
+    expect(allowed(item, 'reload')).toBe(true)
+    expect(inboxNotice({ item, state: 'open', firstSeen: 0, lastSeen: 0 })?.action?.type).toBe('reload')
+    const [none] = collectItems(input({ modsReload: { keys: ['b'], idle: [] } }))
+    expect(none.actions).toEqual([])
+    expect(allowed(none, 'reload')).toBe(false)
+    expect(collectItems(input({ modsReload: null }))).toEqual([])
   })
   it('leaves review offers to the PR watch, keeps CI offers', () => {
     const pr = { url: 'https://github.com/acme/web/pull/3', repo: 'web', number: 3, title: 't', unresolvedThreads: 2, ci: 'failure', headRef: 'f', refsIssue: null, authorIsMe: true } as InboxInput['prs'][number]

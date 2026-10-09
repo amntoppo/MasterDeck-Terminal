@@ -1,6 +1,7 @@
 import type { WatchInfo } from "@shared/watches";
 import { hideSuperseded } from "@shared/superseded";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
+import type { ModsReloadOffer } from "@shared/mods";
 import {
   liveSchedules,
   newScheduleScan,
@@ -674,6 +675,12 @@ export class Sources {
   }
   private parkedOf: ((s: ParkedKey) => Parked | null) | null =
     null;
+
+  /** Running sessions on older MasterDeck mods, for Needs you (index.ts: heartbeats, install state). */
+  setModsReload(fn: (sessions: Session[]) => ModsReloadOffer | null): void {
+    this.modsReloadOf = fn;
+  }
+  private modsReloadOf: ((sessions: Session[]) => ModsReloadOffer | null) | null = null;
 
   /** master's workspace and every account's own: shared by all sessions. */
   workspaces(): string[] {
@@ -2396,6 +2403,7 @@ export class Sources {
         ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
         : undefined,
       accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
+      modsReload: this.modsReloadOf?.(sessions) ?? null,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
