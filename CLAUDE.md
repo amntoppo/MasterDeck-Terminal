@@ -50,7 +50,8 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   - `src/web/` — the web app shell: `Gate.tsx` (sign-in, approval, socket, channel),
     `remoteDeck.ts` (`window.deck` over the encrypted channel), `approval.ts`, `keys.ts` (IndexedDB).
   - `web/wrangler.jsonc` — the `masterdeck-web` static Worker on app.masterdeck.dev.
-  - `scripts/install-mac.sh` (copy the built app to /Applications), `scripts/sync-protocol.sh`.
+  - `scripts/install-mac.sh` (copy the built app to /Applications), `scripts/sync-protocol.sh`,
+    `scripts/icons.mjs` (the app and web icons in `build/` and `src/web/public/`, from one mark).
   - `test/fixtures/` — `agents.json`, `board*.json`, `repo-issues.json`, `ledger.json`, `snapshot.json`, `claude-echo.json`.
 - `skills/` — skills shipped with the app (master, babysit-ticket, babysit-pr, babysit-worktree,
   kill-worktree, worktree-janitor, queue). MasterDeck no longer depends on babysit-ticket,
@@ -360,7 +361,15 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-09)
+## Current state and next steps (2026-10-10)
+
+- **MasterDeck has its own icon** (branch `feat/app-icon`, from `main`, not merged): the mark from
+  masterdeck.dev on a dark tile, as the app icon (`app/build/icon.icns` / `icon.ico`, picked up by
+  electron-builder; the Dock in `npm run dev`) and on app.masterdeck.dev (favicon, home-screen icons,
+  web manifest). Made by `app/scripts/icons.mjs`. Checked: typecheck, `build:web` (icons in
+  `out/web`), a `--mac dir` package whose bundle carries the new `icon.icns`. Not checked: Windows,
+  the web app deployed, the installed app in the Dock (not installed yet).
+
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so
