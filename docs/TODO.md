@@ -285,12 +285,18 @@ fixes it, and move the item here to "Recently done".
 
 ## Where a session starts (2026-10-05)
 
-- **P2 · Trust: the first real run** (2026-10-06). The untrusted-folder flow was checked with fake
-  runners and, in the isolated app, a stand-in `claude` and a temp `.claude.json`. Never done: the
-  real `claude` in the tab (its real prompt, then `~/.claude.json` changing under a real
-  `--bg`), and Windows (how Claude Code spells a folder's key there is assumed: forward slashes,
-  compared without case). If Claude Code moves or renames `hasTrustDialogAccepted`, the dialog says
-  nothing (not known) and the refused start still offers the fix; check `trust.py` then.
+- **P3 · Trust on Windows** (2026-10-06; the Mac's first real run is done, #59, 2026-10-09: the
+  dialog's line for a temp checkout, **Open Claude there…** showing Claude Code 2.1.295's real
+  prompt in the tab, the line turning into "can work in … now" once it was accepted, and a real
+  `claude --bg` starting there). Never done: Windows (how Claude Code spells a folder's key there is
+  assumed: forward slashes, compared without case). If Claude Code moves or renames
+  `hasTrustDialogAccepted`, the dialog says nothing (not known) and the refused start still offers
+  the fix; check `trust.py` then.
+- **P3 · Open Claude there… leaves an interactive Claude running in its tab** after the prompt is
+  accepted (a full session in that folder, on the default model and mode, until the user exits it);
+  the dialog only says "You can close that tab". Decide whether the tab should end on its own once
+  the folder is trusted, or whether the tab should run `claude` with a flag that exits after the
+  prompt if Claude Code ever has one.
 - **P3 · A held start does not count in the Needs you badge and sends no notification** (held
   items never do). A start master spawned and Claude Code refused is only seen in the list.
   Decide whether a refused start should be its own kind.
@@ -301,11 +307,27 @@ fixes it, and move the item here to "Recently done".
 - **P3 · The web app cannot re-check trust** (`deck.trust` is the window's): its Start dialog
   shows the line from the draft and leaves Start available.
 
-- **P2 · Start a session from it once.** Seen in the isolated app (2026-10-05): Setup's rows, the
-  Start dialog's found / not found / cut-short lines, the phone width. Never done: pressing Start,
-  the native picker behind **Choose folder…**, a parked session getting its record
-  (`parked-sessions.json` is written by `master spawn`: check that `claude --bg` still prints
-  `backgrounded · <id>`, else the record is keyed by the session's name).
+- **P2 · Choose folder… with the native picker, once** (#59, 2026-10-09). Done for real in the
+  isolated app with the real `claude` ([OPERATIONS](OPERATIONS.md#isolated-e2e-test-recipe), "A
+  real start from the Start dialog"): Start from the dialog put the session in the resolved temp
+  checkout (`claude agents` agrees), `parked-sessions.json` got its record keyed by the background
+  id (`claude --bg` 2.1.295 prints `backgrounded · <id> · <name>` and four hint lines; the real
+  output is in `test_spawn.py`), and a link of the parked session recorded no branch while the
+  same link without the record took the folder's. The dialog opened from a master proposal
+  carries master's name and prompt. Not done: the native picker itself (the sheet needs a hand on
+  the Mac) and a start from a chosen folder, where `startChoice` is to keep master's model
+  (unit-tested only).
+- **P3 · A proposal's model is not shown by the Start dialog.** Opened from a proposal that names
+  `--model haiku`, the Model select reads "Default" (the start keeps master's model through
+  `startChoice`; only the picker is silent). Preselect it, or say "master picked Haiku" under it.
+- **P3 · Re-linking a session that no longer owns its branch leaves the old `branches` entry**
+  (`ticket-links.json`): seen when the same session was linked with and without its parked record
+  (branch `""` on the second link, `acme/tracker@feat/someone-elses → #59` still mapped). A
+  session's link that records `""` should drop the branch key its earlier link wrote.
+- **P3 · The app tries to link a session it started to its ticket at once** ("link …: could not
+  read #940" in the log for a fixture ticket), so with `MASTERDECK_BOARD_FIXTURE` a started
+  session is never linked and its card never moves; fine for tests, but worth a word in the
+  recipe. Decide whether a failed first link should be retried on the next poll.
 - **P3 · A workspace that is itself a repository with its clones next to it.** Setup's label says
   repos live "in or next to" the workspace, and `ops.repos()` lists the siblings in that case, but
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
@@ -509,6 +531,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the recipe in OPERATIONS; the native picker and a start from a chosen folder are still open (the sheet needs a hand) | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
 | Working hours (issue #64; spec in the backend repo): Costs → **Hours** estimates time per GitHub account, day and ticket from session activity on this Mac (`shared/hours.ts`, activity spans in `tokens.json` v2), idle gap 1 h by default, an account counts a minute once and each ticket its full time, "unknown account" listed, **Export CSV…**; desktop only | PR #75, branch `worktree-MasterDeck-Terminal-64-hours` (not merged, installed locally) | spec on `docs/working-hours-64` (not pushed) |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |

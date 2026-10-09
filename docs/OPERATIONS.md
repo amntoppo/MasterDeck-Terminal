@@ -122,6 +122,25 @@ npx electron . --remote-debugging-port=9333
   the tab running the stand-in in that folder, the dialog coming back once the temp file says
   trusted, the refused start's tab, the HELD card, **Try again** / **Start now** spawning the one
   proposal (held → sent), and no line for a trusted folder.
+- **A real start from the Start dialog** (done once, 2026-10-09, issue #59): the same launch with
+  the real `claude` on the PATH (no stand-in) and `MASTERDECK_BOARD_FIXTURE`, a throwaway checkout
+  `$E2E/ws/tracker` (`git init`, `origin` = `https://github.com/acme/tracker.git`, one commit, left
+  on a branch that is not the ticket's), the config's `workspace` = `$E2E/ws`. Board → **Show
+  everyone's issues** → a card with no PR → **Start a session**. The dialog names the checkout and
+  says Claude Code has not been allowed there: **Open Claude there…** opens the real prompt in a
+  tab (Down, Enter accepts it, which adds the folder to the real `~/.claude.json`: ask the user
+  first; `/exit` the interactive Claude it leaves), the dialog comes back, pick Haiku and a one-line
+  first instruction, Start. Then: `claude agents --json` shows the session's `cwd` is the checkout,
+  `$E2E/home/parked-sessions.json` has one record keyed by the background id (the ledger's note
+  holds the `claude --bg` output), and a link records no branch for it: add a real repository to
+  `repos` in `$E2E/master/config.json` and `window.deck.linkSession({repo, number}, sessionId,
+  cwd)` for a real issue no board of that config holds (a read; no move) → `ticket-links.json`
+  has `"branch": ""`; with `parked-sessions.json` moved aside the same link records the folder's
+  branch. A master proposal for the dialog: the CLI refuses writes from a Claude session, so write
+  the fixture with the ledger library (`with ledger.locked() as led: ledger.add(led, …)`; `locked`
+  saves the object it yields) under `$MASTER_HOME`. Afterwards `claude stop <id>` each session,
+  delete only the transcript folders those folders made under `~/.claude/projects/` (exact names),
+  and leave the trust entry (MasterDeck never writes `~/.claude.json`).
 - A unit test that opens a pane through `PtyManager` runs whatever `paneCommand` names, a real
   shell included: replace `node-pty` for the whole file with `vi.mock` before anything loads it
   (`ptys.test.ts`), so it cannot start a process even while it is red. An argument the code under
