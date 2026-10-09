@@ -279,8 +279,8 @@ GitHub: the app writes, the mod reads, so one poller serves every session.
   switcher at the top of the Details tab).
 - **Mods per session.** Claude Code turns a plugin on or off per settings scope only, so the
   MasterDeck mod does it per session. Its `plugin.register` hook judges every mod module that loads
-  after it (`prependPlugins: ["masterdeck@masterdeck"]` in the user's settings puts it first; a
-  `--plugin-dir` mod loads before any installed one) and reports each in its heartbeat (`mods`:
+  after it (`prependPlugins: ["masterdeck@masterdeck"]` in the user's settings puts it first, ahead
+  of `--plugin-dir` mods too; without it a `--plugin-dir` mod loads before any installed one) and reports each in its heartbeat (`mods`:
   name, provenance, version, tier, `loaded`). The app keeps every mod reported anywhere in
   `<home>/mod-catalog.json` (`ModCatalog`, `mergeCatalog`) as `state.modCatalog`, and the switches in
   `<home>/mod-off.json` (`ModOff`: `{Session.key: [names]}`; its first version, an array of keys,

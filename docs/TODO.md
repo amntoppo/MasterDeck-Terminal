@@ -567,8 +567,10 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   tab (stop and resume with no flags, when idle) would close the gap.
 - **Order matters**: the mod judges only what loads after it. `prependPlugins` in user settings is
   honoured only without managed settings and outside Team/Enterprise sign-in; elsewhere an admin
-  must list it (or the mods load before it and show "Not loaded in this session"). `--plugin-dir`
-  mods always load first. Setup should add `prependPlugins` with the install (backup, atomic).
+  must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
+  the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
+  checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
+  it. Setup should add `prependPlugins` with the install (backup, atomic).
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/masterdeck/types/index.d.ts`);
   a change bumps `v` in both.
