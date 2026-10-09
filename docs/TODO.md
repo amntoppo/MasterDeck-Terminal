@@ -315,6 +315,21 @@ fixes it, and move the item here to "Recently done".
   repository. A tracker whose issues go to several repositories still starts in the tracker's
   checkout (no pair) or always in the one paired repository. Possible next step: the issue's linked
   PRs or branches, when it has any, before the pair.
+- **P3 · Nothing checks that the code repository's account can read the tracker** (#61 review).
+  With a private `bob/tracker` paired to `acme/api` (alice), the session runs as alice and
+  `gh issue view bob/tracker#7` fails, with any comment or board step it does itself. Documented
+  in Setup and the guide; a fix would fall back to the tracker's account when the code account
+  cannot read it (one read, remembered), or warn in the Start dialog.
+- **P3 · A proposal made before a `codeRepos` pair existed** carries the issue's account and folder.
+  The Start dialog's default is now the code account, so the start becomes a new proposal
+  (`reuse` is false) while `adoptFresh` keeps the proposal's folder when it was a checkout (the
+  tracker's), and the session runs as the code account in the tracker's checkout. Rare (only
+  across adding a pair); a fix would let `adoptFresh` also move from the issue repository's own
+  checkout when a pair now points elsewhere.
+- **P3 · "The PR's repository wins" is the app's only** (#61 review). A `PRREVIEW` added through
+  the CLI without `--cwd` / `--account` (`checkout.default_cwd`) looks up the issue's code
+  repository and account, not the PR's: the proposal carries no PR repository. The app's PR
+  popup passes both. A fix would add the PR's repository to the proposal (`--cwd-repo`).
 - **P3 · The Start dialog opened from master's proposal starts with the ticket's default account**,
   not the account the proposal names (`sp.account`). Both come from the same rule now
   (`start_account` / `startAccount`), so they differ only for a proposal written by hand.

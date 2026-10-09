@@ -670,7 +670,8 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                   <summary>Issues whose code is in another repository</summary>
                   <div className="meta">
                     A ticket&apos;s session starts in the code&apos;s checkout, as the account of that repository (an issue tracker and the
-                    repository it is built in).
+                    repository it is built in). That account must be able to read the issues: a private tracker under another account
+                    is not readable from the session.
                   </div>
                   {codeRepos.map((r, i) => (
                     <div key={i} className="row-inputs code-repo-row">

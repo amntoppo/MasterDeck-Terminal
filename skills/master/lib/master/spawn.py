@@ -118,8 +118,10 @@ def command(target: dict) -> list:
 def default_account(led: dict, p: dict, cwd: str) -> "str | None":
     """The account a proposal without one starts as (two or more accounts). A resume (an ORPHAN whose
     session MasterDeck did not record) as the app's sessionAccount: the session's own spawn proposal,
-    its folder's `origin` repo, then the issue repo's account, else the primary. A new session: the
-    issue repo's account, else the primary."""
+    its folder's `origin` repo, then the issue repo's account, else the primary (never the code
+    repository's: a resume with another account than the session's own starts a copy). A new
+    session: `config.start_account` (the code repository's account, else the issue's, else the
+    primary)."""
     sp = p["target"]["spawn"]
     if sp.get("resume"):
         connected = {a["login"].lower(): a["login"] for a in config.accounts()}
@@ -133,6 +135,7 @@ def default_account(led: dict, p: dict, cwd: str) -> "str | None":
         origin = config.match_repo(repo) if repo else None
         if origin:
             return origin
+        return config.account_for_repo(p.get("repo"))
     return config.start_account(p.get("repo"))
 
 

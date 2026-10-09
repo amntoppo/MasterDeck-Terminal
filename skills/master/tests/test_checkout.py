@@ -692,5 +692,18 @@ class PickedAccountTest(Base):
         self.assertEqual(ledger.load()["proposals"][-1]["target"]["spawn"]["cwd"], str(self.mine))
 
 
+class ResumeAccountTest(Base):
+    """A resume with no recorded account keeps the issue's account, never the code repository's: a
+    resume as another account than the session's own adds --settings and starts a copy."""
+
+    def test_an_orphan_resume_falls_back_to_the_issue_account(self):
+        self.cfg(accounts=[A, B], codeRepos=CODE)
+        led = ledger.empty()
+        resume = {"target": {"spawn": {"name": "app-7-x", "resume": "4f2a9c1e-1234-4abc-9def-0123456789ab"}}, "repo": "globex/app"}
+        new = {"target": {"spawn": {"name": "app-8-x", "prompt": "go"}}, "repo": "globex/app"}
+        self.assertEqual(spawn.default_account(led, resume, str(self.tmp)), "bob-work")
+        self.assertEqual(spawn.default_account(led, new, str(self.tmp)), "alice")
+
+
 if __name__ == "__main__":
     unittest.main()

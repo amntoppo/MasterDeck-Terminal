@@ -149,7 +149,9 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   `acme/tracker`, code in `acme/api`). A ticket of the tracker then starts in the checkout of
   `acme/api`, as the account that has `acme/api` (else the tracker's), and the line says "your
   checkout of acme/api (where acme/tracker's code lives)". The system prompt names the code
-  repository instead of asking the session to find it.
+  repository instead of asking the session to find it. The session runs as the code repository's
+  account, so that account must be able to read the tracker: a private tracker under another
+  account cannot be read from the session (pick the tracker's account in the Start dialog then).
   For master's proposal the dialog looks the ticket up again: a checkout that exists now replaces
   the proposal's folder only when that folder is the plain workspace (a folder master chose on
   purpose stays), and the new proposal keeps the proposal's model; when nothing differs, master's

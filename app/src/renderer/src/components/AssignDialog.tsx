@@ -155,13 +155,22 @@ export function AssignDialog({
     swapPrompt(r.draft);
   };
   // Another account picked: the folder is looked for again in its workspace (the latest pick wins).
-  const refinding = useRef(0);
-  const refind = async (login: string | null) => {
-    if (!refindOnAccount(folder, chosen, !!held)) return;
-    const n = ++refinding.current;
-    const other = accountOverride(login, defAccount, state.config);
-    const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, undefined, other ?? undefined);
-    if (!r.ok || n !== refinding.current || chosenPath.current) return;
+  // `picked`: the account the folder must be looked for in now (undefined: the ticket's default).
+  // `looking`: lookups under way; Start waits for them, so a folder never leaves with another
+  // account than the one it was found for.
+  const picked = useRef<string | undefined>(undefined);
+  const lookups = useRef(0);
+  const [looking, setLooking] = useState(0);
+  const track = <T,>(p: Promise<T>): Promise<T> => {
+    setLooking((n) => n + 1);
+    return p.finally(() => setLooking((n) => n - 1));
+  };
+  const refind = async (from: StartFolder | null) => {
+    if (!refindOnAccount(from, chosen, !!held)) return;
+    const n = ++lookups.current;
+    const other = picked.current;
+    const r = await track(deck().draftAssign(ticketOf(issue), issue.title, issue.url, undefined, other));
+    if (!r.ok || n !== lookups.current || chosenPath.current) return;
     setFolder(folderOf(r.draft));
     setAnyway(false);
     swapPrompt(r.draft);
@@ -282,10 +291,11 @@ export function AssignDialog({
         proposalId: fromProposal.id,
       });
       // The proposal only has its folder: look the ticket up now, for where it would start today.
-      void deck()
-        .draftAssign(ticketOf(issue), issue.title, issue.url)
+      const asked = picked.current;
+      const n = ++lookups.current;
+      void track(deck().draftAssign(ticketOf(issue), issue.title, issue.url))
         .then((r) => {
-          if (!alive || !r.ok || chosenPath.current) return;
+          if (!alive || !r.ok || chosenPath.current || n !== lookups.current) return;
           const was = sp.cwd ?? state.masterWorkspace;
           const now = adoptFresh(was, r.draft, state.config.workspace || state.masterWorkspace);
           setFolder(now);
@@ -295,6 +305,8 @@ export function AssignDialog({
             if (r.draft.genericPrompt) generic.current.push(r.draft.genericPrompt);
             swapPrompt(r.draft);
           } else learn(r.draft);
+          // Another account was picked while this ran (the pick could not look yet): look again for it.
+          if (picked.current !== asked) void refind(now);
         });
       return () => {
         alive = false;
@@ -339,7 +351,7 @@ export function AssignDialog({
       peersPromptBlock(peerFactsFor(state, peers, peerSummaries)),
     );
   const promptOk = compose().length > 0 && !compose().startsWith("-");
-  const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError;
+  const ready = !!draft && nameOk && promptOk && !blocked && !busy && !worktreeError && !looking;
 
   const start = async () => {
     if (!draft || !ready) return;
@@ -724,7 +736,8 @@ export function AssignDialog({
                   <AccountSelect state={state} value={account} onChange={(l) => {
                       setAccount(l);
                       setAccountPicked(true);
-                      void refind(l);
+                      picked.current = accountOverride(l, defAccount, state.config) ?? undefined;
+                      void refind(folder);
                     }}
                   />
                 </div>
