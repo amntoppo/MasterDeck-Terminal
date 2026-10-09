@@ -546,16 +546,19 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
   masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
   `mods/` in the app (electron-builder `extraResources`).
-- **User-scope install not tried yet**: the probe and the demo loaded the mod with `--plugin-dir`.
-  The first install at user scope loads it into every session; it draws nothing where MasterDeck has
-  no band file, but check it on the user's machine with their word.
+- **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
+  `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
+  masterdeck@masterdeck --scope user` (settings.json backed up first as
+  `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
+  nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
+  Updating the copy is by hand until the app installs it.
 - **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
   `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
   `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
   install sets, or a pointer file under `~/.claude`) before isolated E2E tests use it.
-- **Not run against the real app.** The app's band files and heartbeats are unit-tested and the mod
-  ran against a stand-in deck folder with a stand-in note pump; an isolated app driving a real
-  session end to end is still to do.
+- **The real app writes the band files** (checked on the installed build: one per live session
+  with a ticket, PR or link). The mod's band was seen only against a stand-in deck folder; seeing it
+  in a real ticket session after `/reload-plugins` is the user's check.
 - **Instant typing with a band above the prompt** (`predictiveEcho`) not checked in MasterDeck's pane.
 - **`/md-note` needs `mv` and `rm`** (`$.process.run`): macOS and Linux only; Windows needs
   `cmd /c move` or a rename in `$.fs`.

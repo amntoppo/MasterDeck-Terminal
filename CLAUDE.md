@@ -367,15 +367,17 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-10)
 
 - **Claude Code mods (#86)** (branch `worktree-MasterDeck-Terminal-86-mods`, not merged, not
-  installed): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
+  pushed; the app is installed locally from it and the mod is installed at user scope from
+  `~/.claude/masterdeck/mods`): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
   `claude --bg` session and draws in `claude attach`. Prototype `mods/masterdeck` (ticket band,
   toasts, `/md-ticket`, `/md-note`, heartbeat) and the app's side (`deck/band/<sid>.json`,
   **Mod live** in Session details). Checked: typecheck, vitest (149 files passed, 2 skipped; 1725
   tests passed, 4 skipped), `claude plugin validate` / `test` (6) / tsc for the mod, and the mod in
   throwaway sessions (background: heartbeat and `ended`; interactive: band at 80/110/160 columns,
-  toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed). Not checked:
-  a user-scope install, the real app writing band files for a live session, instant typing under
-  the band, Windows. A background session gets the daemon's environment, not the launching shell's
+  toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed); on the installed
+  build, band files for the live sessions and the user-scope mod loading in a new `claude --bg`.
+  Not checked: the band in a real ticket session (needs `/reload-plugins` there), instant typing
+  under the band, Windows. A background session gets the daemon's environment, not the launching shell's
   (`MASTERDECK_HOME` does not reach the mod there). Open points: TODO ("MasterDeck mod").
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
