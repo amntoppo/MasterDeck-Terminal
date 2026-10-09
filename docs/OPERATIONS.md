@@ -73,6 +73,16 @@ fallback). Needs a logged-in wrangler on this machine. Only when asked. Local de
 backend: `MD_API=http://localhost:8787 npm run dev:web -- --port 5175 --strictPort` (the backend
 then needs `APP_ORIGIN=http://localhost:5175`).
 
+## Website (masterdeck.dev)
+
+The site is its own repository, [amntoppo/Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+(checkout `~/Documents/personal/Masterdeck-Website`, private). `npm run deploy` there refreshes the
+changelog from this repository's releases, builds, deploys the Workers `masterdeck-site`
+(masterdeck.dev) and `masterdeck-www` (301 to the bare domain), and pings IndexNow. After a release,
+deploy the site again so its Download page shows it. Its README covers search engines: structured
+data, the sitemap, and the one-time Google Search Console setup. This repository links to the site
+from the README, the release notes (`.github/release-notes.md`) and the repository's website field.
+
 ## Backend deploy (other repo, for reference)
 
 `cd ~/Documents/masterdeck-backend && npx wrangler deploy` (local; the CI deploy fails

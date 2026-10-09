@@ -10,6 +10,14 @@ fixes it, and move the item here to "Recently done".
 
 ## Shipping / ops
 
+- **masterdeck.dev in Google (2026-10-10).** The site is live but not indexed yet, and "masterdeck"
+  also names a card trick and a decking brand. Done: structured data, the brand in the home page's
+  h1, sitemap dates, IndexNow on deploy, one address (no workers.dev), links from this repository
+  (website field, description, topics, README, release notes). Left, by hand: add the domain to
+  Google Search Console (Domain property, verified through Cloudflare), submit
+  `https://masterdeck.dev/sitemap-index.xml`, request indexing of the home page, and import it into
+  Bing Webmaster Tools. Then links from elsewhere (a launch post, Claude Code lists) do the most.
+
 - **P2 · First launch after a local reinstall hangs — cause found (2026-10-03).** A stack sample of the
   hung main process shows it inside a JS timer → `SecItemCopyMatching` → `SecKeychainItemCopyContent` →
   `SecurityServer::ClientSession::decrypt` (blocked in `mach_msg`): a synchronous Keychain read
