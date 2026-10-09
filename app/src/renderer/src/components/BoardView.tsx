@@ -1421,7 +1421,6 @@ function Card({
   /** An issue of an account with no board: it cannot be dragged to another column. */
   readOnly: boolean;
   onClick: () => void;
-  /** This ticket has a note. */
   /** The ticket's note (its plain one-line preview shows on hover). */
   note: NoteMeta | null;
   /** Open the ticket's note (absent: Notes is not available here). */
