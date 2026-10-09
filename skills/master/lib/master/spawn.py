@@ -118,8 +118,10 @@ def command(target: dict) -> list:
 def default_account(led: dict, p: dict, cwd: str) -> "str | None":
     """The account a proposal without one starts as (two or more accounts). A resume (an ORPHAN whose
     session MasterDeck did not record) as the app's sessionAccount: the session's own spawn proposal,
-    its folder's `origin` repo, then the issue repo's account, else the primary. A new session: the
-    issue repo's account, else the primary."""
+    its folder's `origin` repo, then the issue repo's account, else the primary (never the code
+    repository's: a resume with another account than the session's own starts a copy). A new
+    session: `config.start_account` (the code repository's account, else the issue's, else the
+    primary)."""
     sp = p["target"]["spawn"]
     if sp.get("resume"):
         connected = {a["login"].lower(): a["login"] for a in config.accounts()}
@@ -133,7 +135,8 @@ def default_account(led: dict, p: dict, cwd: str) -> "str | None":
         origin = config.match_repo(repo) if repo else None
         if origin:
             return origin
-    return config.account_for_repo(p.get("repo"))
+        return config.account_for_repo(p.get("repo"))
+    return config.start_account(p.get("repo"))
 
 
 _COPY = re.compile(r"background session ([0-9a-f]{8}) keeps its own saved options[^\n]*?started a copy as ([0-9a-f]{8})\b")
@@ -227,7 +230,7 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run, held_for_trus
     sp0 = p["target"]["spawn"]
     # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
     cwd = sp0.get("cwd") or (str(config.workspace()) if sp0.get("resume")
-                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo")))
+                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo"), sp0.get("account")))
     if not Path(cwd).is_dir():
         note = f"cwd does not exist: {cwd}"
         hold(note)
