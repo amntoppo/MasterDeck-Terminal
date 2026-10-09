@@ -297,6 +297,9 @@ describe("workflow builder drafts", () => {
       expect(md).toContain("'met' | 'limit'");
       expect(md).toMatch(/no loop in a loop/);
       expect(md).toMatch(/LOOP DONE:/);
+      // The session reports progress in a line; members never write a progress file.
+      expect(md).toMatch(/`PROGRESS:`/);
+      expect(md).toMatch(/never ask the session to write a progress file/);
       expect(md).toMatch(/`iterations` 1-100 \(default 10\)/);
       const json = /```json\n([\s\S]*?)```/.exec(md.split("## Loops")[1])![1];
       const c = checkDraft(JSON.parse(json));

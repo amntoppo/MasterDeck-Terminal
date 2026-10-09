@@ -906,7 +906,9 @@ function planFrom(
         );
         chain(loopEntry(flow, n), `${indent}   `, `${label}.`);
         lines.push(
-          `${indent}   Write a short note of what you tried to the loop's progress file each round (MasterDeck gives you its path).`,
+          // A line, not a file: the progress file lives under ~/.claude, where Claude Code refuses
+          // a session's writes. The loop hook keeps the line (shared/loopHook.ts).
+          `${indent}   End each round with one line starting "PROGRESS:" that says what you tried (MasterDeck keeps these as the loop's progress).`,
         );
         // Headings only over a branch that says something (a notify block adds nothing here).
         const over = lines.length;

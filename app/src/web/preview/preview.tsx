@@ -50,14 +50,15 @@ function previewDeck(noBoard: boolean): DeckApi {
       { id: 'n-lint', name: 'Clean the lint', state: 'limit', iteration: 10, max: 10, startedAt: Date.now() - 50 * 60_000, minutes: 0, reason: 'stopped after 10 iterations; the last check failed', endedAt: Date.now() - 10 * 60_000, lastCheck: { ran: true, passed: false, said: true, tail: '1 problem', at: Date.now() - 10 * 60_000 } },
     ],
   }
-  // History: three rounds of the open loop, with long output, and a progress file in Markdown.
-  const round = (n: number, passed: boolean, said: boolean, tail: string) => ({ n, at: Date.now() - (4 - n) * 4 * 60_000, ms: 38_000 + n * 1500, passed, said, exit: passed ? 0 : 1, tail, hash: `h${n}` })
+  // History: three rounds of the open loop, with long output and PROGRESS lines, and the progress file the hook keeps.
+  const said = ['the redirect drops the query string <b>tags stay text</b>', 'fixed the encoder; two cases left', 'the cookie path is wrong']
+  const round = (n: number, passed: boolean, said_: boolean, tail: string) => ({ n, at: Date.now() - (4 - n) * 4 * 60_000, ms: 38_000 + n * 1500, passed, said: said_, exit: passed ? 0 : 1, tail, hash: `h${n}`, progress: said[n - 1] })
   const failing = (k: number) => Array.from({ length: k }, (_, i) => `FAIL src/auth/redirect.test.ts > keeps the return path on a very long line that wraps at phone width (case ${i + 1})`).join('\n')
   const loopHistory = {
     ok: true,
     name: 'Fix the tests',
     history: [round(1, false, false, failing(6)), round(2, false, true, failing(2)), round(3, false, false, `${failing(2)}\n\nTests  2 failed | 140 passed`)],
-    progress: '# Fix the tests\n\n- Round 1: the redirect drops the query string.\n- Round 2: fixed the encoder; two cases left.\n- Round 3: the cookie path is wrong.\n\n<b>tags stay text</b>',
+    progress: said.map((t, i) => `- round ${i + 1}: ${t}`).join('\n') + '\n',
   }
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()

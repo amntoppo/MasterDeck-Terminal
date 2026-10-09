@@ -95,7 +95,6 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     result: result(o.r),
     now: NOW,
     sid: SID,
-    progress: '/h/workflows/loops/sid-',
   })
 
   it('counts an iteration and keeps going', () => {
@@ -112,6 +111,23 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     expect(out.answer.reason).toContain('The check `false` failed (exit 2, no output).\nGo on')
     const claim = decide(base({ d: [def({ agentDone: { on: true, goal: 'g' } })], r: { tail: '', exit: 1, said: true } }))
     expect(claim.answer.reason).toContain('Your LOOP DONE claim was not backed by the check: `false` failed (exit 1, no output).\nGo on')
+  })
+
+  it('a round\'s PROGRESS line goes into its history, the progress note and the last three into So far', () => {
+    const h = (n: number, progress?: string) => ({ n, hash: `h${n}`, ...(progress ? { progress } : {}) })
+    const e = { iteration: 4, history: [h(1, 'tried A'), h(2), h(3, 'tried B'), h(4, 'tried C')] }
+    const out = decide(base({ e, r: { progress: 'tried D' } }))
+    expect(out.file.loops[0].history[4]).toMatchObject({ n: 5, progress: 'tried D' })
+    expect(out.note).toBe('- round 5: tried D')
+    const r: string = out.answer.reason
+    expect(r).toContain('So far:\n- round 3: tried B\n- round 4: tried C\n- round 5: tried D\nGo on')
+    expect(r).not.toContain('tried A')
+    expect(r).toMatch(/End your turn with one line starting "PROGRESS:" that says what you tried\.$/)
+    // Nothing said: no note, no field, and no So far before any round said something.
+    const none = decide(base())
+    expect(none.note).toBeNull()
+    expect(none.file.loops[0].history[0]).not.toHaveProperty('progress')
+    expect(none.answer.reason).not.toContain('So far')
   })
 
   it('counts the extra iterations Run 5 more adds', () => {
@@ -136,7 +152,7 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
 
   it('leaves a file with no open loop alone', () => {
     const file = { loops: [entry({ state: 'stopped' }), 3] }
-    expect(decide({ ...base(), file })).toEqual({ file, answer: null, run: null, opened: [] })
+    expect(decide({ ...base(), file })).toEqual({ file, answer: null, run: null, opened: [], note: null })
   })
 
   it('stops a loop its workflow no longer has', () => {
@@ -177,7 +193,8 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     expect(met.file.loops[1]).toMatchObject({ step: STEP, iteration: 0, startedAt: NOW, history: [] })
     expect(met.answer.reason).toContain('Loop "Fix" is done: criterion met after 1 iteration. Now:\n2.met.1.')
     expect(met.answer.reason).toContain('Then the loop "B" starts')
-    expect(met.answer.reason).toContain('/h/workflows/loops/sid-lb.md')
+    expect(met.answer.reason).toContain('End each round with one line starting "PROGRESS:" that says what you tried.')
+    expect(met.answer.reason).not.toContain('.md')
     // A plain arrow: opened whatever the outcome; the answer blocks even with no branch text.
     const then = [def(), def({ id: 'lb', name: 'B', after: { loop: 'lp', via: 'then' } })]
     const limit = decide(base({ d: then, e: { iteration: 9 } }))
@@ -244,14 +261,14 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
     expect(gone.run({ session_id: '../x' })).toBe('')
   })
 
-  it('a failing check blocks with the iteration, the output tail, the round and the progress file', () => {
+  it('a failing check blocks with the iteration, the output tail and the round', () => {
     const t = setup({ loops: [def({ check: { command: "echo 'expected 2, got 3'; exit 1" } as CompiledLoop['check'] })] })
     const a = t.answer()
     expect(a.decision).toBe('block')
     expect(a.reason).toContain('↻ Loop "Fix": iteration 1/10.')
     expect(a.reason).toContain('The check failed:\nexpected 2, got 3')
     expect(a.reason).toContain('1. Run the tests and fix what fails.')
-    expect(a.reason).toContain(join(t.home, 'workflows', 'loops', `${SID}-lp.md`))
+    expect(a.reason).not.toContain(t.home)
     const [l] = t.loops()
     expect(l).toMatchObject({ state: 'open', iteration: 1 })
     expect(l.history).toHaveLength(1)
@@ -477,6 +494,25 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
       expect(t.runs()).toEqual([])
       expect(readdirSync(join(t.home, 'workflows', 'loops')).filter((n) => n.endsWith('.tmp'))).toEqual([])
     }
+  })
+
+  it('takes the first PROGRESS line of what the agent said into the progress file, plain and short', () => {
+    const t = setup()
+    const md = join(t.home, 'workflows', 'loops', `${SID}-lp.md`)
+    writeFileSync(md, '')
+    t.run({ last_assistant_message: 'Fixed the encoder.\nPROGRESS:  fixed the encoder\ttwo cases left \nPROGRESS: second' })
+    t.run({ last_assistant_message: 'Nothing to report.' })
+    t.run({ last_assistant_message: `PROGRESS: ${'x'.repeat(400)}\u0007` })
+    const lines = readFileSync(md, 'utf8').split('\n')
+    expect(lines[0]).toBe('- round 1: fixed the encoder two cases left')
+    expect(lines[1]).toBe(`- round 3: ${'x'.repeat(300)}`)
+    expect(lines.length).toBe(3)
+    const h = t.loops()[0].history
+    expect(h[0].progress).toBe('fixed the encoder two cases left')
+    expect(h[1]).not.toHaveProperty('progress')
+    const a = t.answer({ last_assistant_message: 'PROGRESS: tried the cookie path' })
+    expect(a.reason).toContain('So far:\n- round 1: fixed the encoder two cases left\n- round 3: x')
+    expect(a.reason).toContain('- round 4: tried the cookie path\nGo on')
   })
 
   it('writes only under workflows/loops and runs.jsonl', () => {

@@ -18,6 +18,8 @@ export interface LoopCheck {
   exit: number | null
   tail: string
   hash: string
+  /** What the session said it tried this round (its `PROGRESS:` line); absent when it said none. */
+  progress?: string
 }
 
 export interface LoopEntry {
@@ -72,6 +74,8 @@ export const validLoopId = (id: unknown): id is string => typeof id === 'string'
 export const LOOPS_PER_SESSION = 3
 export const LOOP_KEEP_MS = 24 * 3600_000
 export const LOOP_TAIL_MAX = 1024
+/** A round's PROGRESS line, at most (the hook cuts it there too). */
+export const LOOP_PROGRESS_MAX = 300
 /** What Run 5 more adds. */
 export const LOOP_MORE = 5
 
@@ -84,7 +88,7 @@ function parseCheck(v: unknown): LoopCheck | null {
   const n = num(o.n)
   const at = num(o.at)
   if (n === null || at === null) return null
-  return {
+  const c: LoopCheck = {
     n,
     at,
     ms: num(o.ms) ?? 0,
@@ -94,6 +98,9 @@ function parseCheck(v: unknown): LoopCheck | null {
     tail: str(o.tail) ?? '',
     hash: str(o.hash) ?? '',
   }
+  const progress = str(o.progress)?.slice(0, LOOP_PROGRESS_MAX)
+  if (progress) c.progress = progress
+  return c
 }
 
 function parseEntry(v: unknown): LoopEntry | null {

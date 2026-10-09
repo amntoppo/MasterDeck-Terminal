@@ -344,8 +344,11 @@ checkout whose branch was once linked to a ticket does not link it.
   a confirm: a stopped loop can't be given more) lets the session end its turn at the next turn end.
   **History** lists every round, newest first (at most 50): its time, how long the check took,
   passed / failed / no check, *said done* when the session claimed it, and the check's output
-  (click a round to unfold it); then the loop's progress file, drawn as Markdown with every tag
-  shown as text. The session row in the list shows `↻ 3/10` while a loop runs, and `↻ ✓` (met) or
+  (click a round to unfold it), and under it what the session said it tried that round; then the
+  loop's progress, every round's line, drawn as Markdown with every tag shown as text. A session in
+  a loop ends each round with a line starting `PROGRESS:` that says what it tried; MasterDeck keeps
+  those lines and shows the last three to the session at each round (the session writes no file for
+  them). The session row in the list shows `↻ 3/10` while a loop runs, and `↻ ✓` (met) or
   `↻ !` (at a limit) for an hour after; hover it for the same line. On a phone the badge and the
   Details line are the same. A session keeps the hooks it started with (Claude Code reads them once),
   so this works for sessions older than a workflow change too. **Edit** opens the same editor

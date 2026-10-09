@@ -18,6 +18,7 @@ import {
   historyRows,
   loopLine,
   tookText,
+  type LoopCheck,
   type LoopHistory,
   type LoopView,
 } from "@shared/loops";
@@ -240,6 +241,33 @@ export function LoopProgress({
   );
 }
 
+/**
+ * One round in History: when, how long, the check's word, its PROGRESS line (the session's own
+ * words, drawn as text) and the check's output folded.
+ */
+export function LoopRound({ c }: { c: LoopCheck }) {
+  return (
+    <details className="wfl-round">
+      <summary>
+        <b>#{c.n}</b>
+        <span>
+          {new Date(c.at).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+        <span className="muted">{tookText(c.ms)}</span>
+        <span className={`wfl-check ${checkWord(c).replace(" ", "-")}`}>
+          {checkWord(c)}
+        </span>
+        {c.said && <span className="wfl-said">said done</span>}
+        {c.progress && <div className="wfl-round-prog">{c.progress}</div>}
+      </summary>
+      <pre>{c.tail || "(no output)"}</pre>
+    </details>
+  );
+}
+
 /** A loop's rounds, newest first, each check's output folded; then its progress file. */
 function LoopHistoryPanel({
   sessionId,
@@ -266,29 +294,13 @@ function LoopHistoryPanel({
     <div className="wfl-hist">
       {rows.length === 0 && <div className="muted">No round has ended yet.</div>}
       {rows.map((c) => (
-        <details key={c.n} className="wfl-round">
-          <summary>
-            <b>#{c.n}</b>
-            <span>
-              {new Date(c.at).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-            <span className="muted">{tookText(c.ms)}</span>
-            <span className={`wfl-check ${checkWord(c).replace(" ", "-")}`}>
-              {checkWord(c)}
-            </span>
-            {c.said && <span className="wfl-said">said done</span>}
-          </summary>
-          <pre>{c.tail || "(no output)"}</pre>
-        </details>
+        <LoopRound key={c.n} c={c} />
       ))}
-      <div className="eyebrow wfl-prog-head">Progress file</div>
+      <div className="eyebrow wfl-prog-head">Progress</div>
       {h.progress.trim() ? (
         <MarkdownView text={h.progress} html={false} className="wfl-prog" />
       ) : (
-        <div className="muted">No progress file yet.</div>
+        <div className="muted">No PROGRESS line yet.</div>
       )}
     </div>
   );

@@ -46,6 +46,12 @@ describe('parseLoopFile', () => {
     expect(f.loops.map((e) => e.id)).toEqual(['lp', 'd'])
     expect(f.loops[1]).toMatchObject({ extra: 5, stallFrom: 3, history: [check()], lastCheck: { exit: null } })
   })
+
+  it("keeps a round's PROGRESS line (text only, at most 300 characters)", () => {
+    const f = parseLoopFile({ loops: [entry({ history: [check({ progress: 'tried A' }), check({ n: 2, progress: 7 }), check({ n: 3, progress: 'y'.repeat(400) })] })] })
+    expect(f.loops[0].history.map((c) => c.progress)).toEqual(['tried A', undefined, 'y'.repeat(300)])
+    expect(f.loops[0].history[1]).not.toHaveProperty('progress')
+  })
 })
 
 describe('loopViews', () => {

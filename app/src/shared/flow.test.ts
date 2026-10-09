@@ -496,7 +496,7 @@ describe("compiling loops", () => {
         '2. Then: Repeat until the loop "Fix" is done (MasterDeck checks it each time you finish a turn: `npm test` must pass). Each round:',
         "   2.1. B",
         "   2.2. Then: C",
-        "   Write a short note of what you tried to the loop's progress file each round (MasterDeck gives you its path).",
+        '   End each round with one line starting "PROGRESS:" that says what you tried (MasterDeck keeps these as the loop\'s progress).',
         "   When MasterDeck says the loop is over:",
         "     If the criterion was met:",
         "       2.met.1. D",

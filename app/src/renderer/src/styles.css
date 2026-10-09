@@ -1224,6 +1224,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .wfl-check.failed { color: var(--red); }
 .wfl-check.no-check { color: var(--muted); }
 .wfl-said { color: var(--purple); }
+.wfl-round-prog { flex-basis: 100%; color: var(--text); overflow-wrap: anywhere; }
 .wfl-prog-head { margin-top: 8px; }
 .wfl-prog { max-height: 260px; overflow: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .srow-loop { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 9px; color: var(--accent); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }

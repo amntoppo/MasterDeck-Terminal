@@ -612,6 +612,10 @@ criterion is met or a limit is hit. MasterDeck checks it each time the session f
   3 is a good choice). At a limit MasterDeck asks the user in Needs you (they can give it more
   rounds), so the \`limit\` arrow is only for what the session should do then.
 - \`name\`: short, shown on the frame and in progress ("Fix the tests").
+- Progress: MasterDeck tells the session to end each round with one line starting \`PROGRESS:\`
+  that says what it tried, and keeps those lines (the session never writes the progress file
+  itself: Claude Code refuses writes there). So never ask the session to write a progress file or
+  notes file in a member block.
 - Where loops may go: under a trigger the session gets, except \`turn-end\` (a loop there would
   never end) and never under \`needs-you\` or \`idle\`. One loop open at a time, on the main path:
   not inside an \`ok\` / \`fail\` branch (MasterDeck can't tell which branch the session took), and

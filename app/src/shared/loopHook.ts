@@ -23,13 +23,19 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
 
 /**
  * The decision, one jq program so it can be tested alone. Input:
- * `{file, defs, result, now, sid, progress}`: the loop file, the compiled loops of the open loop's
+ * `{file, defs, result, now, sid}`: the loop file, the compiled loops of the open loop's
  * step (`CompiledLoop[]`, from the session's workflow file), what the turn end found
- * (`{ran, passed, said, exit, tail, hash, ms}`), the time in ms, the session id and the progress
- * files' path prefix (`<dir>/workflows/loops/<sid>-`). Output:
- * `{file, answer, run, opened}`: the loop file to write, the hook's answer (null lets the stop
- * through), the `runs.jsonl` line (null when nothing ran) and the loops opened after this one
- * (their progress files are the shell's to create).
+ * (`{ran, passed, said, exit, tail, hash, ms, progress}`: `progress` is the round's `PROGRESS:`
+ * line, "" when it said none), the time in ms and the session id. Output:
+ * `{file, answer, run, opened, note}`: the loop file to write, the hook's answer (null lets the stop
+ * through), the `runs.jsonl` line (null when nothing ran), the loops opened after this one
+ * (their progress files are the shell's to create) and the line the shell appends to the loop's
+ * progress file (null when the round said nothing).
+ *
+ * The session never writes the progress file itself: it lives under MasterDeck's home in
+ * `~/.claude`, where Claude Code refuses a session's writes. Each round ends with a `PROGRESS:`
+ * line instead, which the hook keeps (the round's history entry, the progress file) and hands back
+ * as "So far" (the last three).
  *
  * First match wins: met, the iteration limit (`limits.iterations` plus the `extra` that Run 5 more
  * adds), the time limit, the stall limit (the last `stall` hashes equal: check output with
@@ -40,17 +46,18 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
 export const DECIDE = String.raw`
 def plural($n; $w): "\($n) \($w)\(if $n == 1 then "" else "s" end)";
 def set: type == "string" and test("\\S");
+def progress_ask($w): "\($w) with one line starting \"PROGRESS:\" that says what you tried.";
 def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt: $now, history: [], reason: null, lastCheck: null};
 . as $in
 | ($in.file.loops | [range(0; length) as $i | select((.[$i] | type) == "object" and .[$i].state == "open") | $i][0]) as $k
-| if $k == null then {file: $in.file, answer: null, run: null, opened: []} else
+| if $k == null then {file: $in.file, answer: null, run: null, opened: [], note: null} else
   $in.file.loops[$k] as $e
   | ([$in.defs[]? | select(.id == $e.id)][0]) as $def
   | if $def == null then
       # The workflow was read and no longer has this loop: nothing could ever end it, so it ends
       # here. (A workflow the shell could not read never gets this far.)
       {file: ($in.file | .loops[$k] = ($e + {state: "stopped", reason: "the workflow no longer has this loop"})),
-       answer: null, opened: [],
+       answer: null, opened: [], note: null,
        run: {at: $in.now, sid: $in.sid, trigger: "loop", ids: $e.id, iteration: ($e.iteration // 0), state: "stopped"}}
     else
       $in.result as $r
@@ -62,7 +69,9 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
       | ($in.now - ($e.startedAt // $in.now)) as $elapsed
       | ($def.limits.minutes // 0) as $mins
       | ($def.limits.stall // 0) as $stall
-      | {n: $n, at: $in.now, ms: $r.ms, passed: $r.passed, said: $r.said, exit: $r.exit, tail: $r.tail, hash: $r.hash} as $h
+      | (($r.progress // "") | if set then . else null end) as $said
+      | ({n: $n, at: $in.now, ms: $r.ms, passed: $r.passed, said: $r.said, exit: $r.exit, tail: $r.tail, hash: $r.hash}
+         + (if $said then {progress: $said} else {} end)) as $h
       | ((($e.history // []) + [$h]) | .[-50:]) as $hist
       # Rounds before Run 5 more (stallFrom) never count toward the stall limit: a loop given more
       # gets its own rounds before it can be stopped for no progress again.
@@ -95,7 +104,9 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
                 elif $r.ran and ($r.passed | not) then (if $quiet then "The check \($why)\n" else "The check failed:\n\($r.tail)\n" end)
                 elif $agent and ($r.said | not) then "Not done yet. When the goal is reached (\($def.agentDone.goal)), end your turn with a line starting \"LOOP DONE:\" and why.\n"
                 else "Not met yet.\n" end)
-             + "Go on with the loop's steps:\n\($def.plan)\nAdd a note of what you tried to \($in.progress)\($e.id).md."),
+             + ([$hist[] | select(.progress | set) | "- round \(.n): \(.progress)"] | .[-3:]
+                | if length > 0 then "So far:\n\(join("\n"))\n" else "" end)
+             + "Go on with the loop's steps:\n\($def.plan)\n\(progress_ask("End your turn"))"),
            systemMessage: "↻ loop \($n)/\($max)"}
         else
           (if $d.state == "met" then $def.met else $def.limit end) as $branch
@@ -105,11 +116,12 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
                reason: ("Loop \"\($def.name)\" is \(if $d.state == "met" then "done" else "over" end): \($d.reason)."
                  + (if $branch | set then " Now:\n\($branch)" else "" end)
                  + (if $then | set then "\nAfter the loop:\n\($then)" else "" end)
-                 + ([$next[] | "\nThen the loop \"\(.name)\" starts (MasterDeck checks it each time you finish a turn). Each round:\n\(.plan)\nAdd a note of what you tried to \($in.progress)\(.id).md."] | join(""))),
+                 + ([$next[] | "\nThen the loop \"\(.name)\" starts (MasterDeck checks it each time you finish a turn). Each round:\n\(.plan)\n\(progress_ask("End each round"))"] | join(""))),
                systemMessage: "↻ loop \"\($def.name)\": \($d.reason)"}
             else null end
         end) as $answer
       | {file: ($in.file | .loops = $loops), answer: $answer, opened: [$next[].id],
+         note: (if $said then "- round \($n): \($said)" else null end),
          run: {at: $in.now, sid: $in.sid, trigger: "loop", ids: $e.id, iteration: $n, state: $d.state}}
     end
   end
@@ -168,6 +180,9 @@ if [ -z "$msg" ]; then
 fi
 said=false
 printf '%s\\n' "$msg" | grep -q '^LOOP DONE:' && said=true
+# The round's progress: the first line starting PROGRESS:, as plain text (control characters and
+# runs of blanks made one space), at most 300 characters.
+prog=$(printf '%s' "$msg" | jq -Rrs '[split("\\n")[] | select(startswith("PROGRESS:"))][0] // "" | .[9:] | explode | map(if . < 32 or (. >= 127 and . < 160) then 32 else . end) | implode | gsub("\\\\s+"; " ") | ltrimstr(" ") | rtrimstr(" ") | .[0:300]' 2>/dev/null)
 ran=false; passed=false; ec=null; ms=0; o="$LD/.check-$sid.$$"; : > "$o"
 # With the agent's goal on and nothing said, the check is not run: a test run each turn the agent
 # is mid-work would cost time for nothing.
@@ -207,14 +222,18 @@ tail=$(tail -n 40 "$o" | tail -c 4096 | jq -Rs . 2>/dev/null); [ -n "$tail" ] ||
 rm -f "$o"
 # No progress = the same output (durations taken out) and the same commit and working tree.
 hash=$( { printf '%s' "$tail" | jq -r 'gsub("[0-9]+(\\\\.[0-9]+)? ?m?s\\\\b"; "")' 2>/dev/null; git rev-parse HEAD 2>/dev/null; git --no-optional-locks status --porcelain 2>/dev/null; } | cksum | awk '{print $1}')
-res=$(jq -n --argjson ran "$ran" --argjson passed "$passed" --argjson said "$said" --argjson exit "$ec" --argjson tail "$tail" --arg hash "$hash" --argjson ms "$ms" '{ran: $ran, passed: $passed, said: $said, exit: $exit, tail: $tail, hash: $hash, ms: $ms}')
-out=$(jq -nc --argjson file "$cur" --argjson defs "$defs" --argjson result "$res" --argjson now "$(date +%s)000" --arg sid "$sid" --arg progress "$LD/$sid-" '{file: $file, defs: $defs, result: $result, now: $now, sid: $sid, progress: $progress} | ${DECIDE.replace(/'/g, `'\\''`)}' 2>/dev/null) || exit 0
+res=$(jq -n --argjson ran "$ran" --argjson passed "$passed" --argjson said "$said" --argjson exit "$ec" --argjson tail "$tail" --arg hash "$hash" --argjson ms "$ms" --arg progress "$prog" '{ran: $ran, passed: $passed, said: $said, exit: $exit, tail: $tail, hash: $hash, ms: $ms, progress: $progress}')
+out=$(jq -nc --argjson file "$cur" --argjson defs "$defs" --argjson result "$res" --argjson now "$(date +%s)000" --arg sid "$sid" '{file: $file, defs: $defs, result: $result, now: $now, sid: $sid} | ${DECIDE.replace(/'/g, `'\\''`)}' 2>/dev/null) || exit 0
 [ -n "$out" ] || exit 0
 printf '%s' "$out" | jq -c '.file' > "$L.$$.tmp" 2>/dev/null || { rm -f "$L.$$.tmp"; exit 0; }
 # Stop loop or Run 5 more while the check ran (the loop no longer open, or a new start): the
 # user's write stands, and this round is not counted.
 jq -e --argjson e "$e" 'any(.loops[]?; .id? == $e.id and .state? == "open" and .startedAt? == $e.startedAt)' "$L" >/dev/null 2>&1 || { rm -f "$L.$$.tmp"; exit 0; }
 mv "$L.$$.tmp" "$L" || { rm -f "$L.$$.tmp"; exit 0; }
+# The round's PROGRESS line, kept in the loop's progress file (the session never writes it).
+eid=$(printf '%s' "$e" | jq -r '.id')
+nt=$(printf '%s' "$out" | jq -r '.note // empty' 2>/dev/null)
+case "$eid" in ""|*[!a-z0-9-]*) ;; *) [ -n "$nt" ] && printf '%s\\n' "$nt" >> "$LD/$sid-$eid.md" ;; esac
 for id in $(printf '%s' "$out" | jq -r '.opened[]?'); do
   case "$id" in ""|*[!a-z0-9-]*) continue;; esac
   : > "$LD/$sid-$id.md"

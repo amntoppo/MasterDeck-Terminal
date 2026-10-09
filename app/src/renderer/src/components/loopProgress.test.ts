@@ -15,12 +15,14 @@ const view = (over: Partial<LoopView> = {}): LoopView => ({
 const g = globalThis as Record<string, unknown>
 let LoopProgress: typeof import('./SessionWorkflow').LoopProgress
 let SessionRow: typeof import('./Sidebar').SessionRow
+let LoopRound: typeof import('./SessionWorkflow').LoopRound
 beforeAll(async () => {
   g.localStorage = { getItem: () => null, setItem: () => {} }
   g.window ??= { deck: { platform: 'darwin' }, addEventListener: () => {}, removeEventListener: () => {} }
   g.document ??= { body: {} }
   LoopProgress = (await import('./SessionWorkflow')).LoopProgress
   SessionRow = (await import('./Sidebar')).SessionRow
+  LoopRound = (await import('./SessionWorkflow')).LoopRound
 })
 
 const details = (loops?: LoopView[]) => renderToStaticMarkup(createElement(LoopProgress, { sessionId: 's1', loops, now: NOW }))
@@ -47,6 +49,15 @@ describe('loop progress in Details', () => {
   it('nothing without loops', () => {
     expect(details(undefined)).toBe('')
     expect(details([])).toBe('')
+  })
+})
+
+describe('a round in History', () => {
+  const round = { n: 2, at: NOW, ms: 1200, passed: false, said: false, exit: 1, tail: '2 failed', hash: 'h' }
+  it("shows the round's PROGRESS line under its summary, as text", () => {
+    const html = renderToStaticMarkup(createElement(LoopRound, { c: { ...round, progress: 'fixed <b>the</b> encoder' } }))
+    expect(html).toContain('<div class="wfl-round-prog">fixed &lt;b&gt;the&lt;/b&gt; encoder</div>')
+    expect(renderToStaticMarkup(createElement(LoopRound, { c: round }))).not.toContain('wfl-round-prog')
   })
 })
 
