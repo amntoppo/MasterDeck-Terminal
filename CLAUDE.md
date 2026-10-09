@@ -375,6 +375,14 @@ buttons; it does not go through macOS window drag regions.
   `context.json`, a hand-made dry-run request answered with the bar's values and four overrides).
   Not checked: a real Claude session following the briefing, a real create on GitHub, the web app,
   a phone, two or more accounts on screen, Windows. Open points: TODO ("Create with Claude settings bar").
+- **The web app's Start dialog has Choose folder… (#62)** (branch
+  `worktree-MasterDeck-Terminal-62-web-folder-choice`, not merged, not installed): a pick of the
+  workspace and its repositories (`RepoPicker` `listOnly`), and `chosenFolder(remote, cwd, known)`
+  takes a browser's folder only when it is one of `workspaceFolders()` (real paths), else refuses
+  with a message. Checked: typecheck, vitest, the guard's tests (allowed, refused, a link out of the
+  workspace), and the dev preview at 390 x 844 (the pick, the folder line after it, a refusal
+  keeping the folder). Not checked: the real web app over the bridge, a start from the web, a real
+  phone. An `assign` request's own `cwd` is still not checked (TODO).
 - **Notes in Markdown (#65)** are built on branch `worktree-MasterDeck-Terminal-65-notes-markdown`
   (from `origin/main` with Notes merged, PR #69): the editor's **Write / Preview / Side by side**, the
   preview drawn by `MarkdownView` with `html={false}`, plain one-line previews, the window refusing

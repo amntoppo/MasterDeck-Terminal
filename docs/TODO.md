@@ -345,8 +345,11 @@ fixes it, and move the item here to "Recently done".
   and its sessions get no account from the folder either. Fix both parsers together.
 - **P3 · `collect.Live.branch_head` still looks for local branches beside the top-level workspace
   only** (`config.workspace().parent`); another account's workspace falls back to the GitHub API.
-- **P3 · The web app has no Choose folder…** (the native picker is desktop-only, and main drops a
-  folder a browser sends). `RepoPicker` plus `knownDirsOnly` could offer the workspace repos there.
+- **P3 · A browser's `assign` request still carries any `cwd`.** #62 checks the folder a browser
+  chooses in the Start dialog (`chosenFolder` on `draftAssign`), but `assign` passes its own `cwd`
+  on from a browser as from the window (as it always did, and the + menu's New session takes a
+  typed path). Decide whether a browser's starts should all be held to `workspaceFolders()` (a
+  proposal's folder, a worktree and the workspace would have to pass too).
 
 ## Start dialog (#66): leftovers (2026-10-06)
 
@@ -542,6 +545,7 @@ fixes it, and move the item here to "Recently done".
 | What | MasterDeck | Backend |
 |---|---|---|
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
+| The web app's Start dialog has **Choose folder…** (issue #62): a pick of the workspace and the repositories MasterDeck found (`RepoPicker` `listOnly`, no typed path; fits the phone at 390 px), and main takes a browser's folder for the draft only when it is one of them, as real paths (`chosenFolder(remote, cwd, known)`, `workspaceFolders()` in `main/index.ts`); anything else is refused with a message and the dialog keeps its folder (it was dropped silently) | branch `worktree-MasterDeck-Terminal-62-web-folder-choice` | — |
 | Notes in Markdown (issue #65): a note's text is drawn as Markdown (`MarkdownView` with `html={false}`: every tag is text, https links only, opened in the browser), **Write / Preview / Side by side** in the editor, previews in the list, Details and on the card read the Markdown as one plain line; the window refuses navigation away from the app; sessions can add to notes with the `masterdeck-notes` skill (`note.sh new / ticket / append`, `main/noteRequests.ts`, answers carry an id, never a note's text) | branch `worktree-MasterDeck-Terminal-65-notes-markdown` (not merged) | — |
 | Where a session starts, three decisions (issue #61): Setup's **Issues whose code is in another repository** pairs (`codeRepos`: a tracker's tickets start in the code repository's checkout, as its account, and the prompt names it); picking another account in the Start dialog looks for the folder in that account's workspace (`draft-assign --account`, not after Choose folder… or for a held start); a PR review runs as its PR's repository's account and is looked up in that account's workspace (`checkout --account`). One rule on both sides: `config.start_account` / `startAccount` | branch `worktree-MasterDeck-Terminal-61-start-folder` | — |
 | Remote no longer waits for ever on "waiting for sessions to load" (issue #8): the status says why when `claude agents` fails, and after 60 s (`REMOTE_WAIT_MS`, `remoteWait` in `shared/remoteSnapshot.ts`) the line connects anyway; until the first session list no snapshot is sent, and commands are answered "still loading" (retried) while it loads or fail at once with the agents error while `claude agents` fails | branch `worktree-MasterDeck-Terminal-8-remote-waiting` | — |

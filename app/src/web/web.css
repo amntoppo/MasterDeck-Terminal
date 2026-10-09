@@ -136,3 +136,5 @@ html.phone .filters-sheet-body .mpick-row { padding: 9px 10px; font-size: 14px; 
 .app.phone > .notes-panel .notes-search, .app.phone > .notes-panel .notes-title, .app.phone > .notes-panel .notes-body { font-size: 16px; }
 /* A phone has no hover: the faint mark stays visible. :not(.has) keeps a card with a note fully amber (the desktop .has rule has less specificity than this one would). */
 .app.phone .bcard-note:not(.has) { opacity: .55; }
+html.phone .repo-picker .mpick-row { padding: 10px; font-size: 14px; }
+html.phone .repo-picker .wt-list { max-height: calc(var(--vvh, 100dvh) - 240px) !important; }

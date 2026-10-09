@@ -563,11 +563,13 @@ drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the 
 proposal's own folder); main passes a connected login only (two or more accounts). A PR
 review names its repository (`AssignRequest.cwdRepo`): main's `assignNow` takes the picked account,
 else `startAccount(repo, cfg, cwdRepo)` (the PR's repository's account), and `inRepoFolder`
-(`main/assign.ts`) asks `master checkout --account` for it, so folder and account agree. For web
-callers main drops only the `cwd` argument of `draftAssign` (`chosenFolder` in
-`main/remoteGuards.ts`; from the window it must be an absolute, existing folder); an `assign`
-request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the window, as `cwd`
-always was.
+(`main/assign.ts`) asks `master checkout --account` for it, so folder and account agree. The `cwd`
+argument of `draftAssign` is checked by `chosenFolder` (`main/remoteGuards.ts`): from the window it
+must be an absolute, existing folder; from a browser it must be one of `workspaceFolders()` in
+`main/index.ts` (the workspace and `Ops.repos()`, the list `workspaceRepos` gives the web app's
+`RepoPicker`), compared as real paths, and anything else is refused with a message (the dialog
+keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a
+browser exactly as from the window, as `cwd` always was.
 
 **Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
 was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust
@@ -883,7 +885,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   the visible view; on the web all output goes through `predictiveEcho`).
 - Web gating: `web.ts` — `isWeb()` (`deck().platform === 'web'`), `can(method)`, `WEB_VIEWS`,
   `screenOk`, `shortcutOk`, `actionOk`, `keyPlatform`. `webConfirm.ts` + `WebConfirm.tsx` replace
-  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker.
+  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker (`listOnly`: the workspace repositories and no typed path, for the Start dialog).
 - One stylesheet: `styles.css` (the web adds `src/web/web.css`).
 - Phone layout (web only): `web.ts` `isPhone()` / `usePhone()` = `isWeb() && matchMedia(PHONE_QUERY)`
   (`(max-width: 760px)`), so Electron never gets it. App adds `phone ps-list|main|master` to `.app`
