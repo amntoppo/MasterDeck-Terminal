@@ -1,66 +1,112 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { MOD_SELF, type ModEntry } from '@shared/modBand'
 
 const KEY = /^[0-9a-f-]{8,36}$/i
+const NAME = /^[A-Za-z0-9._-]{1,64}$/
+
+function writeJson(file: string, value: unknown): boolean {
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(`${file}.tmp`, JSON.stringify(value))
+    renameSync(`${file}.tmp`, file)
+    return true
+  } catch (e) {
+    console.error(`mods: could not write ${file}: ${String(e)}`)
+    return false
+  }
+}
 
 /**
- * `mod-off.json`: the sessions (Session.key) where the user switched the MasterDeck mod off in
- * Session details. Claude Code turns a plugin on or off for a whole settings scope only, so "off"
- * here means the mod stays quiet in that session (`off` in its band file).
+ * `mod-off.json`: `{ <Session.key>: [mod names] }`, the mods switched off for a session in Session
+ * details → Mods. Claude Code turns a plugin on or off per settings scope only, so the MasterDeck
+ * mod does it per session: it stays quiet itself, and refuses the others when they load.
+ * The first version of the file was an array of keys (the MasterDeck mod off there).
  */
 export class ModOff {
-  private keys: Set<string> | null = null
+  private map: Map<string, string[]> | null = null
 
   constructor(private file: string) {}
 
-  private load(): Set<string> {
-    if (this.keys) return this.keys
+  private load(): Map<string, string[]> {
+    if (this.map) return this.map
+    this.map = new Map()
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as unknown
-      this.keys = new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && KEY.test(x)) : [])
+      if (Array.isArray(raw)) {
+        for (const k of raw) if (typeof k === 'string' && KEY.test(k)) this.map.set(k, [MOD_SELF])
+      } else if (raw && typeof raw === 'object') {
+        for (const [k, v] of Object.entries(raw)) {
+          const names = Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string' && NAME.test(n)) : []
+          if (KEY.test(k) && names.length) this.map.set(k, [...new Set(names)].sort())
+        }
+      }
     } catch {
-      this.keys = new Set()
+      // none yet, or unreadable: nothing is off
     }
-    return this.keys
+    return this.map
   }
 
-  has(key: string): boolean {
-    return this.load().has(key)
+  /** The mods switched off for a session. */
+  of(key: string): string[] {
+    return this.load().get(key) ?? []
   }
 
-  list(): string[] {
-    return [...this.load()].sort()
+  all(): Record<string, string[]> {
+    return Object.fromEntries(this.load())
   }
 
-  /** Switch the mod on (true) or off (false) for a session. */
-  set(key: string, on: boolean): boolean {
-    if (!KEY.test(key)) return false
-    const keys = this.load()
-    if (on === !keys.has(key)) return true
-    if (on) keys.delete(key)
-    else keys.add(key)
+  /** Switch a mod on (true) or off (false) for a session. */
+  set(key: string, mod: string, on: boolean): boolean {
+    if (!KEY.test(key) || !NAME.test(mod)) return false
+    const map = this.load()
+    const names = new Set(map.get(key) ?? [])
+    if (on === !names.has(mod)) return true
+    if (on) names.delete(mod)
+    else names.add(mod)
+    if (names.size) map.set(key, [...names].sort())
+    else map.delete(key)
     return this.save()
   }
 
   /** Forget sessions that are no longer listed (call only with a real session list). */
   prune(listed: Set<string>): void {
-    const keys = this.load()
-    const gone = [...keys].filter((k) => !listed.has(k))
+    const map = this.load()
+    const gone = [...map.keys()].filter((k) => !listed.has(k))
     if (!gone.length) return
-    for (const k of gone) keys.delete(k)
+    for (const k of gone) map.delete(k)
     this.save()
   }
 
   private save(): boolean {
+    if (writeJson(this.file, this.all())) return true
+    this.map = null
+    return false
+  }
+}
+
+/** `mod-catalog.json`: every mod MasterDeck's mod has reported in any session (shared/modBand.ts `mergeCatalog`). */
+export class ModCatalog {
+  private list: ModEntry[] | null = null
+
+  constructor(private file: string) {}
+
+  entries(): ModEntry[] {
+    if (this.list) return this.list
     try {
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(`${this.file}.tmp`, JSON.stringify(this.list()))
-      renameSync(`${this.file}.tmp`, this.file)
-      return true
-    } catch (e) {
-      console.error(`mod off: ${String(e)}`)
-      this.keys = null
-      return false
+      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as unknown
+      this.list = Array.isArray(raw)
+        ? raw.filter((e): e is ModEntry => !!e && typeof e === 'object' && typeof e.name === 'string' && NAME.test(e.name) && typeof e.provenance === 'string' && typeof e.tier === 'string')
+        : []
+    } catch {
+      this.list = []
     }
+    return this.list
+  }
+
+  /** Keep a new catalog (from mergeCatalog). */
+  replace(next: ModEntry[]): void {
+    this.list = next
+    writeJson(this.file, next)
   }
 }

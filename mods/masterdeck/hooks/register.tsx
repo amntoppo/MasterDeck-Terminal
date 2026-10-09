@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Band, Link } from '../types'
-import { ALIVE_MS, NARROW_COLS, OFF_TEXT, bandEvents, noteAnswerText, noteRequestId, parseBand, segments } from './band'
+import { ALIVE_MS, NARROW_COLS, bandEvents, isQuiet, noteAnswerText, noteRequestId, parseBand, refuses, seenWith, segments, toReload } from './band'
 
 /*
  * MasterDeck's mod. It only reads what the app writes under `<MASTERDECK_HOME>/deck` and never
@@ -12,10 +12,15 @@ import { ALIVE_MS, NARROW_COLS, OFF_TEXT, bandEvents, noteAnswerText, noteReques
  * It writes `mods/<sessionId>.json` every 15 s (its heartbeat: the app shows "Mod live") and asks
  * for notes the way the masterdeck-notes skill does (`note-requests/`, `note-answers/`).
  * In a session MasterDeck has no band for it draws nothing.
+ *
+ * Mods switched off for a session (`offMods` in its band): this one goes quiet (nothing drawn,
+ * toasted or answered); another is refused at `plugin.register`, which judges only the modules
+ * that load after this one (`prependPlugins` puts it first). A mod already running stays until the
+ * session starts again; one switched back on joins at a reload, which this mod asks for.
  */
 
 // Keep in step with .claude-plugin/plugin.json.
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 const PANE = 'md-ticket'
 const BEAT_MS = 15_000
 const READ_MS = 2_000
@@ -23,15 +28,31 @@ const READ_MS = 2_000
 const band = atom({ plugin: 'masterdeck', key: 'band' } as const, null)
 const link = atom({ plugin: 'masterdeck', key: 'link' } as const, { isOffline: false, lastAliveAt: 0 })
 const isHidden = atom({ plugin: 'masterdeck', key: 'isHidden' } as const, false)
+// In $.state, so a reload of this module keeps what it saw (unchanged modules are not judged again).
+const seen = atom({ plugin: 'masterdeck', key: 'seen' } as const, [])
 
 // The module's own: a reload starts them over, and the first read after it toasts nothing.
 let deck = ''
 let sid = ''
 let last: Band | null | undefined
+/** Mods this load already asked a reload for (see toReload). */
+const asked = new Set<string>()
+let isReloading = false
 
 async function deckDir($: EngineInterface): Promise<string> {
   const home = (await $.env.get('MASTERDECK_HOME')) || `${(await $.env.get('HOME')) ?? ''}/.claude/masterdeck`
   return `${home}/deck`
+}
+
+/** The mods switched off for this session, read now (modules load before session.start). */
+async function offModsNow($: EngineInterface): Promise<string[]> {
+  if (!deck) deck = await deckDir($)
+  const id = await $.session.id()
+  try {
+    return parseBand(await $.fs.read(`${deck}/band/${id}.json`))?.offMods ?? []
+  } catch {
+    return []
+  }
 }
 
 async function mtime($: EngineInterface, path: string): Promise<number | null> {
@@ -60,6 +81,16 @@ async function refresh($: EngineInterface): Promise<void> {
   }
   if (last !== undefined) for (const text of bandEvents(last, next)) $.ui.toast(text)
   last = next
+  if (isQuiet(next) && (await $.ui.panes()).some(p => p.id === PANE)) await $.ui.close({ id: PANE })
+  // A refused mod switched on again joins only at a reload: ask for one (queued until idle).
+  const offMods = next?.offMods ?? []
+  for (const name of [...asked]) if (offMods.includes(name)) asked.delete(name)
+  const again = toReload(await read($, seen), offMods, asked)
+  if (again.length && !isReloading) {
+    for (const name of again) asked.add(name)
+    isReloading = true
+    void $.command.run({ command: 'reload-plugins' }).catch(() => {}).finally(() => { isReloading = false })
+  }
   // `alive` moves every 5 s while the app runs: keep its time only once it stopped, so a
   // running app redraws nothing.
   const isOffline = aliveAt === null || now - aliveAt > ALIVE_MS
@@ -73,7 +104,8 @@ async function refresh($: EngineInterface): Promise<void> {
 async function beat($: EngineInterface, isEnded = false): Promise<void> {
   if (!sid || !(await $.fs.exists(`${deck}/alive`))) return
   const claude = (await $.session.version()).version
-  await $.fs.write(`${deck}/mods/${sid}.json`, JSON.stringify({ v: 1, version: VERSION, claude, at: await $.clock.now(), ...(isEnded ? { ended: true } : {}) }))
+  const mods = await read($, seen)
+  await $.fs.write(`${deck}/mods/${sid}.json`, JSON.stringify({ v: 1, version: VERSION, claude, at: await $.clock.now(), mods, ...(isEnded ? { ended: true } : {}) }))
 }
 
 /**
@@ -85,7 +117,6 @@ async function beat($: EngineInterface, isEnded = false): Promise<void> {
 async function addNote($: EngineInterface, text: string): Promise<string> {
   if (!text.trim()) return 'Usage: /md-note <text>. Adds the text to the note of this session\'s ticket in MasterDeck.'
   const b = await read($, band)
-  if (b?.off) return OFF_TEXT
   if (!b?.ticket) return 'This session has no ticket in MasterDeck, so there is no ticket note to add to.'
   if ((await read($, link)).isOffline) return 'MasterDeck is not running, so nothing was saved.'
   const id = noteRequestId(await $.clock.now(), Math.random())
@@ -112,6 +143,13 @@ async function addNote($: EngineInterface, text: string): Promise<string> {
 }
 
 export const register: Register = on => {
+  // Judge each mod that loads after this one. A failed judge lets the mod in.
+  on('plugin.register', async ($, e, next) => {
+    const isRefused = refuses(e, await offModsNow($))
+    await update($, seen, list => seenWith(list, { name: e.name, provenance: e.provenance, version: e.version ?? null, tier: e.tier, loaded: !isRefused }))
+    return isRefused ? { refuse: 'switched off for this session in MasterDeck' } : next(e)
+  }).catch(($, e, next) => next(e))
+
   on('session.start', async ($, e, next) => {
     deck = await deckDir($)
     await $.command.register({ name: 'md-ticket', description: 'Show this session\'s MasterDeck ticket in a pane' })
@@ -128,20 +166,21 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Switched off here: answer with nothing, so the transcript shows nothing.
   on('command.run', { command: 'md-ticket' }, async $ => {
     const b = await read($, band)
-    if (b?.off) return { text: OFF_TEXT }
+    if (isQuiet(b)) return {}
     await update($, isHidden, () => false)
     if (!b) return { text: 'MasterDeck has no ticket, PR or linked session for this session.' }
     await $.ui.open({ id: PANE, title: 'MasterDeck' })
     return { text: 'Opened the ticket pane.' }
   })
 
-  on('command.run', { command: 'md-note' }, async ($, e) => ({ text: await addNote($, e.args) }))
+  on('command.run', { command: 'md-note' }, async ($, e) => (isQuiet(await read($, band)) ? {} : { text: await addNote($, e.args) }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const b = await read($, band)
-    if (!b || b.off || e.props.hasSurvey || (await read($, isHidden))) return next(e)
+    if (!b || isQuiet(b) || e.props.hasSurvey || (await read($, isHidden))) return next(e)
     const l = await read($, link)
     const now = await $.clock.now()
     const cols = e.props.bodyColumns ?? NARROW_COLS
@@ -167,7 +206,7 @@ export const register: Register = on => {
     const { Box, Text, Link } = $.ui.resolve(e)
     const b = await read($, band)
     if (!b) return <Text dimColor>MasterDeck has nothing for this session.</Text>
-    if (b.off) return <Text dimColor>{OFF_TEXT}</Text>
+    if (isQuiet(b)) return <Box />
     const l = await read($, link)
     const pr = b.pr
     return (

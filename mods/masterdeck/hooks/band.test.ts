@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Band } from '../types'
-import { bandEvents, noteAnswerText, noteRequestId, parseBand, segments } from './band'
+import type { Band, SeenMod } from '../types'
+import { bandEvents, isQuiet, noteAnswerText, noteRequestId, parseBand, refuses, seenWith, segments, toReload } from './band'
 
 const BAND: Band = {
   v: 1,
@@ -46,8 +46,31 @@ test('toasts what changed, and nothing on the first read', async () => {
   expect(bandEvents(next, { ...next, pr: { ...next.pr!, ci: 'success', state: 'MERGED' } })).toEqual(['PR #90: CI passed', 'PR #90 merged'])
   expect(bandEvents({ ...BAND, pr: null }, BAND)).toEqual(['PR #90 is linked to this session'])
   // Switched off, or just switched back on: nothing to toast.
-  expect(bandEvents(BAND, { ...next, off: true })).toEqual([])
-  expect(bandEvents({ ...BAND, off: true }, next)).toEqual([])
+  expect(bandEvents(BAND, { ...next, offMods: ['masterdeck'] })).toEqual([])
+  expect(bandEvents({ ...BAND, offMods: ['masterdeck'] }, next)).toEqual([])
+  // Another mod switched off: this one still toasts.
+  expect(bandEvents({ ...BAND, offMods: ['other'] }, { ...next, offMods: ['other'] })).toHaveLength(3)
+})
+
+test('refuses only an installed mod switched off here, never itself or a built-in one', async () => {
+  expect(isQuiet({ ...BAND, offMods: ['masterdeck'] })).toBe(true)
+  expect(isQuiet({ ...BAND, offMods: ['other'] })).toBe(false)
+  expect(isQuiet(null)).toBe(false)
+  expect(refuses({ name: 'other', tier: 'user' }, ['other'])).toBe(true)
+  expect(refuses({ name: 'other', tier: 'user' }, [])).toBe(false)
+  expect(refuses({ name: 'masterdeck', tier: 'user' }, ['masterdeck'])).toBe(false)
+  expect(refuses({ name: 'diff', tier: 'builtin' }, ['diff'])).toBe(false)
+  expect(refuses({ name: 'guard', tier: 'prepend' }, ['guard'])).toBe(false)
+})
+
+test('keeps one entry per mod and asks for a reload once when a refused one is switched on', async () => {
+  const a: SeenMod = { name: 'a', provenance: 'a@m', version: '1', tier: 'user', loaded: false }
+  const list = seenWith(seenWith([], a), { ...a, version: '2' })
+  expect(list).toEqual([{ ...a, version: '2' }])
+  expect(toReload(list, ['a'], new Set())).toEqual([])
+  expect(toReload(list, [], new Set())).toEqual(['a'])
+  expect(toReload(list, [], new Set(['a']))).toEqual([])
+  expect(toReload([{ ...a, loaded: true }], [], new Set())).toEqual([])
 })
 
 test('makes request ids the app takes, and reads its answers', async () => {

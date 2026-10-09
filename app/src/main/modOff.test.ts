@@ -2,28 +2,47 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ModOff } from './modOff'
+import { ModCatalog, ModOff } from './modOff'
+
+const tmp = (name: string) => join(mkdtempSync(join(tmpdir(), 'mods-')), name)
 
 describe('ModOff', () => {
-  it('keeps the sessions switched off across a restart, and forgets ones no longer listed', () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'modoff-')), 'mod-off.json')
+  it('keeps the mods switched off per session across a restart, and forgets sessions no longer listed', () => {
+    const file = tmp('mod-off.json')
     const a = new ModOff(file)
-    expect(a.has('3fa9c1d2')).toBe(false)
-    expect(a.set('3fa9c1d2', false)).toBe(true)
-    expect(a.set('11111111-1111-1111-1111-111111111111', false)).toBe(true)
-    expect(a.set('../x', false)).toBe(false)
+    expect(a.of('3fa9c1d2')).toEqual([])
+    expect(a.set('3fa9c1d2', 'token-chart', false)).toBe(true)
+    expect(a.set('3fa9c1d2', 'masterdeck', false)).toBe(true)
+    expect(a.set('11111111-1111-1111-1111-111111111111', 'diff-x', false)).toBe(true)
+    expect(a.set('../x', 'a', false)).toBe(false)
+    expect(a.set('3fa9c1d2', 'bad name', false)).toBe(false)
     const b = new ModOff(file)
-    expect(b.list()).toEqual(['11111111-1111-1111-1111-111111111111', '3fa9c1d2'])
-    b.set('3fa9c1d2', true)
+    expect(b.of('3fa9c1d2')).toEqual(['masterdeck', 'token-chart'])
+    b.set('3fa9c1d2', 'token-chart', true)
+    expect(b.of('3fa9c1d2')).toEqual(['masterdeck'])
     b.prune(new Set(['3fa9c1d2']))
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([])
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ '3fa9c1d2': ['masterdeck'] })
+    b.set('3fa9c1d2', 'masterdeck', true)
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({})
   })
 
-  it('reads a broken or foreign file as empty', () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'modoff-')), 'mod-off.json')
-    writeFileSync(file, '{')
-    expect(new ModOff(file).list()).toEqual([])
+  it('reads the first version (an array of sessions with the MasterDeck mod off), and a broken file as empty', () => {
+    const file = tmp('mod-off.json')
     writeFileSync(file, JSON.stringify(['abc12345', 7, 'not a key']))
-    expect(new ModOff(file).list()).toEqual(['abc12345'])
+    expect(new ModOff(file).all()).toEqual({ abc12345: ['masterdeck'] })
+    writeFileSync(file, '{')
+    expect(new ModOff(file).all()).toEqual({})
+  })
+})
+
+describe('ModCatalog', () => {
+  it('keeps what it is given and drops entries it cannot read', () => {
+    const file = tmp('mod-catalog.json')
+    const c = new ModCatalog(file)
+    expect(c.entries()).toEqual([])
+    c.replace([{ name: 'token-chart', provenance: 'token-chart@acme', version: '1.0.0', tier: 'user' }])
+    expect(new ModCatalog(file).entries()).toEqual([{ name: 'token-chart', provenance: 'token-chart@acme', version: '1.0.0', tier: 'user' }])
+    writeFileSync(file, JSON.stringify([{ name: 'ok', provenance: 'ok@m', version: null, tier: 'user' }, { name: 3 }]))
+    expect(new ModCatalog(file).entries()).toHaveLength(1)
   })
 })

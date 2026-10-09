@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, parseConfig, setConfig } from './appConfig'
-import { MOD_BEAT_STALE_MS, bandFor, modBand, parseModBeat } from './modBand'
+import { MOD_BEAT_STALE_MS, bandFor, mergeCatalog, modBand, modRows, parseModBeat, type ModSeen } from './modBand'
 import type { Session } from './types'
 
 const cfg = parseConfig({ config: { owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] } })
@@ -69,18 +69,55 @@ describe('modBand', () => {
 
 describe('bandFor', () => {
   const band = { v: 1 as const, name: 's', ticket: null, status: 'In Dev', pr: null, peers: [] }
-  it('marks a band off, and writes one for a session with nothing to show', () => {
-    expect(bandFor(band, 's', false)).toBe(band)
-    expect(bandFor(null, 's', false)).toBeNull()
-    expect(bandFor(band, 's', true)).toEqual({ ...band, off: true })
-    expect(bandFor(null, 'plain', true)).toEqual({ v: 1, name: 'plain', ticket: null, status: null, pr: null, peers: [], off: true })
+  it('carries the mods switched off, and writes a band for a session with nothing else to show', () => {
+    expect(bandFor(band, 's', [])).toBe(band)
+    expect(bandFor(null, 's', [])).toBeNull()
+    expect(bandFor(band, 's', ['masterdeck'])).toEqual({ ...band, offMods: ['masterdeck'] })
+    expect(bandFor(null, 'plain', ['token-chart'])).toEqual({ v: 1, name: 'plain', ticket: null, status: null, pr: null, peers: [], offMods: ['token-chart'] })
+  })
+})
+
+const seen = (name: string, over: Partial<ModSeen> = {}): ModSeen => ({ name, provenance: `${name}@acme`, version: '1.0.0', tier: 'user', loaded: true, ...over })
+
+describe('the mods catalog', () => {
+  it('adds new mods and updates changed ones, and says when nothing changed', () => {
+    const one = mergeCatalog([], [seen('token-chart')])!
+    expect(one).toEqual([{ name: 'token-chart', provenance: 'token-chart@acme', version: '1.0.0', tier: 'user' }])
+    expect(mergeCatalog(one, [seen('token-chart', { loaded: false })])).toBeNull()
+    expect(mergeCatalog(one, [seen('token-chart', { version: '1.1.0' }), seen('blast-radius')])?.map((e) => [e.name, e.version])).toEqual([['blast-radius', '1.0.0'], ['token-chart', '1.1.0']])
+  })
+})
+
+describe('modRows', () => {
+  it('lists MasterDeck first, then each mod with how it stands in this session; managed and built-in ones are locked', () => {
+    const catalog = [
+      { name: 'token-chart', provenance: 'token-chart@acme', version: '1.0.0', tier: 'user' },
+      { name: 'replay', provenance: 'replay@acme', version: '0.2.0', tier: 'user' },
+      { name: 'old', provenance: 'old@acme', version: null, tier: 'user' },
+      { name: 'diff', provenance: 'diff@builtin', version: null, tier: 'builtin' },
+    ]
+    const live = { version: '0.3.0', mods: [seen('token-chart'), seen('replay', { loaded: false }), seen('blast', { loaded: false }), seen('diff', { tier: 'builtin', provenance: 'diff@builtin' })] }
+    const rows = modRows(catalog, live, ['masterdeck', 'token-chart', 'replay'])
+    expect(rows.map((r) => [r.name, r.status, r.isOff, r.locked])).toEqual([
+      ['masterdeck', 'off', true, false],
+      ['blast', 'turning-on', false, false],
+      ['old', 'not-seen', false, false],
+      ['replay', 'off', true, false],
+      ['token-chart', 'off-next-start', true, false],
+      ['diff', 'on', false, true],
+    ])
+    expect(modRows([], { version: '0.3.0', mods: [] }, [])).toEqual([
+      { name: 'masterdeck', provenance: 'masterdeck@masterdeck', version: '0.3.0', locked: false, isSelf: true, isOff: false, status: 'on' },
+    ])
   })
 })
 
 describe('parseModBeat', () => {
   const now = 1_000_000
   it('takes a fresh beat', () => {
-    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.1.0', claude: '2.1.296', at: now - 20_000 }), now)).toEqual({ version: '0.1.0', claude: '2.1.296', at: now - 20_000 })
+    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.1.0', claude: '2.1.296', at: now - 20_000 }), now)).toEqual({ version: '0.1.0', claude: '2.1.296', at: now - 20_000, mods: [] })
+    const mods = [seen('token-chart', { loaded: false }), { name: 'bad name', provenance: 'x', tier: 'user' }, 7]
+    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.3.0', at: now, mods }), now)?.mods).toEqual([seen('token-chart', { loaded: false })])
   })
   it('drops stale, ended, broken and foreign files', () => {
     expect(parseModBeat(JSON.stringify({ v: 1, version: '0.1.0', at: now - MOD_BEAT_STALE_MS }), now)).toBeNull()

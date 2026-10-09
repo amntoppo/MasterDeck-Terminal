@@ -1,4 +1,4 @@
-import type { Band } from '../types'
+import type { Band, SeenMod } from '../types'
 
 /** `deck/alive` older than this: MasterDeck is not running (the app touches it every 5 s; note.sh uses 30 s too). */
 export const ALIVE_MS = 30_000
@@ -78,7 +78,7 @@ export function segments(band: Band, cols: number, staleFor: number | null): Seg
 
 /** What changed between two reads that the person would want a toast for. */
 export function bandEvents(prev: Band | null, next: Band | null): string[] {
-  if (!prev || !next || prev.off || next.off) return []
+  if (!prev || !next || isQuiet(prev) || isQuiet(next)) return []
   const out: string[] = []
   const label = next.ticket?.label ?? next.name
   if (prev.ticket?.ref === next.ticket?.ref && prev.status && next.status && prev.status !== next.status)
@@ -98,8 +98,34 @@ export function bandEvents(prev: Band | null, next: Band | null): string[] {
   return out
 }
 
-/** What the commands answer while the mod is switched off in this session. */
-export const OFF_TEXT = 'The MasterDeck mod is off in this session. Turn it on in MasterDeck: Session details → Turn mod on.'
+/** This mod's own name (plugin.json): in `offMods` it means "stay quiet", never "refuse". */
+export const SELF = 'masterdeck'
+
+/** Switched off for this session: draw nothing, toast nothing, answer commands with nothing. */
+export function isQuiet(band: Band | null): boolean {
+  return !!band?.offMods?.includes(SELF)
+}
+
+/**
+ * Whether to refuse a mod as it loads: one the person installed (tier `user`; never a managed or
+ * built-in one, never this one) that is switched off for this session.
+ */
+export function refuses(mod: { name: string; tier: string }, offMods: readonly string[]): boolean {
+  return mod.tier === 'user' && mod.name !== SELF && offMods.includes(mod.name)
+}
+
+/** The list of mods seen, with this one put in place of an older entry of the same name. */
+export function seenWith(list: readonly SeenMod[], mod: SeenMod): SeenMod[] {
+  return [...list.filter(m => m.name !== mod.name), mod].slice(-50)
+}
+
+/**
+ * Mods refused here that are switched on again: they join only at a reload, so the mod asks for
+ * one. `asked` holds the names it already asked for (cleared when one is switched off again).
+ */
+export function toReload(seen: readonly SeenMod[], offMods: readonly string[], asked: ReadonlySet<string>): string[] {
+  return seen.filter(m => !m.loaded && m.tier === 'user' && !offMods.includes(m.name) && !asked.has(m.name)).map(m => m.name)
+}
 
 /** The id of a note request, as MasterDeck's pump takes it (digits-digits-digits). */
 export function noteRequestId(nowMs: number, rand: number): string {

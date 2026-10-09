@@ -24,14 +24,120 @@ export interface ModBand {
     draft: boolean
   } | null
   peers: { name: string; state: Session['state'] }[]
-  /** Switched off in Session details: the mod draws nothing and its commands say so. */
-  off?: true
+  /**
+   * Mods switched off for this session in Session details → Mods, by plugin name. `masterdeck`:
+   * the mod stays quiet; any other: the mod refuses it when it loads.
+   */
+  offMods?: string[]
 }
 
-/** What to write for a session: its band, or, switched off, a band that says only that (always written). */
-export function bandFor(band: ModBand | null, name: string, off: boolean): ModBand | null {
-  if (!off) return band
-  return { ...(band ?? { v: 1, name, ticket: null, status: null, pr: null, peers: [] }), off: true }
+/** The MasterDeck mod's own plugin name. */
+export const MOD_SELF = 'masterdeck'
+
+/** What to write for a session: its band with the mods switched off there (written even with nothing else to show). */
+export function bandFor(band: ModBand | null, name: string, offMods: readonly string[]): ModBand | null {
+  if (!offMods.length) return band
+  return { ...(band ?? { v: 1, name, ticket: null, status: null, pr: null, peers: [] }), offMods: [...offMods] }
+}
+
+/** A mod the MasterDeck mod saw load (or refused) in a session: `plugin.register`. */
+export interface ModSeen {
+  name: string
+  /** `<name>@<marketplace>`, `<name>@inline` (`--plugin-dir`), `<name>@builtin`. */
+  provenance: string
+  version: string | null
+  /** `user` (installed by the person), `prepend` / `append` (managed), `builtin`. */
+  tier: string
+  /** False: refused in that session (switched off). */
+  loaded: boolean
+}
+
+const MOD_NAME = /^[A-Za-z0-9._-]{1,64}$/
+
+function parseSeen(raw: unknown): ModSeen[] {
+  if (!Array.isArray(raw)) return []
+  const out: ModSeen[] = []
+  for (const m of raw.slice(0, 50)) {
+    if (!m || typeof m !== 'object') continue
+    const o = m as Record<string, unknown>
+    if (typeof o.name !== 'string' || !MOD_NAME.test(o.name) || typeof o.provenance !== 'string' || typeof o.tier !== 'string') continue
+    out.push({
+      name: o.name,
+      provenance: o.provenance.slice(0, 200),
+      version: typeof o.version === 'string' ? o.version.slice(0, 40) : null,
+      tier: o.tier.slice(0, 20),
+      loaded: o.loaded !== false,
+    })
+  }
+  return out
+}
+
+/** A mod MasterDeck has seen in any session (`mod-catalog.json`): what Session details → Mods lists. */
+export interface ModEntry {
+  name: string
+  provenance: string
+  version: string | null
+  tier: string
+}
+
+/** The catalog with what a session reported; null when nothing changed. */
+export function mergeCatalog(catalog: readonly ModEntry[], seen: readonly ModSeen[]): ModEntry[] | null {
+  let changed = false
+  const out = [...catalog]
+  for (const m of seen) {
+    const entry = { name: m.name, provenance: m.provenance, version: m.version, tier: m.tier }
+    const i = out.findIndex((e) => e.name === m.name)
+    if (i < 0) out.push(entry)
+    else if (JSON.stringify(out[i]) !== JSON.stringify(entry)) out[i] = entry
+    else continue
+    changed = true
+  }
+  return changed ? out.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 200) : null
+}
+
+/** How a mod stands in one session, for Session details → Mods. */
+export type ModRowStatus =
+  | 'on'
+  /** Switched off and refused (or, for MasterDeck's own, quiet). */
+  | 'off'
+  /** Switched off while it runs: it goes when the session starts again. */
+  | 'off-next-start'
+  /** Switched on after a refusal: it joins at the reload the MasterDeck mod asks for. */
+  | 'turning-on'
+  /** Not seen in this session (not installed then, or loaded before MasterDeck's mod). */
+  | 'not-seen'
+
+export interface ModRow {
+  name: string
+  provenance: string
+  version: string | null
+  /** Managed or built into Claude Code: not ours to switch. */
+  locked: boolean
+  isSelf: boolean
+  isOff: boolean
+  status: ModRowStatus
+}
+
+/** The rows of Session details → Mods: MasterDeck's own first, then every mod seen anywhere. */
+export function modRows(
+  catalog: readonly ModEntry[],
+  live: { version: string; mods: readonly ModSeen[] },
+  offMods: readonly string[],
+): ModRow[] {
+  const off = new Set(offMods)
+  const self: ModRow = {
+    name: MOD_SELF, provenance: `${MOD_SELF}@${MOD_SELF}`, version: live.version, locked: false, isSelf: true,
+    isOff: off.has(MOD_SELF), status: off.has(MOD_SELF) ? 'off' : 'on',
+  }
+  const names = [...new Set([...catalog.map((e) => e.name), ...live.mods.map((m) => m.name)])].filter((n) => n !== MOD_SELF)
+  const rows = names.map((name): ModRow => {
+    const here = live.mods.find((m) => m.name === name)
+    const known = here ?? catalog.find((e) => e.name === name)!
+    const isOff = off.has(name)
+    const status: ModRowStatus = !here ? 'not-seen' : here.loaded ? (isOff ? 'off-next-start' : 'on') : isOff ? 'off' : 'turning-on'
+    return { name, provenance: known.provenance, version: known.version, locked: known.tier !== 'user', isSelf: false, isOff, status }
+  })
+  return [self, ...rows.sort((a, b) => Number(a.locked) - Number(b.locked) || a.name.localeCompare(b.name))]
 }
 
 /** The mod's heartbeat, `deck/mods/<sessionId>.json`: it runs in that session now. */
@@ -41,6 +147,8 @@ export interface ModBeat {
   /** Claude Code's version in that session. */
   claude: string
   at: number
+  /** The mods it saw load after it in that session. */
+  mods: ModSeen[]
 }
 
 /** The mod writes every 15 s; three missed beats and the session counts as without it. */
@@ -58,7 +166,7 @@ export function parseModBeat(text: string, now: number): ModBeat | null {
   const b = o as Record<string, unknown>
   if (b.v !== 1 || b.ended === true || typeof b.at !== 'number' || typeof b.version !== 'string') return null
   if (!(now - b.at < MOD_BEAT_STALE_MS)) return null
-  return { version: b.version.slice(0, 40), claude: typeof b.claude === 'string' ? b.claude.slice(0, 40) : '', at: b.at }
+  return { version: b.version.slice(0, 40), claude: typeof b.claude === 'string' ? b.claude.slice(0, 40) : '', at: b.at, mods: parseSeen(b.mods) }
 }
 
 /** The band for one session: null when MasterDeck has nothing to show for it (no ticket, no links). */

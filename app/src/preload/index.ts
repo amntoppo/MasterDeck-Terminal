@@ -140,7 +140,7 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.linkSession, issue, sessionId, cwd),
   peersSet: (a, b, on) => ipcRenderer.invoke(CH.peersSet, a, b, on),
   peersSync: (key) => ipcRenderer.invoke(CH.peersSync, key),
-  modSet: (key, on) => ipcRenderer.invoke(CH.modSet, key, on),
+  modSet: (key, mod, on) => ipcRenderer.invoke(CH.modSet, key, mod, on),
   setBoardOpen: (open) => ipcRenderer.send(CH.boardOpen, open),
   boardRepos: (repos) => ipcRenderer.send(CH.boardRepos, repos),
   boardCreatePlan: (account) => ipcRenderer.invoke(CH.boardCreatePlan, account),

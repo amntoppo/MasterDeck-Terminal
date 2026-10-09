@@ -20,7 +20,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { bandFor, modBand } from "@shared/modBand";
+import { bandFor, mergeCatalog, modBand } from "@shared/modBand";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -82,7 +82,7 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
-import { ModOff } from "./modOff";
+import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
@@ -245,6 +245,7 @@ const sessionAccounts = new SessionAccounts(
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
+const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -630,17 +631,25 @@ const sources = new Sources(
     if (sources.isHealthy("agents")) {
       const live = state.sessions.filter((s) => s.state !== "done");
       for (const s of live)
-        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s), s.name, modOff.has(s.key)));
+        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s), s.name, modOff.of(s.key)));
       deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
-    state.modOff = modOff.list();
+    state.modOff = modOff.all();
     const beats = deckHooks.modBeats();
     state.modLive = Object.fromEntries(
       state.sessions
         .filter((s) => beats[s.sessionId])
-        .map((s) => [s.key, { version: beats[s.sessionId].version, claude: beats[s.sessionId].claude }]),
+        .map((s) => {
+          const b = beats[s.sessionId];
+          return [s.key, { version: b.version, claude: b.claude, mods: b.mods }];
+        }),
     );
+    // Every mod any session reported, kept so Session details → Mods can list them all.
+    let catalog = modCatalog.entries();
+    for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
+    if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
+    state.modCatalog = catalog;
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -2881,13 +2890,13 @@ function registerIpc(): void {
     peerSync.refreshAll([a, b]);
     return r;
   });
-  // Session details → Mod on/off: the mod reads it from the session's band file (next state).
-  reg.handle(CH.modSet, (_e, key: unknown, on: unknown) => {
-    if (typeof key !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
+  // Session details → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
+  reg.handle(CH.modSet, (_e, key: unknown, mod: unknown, on: unknown) => {
+    if (typeof key !== "string" || typeof mod !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
       return { ok: false, message: "bad session" };
-    if (!modOff.set(key, on)) return { ok: false, message: "Could not save the choice." };
+    if (!modOff.set(key, mod, on)) return { ok: false, message: "Could not save the choice." };
     sources.changed();
-    return { ok: true, message: on ? "The mod is on in this session." : "The mod is off in this session." };
+    return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
   });
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200

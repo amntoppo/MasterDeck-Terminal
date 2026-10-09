@@ -504,7 +504,7 @@ describe('the MasterDeck mod files', () => {
     writeFileSync(join(dir, `${other}.json`), JSON.stringify({ v: 1, version: '0.1.0', at: now, ended: true }))
     utimesSync(join(dir, `${other}.json`), new Date(now - 2 * 86_400_000), new Date(now - 2 * 86_400_000))
     writeFileSync(join(dir, 'notes.txt'), 'x')
-    expect(d.modBeats(now)).toEqual({ [SID]: { version: '0.1.0', claude: '2.1.296', at: now - 1000 } })
+    expect(d.modBeats(now)).toEqual({ [SID]: { version: '0.1.0', claude: '2.1.296', at: now - 1000, mods: [] } })
     expect(readdirSync(dir).sort()).toEqual([`${SID}.json`, 'notes.txt'])
     expect(new DeckHooks(mkdtempSync(join(tmpdir(), 'deck-'))).modBeats(now)).toEqual({})
   })

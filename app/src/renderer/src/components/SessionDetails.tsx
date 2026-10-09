@@ -24,6 +24,7 @@ import { WorkflowWidget } from "./SessionWorkflow";
 import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
+import { SessionMods } from "./SessionMods";
 import { peerRows } from "./peersView";
 
 interface Props {
@@ -57,6 +58,7 @@ export function SessionDetails({
   const [statusOpen, setStatusOpen] = useState(false);
   const [peersOpen, setPeersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [tab, setTab] = useState<"session" | "mods">("session");
   const since = useStateSince(s);
   const starred = useStars().includes(s.key);
   const status = sessionStatus(
@@ -101,8 +103,6 @@ export function SessionDetails({
   const level = contextLevel(stats?.contextPct ?? null);
   const worktrees = state.sessionWorktrees[s.key] ?? [];
   const hook = state.hookInfo[s.key];
-  const modLive = state.modLive?.[s.key];
-  const modOff = !!state.modOff?.includes(s.key);
   const menu = state.menus[s.key];
   const ask = state.asks[s.key];
   const waiting =
@@ -123,8 +123,34 @@ export function SessionDetails({
     flash(r.ok ? r.message : `Editor: ${r.message}`);
   };
 
+  const tabs = (
+    <div className="d-tabs">
+      <div className="seg" role="tablist" aria-label="Details">
+        <button role="tab" aria-selected={tab === "session"} className={tab === "session" ? "on" : undefined} onClick={() => setTab("session")}>
+          Session
+        </button>
+        <button role="tab" aria-selected={tab === "mods"} className={tab === "mods" ? "on" : undefined} onClick={() => setTab("mods")}>
+          Mods{state.modOff?.[s.key]?.length ? ` · ${state.modOff[s.key].length} off` : ""}
+        </button>
+      </div>
+    </div>
+  );
+  if (tab === "mods")
+    return (
+      <div className="details">
+        {tabs}
+        {note && (
+          <section className="dsec">
+            <span className="d-note">{note}</span>
+          </section>
+        )}
+        <SessionMods session={s} state={state} onMessage={flash} />
+      </div>
+    );
+
   return (
     <div className="details">
+      {tabs}
       {waiting && (
         <section className="dsec d-ask">
           <div className="eyebrow bad">
@@ -420,29 +446,9 @@ export function SessionDetails({
               Compacted <b>{formatAgo(now - hook.compactedAt)} ago</b>
             </div>
           )}
-          {modLive && (
-            <div title="The MasterDeck mod runs inside this session: it shows the ticket above the prompt and adds /md-note and /md-ticket">
-              Mod <b>{modOff ? "off here" : "live"}</b> (v{modLive.version}, Claude Code {modLive.claude || "?"})
-            </div>
-          )}
         </div>
         <div className="d-actions">
-          {modLive && (
-            <button
-              className="btn"
-              title={
-                modOff
-                  ? "Show the ticket line, toasts and /md- commands in this session again"
-                  : "Keep the MasterDeck mod quiet in this session: no ticket line, no toasts, no /md- commands"
-              }
-              onClick={async () => {
-                const r = await deck().modSet(s.key, modOff);
-                flash(r.message);
-              }}
-            >
-              {modOff ? "Turn mod on" : "Turn mod off"}
-            </button>
-          )}
+
           <button
             className={`btn ${(stats?.contextPct ?? 0) >= state.settings.contextWarnPct ? "danger" : ""}`}
             title="Types /compact into the session"
