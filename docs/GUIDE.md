@@ -270,6 +270,22 @@ checkout whose branch was once linked to a ticket does not link it.
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
     change it. Select a block or an arrow and its settings open in a card over the canvas (click
     the canvas or × to close it); Delete removes the selection. **Tidy up** lines the blocks up.
+  - **Loop:** a frame (under Actions) whose blocks the session repeats until the loop is done.
+    Drag skills, instructions, monitors or notifications into it (a trigger, a built-in or another
+    loop stays outside); drag one out to take it out. Move the frame by its header (its blocks
+    move with it) and resize it from its bottom-right corner. Its card sets what ends it: a
+    **check command** (passes when it exits with 0, or when its output matches or no longer
+    matches a pattern, within a time limit of 1 to 9 minutes), **the agent says it's done** (with
+    the goal it works toward; it ends its turn with a line starting `LOOP DONE:`), or both; and
+    its limits: **max iterations** (1 to 100), **max minutes**, and **rounds with no progress**.
+    Arrows into a block in the frame go to the frame (a loop starts at its top); blocks in it lead
+    only to each other. Leave it with the toolbar's arrow kinds while the frame is selected: **when
+    met** (green) and **at the limit** (amber); *then* goes on either way. One loop runs at a time,
+    on the main path: put loops one after another, not side by side or inside an "if it
+    worked/failed" branch. While a loop runs, the session can't end its turn until the loop is
+    over (MasterDeck checks at each turn end and tells it to go on); **Stop loop** in the
+    session's Details ends it. On a session's own workflow the frame's header shows where it is
+    (`3/10 · last check failed`).
   - Drag the palette's right edge to make it wider or narrower (remembered; double-click resets).
   - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
     count in the toolbar; click the count to step through them.

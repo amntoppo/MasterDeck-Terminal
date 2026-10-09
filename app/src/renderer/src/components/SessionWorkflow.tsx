@@ -13,6 +13,7 @@ import {
 } from "@shared/flow";
 import type { WorkflowStatus } from "@shared/ipc";
 import { formatAgo } from "@shared/format";
+import type { LoopView } from "@shared/loops";
 import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
 import { FlowEditor, type Skill } from "./FlowEditor";
@@ -135,6 +136,7 @@ export function WorkflowWidget({
       {open && (
         <SessionWorkflowDialog
           session={s}
+          loops={state.loops?.[s.sessionId]}
           onClose={() => {
             setOpen(false);
             void load();
@@ -151,9 +153,12 @@ export function WorkflowWidget({
  */
 export function SessionWorkflowDialog({
   session,
+  loops,
   onClose,
 }: {
   session: Session;
+  /** The session's loops (`state.loops`): their frames show where they are. */
+  loops?: LoopView[];
   onClose: () => void;
 }) {
   const sid = session.sessionId;
@@ -312,6 +317,7 @@ export function SessionWorkflowDialog({
             flow={flow}
             skills={lib.skills}
             onChange={onChange}
+            loops={loops}
             toolbar={<SaveBadge state={saveState} />}
           />
         ) : (

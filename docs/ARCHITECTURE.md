@@ -357,6 +357,27 @@ a leading `/` or `!`) into the session through `Sender` when it is idle (`nudgeL
 `main/index.ts`, shared with the Needs-you action); a busy session meets the reopened loop at its
 next turn end.
 
+**The Loop frame on the canvas.** `FlowEditor.tsx` draws a loop node as a React Flow node of type
+`frame` (`Frame`: `width`/`height` from the node's `w`/`h`, `zIndex: -1`, listed first, dragged by
+its header only via `dragHandle: ".ff-head"`; the box itself has `pointer-events: none` so blocks
+and arrows inside stay clickable; `NodeResizeControl` at the bottom-right corner; the editor sets
+`elevateNodesOnSelect={false}` so a selected frame never covers its blocks). Members stay ordinary
+nodes with absolute positions; the rules live in `shared/flowFrame.ts` (pure, tested):
+`insideFrame` (a block's centre in the frame's box), `membersAfterDrop` (on `onNodeDragStop` and on
+add: a block joins the frame it lands in and leaves the one it left; a trigger, built-in or loop is
+put back right of the frame with a note; a frame put down takes in the blocks under it),
+`refitFrame` (after a resize), `moveFrame` (a frame's position change moves its members),
+`frameArrow` (an arrow into a member goes to its frame; out of a member to outside is refused),
+`frameEdges` (`parseFlow`'s edge rules applied after membership changes, dropping an arrow that
+would close a cycle; a drop that loses arrows says so), `edgeKindFrom` / `framedEdgeKinds` (from a
+frame the toolbar's *if it worked / failed* read *when met / at the limit*), and the header text
+(`frameHeader`, `frameLive`). `layoutFlow` (`shared/flow.ts`) places a frame like a block, its
+members inside it in rows and columns of their own, and sizes it around them (`BLOCK_W/H`,
+`FRAME_PAD`, `FRAME_HEAD`); a flow without a loop is laid out exactly as before. The session's own
+editor (`SessionWorkflowDialog`) passes `state.loops[sessionId]` as `loops`, and the frame's header
+adds the round (`3/10 · last check failed`, pulsing while open). The web preview (`/?preview`) has
+a workflow with a loop and a session in round 3 to look at.
+
 ### Notes
 
 `main/notes.ts` `NotesStore` keeps the user's notes in `<home>/notes/`, one JSON file per note,
@@ -905,7 +926,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
-| Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
+| Workflows, hooks | `flow.ts`, `flowFrame.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
 | Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`), `noteEditor.ts` (`NoteEditor`: the editor's saves, switches and conflicts, without its screen) |

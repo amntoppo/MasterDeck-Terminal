@@ -8,13 +8,44 @@ import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
-import { fakeScreen, fixtureState } from './fixture'
+import { layoutFlow, newLoop, type Flow } from '@shared/flow'
+import { fakeScreen, fixtureState, SESSIONS } from './fixture'
 
 type Fn = (...a: never[]) => unknown
+
+/** A workflow with a Loop frame, as Build with Claude drafts it (no positions): the editor lays it out. */
+const loopFlow = (): Flow =>
+  layoutFlow({
+    nodes: [
+      { id: 't-push', x: 0, y: 0, kind: 'trigger', trigger: 'command-after', pattern: 'npm (run )?build' },
+      {
+        ...newLoop('n-tests1', 0, 0),
+        name: 'Fix the tests',
+        members: ['n-run', 'n-fix'],
+        check: { command: 'npm test', output: '', outputMode: 'match', timeoutMin: 5 },
+      } as Flow['nodes'][number],
+      { id: 'n-run', x: 0, y: 0, kind: 'instruction', text: 'Run the tests and read what failed.' },
+      { id: 'n-fix', x: 0, y: 0, kind: 'instruction', text: 'Fix the cause, not the test.' },
+      { id: 'n-done', x: 0, y: 0, kind: 'instruction', text: 'Open the PR.' },
+      { id: 'n-help', x: 0, y: 0, kind: 'instruction', text: 'Say on the PR what still fails.' },
+    ],
+    edges: [
+      { id: 'e-1', from: 't-push', to: 'n-tests1', kind: 'then' },
+      { id: 'e-2', from: 'n-run', to: 'n-fix', kind: 'then' },
+      { id: 'e-3', from: 'n-tests1', to: 'n-done', kind: 'met' },
+      { id: 'e-4', from: 'n-tests1', to: 'n-help', kind: 'limit' },
+    ],
+  })
 
 /** `window.deck` with fixture answers: same blocked/local split as the real RemoteDeck, nothing leaves the page. */
 function previewDeck(noBoard: boolean): DeckApi {
   const state: AppState = fixtureState(noBoard)
+  // The first session is in round 3 of its loop, so its workflow's frame shows where it is.
+  state.loops = {
+    [SESSIONS[0].sessionId]: [
+      { id: 'n-tests1', name: 'Fix the tests', state: 'open', iteration: 3, max: 10, startedAt: Date.now() - 12 * 60_000, minutes: 0, reason: null, endedAt: null, lastCheck: { ran: true, passed: false, said: false, tail: '2 failed', at: Date.now() - 60_000 } },
+    ],
+  }
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
   let seq = 1
@@ -60,9 +91,9 @@ function previewDeck(noBoard: boolean): DeckApi {
     workspaceRepos: () => repos,
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,
-    sessionWorkflowGet: () => null,
+    sessionWorkflowGet: () => ({ flow: loopFlow(), from: 'Fix the tests', at: Date.now() }),
     workflowDraftGet: () => null,
-    workflowGet: () => ({ hooks: [], skills: [], flow: null, templates: [], triggers: [], monitors: [] }),
+    workflowGet: () => ({ hooks: [], skills: [], flow: loopFlow(), templates: [{ id: 'default', name: 'Default', flow: loopFlow() }], triggers: [], monitors: [] }),
     defaultModel: () => null,
     ticketRepoMeta: () => ({ labels: [], milestones: [], assignees: [] }),
     issueBody: () => ({ ok: true, body: '## Steps\n\n1. Sign in from a fresh browser.\n2. Open **Settings**.\n\nThe page is blank; expected the settings form.' }),

@@ -169,15 +169,13 @@ export function loopLine(v: LoopView, now: number): string {
   if (v.state === 'limit') return `${head} · ${v.reason ?? 'stopped at a limit'}`
   if (v.state === 'stopped') return `${head} · ${v.reason ?? 'stopped'}`
   const min = Math.max(0, Math.floor((now - v.startedAt) / 60_000))
+  return `${head} · iteration ${v.iteration}/${v.max} · ${min} min · ${loopLast(v)}`
+}
+
+/** An open loop's last round, in a few words. */
+export function loopLast(v: LoopView): string {
   const c = v.lastCheck
-  const last = !c
-    ? 'first round'
-    : c.ran
-      ? c.passed
-        ? 'last check passed'
-        : 'last check failed'
-      : 'not done yet'
-  return `${head} · iteration ${v.iteration}/${v.max} · ${min} min · ${last}`
+  return !c ? 'first round' : c.ran ? (c.passed ? 'last check passed' : 'last check failed') : 'not done yet'
 }
 
 /** The session row's badge: an open loop's count, or how it ended within the hour. */

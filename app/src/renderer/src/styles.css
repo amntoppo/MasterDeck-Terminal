@@ -1115,6 +1115,33 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .fe-label { position: absolute; pointer-events: none; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--bg-2); border: 1px solid currentColor; }
 .fe-ok { color: var(--green); }
 .fe-fail { color: var(--red); }
+.fe-met { color: var(--green); }
+.fe-limit { color: var(--amber); }
+.flow-kinds button.k-met.on { color: var(--green); }
+.flow-kinds button.k-limit.on { color: var(--amber); }
+.fp-loop { border-left-color: #4fd1c5; }
+.fs-chip.fb-loop { border-color: #4fd1c5; }
+.fs-check { display: flex; align-items: center; gap: 6px; }
+/* A Loop frame: drawn under its blocks; only its header, handles and corner take the pointer, so
+   the blocks and arrows inside it stay clickable. */
+.react-flow__node-frame { pointer-events: none !important; }
+.ff { width: 100%; height: 100%; box-sizing: border-box; border: 1.5px dashed #4fd1c5; border-radius: 12px; background: color-mix(in srgb, #4fd1c5 6%, transparent); position: relative; }
+.ff.sel { border-style: solid; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+.ff.bad { border-color: var(--red); }
+.ff-head { pointer-events: all; cursor: grab; display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; color: var(--text); border-bottom: 1px dashed color-mix(in srgb, #4fd1c5 50%, transparent); background: color-mix(in srgb, #4fd1c5 14%, var(--bg-2)); border-radius: 11px 11px 0 0; }
+.ff-head:active { cursor: grabbing; }
+.ff-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ff-live { color: var(--muted); font-weight: 500; }
+.ff-live.st-open { color: #4fd1c5; }
+.ff-live.st-met { color: var(--green); }
+.ff-live.st-limit { color: var(--amber); }
+.ff.live { animation: ff-pulse 2s ease-in-out infinite; }
+@keyframes ff-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, #4fd1c5 25%, transparent); } }
+.ff:hover .fb-x, .ff.sel .fb-x { opacity: 1; }
+.ff-empty { position: absolute; inset: 40px 0 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); pointer-events: none; }
+.ff .fh { pointer-events: all; }
+.ff-resize { pointer-events: all; width: 14px !important; height: 14px !important; border: none !important; background: linear-gradient(135deg, transparent 50%, #4fd1c5 50%) !important; border-radius: 3px; cursor: nwse-resize; }
+@media (prefers-reduced-motion: reduce) { .ff.live { animation: none; } }
 
 .flow-side { border-left: 1px solid var(--line); overflow: auto; background: var(--bg-2); }
 .fs-form { padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 6px; }

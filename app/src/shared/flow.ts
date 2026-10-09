@@ -687,31 +687,97 @@ export function fromSteps(steps: CustomStep[]): Flow {
   return layoutFlow({ nodes, edges });
 }
 
-/** Place the blocks: each trigger on its own row, what follows it to the right, branches below. */
+/** A block's size on the canvas (`.fb` in styles.css; its height is a typical one). */
+export const BLOCK_W = 190;
+export const BLOCK_H = 70;
+/** Room inside a Loop frame: its sides and bottom, and its header above the blocks. */
+export const FRAME_PAD = 30;
+export const FRAME_HEAD = 48;
+/** The narrowest frame `layoutFlow` makes, so its header stays readable. */
+const FRAME_MIN_W = 320;
+
+/**
+ * Place the blocks: each trigger on its own row, what follows it to the right, branches below. A
+ * Loop frame is placed like a block, its members inside it the same way (rows and columns) and
+ * the frame sized around them; what follows it starts right of it, and new rows start below it.
+ * Without a loop this places every block where it always did.
+ */
 export function layoutFlow(flow: Flow, gapX = 290, gapY = 110): Flow {
   const out = new Map<string, FlowEdge[]>();
   for (const e of flow.edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
+  const frame = frameOf(flow);
+  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
   const pos = new Map<string, { x: number; y: number }>();
+  const size = new Map<string, { w: number; h: number }>();
   let row = 0;
-  const place = (id: string, depth: number) => {
-    if (pos.has(id)) return;
-    pos.set(id, { x: depth * gapX, y: row * gapY });
+  // The last row a frame reaches down to (-1: none), so a new row never starts inside one.
+  let below = -1;
+  const nextRow = () => (row = Math.max(row + 1, below + 1));
+  // A frame's members, in columns and rows of their own from its top left.
+  const inside = (n: LoopNode, x: number, y: number): { w: number; h: number } => {
+    if (!n.members.length) return { w: n.w, h: n.h };
+    const mine = new Set(n.members);
+    const at = new Map<string, { c: number; r: number }>();
+    let r = 0;
+    let cols = 1;
+    const put = (id: string, c: number) => {
+      if (at.has(id)) return;
+      at.set(id, { c, r });
+      cols = Math.max(cols, c + 1);
+      (out.get(id) ?? [])
+        .filter((e) => mine.has(e.to))
+        .forEach((e, i) => {
+          if (i > 0 && !at.has(e.to)) r++;
+          put(e.to, c + 1);
+        });
+    };
+    const entries = loopEntry(flow, n);
+    for (const m of [...entries, ...n.members])
+      if (!at.has(m)) (at.size && r++, put(m, 0));
+    for (const [id, p] of at)
+      pos.set(id, {
+        x: x + FRAME_PAD + p.c * gapX,
+        y: y + FRAME_HEAD + p.r * gapY,
+      });
+    return {
+      w: Math.max(FRAME_MIN_W, 2 * FRAME_PAD + (cols - 1) * gapX + BLOCK_W),
+      h: FRAME_HEAD + r * gapY + BLOCK_H + FRAME_PAD,
+    };
+  };
+  const place = (id: string, x: number) => {
+    // A member goes where its frame puts it.
+    if (pos.has(id) || frame.has(id)) return;
+    pos.set(id, { x, y: row * gapY });
+    let right = x + gapX;
+    const n = byId.get(id);
+    if (n?.kind === "loop") {
+      const s = inside(n, x, row * gapY);
+      size.set(id, s);
+      right = x + s.w + gapX - BLOCK_W;
+      below = Math.max(
+        below,
+        row + Math.ceil((s.h + gapY - BLOCK_H) / gapY) - 1,
+      );
+    }
     const kids = out.get(id) ?? [];
     kids.forEach((e, i) => {
-      if (i > 0 && !pos.has(e.to)) row++;
-      place(e.to, depth + 1);
+      if (i > 0 && !pos.has(e.to)) nextRow();
+      place(e.to, right);
     });
   };
   const triggers = flow.nodes.filter((n) => n.kind === "trigger");
   for (const t of triggers) {
     place(t.id, 0);
-    row++;
+    nextRow();
   }
   // Blocks no trigger reaches: a row of their own at the bottom.
-  for (const n of flow.nodes) if (!pos.has(n.id)) (place(n.id, 1), row++);
+  for (const n of flow.nodes)
+    if (!pos.has(n.id) && !frame.has(n.id)) (place(n.id, gapX), nextRow());
   return {
     ...flow,
-    nodes: flow.nodes.map((n) => ({ ...n, ...pos.get(n.id)! })),
+    nodes: flow.nodes.map(
+      (n) => ({ ...n, ...pos.get(n.id)!, ...size.get(n.id) }) as FlowNode,
+    ),
   };
 }
 
