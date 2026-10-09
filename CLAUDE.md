@@ -376,10 +376,13 @@ buttons; it does not go through macOS window drag regions.
   `worktree-MasterDeck-Terminal-89-website`: `site/` (Astro), four pages plus a 404, light and dark,
   scroll reveals, a typing master-agent terminal, a draggable workflow playground, drawn placeholder
   screens in one place (`src/data/screens.ts`), Open Graph images per page, sitemap and robots.
-  Deployed with `npm run deploy` in `site/` as the Workers `masterdeck-site` (masterdeck.dev) and
-  `masterdeck-www` (301 to the bare domain); see OPERATIONS. Checked: the build, Lighthouse 100 for
+  **Live** since 2026-10-10: `npm run deploy` in `site/` deployed the Workers `masterdeck-site`
+  (masterdeck.dev) and `masterdeck-www` (301 to the bare domain); see OPERATIONS. Not pushed, not
+  merged: the deployed site is this branch. Checked: the build, Lighthouse 100 for
   performance, accessibility, best practices and SEO on every page (mobile and desktop), screenshots
-  at 1440 and 390 px in both themes, every link and anchor, both Workers under `wrangler dev`.
+  at 1440 and 390 px in both themes, every link and anchor, both Workers under `wrangler dev`, and
+  after the deploy every page, the 404, the trailing-slash redirect and the www 301 over HTTPS.
+  `http://` is served, not redirected: Always Use HTTPS is a zone setting (TODO).
   Agent loops (#82) are shown as "coming soon": change the copy in `index.astro`, `features.astro`
   and `Playground.astro` when they ship.
 

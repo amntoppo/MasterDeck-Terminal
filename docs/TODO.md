@@ -547,6 +547,11 @@ fixes it, and move the item here to "Recently done".
 - **Agent loops (#82)** are "coming soon" on the site (Home's playground, Features): update the copy
   when they ship.
 - **The README rewrite** (its own ticket) should reuse the site's pitch and the same screens.
+- **`http://masterdeck.dev` is not sent to HTTPS.** Switch on **Always Use HTTPS** for the zone
+  (Cloudflare dashboard → SSL/TLS → Edge Certificates); wrangler cannot. It covers
+  app.masterdeck.dev too.
+- **The site is also on `masterdeck-site.<account>.workers.dev`.** Harmless (every page's canonical
+  is masterdeck.dev); `"workers_dev": false` in `site/wrangler.jsonc` turns it off.
 - **No analytics.** Cloudflare Web Analytics (no cookies) can be switched on for the zone without
   code; decide first.
 

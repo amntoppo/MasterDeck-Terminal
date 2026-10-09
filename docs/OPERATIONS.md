@@ -102,6 +102,9 @@ route can, and `app.masterdeck.dev` is deployed the same way. The bare domain ne
   and run `npm run og` (the link previews embed them).
 - **Link previews.** `npm run og` renders `public/og/<page>.png` (1200×630), `favicon.svg` and
   `apple-touch-icon.png`; the PNGs are committed.
+- **First deploy, 2026-10-10.** A DNS lookup made before the first deploy is cached as "no such
+  domain" (by the Mac and by the router) for up to 30 minutes: check with `dig masterdeck.dev
+  @1.1.1.1` or `curl --resolve masterdeck.dev:443:<ip>` rather than the local resolver.
 - **Checks before a deploy:** `npm run build`, then `npx astro preview` and Lighthouse on each page
   (performance, accessibility, best practices and SEO were 100 on all four pages, mobile and
   desktop, 2026-10-10). `npx wrangler dev` (add `--inspector-port 9331` when a second one runs)
