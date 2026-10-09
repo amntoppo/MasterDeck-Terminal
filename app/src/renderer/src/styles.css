@@ -366,6 +366,13 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .seg button.on { background: var(--accent-soft); color: var(--text); }
 .sec { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
 .kpis { display: flex; gap: 10px; flex-wrap: wrap; }
+.hours-rules { font-size: 12px; margin: 0 0 12px; max-width: 760px; }
+.hours-rules select { font: inherit; }
+.hours-head { display: flex; align-items: center; gap: 10px; }
+.hours-head .sec { margin-bottom: 8px; }
+.hours-tbl { margin-bottom: 10px; }
+.hours-caret { display: inline-block; width: 14px; color: var(--muted); }
+.hours-ticket td { font-size: 12px; }
 .kpi { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 130px; }
 .kpi-v { font-size: 22px; font-weight: 700; }
 .kpi-v.ok { color: var(--green); } .kpi-v.bad { color: var(--red); }
