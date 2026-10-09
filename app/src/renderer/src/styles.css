@@ -1443,3 +1443,9 @@ details.sd-more > summary:hover { color: var(--text); }
 .mdv th, .mdv td { border: 1px solid var(--line-2); padding: 4px 9px; text-align: left; vertical-align: top; }
 .mdv th { background: var(--bg-3); font-weight: 600; }
 .desc-preview .muted { color: var(--muted); font-size: 12px; }
+
+/* The web app's repository pick: a long path is cut, never wider than the dialog (a phone's 390 px); the folder in use is marked. */
+.repo-picker .mpick-row { min-width: 0; background: transparent; border: 0; color: var(--text); }
+.repo-picker .mpick-row b { flex: none; }
+.repo-picker .mpick-row .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-picker .mpick-row.on { background: var(--accent-soft); }

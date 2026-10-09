@@ -136,9 +136,11 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   acme/api found in `<workspace>`." The session then starts in the workspace with the prompt it
   always had, and has to find the repository itself; you can still press Start. A very large
   workspace is not searched to the end (2000 folders): the line then says "No checkout of acme/api
-  found — only the first 2000 folders of `<workspace>` were searched." **Choose folder…** (on the
-  Mac, not in the web app) picks any other folder for this session; if it is a checkout of the
-  repository the prompt says so. The prompt changes with the folder only while it is MasterDeck's
+  found — only the first 2000 folders of `<workspace>` were searched." **Choose folder…** picks
+  another folder for this session; if it is a checkout of the repository the prompt says so. On
+  the Mac it opens the folder picker and any folder will do. In the web app it lists the workspace
+  and the repositories MasterDeck found in it, with a filter, and only those: a session started
+  from a browser never runs in a folder you type. The prompt changes with the folder only while it is MasterDeck's
   own text: one you edited, or one master wrote for its proposal, is left alone. With two or more
   accounts the line also says who the session runs as, and the folder is looked for in that
   account's workspace: picking another **Account** looks again in the picked account's workspace
