@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { appendText } from '@shared/noteRequest'
 import type { Ticket } from '@shared/ticket'
 import {
-  NOTES_MAX, NOTE_BODY_MAX, NOTE_ID, NOTE_QUERY_MAX, cleanNote, matches, noteMeta, sortNotes, storedNote, ticketNoteId,
-  type Note, type NoteChange, type NoteMeta, type NoteTicket, type SaveResult,
+  NOTES_MAX, NOTE_BODY_MAX, NOTE_ID, NOTE_QUERY_MAX, asNoteMeeting, cleanNote, matches, noteMeta, sortNotes, storedNote,
+  ticketNoteId, type Note, type NoteChange, type NoteLink, type NoteLinkInput, type NoteMeeting, type NoteMeta, type NoteTicket,
+  type SaveResult,
 } from '@shared/notes'
 
 interface Deps {
@@ -106,6 +107,42 @@ export class NotesStore {
     return sortNotes([...this.notes.values()].filter((n) => matches(n, query)).map(noteMeta)).map((m) => m.id)
   }
 
+  /** A link's ticket named in full, as a ticket note's is. Null when its repository is not known yet. */
+  private fullLink(l: NoteLinkInput): NoteLink | null {
+    const out: NoteLink = {}
+    if (l.session) out.session = { key: l.session.key, name: l.session.name }
+    if (l.ticket) {
+      const repo = this.repoOf(l.ticket.repo)
+      if (!ticketNoteId(repo, l.ticket.number)) return null
+      out.ticket = { repo, number: l.ticket.number }
+    }
+    return out
+  }
+
+  /** Every write of a note: temp file + rename, then memory and the change event. */
+  private write(note: Note): SaveResult {
+    const file = join(this.dir, `${note.id}.json`)
+    const tmp = `${file}.${process.pid}.tmp`
+    try {
+      mkdirSync(this.dir, { recursive: true })
+      writeFileSync(tmp, JSON.stringify(note, null, 2))
+      renameSync(tmp, file)
+    } catch (e) {
+      try {
+        rmSync(tmp, { force: true })
+      } catch {}
+      return { ok: false, message: this.diskError('save', e), retry: true }
+    }
+    this.notes.set(note.id, note)
+    const meta = noteMeta(note)
+    this.notify({ id: note.id, meta })
+    return { ok: true, meta }
+  }
+
+  /**
+   * An editor's save. A new note takes the link it was sent; a stored one keeps its link and its meeting
+   * (an editor never changes either).
+   */
   save(raw: unknown): SaveResult {
     const c = cleanNote(raw)
     if (!c.ok) return c
@@ -135,6 +172,13 @@ export class NotesStore {
     }
     if (!old && this.notes.size >= NOTES_MAX)
       return { ok: false, message: `${NOTES_MAX} notes is the limit. Delete some first.` }
+    let link: NoteLink | null = old ? (old.link ?? null) : null
+    if (!old && v.link) {
+      // A ticket's note named by id alone (cleanNote only sees the id when it is sent).
+      if (ticket || id?.startsWith('t-')) return { ok: false, message: 'Not a note.' }
+      link = this.fullLink(v.link)
+      if (!link) return { ok: false, message: 'This ticket has no repository yet. Finish Setup first.' }
+    }
     id ??= `n-${randomUUID().replace(/-/g, '')}`
     const t = this.now()
     const note: Note = {
@@ -145,22 +189,54 @@ export class NotesStore {
       created: old?.created ?? t,
       updated: Math.max(t, (old?.updated ?? 0) + 1),
     }
-    const file = join(this.dir, `${id}.json`)
-    const tmp = `${file}.${process.pid}.tmp`
-    try {
-      mkdirSync(this.dir, { recursive: true })
-      writeFileSync(tmp, JSON.stringify(note, null, 2))
-      renameSync(tmp, file)
-    } catch (e) {
-      try {
-        rmSync(tmp, { force: true })
-      } catch {}
-      return { ok: false, message: this.diskError('save', e), retry: true }
+    // Written only when set: a note without them is the same file it was before they existed.
+    if (link) note.link = link
+    if (old?.meeting) note.meeting = old.meeting
+    return this.write(note)
+  }
+
+  /**
+   * A note made from a meeting: a new `n-` note about a session or a ticket, marked with the meeting. The only writer
+   * of `meeting`. Checked as an editor's save is; a body past the limit is cut at a line break (it is quotes from a
+   * transcript, not text the user typed).
+   */
+  addMeetingNote(o: { title: string; body: string; link: NoteLink | NoteLinkInput; meeting: NoteMeeting }): SaveResult {
+    let body = typeof o?.body === 'string' ? o.body.replace(/\r\n?/g, '\n') : o?.body
+    if (typeof body === 'string' && body.length > NOTE_BODY_MAX) {
+      const at = body.lastIndexOf('\n', NOTE_BODY_MAX)
+      body = body.slice(0, at > 0 ? at : NOTE_BODY_MAX)
     }
-    this.notes.set(id, note)
-    const meta = noteMeta(note)
-    this.notify({ id, meta })
-    return { ok: true, meta }
+    const c = cleanNote({ title: o?.title, body, link: o?.link, base: null })
+    if (!c.ok) return c
+    const meeting = asNoteMeeting(o.meeting)
+    if (!meeting) return { ok: false, message: 'Not a meeting.' }
+    if (!c.value.link) return { ok: false, message: 'A meeting note is about a session or a ticket.' }
+    const link = this.fullLink(c.value.link)
+    if (!link) return { ok: false, message: 'This ticket has no repository yet. Finish Setup first.' }
+    if (this.notes.size >= NOTES_MAX) return { ok: false, message: `${NOTES_MAX} notes is the limit. Delete some first.` }
+    const t = this.now()
+    // created === updated marks it as not edited since: matching the meeting again may replace it (dropMeetingNotes).
+    return this.write({ id: `n-${randomUUID().replace(/-/g, '')}`, title: c.value.title, body: c.value.body, ticket: null, link, meeting, created: t, updated: t })
+  }
+
+  /** The notes that came from one meeting, newest first. */
+  meetingNotes(meetingId: string): NoteMeta[] {
+    return sortNotes([...this.notes.values()].filter((n) => n.meeting?.id === meetingId).map(noteMeta))
+  }
+
+  /**
+   * Removes the notes that came from one meeting; with `onlyUnedited`, only the ones the user never saved since
+   * (`updated === created`), so matching it again does not take away what the user wrote.
+   */
+  dropMeetingNotes(meetingId: string, onlyUnedited: boolean): { removed: string[]; failed: string[] } {
+    const removed: string[] = []
+    const failed: string[] = []
+    for (const n of [...this.notes.values()]) {
+      if (n.meeting?.id !== meetingId || (onlyUnedited && n.updated !== n.created)) continue
+      if (this.remove(n.id).ok) removed.push(n.id)
+      else failed.push(n.id)
+    }
+    return { removed, failed }
   }
 
   /**

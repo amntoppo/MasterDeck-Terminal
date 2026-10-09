@@ -523,6 +523,26 @@ that tried to save over it (so the editor can offer Reload). The list (`notes:li
 Markdown read as one plain line (`notePreview` → `markdownText` in `shared/markdown.ts`, from the first
 4000 characters; kept per note object in a WeakMap, since a save replaces the object). `notes:search` runs in main and returns ids.
 
+Two optional fields, on `n-` notes only (a file without them loads as before, and the store writes
+them only when set, so an old note saved again keeps its shape). `ticket` keeps its one meaning: set,
+this *is* the ticket's note (`t-…`). **`link`** (`NoteLink`: `session` `{ key, name }` and/or `ticket`
+`{ repo, number }`) is what an `n-` note is about: `key` is the session's `Session.key` (1 to 200
+characters of `[A-Za-z0-9._:-]`), `name` its name then (200 at most, one line), the ticket's repository
+named in full by the store (`repoOf`, as for a ticket note). An editor sends it in `NoteInput.link`
+(the draft's `link`: `blankDraft(ticket, link)`, `NoteTarget.link`, part of `noteTargetKey`); the
+store takes it for a new note only, a stored note keeps the link it has, and a link on a ticket note
+is refused ("Not a note."). **`meeting`** (`NoteMeeting`: `id` matching `MEETING_ID` from
+`shared/meetings.ts`, `title` at most `MEETING_TITLE_MAX` 120, `at`) is the meeting a note came from.
+No editor can set it (`cleanNote` ignores one); `NotesStore.addMeetingNote({ title, body, link,
+meeting })` is its only writer (a new `n-` note, `created === updated`, checked as a save, a body past
+50,000 cut at a line break, a link required), and every later save keeps it. `meetingNotes(id)` lists
+one meeting's notes, `dropMeetingNotes(id, onlyUnedited)` removes them (with `onlyUnedited`, only
+those never saved since: `updated === created`). `storedNote` refuses a bad link or meeting, and
+either on a ticket note. `NoteMeta` carries both (the web gets them with the list); `matches` also
+searches the session's name, the linked ticket and the meeting's title. `sessionNotes(metas, session,
+ticket, repoOf)` is a session's notes: its ticket's note first, then the notes whose `link.session.key`
+is the session's or whose `link.ticket` is its ticket, newest first, each once.
+
 A note's body is Markdown source, stored as typed. It is drawn by `MarkdownView` with `html={false}`:
 `parseMarkdown(text, { html: false })` builds a tree of blocks and inlines, React draws elements from
 it, and no HTML is ever built from the text. In that mode no tag is read at all (`<img>`, `<br>`, comments

@@ -253,3 +253,81 @@ describe('NotesStore', () => {
     expect(first.title).toBe('edited')
   }, 20_000)
 })
+
+describe('links and meetings', () => {
+  const M = { id: 'm-' + 'a'.repeat(32), title: 'Standup', at: 1_700_000_000_000 }
+  const LINK = { session: { key: 'bg:1a2b3c4d', name: 'Fix login' }, ticket: { repo: 'acme/web', number: 7 } }
+  const file = (id: string) => JSON.parse(readFileSync(join(dir, `${id}.json`), 'utf8'))
+
+  it('a note file from before links and meetings still loads, and a save keeps it without them', () => {
+    const id = 'n-' + '0'.repeat(32)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id, title: 'Old', body: 'x', ticket: null, created: 1, updated: 2 }))
+    const s = open()
+    expect(s.get(id)?.body).toBe('x')
+    saved(s.save({ id, title: 'Old', body: 'y', base: 2 }))
+    expect(Object.keys(file(id)).sort()).toEqual(['body', 'created', 'id', 'ticket', 'title', 'updated'])
+  })
+
+  it('a new note takes its link, named in full; it survives a restart and later saves', () => {
+    const s = open()
+    const m = saved(s.save({ title: 'About it', body: 'b', base: null, link: { session: LINK.session, ticket: { repo: null, number: 7 } } }))
+    expect(m.link).toEqual(LINK)
+    const again = open()
+    expect(again.get(m.id)?.link).toEqual(LINK)
+    // An editor cannot move a stored note's link (nor drop it).
+    const b = saved(again.save({ id: m.id, title: 'About it', body: 'c', base: m.updated, link: { session: { key: 'other', name: 'x' } } }))
+    expect(b.link).toEqual(LINK)
+    expect(saved(again.save({ id: m.id, title: 'About it', body: 'd', base: b.updated, link: null })).link).toEqual(LINK)
+  })
+
+  it('a link on a ticket note is refused', () => {
+    const s = open()
+    expect(s.save({ title: '', body: 'x', base: null, ticket: { repo: 'acme/web', number: 63 }, link: LINK })).toEqual({ ok: false, message: 'Not a note.' })
+    expect(s.list()).toEqual([])
+  })
+
+  it('an editor cannot set a meeting; a save keeps the one a note has', () => {
+    const s = open()
+    const m = saved(s.save({ title: 't', body: 'b', base: null, meeting: M } as never))
+    expect(m.meeting).toBeUndefined()
+    const n = s.addMeetingNote({ title: 'From standup', body: 'said', link: LINK, meeting: M })
+    const meta = saved(n)
+    expect(meta).toMatchObject({ title: 'From standup', ticket: null, link: LINK, meeting: M })
+    expect(meta.created).toBe(meta.updated)
+    const edited = saved(s.save({ id: meta.id, title: 'From standup', body: 'said more', base: meta.updated }))
+    expect(edited.meeting).toEqual(M)
+    expect(open().get(meta.id)?.meeting).toEqual(M)
+  })
+
+  it('addMeetingNote cuts a long body at a line break, and checks the rest', () => {
+    const s = open()
+    const line = 'x'.repeat(99) + '\n'
+    const m = saved(s.addMeetingNote({ title: 't', body: line.repeat(1000), link: LINK, meeting: M }))
+    const body = s.get(m.id)!.body
+    expect(body.length).toBeLessThanOrEqual(50_000)
+    expect(body.endsWith('x')).toBe(true)
+    expect(s.addMeetingNote({ title: 't', body: 'b', link: LINK, meeting: { ...M, id: '../m' } })).toEqual({ ok: false, message: 'Not a meeting.' })
+    expect(s.addMeetingNote({ title: 't', body: 'b', link: {}, meeting: M })).toMatchObject({ ok: false })
+    expect(s.addMeetingNote({ title: 't', body: 'b\x1b[31m', link: LINK, meeting: M })).toMatchObject({ ok: false })
+    expect(s.addMeetingNote({ title: 't', body: 'b', link: { session: { key: '/etc', name: 'x' } }, meeting: M })).toMatchObject({ ok: false })
+  })
+
+  it('meetingNotes lists a meeting\'s notes; dropMeetingNotes leaves the edited ones when asked', () => {
+    const s = open()
+    const other = { ...M, id: 'm-' + 'b'.repeat(32) }
+    const a = saved(s.addMeetingNote({ title: 'a', body: 'a', link: LINK, meeting: M }))
+    clock = 2000
+    const b = saved(s.addMeetingNote({ title: 'b', body: 'b', link: { ticket: LINK.ticket }, meeting: M }))
+    const c = saved(s.addMeetingNote({ title: 'c', body: 'c', link: LINK, meeting: other }))
+    const plain = saved(s.save({ title: 'mine', body: 'x', base: null }))
+    expect(s.meetingNotes(M.id).map((m) => m.id)).toEqual([b.id, a.id])
+    clock = 3000
+    saved(s.save({ id: a.id, title: 'a', body: 'a, edited', base: a.updated }))
+    expect(s.dropMeetingNotes(M.id, true)).toEqual({ removed: [b.id], failed: [] })
+    expect(s.meetingNotes(M.id).map((m) => m.id)).toEqual([a.id])
+    expect(s.dropMeetingNotes(M.id, false)).toEqual({ removed: [a.id], failed: [] })
+    expect(s.list().map((m) => m.id).sort()).toEqual([c.id, plain.id].sort())
+    expect(readdirSync(dir).sort()).toEqual([`${c.id}.json`, `${plain.id}.json`].sort())
+  })
+})

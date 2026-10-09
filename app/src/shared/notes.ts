@@ -1,4 +1,5 @@
 import { markdownText } from './markdown'
+import { MEETING_ID, MEETING_TITLE_MAX } from './meetings'
 import { asTicket, sameTicket, type Ticket } from './ticket'
 
 type Titled = { repo?: string | null; number: number; title: string }
@@ -25,13 +26,39 @@ export interface NoteTicket {
   repo: string
   number: number
 }
+/** A session a note is about: its `Session.key` (survives a resume) and its name when the note was made. */
+export interface NoteSessionLink {
+  key: string
+  name: string
+}
+/** What an `n-` note is about. Never on a ticket's note: that one *is* about its ticket. */
+export interface NoteLink {
+  session?: NoteSessionLink
+  ticket?: NoteTicket
+}
+/** The meeting a note came from. Set by `NotesStore.addMeetingNote` alone: no editor can. */
+export interface NoteMeeting {
+  id: string
+  title: string
+  at: number
+}
+/** A link as an editor sends it: the ticket may be a bare number of the primary repository (the store names it in full). */
+export interface NoteLinkInput {
+  session?: NoteSessionLink
+  ticket?: Ticket
+}
 export interface Note {
   id: string
   /** "" for a ticket note. */
   title: string
   /** As typed: Markdown source, shown rendered (`parseMarkdown` with `html: false`). Never rewritten. */
   body: string
+  /** Set: this note *is* the ticket's note (id `t-…`). What an `n-` note is about is `link`. */
   ticket: NoteTicket | null
+  /** What an `n-` note is about (a session, a ticket). Absent in files from before it. */
+  link?: NoteLink | null
+  /** The meeting it came from. Absent in files from before it. */
+  meeting?: NoteMeeting | null
   created: number
   /** Grows with every save, so it names one version. */
   updated: number
@@ -44,6 +71,8 @@ export interface NoteInput {
   title: string
   body: string
   ticket?: Ticket | null
+  /** Taken for a new note only; a stored note keeps the link it has. */
+  link?: NoteLinkInput | null
   base: number | null
   force?: boolean
 }
@@ -61,6 +90,73 @@ export type NoteChange = { id: string; meta: NoteMeta } | { id: string; deleted:
 export const NOTE_ID = /^(?:n-[0-9a-f]{32}|t-[a-z0-9-]{1,39}~[a-z0-9._-]{1,100}~[1-9][0-9]{0,8})$/
 
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
+/** For one-line names (a session's, a meeting's title): no tab or line break either. */
+const CONTROL_LINE = /[\x00-\x1f\x7f-\x9f]/
+const SESSION_KEY = /^[A-Za-z0-9._:-]{1,200}$/
+export const NOTE_LINK_NAME_MAX = 200
+const FULL_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+function asSessionLink(v: unknown): NoteSessionLink | null {
+  if (!isObject(v) || typeof v.key !== 'string' || typeof v.name !== 'string') return null
+  if (!SESSION_KEY.test(v.key) || v.name.length > NOTE_LINK_NAME_MAX || CONTROL_LINE.test(v.name)) return null
+  return { key: v.key, name: v.name }
+}
+
+/** A ticket as the store writes it: the repository in full. */
+function asNoteTicket(v: unknown): NoteTicket | null {
+  if (!isObject(v) || typeof v.repo !== 'string' || !FULL_REPO.test(v.repo)) return null
+  if (typeof v.number !== 'number' || !Number.isInteger(v.number) || v.number <= 0) return null
+  return { repo: v.repo, number: v.number }
+}
+
+/** A stored meeting mark; null when it is not one. */
+export function asNoteMeeting(v: unknown): NoteMeeting | null {
+  if (!isObject(v) || typeof v.id !== 'string' || typeof v.title !== 'string') return null
+  if (!MEETING_ID.test(v.id) || v.title.length > MEETING_TITLE_MAX || CONTROL_LINE.test(v.title)) return null
+  if (typeof v.at !== 'number' || !Number.isFinite(v.at)) return null
+  return { id: v.id, title: v.title, at: v.at }
+}
+
+/**
+ * A link from an editor (its ticket may name the primary repository by number alone). undefined: not a link.
+ * One with nothing in it is null: a note about nothing.
+ */
+export function asLinkInput(v: unknown): NoteLinkInput | null | undefined {
+  if (v === undefined || v === null) return null
+  if (!isObject(v)) return undefined
+  const out: NoteLinkInput = {}
+  if (v.session !== undefined && v.session !== null) {
+    const s = asSessionLink(v.session)
+    if (!s) return undefined
+    out.session = s
+  }
+  if (v.ticket !== undefined && v.ticket !== null) {
+    const t = asTicket(v.ticket)
+    if (!t) return undefined
+    out.ticket = t
+  }
+  return out.session || out.ticket ? out : null
+}
+
+/** A link read from a file. undefined: not one MasterDeck wrote. */
+function storedLink(v: unknown): NoteLink | null | undefined {
+  if (v === undefined || v === null) return null
+  if (!isObject(v)) return undefined
+  const out: NoteLink = {}
+  if (v.session !== undefined && v.session !== null) {
+    const s = asSessionLink(v.session)
+    if (!s) return undefined
+    out.session = s
+  }
+  if (v.ticket !== undefined && v.ticket !== null) {
+    const t = asNoteTicket(v.ticket)
+    if (!t) return undefined
+    out.ticket = t
+  }
+  return out.session || out.ticket ? out : undefined
+}
 
 /** A ticket's note id, from its full repository (owner/name). Null when there is none to name. */
 export function ticketNoteId(repo: string, number: number): string | null {
@@ -70,9 +166,20 @@ export function ticketNoteId(repo: string, number: number): string | null {
   return NOTE_ID.test(id) ? id : null
 }
 
-export type Cleaned = { id: string | undefined; title: string; body: string; ticket: Ticket | null; base: number | null; force: boolean }
+export type Cleaned = {
+  id: string | undefined
+  title: string
+  body: string
+  ticket: Ticket | null
+  link: NoteLinkInput | null
+  base: number | null
+  force: boolean
+}
 
-/** The one check of what an editor sent (the window or a browser): limits, characters, ids. Never cuts text. */
+/**
+ * The one check of what an editor sent (the window or a browser): limits, characters, ids. Never cuts text.
+ * A `meeting` in it is ignored: only the store's addMeetingNote writes one.
+ */
 export function cleanNote(raw: unknown): { ok: true; value: Cleaned } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message })
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('Not a note.')
@@ -90,7 +197,11 @@ export function cleanNote(raw: unknown): { ok: true; value: Cleaned } | { ok: fa
     ticket = asTicket(o.ticket)
     if (!ticket) return bad('Not a ticket.')
   }
-  return { ok: true, value: { id: o.id as string | undefined, title, body, ticket, base: o.base as number | null, force: o.force === true } }
+  const link = asLinkInput(o.link)
+  if (link === undefined) return bad('Not a note.')
+  // A ticket's note is about its ticket; a link is for the other notes.
+  if (link && (ticket || (typeof o.id === 'string' && o.id.startsWith('t-')))) return bad('Not a note.')
+  return { ok: true, value: { id: o.id as string | undefined, title, body, ticket, link, base: o.base as number | null, force: o.force === true } }
 }
 
 /** A note read from disk, or null when the file is not one MasterDeck wrote (`id` is the file's name without .json). */
@@ -111,7 +222,20 @@ export function storedNote(raw: unknown, id: string): Note | null {
   // A ticket note's file name is its ticket, and a global note has none.
   if (id.startsWith('t-') !== !!ticket) return null
   if (ticket && ticketNoteId(ticket.repo, ticket.number) !== id) return null
-  return { id, title: o.title, body: o.body, ticket, created: o.created as number, updated: o.updated as number }
+  // Both fields are newer than the first notes: a file without them is a note as it always was.
+  const link = storedLink(o.link)
+  if (link === undefined) return null
+  let meeting: NoteMeeting | null = null
+  if (o.meeting !== undefined && o.meeting !== null) {
+    meeting = asNoteMeeting(o.meeting)
+    if (!meeting) return null
+  }
+  // Links and meetings are on `n-` notes only.
+  if (ticket && (link || meeting)) return null
+  const n: Note = { id, title: o.title, body: o.body, ticket, created: o.created as number, updated: o.updated as number }
+  if (link) n.link = link
+  if (meeting) n.meeting = meeting
+  return n
 }
 
 /** A note's text as one plain line, its Markdown marks read (`**done**` is "done", a task "☐ …"); the first part only. */
@@ -134,10 +258,26 @@ export function noteMeta(n: Note): NoteMeta {
 export const sortNotes = (metas: NoteMeta[]): NoteMeta[] =>
   [...metas].sort((a, b) => b.updated - a.updated || (a.id < b.id ? -1 : 1))
 
-/** Every word of the query is in the title, the text or the ticket (owner/name#12). */
+/** Every word of the query is in the title, the text, the ticket (owner/name#12), the linked session's name or ticket, or the meeting's title. */
 export function matches(n: Note, query: string): boolean {
-  const hay = `${n.title}\n${n.body}\n${n.ticket ? `${n.ticket.repo}#${n.ticket.number}` : ''}`.toLowerCase()
+  const ref = (t: NoteTicket | null | undefined) => (t ? `${t.repo}#${t.number}` : '')
+  const hay = [n.title, n.body, ref(n.ticket), n.link?.session?.name ?? '', ref(n.link?.ticket), n.meeting?.title ?? ''].join('\n').toLowerCase()
   return query.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))
+}
+
+/**
+ * A session's notes: its ticket's note first, then the notes about the session or its ticket, newest first, each once.
+ * `repoOf` names a ticket's repository in full (null: the primary).
+ */
+export function sessionNotes(metas: NoteMeta[], s: { key: string }, ticket: Ticket | null, repoOf: (r: string | null) => string): NoteMeta[] {
+  const repo = ticket ? repoOf(ticket.repo).toLowerCase() : ''
+  const tid = ticket ? ticketNoteId(repo, ticket.number) : null
+  const own = tid ? metas.find((m) => m.id === tid) : undefined
+  const about = (m: NoteMeta) =>
+    m.link?.session?.key === s.key ||
+    (!!ticket && !!m.link?.ticket && m.link.ticket.number === ticket.number && m.link.ticket.repo.toLowerCase() === repo)
+  const rest = sortNotes(metas.filter((m) => m.id !== tid && about(m)))
+  return own ? [own, ...rest] : rest
 }
 
 export function applyChange(metas: NoteMeta[], c: NoteChange): NoteMeta[] {

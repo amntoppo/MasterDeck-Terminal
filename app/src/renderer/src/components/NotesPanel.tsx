@@ -115,7 +115,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
       const n = meta ? await deck().notesGet(meta.id) : null
       if (n) return draftOf(n)
       if (target.ticket) return blankDraft(target.ticket)
-      return target.fresh ? blankDraft(null) : null
+      return target.fresh ? blankDraft(null, target.link) : null
     }
     void editor.show(target, load).then((shown) => {
       // The open text could not be saved: the panel stays on it rather than lose it (the editor says why).

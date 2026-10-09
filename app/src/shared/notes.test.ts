@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   NOTE_BODY_MAX, NOTE_ID, NOTE_TITLE_MAX, applyChange, cleanNote, incoming, matches, noteMeta,
-  sortNotes, storedNote, ticketNoteId, ticketTitle, type Note, type NoteMeta,
+  sessionNotes, sortNotes, storedNote, ticketNoteId, ticketTitle, type Note, type NoteMeta,
 } from './notes'
 
 const note = (over: Partial<Note> = {}): Note => ({
@@ -49,7 +49,35 @@ describe('cleanNote', () => {
   })
   it('keeps a ticket and reads force', () => {
     const r = cleanNote({ title: 'ignored', body: 'b', base: 5, force: true, ticket: { repo: 'acme/web', number: 63 } })
-    expect(r.ok && r.value).toEqual({ id: undefined, title: 'ignored', body: 'b', base: 5, force: true, ticket: { repo: 'acme/web', number: 63 } })
+    expect(r.ok && r.value).toEqual({ id: undefined, title: 'ignored', body: 'b', base: 5, force: true, ticket: { repo: 'acme/web', number: 63 }, link: null })
+  })
+  it('reads a link to a session and a ticket', () => {
+    const link = { session: { key: 'bg:1a2b3c4d', name: 'Fix login' }, ticket: { repo: 'acme/web', number: 7 } }
+    const r = cleanNote({ title: 'a', body: '', base: null, link })
+    expect(r.ok && r.value.link).toEqual(link)
+    expect(cleanNote({ title: 'a', body: '', base: null, link: { ticket: 7 } })).toMatchObject({ ok: true, value: { link: { ticket: { repo: null, number: 7 } } } })
+    // A link about nothing is no link.
+    expect(cleanNote({ title: 'a', body: '', base: null, link: {} })).toMatchObject({ ok: true, value: { link: null } })
+  })
+  it('refuses a bad link', () => {
+    const bad = (link: unknown) => expect(cleanNote({ title: 'a', body: '', base: null, link }), JSON.stringify(link)).toEqual({ ok: false, message: 'Not a note.' })
+    bad('bg:1')
+    bad({ session: { key: '../x', name: 'n' } })
+    bad({ session: { key: 'k'.repeat(201), name: 'n' } })
+    bad({ session: { key: 'k', name: 'n'.repeat(201) } })
+    bad({ session: { key: 'k', name: 'a\nb' } })
+    bad({ session: { key: 'k' } })
+    bad({ ticket: { repo: 'not a repo', number: 1 } })
+  })
+  it('refuses a link on a ticket note', () => {
+    const link = { session: { key: 'k', name: 'n' } }
+    expect(cleanNote({ title: '', body: '', base: null, ticket: { repo: 'acme/web', number: 63 }, link })).toEqual({ ok: false, message: 'Not a note.' })
+    expect(cleanNote({ id: 't-acme~web~63', title: '', body: '', base: null, link })).toEqual({ ok: false, message: 'Not a note.' })
+  })
+  it('never takes a meeting from an editor', () => {
+    const r = cleanNote({ title: 'a', body: '', base: null, meeting: { id: 'm-' + 'a'.repeat(32), title: 'Standup', at: 1 } })
+    expect(r.ok).toBe(true)
+    expect(r.ok && 'meeting' in r.value).toBe(false)
   })
 })
 
@@ -66,6 +94,55 @@ describe('storedNote', () => {
     expect(storedNote({ ...note(), body: 'x'.repeat(NOTE_BODY_MAX + 1) }, note().id)).toBeNull()
     expect(storedNote({ ...note(), updated: 'now' }, note().id)).toBeNull()
     expect(storedNote([], note().id)).toBeNull()
+  })
+  const M = { id: 'm-' + 'a'.repeat(32), title: 'Standup', at: 1_700_000_000_000 }
+  const LINK = { session: { key: 'bg:1a2b3c4d', name: 'Fix login' }, ticket: { repo: 'acme/web', number: 7 } }
+  it('a note from before links and meetings still loads, and stays without them', () => {
+    const old = { id: 'n-' + '0'.repeat(32), title: 'Old', body: 'x', ticket: null, created: 1, updated: 2 }
+    const n = storedNote(old, old.id)!
+    expect(n).toEqual(old)
+    expect('link' in n || 'meeting' in n).toBe(false)
+    expect(storedNote({ ...old, link: null, meeting: null }, old.id)).toEqual(old)
+  })
+  it('reads a link and a meeting', () => {
+    const n = note({ link: LINK, meeting: M })
+    expect(storedNote(n, n.id)).toEqual(n)
+    expect(storedNote(note({ link: { ticket: LINK.ticket } }), note().id)?.link).toEqual({ ticket: LINK.ticket })
+  })
+  it('a bad link or meeting is not a note', () => {
+    for (const over of [
+      { link: 'x' }, { link: {} }, { link: { session: { key: '/etc', name: 'n' } } }, { link: { ticket: { repo: 'web', number: 7 } } },
+      { link: { ticket: { repo: 'acme/web', number: 0 } } }, { meeting: { ...M, id: '../m' } }, { meeting: { ...M, title: 'x'.repeat(121) } },
+      { meeting: { ...M, at: 'today' } }, { meeting: 'm' },
+    ])
+      expect(storedNote({ ...note(), ...over }, note().id), JSON.stringify(over)).toBeNull()
+  })
+  it('a ticket note carries neither', () => {
+    const t = note({ id: 't-acme~web~63', title: '', ticket: { repo: 'acme/web', number: 63 } })
+    expect(storedNote({ ...t, link: LINK }, t.id)).toBeNull()
+    expect(storedNote({ ...t, meeting: M }, t.id)).toBeNull()
+  })
+})
+
+describe('sessionNotes', () => {
+  const repoOf = (r: string | null) => r ?? 'acme/web'
+  const m = (id: string, updated: number, over: Partial<Note> = {}) => noteMeta(note({ id, updated, ...over }))
+  const N = (n: number) => 'n-' + String(n).padStart(32, '0')
+  const own = m('t-acme~web~7', 1, { title: '', ticket: { repo: 'acme/web', number: 7 } })
+  const bySession = m(N(1), 5, { link: { session: { key: 'bg:aa', name: 's' } } })
+  const byTicket = m(N(2), 9, { link: { ticket: { repo: 'Acme/Web', number: 7 } } })
+  const both = m(N(3), 7, { link: { session: { key: 'bg:aa', name: 's' }, ticket: { repo: 'acme/web', number: 7 } } })
+  const other = m(N(4), 20, { link: { session: { key: 'bg:bb', name: 's' }, ticket: { repo: 'acme/api', number: 7 } } })
+  const plain = m(N(5), 30)
+  const all = [plain, other, bySession, own, both, byTicket]
+  it('the ticket note first, then the notes about the session or its ticket, newest first, each once', () => {
+    expect(sessionNotes(all, { key: 'bg:aa' }, { repo: null, number: 7 }, repoOf).map((x) => x.id)).toEqual([own.id, byTicket.id, both.id, bySession.id])
+  })
+  it('a session without a ticket: only the notes about it', () => {
+    expect(sessionNotes(all, { key: 'bg:aa' }, null, repoOf).map((x) => x.id)).toEqual([both.id, bySession.id])
+  })
+  it('no ticket note: the rest alone', () => {
+    expect(sessionNotes([byTicket], { key: 'bg:zz' }, { repo: 'acme/web', number: 7 }, repoOf).map((x) => x.id)).toEqual([byTicket.id])
   })
 })
 
@@ -92,6 +169,9 @@ describe('list helpers', () => {
     expect(matches(n, 'REVIEW dana')).toBe(true)
     expect(matches(n, 'review merge')).toBe(false)
     expect(matches(note({ ticket: { repo: 'acme/web', number: 63 } }), 'web#63')).toBe(true)
+    expect(matches(note({ link: { session: { key: 'k', name: 'Fix login' } } }), 'login')).toBe(true)
+    expect(matches(note({ link: { ticket: { repo: 'acme/api', number: 4 } } }), 'api#4')).toBe(true)
+    expect(matches(note({ meeting: { id: 'm-' + 'a'.repeat(32), title: 'Weekly sync', at: 1 } }), 'weekly')).toBe(true)
   })
   it('applyChange replaces, adds and removes', () => {
     const a = meta('n-' + '1'.repeat(32), 5)
