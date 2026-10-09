@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -94,6 +94,17 @@ describe("WorkflowStore", () => {
     w.logRun(SID, "needs-you", ["ny-2"]);
     expect(w.lastRun(SID)).toMatchObject({ trigger: "needs-you", ids: ["ny-2"] });
     expect(w.lastRun(SID2)?.trigger).toBe("needs-you");
+  });
+  it("a loop's rounds are not the session's last workflow step", () => {
+    const home = mkdtempSync(join(tmpdir(), "wfr-"));
+    const w = new WorkflowStore(home);
+    w.logRun(SID, "after-push", ["push-1"]);
+    // What loop.sh logs for each round.
+    appendFileSync(
+      join(home, "workflows", "runs.jsonl"),
+      JSON.stringify({ at: Date.now(), sid: SID, trigger: "loop", ids: "lp", iteration: 3, state: "open" }) + "\n",
+    );
+    expect(w.lastRun(SID)).toMatchObject({ trigger: "after-push", ids: ["push-1"] });
   });
   // The Default workflow hangs every built-in under its trigger, so every session on it gets
   // self-review, board moves and the PR watch; this test pins that.

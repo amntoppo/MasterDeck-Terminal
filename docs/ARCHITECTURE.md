@@ -332,7 +332,7 @@ hashes of the output tail, durations taken out, plus `git rev-parse HEAD` and `g
 --porcelain`, equal). It writes the loop file (temp + rename; history keeps 50 entries, a tail is
 at most 40 lines / 4 KB; just before the rename it reads the file again and writes nothing, and
 answers nothing, when the loop is no longer open or has a new `startedAt`: a Stop loop or Run 5
-more during the check stands), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`) and
+more during the check stands), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`; `WorkflowStore.lastRun` skips these, so the Workflow line in Details stays on the step that armed the loop) and
 answers: an open loop blocks the stop with `↻ Loop "<name>": iteration n/max[, m min left].`, the
 check's output (one that failed and printed nothing: ``The check `<cmd>` failed (exit N, no
 output).``) or "not done yet", "So far" (the last three rounds' `PROGRESS:` lines), the round's

@@ -590,7 +590,10 @@ export class WorkflowStore {
           if (
             typeof r.sid !== "string" ||
             typeof r.at !== "number" ||
-            typeof r.trigger !== "string"
+            typeof r.trigger !== "string" ||
+            // A loop's rounds (loop.sh) are not a workflow step: the line stays on the step
+            // that armed the loop.
+            r.trigger === "loop"
           )
             continue;
           last.set(r.sid, {
