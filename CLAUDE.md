@@ -362,6 +362,18 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-09)
 
+- **Where a session starts was checked for real** (issue #59, branch
+  `worktree-MasterDeck-Terminal-59-start-for-real`, pushed as a draft PR, not merged; no app code
+  changed, one Python test added): in the isolated app with the real `claude`, a ticket session started from the
+  Start dialog in the resolved temp checkout, `parked-sessions.json` got its record keyed by the
+  background id, the parked session's link recorded no branch (the same link without the record
+  took the folder's), the real trust prompt came up through **Open Claude there…**, and
+  `claude --bg` 2.1.295's output matches the parser (its real shape is now in `test_spawn.py`),
+  and from a master proposal the native picker, **Choose folder…**'s line and a start that kept
+  master's prompt and model in the chosen folder (the checkout itself; a folder that is no
+  checkout is still only unit-tested). The recipe is in OPERATIONS; follow-ups in TODO ("Where a
+  session starts"). The Python suite: 453 passed.
+
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so
   watched sessions showed Rework; `isUserWords` skips `[MasterDeck …]` messages, and the watch's

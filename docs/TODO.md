@@ -285,12 +285,18 @@ fixes it, and move the item here to "Recently done".
 
 ## Where a session starts (2026-10-05)
 
-- **P2 · Trust: the first real run** (2026-10-06). The untrusted-folder flow was checked with fake
-  runners and, in the isolated app, a stand-in `claude` and a temp `.claude.json`. Never done: the
-  real `claude` in the tab (its real prompt, then `~/.claude.json` changing under a real
-  `--bg`), and Windows (how Claude Code spells a folder's key there is assumed: forward slashes,
-  compared without case). If Claude Code moves or renames `hasTrustDialogAccepted`, the dialog says
-  nothing (not known) and the refused start still offers the fix; check `trust.py` then.
+- **P3 · Trust on Windows** (2026-10-06; the Mac's first real run is done, #59, 2026-10-09: the
+  dialog's line for a temp checkout, **Open Claude there…** showing Claude Code 2.1.295's real
+  prompt in the tab, the line turning into "can work in … now" once it was accepted, and a real
+  `claude --bg` starting there). Never done: Windows (how Claude Code spells a folder's key there is
+  assumed: forward slashes, compared without case). If Claude Code moves or renames
+  `hasTrustDialogAccepted`, the dialog says nothing (not known) and the refused start still offers
+  the fix; check `trust.py` then.
+- **P3 · Open Claude there… leaves an interactive Claude running in its tab** after the prompt is
+  accepted (a full session in that folder, on the default model and mode, until the user exits it);
+  the dialog only says "You can close that tab". Decide whether the tab should end on its own once
+  the folder is trusted, or whether the tab should run `claude` with a flag that exits after the
+  prompt if Claude Code ever has one.
 - **P3 · A held start does not count in the Needs you badge and sends no notification** (held
   items never do). A start master spawned and Claude Code refused is only seen in the list.
   Decide whether a refused start should be its own kind.
@@ -301,11 +307,30 @@ fixes it, and move the item here to "Recently done".
 - **P3 · The web app cannot re-check trust** (`deck.trust` is the window's): its Start dialog
   shows the line from the draft and leaves Start available.
 
-- **P2 · Start a session from it once.** Seen in the isolated app (2026-10-05): Setup's rows, the
-  Start dialog's found / not found / cut-short lines, the phone width. Never done: pressing Start,
-  the native picker behind **Choose folder…**, a parked session getting its record
-  (`parked-sessions.json` is written by `master spawn`: check that `claude --bg` still prints
-  `backgrounded · <id>`, else the record is keyed by the session's name).
+- **P3 · Choose folder… into a folder that is not the checkout, once** (#59, 2026-10-09). Done for
+  real in the isolated app with the real `claude` ([OPERATIONS](OPERATIONS.md#isolated-e2e-test-recipe),
+  "A real start from the Start dialog"): Start from the dialog put the session in the resolved temp
+  checkout (`claude agents` agrees), `parked-sessions.json` got its record keyed by the background
+  id (`claude --bg` 2.1.295 prints `backgrounded · <id> · <name>` and four hint lines; the real
+  output is in `test_spawn.py`), and a link of the parked session recorded no branch while the
+  same link without the record took the folder's. From a master proposal: the native picker
+  (the user chose in the sheet), the line turning into "the folder you chose (a checkout of
+  acme/tracker)", and Start replacing master's proposal with one that keeps its prompt and model
+  (`--model haiku`), the session running in the chosen folder with its own parked record. The
+  folder chosen was the checkout the sheet opened on, so a start in a folder that is no checkout
+  (the "the folder you chose" line without the repository, no parked record for a workspace) is
+  still only unit-tested.
+- **P3 · A proposal's model is not shown by the Start dialog.** Opened from a proposal that names
+  `--model haiku`, the Model select reads "Default" (the start keeps master's model through
+  `startChoice`; only the picker is silent). Preselect it, or say "master picked Haiku" under it.
+- **P3 · Re-linking a session that no longer owns its branch leaves the old `branches` entry**
+  (`ticket-links.json`): seen when the same session was linked with and without its parked record
+  (branch `""` on the second link, `acme/tracker@feat/someone-elses → #59` still mapped). A
+  session's link that records `""` should drop the branch key its earlier link wrote.
+- **P3 · The app tries to link a session it started to its ticket at once** ("link …: could not
+  read #940" in the log for a fixture ticket), so with `MASTERDECK_BOARD_FIXTURE` a started
+  session is never linked and its card never moves; fine for tests, but worth a word in the
+  recipe. Decide whether a failed first link should be retried on the next poll.
 - **P3 · A workspace that is itself a repository with its clones next to it.** Setup's label says
   repos live "in or next to" the workspace, and `ops.repos()` lists the siblings in that case, but
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
@@ -544,6 +569,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |
