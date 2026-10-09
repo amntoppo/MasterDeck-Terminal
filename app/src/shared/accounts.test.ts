@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
   accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
-  accountForCard, matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
+  accountForCard, knownProject, matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
 const A = { login: 'alice', primary: true, name: 'Alice', email: 'a@acme.test', owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'], projects: [{ owner: 'acme', number: 1, columns: ['Todo', 'Done'] }] }
@@ -265,6 +265,23 @@ describe('the account a card\'s calls go out as', () => {
     expect(accountForCard('partner/portal', null, cfg)).toBe('alice') // on no loaded board
     expect(accountForCard('partner/portal', 'other/9', cfg)).toBe('alice') // a board no account selects
     expect(accountForCard(null, 'globex/7', cfg)).toBe('alice') // no repository: the primary issue repo
+  })
+  it('a new session for a card on a known board starts as the account its calls use', () => {
+    expect(defaultAccount({ issue: { repo: 'partner/portal', project: 'globex/7' } }, cfg)).toBe('bob-work') // listed nowhere, on bob-work's board
+    expect(defaultAccount({ issue: { repo: 'partner/portal', project: 'globex/7' }, origin: 'acme/tracker' }, cfg)).toBe('bob-work') // the board, before the folder
+    expect(defaultAccount({ issue: { repo: 'globex/app', project: 'acme/1' } }, cfg)).toBe('bob-work') // listed: the board does not matter
+    expect(defaultAccount({ issue: { repo: 'acme/infra', project: 'globex/7' } }, cfg)).toBe('alice') // the owner's account, as accountForCard
+    // No board known: as before (the repository, then the folder, then the primary).
+    expect(defaultAccount({ issue: { repo: 'partner/portal', project: null }, origin: 'globex/app' }, cfg)).toBe('bob-work')
+    expect(defaultAccount({ issue: { repo: 'partner/portal' } }, cfg)).toBe('alice')
+    for (const [repo, project] of [['partner/portal', 'globex/7'], ['globex/app', 'acme/1'], ['acme/infra', 'globex/7']])
+      expect(defaultAccount({ issue: { repo, project } }, cfg)).toBe(accountForCard(repo, project, cfg))
+  })
+  it('a board key from outside is kept only when Setup selects it', () => {
+    expect(knownProject('globex/7', cfg)).toBe('globex/7')
+    expect(knownProject('other/9', cfg)).toBeNull()
+    expect(knownProject(7, cfg)).toBeNull()
+    expect(knownProject(null, cfg)).toBeNull()
   })
   it('before the board: an account whose owner is the repository\'s owner (it is the one with rights there)', () => {
     // acme/infra is ticked nowhere; alice's owner is acme; bob-work's board holds the card.

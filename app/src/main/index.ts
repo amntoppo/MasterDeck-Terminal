@@ -65,6 +65,7 @@ import { parseGhAccounts, setupScopes, type GhAccount } from "@shared/ghAuth";
 import {
   defaultAccount,
   isMulti,
+  knownProject,
   ticketAccount,
   noreplyEmail,
   parseGhUser,
@@ -314,7 +315,17 @@ async function assignNow(
   return assignAs(cli, req, {
     settings: (account) =>
       settingsFor(account, async () =>
-        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
+        // The card's board too (the one the dialog names, else the loaded board that holds it):
+        // the session starts as the account its card's calls use (`accountForCard`).
+        defaultAccount(
+          {
+            issue: {
+              repo: req.repo ?? null,
+              project: knownProject(req.project, getConfig()) ?? sources.boardOf(req.repo ?? null, req.issue),
+            },
+          },
+          getConfig(),
+        ),
       ),
     proposalAccount: (id) =>
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
@@ -351,7 +362,7 @@ const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
 // Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
-const { forAccount, forRepo, forCard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+const { forAccount, forRepo, forCard, forBoard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
   config: getConfig,
   base: { gh, github, ops: boardOps },
   run,
@@ -1257,7 +1268,8 @@ async function linkSession(
     return { ok: false, message: "bad session id" };
   const r = await linkTicket(
     {
-      ops: forCard(t.repo, t.number).ops,
+      // The issue's board item is read, and moved, as the account whose board holds it.
+      ops: { issueInfo: (tk) => forBoard(tk).ops.issueInfo(tk), move: boardOpsByRepo.move },
       link: (sid, tk, title, branch) => linkStore.link(sid, tk, title, branch),
       // A session MasterDeck parked in a main checkout is still on the branch it found there:
       // not its own, so not recorded. Any other session: as always.
@@ -1860,13 +1872,19 @@ function registerIpc(): void {
   });
   reg.handle(CH.getSettings, () => sources.getSettings());
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
-    const t = asTicket(issue);
-    if (!t) return { ok: false, message: "bad issue" };
-    // No board on its account: the columns are MasterDeck's own, there is nothing to write.
-    // Asked of the account the write below goes out as (`accountForCard`), never just of the repository's.
-    if (cardBoardless(t.repo, sources.boardOf(t.repo, t.number), getConfig()))
+    const t0 = asTicket(issue);
+    if (!t0) return { ok: false, message: "bad issue" };
+    // The card's board (the Board names it; a selected one only), else the loaded board that holds it.
+    const project =
+      knownProject((issue as { project?: unknown }).project, getConfig()) ?? sources.boardOf(t0.repo, t0.number);
+    const t = { ...t0, project };
+    // No board on its account: the columns are MasterDeck's own, there is nothing to write. Asked
+    // of the card's account (`accountForCard`), never just of the repository's, and only when no
+    // board holds the card: one on another account's board is moved there, as that account.
+    if (!project && cardBoardless(t.repo, null, getConfig()))
       return { ok: false, message: "this account has no GitHub board; MasterDeck works out its columns" };
-    const r = await forCard(t.repo, t.number).ops.setStatus(t, status);
+    // Moved as the account whose board holds the card (`forBoard`).
+    const r = await boardOpsByRepo.setStatus(t, status);
     if (r.ok) sources.noteStatus(t, status);
     return r;
   });
@@ -2261,9 +2279,10 @@ function registerIpc(): void {
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
-  reg.handle(CH.prSummary, (_e, url: string) =>
-    // A PR of a repository no account lists: as the account whose board holds a card of that repository.
-    forCard(prRepo(String(url))).github.prSummary(url),
+  reg.handle(CH.prSummary, (_e, url: string, project?: unknown) =>
+    // A PR of a repository no account lists: as the account whose board holds the card it was opened
+    // from (`project`), else a board that holds a card of that repository.
+    forCard(prRepo(String(url)), undefined, knownProject(project, getConfig())).github.prSummary(url),
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>

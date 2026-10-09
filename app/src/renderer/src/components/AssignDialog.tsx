@@ -89,7 +89,9 @@ export function AssignDialog({
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState(prefs?.workflow ?? "default");
   // The issue's account by default; picking another starts (or resumes) as that one.
-  const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null } }, state.config);
+  // With its card's board, so a repository no account lists defaults to that board's account (as main does).
+  const issueBoard = issue.project ?? state.board?.cards.find((c) => sameTicket(c, issue))?.project ?? null;
+  const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null, project: issueBoard } }, state.config);
   const [account, setAccount] = useState<string | null>(defAccount);
   const [accountPicked, setAccountPicked] = useState(false);
   const override = accountOverride(account, defAccount, state.config);
@@ -390,6 +392,7 @@ export function AssignDialog({
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
+      ...(issueBoard ? { project: issueBoard } : {}),
       name,
       cwd,
       prompt,

@@ -72,9 +72,10 @@ fixes it, and move the item here to "Recently done".
   `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
   builder sessions use gh's active account. (f) master starts without `--settings` when the primary
   needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
-  without an `origin` of any connected account is read as the primary. (h) Boards and their repos
-  belong to one account: a board holding issues from another account's repos moves cards as the
-  repo's account. (i) Select all in one account's Repos & boards may widen what another account
+  without an `origin` of any connected account is read as the primary. (h) A card's issue calls
+  (assign, a PR link) go as its repository's account even when its board is another account's
+  (status moves go as the board's, #54); the assignable-users cache is per repository, so its read
+  has no card to ask. (i) Select all in one account's Repos & boards may widen what another account
   lists. (j) An account can show healthy for a few seconds before its background check fails.
 - **P3 · Phone/API clients and `session.start.account`.** The protocol field is merged and deployed
   in the backend (PR #10); no web or phone UI sends it yet.
@@ -227,20 +228,11 @@ fixes it, and move the item here to "Recently done".
   lost with it, and other repository reads and Refresh wait behind it (one read at a time).
   Approach: print each chunk as a line when it is done and let `RepoIssues` apply them as they come,
   or have the app send one CLI call per ten.
-- **P3 · Three gaps in which account a card's calls go out as** (`accountForCard`, `forCard`).
-  (1) A status move is routed by the card's account, not by the project's owner: a repository
-  listed by account A whose card sits only on B's board is moved with A's token, which fails when A
-  cannot write B's project. (2) `Sources.boardOf` without a number (the assignable-users read, a
-  PR's summary) guesses by repository: the first loaded card of that repository decides the board.
-  (3) `BoardFlow` drops the project it already knows: a my-issues card outside the loaded sprint, in
-  a repository no account lists or owns, is not found by `boardOf` and routes to the primary.
-  Approach: carry the card's `project` in the ticket through `move`/`linkPr`/`setStatus` and route
-  project writes by `accountForProject`.
-- **P3 · A session for a card of a repository no account lists starts as the primary account.**
-  MasterDeck's own calls for such a card go out as the account whose board holds it (`forCard`);
-  a session started from it (Start, a PR review) still takes its account from the repository alone
-  (`defaultAccount`: `matchRepo`, else the primary), so it may not be able to read a private
-  repository on another account's board. Approach: pass the card's board into `defaultAccount`.
+- **P3 · master's own proposals pick the account by repository alone.** `spawn.default_account`
+  (a proposal without an account) uses `config.account_for_repo`: an ASSIGN for a card of a
+  repository no account lists, on another account's board, starts as the primary, while a start
+  from the app (#54) starts as the board's account. Approach: the proposal's card board from the
+  snapshot, and the same order as `accountForCard`.
 - **P3 · The per-repository Assign list was not seen in the app or against GitHub** (suites only):
   the loading line, the error line, and `gh api repos/<o>/<r>/assignees` as a second account.
 - **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens
@@ -500,6 +492,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Which account a card's calls and sessions use (issue #54): a status move (the Board's menu, BoardFlow, `linkSession`'s In Dev) goes as the account whose board holds the card (`forBoard`, `accountForProject`), even when another account lists the repository; the card's `project` travels in the ticket (`Ticket.project`, `knownProject`), so a my-issues card outside the loaded sprint routes by its board; `Sources.boardOf` without a number answers Setup's first board, not the first loaded card; a session started from a card (Start, PR review) defaults to `accountForCard`'s account (`defaultAccount` with `project`). One account: unchanged | branch `worktree-MasterDeck-Terminal-54-card-account-routing` | — |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |

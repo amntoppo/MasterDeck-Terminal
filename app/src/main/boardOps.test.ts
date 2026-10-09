@@ -32,6 +32,20 @@ describe('BoardOps', () => {
     const { gh } = fakeGh([[/graphql/, issue('Todo')]])
     expect(await new BoardOps(gh, () => cfg).issueInfo({ repo: null, number: 12 })).toEqual({ title: 'Fix it', state: 'OPEN', item: 'ITEM_1', project: 'acme/1', status: 'Todo' })
   })
+  it('reads the board the ticket names first: the card is moved on its own board', async () => {
+    const two: AppConfig = parseConfig({ ...cfg, projects: [...cfg.projects, { ...cfg.projects[0], number: 2, id: 'PVT_2', statusFieldId: 'F2' }] })
+    const both = JSON.stringify({ data: { repository: { issue: { title: 'Fix it', state: 'OPEN', projectItems: { nodes: [
+      { id: 'ITEM_1', project: { number: 1, owner: { login: 'acme' } }, fieldValues: { nodes: [{ name: 'Todo', field: { id: 'F1' } }] } },
+      { id: 'ITEM_2', project: { number: 2, owner: { login: 'acme' } }, fieldValues: { nodes: [{ name: 'In Dev', field: { id: 'F2' } }] } },
+    ] } } } } })
+    const { gh, calls } = fakeGh([[/graphql/, both], [/item-edit/, '']])
+    const ops = new BoardOps(gh, () => two)
+    expect((await ops.issueInfo({ repo: null, number: 12 }))?.item).toBe('ITEM_1') // none named: config order
+    expect(await ops.issueInfo({ repo: null, number: 12, project: 'acme/2' })).toMatchObject({ item: 'ITEM_2', project: 'acme/2', status: 'In Dev' })
+    expect((await ops.issueInfo({ repo: null, number: 12, project: 'other/9' }))?.item).toBe('ITEM_1') // not a selected board
+    await ops.setStatus({ repo: null, number: 12, project: 'acme/2' }, 'PR Raised')
+    expect(calls.at(-1)).toEqual(['project', 'item-edit', '--project-id', 'PVT_2', '--id', 'ITEM_2', '--field-id', 'F2', '--single-select-option-id', 'o3'])
+  })
   it('moves forward only, unless forced', async () => {
     const { gh, calls } = fakeGh([[/graphql/, issue('PR Raised')], [/item-edit/, '']])
     const ops = new BoardOps(gh, () => cfg)
@@ -108,6 +122,13 @@ describe('linkTicket', () => {
     const r = await linkTicket(d, { repo: null, number: 12 }, SID, '/tmp/x')
     expect(r).toEqual({ ok: true, message: 'linked session to #12 Fix it; #12: Todo -> In Dev' })
     expect(log).toEqual([`link ${SID} #12 Fix it acme/web@feat`, 'reload', `mark ${SID} linked`, 'note #12 In Dev'])
+  })
+  it('the move names the board the issue was read on (its account moves it there)', async () => {
+    const seen: (string | null | undefined)[] = []
+    const ops = new BoardOps(fakeGh([[/graphql/, issue('Todo')]]).gh, () => cfg)
+    const { d } = deps({ ops: { issueInfo: (t) => ops.issueInfo(t), move: async (t) => (seen.push(t.project), { ok: true, message: 'moved' }) } })
+    await linkTicket(d, { repo: null, number: 12 }, SID, null)
+    expect(seen).toEqual(['acme/1'])
   })
   it('does not move when the workflow drops ticket, but still links and marks', async () => {
     const { d, log } = deps({ moves: () => false })

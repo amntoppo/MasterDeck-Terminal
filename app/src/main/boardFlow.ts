@@ -93,7 +93,9 @@ export class BoardFlow {
           this.deps.log?.(`ticket links: could not record ${url}: ${String(e)}`)
           continue
         }
-        if (this.deps.builtinOn(sid) && !(await this.deps.ops.linkPr({ repo: e.repo ?? null, number: e.issue }, url)))
+        const t: Ticket = { repo: e.repo ?? null, number: e.issue }
+        // Its card's board goes along: a repository no account lists is linked as that board's account.
+        if (this.deps.builtinOn(sid) && !(await this.deps.ops.linkPr({ ...t, project: cardOf(state, t)?.project ?? null }, url)))
           this.deps.log?.(`board: could not link ${url} under #${e.issue}'s Development`)
       }
     }
@@ -108,7 +110,7 @@ export class BoardFlow {
       const urls = ticketPrs(file, t)
       if (!urls.length) continue
       // Its board not known yet: wait for it rather than guess status names.
-      const card = state.board?.cards.find((c) => sameTicket(c, t)) ?? state.issues.find((i) => sameTicket(i, t))
+      const card = cardOf(state, t)
       if (!card?.project) continue
       const status = card.status ?? null
       const rank = (n: string | null) => statusRank(n, undefined, card.project)
@@ -129,7 +131,8 @@ export class BoardFlow {
       const id = `${key}:${target}:${[...urls].sort().join(' ')}`
       if (this.moved.has(id) || now - (this.tried.get(id) ?? -Infinity) < RETRY_MS) continue
       this.tried.set(id, now)
-      const r = await this.deps.ops.move(t, name)
+      // The board it already knows goes along: a card outside the loaded sprint moves as its board's account.
+      const r = await this.deps.ops.move({ ...t, project }, name)
       if (r.ok) {
         this.moved.add(id)
         if (this.deps.movedFile) writeJson(this.deps.movedFile, [...this.moved], this.deps.log)
@@ -137,6 +140,11 @@ export class BoardFlow {
       } else this.deps.log?.(`board ${key}: ${r.message}`)
     }
   }
+}
+
+/** The ticket's card: on the loaded board, else among my issues (any sprint). */
+function cardOf(state: AppState, t: Ticket): { project?: string | null; status: string | null } | undefined {
+  return state.board?.cards.find((c) => sameTicket(c, t)) ?? state.issues.find((i) => sameTicket(i, t))
 }
 
 function readIds(file: string | undefined, log?: (m: string) => void): Set<string> {

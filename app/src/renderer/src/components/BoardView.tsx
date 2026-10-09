@@ -280,7 +280,8 @@ export function BoardView({
     const lab = ticketLabel(card.repo, card.number);
     setMoving((m) => ({ ...m, [k]: to }));
     setMoveMsg(`Moving ${lab} to ${to}…`);
-    const r = await deck().setStatus(ticketOf(card), to);
+    // Its board goes along: the card is moved there, as that board's account.
+    const r = await deck().setStatus({ ...ticketOf(card), project: card.project ?? null }, to);
     setMoving((m) => {
       const n = { ...m };
       delete n[k];

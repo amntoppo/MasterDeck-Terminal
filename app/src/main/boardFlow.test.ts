@@ -72,6 +72,20 @@ describe('BoardFlow', () => {
   })
 })
 
+describe('BoardFlow and the card\'s board', () => {
+  it('a card known only from my issues (outside the loaded sprint) is moved, and its PR linked, with its board', async () => {
+    const s = setup(withLink(emptyLinks(), SID, { repo: 'partner/portal', number: 12 }, 't', '', new Date(0)), { [PR]: { state: 'OPEN', isDraft: false } })
+    const seen: string[] = []
+    s.deps.ops = {
+      move: async (t, st) => (seen.push(`move ${t.project} ${st}`), { ok: true, message: 'moved' }),
+      linkPr: async (t) => (seen.push(`link ${t.project}`), true),
+    }
+    const mine = { number: 12, repo: 'partner/portal', project: 'acme/1', title: 't', url: '', status: 'In Dev', currentSprint: false, assignedToMe: true }
+    await new BoardFlow(s.deps).tick(state({ sessionPrs: { [SID]: [PR] }, board: { cards: [] } as never, issues: [mine] }), 0)
+    expect(seen).toEqual(['link acme/1', 'move acme/1 PR Raised'])
+  })
+})
+
 describe('BoardFlow errors', () => {
   it('a link file that cannot be written is logged; the other PRs still go on', async () => {
     const other = '55555555-5555-4555-8555-555555555555'

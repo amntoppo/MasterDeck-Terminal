@@ -8,6 +8,9 @@ import { getConfig, primaryRepo } from './appConfig'
 export interface Ticket {
   repo: string | null
   number: number
+  /** The board (owner/number) its card is on, when the caller knows it: board writes go out as
+   * that board's account. Never part of the ticket's identity (keys, links, records). */
+  project?: string | null
 }
 
 /** null for the primary repo (or nothing), else owner/name as given. */

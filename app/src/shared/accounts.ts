@@ -1,4 +1,4 @@
-import { primaryRepo, projectKey, type AccountConfig, type AppConfig } from './appConfig'
+import { primaryRepo, projectByKey, projectKey, type AccountConfig, type AppConfig } from './appConfig'
 import { parsePrUrl } from './prSummary'
 
 /**
@@ -88,9 +88,19 @@ export function accountForProject(key: string | null | undefined, c: AppConfig):
   return (key && c.accounts.find((a) => a.projects.some((p) => projectKey(p) === key))?.login) || primaryLogin(c)
 }
 
-/** A new session's account: the issue's repo, then the folder's `origin` remote, then the primary. */
-export function defaultAccount(o: { issue?: { repo?: string | null } | null; origin?: string | null }, c: AppConfig): string | null {
-  return (o.issue ? matchRepo(o.issue.repo, c) : null) ?? (o.origin ? matchRepo(o.origin, c) : null) ?? primaryLogin(c)
+/** A board key from outside (IPC, the web): kept only when Setup selects that board. */
+export function knownProject(key: unknown, c: AppConfig): string | null {
+  return typeof key === 'string' && projectByKey(key, c) ? key : null
+}
+
+/**
+ * A new session's account: the issue's repo, then the folder's `origin` remote, then the primary.
+ * An issue whose board is known (`project`) starts as the account its card's calls use
+ * (`accountForCard`): a repository no account lists, on another account's board, is that board's.
+ */
+export function defaultAccount(o: { issue?: { repo?: string | null; project?: string | null } | null; origin?: string | null }, c: AppConfig): string | null {
+  const issue = o.issue ? (o.issue.project ? accountForCard(o.issue.repo, o.issue.project, c) : matchRepo(o.issue.repo, c)) : null
+  return issue ?? (o.origin ? matchRepo(o.origin, c) : null) ?? primaryLogin(c)
 }
 
 /** A running session's account: as recorded at its start, else its spawn proposal's, else its folder's repo, else the primary. A login no longer connected is skipped. */

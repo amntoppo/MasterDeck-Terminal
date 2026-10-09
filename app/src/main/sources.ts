@@ -118,6 +118,7 @@ import {
   getConfig,
   parseConfig,
   projectByKey,
+  projectKey,
   setConfig,
   type AppConfig,
 } from "@shared/appConfig";
@@ -1202,13 +1203,17 @@ export class Sources {
 
   /**
    * The key of the selected board whose loaded cards hold this issue; with no number, or when no
-   * card is that issue, a board that holds an issue of the repository. Null when none does. The
-   * account of that board is who a card of a repository no account lists is read and written as.
+   * card is that issue, the first board in Setup's order that holds an issue of the repository
+   * (never whichever board happened to load first). Null when none does. The account of that board
+   * is who a card of a repository no account lists is read and written as.
    */
   boardOf(repo: string | null | undefined, number?: number): string | null {
     if (!repo) return null;
     const cards = this.boardCards().filter((c) => c.repo!.toLowerCase() === repo.toLowerCase());
-    return (cards.find((c) => c.number === number) ?? cards[0])?.project ?? null;
+    const hit = cards.find((c) => c.number === number);
+    if (hit) return hit.project ?? null;
+    const held = new Set(cards.map((c) => c.project));
+    return this.config.projects.map((p) => projectKey(p)).find((k) => held.has(k)) ?? null;
   }
 
   /** Show another sprint: from the cache at once, fetched when never seen before. */

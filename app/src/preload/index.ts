@@ -35,7 +35,7 @@ const api: DeckApi = {
   draftAssign: (issue, title, url, cwd) =>
     ipcRenderer.invoke(CH.draftAssign, issue, title, url, cwd),
   setSprint: (sprint) => ipcRenderer.send(CH.setSprint, sprint),
-  prSummary: (url) => ipcRenderer.invoke(CH.prSummary, url),
+  prSummary: (url, project) => ipcRenderer.invoke(CH.prSummary, url, project),
   issueBody: (ticket) => ipcRenderer.invoke(CH.issueBody, ticket),
   shellPrepare: (dir) => ipcRenderer.invoke(CH.shellPrepare, dir),
   ticketMemory: (ticket) => ipcRenderer.invoke(CH.ticketMemory, ticket),

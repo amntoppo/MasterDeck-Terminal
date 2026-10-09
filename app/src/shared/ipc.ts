@@ -242,6 +242,9 @@ export interface AssignRequest {
   workflow?: string;
   /** Another GitHub account than the issue's default (the Start dialog's Account field). */
   account?: string;
+  /** The board (owner/number) the issue's card is on, when known: the default account is then
+   * the one its card's calls use (`accountForCard`). Main keeps it only when Setup selects it. */
+  project?: string | null;
   /** owner/name: main picks the folder (this repository's checkout, else its account's workspace)
    * and `cwd` is only the fallback. A PR review names its PR's repository. */
   cwdRepo?: string;
@@ -310,6 +313,8 @@ export interface DeckApi {
   ): Promise<{ ok: true; body: string } | { ok: false; message: string }>;
   prSummary(
     url: string,
+    /** The board of the card it was opened from: a PR of a repository no account lists is read as that board's account. */
+    project?: string | null,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;
   /** Resume a session that runs in another terminal as a background session here. */
   startHere(o: {
