@@ -828,6 +828,21 @@ export class Sources {
     this.emit();
   }
 
+  /**
+   * The PR watch saw this PR merged or closed: read it again now, past the gh cache, so its
+   * session's lane moves at once instead of on the next review poll (up to minutes later).
+   */
+  async prEnded(url: string): Promise<void> {
+    if (this.prLive[url] && this.prLive[url].state !== "OPEN") return;
+    const r = await this.gh(["pr", "view", url, ...PR_VIEW_ARGS], { timeoutMs: 20_000, force: true });
+    this.noteBinary("gh", r.code);
+    if (this.githubPaused(ghErrorText(r))) return;
+    const pr = r.code === 0 ? parsePrView(r.stdout) : null;
+    if (!pr) return;
+    this.prLive[url] = pr;
+    this.emit();
+  }
+
   /** Read `claude agents` now (after stopping a session, so it leaves the list at once). */
   refreshAgents(): Promise<void> {
     return this.pollAgents();
@@ -2510,6 +2525,11 @@ export class Sources {
 
   isHealthy(name: string): boolean {
     return this.health[name] === "ok";
+  }
+
+  /** A source's health and, when it failed, why. */
+  sourceHealth(name: string): { health: SourceHealth | undefined; error: string | undefined } {
+    return { health: this.health[name], error: this.errors[name] };
   }
 }
 

@@ -286,7 +286,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
-  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told).
+  and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told). On merge/close it also calls `deps.ended(url)` → `Sources.prEnded`, which reads that PR again past the gh cache so the session's lane (`prStage`) moves at once, not on the next review poll. Its messages, like `[MasterDeck monitor: …]` lines, are not the user writing (`isUserWords` in `shared/ask.ts`): the "merged" message arrives after the merge and would otherwise turn Merged into Rework.
   With two or more accounts each watched PR keeps its session's account (`PrWatchEntry.account`) and `poll` reads each account's PRs with that account's runner, so "me" (`viewer`) is that account.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
   `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
@@ -327,8 +327,34 @@ Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text l
 through the `notes:*` handlers. A note's full text travels to a web tab in two answers only: `notes:get`
 (a note opened), and the conflict answer of `notes:save`, which carries the stored note to the tab
 that tried to save over it (so the editor can offer Reload). The list (`notes:list`) and
-`notes:changed` carry `NoteMeta`, which has a 120-character `preview` (whitespace collapsed) instead
-of the text. `notes:search` runs in main and returns ids.
+`notes:changed` carry `NoteMeta`, which has a 120-character `preview` instead of the text: the note's
+Markdown read as one plain line (`notePreview` → `markdownText` in `shared/markdown.ts`, from the first
+4000 characters; kept per note object in a WeakMap, since a save replaces the object). `notes:search` runs in main and returns ids.
+
+A note's body is Markdown source, stored as typed. It is drawn by `MarkdownView` with `html={false}`:
+`parseMarkdown(text, { html: false })` builds a tree of blocks and inlines, React draws elements from
+it, and no HTML is ever built from the text. In that mode no tag is read at all (`<img>`, `<br>`, comments
+stay text, unlike an issue's description), and an image is drawn as a link to it, so opening a note
+never fetches an address (its text may come from a session); links keep `https://` addresses only (`safeHref`,
+`safeImage`); a click goes to `deck.openExternal` (the window: `shell.openExternal`, https only; the
+web: `window.open`, https only). The window also refuses any navigation away from the app
+(`will-navigate`: an https address opens in the browser instead). The editor's Write / Preview / Side by
+side choice is per viewer (localStorage `masterdeck.notesView`; side by side only at `WIDE_QUERY`).
+
+**Sessions add to notes** (the `masterdeck-notes` skill): `skills/masterdeck-notes/scripts/note.sh
+new "Title" | ticket owner/name#12 | append n-…` reads the text on stdin, writes
+`<home>/deck/note-requests/<id>.json` (`{op, arg, body}`, by jq) while MasterDeck runs (`deck/alive`
+younger than 30 s), and waits up to 8 s for `note-answers/<id>.json`, then takes the request back by
+renaming it (one rename wins against MasterDeck's claim; a claimed one gets 7 s more). The 1-second
+`pumpWatches` tick runs `pumpNoteRequests` (`main/noteRequests.ts`): claim (`.taken`), at most 20 a
+tick, files over 256 KB refused, `parseNoteRequest` (`shared/noteRequest.ts`: the ticket as GitHub
+names it, ids `n-…` only, control characters and terminal colours stripped), then `NotesStore.save`
+(new) or `NotesStore.append` (the text as a new paragraph at the end; a ticket's note is made when
+there is none; refused past 50,000 characters). The answer carries the note's id and a sentence,
+never a note's text: the app never hands a session a note. That is the app's rule, not a wall: a
+session runs as the user and can read `<home>/notes/` like any file, and a refusal past 50,000
+characters says something about a note's length. Leftovers older than a minute are swept. Not on
+Windows (the deck hook folder and the pump run on macOS only).
 
 The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
 after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
@@ -437,6 +463,20 @@ here (needs `hooks.queue`).
   prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
   (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
   from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
+- Create with Claude's settings bar (#68; `renderer/.../TicketSettingsBar.tsx`, `shared/ticketSettings.ts`):
+  the panel holds `TicketSession.settings` (repo, board, status, assignees, labels, milestone, sprint
+  and its field), started by `settingsFrom` (the dialog's draft, else `ticketDefaults` of the + column,
+  the tab's filters and sprint; no board, status or sprint for an account with none) and changed by
+  `changeSettings` (another repository drops labels and milestone, another board keeps only the
+  status and sprint it has; sprints follow the board: `boardSprints`, none on a `sprintless` one).
+  Every change calls `ticketBuilderPrepare` again, which rewrites `context.json` with `settings` (no
+  new channel). `pumpTicketDir` re-reads it at each request: `readSettings` checks it (no `settings`:
+  the flags pass as before; `settings` that fail the check refuse the create, never drop the bar) and `enforceSettings` replaces all seven flags with the bar's,
+  so the bar wins over anything the session passed; the answer carries `applied` (what was used)
+  and, when a passed flag differed, `overridden` and a `note`. The briefing tells Claude to leave
+  those flags out and, when the chat asks for another value, to say the bar's applies and that the
+  user can change it there (the one way a conflict is handled). New chat keeps the bar; a + on
+  another column (or the dialog) starts it again from there.
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).
@@ -468,10 +508,16 @@ workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/
 `gh` directly on Windows).
 
 **Where a ticket's session starts** is decided in one place, `skills/master/lib/master/checkout.py`
-(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`, plus `partial` and `searched` when it
-was not found and a limit was reached): the workspace of the ticket's account
-(`config.workspace_for`: the account that lists the repository, else the primary; an account's own
-`workspace`, blank counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all).
+(`resolve(repo, cwd=None, account=None, mapped=True)` → `{cwd, workspace, repo, found}`, plus
+`filedIn` when the repository looked for is not the issue's, and `partial` and `searched` when it
+was not found and a limit was reached). The repository looked for is where the issue's code lives:
+`config.code_repo` (Setup's `codeRepos` pairs, `[{issues, code}]`, a list so a save replaces it;
+`mapped=False` for a PR's repository). It is looked for in the workspace of the account the session
+runs as (`config.workspace_for(repo, cfg, account)`: `account` when given, else the code
+repository's account, else the issue's, else the primary; an account's own `workspace`, blank
+counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all). That account is
+`config.start_account` (two or more accounts; the app's `startAccount` in `shared/accounts.ts` is
+the same rule, plus a PR review's repository first).
 First the folder named after the repository (`_named`: one directory read, no scan). Else `scan`:
 the workspace, its sub-folders, and the sub-folders of the plain ones; a `.git` folder whose
 `origin` is the repository, without case. The origin is read from `.git/config` (`_config_origin`,
@@ -485,10 +531,12 @@ longer a pure function of the snapshot. The tests' `conftest.py` points HOME, `M
 `MASTER_HOME` and `MASTER_WORKSPACE` into one temp sandbox before anything is imported and again
 before every test, and fails a test that leaves a path in the real home (`test_isolation.py`).
 Found: `cwd` is the checkout and step 1 of the ASSIGN prompt (`rules.assign_prompt`) says so, naming
-the workspace for an issue filed in one repository and built in another; else `cwd` is the workspace
-and the prompt is the text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
+the workspace for an issue filed in one repository and built in another; with a `codeRepos` pair it
+names the code repository instead (found or not); else `cwd` is the workspace and the prompt is the
+text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
 (master's proposals and `master draft-assign`, which also prints `workspace`, `found`, `checkoutOf`,
-`genericPrompt`, and takes `--cwd` for a folder the user chose), `master checkout <owner/name>`, and
+`genericPrompt`, `filedIn` and `account`, and takes `--cwd` for a folder the user chose and
+`--account` for another account than the ticket's), `master checkout <owner/name> [--account]`, and
 `checkout.default_cwd` for `master add` without `--cwd` and `master spawn` of a proposal without a
 folder: only an ASSIGN or PRREVIEW for an issue number above 0 is looked up; any other kind, issue 0
 and a resume keep `config.workspace()`.
@@ -510,13 +558,18 @@ travels as `AssignRequest.permissionMode` → `master add --permission-mode` →
 `bypassPermissions` is refused); like a model, it always makes a new proposal. The description's
 Preview is `shared/markdown.ts` (`parseMarkdown` → a tree; `safeHref` / `safeImage`: https only)
 drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the text; the CSP's
-`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. A PR
-review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
-`master checkout`. For web callers main drops only the `cwd` argument of `draftAssign`
-(`chosenFolder` in `main/remoteGuards.ts`; from the window it must be an absolute, existing folder);
-an `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
-window, as `cwd` always was. Which account the session runs as is not part of this:
-`config.account_for_repo` / `defaultAccount` as before.
+`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. Picking another account asks for a draft with
+`--account` (`refindOnAccount`: not after Choose folder…, not for a held start, not for a
+proposal's own folder); main passes a connected login only (two or more accounts). A PR
+review names its repository (`AssignRequest.cwdRepo`): main's `assignNow` takes the picked account,
+else `startAccount(repo, cfg, cwdRepo)` (the PR's repository's account), and `inRepoFolder`
+(`main/assign.ts`) asks `master checkout --account` for it, so folder and account agree. The `cwd`
+argument of `draftAssign` is checked by `chosenFolder` (`main/remoteGuards.ts`): from the window it
+must be an absolute, existing folder; from a browser it must be one of `workspaceFolders()` in
+`main/index.ts` (the workspace and `Ops.repos()`, the list `workspaceRepos` gives the web app's
+`RepoPicker`), compared as real paths, and anything else is refused with a message (the dialog
+keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a
+browser exactly as from the window, as `cwd` always was.
 
 **Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
 was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust
@@ -750,6 +803,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   `ghAccounts` in state. There is no `ghSwitch`: MasterDeck never runs `gh auth switch`.
 - Create a GitHub board: `boardCreatePlan(account?)` (a read), `boardCreate({account?, title})`, `boardCreateRetry(account?)` and the event `onBoardCreateProgress` (`board:createProgress`, sent to the Mac's window only). All four are `blocked` in `DECK_ACCESS`, and the handlers refuse a remote caller as well: the confirmation is main's native dialog, and the usual fix (the `project` scope) needs a terminal on the Mac.
 - Assign popup: `assignableUsers(repo)` (`issue:assignable`, invoke, `remote` in `DECK_ACCESS`: a read, the repository is checked in `AssignableUsers.get`).
+- Description and sub-issues of a ticket (Assign popup, Start dialog): `issueBody(ticket)` (`issue:body`) and `issueSubIssues(ticket)` (`issue:subIssues`), both invokes, `remote` in `DECK_ACCESS` (reads), routed `forCard`. `GitHub.subIssues` reads `repos/<repo>/issues/<n>/sub_issues?per_page=100` (GitHub allows 100 sub-issues per issue, so one page), cached 5 minutes, flattened by `SUB_ISSUES_JQ` and parsed by `parseSubIssues` (`shared/subIssues.ts`; a sub-issue in another repository keeps its owner/name, a URL that is not github.com is dropped). `SubIssues.tsx` reads them when the popup opens and gives each its column from `state.board` (or the repository view) by `ticketKey`, else Open / Closed (`subIssueRows`); "done" is closed, as GitHub counts it (`subIssueProgress`). Nothing about sub-issues enters `AppState`.
 - Repository view: `boardRepos(repos)` (`board:repos`, fire-and-forget, `remote` in `DECK_ACCESS`: it is a read, and main checks the list with `cleanRepos`).
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
@@ -792,7 +846,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Area | Modules |
 |---|---|
 | Types, IPC, settings | `types.ts` (`AppState`, `Session`, `PaneSpec`…), `ipc.ts`, `settings.ts` (`Settings`, `DEFAULT_SETTINGS`, `normalizeSettings`), `appConfig.ts`, `shortcuts.ts`, `keys.ts` |
-| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
+| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `sessionFilter.ts`, `stars.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
@@ -832,7 +886,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   the visible view; on the web all output goes through `predictiveEcho`).
 - Web gating: `web.ts` — `isWeb()` (`deck().platform === 'web'`), `can(method)`, `WEB_VIEWS`,
   `screenOk`, `shortcutOk`, `actionOk`, `keyPlatform`. `webConfirm.ts` + `WebConfirm.tsx` replace
-  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker.
+  native dialogs on the web. `repoPicker.ts` + `RepoPicker.tsx` replace the folder picker (`listOnly`: the workspace repositories and no typed path, for the Start dialog).
 - One stylesheet: `styles.css` (the web adds `src/web/web.css`).
 - Phone layout (web only): `web.ts` `isPhone()` / `usePhone()` = `isWeb() && matchMedia(PHONE_QUERY)`
   (`(max-width: 760px)`), so Electron never gets it. App adds `phone ps-list|main|master` to `.app`

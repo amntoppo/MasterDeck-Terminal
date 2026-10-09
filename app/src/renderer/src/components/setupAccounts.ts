@@ -1,4 +1,4 @@
-import { projectKey, type AccountConfig, type ProjectConfig } from '@shared/appConfig'
+import { parseCodeRepos, projectKey, type AccountConfig, type CodeRepo, type ProjectConfig } from '@shared/appConfig'
 import type { DetectAll } from '@shared/detect'
 
 /** One account's choices on Setup's Repos & boards step. */
@@ -19,6 +19,22 @@ export interface Connected {
 }
 
 const EMPTY: AccountSel = { repos: [], allRepos: false, primary: '', boards: {}, allBoards: false }
+
+const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+
+/**
+ * The "code lives in" rows as Setup saves them: a row with no code repository is left out, and one
+ * that names itself (nothing to say) too; a code repository that is not owner/name, or a second row
+ * for the same issue repository, is an error (the message says which).
+ */
+export function codeReposToSave(rows: CodeRepo[]): { ok: true; list: CodeRepo[] } | { ok: false; message: string } {
+  const kept = rows.map((r) => ({ issues: r.issues.trim(), code: r.code.trim() })).filter((r) => r.issues && r.code)
+  const bad = kept.find((r) => !REPO.test(r.code))
+  if (bad) return { ok: false, message: `Code lives in: ${bad.code} is not owner/name.` }
+  const twice = kept.find((r, i) => kept.findIndex((x) => x.issues.toLowerCase() === r.issues.toLowerCase()) !== i)
+  if (twice) return { ok: false, message: `Code lives in: ${twice.issues} has two rows; keep one.` }
+  return { ok: true, list: parseCodeRepos(kept) }
+}
 
 /** The other accounts' own workspaces as Setup shows them (the primary's is the config's `workspace`). */
 export function workspacesFromConfig(accounts: AccountConfig[]): Record<string, string> {

@@ -6,6 +6,7 @@ import type {
 } from "./boardCreate";
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
+import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
@@ -166,6 +167,7 @@ export const CH = {
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
+  issueSubIssues: "issue:subIssues",
   shellPrepare: "shell:prepare",
   ticketMemory: "ticket:memory",
   assignIssue: "issue:assign",
@@ -293,12 +295,14 @@ export interface DeckApi {
   onShowInboxItem(cb: (id: string) => void): () => void;
   approve(id: number): Promise<CliResult>;
   reject(id: number): Promise<CliResult>;
-  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app). */
+  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app).
+   * `account`: another connected account than the ticket's: its workspace is looked in. */
   draftAssign(
     issue: Ticket,
     title?: string,
     url?: string,
     cwd?: string,
+    account?: string,
   ): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>;
   setSprint(sprint: string): void;
   /** What earlier sessions on a ticket did (their saved summaries), newest first. */
@@ -311,6 +315,10 @@ export interface DeckApi {
   issueBody(
     ticket: Ticket,
   ): Promise<{ ok: true; body: string } | { ok: false; message: string }>;
+  /** An issue's sub-issues, for the Board's popups (Assign and Start session). A read. */
+  issueSubIssues(
+    ticket: Ticket,
+  ): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }>;
   prSummary(
     url: string,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;

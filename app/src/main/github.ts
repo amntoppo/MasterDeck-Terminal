@@ -1,6 +1,7 @@
 import { getConfig } from '@shared/appConfig'
 import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import { buildPrSummary, parsePrUrl, type PrSummary } from '@shared/prSummary'
+import { parseSubIssues, SUB_ISSUES_JQ, type SubIssue } from '@shared/subIssues'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
 import { CLOSED_MAX, TEAM_PR_CLOSED_QUERY, TEAM_PR_QUERY, teamPrSearches } from '@shared/teamPrs'
@@ -49,6 +50,13 @@ export class GitHub {
     const r = await this.api([`${issueRepoPath(t.repo)}/issues/${t.number}`, '--jq', '.body // ""'], 300)
     if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) || `could not read ${ticketLabel(t.repo, t.number)}` }
     return { ok: true, body: r.stdout.replace(/\r\n/g, '\n').trim() }
+  }
+
+  /** An issue's sub-issues (GitHub allows 100, so one page holds them all); cached for 5 minutes. */
+  async subIssues(t: Ticket): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }> {
+    const r = await this.api([`${issueRepoPath(t.repo)}/issues/${t.number}/sub_issues?per_page=100`, '--jq', SUB_ISSUES_JQ], 300)
+    if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) || `could not read the sub-issues of ${ticketLabel(t.repo, t.number)}` }
+    return { ok: true, subIssues: parseSubIssues(r.stdout, t.repo) }
   }
 
   async prSummary(url: string): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }> {

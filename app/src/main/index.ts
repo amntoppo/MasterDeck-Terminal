@@ -72,6 +72,7 @@ import {
   prRepo,
   repoFromRemote,
   sessionAccount,
+  startAccount,
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
@@ -81,6 +82,7 @@ import {
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
 import { NotesStore } from "./notes";
+import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
@@ -95,7 +97,7 @@ import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
-import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
   externalAnswerAllowed,
   optionMessage,
@@ -242,7 +244,7 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
-// tabs that subscribed).
+// tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
@@ -344,13 +346,15 @@ function settingsFor(
 async function assignNow(
   given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  const cfg = getConfig();
+  // The account it runs as: the one picked, else the code's repository's (a PR review: its PR's),
+  // else the issue's. Its workspace is where the folder is looked for.
+  const picked = given.account && cfg.accounts.some((a) => a.login === given.account) ? given.account : null;
+  const as = picked ?? startAccount(given.repo ?? null, cfg, given.cwdRepo);
   // A PR review names its repository, not a folder: the CLI's resolver picks it.
-  const req = await inRepoFolder(cli, given);
+  const req = await inRepoFolder(cli, given, isMulti(cfg) ? as : null);
   return assignAs(cli, req, {
-    settings: (account) =>
-      settingsFor(account, async () =>
-        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
-      ),
+    settings: (account) => settingsFor(account, async () => as),
     proposalAccount: (id) =>
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
@@ -496,6 +500,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
         latest?.master.kind === "elsewhere",
     ),
   onChange: () => sources.changed(),
+  ended: (url) => void sources.prEnded(url).catch(() => {}),
 });
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
@@ -530,6 +535,8 @@ let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
   deckHooks.pumpQueue();
+  // Sessions adding to the notes (the masterdeck-notes skill's note.sh). They get the note's id back, never its text.
+  pumpNoteRequests(deckHooks.dir, notes);
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
   const m = mtimeMs(paths.claudeSettings);
   if (m !== settingsSeen) {
@@ -630,18 +637,19 @@ const sources = new Sources(
     }
     void linkedSteps.deliver(state.sessions);
     emit(CH.state, state);
+    // The session list is in: commands that waited while MasterDeck was closed can run now.
+    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
-      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+      // Not before the session list: an empty one would wipe what the phone and web still show.
+      if (sessionsLoaded) cloud?.push(toRemoteSnapshot(state, app.getVersion()));
     } catch (e) {
       console.error(`remote snapshot: ${String(e)}`);
     }
     try {
-      if (!remoteReady && sources.isHealthy("agents")) {
-        // The session list is in: commands that waited while MasterDeck was closed can run now.
-        remoteReady = true;
-        syncRemote();
-      } else if (
+      if (
+        // While waiting: dial once the list is in or the wait is over, and keep the reason current.
+        (!remoteReady && remoteWaitSince !== null) ||
         state.settings.remoteEnabled !== prev?.settings.remoteEnabled
       )
         syncRemote();
@@ -993,7 +1001,13 @@ bridge = new BrowserBridge({
 });
 const remoteCommands = new RemoteCommands(
   {
-    state: () => latest,
+    // No state before the first session list: a command is answered "still loading" (retried) while it
+    // loads, and fails at once with the reason while `claude agents` fails.
+    state: () => (sessionsLoaded ? latest : null),
+    notLoaded: () => {
+      const a = sources.sourceHealth("agents");
+      return !sessionsLoaded && a.health === "error" ? `MasterDeck has no session list: ${agentsFailure(a.error)}` : null;
+    },
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
@@ -1014,8 +1028,14 @@ const remoteCommands = new RemoteCommands(
 );
 let cloud: CloudSync | null = null;
 let cloudKey = "";
-/** True once the first state with the session list exists; until then the backend is not dialled. */
+/** True once `claude agents` has answered; until then remote commands are answered "still loading". */
+let sessionsLoaded = false;
+/** True once the line may be dialled: the session list is in, or `REMOTE_WAIT_MS` went by without it. */
 let remoteReady = false;
+/** While the line waits for the session list: when the wait began, the text shown, the timer that ends it. */
+let remoteWaitSince: number | null = null;
+let remoteWaitMessage: string | null = null;
+let remoteWaitTimer: NodeJS.Timeout | null = null;
 
 function deviceId(): string {
   const f = join(paths.home, "remote-device-id");
@@ -1044,12 +1064,34 @@ function syncRemote(): void {
   if (key && key === cloudKey) return;
   if (key && !remoteReady) {
     // Pending commands arrive on connect; running them before the sessions load would fail them.
-    cloud?.stop();
-    cloud = null;
-    cloudKey = "";
-    sources.setRemote({ conn: "connecting", message: "waiting for sessions to load", lastSyncAt: null, hasToken: true });
-    return;
+    if (remoteWaitSince === null) {
+      remoteWaitSince = Date.now();
+      remoteWaitTimer = setTimeout(() => {
+        remoteWaitTimer = null;
+        syncRemote();
+      }, REMOTE_WAIT_MS);
+    }
+    const agents = sources.sourceHealth("agents");
+    const wait = remoteWait(agents.health, agents.error, Date.now() - remoteWaitSince);
+    if (!wait.connect) {
+      cloud?.stop();
+      cloud = null;
+      cloudKey = "";
+      // Only on a change: setRemote emits a state, whose callback calls this again.
+      if (wait.message !== remoteWaitMessage) {
+        remoteWaitMessage = wait.message;
+        sources.setRemote({ conn: "connecting", message: wait.message, lastSyncAt: null, hasToken: true });
+      }
+      return;
+    }
+    remoteReady = true;
+    if (agents.health !== "ok")
+      console.log(`remote: no session list after ${REMOTE_WAIT_MS / 1000} s (claude agents: ${agents.error ?? agents.health}); connecting anyway`);
   }
+  if (remoteWaitTimer) clearTimeout(remoteWaitTimer);
+  remoteWaitTimer = null;
+  remoteWaitSince = null;
+  remoteWaitMessage = null;
   cloud?.stop();
   cloud = null;
   cloudKey = key;
@@ -1080,7 +1122,7 @@ function syncRemote(): void {
     onClients: (c) => sources.setRemoteClients(c),
   });
   cloud.start();
-  if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
+  if (latest && sessionsLoaded) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
 }
 
 /** Stop a background session (no confirmation: callers ask first). */
@@ -1838,18 +1880,32 @@ function liveDirs(): string[] {
   return dirs;
 }
 
+/**
+ * The workspace and the repositories MasterDeck found in it (`Ops.repos()`): the + menu's and the
+ * web app's folder pick, and the only folders a browser may choose for a ticket's session.
+ */
+function workspaceFolders(): string[] {
+  const seen = new Set<string>();
+  return [paths.masterWorkspace, ...ops.repos()]
+    .filter((p) => typeof p === "string" && p && existsSync(p))
+    .map((p) => resolve(p))
+    .filter((p) => !seen.has(p) && seen.add(p));
+}
+
 function registerIpc(): void {
   reg.handle(CH.getState, () => latest);
   reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown, account?: unknown) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
-      const dir = chosenFolder(isRemote(e), cwd);
-      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
+      // The window's must be a real folder; a browser's one of the folders MasterDeck found (its pick).
+      const dir = chosenFolder(isRemote(e), cwd, isRemote(e) ? workspaceFolders() : []);
+      // Another connected account (two or more): its workspace is looked in. Anything else is dropped.
+      const as = isMulti(getConfig()) && getConfig().accounts.some((a) => a.login === account) ? (account as string) : undefined;
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd, as) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
@@ -2165,14 +2221,9 @@ function registerIpc(): void {
     return meta;
   });
   // The + menu: the workspace and its repos, to open a terminal or a session in.
-  reg.handle(CH.workspaceRepos, () => {
-    const seen = new Set<string>();
-    return [paths.masterWorkspace, ...ops.repos()]
-      .filter((p) => typeof p === "string" && p && existsSync(p))
-      .map((p) => resolve(p))
-      .filter((p) => !seen.has(p) && seen.add(p))
-      .map((p) => ({ name: basename(p), path: p }));
-  });
+  reg.handle(CH.workspaceRepos, () =>
+    workspaceFolders().map((p) => ({ name: basename(p), path: p })),
+  );
   // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
   reg.handle(CH.startClaude, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as {
@@ -2363,6 +2414,12 @@ function registerIpc(): void {
     const t = asTicket(ticket);
     return t
       ? forCard(t.repo, t.number).github.issueBody(t)
+      : { ok: false, message: "bad ticket" };
+  });
+  reg.handle(CH.issueSubIssues, (_e, ticket: unknown) => {
+    const t = asTicket(ticket);
+    return t
+      ? forCard(t.repo, t.number).github.subIssues(t)
       : { ok: false, message: "bad ticket" };
   });
   // The Assign popup's people: the card's repository's, read as that repository's account (also
@@ -3027,6 +3084,13 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  // The window never leaves the app: a link dropped on it (or any other navigation) opens in the
+  // browser instead. A reload of the same page still goes through.
+  win.webContents.on("will-navigate", (e, url) => {
+    if (url === win?.webContents.getURL()) return;
+    e.preventDefault();
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   if (process.env.ELECTRON_RENDERER_URL)
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);

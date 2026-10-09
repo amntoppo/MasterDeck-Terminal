@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
 /**
@@ -16,14 +16,35 @@ export function knownDirsOnly(dirs: string[], known: Iterable<string>): string[]
   return dirs.map((d) => resolve(d)).filter((d) => ok.has(d))
 }
 
+/** A folder's real path (links followed), or null when it is not there. */
+function real(dir: string): string | null {
+  try {
+    return realpathSync(dir)
+  } catch {
+    return null
+  }
+}
+
 /**
- * The folder a draft is asked for (the Start dialog's Choose folder…). From a browser it is dropped
- * and the draft is made without it: choosing a folder on the Mac is the desktop's. From the Mac's
- * own window it must be an absolute path to a folder that is there.
+ * The folder a draft is asked for (the Start dialog's Choose folder…). From the Mac's own window it
+ * must be an absolute path to a folder that is there. From a browser only one of `known`, the
+ * folders MasterDeck found itself (the web app's pick of the workspace repositories), compared as
+ * real paths so a link cannot lead out of them; anything else is refused, never typed in.
  */
-export function chosenFolder(remote: boolean, cwd: unknown): { ok: true; cwd?: string } | { ok: false; message: string } {
-  if (remote || cwd === undefined || cwd === null || cwd === '') return { ok: true }
+export function chosenFolder(
+  remote: boolean,
+  cwd: unknown,
+  known: Iterable<string> = [],
+): { ok: true; cwd?: string } | { ok: false; message: string } {
+  if (cwd === undefined || cwd === null || cwd === '') return { ok: true }
   if (typeof cwd !== 'string') return { ok: false, message: 'not a folder on this Mac' }
+  if (remote) {
+    const want = isAbsolute(cwd) ? real(cwd) : null
+    const hit = want === null ? undefined : [...known].find((k) => real(k) === want)
+    return hit !== undefined
+      ? { ok: true, cwd: hit }
+      : { ok: false, message: `From the web app a session starts only in one of the workspace's repositories: ${cwd} is not one.` }
+  }
   let dir = false
   try {
     dir = isAbsolute(cwd) && statSync(cwd).isDirectory()

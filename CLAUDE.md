@@ -148,8 +148,9 @@ web tabs keep working.
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card |
+| A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
-| Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx` |
+| Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
@@ -162,7 +163,7 @@ web tabs keep working.
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
-| Notes | `shared/notes.ts` (types, limits, checks), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`), `renderer/.../NotesPanel.tsx`; entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`) |
+| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
@@ -340,7 +341,9 @@ buttons; it does not go through macOS window drag regions.
 
 - **Notes are private and are not state.** They have their own channels (`notes:*`) and never enter
   `AppState`, `toRemoteSnapshot`, a prompt or a GitHub call; a new reader of `NotesStore` needs a
-  decision first. A save carries `base`; never write a note without it except with the user's **Keep
+  decision first. Sessions may only add (`note.sh` → `pumpNoteRequests` → `NotesStore.append`/`save`):
+  the answer to a session carries a note's id, never its text. A note's text is drawn with
+  `MarkdownView html={false}` (every tag is text); never build HTML from it. A save carries `base`; never write a note without it except with the user's **Keep
   mine**. A web tab gets a 120-character preview with the list and the change event; a full text
   goes to it in two answers only: `notes:get`, and the conflict answer of `notes:save` (the stored
   note, to the tab that tried to save over it). A file in the notes folder that is not a note is
@@ -371,6 +374,60 @@ buttons; it does not go through macOS window drag regions.
   checkout is still only unit-tested). The recipe is in OPERATIONS; follow-ups in TODO ("Where a
   session starts"). The Python suite: 453 passed.
 
+- **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
+  installed): the PR watch's "merged" message counted as the user writing after the merge, so
+  watched sessions showed Rework; `isUserWords` skips `[MasterDeck …]` messages, and the watch's
+  merge reaches `Sources.prLive` at once (`prEnded`). Checked: typecheck, vitest (`ask`, `prWatch`
+  tests). Not checked: a real merge in the installed app.
+
+- **Create with Claude's settings bar** (issue #68) is built on branch
+  `worktree-MasterDeck-Terminal-68-ticket-settings`: not merged, not pushed, **not installed** (the
+  rebuild and relaunch of the real app waits for the user's word). A bar below the chat, collapsed
+  to one line (repo · people · column (board) · sprint · labels · milestone), expanded to pickers;
+  it starts from the + column, the tab's filters and sprint, or the dialog's draft; each change
+  rewrites `context.json` (`settings`) and the create pump enforces it on the next ticket
+  (`enforceSettings`), answering with `applied` and any `overridden` value. A conflict is handled one
+  way: Claude says the bar's value applies, and the user changes it in the bar. Checked: typecheck,
+  vitest (142 files passed, 2 skipped; 1620 tests passed, 4 skipped, before the last sprint fix; the
+  touched files again after it), and the isolated app with a fixture board and a stand-in `claude`
+  (the collapsed line and expanded pickers, a board change moving status and sprint and reaching
+  `context.json`, a hand-made dry-run request answered with the bar's values and four overrides).
+  Not checked: a real Claude session following the briefing, a real create on GitHub, the web app,
+  a phone, two or more accounts on screen, Windows. Open points: TODO ("Create with Claude settings bar").
+
+- **Board popups show the description and sub-issues** (issue #81) on branch
+  `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged, not installed): the Assign
+  popup shows the ticket's rendered description; it and the Start dialog list the sub-issues
+  (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues` → `issue:subIssues`, a read open to
+  the web). Checked: typecheck, vitest, and the web preview (`/?preview`) at 1280x900 and 390x844,
+  with a 40-paragraph description and 30 sub-issues scrolling in their boxes. Not checked: a real
+  issue with sub-issues (none found in this repo; the endpoint and the jq filter were run read-only
+  against GitHub), the Electron window.
+
+- **The web app's Start dialog has Choose folder… (#62)** (branch
+  `worktree-MasterDeck-Terminal-62-web-folder-choice`, not merged, not installed): a pick of the
+  workspace and its repositories (`RepoPicker` `listOnly`), and `chosenFolder(remote, cwd, known)`
+  takes a browser's folder only when it is one of `workspaceFolders()` (real paths), else refuses
+  with a message. Checked: typecheck, vitest, the guard's tests (allowed, refused, a link out of the
+  workspace), and the dev preview at 390 x 844 (the pick, the folder line after it, a refusal
+  keeping the folder). Not checked: the real web app over the bridge, a start from the web, a real
+  phone. An `assign` request's own `cwd` is still not checked (TODO).
+- **Notes in Markdown (#65)** are built on branch `worktree-MasterDeck-Terminal-65-notes-markdown`
+  (from `origin/main` with Notes merged, PR #69): the editor's **Write / Preview / Side by side**, the
+  preview drawn by `MarkdownView` with `html={false}`, plain one-line previews, the window refusing
+  navigation, and sessions adding to notes through the `masterdeck-notes` skill. Not merged, not
+  installed (the user's word first). What was checked is in the PR; open points in TODO.
+
+- **Where a session starts: three decisions (issue #61)** are built on branch
+  `worktree-MasterDeck-Terminal-61-start-folder` (not merged, not installed). One rule decides the
+  account a ticket's session runs as, and its workspace is where the folder is looked for:
+  `config.start_account` (Python) / `startAccount` (TS): the account of the repository the code is
+  in, else the issue's, else the primary. The code repository is a PR review's repository, else
+  Setup's **Issues whose code is in another repository** pair (`codeRepos`), else the issue's.
+  Picking another account in the Start dialog looks again in its workspace (`draft-assign
+  --account`); a PR review asks `master checkout --account`. Checked: the Python suite, typecheck,
+  vitest. Not checked: the isolated app on screen (Setup's pairs, the dialog's line after a pick).
+
 - **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
   (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
   ticket from session activity on this Mac (idle gap 1 h by default, an account counts a minute once,
@@ -378,6 +435,14 @@ buttons; it does not go through macOS window drag regions.
   the issue; the spec is in the backend repo (`docs/superpowers/specs/2026-10-09-working-hours-design.md`,
   branch `docs/working-hours-64`, not pushed). Open points: TODO ("Working hours: open points").
 
+- **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
+  (PR #76, draft, not merged; installed locally 2026-10-09): a **Filters** line in the Sessions column, closed by
+  default, with chips, Clear all and an empty state; status, account (two or more accounts), repo,
+  starred and a name search, kept in localStorage. Logic in `shared/sessionFilter.ts`, UI in
+  `SessionFilterBar.tsx`. Checked: typecheck, vitest, and the isolated app with a stand-in `claude`
+  listing five fake sessions and two fictional accounts (open/close, picking, AND across kinds, the
+  empty state, chip ×, Clear all, kept after a restart). Not checked: the web app, a phone, Windows,
+  real sessions with recorded accounts.
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
   this line): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the
@@ -397,6 +462,12 @@ buttons; it does not go through macOS window drag regions.
   indicator's card over the panel (nothing was connected), the real web app over the real bridge, a
   real phone, Windows. The Python suite was not run again for the final fixes (no Python changed).
   Open points are in TODO ("Notes: open points").
+- **Remote no longer waits for ever for the session list** (issue #8, branch
+  `worktree-MasterDeck-Terminal-8-remote-waiting`, not merged; 2026-10-09): the
+  status names the `claude agents` error, and after 60 s the line connects anyway (`remoteWait`,
+  `REMOTE_WAIT_MS`); until the first session list no snapshot is sent and commands are answered
+  "still loading" (agents loading) or fail at once with its error (agents failing). PR #77; the
+  first version is installed locally. Checked: typecheck, vitest. Not checked: the isolated app against a local backend with a failing `claude`.
 - **Where things stand:** `main` is pushed and released as **v0.8.2** (2026-10-06; v0.8.0 and v0.8.1 had no Windows build): several GitHub
   accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the
   Board's repository view with assignable users per repository (plan K, merge e75ec9c) and a

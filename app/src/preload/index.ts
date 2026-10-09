@@ -32,11 +32,12 @@ const api: DeckApi = {
   onShowInboxItem: (cb) => listen(CH.showInboxItem, cb),
   approve: (id) => ipcRenderer.invoke(CH.approve, id),
   reject: (id) => ipcRenderer.invoke(CH.reject, id),
-  draftAssign: (issue, title, url, cwd) =>
-    ipcRenderer.invoke(CH.draftAssign, issue, title, url, cwd),
+  draftAssign: (issue, title, url, cwd, account) =>
+    ipcRenderer.invoke(CH.draftAssign, issue, title, url, cwd, account),
   setSprint: (sprint) => ipcRenderer.send(CH.setSprint, sprint),
   prSummary: (url) => ipcRenderer.invoke(CH.prSummary, url),
   issueBody: (ticket) => ipcRenderer.invoke(CH.issueBody, ticket),
+  issueSubIssues: (ticket) => ipcRenderer.invoke(CH.issueSubIssues, ticket),
   shellPrepare: (dir) => ipcRenderer.invoke(CH.shellPrepare, dir),
   ticketMemory: (ticket) => ipcRenderer.invoke(CH.ticketMemory, ticket),
   assignableUsers: (repo) => ipcRenderer.invoke(CH.assignableUsers, repo),

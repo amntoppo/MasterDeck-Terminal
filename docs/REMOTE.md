@@ -58,11 +58,19 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
 
 ### Lifecycle
 
-- `syncRemote()` runs at startup, on account changes, on a `remoteEnabled` flip and on the first
-  state with healthy agents. Key = `url + token` when `settings.remoteEnabled` and a token exist.
-- **Waits for sessions**: until `remoteReady` (first state where `sources.isHealthy("agents")`)
-  it shows `connecting · "waiting for sessions to load"` and does not dial, so pending commands
-  find their sessions. (If `claude agents` never succeeds it stays there — see TODO.)
+- `syncRemote()` runs at startup, on account changes, on a `remoteEnabled` flip, on every state
+  while it waits for sessions (below) and from the wait's timer. Key = `url + token` when `settings.remoteEnabled` and a token exist.
+- **Waits for sessions**: until `remoteReady` it shows `connecting · "waiting for sessions to load"`
+  and does not dial, so pending commands find their sessions. When `claude agents` fails the text
+  adds the reason (`…: claude agents: <first line of the error>`, ≤ 120 chars, `agentsFailure`),
+  set again only when it changes (`setRemote` emits a state, whose callback calls `syncRemote`). `remoteReady` is set by `remoteWait` (`shared/remoteSnapshot.ts`): as
+  soon as agents is healthy, or after `REMOTE_WAIT_MS` (60 s, a timer started with the wait) without
+  it, when it connects anyway and logs one line. Until the first healthy session list
+  (`sessionsLoaded`) no snapshot is pushed (an empty session list would wipe what the phone and web
+  still show) and `RemoteCommands` gets no state: while agents is only loading a command is answered
+  transiently ("still loading", re-run for a minute by `CloudSync`, not written to
+  `remote-done.json`); while it is in `error` it fails at once and finally (`notLoaded`: "MasterDeck
+  has no session list: claude agents: …"), so a queue of commands does not hold the line a minute each.
 - Each (re)start clears external items (`sources.setExternalItems([])`).
 - On `open`: `hello {deviceId, appVersion, protocol: 3, macPublicKey?}`. No `welcome` within 15 s
   → terminate and redial. Ping every 30 s; nothing received for 2 × ping → terminate.
@@ -254,7 +262,8 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   first. Measured before patches: the bridge sent the full AppState to each tab up to every
   500 ms, 134 MB / 3 min.
 - Notes travel here and nowhere else remote (never in the snapshot of §2): `notesList` answers
-  titles and 120-character previews, `notes:changed` carries the same for one note to tabs that
+  titles and 120-character previews (the note's Markdown read as plain words, `notePreview`; its text
+  is Markdown source since #65, drawn by the tab itself), `notes:changed` carries the same for one note to tabs that
   subscribed, and a note's whole text goes only as the answer of `notesGet` or in the conflict
   answer of `notesSave`. `notesDelete` from a tab skips the Mac's native confirmation (the web app
   asked with `webConfirm`). Details: [ARCHITECTURE § Notes](ARCHITECTURE.md).
@@ -287,6 +296,13 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   Account actions, browser approval/revoke, editor buttons, folder picker (replaced by
   `RepoPicker`), native dialogs (replaced by `webConfirm`). `openExternal` on the web opens only
   `https://` URLs.
+- What folder a browser may choose for a ticket's session (the Start dialog's **Choose folder…**):
+  only one of the folders MasterDeck found itself, the workspace and its repositories
+  (`workspaceRepos`: `workspaceFolders()` in `main/index.ts`, `Ops.repos()`), picked from
+  `RepoPicker` with `listOnly` (no typed path). Main checks the draft's `cwd` again
+  (`chosenFolder(remote, cwd, known)` in `main/remoteGuards.ts`, real paths, so a link in the
+  workspace cannot lead out of it) and refuses anything else with a message: no draft, nothing
+  starts. The + menu's New session keeps its typed path, as before.
 - Build/serve/deploy: `npm run build:web` (→ `app/out/web`, `MD_API` default
   `https://dev.masterdeck.dev`, must be https for production), `npm run dev:web` (Vite;
   `MD_API=http://localhost:8787` adds the local backend to the CSP; `/?preview` shows the app on fixture data

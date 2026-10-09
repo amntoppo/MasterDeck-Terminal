@@ -188,7 +188,10 @@ describe('the popups name the ticket with its repository', () => {
     const popup = (repo: string | null, me?: string) => renderToStaticMarkup(createElement(AssignPopup, { card: { number: 7, repo, title: 'Fix it', url: 'u', status: 'Todo', assignees: [], prs: [], labels: [] } as never, state, onClose: noop, onAssigned: noop, onStart: noop, ...(me ? { me } : {}) }))
     const primary = popup(null) // the primary issue repo: the people MasterDeck has, no read
     expect([...primary.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])).toEqual(['alice', 'carol', 'zoe'])
-    expect(primary).not.toContain('Loading')
+    expect(primary).not.toContain('Loading who else')
+    // The description and the sub-issues are read when the popup opens, for any ticket.
+    expect(primary).toContain('Loading the description from GitHub…')
+    expect(primary).toContain('Loading the sub-issues from GitHub…')
     const other = popup('globex/app', 'bob-work') // bob-work's tab, its repository
     expect([...other.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])).toEqual(['bob-work'])
     expect(other).toContain('Me (bob-work)')
