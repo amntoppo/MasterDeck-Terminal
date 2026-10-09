@@ -598,6 +598,16 @@ fixes it, and move the item here to "Recently done".
   was), the real web app over the bridge, a real phone, Windows, a loop driven by the installed
   app's real hooks (the live runs used `claude -p` with a temp settings file and temp home).
 
+## Website: open points (2026-10-10, issue #89)
+
+The site moved to [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website); its README
+lists its open points (real screenshots, Always Use HTTPS for the zone, analytics, Google Search
+Console). Here only what touches this repository:
+
+- **Agent loops (#82)** are "coming soon" on the site: update it when they ship.
+- **The README rewrite** (its own ticket) should reuse the site's pitch and screens.
+- **Redeploy the site after each release** so Download and the changelog show it (OPERATIONS).
+
 ## MasterDeck mod: open points (2026-10-10, issue #86)
 
 See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
@@ -656,7 +666,8 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 | What | MasterDeck | Backend |
 |---|---|---|
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
-| MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | branch `feat/app-icon` | — |
+| The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |
+| MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | 3d83781, merge 3ce574c | — |
 | The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
 | Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
 | Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
