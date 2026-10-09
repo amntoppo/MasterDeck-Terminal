@@ -148,6 +148,7 @@ web tabs keep working.
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card |
+| A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
@@ -375,6 +376,16 @@ buttons; it does not go through macOS window drag regions.
   `context.json`, a hand-made dry-run request answered with the bar's values and four overrides).
   Not checked: a real Claude session following the briefing, a real create on GitHub, the web app,
   a phone, two or more accounts on screen, Windows. Open points: TODO ("Create with Claude settings bar").
+
+- **Board popups show the description and sub-issues** (issue #81) on branch
+  `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged, not installed): the Assign
+  popup shows the ticket's rendered description; it and the Start dialog list the sub-issues
+  (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues` → `issue:subIssues`, a read open to
+  the web). Checked: typecheck, vitest, and the web preview (`/?preview`) at 1280x900 and 390x844,
+  with a 40-paragraph description and 30 sub-issues scrolling in their boxes. Not checked: a real
+  issue with sub-issues (none found in this repo; the endpoint and the jq filter were run read-only
+  against GitHub), the Electron window.
+
 - **The web app's Start dialog has Choose folder… (#62)** (branch
   `worktree-MasterDeck-Terminal-62-web-folder-choice`, not merged, not installed): a pick of the
   workspace and its repositories (`RepoPicker` `listOnly`), and `chosenFolder(remote, cwd, known)`

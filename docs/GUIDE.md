@@ -1091,6 +1091,13 @@ cards is in them.
   fails the popup says so and offers **Me** alone: assigning to yourself still works. A card on one of your boards whose repository is not ticked in Setup gets its repository's people too, read (and assigned) as the account whose organisation owns the repository, or else the account whose board holds the card, so a private repository on bob-work's board is not asked for as the primary account. The Board's
   Assignee filter lists the people seen on the tab's cards and the tab's account; the primary issue
   repo's people are added only on the primary account's tab (or with one account).
+- **Description and sub-issues in the popups:** the Assign popup shows the ticket's description as
+  GitHub renders it, so you can tell what the work is before you pick it up. The Assign popup and
+  the Start dialog (under Ticket) list the ticket's **Sub-issues**: each one's number, title and
+  status (its column when it is on the board, else Open or Closed), with "2 / 5 done" above the
+  list (done means closed, as on GitHub). Clicking a sub-issue opens it on GitHub. A ticket with no
+  sub-issues shows no section. A long description and a long list each scroll in their own box,
+  so the popup's buttons stay in view.
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue
   opens a PR, MasterDeck adds that PR to the issue as a closing reference (it shows under the
   issue's Development box on GitHub), exactly as writing "Closes #12" in the PR would. This holds for
