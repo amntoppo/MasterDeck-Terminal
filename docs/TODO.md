@@ -359,7 +359,7 @@ fixes it, and move the item here to "Recently done".
   the spawn fails, **Retry** starts the held proposal in it, but closing the tab leaves the
   worktree and its branch (Janitor lists it). Starting the ticket again with the box ticked says
   the branch exists.
-- **P3 · Notes (#65) should draw Markdown with `MarkdownView`** (`shared/markdown.ts`), not a second renderer. The small `Markdown` in `SummaryPanel.tsx` could move to it too.
+- **P3 · The small `Markdown` in `SummaryPanel.tsx` could move to `MarkdownView`** (`shared/markdown.ts`), as Notes (#65) did.
 - **P3 · Remembered choices are per window profile** (localStorage): the web app keeps its own.
 - **P3 · `skills/master/tests/test_ghcache.py`: three tests fail when run from inside a MasterDeck-started session** (seen 2026-10-06, on `main` too; cause not looked into, the session's own `GHC_*` environment is the suspect).
 
@@ -448,9 +448,22 @@ fixes it, and move the item here to "Recently done".
 
 ## Notes: open points (2026-10-06, issue #63; Markdown is #65)
 
-- **P2 · Markdown with a preview** (#65). A note is plain text today; `Note.body` is stored as typed, so
-  a renderer can come later without a migration. Also open: no history of a note's earlier versions
-  and no export (the files in `~/.claude/masterdeck/notes/` are plain JSON).
+- **P3 · No history and no export.** No earlier versions of a note, and no export (the files in
+  `~/.claude/masterdeck/notes/` are plain JSON).
+- **P3 · Markdown in notes (#65): open points.** (a) A task list's boxes in the preview cannot be
+  ticked: change `[ ]` in the text. (b) An image in a note is a link, never drawn (nothing is fetched
+  on opening a note): a picture pasted into a note is not shown. (c)
+  Details and the card's hover show the plain one-line preview, not rendered Markdown (the full text
+  is never in the list). (d) The preview parses the whole text on every key; fine at 50,000
+  characters, not measured on a slow phone.
+- **P3 · Sessions writing notes (#65): open points.** (a) Any process of the user's can write a
+  request (as it can write the notes folder itself); there is no switch to turn it off. (b) A
+  session cannot read a note, also not one it made, and cannot replace or delete text. Not a wall: a
+  session runs as the user and can read the notes folder's files, and the 50,000-character refusal
+  tells it something about a note's length. (c) Not on
+  Windows (bash and the deck folder are macOS-only today). (d) A note does not say which session
+  wrote it; the session can say so in its text. (e) The skill names its script by
+  `~/.claude/skills/...`: with `MASTERDECK_SKILLS_DIR` elsewhere the path in SKILL.md is wrong.
 - **P3 · Editor edges.** (a) If the answer to a first save is lost (the line drops after the store
   wrote it), the editor retries as a new note and makes a duplicate. (b) A note marked "Deleted
   elsewhere" with nothing unsaved is dropped when the user switches to another note. (c) The notes
@@ -518,6 +531,7 @@ fixes it, and move the item here to "Recently done".
 | What | MasterDeck | Backend |
 |---|---|---|
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |
+| Notes in Markdown (issue #65): a note's text is drawn as Markdown (`MarkdownView` with `html={false}`: every tag is text, https links only, opened in the browser), **Write / Preview / Side by side** in the editor, previews in the list, Details and on the card read the Markdown as one plain line; the window refuses navigation away from the app; sessions can add to notes with the `masterdeck-notes` skill (`note.sh new / ticket / append`, `main/noteRequests.ts`, answers carry an id, never a note's text) | branch `worktree-MasterDeck-Terminal-65-notes-markdown` (not merged) | — |
 | Where a session starts, three decisions (issue #61): Setup's **Issues whose code is in another repository** pairs (`codeRepos`: a tracker's tickets start in the code repository's checkout, as its account, and the prompt names it); picking another account in the Start dialog looks for the folder in that account's workspace (`draft-assign --account`, not after Choose folder… or for a held start); a PR review runs as its PR's repository's account and is looked up in that account's workspace (`checkout --account`). One rule on both sides: `config.start_account` / `startAccount` | branch `worktree-MasterDeck-Terminal-61-start-folder` | — |
 | Remote no longer waits for ever on "waiting for sessions to load" (issue #8): the status says why when `claude agents` fails, and after 60 s (`REMOTE_WAIT_MS`, `remoteWait` in `shared/remoteSnapshot.ts`) the line connects anyway; until the first session list no snapshot is sent, and commands are answered "still loading" (retried) while it loads or fail at once with the agents error while `claude agents` fails | branch `worktree-MasterDeck-Terminal-8-remote-waiting` | — |
 | Session filters (issue #74): a **Filters** line in the Sessions column, closed by default, with the count of filters on, a removable chip for each and Clear all; open, a name/ticket search and Status (lanes and Parked), Account (two or more accounts only), Repo (a worktree counts under its repository) and Starred only, any-of within a kind and all kinds combined (`shared/sessionFilter.ts`, `SessionFilterBar.tsx`); "No sessions match the filters" with Clear filters; Cleanup only offers what is shown; kept in localStorage (`sessionFilter`, `sessionFilterOpen`) | `worktree-MasterDeck-Terminal-74-session-filters`, PR #76 (not merged) | — |
