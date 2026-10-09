@@ -431,6 +431,12 @@ checkout whose branch was once linked to a ticket does not link it.
   how. It is saved in `~/.claude/masterdeck/inbox.json`; every addition, action and resolution is
   appended to `inbox-events.jsonl`, and notifications come from those events. The PRs view's
   "Needs its session" list is the same inbox.
+- **A workflow loop at its limit:** when a loop ends at a limit (iterations, time, or no progress)
+  without its criterion met, a **LOOP AT ITS LIMIT** card names the session, the loop and why it
+  stopped. **Run 5 more** opens the loop again with five more iterations and, if the session is
+  idle, types MasterDeck's own `Continue the loop "<name>".` into it (also from the notification and
+  the web app). **Leave it** dismisses the card; **Open** opens the session. The card closes by
+  itself once the loop runs again, and a loop that reaches its limit again is a new card.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it

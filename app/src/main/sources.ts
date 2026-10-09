@@ -2396,6 +2396,12 @@ export class Sources {
     );
     const m = deriveMaster(sessions);
     const masterAs = "session" in m ? this.masterAccountOf(m.session) : undefined;
+    const loops = this.loopStore
+      ? this.loopStore.views(
+          sessions.map((s) => s.sessionId),
+          now,
+        )
+      : {};
     const items = collectItems({
       sessions,
       proposals: this.proposals.filter((p) => !answered.has(p.id)),
@@ -2414,6 +2420,7 @@ export class Sources {
         ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
         : undefined,
       accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
+      loops,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -2454,12 +2461,7 @@ export class Sources {
           .map((s) => [s.sessionId, this.schedulesOf(s.sessionId, now)] as const)
           .filter((e) => e[1].length > 0),
       ),
-      loops: this.loopStore
-        ? this.loopStore.views(
-            sessions.map((s) => s.sessionId),
-            now,
-          )
-        : {},
+      loops,
       hookInfo,
       sessionWorktrees: Object.fromEntries(
         sessions

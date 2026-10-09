@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { allowed, collectItems, inboxNotice, type InboxInput } from './inbox'
+import { allowed, collectItems, inboxNotice, PRIORITY, RESOLVED_BECAUSE, type InboxInput } from './inbox'
+import type { LoopView } from './loops'
 import { DEFAULT_SETTINGS } from './settings'
 import { parseTicket } from './ticket'
 import type { ExternalItem } from './remote'
@@ -181,5 +182,70 @@ describe('external items', () => {
     const items = collectItems(input({ sessions: [sess('a')], external: [ext({ id: 'e-gone', sessionKey: 'gone' }), ext({ id: 'e-known', sessionKey: 'a' })] }))
     expect(items.find((x) => x.id === 'e-gone')?.sessionKey).toBeNull()
     expect(items.find((x) => x.id === 'e-known')?.sessionKey).toBe('a')
+  })
+})
+
+describe('loop items', () => {
+  const view = (o: Partial<LoopView> = {}): LoopView => ({
+    id: 'fix',
+    name: 'Fix the tests',
+    state: 'limit',
+    iteration: 10,
+    max: 10,
+    startedAt: 5000,
+    minutes: 0,
+    reason: 'stopped after 10 iterations: the check still fails',
+    endedAt: 9000,
+    lastCheck: null,
+    ...o,
+  })
+  const s = sess('a', { name: 'api-work', issue: 7 })
+  const loopItems = (o: Partial<InboxInput>) => collectItems(input(o)).filter((i) => i.kind === 'loop')
+
+  it('a loop at its limit is an item: Run 5 more, Leave it, Open', () => {
+    const [i] = loopItems({ sessions: [s], loops: { 'id-a': [view()] } })
+    expect(i).toMatchObject({
+      id: 'loop:id-a:fix:5000',
+      kind: 'loop',
+      sessionKey: 'a',
+      ticket: { repo: null, number: 7 },
+      title: 'api-work',
+      body: 'Fix the tests: stopped after 10 iterations: the check still fails',
+      detail: { type: 'loop', loopId: 'fix', reason: 'stopped after 10 iterations: the check still fails' },
+    })
+    expect(i.actions).toEqual([
+      { type: 'loop-more', label: 'Run 5 more', primary: true },
+      { type: 'dismiss', label: 'Leave it' },
+      { type: 'open', label: 'Open' },
+    ])
+    expect(allowed(i, 'loop-more')).toBe(true)
+    expect(i.priority).toBeLessThan(PRIORITY.blocked)
+    expect(i.priority).toBeGreaterThan(PRIORITY.ci)
+    // Its notification can run 5 more by itself.
+    expect(inboxNotice({ item: i, state: 'open', firstSeen: 0, lastSeen: 0 })).toMatchObject({
+      title: 'api-work: loop stopped at its limit',
+      action: { type: 'loop-more' },
+    })
+  })
+
+  it('none for an open, met or stopped loop, a session that ended, or one not listed', () => {
+    for (const state of ['open', 'met', 'stopped'] as const)
+      expect(loopItems({ sessions: [s], loops: { 'id-a': [view({ state })] } })).toEqual([])
+    expect(loopItems({ sessions: [sess('a', { state: 'done' })], loops: { 'id-a': [view()] } })).toEqual([])
+    expect(loopItems({ sessions: [s], loops: { 'id-b': [view()] } })).toEqual([])
+    // Loops absent (still loading, or no loop store): nothing.
+    expect(loopItems({ sessions: [s] })).toEqual([])
+  })
+
+  it('a loop at its limit again after Run 5 more is a new item (its new start)', () => {
+    const [a] = loopItems({ sessions: [s], loops: { 'id-a': [view()] } })
+    const [b] = loopItems({ sessions: [s], loops: { 'id-a': [view({ startedAt: 8000 })] } })
+    expect(a.id).not.toBe(b.id)
+  })
+
+  it('without a reason the body says it stopped at a limit; when it goes, the loop runs again', () => {
+    const [i] = loopItems({ sessions: [s], loops: { 'id-a': [view({ reason: null })] } })
+    expect(i.body).toBe('Fix the tests: stopped at a limit')
+    expect(RESOLVED_BECAUSE.loop).toBe('the loop is running again')
   })
 })

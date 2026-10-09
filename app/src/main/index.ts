@@ -1277,6 +1277,15 @@ async function runInboxAction(
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
+    case "loop-more": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const r = loopStore.more(s.sessionId, d.loopId);
+      if (!r.ok) return r;
+      sources.pollLoops();
+      return nudgeLoop(s.sessionId, r.name ?? "loop", remote);
+    }
     case "login": {
       if (d.type !== "account")
         return { ok: false, message: "not a GitHub account item" };

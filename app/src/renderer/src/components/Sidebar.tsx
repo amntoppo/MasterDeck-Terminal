@@ -774,6 +774,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
+  loop: "LOOP",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -1369,6 +1370,8 @@ function ExtraCard({
   const kind =
     i.kind === "account"
       ? "GITHUB"
+      : i.kind === "loop"
+      ? "LOOP AT ITS LIMIT"
       : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
@@ -1380,14 +1383,18 @@ function ExtraCard({
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
     (a) =>
-      a.type === "continue" || a.type === "compact" || a.type === "login",
+      a.type === "continue" ||
+      a.type === "compact" ||
+      a.type === "login" ||
+      a.type === "loop-more",
   );
+  const leave = i.actions.find((a) => a.type === "dismiss");
   return (
     <div
       className={`card ${onDetails ? "clickable" : ""}`}
       style={{
         ["--kind" as string]:
-          i.kind === "idle" || i.kind === "waiting"
+          i.kind === "idle" || i.kind === "waiting" || i.kind === "loop"
             ? "var(--amber)"
             : "var(--red)",
       }}
@@ -1411,6 +1418,15 @@ function ExtraCard({
         {owner && (
           <button className="btn" onClick={() => onOpenSession(owner)}>
             {i.detail.type === "budget" ? `Open ${owner.name}` : "Open"}
+          </button>
+        )}
+        {leave && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => void deck().inboxAct(i.id, "dismiss")}
+          >
+            {leave.label}
           </button>
         )}
         {primary && (
