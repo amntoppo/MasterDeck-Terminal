@@ -530,43 +530,51 @@ after a restart.
 Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
 creation.
 
-## The MasterDeck mod (prototype)
+## MasterDeck's mods (prototype)
 
-A Claude Code mod (Claude Code 2.1.287 or later) that shows inside a session what MasterDeck knows
-about it. It is not installed for you yet; to try it:
+Claude Code mods (Claude Code 2.1.287 or later) that show inside a session what MasterDeck knows
+about it, one mod per feature, each switched on or off per session. They are not installed for you
+yet; to try them:
 
 ```bash
 claude plugin marketplace add <path to MasterDeck>/mods
 claude plugin install masterdeck@masterdeck
+claude plugin install masterdeck-ticket@masterdeck
+claude plugin install masterdeck-alerts@masterdeck
+claude plugin install masterdeck-note@masterdeck
 ```
 
-Then start or resume a session (or run `/reload-plugins` in one). In a session on a ticket, with a
-PR or with linked sessions:
+and add `"prependPlugins": ["masterdeck@masterdeck"]` to `~/.claude/settings.json`. Then start or
+resume a session (or run `/reload-plugins` in one). In a session on a ticket, with a PR or with
+linked sessions:
 
-- **A line above the prompt:** the ticket, its board column, the PR with its CI and open review
-  threads, and how many sessions are linked; short in a narrow terminal, with the title when there
-  is room. **Details** opens a pane with links to the ticket and the PR; **Hide** hides the line
-  (`/md-ticket` brings it back).
-- **Toasts** when the card moves, a review thread opens, CI fails or passes, or the PR merges.
-- **`/md-note <text>`** adds the text to the ticket's note in Notes at once, without a turn of
-  Claude (macOS and Linux).
-- **`/md-ticket`** opens the ticket pane.
-- With MasterDeck closed, the line says so and how old its data is.
-- **Session details → Mods** lists every mod MasterDeck has seen in your sessions (yours,
-  marketplace ones, ones loaded with `--plugin-dir`, the ones built into Claude Code) with a switch
-  each, for that session only:
-  - **MasterDeck** off: nothing of it shows in that session (no line, no toasts, the commands do
-    nothing), at once.
-  - **Another mod** off: it does not load in that session. One that is running keeps running until
-    the session starts again ("Off from the session's next start"). Switched back on, it loads
-    within seconds (Claude Code reloads its plugins in that session, one line in the transcript).
-  - Mods your organization manages and mods built into Claude Code cannot be switched here.
-  - The choices last across a resume. Mods load in every other session as usual.
-  This needs the mod running in that session; MasterDeck's mod must load before the others, which
-  `"prependPlugins": ["masterdeck@masterdeck"]` in `~/.claude/settings.json` makes sure of.
+- **Ticket line** (`masterdeck-ticket`): a line above the prompt with the ticket, its board column,
+  the PR with its CI and open review threads, and how many sessions are linked; short in a narrow
+  terminal, with the title when there is room. **Details** (or `/md-ticket`) opens a pane with links
+  to the ticket and the PR; **Hide** hides the line. With MasterDeck closed, the line says so and how
+  old its data is.
+- **Alerts** (`masterdeck-alerts`): toasts when the card moves, a review thread opens, CI fails or
+  passes, or the PR merges.
+- **Note command** (`masterdeck-note`): `/md-note <text>` adds the text to the ticket's note in
+  Notes at once, without a turn of Claude (macOS and Linux).
+- **MasterDeck core** (`masterdeck`): nothing on screen; it does the switching below and tells
+  MasterDeck which mods run in each session.
 
-The mod only reads what MasterDeck writes and never talks to GitHub. In a session MasterDeck has
-nothing for, it shows nothing. To remove it: `claude plugin uninstall masterdeck@masterdeck`.
+**Session details → Mods** has a switch per mod, for that session only:
+
+- **MasterDeck** lists the core (always on: it does the switching) and the three feature mods. One
+  switched off stops at once (nothing drawn or toasted, its command does nothing), and comes back at
+  once when switched on.
+- **Other mods** lists every other mod MasterDeck has seen in your sessions (yours, marketplace ones,
+  ones loaded with `--plugin-dir`, the ones built into Claude Code). One switched off does not load
+  in that session; one that is running keeps running until the session starts again ("Off from the
+  session's next start"). Switched back on, it loads within seconds (Claude Code reloads its plugins
+  in that session, one line in the transcript). Mods your organization manages and mods built into
+  Claude Code cannot be switched here.
+- The choices last across a resume. Mods load in every other session as usual.
+
+The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
+nothing for, they show nothing. To remove one: `claude plugin uninstall <name>@masterdeck`.
 
 ## Cost and context
 

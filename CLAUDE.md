@@ -58,9 +58,11 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   they stay for use by hand. `skills/master/` is also the `master` CLI (Python,
   `lib/master/`) that the app calls for the ledger, snapshot, board, config and spawning.
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
-- `mods/` — Claude Code mods (a local-folder marketplace, `.claude-plugin/marketplace.json`):
-  `mods/masterdeck` draws the session's ticket inside Claude Code (see [docs/MODS.md](docs/MODS.md)).
-  Check it with `claude plugin validate mods/masterdeck` and `claude plugin test mods/masterdeck`.
+- `mods/` — Claude Code mods (a local-folder marketplace, `.claude-plugin/marketplace.json`): the
+  core `mods/masterdeck` (per-session switches, heartbeat) and one mod per feature,
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note` (see [docs/MODS.md](docs/MODS.md)).
+  `mods/shared/deck.ts` is copied into each by `mods/sync-shared.sh`: edit it there. Check each with
+  `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
 - `.github/workflows/ci.yml` — Python tests, typecheck, vitest, DMG/EXE builds; tags publish a release.
@@ -168,7 +170,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
-| The MasterDeck mod (inside a session: ticket band, `/md-note`, `/md-ticket`) | `mods/masterdeck` (`hooks/register.tsx`, pure parts `hooks/band.ts`, contract `types/index.d.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
+| MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -369,9 +371,9 @@ buttons; it does not go through macOS window drag regions.
 - **Claude Code mods (#86)** (branch `worktree-MasterDeck-Terminal-86-mods`, not merged, not
   pushed; the app is installed locally from it and the mod is installed at user scope from
   `~/.claude/masterdeck/mods`): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
-  `claude --bg` session and draws in `claude attach`. Prototype `mods/masterdeck` (ticket band,
-  toasts, `/md-ticket`, `/md-note`, heartbeat) and the app's side (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session,
-  **Mod live** in Session details). Checked: typecheck, vitest (150 files passed, 2 skipped; 1731
+  `claude --bg` session and draws in `claude attach`. Prototype mods: a core `mods/masterdeck`
+  (per-session switches, heartbeat) and `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note` and the app's side (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session,
+  **Mod live** in Session details). Checked: typecheck, vitest (151 files passed, 2 skipped; 1733
   tests passed, 4 skipped), `claude plugin validate` / `test` (6) / tsc for the mod, and the mod in
   throwaway sessions (background: heartbeat and `ended`; interactive: band at 80/110/160 columns,
   toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed); on the installed

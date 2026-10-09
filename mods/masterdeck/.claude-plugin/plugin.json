@@ -1,8 +1,8 @@
 {
   "name": "masterdeck",
   "displayName": "MasterDeck",
-  "version": "0.3.0",
-  "description": "Shows the session's MasterDeck ticket above the prompt and adds /md-ticket and /md-note",
+  "version": "0.4.0",
+  "description": "MasterDeck's core mod: switches mods on and off per session from MasterDeck and tells it which mods run",
   "author": { "name": "MasterDeck" },
   "repository": "https://github.com/amntoppo/MasterDeck-Terminal",
   "license": "MIT",

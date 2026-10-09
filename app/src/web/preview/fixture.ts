@@ -138,9 +138,12 @@ export function fixtureState(noBoard = false): AppState {
     // Session details → Mods: the MasterDeck mod runs in the first session and reported these.
     modLive: {
       [SESSIONS[0].key]: {
-        version: '0.3.0',
+        version: '0.4.0',
         claude: '2.1.296',
         mods: [
+          { name: 'masterdeck-ticket', provenance: 'masterdeck-ticket@masterdeck', version: '0.4.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-alerts', provenance: 'masterdeck-alerts@masterdeck', version: '0.4.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-note', provenance: 'masterdeck-note@masterdeck', version: '0.4.0', tier: 'user', loaded: true },
           { name: 'token-weather', provenance: 'token-weather@claude-code-playground-mods', version: '0.1.0', tier: 'user', loaded: true },
           { name: 'blast-radius', provenance: 'blast-radius@claude-code-playground-mods', version: '0.2.0', tier: 'user', loaded: false },
           { name: 'my-turn-timer', provenance: 'my-turn-timer@inline', version: null, tier: 'user', loaded: true },
@@ -148,7 +151,7 @@ export function fixtureState(noBoard = false): AppState {
         ],
       },
     },
-    modOff: { [SESSIONS[0].key]: ['blast-radius'] },
+    modOff: { [SESSIONS[0].key]: ['blast-radius', 'masterdeck-alerts'] },
     modCatalog: [
       { name: 'blast-radius', provenance: 'blast-radius@claude-code-playground-mods', version: '0.2.0', tier: 'user' },
       { name: 'cc-plugin-diff', provenance: 'cc-plugin-diff@builtin', version: null, tier: 'builtin' },

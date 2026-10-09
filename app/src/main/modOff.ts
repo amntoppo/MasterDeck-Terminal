@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { MOD_SELF, type ModEntry } from '@shared/modBand'
+import { MASTERDECK_MODS, MOD_CORE, type ModEntry } from '@shared/modBand'
 
 const KEY = /^[0-9a-f-]{8,36}$/i
 const NAME = /^[A-Za-z0-9._-]{1,64}$/
@@ -21,7 +21,8 @@ function writeJson(file: string, value: unknown): boolean {
  * `mod-off.json`: `{ <Session.key>: [mod names] }`, the mods switched off for a session in Session
  * details → Mods. Claude Code turns a plugin on or off per settings scope only, so the MasterDeck
  * mod does it per session: it stays quiet itself, and refuses the others when they load.
- * The first version of the file was an array of keys (the MasterDeck mod off there).
+ * Older files: an array of keys (the one MasterDeck mod off there), and `masterdeck` in a list
+ * (the same, before it became a core and feature mods): both read as every feature mod off.
  */
 export class ModOff {
   private map: Map<string, string[]> | null = null
@@ -33,11 +34,13 @@ export class ModOff {
     this.map = new Map()
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as unknown
+      const features = MASTERDECK_MODS.map((m) => m.name)
       if (Array.isArray(raw)) {
-        for (const k of raw) if (typeof k === 'string' && KEY.test(k)) this.map.set(k, [MOD_SELF])
+        for (const k of raw) if (typeof k === 'string' && KEY.test(k)) this.map.set(k, [...features].sort())
       } else if (raw && typeof raw === 'object') {
         for (const [k, v] of Object.entries(raw)) {
-          const names = Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string' && NAME.test(n)) : []
+          const listed = Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string' && NAME.test(n)) : []
+          const names = listed.flatMap((n) => (n === MOD_CORE ? features : [n]))
           if (KEY.test(k) && names.length) this.map.set(k, [...new Set(names)].sort())
         }
       }
@@ -58,7 +61,8 @@ export class ModOff {
 
   /** Switch a mod on (true) or off (false) for a session. */
   set(key: string, mod: string, on: boolean): boolean {
-    if (!KEY.test(key) || !NAME.test(mod)) return false
+    // The core does the switching: it is never switched off.
+    if (!KEY.test(key) || !NAME.test(mod) || mod === MOD_CORE) return false
     const map = this.load()
     const names = new Set(map.get(key) ?? [])
     if (on === !names.has(mod)) return true

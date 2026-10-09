@@ -25,14 +25,21 @@ export interface ModBand {
   } | null
   peers: { name: string; state: Session['state'] }[]
   /**
-   * Mods switched off for this session in Session details → Mods, by plugin name. `masterdeck`:
-   * the mod stays quiet; any other: the mod refuses it when it loads.
+   * Mods switched off for this session in Session details → Mods, by plugin name. MasterDeck's own
+   * feature mods read it and go quiet; the core refuses any other when it loads.
    */
   offMods?: string[]
 }
 
-/** The MasterDeck mod's own plugin name. */
-export const MOD_SELF = 'masterdeck'
+/** MasterDeck's core mod (mods/masterdeck): the switching and the heartbeat; never switched off. */
+export const MOD_CORE = 'masterdeck'
+
+/** MasterDeck's feature mods (mods/<name>), as the Mods tab names them; each switches itself at once. */
+export const MASTERDECK_MODS: readonly { name: string; title: string; about: string }[] = [
+  { name: 'masterdeck-ticket', title: 'Ticket line', about: 'The ticket, its column, the PR and linked sessions above the prompt; /md-ticket' },
+  { name: 'masterdeck-alerts', title: 'Alerts', about: 'Toasts when the card moves, a review thread opens, CI changes or the PR merges' },
+  { name: 'masterdeck-note', title: 'Note command', about: '/md-note <text> adds to the ticket\'s note in Notes' },
+]
 
 /** What to write for a session: its band with the mods switched off there (written even with nothing else to show). */
 export function bandFor(band: ModBand | null, name: string, offMods: readonly string[]): ModBand | null {
@@ -104,40 +111,59 @@ export type ModRowStatus =
   | 'off-next-start'
   /** Switched on after a refusal: it joins at the reload the MasterDeck mod asks for. */
   | 'turning-on'
-  /** Not seen in this session (not installed then, or loaded before MasterDeck's mod). */
+  /** Not seen in this session (not installed then, or loaded before MasterDeck's core). */
   | 'not-seen'
 
 export interface ModRow {
   name: string
+  /** What the tab calls it: MasterDeck's own by what they do, any other by its plugin name. */
+  title: string
+  /** One line on what it does (MasterDeck's own only). */
+  about: string | null
   provenance: string
   version: string | null
-  /** Managed or built into Claude Code: not ours to switch. */
+  /** The core, a managed or a built-in mod: not switched from MasterDeck. */
   locked: boolean
-  isSelf: boolean
+  /** One of MasterDeck's: the core or a feature mod. */
+  isMasterDeck: boolean
   isOff: boolean
   status: ModRowStatus
 }
 
-/** The rows of Session details → Mods: MasterDeck's own first, then every mod seen anywhere. */
+/**
+ * The rows of Session details → Mods: MasterDeck's core (locked: it does the switching), its
+ * feature mods (always listed; they switch themselves at once), then every other mod seen anywhere.
+ */
 export function modRows(
   catalog: readonly ModEntry[],
   live: { version: string; mods: readonly ModSeen[] },
   offMods: readonly string[],
 ): ModRow[] {
   const off = new Set(offMods)
-  const self: ModRow = {
-    name: MOD_SELF, provenance: `${MOD_SELF}@${MOD_SELF}`, version: live.version, locked: false, isSelf: true,
-    isOff: off.has(MOD_SELF), status: off.has(MOD_SELF) ? 'off' : 'on',
+  const core: ModRow = {
+    name: MOD_CORE, title: 'MasterDeck core', about: 'Switches the mods in this list and tells MasterDeck which run here',
+    provenance: `${MOD_CORE}@${MOD_CORE}`, version: live.version, locked: true, isMasterDeck: true, isOff: false, status: 'on',
   }
-  const names = [...new Set([...catalog.map((e) => e.name), ...live.mods.map((m) => m.name)])].filter((n) => n !== MOD_SELF)
-  const rows = names.map((name): ModRow => {
+  const known = (name: string) => live.mods.find((m) => m.name === name) ?? catalog.find((e) => e.name === name)
+  const ours = MASTERDECK_MODS.map((m): ModRow => {
+    const here = live.mods.find((s) => s.name === m.name)
+    const isOff = off.has(m.name)
+    return {
+      name: m.name, title: m.title, about: m.about, provenance: known(m.name)?.provenance ?? `${m.name}@${MOD_CORE}`,
+      version: known(m.name)?.version ?? null, locked: false, isMasterDeck: true, isOff,
+      status: !here ? 'not-seen' : isOff ? 'off' : 'on',
+    }
+  })
+  const family = new Set([MOD_CORE, ...MASTERDECK_MODS.map((m) => m.name)])
+  const names = [...new Set([...catalog.map((e) => e.name), ...live.mods.map((m) => m.name)])].filter((n) => !family.has(n))
+  const others = names.map((name): ModRow => {
     const here = live.mods.find((m) => m.name === name)
-    const known = here ?? catalog.find((e) => e.name === name)!
+    const entry = known(name)!
     const isOff = off.has(name)
     const status: ModRowStatus = !here ? 'not-seen' : here.loaded ? (isOff ? 'off-next-start' : 'on') : isOff ? 'off' : 'turning-on'
-    return { name, provenance: known.provenance, version: known.version, locked: known.tier !== 'user', isSelf: false, isOff, status }
+    return { name, title: name, about: null, provenance: entry.provenance, version: entry.version, locked: entry.tier !== 'user', isMasterDeck: false, isOff, status }
   })
-  return [self, ...rows.sort((a, b) => Number(a.locked) - Number(b.locked) || a.name.localeCompare(b.name))]
+  return [core, ...ours, ...others.sort((a, b) => Number(a.locked) - Number(b.locked) || a.name.localeCompare(b.name))]
 }
 
 /** The mod's heartbeat, `deck/mods/<sessionId>.json`: it runs in that session now. */

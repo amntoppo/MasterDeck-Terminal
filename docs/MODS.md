@@ -2,7 +2,7 @@
 
 Research for #86, 2026-10-10, against Claude Code 2.1.296. The mods API is marked early access and
 changes between releases: the declaration file Claude Code writes for each build is the authority.
-The prototype that came out of it is `mods/masterdeck` (ARCHITECTURE, "The MasterDeck mod").
+The prototype that came out of it is `mods/`: a core `masterdeck` and one mod per feature (ARCHITECTURE, "MasterDeck's mods").
 
 Docs: [overview](https://code.claude.com/docs/en/plugins/mods/overview),
 [reference](https://code.claude.com/docs/en/plugins/mods/reference),

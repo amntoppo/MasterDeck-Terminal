@@ -1,0 +1,9 @@
+{
+  "name": "masterdeck-ticket",
+  "displayName": "MasterDeck ticket line",
+  "version": "0.4.0",
+  "description": "Shows the session's MasterDeck ticket, board column, PR and linked sessions above the prompt; /md-ticket opens it in a pane",
+  "author": { "name": "MasterDeck" },
+  "repository": "https://github.com/amntoppo/MasterDeck-Terminal",
+  "license": "MIT"
+}

@@ -1,5 +1,11 @@
 {
   "name": "masterdeck",
   "owner": { "name": "MasterDeck" },
-  "plugins": [{ "name": "masterdeck", "source": "./masterdeck" }]
+  "metadata": { "description": "MasterDeck's Claude Code mods: a core that switches mods per session, and one mod per feature" },
+  "plugins": [
+    { "name": "masterdeck", "source": "./masterdeck" },
+    { "name": "masterdeck-ticket", "source": "./masterdeck-ticket" },
+    { "name": "masterdeck-alerts", "source": "./masterdeck-alerts" },
+    { "name": "masterdeck-note", "source": "./masterdeck-note" }
+  ]
 }

@@ -259,58 +259,78 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   hook passes a `session_id` that equals a line or starts with it. It fails open: no jq, input
   that does not parse, a `to` or message that is not a string, all print nothing.
 
-### The MasterDeck mod (`mods/masterdeck`, issue #86, prototype)
+### MasterDeck's mods (`mods/`, issue #86, prototype)
 
-A Claude Code mod (a plugin of function hooks, Claude Code 2.1.287 or later; see
-[MODS.md](MODS.md)) that draws inside a session what MasterDeck knows about it. It never calls
-GitHub: the app writes, the mod reads, so one poller serves every session.
+Claude Code mods (plugins of function hooks, Claude Code 2.1.287 or later; see [MODS.md](MODS.md))
+that work inside a session with what MasterDeck knows about it. They never call GitHub: the app
+writes, the mods read, so one poller serves every session. `mods/` is a local-folder marketplace
+(`.claude-plugin/marketplace.json`) of four plugins:
 
+| Mod | What |
+|---|---|
+| `masterdeck` (core) | Nothing on screen. Switches mods per session, reports which run (heartbeat). Never switched off |
+| `masterdeck-ticket` | The ticket line above the prompt, its pane, `/md-ticket` |
+| `masterdeck-alerts` | Toasts when the card moves, a review thread opens, CI fails or passes, the PR merges or is linked |
+| `masterdeck-note` | `/md-note <text>`: adds to the ticket's note through the note pump |
+
+- **What they share.** A mod may import only its own files, and the engine follows `$` into
+  functions of the register file only (a `$` passed to an imported function fails validation). So
+  `mods/shared/deck.ts` holds the pure part (the `Band` type, `parseBand`, `isOff`, `deckFolder`,
+  `deckRead`, `ago`), copied into each mod as `hooks/deck.ts` by `mods/sync-shared.sh`
+  (`app/src/shared/modsShared.test.ts` fails while a copy differs, or the marketplace lists other
+  names), and each register file carries its own few lines that read `deck/alive` and the band.
+  The deck folder is `$MASTERDECK_HOME/deck`, else `~/.claude/masterdeck/deck` (a background
+  session has the daemon's environment, so in practice the latter).
 - **App side.** In the state callback (`main/index.ts`, while `agents` is healthy)
-  `DeckHooks.setBand(sessionId, modBand(state, s))` writes `deck/band/<sessionId>.json` for every
-  live session that has a ticket, a PR or a linked session (`shared/modBand.ts` `ModBand`: name,
-  ticket label/ref/title/url, the card's column, the session's newest PR with state, CI, open
-  threads and draft, linked sessions). It is written only when its text changed (kept in memory)
-  and `pruneBands` removes the files of sessions that are no longer live.
-  `DeckHooks.modBeats()` reads the mod's heartbeats, `deck/mods/<sessionId>.json`
-  (`{v: 1, version, claude, at, ended?}`, `parseModBeat`: fresh under 45 s, `MOD_BEAT_STALE_MS`;
-  files older than a day are removed), and the callback puts them in `state.modLive` by
-  `Session.key` (`version`, `claude` only, so a beat does not change the state). Session details
-  lists the session's mods in Session details → **Mods** (`SessionMods.tsx`, a `Session | Mods`
-  switcher at the top of the Details tab).
-- **Mods per session.** Claude Code turns a plugin on or off per settings scope only, so the
-  MasterDeck mod does it per session. Its `plugin.register` hook judges every mod module that loads
-  after it (`prependPlugins: ["masterdeck@masterdeck"]` in the user's settings puts it first, ahead
-  of `--plugin-dir` mods too; without it a `--plugin-dir` mod loads before any installed one) and reports each in its heartbeat (`mods`:
-  name, provenance, version, tier, `loaded`). The app keeps every mod reported anywhere in
-  `<home>/mod-catalog.json` (`ModCatalog`, `mergeCatalog`) as `state.modCatalog`, and the switches in
-  `<home>/mod-off.json` (`ModOff`: `{Session.key: [names]}`; its first version, an array of keys,
-  reads as MasterDeck's own mod off) as `state.modOff`. `CH.modSet` (`deck.modSet(key, mod, on)`,
-  open to the web) writes it and calls `sources.changed()`; the state callback writes the names into
-  the session's band as `offMods` (`bandFor`: also for a session with nothing else to show).
-  What the mod does with them (`hooks/band.ts`): `masterdeck` itself goes quiet at once (no band, no
-  toasts, `/md-ticket` and `/md-note` answer with nothing, its pane closes); another mod of tier
-  `user` is refused when it loads (`refuses`), so one switched off while it runs stays until the
-  session starts again; one switched on after a refusal joins at a `/reload-plugins` the mod asks
-  for itself from its timer (`toReload`; a `$.command.run` cannot run from a `command.run` hook).
-  Managed (`prepend`/`append`) and built-in mods are never refused and show locked.
-  `modRows` (shared) gives each row's status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`.
-- **Mod side** (`hooks/register.tsx`, pure parts in `hooks/band.ts`, its contract in
-  `types/index.d.ts`): the deck folder is `$MASTERDECK_HOME/deck`, else `~/.claude/masterdeck/deck`.
-  Every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its band file into
-  `$.state`; a change redraws the band above the prompt (`AbovePrompt`, sized to `bodyColumns`:
-  one short line under 90 columns, the title when there is room, then **Details** / **Hide**), and
-  what changed between two reads (`bandEvents`: a column move, new review threads, CI failed or
-  passed, merged, a PR linked) is a toast. Nothing is drawn where the session has no band file.
-  Every 15 s, and only where `deck/alive` exists, it writes its heartbeat; `session.end` writes
-  `ended: true`. `/md-ticket` opens a pane with the ticket, its column, the PR (links) and linked
-  sessions. `/md-note <text>` adds to the ticket's note through the same pump as the
-  `masterdeck-notes` skill: it writes `note-requests/<id>.part`, renames it to `.json` and waits up
-  to 6 s for `note-answers/<id>.json`, else takes the request back by renaming it (the mods API has
-  no rename or delete, so these go through `$.process.run(['mv' | 'rm', …])`: macOS and Linux only).
-  The band hook draws its line first and keeps what other mods draw there (`next(e)` under it).
-- **Not wired yet:** MasterDeck does not install the mod (by hand:
-  `claude plugin marketplace add <repo>/mods`, then `claude plugin install masterdeck@masterdeck`),
-  nothing of the deck hook moved into it, and no Windows path. See TODO ("MasterDeck mod").
+  `DeckHooks.setBand(sessionId, bandFor(modBand(state, s), s.name, modOff.of(s.key)))` writes
+  `deck/band/<sessionId>.json` for every live session that has a ticket, a PR, a linked session or
+  a mod switched off (`shared/modBand.ts` `ModBand`: name, ticket label/ref/title/url, the card's
+  column, the session's newest PR with state, CI, open threads and draft, linked sessions,
+  `offMods`). It is written only when its text changed, and `pruneBands` removes the files of
+  sessions that are no longer live. `DeckHooks.modBeats()` reads the core's heartbeats,
+  `deck/mods/<sessionId>.json` (`{v: 1, version, claude, at, mods, ended?}`, `parseModBeat`: fresh
+  under 45 s; files older than a day are removed), and the callback puts them in `state.modLive` by
+  `Session.key` (`version`, `claude`, `mods`, so a beat alone does not change the state).
+- **Mods per session.** Claude Code turns a plugin on or off per settings scope only, so MasterDeck
+  does it per session. The core's `plugin.register` hook judges every mod module that loads after it
+  (`prependPlugins: ["masterdeck@masterdeck"]` in the user's settings puts it first, ahead of
+  `--plugin-dir` mods too) and reports each in its heartbeat (`mods`: name, provenance, version,
+  tier, `loaded`). The app keeps every mod reported anywhere in `<home>/mod-catalog.json`
+  (`ModCatalog`, `mergeCatalog`) as `state.modCatalog`, and the switches in `<home>/mod-off.json`
+  (`ModOff`: `{Session.key: [names]}`; older files, where `masterdeck` meant the one mod off, read as
+  every feature mod off; the core cannot be switched) as `state.modOff`. `CH.modSet`
+  (`deck.modSet(key, mod, on)`, open to the web) writes it and calls `sources.changed()`; the state
+  callback puts the names in the session's band as `offMods`.
+  MasterDeck's feature mods read their own name there (`isOff`) and go quiet at once, either way
+  (nothing drawn or toasted, their commands answer with nothing, the ticket pane closes); the core
+  never refuses them (`FAMILY` in `mods/masterdeck/hooks/core.ts`). Any other mod of tier `user` is
+  refused when it loads (`refuses`), so one switched off while it runs stays until the session starts
+  again; one switched on after a refusal joins at a `/reload-plugins` the core asks for from its timer
+  (`toReload`; a `$.command.run` cannot run from a `command.run` hook). Managed (`prepend`/`append`)
+  and built-in mods are never refused.
+- **Session details → Mods** (`SessionMods.tsx`, a `Session | Mods` switcher at the top of the
+  Details tab; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
+  `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
+  or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
+  and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`.
+- **masterdeck-ticket**: every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its
+  band into module variables and redraws on a change (`$.ui.invalidate`; a reload refills them at
+  `session.start`). The line above the prompt (`AbovePrompt`, sized to `bodyColumns`: one short line
+  under 90 columns, the title when there is room, then **Details** / **Hide**; `hooks/line.ts`
+  `segments`) keeps what other mods draw there (`next(e)` under it). `/md-ticket` opens a pane with
+  the ticket, its column, the PR (links) and linked sessions.
+- **masterdeck-alerts**: compares two reads of the band (`bandEvents`) and toasts the difference;
+  the first read after a load, and the first after it is switched on, toast nothing.
+- **masterdeck-note**: `/md-note <text>` writes `note-requests/<id>.part`, renames it to `.json`
+  and waits up to 6 s for `note-answers/<id>.json`, else takes the request back by renaming it (the
+  mods API has no rename or delete, so these go through `$.process.run(['mv' | 'rm', …])`: macOS and
+  Linux only).
+- **The core** writes its heartbeat every 15 s where `deck/alive` exists (`ended: true` at
+  `session.end`); what it saw is in `$.state` (`seen`), since a reload does not judge an unchanged
+  module again.
+- **Not wired yet:** MasterDeck does not install the mods (by hand: `claude plugin marketplace add
+  <folder>/mods`, `claude plugin install <name>@masterdeck` for each, `prependPlugins` in settings),
+  nothing of the deck hook moved into them, and no Windows path. See TODO ("MasterDeck mod").
 
 ### Monitors (watches) and schedules
 
@@ -981,7 +1001,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
 | `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
-| `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions the MasterDeck mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
+| `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |

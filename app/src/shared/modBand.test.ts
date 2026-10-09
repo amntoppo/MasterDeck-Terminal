@@ -89,26 +89,36 @@ describe('the mods catalog', () => {
 })
 
 describe('modRows', () => {
-  it('lists MasterDeck first, then each mod with how it stands in this session; managed and built-in ones are locked', () => {
+  it('lists the core (locked), MasterDeck\'s feature mods, then each other mod with how it stands in this session', () => {
     const catalog = [
       { name: 'token-chart', provenance: 'token-chart@acme', version: '1.0.0', tier: 'user' },
       { name: 'replay', provenance: 'replay@acme', version: '0.2.0', tier: 'user' },
       { name: 'old', provenance: 'old@acme', version: null, tier: 'user' },
       { name: 'diff', provenance: 'diff@builtin', version: null, tier: 'builtin' },
+      { name: 'masterdeck-ticket', provenance: 'masterdeck-ticket@masterdeck', version: '0.4.0', tier: 'user' },
     ]
-    const live = { version: '0.3.0', mods: [seen('token-chart'), seen('replay', { loaded: false }), seen('blast', { loaded: false }), seen('diff', { tier: 'builtin', provenance: 'diff@builtin' })] }
-    const rows = modRows(catalog, live, ['masterdeck', 'token-chart', 'replay'])
-    expect(rows.map((r) => [r.name, r.status, r.isOff, r.locked])).toEqual([
-      ['masterdeck', 'off', true, false],
-      ['blast', 'turning-on', false, false],
-      ['old', 'not-seen', false, false],
-      ['replay', 'off', true, false],
-      ['token-chart', 'off-next-start', true, false],
-      ['diff', 'on', false, true],
+    const live = {
+      version: '0.4.0',
+      mods: [
+        seen('masterdeck-ticket', { provenance: 'masterdeck-ticket@masterdeck', version: '0.4.0' }),
+        seen('masterdeck-alerts', { provenance: 'masterdeck-alerts@masterdeck', version: '0.4.0' }),
+        seen('token-chart'), seen('replay', { loaded: false }), seen('blast', { loaded: false }),
+        seen('diff', { tier: 'builtin', provenance: 'diff@builtin' }),
+      ],
+    }
+    const rows = modRows(catalog, live, ['masterdeck-alerts', 'token-chart', 'replay'])
+    expect(rows.map((r) => [r.name, r.title, r.status, r.isOff, r.locked, r.isMasterDeck])).toEqual([
+      ['masterdeck', 'MasterDeck core', 'on', false, true, true],
+      ['masterdeck-ticket', 'Ticket line', 'on', false, false, true],
+      ['masterdeck-alerts', 'Alerts', 'off', true, false, true],
+      ['masterdeck-note', 'Note command', 'not-seen', false, false, true],
+      ['blast', 'blast', 'turning-on', false, false, false],
+      ['old', 'old', 'not-seen', false, false, false],
+      ['replay', 'replay', 'off', true, false, false],
+      ['token-chart', 'token-chart', 'off-next-start', true, false, false],
+      ['diff', 'diff', 'on', false, true, false],
     ])
-    expect(modRows([], { version: '0.3.0', mods: [] }, [])).toEqual([
-      { name: 'masterdeck', provenance: 'masterdeck@masterdeck', version: '0.3.0', locked: false, isSelf: true, isOff: false, status: 'on' },
-    ])
+    expect(modRows([], { version: '0.4.0', mods: [] }, []).map((r) => r.name)).toEqual(['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note'])
   })
 })
 
