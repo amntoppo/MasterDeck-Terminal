@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -407,6 +407,27 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
     expect(readFileSync(join(t.home, 'workflows', 'loops', `${SID}-lb.md`), 'utf8')).toBe('')
     // The next turn end checks B.
     expect(t.answer().reason).toContain('↻ Loop "B": iteration 1/10.')
+  })
+
+  it('a workflow file it cannot read leaves the loop alone; one without the loop stops it', () => {
+    const wf = (t: ReturnType<typeof setup>) => join(t.home, 'workflows', 'sessions', `${SID}.json`)
+    // No session workflow and no default one.
+    const gone = setup()
+    rmSync(wf(gone))
+    const before = readFileSync(gone.L, 'utf8')
+    expect(gone.run()).toBe('')
+    expect(readFileSync(gone.L, 'utf8')).toBe(before)
+    expect(gone.runs()).toEqual([])
+    // Not JSON (a file being written, a broken edit).
+    const bad = setup()
+    writeFileSync(wf(bad), '{"steps": [')
+    expect(bad.run()).toBe('')
+    expect(bad.loops()[0]).toMatchObject({ state: 'open', iteration: 0 })
+    // Read, and the loop is not in it: nothing could ever end it, so it ends.
+    const other = setup()
+    writeFileSync(wf(other), JSON.stringify({ steps: [{ id: STEP, trigger: 'after-push', note: 'n' }] }))
+    expect(other.run()).toBe('')
+    expect(other.loops()[0]).toMatchObject({ state: 'stopped', reason: 'the workflow no longer has this loop' })
   })
 
   it('a Stop loop or Run 5 more during the check is kept: the hook writes nothing', async () => {

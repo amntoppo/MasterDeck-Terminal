@@ -47,7 +47,8 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
   $in.file.loops[$k] as $e
   | ([$in.defs[]? | select(.id == $e.id)][0]) as $def
   | if $def == null then
-      # The workflow no longer has this loop: nothing could ever end it, so it ends here.
+      # The workflow was read and no longer has this loop: nothing could ever end it, so it ends
+      # here. (A workflow the shell could not read never gets this far.)
       {file: ($in.file | .loops[$k] = ($e + {state: "stopped", reason: "the workflow no longer has this loop"})),
        answer: null, opened: [],
        run: {at: $in.now, sid: $in.sid, trigger: "loop", ids: $e.id, iteration: ($e.iteration // 0), state: "stopped"}}
@@ -143,10 +144,14 @@ cur=$(jq -ce 'if (.loops | type) == "array" then . else empty end' "$L" 2>/dev/n
 e=$(printf '%s' "$cur" | jq -c '[.loops[] | select(.state? == "open")][0] // empty' 2>/dev/null)
 [ -n "$e" ] || exit 0
 f="$H/workflows/sessions/$sid.json"; [ -f "$f" ] || f="$H/workflow.json"
+# A workflow file that is missing or not read (being written, a broken edit) says nothing about
+# the loop: the stop goes through and the loop file is left alone. Only a workflow read without
+# this loop ends it (DECIDE).
+[ -f "$f" ] || exit 0
 # The compiled loops of the open loop's step; when the workflow changed since it was armed (a new
 # step id), the step that still has this loop.
-defs=$(jq -c --argjson e "$e" '[.steps[]? | select(.id == $e.step) | .loops[]?] as $here | if any($here[]; .id == $e.id) then $here else [.steps[]? | select(any(.loops[]?; .id == $e.id)) | .loops[]?] end' "$f" 2>/dev/null)
-[ -n "$defs" ] || defs='[]'
+defs=$(jq -c --argjson e "$e" '[.steps[]? | select(.id == $e.step) | .loops[]?] as $here | if any($here[]; .id == $e.id) then $here else [.steps[]? | select(any(.loops[]?; .id == $e.id)) | .loops[]?] end' "$f" 2>/dev/null) || exit 0
+[ -n "$defs" ] || exit 0
 cmd=''; re=''; mode=match; tmin=5; agent=false
 eval "$(printf '%s' "$defs" | jq -r --argjson e "$e" '[.[] | select(.id == $e.id)][0] // empty | @sh "cmd=\\(.check.command // "") re=\\(.check.output // "") mode=\\(.check.outputMode // "match") tmin=\\(.check.timeoutMin // 5 | tostring) agent=\\(.agentDone.on == true | tostring)"' 2>/dev/null)"
 cwd=$(printf '%s' "$in" | jq -r '.cwd // "" | strings' 2>/dev/null)

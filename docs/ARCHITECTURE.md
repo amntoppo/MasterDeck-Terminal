@@ -338,8 +338,9 @@ opens the loops of its step whose `after` names it by that outcome or by a plain
 empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>`, then
 `After the loop: <then>` (the blocks its plain arrows lead to: `CompiledLoop.then`, loops left out
 as they open themselves), then each next loop's round; with none of these it lets the stop through. A `stopped`
-loop, a missing or unreadable loop file, or no jq lets the stop through; a loop its workflow no
-longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `runs.jsonl`.
+loop, a missing or unreadable loop file, or no jq lets the stop through; so does a session workflow
+file (else `workflow.json`) that is missing or that jq cannot read, leaving the loop file as it is;
+a loop that a workflow read without error no longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `runs.jsonl`.
 While a loop is open the loop hook owns the session's stops: the turn-end trigger's hook and the
 deck hook's queue (Stop) exit at once when `workflows/loops/<sid>.json` has an open loop, and go on
 once it is over.
