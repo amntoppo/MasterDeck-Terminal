@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
+  accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, startAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
   accountForCard, matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
@@ -283,5 +283,27 @@ describe('the account a card\'s calls go out as', () => {
   it('one account, or none: as before', () => {
     expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true)] }))).toBe('alice')
     expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
+  })
+})
+
+describe('startAccount (issue #61)', () => {
+  const code = (pairs: { issues: string; code: string }[]) => parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [A, B], codeRepos: pairs })
+  it("is the issue's account when its code is where it is filed", () => {
+    expect(startAccount('globex/app', two)).toBe('bob-work')
+    expect(startAccount(null, two)).toBe('alice')
+    expect(startAccount('initech/x', two)).toBe('alice')
+  })
+  it("follows the code: a tracker's issues built in another account's repository run as that account", () => {
+    expect(startAccount('globex/app', code([{ issues: 'globex/app', code: 'acme/api' }]))).toBe('alice')
+    expect(startAccount(null, code([{ issues: 'acme/tracker', code: 'globex/engine' }]))).toBe('bob-work')
+  })
+  it("keeps the issue's account when no account has the code repository", () => {
+    expect(startAccount('globex/app', code([{ issues: 'globex/app', code: 'initech/engine' }]))).toBe('bob-work')
+  })
+  it("a PR review: the PR's repository wins over the card's issue repository", () => {
+    expect(startAccount('acme/tracker', two, 'globex/app')).toBe('bob-work')
+    expect(startAccount('globex/app', two, 'acme/api')).toBe('alice')
+    // A PR in a repository no account has: the issue's.
+    expect(startAccount('globex/app', two, 'initech/x')).toBe('bob-work')
   })
 })

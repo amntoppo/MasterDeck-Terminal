@@ -468,10 +468,16 @@ workspace. GitHub reads go through `ghc` (`main/ghc.ts`, the shared cache in `~/
 `gh` directly on Windows).
 
 **Where a ticket's session starts** is decided in one place, `skills/master/lib/master/checkout.py`
-(`resolve(repo, cwd=None)` → `{cwd, workspace, repo, found}`, plus `partial` and `searched` when it
-was not found and a limit was reached): the workspace of the ticket's account
-(`config.workspace_for`: the account that lists the repository, else the primary; an account's own
-`workspace`, blank counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all).
+(`resolve(repo, cwd=None, account=None, mapped=True)` → `{cwd, workspace, repo, found}`, plus
+`filedIn` when the repository looked for is not the issue's, and `partial` and `searched` when it
+was not found and a limit was reached). The repository looked for is where the issue's code lives:
+`config.code_repo` (Setup's `codeRepos` pairs, `[{issues, code}]`, a list so a save replaces it;
+`mapped=False` for a PR's repository). It is looked for in the workspace of the account the session
+runs as (`config.workspace_for(repo, cfg, account)`: `account` when given, else the code
+repository's account, else the issue's, else the primary; an account's own `workspace`, blank
+counting as none, else the top-level one; `MASTER_WORKSPACE` replaces them all). That account is
+`config.start_account` (two or more accounts; the app's `startAccount` in `shared/accounts.ts` is
+the same rule, plus a PR review's repository first).
 First the folder named after the repository (`_named`: one directory read, no scan). Else `scan`:
 the workspace, its sub-folders, and the sub-folders of the plain ones; a `.git` folder whose
 `origin` is the repository, without case. The origin is read from `.git/config` (`_config_origin`,
@@ -485,10 +491,12 @@ longer a pure function of the snapshot. The tests' `conftest.py` points HOME, `M
 `MASTER_HOME` and `MASTER_WORKSPACE` into one temp sandbox before anything is imported and again
 before every test, and fails a test that leaves a path in the real home (`test_isolation.py`).
 Found: `cwd` is the checkout and step 1 of the ASSIGN prompt (`rules.assign_prompt`) says so, naming
-the workspace for an issue filed in one repository and built in another; else `cwd` is the workspace
-and the prompt is the text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
+the workspace for an issue filed in one repository and built in another; with a `codeRepos` pair it
+names the code repository instead (found or not); else `cwd` is the workspace and the prompt is the
+text it always was (pinned in `tests/prompts/`). Callers: `rules._assign`
 (master's proposals and `master draft-assign`, which also prints `workspace`, `found`, `checkoutOf`,
-`genericPrompt`, and takes `--cwd` for a folder the user chose), `master checkout <owner/name>`, and
+`genericPrompt`, `filedIn` and `account`, and takes `--cwd` for a folder the user chose and
+`--account` for another account than the ticket's), `master checkout <owner/name> [--account]`, and
 `checkout.default_cwd` for `master add` without `--cwd` and `master spawn` of a proposal without a
 folder: only an ASSIGN or PRREVIEW for an issue number above 0 is looked up; any other kind, issue 0
 and a resume keep `config.workspace()`.
@@ -510,15 +518,18 @@ travels as `AssignRequest.permissionMode` → `master add --permission-mode` →
 `bypassPermissions` is refused); like a model, it always makes a new proposal. The description's
 Preview is `shared/markdown.ts` (`parseMarkdown` → a tree; `safeHref` / `safeImage`: https only)
 drawn by `renderer/.../MarkdownView.tsx` as React elements, never HTML from the text; the CSP's
-`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. A PR
-review names its repository (`AssignRequest.cwdRepo`) and `inRepoFolder` (`main/assign.ts`) asks
-`master checkout`. The `cwd` argument of `draftAssign` is checked by `chosenFolder`
-(`main/remoteGuards.ts`): from the window it must be an absolute, existing folder; from a browser
-it must be one of `workspaceFolders()` in `main/index.ts` (the workspace and `Ops.repos()`, the
-list `workspaceRepos` gives the web app's `RepoPicker`), compared as real paths, and anything else
-is refused with a message (the dialog keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a browser exactly as from the
-window, as `cwd` always was. Which account the session runs as is not part of this:
-`config.account_for_repo` / `defaultAccount` as before.
+`img-src` allows `https:` for it. Reuse both for any other Markdown view (Notes). **Choose folder…** asks for a draft with `--cwd`. Picking another account asks for a draft with
+`--account` (`refindOnAccount`: not after Choose folder…, not for a held start, not for a
+proposal's own folder); main passes a connected login only (two or more accounts). A PR
+review names its repository (`AssignRequest.cwdRepo`): main's `assignNow` takes the picked account,
+else `startAccount(repo, cfg, cwdRepo)` (the PR's repository's account), and `inRepoFolder`
+(`main/assign.ts`) asks `master checkout --account` for it, so folder and account agree. The `cwd`
+argument of `draftAssign` is checked by `chosenFolder` (`main/remoteGuards.ts`): from the window it
+must be an absolute, existing folder; from a browser it must be one of `workspaceFolders()` in
+`main/index.ts` (the workspace and `Ops.repos()`, the list `workspaceRepos` gives the web app's
+`RepoPicker`), compared as real paths, and anything else is refused with a message (the dialog
+keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a
+browser exactly as from the window, as `cwd` always was.
 
 **Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
 was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust

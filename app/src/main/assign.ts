@@ -103,15 +103,16 @@ export async function retryHeld(
 
 /**
  * A request that names a repository instead of a folder (a PR review): it starts where the CLI's
- * one resolver says, that repository's checkout, else its account's workspace. The given folder
- * stays when the CLI cannot say.
+ * one resolver says, that repository's checkout, else the workspace of `account` (the one the
+ * session runs as; null: the repository's own). The given folder stays when the CLI cannot say.
  */
 export async function inRepoFolder(
-  cli: { checkout(repo: string): Promise<{ ok: true; cwd: string } | { ok: false; message: string }> },
+  cli: { checkout(repo: string, account?: string | null): Promise<{ ok: true; cwd: string } | { ok: false; message: string }> },
   req: AssignRequest,
+  account: string | null = null,
 ): Promise<AssignRequest> {
   if (typeof req.cwdRepo !== 'string' || !/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(req.cwdRepo)) return req
-  const r = await cli.checkout(req.cwdRepo)
+  const r = await cli.checkout(req.cwdRepo, account)
   return r.ok ? { ...req, cwd: r.cwd } : req
 }
 

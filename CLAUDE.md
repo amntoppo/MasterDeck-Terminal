@@ -367,6 +367,15 @@ buttons; it does not go through macOS window drag regions.
   workspace), and the dev preview at 390 x 844 (the pick, the folder line after it, a refusal
   keeping the folder). Not checked: the real web app over the bridge, a start from the web, a real
   phone. An `assign` request's own `cwd` is still not checked (TODO).
+- **Where a session starts: three decisions (issue #61)** are built on branch
+  `worktree-MasterDeck-Terminal-61-start-folder` (not merged, not installed). One rule decides the
+  account a ticket's session runs as, and its workspace is where the folder is looked for:
+  `config.start_account` (Python) / `startAccount` (TS): the account of the repository the code is
+  in, else the issue's, else the primary. The code repository is a PR review's repository, else
+  Setup's **Issues whose code is in another repository** pair (`codeRepos`), else the issue's.
+  Picking another account in the Start dialog looks again in its workspace (`draft-assign
+  --account`); a PR review asks `master checkout --account`. Checked: the Python suite, typecheck,
+  vitest. Not checked: the isolated app on screen (Setup's pairs, the dialog's line after a pick).
 
 - **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
   (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
