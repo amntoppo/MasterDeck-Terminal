@@ -359,8 +359,8 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-09)
 
-- **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours`
-  (not merged, not pushed): the Costs view's **Hours** estimates time per GitHub account, day and
+- **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
+  (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
   ticket from session activity on this Mac (idle gap 1 h by default, an account counts a minute once,
   each ticket its full time, unknown account listed), with CSV export; desktop only. Decisions are on
   the issue; the spec is in the backend repo (`docs/superpowers/specs/2026-10-09-working-hours-design.md`,
