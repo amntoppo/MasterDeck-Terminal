@@ -369,17 +369,19 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-10)
 
 - **Claude Code mods (#86)** (branch `worktree-MasterDeck-Terminal-86-mods`, not merged, not
-  pushed; the app is installed locally from it and the mod is installed at user scope from
-  `~/.claude/masterdeck/mods`): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
-  `claude --bg` session and draws in `claude attach`. Prototype mods: a core `mods/masterdeck`
-  (per-session switches, heartbeat) and `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note` and the app's side (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session,
-  **Mod live** in Session details). Checked: typecheck, vitest (151 files passed, 2 skipped; 1733
-  tests passed, 4 skipped), `claude plugin validate` / `test` (6) / tsc for the mod, and the mod in
-  throwaway sessions (background: heartbeat and `ended`; interactive: band at 80/110/160 columns,
-  toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed); on the installed
-  build, band files for the live sessions and the user-scope mod loading in a new `claude --bg`.
-  Not checked: the band in a real ticket session (needs `/reload-plugins` there), instant typing
-  under the band, Windows. A background session gets the daemon's environment, not the launching shell's
+  pushed; the app is installed locally from it, the four mods are installed at user scope from
+  `~/.claude/masterdeck/mods`, and `prependPlugins` lists the core): research in
+  [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a `claude --bg` session and draws in
+  `claude attach`. Prototype mods: a core `mods/masterdeck` (per-session switches, heartbeat) and
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, and the app's side
+  (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session). Checked:
+  typecheck, vitest (151 files passed, 2 skipped; 1733 tests passed, 4 skipped), `claude plugin
+  validate` / `test` / tsc for each mod, the Mods tab in the web preview at 1400 and 390 px, and
+  throwaway sessions: the line at 80/110/160 columns, toasts, `/md-note` against a stand-in pump,
+  the pane, MasterDeck closed, a `--plugin-dir` mod refused at start and back after a reload, and
+  with the installed mods the core reporting all three and the ticket line switched off and on at
+  once. The user saw the line, `/md-ticket` and the pane in a real session. Not checked: the Mods
+  tab in the installed app with real switches, instant typing under the line, Windows. A background session gets the daemon's environment, not the launching shell's
   (`MASTERDECK_HOME` does not reach the mod there). Open points: TODO ("MasterDeck mod").
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
