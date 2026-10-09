@@ -11,7 +11,8 @@ One window for all your Claude Code sessions, laid out as a command center:
   - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
     sessions starting, and Parked; a **Filters** line above the groups narrows the list. Click one to open its terminal. **Split** shows two terminals
-    side by side; **+** opens the new-terminal / new-session menu.
+    side by side; **+** opens the new-terminal / new-session menu. A row always shows the session's
+    name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
     ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**

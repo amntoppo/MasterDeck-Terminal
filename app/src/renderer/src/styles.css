@@ -808,8 +808,13 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .srow.active { background: var(--bg-3); border-color: var(--line-2); }
 .srow.dragging { opacity: .4; }
 .srow.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.srow-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.srow-top .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.srow-top { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+/* Lined up with the name's line (18px), not centred on a row whose ticket wrapped below. */
+.srow-top > .dot { margin-top: 5px; }
+.srow-top > .srow-pick, .srow-top > .srow-star { margin-top: 2px; }
+.srow-name { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
+.srow-name .acct-badge { margin-left: 0; }
+.srow-top .label { flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .srow-top .num { color: var(--muted); font-family: var(--mono); font-size: 10.5px; flex: none; }
 .acct-badge { flex: none; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-4); color: var(--muted); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
 .srow-sub { margin-top: 2px; padding-left: 16px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
