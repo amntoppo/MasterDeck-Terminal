@@ -311,12 +311,28 @@ fixes it, and move the item here to "Recently done".
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
   checkout found" and starts in the workspace as before. Approach: when the workspace has a `.git`
   folder, also look at its parent's direct sub-folders.
-- **P3 · An issue tracked in one repository and built in another.** With the tracker cloned, the
-  session starts in the tracker's checkout; the prompt tells it to use the other repository under
-  the workspace (the workspace's CLAUDE.md may say which), without asking. Better: a per-repository
-  "code lives in" setting, or the issue's linked PRs, so it starts in the right checkout.
-- **P3 · Picking another account in the Start dialog keeps the folder** of the ticket's own
-  account's workspace. Decide whether the picked account's workspace should be looked in instead.
+- **P3 · "Code lives in" is set by hand.** Setup's pairs (#61) cover a tracker whose code is in one
+  repository. A tracker whose issues go to several repositories still starts in the tracker's
+  checkout (no pair) or always in the one paired repository. Possible next step: the issue's linked
+  PRs or branches, when it has any, before the pair.
+- **P3 · Nothing checks that the code repository's account can read the tracker** (#61 review).
+  With a private `bob/tracker` paired to `acme/api` (alice), the session runs as alice and
+  `gh issue view bob/tracker#7` fails, with any comment or board step it does itself. Documented
+  in Setup and the guide; a fix would fall back to the tracker's account when the code account
+  cannot read it (one read, remembered), or warn in the Start dialog.
+- **P3 · A proposal made before a `codeRepos` pair existed** carries the issue's account and folder.
+  The Start dialog's default is now the code account, so the start becomes a new proposal
+  (`reuse` is false) while `adoptFresh` keeps the proposal's folder when it was a checkout (the
+  tracker's), and the session runs as the code account in the tracker's checkout. Rare (only
+  across adding a pair); a fix would let `adoptFresh` also move from the issue repository's own
+  checkout when a pair now points elsewhere.
+- **P3 · "The PR's repository wins" is the app's only** (#61 review). A `PRREVIEW` added through
+  the CLI without `--cwd` / `--account` (`checkout.default_cwd`) looks up the issue's code
+  repository and account, not the PR's: the proposal carries no PR repository. The app's PR
+  popup passes both. A fix would add the PR's repository to the proposal (`--cwd-repo`).
+- **P3 · The Start dialog opened from master's proposal starts with the ticket's default account**,
+  not the account the proposal names (`sp.account`). Both come from the same rule now
+  (`start_account` / `startAccount`), so they differ only for a proposal written by hand.
 - **P3 · The scan is remembered per CLI process only** (60 s): each Start dialog and each sweep
   scans once (a stat per folder, a small file read per checkout; the folder named after the
   repository is found without a scan). If a large workspace makes that slow, keep the map in a file under `master_home()`
@@ -327,9 +343,6 @@ fixes it, and move the item here to "Recently done".
 - **P3 · An SSH alias without a user** (`github-acme:acme/api.git`) is not parsed by the shared
   origin parser (`config._REMOTE_RE`, the app's `repoFromRemote`), so such a checkout is not found
   and its sessions get no account from the folder either. Fix both parsers together.
-- **P3 · A PR review's folder follows the PR's repository, its account the card's issue
-  repository** (`cwdRepo` against `defaultAccount`). When they belong to different accounts the
-  session sits in one account's checkout as the other. Decide which one wins.
 - **P3 · `collect.Live.branch_head` still looks for local branches beside the top-level workspace
   only** (`config.workspace().parent`); another account's workspace falls back to the GitHub API.
 - **P3 · The web app has no Choose folder…** (the native picker is desktop-only, and main drops a
@@ -505,6 +518,7 @@ fixes it, and move the item here to "Recently done".
 | What | MasterDeck | Backend |
 |---|---|---|
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |
+| Where a session starts, three decisions (issue #61): Setup's **Issues whose code is in another repository** pairs (`codeRepos`: a tracker's tickets start in the code repository's checkout, as its account, and the prompt names it); picking another account in the Start dialog looks for the folder in that account's workspace (`draft-assign --account`, not after Choose folder… or for a held start); a PR review runs as its PR's repository's account and is looked up in that account's workspace (`checkout --account`). One rule on both sides: `config.start_account` / `startAccount` | branch `worktree-MasterDeck-Terminal-61-start-folder` | — |
 | Remote no longer waits for ever on "waiting for sessions to load" (issue #8): the status says why when `claude agents` fails, and after 60 s (`REMOTE_WAIT_MS`, `remoteWait` in `shared/remoteSnapshot.ts`) the line connects anyway; until the first session list no snapshot is sent, and commands are answered "still loading" (retried) while it loads or fail at once with the agents error while `claude agents` fails | branch `worktree-MasterDeck-Terminal-8-remote-waiting` | — |
 | Session filters (issue #74): a **Filters** line in the Sessions column, closed by default, with the count of filters on, a removable chip for each and Clear all; open, a name/ticket search and Status (lanes and Parked), Account (two or more accounts only), Repo (a worktree counts under its repository) and Starred only, any-of within a kind and all kinds combined (`shared/sessionFilter.ts`, `SessionFilterBar.tsx`); "No sessions match the filters" with Clear filters; Cleanup only offers what is shown; kept in localStorage (`sessionFilter`, `sessionFilterOpen`) | `worktree-MasterDeck-Terminal-74-session-filters`, PR #76 (not merged) | — |
 | Working hours (issue #64; spec in the backend repo): Costs → **Hours** estimates time per GitHub account, day and ticket from session activity on this Mac (`shared/hours.ts`, activity spans in `tokens.json` v2), idle gap 1 h by default, an account counts a minute once and each ticket its full time, "unknown account" listed, **Export CSV…**; desktop only | PR #75, branch `worktree-MasterDeck-Terminal-64-hours` (not merged, installed locally) | spec on `docs/working-hours-64` (not pushed) |

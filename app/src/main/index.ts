@@ -72,6 +72,7 @@ import {
   prRepo,
   repoFromRemote,
   sessionAccount,
+  startAccount,
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
@@ -344,13 +345,15 @@ function settingsFor(
 async function assignNow(
   given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  const cfg = getConfig();
+  // The account it runs as: the one picked, else the code's repository's (a PR review: its PR's),
+  // else the issue's. Its workspace is where the folder is looked for.
+  const picked = given.account && cfg.accounts.some((a) => a.login === given.account) ? given.account : null;
+  const as = picked ?? startAccount(given.repo ?? null, cfg, given.cwdRepo);
   // A PR review names its repository, not a folder: the CLI's resolver picks it.
-  const req = await inRepoFolder(cli, given);
+  const req = await inRepoFolder(cli, given, isMulti(cfg) ? as : null);
   return assignAs(cli, req, {
-    settings: (account) =>
-      settingsFor(account, async () =>
-        defaultAccount({ issue: { repo: req.repo ?? null } }, getConfig()),
-      ),
+    settings: (account) => settingsFor(account, async () => as),
     proposalAccount: (id) =>
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
@@ -1879,12 +1882,14 @@ function registerIpc(): void {
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown, account?: unknown) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
       // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
       const dir = chosenFolder(isRemote(e), cwd);
-      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
+      // Another connected account (two or more): its workspace is looked in. Anything else is dropped.
+      const as = isMulti(getConfig()) && getConfig().accounts.some((a) => a.login === account) ? (account as string) : undefined;
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd, as) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));

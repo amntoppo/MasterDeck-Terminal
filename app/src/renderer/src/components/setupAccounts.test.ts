@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, takenBy, swapPrimaryWorkspace, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, switchSel, takenBy, swapPrimaryWorkspace, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -184,5 +184,20 @@ describe('a created board that got a sprint field on GitHub is no longer sprintl
     const none: DetectAll = { ...globex, owners: [{ ...globex.owners[0], projects: [det({ owner: 'globex', number: 7, sprintField: '' })] }] }
     expect(markMade(none, [made]).owners[0].projects[0].sprintless).toBe(true)
     expect(withFound({ ...EMPTY, repos: ['globex/app'], boards: { 'globex/7': made } }, none, 'bob-work', {}).boards['globex/7'].sprintless).toBe(true)
+  })
+})
+
+describe('codeReposToSave (issue #61)', () => {
+  it('drops empty and self rows, keeps the rest', () => {
+    expect(codeReposToSave([{ issues: 'acme/tracker', code: ' acme/api ' }, { issues: 'acme/x', code: '' }, { issues: 'acme/y', code: 'acme/y' }])).toEqual({
+      ok: true, list: [{ issues: 'acme/tracker', code: 'acme/api' }],
+    })
+    expect(codeReposToSave([])).toEqual({ ok: true, list: [] })
+  })
+  it('says which row is wrong', () => {
+    expect(codeReposToSave([{ issues: 'acme/tracker', code: 'api' }])).toEqual({ ok: false, message: 'Code lives in: api is not owner/name.' })
+    expect(codeReposToSave([{ issues: 'acme/tracker', code: 'acme/api' }, { issues: 'Acme/Tracker', code: 'acme/web' }])).toEqual({
+      ok: false, message: 'Code lives in: Acme/Tracker has two rows; keep one.',
+    })
   })
 })

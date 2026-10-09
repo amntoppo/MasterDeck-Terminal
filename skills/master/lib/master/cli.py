@@ -164,7 +164,7 @@ def cmd_add(args) -> int:
         add_repo, add_n = refs.parse(args.issue)
         if args.repo:
             add_repo = refs.stored(args.repo)
-        sp = {"name": args.spawn_name, "cwd": args.cwd or checkout.default_cwd(args.kind, add_n, add_repo), "prompt": args.prompt}
+        sp = {"name": args.spawn_name, "cwd": args.cwd or checkout.default_cwd(args.kind, add_n, add_repo, args.account), "prompt": args.prompt}
         if args.model:
             sp["model"] = args.model
         if args.account:
@@ -309,13 +309,17 @@ def cmd_draft_assign(args) -> int:
         if issue is None:
             print(f"issue {refs.label(repo, n).lstrip('#')} not found")
             return 1
-    a = rules._assign(issue, args.cwd)
+    a = rules._assign(issue, args.cwd, args.account)
     sp = a["target"]["spawn"]
-    where = checkout.resolve(repo, args.cwd)  # the one _assign used (a scan is remembered)
+    where = checkout.resolve(repo, args.cwd, account=args.account)  # the one _assign used (a scan is remembered)
     print(json.dumps({"issue": a["issue"], "repo": a["repo"], "name": sp["name"], "cwd": sp["cwd"], "prompt": sp["prompt"],
                       "summary": a["summary"], "title": issue["title"], "url": issue["url"],
                       # For the Start dialog: where it looked, for which repository, and whether it found it.
                       "workspace": where["workspace"], "found": where["found"], "checkoutOf": where["repo"],
+                      # The issue's own repository, when its code lives in another (Setup's "code lives in").
+                      **({"filedIn": where["filedIn"]} if where.get("filedIn") else {}),
+                      # The account the session runs as (two or more accounts; null with one).
+                      "account": sp.get("account"),
                       # The text without a checkout: the dialog replaces a system prompt only while it is one of these.
                       "genericPrompt": rules.assign_prompt(issue),
                       # Whether Claude Code may work in that folder (null: not known); it refuses to start where it may not.
@@ -330,7 +334,9 @@ def cmd_checkout(args) -> int:
     if not re.fullmatch(config.REPO_RE, args.repo):
         print(f"not a repository (owner/name): {args.repo}")
         return 2
-    where = checkout.resolve(args.repo)
+    # A PR's repository is the code itself: no "code lives in" pair applies. `--account`: the one
+    # the session runs as, whose workspace is looked in.
+    where = checkout.resolve(args.repo, account=args.account, mapped=False)
     print(json.dumps({**where, "trusted": trust.trusted(where["cwd"])}))
     return 0
 
@@ -638,10 +644,12 @@ def parser() -> argparse.ArgumentParser:
     da.add_argument("--title")
     da.add_argument("--url")
     da.add_argument("--cwd", help="a folder the user chose; omitted: the repository's checkout, else its account's workspace")
+    da.add_argument("--account", help="gh login the session runs as; its workspace is looked in")
     da.set_defaults(fn=cmd_draft_assign)
 
     co = sub.add_parser("checkout")
     co.add_argument("repo", help="owner/name")
+    co.add_argument("--account", help="gh login the session runs as; its workspace is looked in")
     co.set_defaults(fn=cmd_checkout)
     tr = sub.add_parser("trust", help="has Claude Code been allowed to work in this folder (read only)")
     tr.add_argument("folder")
