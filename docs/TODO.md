@@ -546,6 +546,19 @@ fixes it, and move the item here to "Recently done".
   hook is quick (no check command) and closes the loop first, the trigger sees it closed and
   hands the plan over too (`ponytail:` in `flowTriggerCommand`). Upgrade: a lock, or a marker the
   loop hook leaves for that turn.
+- **Two triggers arming loops at the same moment can lose one.** Each arming reads the loop file,
+  changes it and renames it in (`"$L.$$.tmp"`): the same Bash call matching two triggers that both
+  hold loops can drop one arming. The app's Stop loop / Run 5 more and the hook are handled (the
+  hook re-reads before its rename); the arming side needs a lock file.
+- **The phone API cannot run Run 5 more / Continue / Stop loop.** The protocol's `INBOX_ACTIONS`
+  lacks them (no protocol change in v1); the web app over the bridge and notifications can.
+  Loop state is not in `RemoteSnapshot` either (spec S10).
+- **Not in v1:** a cost limit, a fresh session per iteration, nested loops, loops in an
+  "if it worked / failed" branch or side by side (the check refuses them), loops under the
+  needs-you / idle / turn-end triggers.
+- **Not checked:** the window's native Stop loop dialog (CDP cannot press it; the web's confirm
+  was), the real web app over the bridge, a real phone, Windows, a loop driven by the installed
+  app's real hooks (the live runs used `claude -p` with a temp settings file and temp home).
 
 ## Product ideas (from the user, 2026-10-03)
 
@@ -553,6 +566,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, not installed) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |
