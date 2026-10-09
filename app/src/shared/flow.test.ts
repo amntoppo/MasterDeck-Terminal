@@ -676,6 +676,31 @@ describe("compiling loops", () => {
       text: 'Loops "B" and "E" would run at the same time: put one after the other.',
     });
   });
+
+  it("a loop behind a then arrow meets the loops behind met and limit", () => {
+    // la -then→ lc and la -met→ lb: lc opens whatever the outcome, so with a met it runs beside lb.
+    for (const kind of ["met", "limit"] as const) {
+      const { problems } = compileFlow({
+        nodes: [
+          T("t", "after-push"),
+          I("a1", "x"),
+          I("b1", "y"),
+          I("c1", "z"),
+          L("la", ["a1"], { name: "A", ...check("true") }),
+          L("lb", ["b1"], { name: "B", ...check("true") }),
+          L("lc", ["c1"], { name: "C", ...check("true") }),
+        ],
+        edges: [e("t", "la"), e("la", "lb", kind), e("la", "lc")],
+      });
+      expect(problems.filter((p) => /would run at the same time/.test(p.text))).toHaveLength(1);
+    }
+    // met and limit alone never run together.
+    expect(
+      compileFlow(chained()).problems.filter((p) =>
+        /would run at the same time/.test(p.text),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe.skipIf(process.platform === "win32")("arming a loop", () => {

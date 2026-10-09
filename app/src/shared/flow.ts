@@ -1084,16 +1084,27 @@ export function compileFlow(
             });
         // ponytail: one open loop per session (the hook works on the first open one); running
         // loops side by side needs the hook to evaluate each open loop at every turn end.
-        const byAfter = new Map<string, LoopNode>();
+        // A "then" arrow out of a loop leads on however it ended, so it meets its met and its
+        // limit arrows too.
+        const together = (
+          a: CompiledLoop["after"],
+          b: CompiledLoop["after"],
+        ): boolean =>
+          a === null || b === null
+            ? a === b
+            : a.loop === b.loop &&
+              (a.via === b.via || a.via === "then" || b.via === "then");
+        const seen: LoopNode[] = [];
         for (const b of loopNodes) {
-          const key = JSON.stringify(place(b.id).after);
-          const first = byAfter.get(key);
+          const first = seen.find((s) =>
+            together(place(s.id).after, place(b.id).after),
+          );
           if (first)
             problems.push({
               node: b.id,
               text: `Loops "${first.name}" and "${b.name}" would run at the same time: put one after the other.`,
             });
-          else byAfter.set(key, b);
+          else seen.push(b);
         }
       }
       const loops: CompiledLoop[] =
