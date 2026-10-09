@@ -571,6 +571,9 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
   checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
   it. Setup should add `prependPlugins` with the install (backup, atomic).
+- **Updating the mods needs a reload in every running session** (the copy under
+  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
+  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
   a change bumps `v` in both.

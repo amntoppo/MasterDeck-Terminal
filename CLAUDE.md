@@ -375,7 +375,7 @@ buttons; it does not go through macOS window drag regions.
   `claude attach`. Prototype mods: a core `mods/masterdeck` (per-session switches, heartbeat) and
   `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, and the app's side
   (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session). Checked:
-  typecheck, vitest (151 files passed, 2 skipped; 1733 tests passed, 4 skipped), `claude plugin
+  typecheck, vitest (151 files passed, 2 skipped; 1734 tests passed, 4 skipped), `claude plugin
   validate` / `test` / tsc for each mod, the Mods tab in the web preview at 1400 and 390 px, and
   throwaway sessions: the line at 80/110/160 columns, toasts, `/md-note` against a stand-in pump,
   the pane, MasterDeck closed, a `--plugin-dir` mod refused at start and back after a reload, and

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { MASTERDECK_MODS, MOD_CORE } from './modBand'
+import { MASTERDECK_MODS, MOD_CORE, MOD_VERSION } from './modBand'
 
 // A mod may import only its own files, so mods/shared/deck.ts is copied into each one
 // (mods/sync-shared.sh). This fails while a copy differs.
@@ -20,7 +20,9 @@ describe('the MasterDeck mods', () => {
     expect(market.plugins.map((p) => p.name)).toEqual(names)
     for (const name of names) {
       expect(existsSync(new URL(`${name}/.claude-plugin/plugin.json`, mods))).toBe(true)
-      expect(JSON.parse(readFileSync(new URL(`${name}/.claude-plugin/plugin.json`, mods), 'utf8')).name).toBe(name)
+      const manifest = JSON.parse(readFileSync(new URL(`${name}/.claude-plugin/plugin.json`, mods), 'utf8'))
+      expect(manifest.name).toBe(name)
+      expect(manifest.version, `${name}: MOD_VERSION in shared/modBand.ts`).toBe(MOD_VERSION)
     }
   })
 })

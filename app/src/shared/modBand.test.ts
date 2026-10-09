@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, parseConfig, setConfig } from './appConfig'
-import { MOD_BEAT_STALE_MS, bandFor, mergeCatalog, modBand, modRows, parseModBeat, type ModSeen } from './modBand'
+import { MOD_BEAT_STALE_MS, MOD_VERSION, bandFor, mergeCatalog, modBand, modRows, modsStale, parseModBeat, type ModSeen } from './modBand'
 import type { Session } from './types'
 
 const cfg = parseConfig({ config: { owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] } })
@@ -119,6 +119,15 @@ describe('modRows', () => {
       ['diff', 'diff', 'on', false, true, false],
     ])
     expect(modRows([], { version: '0.4.0', mods: [] }, []).map((r) => r.name)).toEqual(['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note'])
+  })
+})
+
+describe('modsStale', () => {
+  const all = ['masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note'].map((n) => seen(n))
+  it('is true for an older core, or a MasterDeck mod the session has not loaded', () => {
+    expect(modsStale({ version: MOD_VERSION, mods: all })).toBe(false)
+    expect(modsStale({ version: '0.3.0', mods: all })).toBe(true)
+    expect(modsStale({ version: MOD_VERSION, mods: all.slice(1) })).toBe(true)
   })
 })
 

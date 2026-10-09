@@ -34,6 +34,17 @@ export interface ModBand {
 /** MasterDeck's core mod (mods/masterdeck): the switching and the heartbeat; never switched off. */
 export const MOD_CORE = 'masterdeck'
 
+/** The mods' version this MasterDeck goes with (each mod's plugin.json; shared/modsShared.test.ts checks). */
+export const MOD_VERSION = '0.4.0'
+
+/**
+ * The session runs MasterDeck's mods from before they were updated or installed: a running session
+ * takes new or changed mods only at /reload-plugins (or its next start).
+ */
+export function modsStale(live: { version: string; mods: readonly ModSeen[] }): boolean {
+  return live.version !== MOD_VERSION || MASTERDECK_MODS.some((m) => !live.mods.some((s) => s.name === m.name))
+}
+
 /** MasterDeck's feature mods (mods/<name>), as the Mods tab names them; each switches itself at once. */
 export const MASTERDECK_MODS: readonly { name: string; title: string; about: string }[] = [
   { name: 'masterdeck-ticket', title: 'Ticket line', about: 'The ticket, its column, the PR and linked sessions above the prompt; /md-ticket' },

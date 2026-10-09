@@ -312,7 +312,11 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   Details tab; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
   `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
   or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
-  and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`.
+  and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`. A running session takes
+  new or changed mods only at `/reload-plugins`: when its core is not `MOD_VERSION` or a feature mod is
+  missing from its heartbeat (`modsStale`), the tab says so with **Reload plugins**, which types it
+  (`deck.sendText`, as **Compact** does). MasterDeck's own switches stay usable then (the choice is in
+  the band when the mod loads). `modsShared.test.ts` holds every mod's `version` to `MOD_VERSION`.
 - **masterdeck-ticket**: every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its
   band into module variables and redraws on a change (`$.ui.invalidate`; a reload refills them at
   `session.start`). The line above the prompt (`AbovePrompt`, sized to `bodyColumns`: one short line

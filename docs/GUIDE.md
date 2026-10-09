@@ -572,6 +572,10 @@ linked sessions:
   in that session, one line in the transcript). Mods your organization manages and mods built into
   Claude Code cannot be switched here.
 - The choices last across a resume. Mods load in every other session as usual.
+- A running session takes new or updated mods only when it reloads its plugins. When a session runs
+  older ones the tab says so, with **Reload plugins** (it types `/reload-plugins` into the session
+  when it waits for you). MasterDeck's switches work before that too: the choice applies once the
+  mod runs there.
 
 The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
 nothing for, they show nothing. To remove one: `claude plugin uninstall <name>@masterdeck`.

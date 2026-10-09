@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { modRows, type ModRow } from "@shared/modBand";
+import { modRows, modsStale, type ModRow } from "@shared/modBand";
 import type { AppState, Session } from "@shared/types";
 import { deck } from "../deck";
 
@@ -12,8 +12,9 @@ function source(r: ModRow): string {
 }
 
 function statusText(r: ModRow): string {
-  if (r.isMasterDeck)
-    return r.status === "not-seen" ? "Not running in this session (not installed?)" : r.isOff ? "Off" : "On";
+  if (r.isMasterDeck && r.status === "not-seen")
+    return r.isOff ? "Off (not running here yet)" : "Not running here yet: reload plugins";
+  if (r.isMasterDeck) return r.isOff ? "Off" : "On";
   switch (r.status) {
     case "on":
       return "On";
@@ -55,7 +56,7 @@ function Row({ r, busy, onFlip }: { r: ModRow; busy: boolean; onFlip: () => void
         role="switch"
         aria-checked={!r.isOff}
         aria-label={`${r.title} in this session`}
-        disabled={r.locked || busy || (r.isMasterDeck && r.status === "not-seen")}
+        disabled={r.locked || busy}
         title={title(r)}
         onClick={onFlip}
       />
@@ -71,14 +72,28 @@ function Row({ r, busy, onFlip }: { r: ModRow; busy: boolean; onFlip: () => void
 export function SessionMods({ session: s, state, onMessage }: { session: Session; state: AppState; onMessage: (text: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const live = state.modLive?.[s.key];
+  // A running session takes new or changed mods only at /reload-plugins: type it, as Compact does.
+  const reload = (
+    <button
+      className="btn"
+      title="Types /reload-plugins into the session (only when it waits for you)"
+      onClick={async () => {
+        const r = await deck().sendText(s.key, "/reload-plugins");
+        onMessage(r.ok ? "Reloading plugins…" : r.message);
+      }}
+    >
+      Reload plugins
+    </button>
+  );
   if (!live)
     return (
       <section className="dsec">
         <div className="eyebrow">Mods</div>
         <div className="d-text muted">
           MasterDeck's core mod is not running in this session, so its mods cannot be seen or switched here.
-          Run /reload-plugins in the session, or start it again.
+          Reload the session's plugins, or start it again.
         </div>
+        <div className="d-actions-inline">{reload}</div>
       </section>
     );
   const rows = modRows(state.modCatalog ?? [], live, state.modOff?.[s.key] ?? []);
@@ -92,6 +107,15 @@ export function SessionMods({ session: s, state, onMessage }: { session: Session
   const others = rows.filter((r) => !r.isMasterDeck);
   return (
     <>
+      {modsStale(live) && (
+        <section className="dsec">
+          <div className="d-text">
+            This session runs MasterDeck's mods from before they were updated (core {live.version}). Reload its
+            plugins to use the switches below; your choices are kept until then.
+          </div>
+          <div className="d-actions-inline">{reload}</div>
+        </section>
+      )}
       <section className="dsec">
         <div className="eyebrow">MasterDeck</div>
         <div className="d-mods">
