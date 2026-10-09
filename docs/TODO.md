@@ -577,6 +577,9 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   check and goal.
 - **`/md-board` is read only** and lists 30 cards a column; moving a card from it is a later step
   (through BoardFlow, never from the mod).
+- **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
+  account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
+  account). A board file per account and its own current sprint needs a read per account.
 - **Updating the mods needs a reload in every running session** (the copy under
   `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
   offers **Reload plugins** per session; an app-run install could offer it for every idle session.
