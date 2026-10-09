@@ -45,6 +45,19 @@ function previewDeck(noBoard: boolean): DeckApi {
     [SESSIONS[0].sessionId]: [
       { id: 'n-tests1', name: 'Fix the tests', state: 'open', iteration: 3, max: 10, startedAt: Date.now() - 12 * 60_000, minutes: 0, reason: null, endedAt: null, lastCheck: { ran: true, passed: false, said: false, tail: '2 failed', at: Date.now() - 60_000 } },
     ],
+    // The second one stopped at its limit ten minutes ago: the ↻ ! badge, the reason in Details.
+    [SESSIONS[1].sessionId]: [
+      { id: 'n-lint', name: 'Clean the lint', state: 'limit', iteration: 10, max: 10, startedAt: Date.now() - 50 * 60_000, minutes: 0, reason: 'stopped after 10 iterations; the last check failed', endedAt: Date.now() - 10 * 60_000, lastCheck: { ran: true, passed: false, said: true, tail: '1 problem', at: Date.now() - 10 * 60_000 } },
+    ],
+  }
+  // History: three rounds of the open loop, with long output, and a progress file in Markdown.
+  const round = (n: number, passed: boolean, said: boolean, tail: string) => ({ n, at: Date.now() - (4 - n) * 4 * 60_000, ms: 38_000 + n * 1500, passed, said, exit: passed ? 0 : 1, tail, hash: `h${n}` })
+  const failing = (k: number) => Array.from({ length: k }, (_, i) => `FAIL src/auth/redirect.test.ts > keeps the return path on a very long line that wraps at phone width (case ${i + 1})`).join('\n')
+  const loopHistory = {
+    ok: true,
+    name: 'Fix the tests',
+    history: [round(1, false, false, failing(6)), round(2, false, true, failing(2)), round(3, false, false, `${failing(2)}\n\nTests  2 failed | 140 passed`)],
+    progress: '# Fix the tests\n\n- Round 1: the redirect drops the query string.\n- Round 2: fixed the encoder; two cases left.\n- Round 3: the cookie path is wrong.\n\n<b>tags stay text</b>',
   }
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
@@ -91,6 +104,16 @@ function previewDeck(noBoard: boolean): DeckApi {
     workspaceRepos: () => repos,
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,
+    workflowLoopHistory: () => loopHistory,
+    // Stop loop: the loop ends here as the Mac would end it, so the line and the badge change.
+    workflowLoopStop: (sid: string, id: string) => {
+      const v = state.loops[sid]?.find((x) => x.id === id && x.state === 'open')
+      if (!v) return { ok: false, message: 'the loop is not running' }
+      Object.assign(v, { state: 'stopped', reason: 'stopped by you', endedAt: Date.now() })
+      state.loops = { ...state.loops, [sid]: [...state.loops[sid]] }
+      for (const cb of stateCbs) cb({ ...state })
+      return { ok: true, message: 'loop stopped' }
+    },
     sessionWorkflowGet: () => ({ flow: loopFlow(), from: 'Fix the tests', at: Date.now() }),
     workflowDraftGet: () => null,
     workflowGet: () => ({ hooks: [], skills: [], flow: loopFlow(), templates: [{ id: 'default', name: 'Default', flow: loopFlow() }], triggers: [], monitors: [] }),

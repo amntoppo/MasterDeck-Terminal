@@ -13,10 +13,19 @@ import {
 } from "@shared/flow";
 import type { WorkflowStatus } from "@shared/ipc";
 import { formatAgo } from "@shared/format";
-import type { LoopView } from "@shared/loops";
+import {
+  checkWord,
+  historyRows,
+  loopLine,
+  tookText,
+  type LoopHistory,
+  type LoopView,
+} from "@shared/loops";
 import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
+import { webConfirm } from "../webConfirm";
 import { FlowEditor, type Skill } from "./FlowEditor";
+import { MarkdownView } from "./MarkdownView";
 import { SaveBadge, useAutosave } from "./WorkflowView";
 
 /** A trigger's name for people; an unknown one (renamed since) as it is. */
@@ -79,6 +88,12 @@ export function WorkflowWidget({
           Edit
         </button>
       </div>
+      <LoopProgress
+        key={s.sessionId}
+        sessionId={s.sessionId}
+        loops={state.loops?.[s.sessionId]}
+        now={now}
+      />
       {cur ? (
         <div
           className="wfw-step"
@@ -144,6 +159,138 @@ export function WorkflowWidget({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The session's workflow loops in Details: where an open one is (pulsing) or how it ended, with
+ * Stop loop while it runs and History (every round and the progress file) for any.
+ */
+export function LoopProgress({
+  sessionId,
+  loops,
+  now,
+}: {
+  sessionId: string;
+  loops?: LoopView[];
+  now: number;
+}) {
+  const [shown, setShown] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!loops?.length) return null;
+  const stop = async (v: LoopView) => {
+    // A stopped loop cannot be given more: ask first (the window asks natively in main).
+    const ask = `Stop the loop “${v.name}”? The session finishes its turn and the loop does not go on.`;
+    if (!(await webConfirm(ask, { confirmLabel: "Stop loop", danger: true })))
+      return;
+    setBusy(true);
+    const r = await deck().workflowLoopStop(sessionId, v.id);
+    setBusy(false);
+    if (r.message !== "cancelled")
+      setMsg({ text: r.ok ? "Loop stopped" : r.message, ok: r.ok });
+  };
+  return (
+    <div className="wfl">
+      {loops.map((v) => {
+        const open = v.state === "open";
+        return (
+          <div key={v.id} className={`wfl-row ${open ? "on" : ""} st-${v.state}`}>
+            <div className="wfl-top">
+              <span
+                className={`wfw-dot ${open ? "live" : ""}`}
+                aria-hidden="true"
+              />
+              <span className="wfl-line">{loopLine(v, now)}</span>
+            </div>
+            <div className="wfl-acts">
+              <button
+                className="link-btn"
+                aria-expanded={shown === v.id}
+                onClick={() => setShown((x) => (x === v.id ? null : v.id))}
+              >
+                {shown === v.id ? "Hide history" : "History"}
+              </button>
+              {open && (
+                <button
+                  className="link-btn danger"
+                  disabled={busy}
+                  onClick={() => void stop(v)}
+                  title="End the loop at this round"
+                >
+                  Stop loop
+                </button>
+              )}
+            </div>
+            {shown === v.id && (
+              // Read again when a round ends or the loop closes.
+              <LoopHistoryPanel
+                key={`${v.iteration}-${v.state}`}
+                sessionId={sessionId}
+                loopId={v.id}
+              />
+            )}
+          </div>
+        );
+      })}
+      {msg && (
+        <div className={`wfl-msg ${msg.ok ? "wf-ok" : "error"}`}>{msg.text}</div>
+      )}
+    </div>
+  );
+}
+
+/** A loop's rounds, newest first, each check's output folded; then its progress file. */
+function LoopHistoryPanel({
+  sessionId,
+  loopId,
+}: {
+  sessionId: string;
+  loopId: string;
+}) {
+  const [h, setH] = useState<LoopHistory | null>(null);
+  useEffect(() => {
+    let live = true;
+    void deck()
+      .workflowLoopHistory(sessionId, loopId)
+      .then((r) => live && setH(r))
+      .catch((e: unknown) => live && setH({ ok: false, message: String(e) }));
+    return () => {
+      live = false;
+    };
+  }, [sessionId, loopId]);
+  if (!h) return <div className="wfl-hist muted">Reading the history…</div>;
+  if (!h.ok) return <div className="wfl-hist error">{h.message}</div>;
+  const rows = historyRows(h.history);
+  return (
+    <div className="wfl-hist">
+      {rows.length === 0 && <div className="muted">No round has ended yet.</div>}
+      {rows.map((c) => (
+        <details key={c.n} className="wfl-round">
+          <summary>
+            <b>#{c.n}</b>
+            <span>
+              {new Date(c.at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+            <span className="muted">{tookText(c.ms)}</span>
+            <span className={`wfl-check ${checkWord(c).replace(" ", "-")}`}>
+              {checkWord(c)}
+            </span>
+            {c.said && <span className="wfl-said">said done</span>}
+          </summary>
+          <pre>{c.tail || "(no output)"}</pre>
+        </details>
+      ))}
+      <div className="eyebrow wfl-prog-head">Progress file</div>
+      {h.progress.trim() ? (
+        <MarkdownView text={h.progress} html={false} className="wfl-prog" />
+      ) : (
+        <div className="muted">No progress file yet.</div>
+      )}
+    </div>
   );
 }
 

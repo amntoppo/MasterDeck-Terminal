@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CompiledLoop } from './flow'
-import { loopBadge, loopLine, loopNudge, loopViews, parseLoopFile, type LoopView } from './loops'
+import { checkWord, historyRows, loopBadge, loopLine, loopNudge, loopViews, parseLoopFile, rowLoop, tookText, type LoopCheck, type LoopView } from './loops'
 
 const NOW = 1_760_000_000_000
 const H = 3600_000
@@ -104,6 +104,31 @@ describe('loopBadge', () => {
     expect(loopBadge(view({ state: 'met', endedAt: NOW - 2 * H }), NOW)).toBeNull()
     expect(loopBadge(view({ state: 'limit', endedAt: NOW - 2 * H }), NOW)).toBeNull()
     expect(loopBadge(view({ state: 'stopped', endedAt: NOW }), NOW)).toBeNull()
+  })
+})
+
+describe('rowLoop', () => {
+  it('the open loop first, else one that ended within the hour; nothing without loops', () => {
+    expect(rowLoop(undefined, NOW)).toBeNull()
+    expect(rowLoop([], NOW)).toBeNull()
+    const met = view({ id: 'a', state: 'met', endedAt: NOW - 60_000, reason: 'tests pass' })
+    const open = view({ id: 'b' })
+    expect(rowLoop([met, open], NOW)).toEqual({ badge: '↻ 3/10', line: loopLine(open, NOW) })
+    expect(rowLoop([met], NOW)?.badge).toBe('↻ ✓')
+    expect(rowLoop([view({ state: 'stopped', endedAt: NOW })], NOW)).toBeNull()
+    expect(rowLoop([view({ state: 'limit', endedAt: NOW - 2 * H })], NOW)).toBeNull()
+  })
+})
+
+describe('history rows', () => {
+  it('newest first, at most 50; a round with no check says so', () => {
+    const rows = historyRows(Array.from({ length: 60 }, (_, i) => check({ n: i + 1 })) as LoopCheck[])
+    expect(rows).toHaveLength(50)
+    expect([rows[0].n, rows[49].n]).toEqual([60, 11])
+    expect(checkWord(check({ exit: null }) as LoopCheck)).toBe('no check')
+    expect(checkWord(check({ exit: 0, passed: true }) as LoopCheck)).toBe('passed')
+    expect(checkWord(check() as LoopCheck)).toBe('failed')
+    expect([tookText(40), tookText(41_000), tookText(150_000)]).toEqual(['40 ms', '41 s', '3 min'])
   })
 })
 

@@ -145,7 +145,7 @@ import {
 } from "./skills";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { LoopStore } from "./loops";
-import { loopNudge } from "@shared/loops";
+import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
 import {
   DEFAULT_TEMPLATE,
@@ -2831,7 +2831,23 @@ function registerIpc(): void {
   reg.handle(CH.workflowLoopHistory, (_e, sid: unknown, id: unknown) =>
     loopStore.history(sid, id),
   );
-  reg.handle(CH.workflowLoopStop, (_e, sid: unknown, id: unknown) => {
+  reg.handle(CH.workflowLoopStop, async (e, sid: unknown, id: unknown) => {
+    // A stopped loop cannot be given more: ask, as Stop session does. From a browser the web UI
+    // asked first; no native dialog on the Mac.
+    const v = validSessionId(sid) && validLoopId(id)
+      ? latest?.loops?.[sid]?.find((x) => x.id === id && x.state === "open")
+      : undefined;
+    if (v && !isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Stop loop"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Stop the loop “${v.name}”?`,
+        detail: "The session finishes its turn and the loop does not go on.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
     const r = loopStore.stop(sid, id);
     if (r.ok) sources.pollLoops();
     return r;

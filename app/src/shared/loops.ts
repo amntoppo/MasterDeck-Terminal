@@ -189,6 +189,30 @@ export function loopBadge(v: LoopView, now: number): string | null {
 }
 
 /**
+ * The session row's loop: its open loop, else the newest that ended met or at a limit within the
+ * hour. The badge, and the Details line as its tooltip.
+ */
+export function rowLoop(views: LoopView[] | undefined, now: number): { badge: string; line: string } | null {
+  const v = views?.find((x) => x.state === 'open') ?? views?.find((x) => loopBadge(x, now) !== null)
+  const badge = v ? loopBadge(v, now) : null
+  return v && badge ? { badge, line: loopLine(v, now) } : null
+}
+
+/** What History lists: the newest round first, at most 50 (the hook keeps 50 too). */
+export const LOOP_HISTORY_MAX = 50
+export const historyRows = (h: LoopCheck[]): LoopCheck[] => h.slice(-LOOP_HISTORY_MAX).reverse()
+
+/** A round's check in a word: no check ran (an agent-done loop, or one that ended early), passed, failed. */
+export const checkWord = (c: LoopCheck): string => (c.exit === null ? 'no check' : c.passed ? 'passed' : 'failed')
+
+/** How long a round's check took, short. */
+export function tookText(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`
+  if (ms < 60_000) return `${Math.round(ms / 1000)} s`
+  return `${Math.round(ms / 60_000)} min`
+}
+
+/**
  * The one text MasterDeck types into a session for a loop. The name is the user's own (the
  * workflow), but it is cleaned to the remote text rules all the same: no control characters, and
  * nothing that could read as a slash command or a shell escape.

@@ -41,6 +41,7 @@ import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
 import { AccountBadge } from "./AccountBits";
 import { isMulti } from "@shared/accounts";
+import { rowLoop } from "@shared/loops";
 import { heldForTrust, isNotTrusted } from "@shared/trust";
 import { TrustNote, useTrust } from "./TrustFix";
 
@@ -296,6 +297,7 @@ export function Sidebar({
         status={status}
         starred={stars.includes(s.key)}
         onStar={() => toggleStar(s.key)}
+        loop={rowLoop(state.loops?.[s.sessionId], now)}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
       />
@@ -912,7 +914,7 @@ function InboxCard({
 }
 
 /** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
-function SessionRow({
+export function SessionRow({
   s,
   active,
   now,
@@ -921,6 +923,7 @@ function SessionRow({
   pick,
   starred,
   onStar,
+  loop,
   dragging,
   dropBefore,
   ...drag
@@ -935,6 +938,8 @@ function SessionRow({
   /** Starred or not, and its toggle; absent (Cleanup) shows no star. */
   starred?: boolean;
   onStar?: () => void;
+  /** Its workflow loop's badge and line (`rowLoop`); none without a loop to show. */
+  loop?: { badge: string; line: string } | null;
   dragging?: boolean;
   dropBefore?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -972,6 +977,14 @@ function SessionRow({
           <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
         )}
         <AccountBadge login={s.account} ghActive={s.ghActive} />
+        {loop && (
+          <span
+            className={`srow-loop ${loop.badge.endsWith("!") ? "limit" : loop.badge.endsWith("✓") ? "met" : ""}`}
+            title={loop.line}
+          >
+            {loop.badge}
+          </span>
+        )}
         {onStar && (
           <button
             className={`srow-star ${starred ? "on" : ""}`}

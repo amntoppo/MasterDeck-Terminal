@@ -338,7 +338,16 @@ checkout whose branch was once linked to a ticket does not link it.
   hooks' log, with what the workflow does there (built-ins and the plan's first lines; click for
   all of it). It pulses as **running** while the session works on that step (since its last turn
   end) or waits on the watch a built-in started there, else it shows how long ago; *Next* lists
-  the points still ahead. A session keeps the hooks it started with (Claude Code reads them once),
+  the points still ahead. Above it, each of the session's workflow loops has a line: while one
+  runs, `↻ Fix the tests · iteration 3/10 · 12 min · last check failed` (pulsing); once it is over,
+  how it ended (`done: …`, the limit it hit, or `stopped by you`). **Stop loop** (while it runs, after
+  a confirm: a stopped loop can't be given more) lets the session end its turn at the next turn end.
+  **History** lists every round, newest first (at most 50): its time, how long the check took,
+  passed / failed / no check, *said done* when the session claimed it, and the check's output
+  (click a round to unfold it); then the loop's progress file, drawn as Markdown with every tag
+  shown as text. The session row in the list shows `↻ 3/10` while a loop runs, and `↻ ✓` (met) or
+  `↻ !` (at a limit) for an hour after; hover it for the same line. On a phone the badge and the
+  Details line are the same. A session keeps the hooks it started with (Claude Code reads them once),
   so this works for sessions older than a workflow change too. **Edit** opens the same editor
   as the Workflow window, full size, for that session only, with **Use a template… → Apply** and
   **Save as template**. Changing the Default or a template doesn't change sessions that already have
