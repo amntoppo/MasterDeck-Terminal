@@ -365,10 +365,11 @@ buttons; it does not go through macOS window drag regions.
   Start dialog in the resolved temp checkout, `parked-sessions.json` got its record keyed by the
   background id, the parked session's link recorded no branch (the same link without the record
   took the folder's), the real trust prompt came up through **Open Claude there…**, and
-  `claude --bg` 2.1.295's output matches the parser (its real shape is now in `test_spawn.py`).
-  Still open: **Choose folder…** with the native picker and a start from a chosen folder (the
-  sheet needs a hand on the Mac; the recipe is in OPERATIONS). Follow-ups: TODO ("Where a session
-  starts"). The Python suite: 453 passed.
+  `claude --bg` 2.1.295's output matches the parser (its real shape is now in `test_spawn.py`),
+  and from a master proposal the native picker, **Choose folder…**'s line and a start that kept
+  master's prompt and model in the chosen folder (the checkout itself; a folder that is no
+  checkout is still only unit-tested). The recipe is in OPERATIONS; follow-ups in TODO ("Where a
+  session starts"). The Python suite: 453 passed.
 
 - **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
   (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
