@@ -351,7 +351,10 @@ export const newLoop = (id: string, x: number, y: number): FlowNode => ({
   h: 200,
   check: { command: "", output: "", outputMode: "match", timeoutMin: 5 },
   agentDone: { on: false, goal: "" },
-  limits: { iterations: 10, minutes: 0, stall: 0 },
+  // Stall on (3 rounds) by default: a loop that stops making progress ends rather than run out
+  // its iterations. parseFlow's default for a missing stall stays 0 (off), so a saved loop
+  // without one keeps the meaning it had.
+  limits: { iterations: 10, minutes: 0, stall: 3 },
 });
 
 /**
@@ -513,6 +516,7 @@ export function parseFlow(raw: unknown): Flow {
       const check = obj(r.check);
       const done = obj(r.agentDone);
       const lim = obj(r.limits);
+      // 0 (off) when missing, not newLoop's 3: files saved before keep their meaning.
       const stall = num(lim.stall, 0);
       n = {
         id,

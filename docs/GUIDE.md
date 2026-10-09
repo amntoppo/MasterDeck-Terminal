@@ -277,7 +277,8 @@ checkout whose branch was once linked to a ticket does not link it.
     **check command** (passes when it exits with 0, or when its output matches or no longer
     matches a pattern, within a time limit of 1 to 9 minutes), **the agent says it's done** (with
     the goal it works toward; it ends its turn with a line starting `LOOP DONE:`), or both; and
-    its limits: **max iterations** (1 to 100), **max minutes**, and **rounds with no progress**.
+    its limits: **max iterations** (1 to 100), **max minutes**, and **rounds with no progress**
+    (3 on a new loop; 0 turns it off).
     Arrows into a block in the frame go to the frame (a loop starts at its top); blocks in it lead
     only to each other. Leave it with the toolbar's arrow kinds while the frame is selected: **when
     met** (green) and **at the limit** (amber); *then* goes on either way. One loop runs at a time,
@@ -467,7 +468,14 @@ checkout whose branch was once linked to a ticket does not link it.
   stopped. **Run 5 more** opens the loop again with five more iterations and, if the session is
   idle, types MasterDeck's own `Continue the loop "<name>".` into it (also from the notification and
   the web app). **Leave it** dismisses the card; **Open** opens the session. The card closes by
-  itself once the loop runs again, and a loop that reaches its limit again is a new card.
+  itself once the loop runs again, and a loop that reaches its limit again is a new card. The card
+  has no **Stop loop**: the loop is already over.
+- **A workflow loop that paused:** a loop still running on a session that has been idle for 5
+  minutes (Claude Code ends a turn after eight blocked stops in a row, or the session simply
+  stopped) shows a **LOOP PAUSED** card with the loop and its round. **Continue** types
+  MasterDeck's own `Continue the loop "<name>".` into the session (also from the notification and
+  the web app); **Stop loop** ends the loop (after a confirm); **Open** opens the session. The card
+  closes by itself once the session works again or the loop ends.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it

@@ -1286,6 +1286,27 @@ async function runInboxAction(
       sources.pollLoops();
       return nudgeLoop(s.sessionId, r.name ?? "loop", remote);
     }
+    case "loop-continue": {
+      // A paused loop: the same fixed text as Run 5 more's nudge, typed only into an idle session.
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      if (v?.state !== "open") return { ok: false, message: "the loop is not running" };
+      return nudgeLoop(s.sessionId, v.name, remote, "the session is working; the loop goes on at its next turn end");
+    }
+    case "loop-stop": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      // From a browser the web UI asked first; the window asks here.
+      if (v && !remote && !(await confirmLoopStop(v.name)))
+        return { ok: false, message: "cancelled" };
+      const r = loopStore.stop(s.sessionId, d.loopId);
+      if (r.ok) sources.pollLoops();
+      return r;
+    }
     case "login": {
       if (d.type !== "account")
         return { ok: false, message: "not a GitHub account item" };
@@ -1702,11 +1723,23 @@ async function nudgeLoop(
   sessionId: string,
   name: string,
   remote: boolean,
+  busy = "5 more iterations; the loop goes on at the next turn end",
 ): Promise<CliResult> {
   const s = latest?.sessions.find((x) => x.sessionId === sessionId);
-  if (!s || s.state !== "idle")
-    return { ok: true, message: "5 more iterations; the loop goes on at the next turn end" };
+  if (!s || s.state !== "idle") return { ok: true, message: busy };
   return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+}
+/** The window's ask before Stop loop (Details, Needs you): a stopped loop cannot be given more. */
+async function confirmLoopStop(name: string): Promise<boolean> {
+  const choice = await dialog.showMessageBox(win!, {
+    type: "warning",
+    buttons: ["Cancel", "Stop loop"],
+    defaultId: 0,
+    cancelId: 0,
+    message: `Stop the loop “${name}”?`,
+    detail: "The session finishes its turn and the loop does not go on.",
+  });
+  return choice.response === 1;
 }
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
@@ -2837,17 +2870,8 @@ function registerIpc(): void {
     const v = validSessionId(sid) && validLoopId(id)
       ? latest?.loops?.[sid]?.find((x) => x.id === id && x.state === "open")
       : undefined;
-    if (v && !isRemote(e)) {
-      const choice = await dialog.showMessageBox(win!, {
-        type: "warning",
-        buttons: ["Cancel", "Stop loop"],
-        defaultId: 0,
-        cancelId: 0,
-        message: `Stop the loop “${v.name}”?`,
-        detail: "The session finishes its turn and the loop does not go on.",
-      });
-      if (choice.response !== 1) return { ok: false, message: "cancelled" };
-    }
+    if (v && !isRemote(e) && !(await confirmLoopStop(v.name)))
+      return { ok: false, message: "cancelled" };
     const r = loopStore.stop(sid, id);
     if (r.ok) sources.pollLoops();
     return r;

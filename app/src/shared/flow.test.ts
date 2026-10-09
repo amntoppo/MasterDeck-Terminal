@@ -325,12 +325,15 @@ describe("loops", () => {
     });
     expect(high.limits).toEqual({ iterations: 100, minutes: 1440, stall: 10 });
     expect([high.w, high.h]).toEqual([2000, 1500]);
-    // Junk fields fall back to a new loop's.
+    // Junk fields fall back to a new loop's, except the stall limit: a saved loop without one
+    // keeps meaning "off", while a new frame starts with 3.
     const junk = loopOf(
       parseFlow({ nodes: [{ id: "lp", kind: "loop" }] }),
       "lp",
     );
-    expect(junk).toEqual({ ...newLoop("lp", 0, 0), members: [] });
+    const fresh = newLoop("lp", 0, 0) as Extract<FlowNode, { kind: "loop" }>;
+    expect(fresh.limits.stall).toBe(3);
+    expect(junk).toEqual({ ...fresh, members: [], limits: { ...fresh.limits, stall: 0 } });
   });
 
   it("keeps only members that exist and may be in a loop", () => {
@@ -557,7 +560,7 @@ describe("compiling loops", () => {
           timeoutMin: 5,
         },
         agentDone: { on: false, goal: "" },
-        limits: { iterations: 10, minutes: 0, stall: 0 },
+        limits: { iterations: 10, minutes: 0, stall: 3 },
         plan: "1. B\n2. Then: C",
         met: "1. D",
         limit: "",

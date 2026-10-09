@@ -68,7 +68,7 @@ it('an inbox action from the web app takes the path it always did; only opening 
   for (const remote of [false, true]) {
     expect(inboxActCall(remote, 'i1', 'reply', { text: '/compact' })).toEqual({ ok: true, id: 'i1', type: 'reply', payload: { text: '/compact' } })
     expect(inboxActCall(remote, 'i1', 'approve', null)).toEqual({ ok: true, id: 'i1', type: 'approve', payload: {} })
-    for (const type of ['option', 'menu', 'continue', 'compact', 'reject', 'send', 'login', 'dismiss', 'snooze', 'loop-more'])
+    for (const type of ['option', 'menu', 'continue', 'compact', 'reject', 'send', 'login', 'dismiss', 'snooze', 'loop-more', 'loop-continue', 'loop-stop'])
       expect(inboxActCall(remote, 'i1', type, { a: 1 })).toEqual({ ok: true, id: 'i1', type, payload: { a: 1 } })
     expect(inboxActCall(remote, 'i1', 'reply', 'nope')).toEqual({ ok: true, id: 'i1', type: 'reply', payload: {} })
   }

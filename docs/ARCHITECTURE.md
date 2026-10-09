@@ -368,7 +368,12 @@ reset to now so a time limit is not hit again at once, and `stallFrom` set to th
 `Continue the loop "<name>".` (`loopNudge`: fixed text, the name cleaned of control characters and
 a leading `/` or `!`) into the session through `Sender` when it is idle (`nudgeLoop` in
 `main/index.ts`, shared with the Needs-you action); a busy session meets the reopened loop at its
-next turn end.
+next turn end. Needs you (`collectItems` in `shared/inbox.ts`) has two loop kinds: `loop` (a loop
+at a limit: `loop-more`, dismiss, open) and `loop-paused` (an open loop whose session is `idle`,
+not waiting on its own watch, and quiet for `LOOP_PAUSED_MS`, 5 minutes, by `lastActivity`; the id
+carries that time, so a new quiet spell is a new item: `loop-continue`, the same `nudgeLoop`, and
+`loop-stop`, `LoopStore.stop` after the window's own confirm, `confirmLoopStop`). `newLoop` starts
+with a stall limit of 3; `parseFlow` keeps 0 for a loop saved without one.
 
 **The Loop frame on the canvas.** `FlowEditor.tsx` draws a loop node as a React Flow node of type
 `frame` (`Frame`: `width`/`height` from the node's `w`/`h`, `zIndex: -1`, listed first, dragged by

@@ -777,6 +777,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   error: "API ERROR",
   external: "ASKED",
   loop: "LOOP",
+  "loop-paused": "LOOP",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -1385,6 +1386,8 @@ function ExtraCard({
       ? "GITHUB"
       : i.kind === "loop"
       ? "LOOP AT ITS LIMIT"
+      : i.kind === "loop-paused"
+      ? "LOOP PAUSED"
       : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
@@ -1399,15 +1402,26 @@ function ExtraCard({
       a.type === "continue" ||
       a.type === "compact" ||
       a.type === "login" ||
-      a.type === "loop-more",
+      a.type === "loop-more" ||
+      a.type === "loop-continue",
   );
   const leave = i.actions.find((a) => a.type === "dismiss");
+  const stopLoop = i.actions.find((a) => a.type === "loop-stop");
+  const askStop = async () => {
+    // A stopped loop cannot be given more: the web asks here, the window natively in main.
+    const ask = "Stop the loop? The session does not go on with it, and it can't be given more.";
+    if (!(await webConfirm(ask, { confirmLabel: "Stop loop", danger: true }))) return;
+    await act("loop-stop");
+  };
   return (
     <div
       className={`card ${onDetails ? "clickable" : ""}`}
       style={{
         ["--kind" as string]:
-          i.kind === "idle" || i.kind === "waiting" || i.kind === "loop"
+          i.kind === "idle" ||
+          i.kind === "waiting" ||
+          i.kind === "loop" ||
+          i.kind === "loop-paused"
             ? "var(--amber)"
             : "var(--red)",
       }}
@@ -1440,6 +1454,15 @@ function ExtraCard({
             onClick={() => void deck().inboxAct(i.id, "dismiss")}
           >
             {leave.label}
+          </button>
+        )}
+        {stopLoop && (
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={() => void askStop()}
+          >
+            {stopLoop.label}
           </button>
         )}
         {primary && (

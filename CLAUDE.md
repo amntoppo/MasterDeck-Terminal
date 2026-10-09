@@ -292,8 +292,11 @@ buttons; it does not go through macOS window drag regions.
 - **Claude Code ends a turn after eight Stop-hook blocks in a row without a tool call**
   (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises it; MasterDeck does not set it). A workflow loop
   (`workflows/loop.sh`, `shared/loopHook.ts`) blocks every stop while it is open, so a loop that
-  only talks pauses there: it stays `open` and goes on counting at its next turn end (the stall
-  limit catches it). Never rely on `stop_hook_active` to end a loop; its iteration counter does.
+  only talks pauses there: it stays `open` and goes on counting at its next turn end, and nothing
+  wakes the session. After 5 quiet minutes Needs you shows a `loop-paused` item (**Continue** types
+  MasterDeck's fixed `Continue the loop "<name>".`, **Stop loop**). A loop that keeps going without
+  changing anything is ended by the stall limit (3 rounds on a new Loop frame; a saved loop without
+  the field keeps 0, off). Never rely on `stop_hook_active` to end a loop; its iteration counter does.
 - **A Board tab without a GitHub board is derived, not stored.** `boardless(login, cfg)` (TS) /
   `config.boardless(view)` (Python) is the one check. `master board` sends such an account's
   repository issues as cards with `derived: true` and no status; `Sources.build()` gives them a column

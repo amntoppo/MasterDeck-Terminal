@@ -59,6 +59,14 @@ describe('Inbox', () => {
     expect(box.view().history[0]).toMatchObject({ resolvedHow: 'the loop is running again' })
   })
 
+  it('a paused loop item resolves when the loop goes on or ends', () => {
+    const { box } = setup()
+    const p = item('loop-paused:id-a:fix:5000', { kind: 'loop-paused', detail: { type: 'loop', loopId: 'fix', reason: null } })
+    box.update([p])
+    box.update([])
+    expect(box.view().history[0]).toMatchObject({ resolvedHow: 'the loop went on or ended' })
+  })
+
   it('orders open items by priority', () => {
     const { box } = setup()
     box.update([item('low', { priority: 10 }), item('high', { priority: 100 })], true)
