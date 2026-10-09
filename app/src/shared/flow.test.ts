@@ -531,6 +531,7 @@ describe("compiling loops", () => {
         plan: "1. B\n2. Then: C",
         met: "1. D",
         limit: "",
+        after: null,
       },
     ]);
   });
@@ -596,6 +597,84 @@ describe("compiling loops", () => {
         .filter((p) => /Not connected/.test(p.text))
         .map((p) => p.node),
     ).toEqual(["b", "lp"]);
+  });
+
+  /** trigger → A; A -met→ B; A -then→ C; A -limit→ notify → D. */
+  const chained = (): Flow => ({
+    nodes: [
+      T("t", "after-push"),
+      I("a1", "Fix."),
+      I("b1", "Polish."),
+      I("c", "Report."),
+      I("d1", "Try another way."),
+      N("n", "Stuck."),
+      L("la", ["a1"], { name: "A", ...check("npm test") }),
+      L("lb", ["b1"], { name: "B", ...check("npm run lint") }),
+      L("ld", ["d1"], { name: "D", ...check("npm test") }),
+    ],
+    edges: [
+      e("t", "la"),
+      e("la", "lb", "met"),
+      e("la", "c"),
+      e("la", "n", "limit"),
+      e("n", "ld"),
+    ],
+  });
+
+  it("each loop knows the loop it comes after", () => {
+    const { steps, problems } = compileFlow(chained());
+    expect(
+      steps[0].loops!.map((l) => [l.id, l.after]),
+    ).toEqual([
+      ["la", null],
+      ["lb", { loop: "la", via: "met" }],
+      ["ld", { loop: "la", via: "limit" }],
+    ]);
+    expect(problems.filter((p) => /Loops? "/.test(p.text))).toEqual([]);
+  });
+
+  it("a loop in an outcome branch is a problem", () => {
+    const { problems } = compileFlow({
+      nodes: [
+        T("t", "after-push"),
+        S("tests", "run-tests"),
+        I("b", "Fix."),
+        L("lp", ["b"], { name: "Fix", ...check("npm test") }),
+      ],
+      edges: [e("t", "tests"), e("tests", "lp", "fail")],
+    });
+    expect(problems).toContainEqual({
+      node: "lp",
+      text: 'Loop "Fix" is inside an "if it worked/failed" branch: MasterDeck can\'t tell which branch the session took. Put it on the main path.',
+    });
+  });
+
+  it("two loops open at the same time are a problem", () => {
+    const side = compileFlow({
+      nodes: [
+        T("t", "after-push"),
+        I("a1", "x"),
+        I("b1", "y"),
+        L("la", ["a1"], { name: "A", ...check("true") }),
+        L("lb", ["b1"], { name: "B", ...check("true") }),
+      ],
+      edges: [e("t", "la"), e("t", "lb")],
+    });
+    expect(side.problems).toContainEqual({
+      node: "lb",
+      text: 'Loops "A" and "B" would run at the same time: put one after the other.',
+    });
+    // Two loops after the same loop's met arrow, too.
+    const flow = chained();
+    flow.nodes.push(
+      I("e1", "z"),
+      L("le", ["e1"], { name: "E", ...check("true") }),
+    );
+    flow.edges.push(e("la", "le", "met"));
+    expect(compileFlow(flow).problems).toContainEqual({
+      node: "le",
+      text: 'Loops "B" and "E" would run at the same time: put one after the other.',
+    });
   });
 });
 
@@ -727,6 +806,33 @@ describe.skipIf(process.platform === "win32")("arming a loop", () => {
     fire(dir);
     expect(readLoops(dir).loops.map((l: { id: string }) => l.id)).toEqual([
       "lp",
+    ]);
+  }, 20_000);
+
+  it("arms only the loops that start with the trigger", () => {
+    const loop = (id: string, members: string[]) =>
+      ({
+        ...newLoop(id, 0, 0),
+        members,
+        check: { command: "true", output: "", outputMode: "match", timeoutMin: 5 },
+      }) as FlowNode;
+    const dir = setup({
+      nodes: [
+        T("t", "after-push"),
+        I("a1", "Fix."),
+        I("b1", "Polish."),
+        loop("la", ["a1"]),
+        loop("lb", ["b1"]),
+      ],
+      edges: [e("t", "la"), e("la", "lb", "met")],
+    });
+    fire(dir);
+    expect(readLoops(dir).loops.map((l: { id: string }) => l.id)).toEqual([
+      "la",
+    ]);
+    expect(readdirSync(loopsDir(dir)).sort()).toEqual([
+      `${SID}-la.md`,
+      `${SID}.json`,
     ]);
   }, 20_000);
 

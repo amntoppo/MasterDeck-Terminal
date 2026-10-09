@@ -920,6 +920,44 @@ export interface CompiledLoop {
   /** What to do after: the `met` and `limit` branches' plan text ("" when there is no arrow). */
   met: string;
   limit: string;
+  /**
+   * The loop whose arrow leads here (through blocks that are not loops), and which arrow; null
+   * for a loop the trigger starts. Only those are armed when the trigger fires; the loop hook
+   * opens the others when the loop before them closes.
+   */
+  after: { loop: string; via: "met" | "limit" | "then" } | null;
+}
+
+/**
+ * Where each loop after `start` sits: the loop it comes after, and whether an "if it worked /
+ * failed" arrow leads to it. The first path found decides (a block is numbered once in the plan).
+ */
+function loopPlaces(
+  flow: Flow,
+  start: string,
+): Map<string, { after: CompiledLoop["after"]; branch: boolean }> {
+  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
+  const out = new Map<string, { after: CompiledLoop["after"]; branch: boolean }>();
+  const seen = new Set<string>();
+  const walk = (id: string, after: CompiledLoop["after"], branch: boolean) => {
+    const isLoop = byId.get(id)?.kind === "loop";
+    for (const e of flow.edges.filter((e) => e.from === id)) {
+      const next = isLoop
+        ? {
+            loop: id,
+            via: e.kind === "met" || e.kind === "limit" ? e.kind : ("then" as const),
+          }
+        : after;
+      const inBranch = branch || e.kind === "ok" || e.kind === "fail";
+      if (byId.get(e.to)?.kind === "loop" && !out.has(e.to))
+        out.set(e.to, { after: next, branch: inBranch });
+      if (seen.has(e.to)) continue;
+      seen.add(e.to);
+      walk(e.to, next, inBranch);
+    }
+  };
+  walk(start, null, false);
+  return out;
 }
 
 export interface Problem {
@@ -1032,6 +1070,32 @@ export function compileFlow(
             node: b.id,
             text: `A loop under "${info.short}" would never end: put it under another trigger`,
           });
+      const places = loopPlaces(flow, n.id);
+      const place = (id: string) =>
+        places.get(id) ?? { after: null, branch: false };
+      if (n.trigger !== "turn-end") {
+        // ponytail: the hook cannot see which outcome arrow the session followed, so a loop in
+        // such a branch is refused; allowing it needs the session to report the branch it took.
+        for (const b of loopNodes)
+          if (place(b.id).branch)
+            problems.push({
+              node: b.id,
+              text: `Loop "${b.name}" is inside an "if it worked/failed" branch: MasterDeck can't tell which branch the session took. Put it on the main path.`,
+            });
+        // ponytail: one open loop per session (the hook works on the first open one); running
+        // loops side by side needs the hook to evaluate each open loop at every turn end.
+        const byAfter = new Map<string, LoopNode>();
+        for (const b of loopNodes) {
+          const key = JSON.stringify(place(b.id).after);
+          const first = byAfter.get(key);
+          if (first)
+            problems.push({
+              node: b.id,
+              text: `Loops "${first.name}" and "${b.name}" would run at the same time: put one after the other.`,
+            });
+          else byAfter.set(key, b);
+        }
+      }
       const loops: CompiledLoop[] =
         n.trigger === "turn-end"
           ? []
@@ -1052,6 +1116,7 @@ export function compileFlow(
                 targets(flow, b.id, "limit"),
                 extraMonitors,
               ).join("\n"),
+              after: place(b.id).after,
             }));
       // Lowercase the first letter, unless it starts an acronym ("SQL migration edited").
       const label = /^[A-Z][A-Z]/.test(info.label)
@@ -1176,8 +1241,11 @@ export const actionCount = (flow: Flow): number =>
 /** Triggers that need a hook (installed once, for everyone; each reads the session's workflow). */
 export const HOOK_TRIGGERS = FLOW_TRIGGERS.filter((t) => t.runner === "hook");
 
-/** The loops of the steps that fired (`$ids`), each with its step's id; nothing when there are none. */
-const ARM_PICK = `($ids | split(" ") | map(select(. != ""))) as $w | [.steps[]? | select(.id as $i | $w | index($i)) | .id as $s | .loops[]? | {id, step: $s}] | select(length > 0)`;
+/**
+ * The loops the steps that fired (`$ids`) start, each with its step's id; nothing when there are
+ * none. A loop that comes after another (`after`) is opened by the loop hook, not here.
+ */
+const ARM_PICK = `($ids | split(" ") | map(select(. != ""))) as $w | [.steps[]? | select(.id as $i | $w | index($i)) | .id as $s | .loops[]? | select(.after == null) | {id, step: $s}] | select(length > 0)`;
 /**
  * The loop file with those loops armed (iteration 0), then one line per loop armed afresh. A loop
  * still open is left as it is: a trigger firing twice does not reset it.
