@@ -161,6 +161,16 @@ describe('RemoteCommands', () => {
     expect(await new RemoteCommands(deps(null), file()).run(cmd({ type: 'session.stop', args: { key: 'a' } }))).toEqual({ ok: false, transient: true, message: 'MasterDeck is still loading; try again' })
   })
 
+  it('answers at once, finally, when the session list cannot load', async () => {
+    const f = file()
+    const d = deps(null, { notLoaded: () => 'no session list: claude agents: not found' })
+    const c = cmd({ type: 'session.stop', args: { key: 'a' } })
+    expect(await new RemoteCommands(d, f).run(c)).toEqual({ ok: false, message: 'no session list: claude agents: not found' })
+    // Final: a re-send after a reconnect gets the same answer, not a new run.
+    expect(await new RemoteCommands(deps(st([sess('a', 'idle')])), f).run(c)).toEqual({ ok: false, message: 'no session list: claude agents: not found' })
+    expect(await new RemoteCommands(deps(null, { notLoaded: () => null }), file()).run(c)).toMatchObject({ transient: true })
+  })
+
   it('runs a command id once, across restarts (Review Focus 1)', async () => {
     const f = file()
     const d = deps(st([sess('a', 'idle')]))

@@ -806,7 +806,9 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   is connected to this account" and keeps retrying slowly.
 - **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
   the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
-  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (another Mac is
+  MasterDeck connects once its session list is in, so waiting commands find their sessions; if
+  `claude agents` fails the status says why, and after a minute it connects anyway: phone and API
+  commands then fail with that reason, and the phone keeps its last session list, until the list is in), red an error that needs you (another Mac is
   connected, or MasterDeck is too old for the backend), grey off. If the server signs this Mac out
   (or the account was deleted) the line stops and says so.
 - **Security:** anyone signed in to your account can drive your Claude sessions. Keep your password
