@@ -538,12 +538,39 @@ fixes it, and move the item here to "Recently done".
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 
+## MasterDeck mod: open points (2026-10-10, issue #86)
+
+See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
+
+- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
+  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
+  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
+  `mods/` in the app (electron-builder `extraResources`).
+- **User-scope install not tried yet**: the probe and the demo loaded the mod with `--plugin-dir`.
+  The first install at user scope loads it into every session; it draws nothing where MasterDeck has
+  no band file, but check it on the user's machine with their word.
+- **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
+  `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
+  `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
+  install sets, or a pointer file under `~/.claude`) before isolated E2E tests use it.
+- **Not run against the real app.** The app's band files and heartbeats are unit-tested and the mod
+  ran against a stand-in deck folder with a stand-in note pump; an isolated app driving a real
+  session end to end is still to do.
+- **Instant typing with a band above the prompt** (`predictiveEcho`) not checked in MasterDeck's pane.
+- **`/md-note` needs `mv` and `rm`** (`$.process.run`): macOS and Linux only; Windows needs
+  `cmd /c move` or a rename in `$.fs`.
+- **Two copies of the band's shape** (`shared/modBand.ts`, `mods/masterdeck/types/index.d.ts`);
+  a change bumps `v` in both.
+- **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
+  `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`) | branch `worktree-MasterDeck-Terminal-86-mods` (not merged) | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |

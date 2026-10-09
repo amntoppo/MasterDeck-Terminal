@@ -214,6 +214,8 @@ export interface AppState {
   sessionPrs: Record<string, string[]>;
   /** Sessions linked to each other ("Linked sessions"), by Session.key; symmetric, sorted. */
   peers: Record<string, string[]>;
+  /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
+  modLive?: Record<string, { version: string; claude: string }>;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */

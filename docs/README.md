@@ -6,6 +6,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | agents | Main process (startup, Sources/state build, inbox, hooks, monitors, workflows, queue, sender/PTYs, master-agent), preload/IPC, shared modules, renderer, AppState producers, files on disk |
 | [REMOTE.md](REMOTE.md) | agents | Account sign-in, CloudSync (snapshots/patches, commands, items, clients), browser bridge (approval, E2E, state patches, PTY streaming), web app, instant typing, remote indicator, message tables |
 | [OPERATIONS.md](OPERATIONS.md) | agents | Dev setup, build/package/install, release, web and backend deploy, isolated E2E recipe, throwaway Claude session, measuring upload, troubleshooting |
+| [MODS.md](MODS.md) | agents | Claude Code mods (issue #86): how they work, what they mean for MasterDeck, the probe in a background session, integration ideas, how MasterDeck should ship its mod |
 | [TODO.md](TODO.md) | agents | Open work by priority with code pointers and approaches; recently done with commits |
 | [GUIDE.md](GUIDE.md) | users | Every feature as a user sees it |
 | [../README.md](../README.md) | users | Install, first run, requirements, develop |

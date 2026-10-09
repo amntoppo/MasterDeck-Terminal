@@ -259,6 +259,41 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   hook passes a `session_id` that equals a line or starts with it. It fails open: no jq, input
   that does not parse, a `to` or message that is not a string, all print nothing.
 
+### The MasterDeck mod (`mods/masterdeck`, issue #86, prototype)
+
+A Claude Code mod (a plugin of function hooks, Claude Code 2.1.287 or later; see
+[MODS.md](MODS.md)) that draws inside a session what MasterDeck knows about it. It never calls
+GitHub: the app writes, the mod reads, so one poller serves every session.
+
+- **App side.** In the state callback (`main/index.ts`, while `agents` is healthy)
+  `DeckHooks.setBand(sessionId, modBand(state, s))` writes `deck/band/<sessionId>.json` for every
+  live session that has a ticket, a PR or a linked session (`shared/modBand.ts` `ModBand`: name,
+  ticket label/ref/title/url, the card's column, the session's newest PR with state, CI, open
+  threads and draft, linked sessions). It is written only when its text changed (kept in memory)
+  and `pruneBands` removes the files of sessions that are no longer live.
+  `DeckHooks.modBeats()` reads the mod's heartbeats, `deck/mods/<sessionId>.json`
+  (`{v: 1, version, claude, at, ended?}`, `parseModBeat`: fresh under 45 s, `MOD_BEAT_STALE_MS`;
+  files older than a day are removed), and the callback puts them in `state.modLive` by
+  `Session.key` (`version`, `claude` only, so a beat does not change the state). Session details
+  shows "Mod live (v…, Claude Code …)".
+- **Mod side** (`hooks/register.tsx`, pure parts in `hooks/band.ts`, its contract in
+  `types/index.d.ts`): the deck folder is `$MASTERDECK_HOME/deck`, else `~/.claude/masterdeck/deck`.
+  Every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its band file into
+  `$.state`; a change redraws the band above the prompt (`AbovePrompt`, sized to `bodyColumns`:
+  one short line under 90 columns, the title when there is room, then **Details** / **Hide**), and
+  what changed between two reads (`bandEvents`: a column move, new review threads, CI failed or
+  passed, merged, a PR linked) is a toast. Nothing is drawn where the session has no band file.
+  Every 15 s, and only where `deck/alive` exists, it writes its heartbeat; `session.end` writes
+  `ended: true`. `/md-ticket` opens a pane with the ticket, its column, the PR (links) and linked
+  sessions. `/md-note <text>` adds to the ticket's note through the same pump as the
+  `masterdeck-notes` skill: it writes `note-requests/<id>.part`, renames it to `.json` and waits up
+  to 6 s for `note-answers/<id>.json`, else takes the request back by renaming it (the mods API has
+  no rename or delete, so these go through `$.process.run(['mv' | 'rm', …])`: macOS and Linux only).
+  The band hook draws its line first and keeps what other mods draw there (`next(e)` under it).
+- **Not wired yet:** MasterDeck does not install the mod (by hand:
+  `claude plugin marketplace add <repo>/mods`, then `claude plugin install masterdeck@masterdeck`),
+  nothing of the deck hook moved into it, and no Windows path. See TODO ("MasterDeck mod").
+
 ### Monitors (watches) and schedules
 
 - Settings `monitorsBy`: `claude` (Claude Code runs Monitor, 30 min, re-armed) or `masterdeck`.
@@ -928,6 +963,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `browsers`, `browserRequests` | `BrowserBridge` via `publishBrowsers()` |
 | `account` | `Account.state()` |
 | `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
+| `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions the MasterDeck mod runs in (fresh heartbeat), by `Session.key`, `{version, claude}` |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -952,7 +988,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
 | `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
-| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by` |
+| `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
 | `workflow.json`, `workflows/` | workflows (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |

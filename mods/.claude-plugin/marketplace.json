@@ -1,0 +1,5 @@
+{
+  "name": "masterdeck",
+  "owner": { "name": "MasterDeck" },
+  "plugins": [{ "name": "masterdeck", "source": "./masterdeck" }]
+}

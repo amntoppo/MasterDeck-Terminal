@@ -20,6 +20,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
+import { modBand } from "@shared/modBand";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -623,6 +624,18 @@ const sources = new Sources(
             .map((s) => s.sessionId),
         ),
       );
+    // The MasterDeck mod (mods/masterdeck) reads band/<id>.json and writes mods/<id>.json.
+    if (sources.isHealthy("agents")) {
+      const live = state.sessions.filter((s) => s.state !== "done");
+      for (const s of live) deckHooks.setBand(s.sessionId, modBand(state, s));
+      deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+    }
+    const beats = deckHooks.modBeats();
+    state.modLive = Object.fromEntries(
+      state.sessions
+        .filter((s) => beats[s.sessionId])
+        .map((s) => [s.key, { version: beats[s.sessionId].version, claude: beats[s.sessionId].claude }]),
+    );
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {

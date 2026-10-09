@@ -418,6 +418,11 @@ export function SessionDetails({
               Compacted <b>{formatAgo(now - hook.compactedAt)} ago</b>
             </div>
           )}
+          {state.modLive?.[s.key] && (
+            <div title="The MasterDeck mod runs inside this session: it shows the ticket above the prompt and adds /md-note and /md-ticket">
+              Mod <b>live</b> (v{state.modLive[s.key].version}, Claude Code {state.modLive[s.key].claude || "?"})
+            </div>
+          )}
         </div>
         <div className="d-actions">
           <button

@@ -530,6 +530,33 @@ after a restart.
 Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
 creation.
 
+## The MasterDeck mod (prototype)
+
+A Claude Code mod (Claude Code 2.1.287 or later) that shows inside a session what MasterDeck knows
+about it. It is not installed for you yet; to try it:
+
+```bash
+claude plugin marketplace add <path to MasterDeck>/mods
+claude plugin install masterdeck@masterdeck
+```
+
+Then start or resume a session (or run `/reload-plugins` in one). In a session on a ticket, with a
+PR or with linked sessions:
+
+- **A line above the prompt:** the ticket, its board column, the PR with its CI and open review
+  threads, and how many sessions are linked; short in a narrow terminal, with the title when there
+  is room. **Details** opens a pane with links to the ticket and the PR; **Hide** hides the line
+  (`/md-ticket` brings it back).
+- **Toasts** when the card moves, a review thread opens, CI fails or passes, or the PR merges.
+- **`/md-note <text>`** adds the text to the ticket's note in Notes at once, without a turn of
+  Claude (macOS and Linux).
+- **`/md-ticket`** opens the ticket pane.
+- With MasterDeck closed, the line says so and how old its data is.
+- Session details shows **Mod live** for a session the mod runs in.
+
+The mod only reads what MasterDeck writes and never talks to GitHub. In a session MasterDeck has
+nothing for, it shows nothing. To remove it: `claude plugin uninstall masterdeck@masterdeck`.
+
 ## Cost and context
 
 - **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the

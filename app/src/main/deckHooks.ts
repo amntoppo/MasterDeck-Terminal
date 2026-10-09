@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { applyEventLine, parseRequest, type HookRequest, type HookSessionState } from '@shared/deckHooks'
+import { parseModBeat, type ModBand, type ModBeat } from '@shared/modBand'
 import { readNewLines, type FollowState } from './files'
 import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
 
@@ -555,7 +556,67 @@ export class DeckHooks {
       // none
     }
   }
+
+  /** What was last written to each band file, so an unchanged state writes nothing. */
+  private bands = new Map<string, string>()
+
+  /** What the MasterDeck mod draws in this session (`band/<id>.json`; null: nothing, the file goes). */
+  setBand(sessionId: string, band: ModBand | null): void {
+    if (!SID.test(sessionId)) return
+    const dir = join(this.dir, 'band')
+    const p = join(dir, `${sessionId}.json`)
+    if (!band) {
+      if (this.bands.delete(sessionId) || existsSync(p)) rm(p)
+      return
+    }
+    const text = JSON.stringify(band)
+    if (this.bands.get(sessionId) === text && existsSync(p)) return
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(`${p}.tmp`, text)
+      renameSync(`${p}.tmp`, p)
+      this.bands.set(sessionId, text)
+    } catch {
+      // next state
+    }
+  }
+
+  /** Band files of sessions not live any more. */
+  pruneBands(live: Set<string>): void {
+    for (const id of this.bands.keys()) if (!live.has(id)) this.bands.delete(id)
+    try {
+      for (const n of readdirSync(join(this.dir, 'band'))) if (n.endsWith('.json') && !live.has(n.slice(0, -5))) rm(join(this.dir, 'band', n))
+    } catch {
+      // none
+    }
+  }
+
+  /** Sessions the mod runs in now, by session id (its fresh heartbeats); old files go after a day. */
+  modBeats(now = Date.now()): Record<string, ModBeat> {
+    const out: Record<string, ModBeat> = {}
+    const dir = join(this.dir, 'mods')
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      return out
+    }
+    for (const n of names) {
+      if (!n.endsWith('.json') || !SID.test(n.slice(0, -5))) continue
+      const p = join(dir, n)
+      try {
+        const beat = parseModBeat(readFileSync(p, 'utf8'), now)
+        if (beat) out[n.slice(0, -5)] = beat
+        else if (now - statSync(p).mtimeMs > 86_400_000) rm(p)
+      } catch {
+        // gone meanwhile
+      }
+    }
+    return out
+  }
 }
+
+const SID = /^[0-9a-f-]{36}$/i
 
 function alive(pid: number): boolean {
   if (!pid) return false

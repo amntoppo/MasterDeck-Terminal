@@ -58,6 +58,9 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   they stay for use by hand. `skills/master/` is also the `master` CLI (Python,
   `lib/master/`) that the app calls for the ledger, snapshot, board, config and spawning.
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
+- `mods/` — Claude Code mods (a local-folder marketplace, `.claude-plugin/marketplace.json`):
+  `mods/masterdeck` draws the session's ticket inside Claude Code (see [docs/MODS.md](docs/MODS.md)).
+  Check it with `claude plugin validate mods/masterdeck` and `claude plugin test mods/masterdeck`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
 - `.github/workflows/ci.yml` — Python tests, typecheck, vitest, DMG/EXE builds; tags publish a release.
@@ -165,6 +168,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
+| The MasterDeck mod (inside a session: ticket band, `/md-note`, `/md-ticket`) | `mods/masterdeck` (`hooks/register.tsx`, pure parts `hooks/band.ts`, contract `types/index.d.ts`), the app's side: `shared/modBand.ts` (`modBand`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, the state callback in `main/index.ts` (`state.modLive`), `SessionDetails.tsx` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -360,7 +364,19 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-09)
+## Current state and next steps (2026-10-10)
+
+- **Claude Code mods (#86)** (branch `worktree-MasterDeck-Terminal-86-mods`, not merged, not
+  installed): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
+  `claude --bg` session and draws in `claude attach`. Prototype `mods/masterdeck` (ticket band,
+  toasts, `/md-ticket`, `/md-note`, heartbeat) and the app's side (`deck/band/<sid>.json`,
+  **Mod live** in Session details). Checked: typecheck, vitest (149 files passed, 2 skipped; 1725
+  tests passed, 4 skipped), `claude plugin validate` / `test` (6) / tsc for the mod, and the mod in
+  throwaway sessions (background: heartbeat and `ended`; interactive: band at 80/110/160 columns,
+  toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed). Not checked:
+  a user-scope install, the real app writing band files for a live session, instant typing under
+  the band, Windows. A background session gets the daemon's environment, not the launching shell's
+  (`MASTERDECK_HOME` does not reach the mod there). Open points: TODO ("MasterDeck mod").
 
 - **Sessions move to Merged again** (branch `fix/session-merged-state`, not merged, not
   installed): the PR watch's "merged" message counted as the user writing after the merge, so
