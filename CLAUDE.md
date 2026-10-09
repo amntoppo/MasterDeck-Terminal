@@ -162,7 +162,7 @@ web tabs keep working.
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
-| Notes | `shared/notes.ts` (types, limits, checks), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`), `renderer/.../NotesPanel.tsx`; entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`) |
+| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 
 ## Adding a feature
@@ -339,7 +339,9 @@ buttons; it does not go through macOS window drag regions.
 
 - **Notes are private and are not state.** They have their own channels (`notes:*`) and never enter
   `AppState`, `toRemoteSnapshot`, a prompt or a GitHub call; a new reader of `NotesStore` needs a
-  decision first. A save carries `base`; never write a note without it except with the user's **Keep
+  decision first. Sessions may only add (`note.sh` → `pumpNoteRequests` → `NotesStore.append`/`save`):
+  the answer to a session carries a note's id, never its text. A note's text is drawn with
+  `MarkdownView html={false}` (every tag is text); never build HTML from it. A save carries `base`; never write a note without it except with the user's **Keep
   mine**. A web tab gets a 120-character preview with the list and the change event; a full text
   goes to it in two answers only: `notes:get`, and the conflict answer of `notes:save` (the stored
   note, to the tab that tried to save over it). A file in the notes folder that is not a note is
@@ -356,7 +358,13 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-06)
+## Current state and next steps (2026-10-09)
+
+- **Notes in Markdown (#65)** are built on branch `worktree-MasterDeck-Terminal-65-notes-markdown`
+  (from `origin/main` with Notes merged, PR #69): the editor's **Write / Preview / Side by side**, the
+  preview drawn by `MarkdownView` with `html={false}`, plain one-line previews, the window refusing
+  navigation, and sessions adding to notes through the `masterdeck-notes` skill. Not merged, not
+  installed (the user's word first). What was checked is in the PR; open points in TODO.
 
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries

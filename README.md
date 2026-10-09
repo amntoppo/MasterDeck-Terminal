@@ -39,6 +39,7 @@ they are for use by hand; MasterDeck does not depend on them:
 | `babysit-pr` | A deeper self-review before a PR, then review comments, CI and deploy until it merges (MasterDeck's own gate and PR watch cover the basics). |
 | `babysit-worktree` / `kill-worktree` | Isolates a session in a git worktree, then folds the work back. |
 | `worktree-janitor` | Cleans up finished worktrees across your repos. |
+| `masterdeck-notes` | Lets a session add to your Notes when you ask it to: a new note, more text on one it made, or a ticket's note. Sessions never read a note. |
 | `queue` | Describes `/queue`. MasterDeck's own hook runs `/queue <prompt>` (run after the current response), `/queue list` and `/queue clear`; **Queue Prompts** in a session's header opens a Queue panel that shows and edits it. |
 
 Nothing is sent to a session or started without your yes. The skills never merge, never

@@ -1237,7 +1237,7 @@ export function BoardView({
                         moving={!!moving[ticketKey(c.repo, c.number)]}
                         readOnly={!canMove(c, worked)}
                         onClick={() => onCard(c)}
-                        noted={!!ticketNote(notes ?? [], c.repo, c.number)}
+                        note={ticketNote(notes ?? [], c.repo, c.number)}
                         onNote={
                           onNote && can("notesList")
                             ? () => onNote(ticketOf(c))
@@ -1409,7 +1409,7 @@ function Card({
   moving,
   readOnly,
   onClick,
-  noted,
+  note,
   onNote,
 }: {
   card: BoardCard;
@@ -1422,7 +1422,8 @@ function Card({
   readOnly: boolean;
   onClick: () => void;
   /** This ticket has a note. */
-  noted: boolean;
+  /** The ticket's note (its plain one-line preview shows on hover). */
+  note: NoteMeta | null;
   /** Open the ticket's note (absent: Notes is not available here). */
   onNote?: () => void;
 }) {
@@ -1479,9 +1480,9 @@ function Card({
         <span style={{ flex: 1 }} />
         {onNote && (
           <button
-            className={`bcard-note ${noted ? "has" : ""}`}
-            title={noted ? "Open the note" : "Add a note"}
-            aria-label={noted ? "Open the note" : "Add a note"}
+            className={`bcard-note ${note ? "has" : ""}`}
+            title={note ? (note.preview ? `Note: ${note.preview}` : "Open the note") : "Add a note"}
+            aria-label={note ? "Open the note" : "Add a note"}
             draggable={false}
             // A press on the mark must not start the draggable card's drag.
             onDragStart={(e) => {

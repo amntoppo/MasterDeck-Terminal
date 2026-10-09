@@ -346,7 +346,7 @@ fixes it, and move the item here to "Recently done".
   the spawn fails, **Retry** starts the held proposal in it, but closing the tab leaves the
   worktree and its branch (Janitor lists it). Starting the ticket again with the box ticked says
   the branch exists.
-- **P3 · Notes (#65) should draw Markdown with `MarkdownView`** (`shared/markdown.ts`), not a second renderer. The small `Markdown` in `SummaryPanel.tsx` could move to it too.
+- **P3 · The small `Markdown` in `SummaryPanel.tsx` could move to `MarkdownView`** (`shared/markdown.ts`), as Notes (#65) did.
 - **P3 · Remembered choices are per window profile** (localStorage): the web app keeps its own.
 - **P3 · `skills/master/tests/test_ghcache.py`: three tests fail when run from inside a MasterDeck-started session** (seen 2026-10-06, on `main` too; cause not looked into, the session's own `GHC_*` environment is the suspect).
 
@@ -440,9 +440,20 @@ fixes it, and move the item here to "Recently done".
 
 ## Notes: open points (2026-10-06, issue #63; Markdown is #65)
 
-- **P2 · Markdown with a preview** (#65). A note is plain text today; `Note.body` is stored as typed, so
-  a renderer can come later without a migration. Also open: no history of a note's earlier versions
-  and no export (the files in `~/.claude/masterdeck/notes/` are plain JSON).
+- **P3 · No history and no export.** No earlier versions of a note, and no export (the files in
+  `~/.claude/masterdeck/notes/` are plain JSON).
+- **P3 · Markdown in notes (#65): open points.** (a) A task list's boxes in the preview cannot be
+  ticked: change `[ ]` in the text. (b) Images with an `https://` address load in the preview (as in
+  an issue's description), so a note can make the window fetch an address; only tags are text. (c)
+  Details and the card's hover show the plain one-line preview, not rendered Markdown (the full text
+  is never in the list). (d) The preview parses the whole text on every key; fine at 50,000
+  characters, not measured on a slow phone.
+- **P3 · Sessions writing notes (#65): open points.** (a) Any process of the user's can write a
+  request (as it can write the notes folder itself); there is no switch to turn it off. (b) A
+  session cannot read a note, also not one it made, and cannot replace or delete text. (c) Not on
+  Windows (bash and the deck folder are macOS-only today). (d) A note does not say which session
+  wrote it; the session can say so in its text. (e) The skill names its script by
+  `~/.claude/skills/...`: with `MASTERDECK_SKILLS_DIR` elsewhere the path in SKILL.md is wrong.
 - **P3 · Editor edges.** (a) If the answer to a first save is lost (the line drops after the store
   wrote it), the editor retries as a new note and makes a duplicate. (b) A note marked "Deleted
   elsewhere" with nothing unsaved is dropped when the user switches to another note. (c) The notes
@@ -500,6 +511,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Notes in Markdown (issue #65): a note's text is drawn as Markdown (`MarkdownView` with `html={false}`: every tag is text, https links only, opened in the browser), **Write / Preview / Side by side** in the editor, previews in the list, Details and on the card read the Markdown as one plain line; the window refuses navigation away from the app; sessions can add to notes with the `masterdeck-notes` skill (`note.sh new / ticket / append`, `main/noteRequests.ts`, answers carry an id, never a note's text) | branch `worktree-MasterDeck-Terminal-65-notes-markdown` (not merged) | — |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_MARKDOWN, parseInline, parseMarkdown, safeHref, safeImage, type Block, type Inline } from './markdown'
+import { MAX_MARKDOWN, markdownText, parseInline, parseMarkdown, safeHref, safeImage, type Block, type Inline } from './markdown'
 
 const t = (v: string): Inline => ({ t: 'text', v })
 const p = (...c: Inline[]): Block => ({ t: 'para', c })
@@ -139,5 +139,75 @@ describe('parseMarkdown', () => {
     expect(parseMarkdown('> '.repeat(500) + 'x').length).toBe(1)
     expect(parseInline('*'.repeat(2000) + 'a').length).toBeGreaterThan(0)
     expect(parseInline('['.repeat(2000)).length).toBeGreaterThan(0)
+  })
+})
+
+/** Every node of a tree, for checks that nothing but text came out of some markup. */
+function nodes(bs: Block[]): (Block | Inline)[] {
+  const out: (Block | Inline)[] = []
+  const inl = (c: Inline[]) => c.forEach((n) => (out.push(n), 'c' in n && inl(n.c)))
+  const walk = (b: Block) => {
+    out.push(b)
+    if (b.t === 'heading' || b.t === 'para') inl(b.c)
+    else if (b.t === 'quote') b.c.forEach(walk)
+    else if (b.t === 'list') b.items.forEach((it) => it.c.forEach(walk))
+    else if (b.t === 'table') [b.head, ...b.rows].forEach((r) => r.forEach(inl))
+  }
+  bs.forEach(walk)
+  return out
+}
+
+describe('html: false (notes)', () => {
+  const notes = (s: string) => parseMarkdown(s, { html: false })
+  const text = (s: string) =>
+    nodes(notes(s))
+      .filter((n): n is Inline & { t: 'text' } => n.t === 'text')
+      .map((n) => n.v)
+      .join('')
+
+  it('keeps every tag as its text: no image, no line break, no comment dropped', () => {
+    const src = '<img src="https://example.com/x.png" alt="x"> a<br>b <!-- hidden --> <script>alert(1)</script>'
+    const all = nodes(notes(src))
+    expect(all.some((n) => n.t === 'image' || n.t === 'br')).toBe(false)
+    expect(text(src)).toBe(src)
+  })
+  it('a comment on its own lines is shown, not skipped', () => {
+    expect(notes('<!-- keep\nme -->')).toEqual([{ t: 'para', c: [{ t: 'text', v: '<!-- keep' }, { t: 'br' }, { t: 'text', v: 'me -->' }] }])
+  })
+  it('event handlers and iframes stay text, in every block', () => {
+    const src = '# <iframe src="https://evil.example"></iframe>\n\n- <a href="javascript:alert(1)" onclick="x()">x</a>\n\n> <svg onload=alert(1)>'
+    const all = nodes(notes(src))
+    // A bare https address inside the tag is still a link to it (as anywhere else in the text); nothing else is.
+    expect(all.some((n) => n.t === 'image')).toBe(false)
+    expect(all.filter((n) => n.t === 'link').map((n) => (n as { href: string }).href)).toEqual(['https://evil.example'])
+    expect(text(src)).toContain('<iframe src="')
+    expect(text(src)).toContain('"></iframe>')
+    expect(text(src)).toContain('onclick="x()"')
+    expect(text(src)).toContain('<svg onload=alert(1)>')
+  })
+  it('links keep https only; javascript:, data:, file: and http: are text', () => {
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<b>x</b>', 'file:///etc/passwd', 'http://example.com', '//example.com', 'JaVaScRiPt:alert(1)']) {
+      const all = nodes(notes(`[click](${bad}) ![i](${bad}) <${bad}>`))
+      expect(all.some((n) => n.t === 'link' || n.t === 'image'), bad).toBe(false)
+    }
+    expect(nodes(notes('[ok](https://example.com/a)')).find((n) => n.t === 'link')).toMatchObject({ href: 'https://example.com/a' })
+    // What was typed stays on screen, whole.
+    expect(text('[bad](javascript:alert(1)) ![i](file:///x)')).toBe('[bad](javascript:alert(1)) ![i](file:///x)')
+  })
+  it('Markdown images with an https address still show (only tags are text)', () => {
+    expect(nodes(notes('![pic](https://example.com/p.png)')).some((n) => n.t === 'image')).toBe(true)
+  })
+  it('the rest of Markdown is read as before', () => {
+    const src = '## Todo\n\n- [ ] one\n- [x] **two**\n\n```\n<b>x</b>\n```'
+    expect(notes(src)).toEqual(parseMarkdown(src))
+  })
+})
+
+describe('markdownText', () => {
+  it('is one plain line', () => {
+    expect(markdownText('# T\n\n1. a\n2. b\n\n| x | y |\n|---|---|\n| 1 | 2 |\n\n---\n\n> q')).toBe('T a · b x | y · 1 | 2 q')
+  })
+  it('keeps tags as text', () => {
+    expect(markdownText('a <img src="https://e.x/i.png" alt="z"> <br> b')).toBe('a <img src="https://e.x/i.png" alt="z"> <br> b')
   })
 })

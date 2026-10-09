@@ -327,8 +327,31 @@ Notes are not in `AppState`, a snapshot, a prompt or a GitHub call: their text l
 through the `notes:*` handlers. A note's full text travels to a web tab in two answers only: `notes:get`
 (a note opened), and the conflict answer of `notes:save`, which carries the stored note to the tab
 that tried to save over it (so the editor can offer Reload). The list (`notes:list`) and
-`notes:changed` carry `NoteMeta`, which has a 120-character `preview` (whitespace collapsed) instead
-of the text. `notes:search` runs in main and returns ids.
+`notes:changed` carry `NoteMeta`, which has a 120-character `preview` instead of the text: the note's
+Markdown read as one plain line (`notePreview` → `markdownText` in `shared/markdown.ts`, from the first
+4000 characters). `notes:search` runs in main and returns ids.
+
+A note's body is Markdown source, stored as typed. It is drawn by `MarkdownView` with `html={false}`:
+`parseMarkdown(text, { html: false })` builds a tree of blocks and inlines, React draws elements from
+it, and no HTML is ever built from the text. In that mode no tag is read at all (`<img>`, `<br>`, comments
+stay text, unlike an issue's description); links and images keep `https://` addresses only (`safeHref`,
+`safeImage`); a click goes to `deck.openExternal` (the window: `shell.openExternal`, https only; the
+web: `window.open`, https only). The window also refuses any navigation away from the app
+(`will-navigate`: an https address opens in the browser instead). The editor's Write / Preview / Side by
+side choice is per viewer (localStorage `masterdeck.notesView`; side by side only at `WIDE_QUERY`).
+
+**Sessions add to notes** (the `masterdeck-notes` skill): `skills/masterdeck-notes/scripts/note.sh
+new "Title" | ticket owner/name#12 | append n-…` reads the text on stdin, writes
+`<home>/deck/note-requests/<id>.json` (`{op, arg, body}`, by jq) while MasterDeck runs (`deck/alive`
+younger than 30 s), and waits up to 8 s for `note-answers/<id>.json`, then takes the request back by
+renaming it (one rename wins against MasterDeck's claim; a claimed one gets 7 s more). The 1-second
+`pumpWatches` tick runs `pumpNoteRequests` (`main/noteRequests.ts`): claim (`.taken`), at most 20 a
+tick, files over 256 KB refused, `parseNoteRequest` (`shared/noteRequest.ts`: the ticket as GitHub
+names it, ids `n-…` only, control characters and terminal colours stripped), then `NotesStore.save`
+(new) or `NotesStore.append` (the text as a new paragraph at the end; a ticket's note is made when
+there is none; refused past 50,000 characters). The answer carries the note's id and a sentence,
+never a note's text: a session can write, not read. Leftovers older than a minute are swept. Not on
+Windows (the deck hook folder and the pump run on macOS only).
 
 The panel (`renderer/.../NotesPanel.tsx`, opened by the rail's Notes button or the palette, mounted
 after every header so it gets its clicks) only draws. The list is `useNotes` (`renderer/src/notes.ts`:
