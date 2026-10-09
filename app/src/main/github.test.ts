@@ -56,6 +56,20 @@ describe('GitHub users', () => {
   })
 })
 
+describe('GitHub.subIssues', () => {
+  it("reads the issue's sub-issues in one page, as a read", async () => {
+    const f = fake(() => ({ stdout: JSON.stringify({ number: 3, title: 'Part', state: 'open', url: 'https://github.com/globex/app/issues/3', repo: 'globex/app' }) + '\n' }))
+    const r = await new GitHub(f.run).subIssues({ repo: 'globex/app', number: 12 })
+    expect(r).toEqual({ ok: true, subIssues: [{ repo: 'globex/app', number: 3, title: 'Part', state: 'open', url: 'https://github.com/globex/app/issues/3' }] })
+    expect(f.calls[0].slice(0, 2)).toEqual(['api', 'repos/globex/app/issues/12/sub_issues?per_page=100'])
+    expect(f.calls[0]).not.toContain('-X')
+  })
+  it('reports a failed read', async () => {
+    const f = fake(() => ({ code: 1, stdout: 'Not Found' }))
+    expect(await new GitHub(f.run).subIssues({ repo: null, number: 1 })).toEqual({ ok: false, message: 'Not Found' })
+  })
+})
+
 describe('GitHub.teamPrPages', () => {
   const empty = JSON.stringify({ data: { search: { nodes: [], pageInfo: { hasNextPage: false } } } })
   it("searches the given owner as its type (an account's), else the config's owner as before", async () => {

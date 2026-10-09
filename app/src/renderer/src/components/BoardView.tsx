@@ -95,11 +95,14 @@ import {
   claudePrompt,
   ClaudeMark,
   NewTicketDialog,
+  settingsFrom,
   type TicketContext,
 } from "./NewTicket";
 import { TerminalView } from "./TerminalView";
 import { SessionAccount } from "./AccountBits";
 import type { NewTicket } from "@shared/ipc";
+import type { TicketSettings } from "@shared/ticketSettings";
+import { TicketSettingsBar } from "./TicketSettingsBar";
 import { whileBusy } from "@shared/busy";
 
 interface Props {
@@ -690,23 +693,28 @@ export function BoardView({
     ? (ticketDefaults(state, ctxFor("Todo")).repo.split("/")[1] ?? "")
     : "";
   // `restart`: a new conversation. Otherwise an open session keeps going: its context.json now
-  // says where this + was, and what was typed in the dialog is sent to it as a message.
+  // says where this + was, and what was typed in the dialog is sent to it as a message. The
+  // settings bar starts from there too (the dialog's picks, else the column, filters and sprint);
+  // New chat keeps what the bar holds (`keep`).
   const openClaude = async (
     picked: TicketContext,
     draft?: NewTicket,
     restart = false,
+    keep?: TicketSettings,
   ) => {
     // Two or more accounts: the tab's session works as the tab's account, and creates as it too.
     const ctx = multi ? { ...picked, account: acct ?? undefined } : picked;
+    const settings = keep ?? settingsFrom(state, ctx, draft);
     const r = await deck().ticketBuilderPrepare({
       ...ctx,
       ...(draft ? { draft } : {}),
+      settings,
     });
     if (!r.ok) return setMoveMsg(r.message);
     setTicketCtx(null);
     const prompt = claudePrompt(ctx.status, draft);
     if (claude && !restart) {
-      setClaude({ ...claude, ctx });
+      setClaude({ ...claude, ctx, draft, settings });
       if (prompt) {
         deck().ptyWrite(ticketPaneId(claudeKey, claude.gen), prompt);
         setTimeout(
@@ -722,8 +730,22 @@ export function BoardView({
       resume: !restart && !prompt && r.canContinue,
       prompt,
       ctx,
+      draft,
+      settings,
       ...(acct ? { account: acct } : {}),
     });
+  };
+  // A change in the settings bar: context.json is rewritten now, so the next ticket gets it (the
+  // session goes on; MasterDeck reads the bar at each create).
+  const changeBar = async (settings: TicketSettings) => {
+    if (!claude) return;
+    setClaude({ ...claude, settings });
+    const r = await deck().ticketBuilderPrepare({
+      ...claude.ctx,
+      ...(claude.draft ? { draft: claude.draft } : {}),
+      settings,
+    });
+    if (!r.ok) setMoveMsg(r.message);
   };
   const closeClaude = () => closeClaudeOf(claudeKey);
   const dragPanel = (e: React.MouseEvent) => {
@@ -1237,7 +1259,7 @@ export function BoardView({
                         moving={!!moving[ticketKey(c.repo, c.number)]}
                         readOnly={!canMove(c, worked)}
                         onClick={() => onCard(c)}
-                        noted={!!ticketNote(notes ?? [], c.repo, c.number)}
+                        note={ticketNote(notes ?? [], c.repo, c.number)}
                         onNote={
                           onNote && can("notesList")
                             ? () => onNote(ticketOf(c))
@@ -1325,20 +1347,15 @@ export function BoardView({
                 <ClaudeMark /> Tickets with Claude
               </b>
               <SessionAccount login={multi ? claude.account : null} />
-              <span
-                className="muted small"
-                title="Where new tickets go; + on another column changes it"
-              >
-                {claude.ctx.status || "no board"}
-                {claude.ctx.tab ? ` · ${claude.ctx.tab}` : ""}
-                {claude.ctx.sprint && claude.ctx.sprint !== "none"
-                  ? ` · ${claude.ctx.sprint === "@current" ? "current sprint" : claude.ctx.sprint}`
-                  : ""}
-              </span>
+              {claude.ctx.tab && (
+                <span className="muted small">{claude.ctx.tab}</span>
+              )}
               <span style={{ flex: 1 }} />
               <button
                 className="btn"
-                onClick={() => void openClaude(claude.ctx, undefined, true)}
+                onClick={() =>
+                  void openClaude(claude.ctx, undefined, true, claude.settings)
+                }
                 title="Start a new conversation"
               >
                 New chat
@@ -1368,11 +1385,18 @@ export function BoardView({
                 focusOnShow
               />
             </div>
+            {claude.settings && (
+              <TicketSettingsBar
+                state={state}
+                account={multi ? claude.account : undefined}
+                value={claude.settings}
+                onChange={(s) => void changeBar(s)}
+              />
+            )}
             <div className="wf-builder-tip muted">
               Describe what you need (“a bug: report sharing fails for B2B
-              orgs”, “split this into tickets…”). It creates them on the board,
-              in the column you clicked, with the tab's people, labels and
-              sprint.
+              orgs”, “split this into tickets…”). It creates them with the
+              settings above.
             </div>
           </aside>
         </>
@@ -1386,6 +1410,10 @@ type TicketSession = {
   resume: boolean;
   prompt?: string;
   ctx: TicketContext;
+  /** What was typed in the dialog, when it came from there (kept in context.json across bar changes). */
+  draft?: NewTicket;
+  /** The settings bar: what every ticket it creates gets (absent on a session kept from before it). */
+  settings?: TicketSettings;
   /** The tab's account it runs as (two or more accounts). */
   account?: string;
 };
@@ -1409,7 +1437,7 @@ function Card({
   moving,
   readOnly,
   onClick,
-  noted,
+  note,
   onNote,
 }: {
   card: BoardCard;
@@ -1421,8 +1449,8 @@ function Card({
   /** An issue of an account with no board: it cannot be dragged to another column. */
   readOnly: boolean;
   onClick: () => void;
-  /** This ticket has a note. */
-  noted: boolean;
+  /** The ticket's note (its plain one-line preview shows on hover). */
+  note: NoteMeta | null;
   /** Open the ticket's note (absent: Notes is not available here). */
   onNote?: () => void;
 }) {
@@ -1479,9 +1507,9 @@ function Card({
         <span style={{ flex: 1 }} />
         {onNote && (
           <button
-            className={`bcard-note ${noted ? "has" : ""}`}
-            title={noted ? "Open the note" : "Add a note"}
-            aria-label={noted ? "Open the note" : "Add a note"}
+            className={`bcard-note ${note ? "has" : ""}`}
+            title={note ? (note.preview ? `Note: ${note.preview}` : "Open the note") : "Add a note"}
+            aria-label={note ? "Open the note" : "Add a note"}
             draggable={false}
             // A press on the mark must not start the draggable card's drag.
             onDragStart={(e) => {

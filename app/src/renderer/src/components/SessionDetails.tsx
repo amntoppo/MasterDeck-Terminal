@@ -18,6 +18,7 @@ import { deck, useNow } from "../deck";
 import { ticketNote } from "../notes";
 import type { NoteMeta } from "@shared/notes";
 import { can } from "../web";
+import { toggleStar, useStars } from "../stars";
 import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { MonitorWidget } from "./MonitorWidget";
@@ -57,6 +58,7 @@ export function SessionDetails({
   const [peersOpen, setPeersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const since = useStateSince(s);
+  const starred = useStars().includes(s.key);
   const status = sessionStatus(
     s,
     state.prStage[s.key],
@@ -169,6 +171,17 @@ export function SessionDetails({
             <span className="muted"> ▾</span>
           </button>
           <span style={{ flex: 1 }} />
+          {s.state !== "done" && s.state !== "suspended" && (
+            <button
+              className={`d-star ${starred ? "on" : ""}`}
+              aria-pressed={starred}
+              aria-label={starred ? "Unstar this session" : "Star this session"}
+              title={starred ? "Unstar: back to its status group in the sidebar" : "Star: keep it in Starred at the top of the sidebar"}
+              onClick={() => toggleStar(s.key)}
+            >
+              {starred ? "★ Starred" : "☆ Star"}
+            </button>
+          )}
           {hook?.compacting && <span className="d-tag">Compacting…</span>}
           {note && <span className="d-note">{note}</span>}
         </div>

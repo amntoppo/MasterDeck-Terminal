@@ -130,6 +130,7 @@ import {
   type RestoreFile,
 } from "@shared/restore";
 import { totalOf, type Tokens, type TokensByDay } from "@shared/tokens";
+import type { HoursSource } from "@shared/hours";
 import {
   pastByIssue,
   type PastSession,
@@ -507,6 +508,41 @@ export class Sources {
     );
   }
 
+  /**
+   * When these sessions were active since `since` (the Costs view's Hours), with what finds each
+   * one's account: its key, folder and ticket. A session with nothing since then is left out.
+   */
+  async hoursActivity(
+    sessionIds: string[],
+    since: number,
+  ): Promise<Record<string, HoursSource>> {
+    const ids = sessionIds.filter(
+      (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
+    );
+    const spans = await this.tokenIndex.activity(ids);
+    const out: Record<string, HoursSource> = {};
+    for (const [id, all] of Object.entries(spans)) {
+      const s = all.filter(([, end]) => end >= since);
+      if (!s.length) continue;
+      const rec = this.costBook[id];
+      out[id] = {
+        spans: s,
+        ticket:
+          rec && rec.issue !== null ? { repo: rec.issueRepo ?? null } : null,
+        key:
+          rec?.key ??
+          this.rawSessions.find((x) => x.sessionId === id)?.key ??
+          id.slice(0, 8),
+        cwd:
+          this.stats[id]?.currentDir ??
+          this.tails[id]?.cwd ??
+          this.transcriptInfo(id)?.cwd ??
+          null,
+      };
+    }
+    return out;
+  }
+
   /** The sessions of the last `claude agents` scan; null until one succeeded. */
   sessionsNow(): Session[] | null {
     return this.isHealthy("agents") ? this.rawSessions : null;
@@ -789,6 +825,21 @@ export class Sources {
 
   /** Send the state again now (after an inbox action). */
   changed(): void {
+    this.emit();
+  }
+
+  /**
+   * The PR watch saw this PR merged or closed: read it again now, past the gh cache, so its
+   * session's lane moves at once instead of on the next review poll (up to minutes later).
+   */
+  async prEnded(url: string): Promise<void> {
+    if (this.prLive[url] && this.prLive[url].state !== "OPEN") return;
+    const r = await this.gh(["pr", "view", url, ...PR_VIEW_ARGS], { timeoutMs: 20_000, force: true });
+    this.noteBinary("gh", r.code);
+    if (this.githubPaused(ghErrorText(r))) return;
+    const pr = r.code === 0 ? parsePrView(r.stdout) : null;
+    if (!pr) return;
+    this.prLive[url] = pr;
     this.emit();
   }
 
@@ -2474,6 +2525,11 @@ export class Sources {
 
   isHealthy(name: string): boolean {
     return this.health[name] === "ok";
+  }
+
+  /** A source's health and, when it failed, why. */
+  sourceHealth(name: string): { health: SourceHealth | undefined; error: string | undefined } {
+    return { health: this.health[name], error: this.errors[name] };
   }
 }
 

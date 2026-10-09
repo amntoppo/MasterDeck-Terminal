@@ -206,7 +206,7 @@ a tab open is still to be measured (TODO).
 | `npm test` / `npm run dev` crash in node-pty (wrong architecture, x86_64) | `cd app && npx electron-builder install-app-deps` (needed after every packaging build) |
 | `electron-builder` fails or DMG build dies | disk space: `rm -rf app/dist`; a DMG build needs ~1.5 GB free |
 | `remote.drift.test.ts` fails | the backend checkout is on a branch whose `src/protocol.ts` differs (or `remote.ts` was hand-edited). Check out backend `master` (or the matching branch) or run `app/scripts/sync-protocol.sh`; set `MASTERDECK_BACKEND` if the backend lives elsewhere. Missing checkout = skipped |
-| Remote stuck on "waiting for sessions to load" | `claude agents --json` is failing (see TODO); run it by hand |
+| Remote stuck on "waiting for sessions to load" | `claude agents --json` is failing (the status says why when it errors); run it by hand. After 60 s the line connects anyway; commands then fail at once with "MasterDeck has no session list: …" and no snapshot is sent until the session list is in |
 | "Another Mac is connected to this account" | close 4005: only one Mac per account; sign the other out |
 | Notifications never show | the bundle needs a whole-bundle (ad-hoc) signature; reinstall from a fresh build |
 | `install-mac.sh` says MasterDeck is running | quit it and wait for `pgrep` to be empty |

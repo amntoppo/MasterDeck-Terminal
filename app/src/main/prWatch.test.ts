@@ -264,10 +264,13 @@ describe('PrWatch', () => {
   })
   it('ends on merge (after telling the session), and never restarts on a stale OPEN', async () => {
     const { gh } = fakeGh(() => ({ ...lightPr, state: 'MERGED' }))
-    const { w, sent } = make(gh)
+    const ended: string[] = []
+    const { w, sent } = make(gh, undefined, false, { ended: (u) => ended.push(u) })
     const st = one(NOW)
     w.sync(st, () => true, NOW)
     await w.poll(NOW)
+    // The session's lane hears of it at once (Sources reads the PR again).
+    expect(ended).toEqual([url(1)])
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toEqual(['[MasterDeck PR watch] web#1: merged. The PR watch has ended.'])

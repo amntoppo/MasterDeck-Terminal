@@ -4,11 +4,12 @@ import { deck } from "../deck";
 
 /**
  * Markdown as GitHub shows it in an issue, drawn from `parseMarkdown`'s tree: React elements only,
- * never HTML built from the text. A link opens in the browser; an image that does not load (a
- * private repository's upload needs a login the app does not have) becomes a link to it.
+ * never HTML built from the text. `html: false` (notes) reads no tag at all. A link opens in the
+ * browser; an image that does not load (a private repository's upload needs a login the app does
+ * not have) becomes a link to it.
  */
-export function MarkdownView({ text, className }: { text: string; className?: string }) {
-  const blocks = useMemo(() => parseMarkdown(text), [text]);
+export function MarkdownView({ text, className, html = true }: { text: string; className?: string; html?: boolean }) {
+  const blocks = useMemo(() => parseMarkdown(text, { html }), [text, html]);
   return <div className={`mdv${className ? ` ${className}` : ""}`}>{blocks.map(block)}</div>;
 }
 

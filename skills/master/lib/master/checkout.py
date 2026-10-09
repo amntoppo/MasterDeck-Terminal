@@ -1,5 +1,6 @@
-"""Where a ticket's session starts: the checkout of the ticket's repository when there is one under
-its account's workspace, else that workspace. The one place that decides it: master's ASSIGN
+"""Where a ticket's session starts: the checkout of the repository its code lives in (the ticket's
+own, unless Setup says another) when there is one under its account's workspace, else that
+workspace. The one place that decides it: master's ASSIGN
 proposals (`rules._assign`), the app's Start dialog (`master draft-assign`), its PR review sessions
 (`master checkout`), and `master add` / `master spawn` for ticket work that names no folder.
 
@@ -169,35 +170,41 @@ def _named(ws: str, full: str) -> "str | None":
     return None
 
 
-def resolve(repo: "str | None", cwd: "str | None" = None, cfg: "dict | None" = None) -> dict:
+def resolve(repo: "str | None", cwd: "str | None" = None, cfg: "dict | None" = None,
+            account: "str | None" = None, mapped: bool = True) -> dict:
     """Where a session for a ticket in `repo` starts (None = the primary issue repo).
-    `cwd`: the checkout when `found`, else the account's `workspace`. A folder the user chose is
-    passed as `cwd` and used as it is; `found` then says whether it is a checkout of the repo.
-    Not found after a search that hit a limit: also `partial` and `searched` (folders looked at)."""
-    full = repo or config.primary_repo(cfg)
-    ws = str(config.workspace_for(repo, cfg))
+    The repository looked for is where the issue's code lives (`config.code_repo`, Setup's "code
+    lives in"; `mapped` False: `repo` itself, as for a PR's repository), in the workspace of the
+    account the session runs as (`account`, else `config.start_account`'s).
+    `cwd`: the checkout when `found`, else that `workspace`. `repo`: the repository looked for;
+    `filedIn`: the issue's, only when that is another. A folder the user chose is passed as `cwd`
+    and used as it is; `found` then says whether it is a checkout of the repo. Not found after a
+    search that hit a limit: also `partial` and `searched` (folders looked at)."""
+    filed = repo or config.primary_repo(cfg)
+    full = config.code_repo(filed, cfg) if mapped else filed
+    ws = str(config.workspace_for(filed, cfg, account, mapped))
+    base = {"workspace": ws, "repo": full, **({"filedIn": filed} if full != filed else {})}
     if cwd:
-        return {"cwd": cwd, "workspace": ws, "repo": full,
-                "found": bool(full) and (config.origin_repo(cwd) or "").lower() == full.lower()}
+        return {"cwd": cwd, **base, "found": bool(full) and (config.origin_repo(cwd) or "").lower() == full.lower()}
     if not full:
-        return {"cwd": ws, "workspace": ws, "repo": full, "found": False}
+        return {"cwd": ws, **base, "found": False}
     hit = _named(ws, full)
     if hit:
-        return {"cwd": hit, "workspace": ws, "repo": full, "found": True}
+        return {"cwd": hit, **base, "found": True}
     got = scan(ws)
     hit = got["repos"].get(full.lower())
-    out = {"cwd": hit or ws, "workspace": ws, "repo": full, "found": bool(hit)}
+    out = {"cwd": hit or ws, **base, "found": bool(hit)}
     if not hit and got["partial"]:
         out.update(partial=True, searched=got["searched"])
     return out
 
 
-def default_cwd(kind: str, issue, repo: "str | None") -> str:
+def default_cwd(kind: str, issue, repo: "str | None", account: "str | None" = None) -> str:
     """The folder of a proposal that names none: ticket work (an ASSIGN or a PR review for a real
-    issue) starts where `resolve` says; anything else (a meeting, a chat, issue 0) in the
-    workspace, as it always did."""
+    issue) starts where `resolve` says (in `account`'s workspace when the proposal names one);
+    anything else (a meeting, a chat, issue 0) in the workspace, as it always did."""
     if kind in TICKET_KINDS and isinstance(issue, int) and issue > 0:
-        return resolve(repo)["cwd"]
+        return resolve(repo, account=account)["cwd"]
     return str(config.workspace())
 
 

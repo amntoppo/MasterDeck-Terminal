@@ -90,6 +90,16 @@ export interface AppConfig {
   accounts: AccountConfig[]
   /** Linked sessions: `auto: false` stops summarizing a linked session on every Stop (Sync now still works). No UI. */
   peerSync?: { auto?: boolean }
+  /** Setup's "code lives in": issues filed in `issues` are built in `code` (a tracker and its code
+   * repository). A ticket's session starts in `code`'s checkout, as its account. Absent: none. */
+  codeRepos?: CodeRepo[]
+}
+
+export interface CodeRepo {
+  /** owner/name the issues are filed in. */
+  issues: string
+  /** owner/name their code is in. */
+  code: string
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -232,6 +242,16 @@ function parseAccounts(v: unknown): AccountConfig[] {
   return out
 }
 
+/** The "code lives in" pairs: both owner/name, not the same repository, one per issue repository (the first). */
+export function parseCodeRepos(v: unknown): CodeRepo[] {
+  const out: CodeRepo[] = []
+  for (const e of (Array.isArray(v) ? v : []).map(obj)) {
+    const issues = str(e.issues, ''), code = str(e.code, '')
+    if (REPO.test(issues) && REPO.test(code) && low(issues) !== low(code) && !out.some((x) => low(x.issues) === low(issues))) out.push({ issues, code })
+  }
+  return out
+}
+
 /** `master config show` output (or anything like it) to an AppConfig, defaults filling gaps. */
 export function parseConfig(raw: unknown): AppConfig {
   const top = obj(raw)
@@ -288,6 +308,7 @@ export function parseConfig(raw: unknown): AppConfig {
     allProjects: c.allProjects === true || accounts.some((a) => a.allProjects),
     accounts,
     ...(typeof obj(c.peerSync).auto === 'boolean' ? { peerSync: { auto: obj(c.peerSync).auto as boolean } } : {}),
+    ...(parseCodeRepos(c.codeRepos).length ? { codeRepos: parseCodeRepos(c.codeRepos) } : {}),
   }
 }
 
@@ -307,6 +328,12 @@ export function projectByKey(key: string | null | undefined, c: AppConfig = curr
 /** A board's own status meanings; the config's (first board's) for a card with no known board. */
 export function statusesFor(key: string | null | undefined, c: AppConfig = current): StatusMap {
   return projectByKey(key, c)?.statuses ?? c.statuses
+}
+
+/** Where the code of an issue in `repo` lives (null = the primary repo): Setup's "code lives in", else `repo`. The CLI's `config.code_repo`. */
+export function codeRepoOf(repo: string | null | undefined, c: AppConfig = current): string {
+  const full = repo || primaryRepo(c)
+  return (full && c.codeRepos?.find((x) => low(x.issues) === low(full))?.code) || full
 }
 
 /** Is a ticket in this repo one of ours? Every repo after "Select all". */

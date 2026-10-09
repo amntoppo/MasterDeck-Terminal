@@ -6,11 +6,13 @@ import type {
 } from "./boardCreate";
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
+import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
+import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { HookEntry } from "./workflow";
@@ -165,6 +167,7 @@ export const CH = {
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
+  issueSubIssues: "issue:subIssues",
   shellPrepare: "shell:prepare",
   ticketMemory: "ticket:memory",
   assignIssue: "issue:assign",
@@ -210,6 +213,8 @@ export const CH = {
   accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
+  hoursActivity: "costs:hoursActivity",
+  hoursExport: "costs:hoursExport",
   dismissStopped: "session:dismissStopped",
   boardOpen: "board:open",
   boardRepos: "board:repos",
@@ -290,12 +295,14 @@ export interface DeckApi {
   onShowInboxItem(cb: (id: string) => void): () => void;
   approve(id: number): Promise<CliResult>;
   reject(id: number): Promise<CliResult>;
-  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app). */
+  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app).
+   * `account`: another connected account than the ticket's: its workspace is looked in. */
   draftAssign(
     issue: Ticket,
     title?: string,
     url?: string,
     cwd?: string,
+    account?: string,
   ): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>;
   setSprint(sprint: string): void;
   /** What earlier sessions on a ticket did (their saved summaries), newest first. */
@@ -308,6 +315,10 @@ export interface DeckApi {
   issueBody(
     ticket: Ticket,
   ): Promise<{ ok: true; body: string } | { ok: false; message: string }>;
+  /** An issue's sub-issues, for the Board's popups (Assign and Start session). A read. */
+  issueSubIssues(
+    ticket: Ticket,
+  ): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }>;
   prSummary(
     url: string,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;
@@ -432,6 +443,10 @@ export interface DeckApi {
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
+  /** When each of these sessions was active since `since` (epoch ms; sessions with nothing since left out), and the account its time goes to (the Costs view's Hours; the window only). */
+  hoursActivity(sessionIds: string[], since: number): Promise<Record<string, SessionActivity>>;
+  /** Save this CSV where the user picks (a save dialog, `name` its suggested file name); the path, or null when cancelled. */
+  hoursExport(csv: string, name: string): Promise<string | null>;
   dismissStopped(): Promise<void>;
   /**
    * Who can be assigned an issue of this repository (none: the primary issue repo), read as the
