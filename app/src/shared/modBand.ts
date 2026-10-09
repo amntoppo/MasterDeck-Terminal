@@ -1,6 +1,6 @@
 import { primaryLogin } from './accounts'
 import type { AppConfig } from './appConfig'
-import { tabBoard } from './derivedBoard'
+import { boardless, tabBoard } from './derivedBoard'
 import { sameTicket, ticketLabel, ticketRef, ticketUrl } from './ticket'
 import type { AppState, Board, Session } from './types'
 
@@ -239,11 +239,13 @@ export function modBoard(board: Board | null, key: string, c: AppConfig): ModBoa
   const names = [...b.columns]
   const loose = b.cards.filter((x) => !x.status || !names.includes(x.status))
   if (loose.length) names.push('No status')
+  // An account with no GitHub board: MasterDeck's columns, and no sprint (that is another board's).
+  const derived = boardless(login, c)
   return {
     v: 1,
     account: login,
-    sprint: b.sprint,
-    derived: b.cards.length > 0 && b.cards.every((x) => x.derived),
+    sprint: derived ? null : b.sprint,
+    derived,
     columns: names.map((name) => {
       const cards = name === 'No status' ? loose : b.cards.filter((x) => x.status === name)
       return {

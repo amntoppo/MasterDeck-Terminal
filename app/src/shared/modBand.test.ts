@@ -92,6 +92,12 @@ describe('modBoard', () => {
     expect(modBoard(null, '_', boarded)).toBeNull()
   })
 
+  it('says when the account has no GitHub board, with no sprint', () => {
+    setConfig(cfg)
+    const b = modBoard({ takenAt: null, sprint: 'Sprint 7', columns: ['Todo'], cards: [] }, '_', cfg)!
+    expect([b.derived, b.sprint, b.columns.map((x) => x.name)]).toEqual([true, null, ['Todo', 'In Dev', 'PR Raised', 'Done']])
+  })
+
   it('lists at most 30 cards a column, and counts them all', () => {
     setConfig(boarded)
     const cards = Array.from({ length: 45 }, (_, i) => card(i + 1, 'Todo'))
