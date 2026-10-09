@@ -522,6 +522,8 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .status-row span { flex: 1; color: var(--muted); }
 .status-more { margin-top: 8px; font-size: 12px; }
 .status-more summary { cursor: pointer; color: var(--accent); }
+.code-repo-row { align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.code-repo-row input { flex: 1; min-width: 140px; }
 .status-more .tbl td input { width: auto; }
 .small { font-size: 11.5px; }
 .setup-summary, .skill-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }

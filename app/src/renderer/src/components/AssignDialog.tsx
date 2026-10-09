@@ -7,9 +7,9 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import { composePrompt, earlierBlock, peersPromptBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
 import { formatAgo } from "@shared/format";
-import { defaultAccount, accountOverride, resumeAccount } from "@shared/accounts";
+import { startAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
-import { adoptFresh, folderKind, folderOf, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
+import { adoptFresh, folderKind, folderOf, refindOnAccount, startChoice, swapPrompt as swapped, type StartFolder } from "@shared/startFolder";
 import { startBlocked, startFlags, trustHeldAssign } from "@shared/trust";
 import { baseError, branchError, parsePrefs, PERMISSION_MODES, prefsKey, ticketBranch, worktreeDir, worktreeNote, type StartPrefs } from "@shared/startOptions";
 import { AccountBadge, AccountSelect } from "./AccountBits";
@@ -88,8 +88,9 @@ export function AssignDialog({
   const [configuredModel, setConfiguredModel] = useState<string | null>(null);
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState(prefs?.workflow ?? "default");
-  // The issue's account by default; picking another starts (or resumes) as that one.
-  const defAccount = defaultAccount({ issue: { repo: issue.repo ?? null } }, state.config);
+  // The account of the repository the ticket's code is in (else the issue's) by default; picking
+  // another starts (or resumes) as that one, and its workspace is looked in for the folder.
+  const defAccount = startAccount(issue.repo ?? null, state.config);
   const [account, setAccount] = useState<string | null>(defAccount);
   const [accountPicked, setAccountPicked] = useState(false);
   const override = accountOverride(account, defAccount, state.config);
@@ -151,6 +152,18 @@ export function AssignDialog({
     const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, p);
     if (!r.ok || chosenPath.current !== p || r.draft.cwd !== p) return;
     setFolder(folderOf(r.draft));
+    swapPrompt(r.draft);
+  };
+  // Another account picked: the folder is looked for again in its workspace (the latest pick wins).
+  const refinding = useRef(0);
+  const refind = async (login: string | null) => {
+    if (!refindOnAccount(folder, chosen, !!held)) return;
+    const n = ++refinding.current;
+    const other = accountOverride(login, defAccount, state.config);
+    const r = await deck().draftAssign(ticketOf(issue), issue.title, issue.url, undefined, other ?? undefined);
+    if (!r.ok || n !== refinding.current || chosenPath.current) return;
+    setFolder(folderOf(r.draft));
+    setAnyway(false);
     swapPrompt(r.draft);
   };
   // Stopped sessions that worked on this issue, newest first; resuming continues one instead.
@@ -711,6 +724,7 @@ export function AssignDialog({
                   <AccountSelect state={state} value={account} onChange={(l) => {
                       setAccount(l);
                       setAccountPicked(true);
+                      void refind(l);
                     }}
                   />
                 </div>
@@ -982,14 +996,16 @@ function StartFolderLine({
           </>
         ) : kind === "missing" ? (
           <>
-            No checkout of {folder.checkoutOf} found in{" "}
+            No checkout of {folder.checkoutOf}
+            {folder.filedIn ? <> (where {folder.filedIn}'s code lives)</> : null} found in{" "}
             <code className="mono">{folder.workspace || folder.cwd}</code>. The
             session starts in that folder and has to find the repository
             itself.
           </>
         ) : kind === "found" ? (
           <>
-            Starts in {dir}, your checkout of {folder.checkoutOf}.
+            Starts in {dir}, your checkout of {folder.checkoutOf}
+            {folder.filedIn ? <> (where {folder.filedIn}'s code lives)</> : null}.
           </>
         ) : kind === "chosen-found" ? (
           <>

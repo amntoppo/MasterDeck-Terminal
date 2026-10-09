@@ -115,10 +115,11 @@ export class MasterCli {
   /**
    * With title and url (a board card), no snapshot lookup is needed. The draft's folder is the
    * ticket's repository's checkout under its account's workspace, else that workspace (the CLI's
-   * `checkout.resolve`); `cwd`: a folder the user chose instead.
+   * `checkout.resolve`); `cwd`: a folder the user chose instead. `account`: another account than
+   * the ticket's (the Start dialog's pick): its workspace is looked in.
    */
-  async draftAssign(t: Ticket, title?: string, url?: string, cwd?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
-    const extra = [...(title && url ? ['--title', title, '--url', url] : []), ...(cwd ? ['--cwd', cwd] : [])]
+  async draftAssign(t: Ticket, title?: string, url?: string, cwd?: string, account?: string): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }> {
+    const extra = [...(title && url ? ['--title', title, '--url', url] : []), ...(cwd ? ['--cwd', cwd] : []), ...(account ? ['--account', account] : [])]
     const r = await this.exec(['draft-assign', String(t.number), ...(t.repo ? ['--repo', t.repo] : []), ...extra], undefined, 120_000)
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
@@ -129,10 +130,11 @@ export class MasterCli {
     }
   }
 
-  /** `master checkout <owner/name>`: where a session for that repository starts (its checkout, else its account's workspace). */
-  async checkout(repo: string): Promise<{ ok: true; cwd: string; workspace: string; found: boolean; trusted: boolean | null } | { ok: false; message: string }> {
+  /** `master checkout <owner/name>`: where a session for that repository starts (its checkout, else
+   * the workspace of `account`, the one the session runs as; omitted: the repository's account's). */
+  async checkout(repo: string, account?: string | null): Promise<{ ok: true; cwd: string; workspace: string; found: boolean; trusted: boolean | null } | { ok: false; message: string }> {
     if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(repo)) return { ok: false, message: 'not a repository (owner/name)' }
-    const r = await this.exec(['checkout', repo])
+    const r = await this.exec(['checkout', repo, ...(account ? ['--account', account] : [])])
     if (r.code !== 0) return { ok: false, message: message(r) }
     try {
       const d = JSON.parse(r.stdout)

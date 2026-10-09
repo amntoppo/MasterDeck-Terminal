@@ -140,13 +140,22 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   Mac, not in the web app) picks any other folder for this session; if it is a checkout of the
   repository the prompt says so. The prompt changes with the folder only while it is MasterDeck's
   own text: one you edited, or one master wrote for its proposal, is left alone. With two or more
-  accounts the line also says who the session runs as. A ticket with no repository of its own is
-  looked up as the primary repository.
+  accounts the line also says who the session runs as, and the folder is looked for in that
+  account's workspace: picking another **Account** looks again in the picked account's workspace
+  (not after **Choose folder…**, and not for a refused start being tried again). A ticket with no
+  repository of its own is looked up as the primary repository.
+  **Issues built in another repository** (an issue tracker whose code lives elsewhere): add the pair
+  in Setup → Repos & boards, under **Issues whose code is in another repository** (issues filed in
+  `acme/tracker`, code in `acme/api`). A ticket of the tracker then starts in the checkout of
+  `acme/api`, as the account that has `acme/api` (else the tracker's), and the line says "your
+  checkout of acme/api (where acme/tracker's code lives)". The system prompt names the code
+  repository instead of asking the session to find it.
   For master's proposal the dialog looks the ticket up again: a checkout that exists now replaces
   the proposal's folder only when that folder is the plain workspace (a folder master chose on
   purpose stays), and the new proposal keeps the proposal's model; when nothing differs, master's
   own proposal is approved as it is. master's ASSIGN proposals and a PR's **Start review** (for the
-  PR's repository) pick the folder the same way, and so does `master add` without `--cwd` for an
+  PR's repository, as the PR's repository's account: it reads and pushes there; the card's issue
+  repository's account only when no account has the PR's) pick the folder the same way, and so does `master add` without `--cwd` for an
   ASSIGN or a PR review of a real issue; a meeting's session and any other kind start in the
   workspace, as before.
 - **The PR of the folder's branch:** a session working by hand in a repository's main checkout on a
@@ -900,7 +909,8 @@ is a `gh` login (`gh auth status` lists them).
   the + menu's repos and standup cover every account's workspace.
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
-  accounts): it defaults to the issue's repository's account, else the folder's `origin`, else the
+  accounts): it defaults to the account of the repository the issue's code is in (the issue's own
+  unless Setup says another), else the issue's repository's, else the folder's `origin`, else the
   primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog: that starts a copy of the conversation as the new account (a running session is

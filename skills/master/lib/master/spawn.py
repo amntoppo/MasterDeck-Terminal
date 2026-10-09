@@ -133,7 +133,7 @@ def default_account(led: dict, p: dict, cwd: str) -> "str | None":
         origin = config.match_repo(repo) if repo else None
         if origin:
             return origin
-    return config.account_for_repo(p.get("repo"))
+    return config.start_account(p.get("repo"))
 
 
 _COPY = re.compile(r"background session ([0-9a-f]{8}) keeps its own saved options[^\n]*?started a copy as ([0-9a-f]{8})\b")
@@ -227,7 +227,7 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run, held_for_trus
     sp0 = p["target"]["spawn"]
     # No folder: ticket work starts where the resolver says; a resume and anything else in the workspace.
     cwd = sp0.get("cwd") or (str(config.workspace()) if sp0.get("resume")
-                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo")))
+                             else checkout.default_cwd(p["kind"], p["issue"], p.get("repo"), sp0.get("account")))
     if not Path(cwd).is_dir():
         note = f"cwd does not exist: {cwd}"
         hold(note)

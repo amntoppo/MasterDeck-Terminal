@@ -1,4 +1,4 @@
-import { primaryRepo, projectKey, type AccountConfig, type AppConfig } from './appConfig'
+import { codeRepoOf, primaryRepo, projectKey, type AccountConfig, type AppConfig } from './appConfig'
 import { parsePrUrl } from './prSummary'
 
 /**
@@ -86,6 +86,17 @@ export function ticketAccount(picked: string | null | undefined, repo: string | 
 /** Board calls: the account whose boards include this one, else the primary. */
 export function accountForProject(key: string | null | undefined, c: AppConfig): string | null {
   return (key && c.accounts.find((a) => a.projects.some((p) => projectKey(p) === key))?.login) || primaryLogin(c)
+}
+
+/**
+ * A ticket session's account, and so the workspace its folder is looked for in: the account of the
+ * repository its code is in (it pushes there), else the issue's, else the primary. The code is a
+ * PR review's repository (`prRepo`), else Setup's "code lives in" for the issue's repository, else
+ * that repository. The CLI's `config.start_account`; the Start dialog shows it and main starts as it.
+ */
+export function startAccount(repo: string | null | undefined, c: AppConfig, prRepo?: string | null): string | null {
+  const code = prRepo || codeRepoOf(repo, c)
+  return (code ? matchRepo(code, c) : null) ?? matchRepo(repo, c) ?? primaryLogin(c)
 }
 
 /** A new session's account: the issue's repo, then the folder's `origin` remote, then the primary. */

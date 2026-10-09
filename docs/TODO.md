@@ -311,12 +311,13 @@ fixes it, and move the item here to "Recently done".
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
   checkout found" and starts in the workspace as before. Approach: when the workspace has a `.git`
   folder, also look at its parent's direct sub-folders.
-- **P3 · An issue tracked in one repository and built in another.** With the tracker cloned, the
-  session starts in the tracker's checkout; the prompt tells it to use the other repository under
-  the workspace (the workspace's CLAUDE.md may say which), without asking. Better: a per-repository
-  "code lives in" setting, or the issue's linked PRs, so it starts in the right checkout.
-- **P3 · Picking another account in the Start dialog keeps the folder** of the ticket's own
-  account's workspace. Decide whether the picked account's workspace should be looked in instead.
+- **P3 · "Code lives in" is set by hand.** Setup's pairs (#61) cover a tracker whose code is in one
+  repository. A tracker whose issues go to several repositories still starts in the tracker's
+  checkout (no pair) or always in the one paired repository. Possible next step: the issue's linked
+  PRs or branches, when it has any, before the pair.
+- **P3 · The Start dialog opened from master's proposal starts with the ticket's default account**,
+  not the account the proposal names (`sp.account`). Both come from the same rule now
+  (`start_account` / `startAccount`), so they differ only for a proposal written by hand.
 - **P3 · The scan is remembered per CLI process only** (60 s): each Start dialog and each sweep
   scans once (a stat per folder, a small file read per checkout; the folder named after the
   repository is found without a scan). If a large workspace makes that slow, keep the map in a file under `master_home()`
@@ -327,9 +328,6 @@ fixes it, and move the item here to "Recently done".
 - **P3 · An SSH alias without a user** (`github-acme:acme/api.git`) is not parsed by the shared
   origin parser (`config._REMOTE_RE`, the app's `repoFromRemote`), so such a checkout is not found
   and its sessions get no account from the folder either. Fix both parsers together.
-- **P3 · A PR review's folder follows the PR's repository, its account the card's issue
-  repository** (`cwdRepo` against `defaultAccount`). When they belong to different accounts the
-  session sits in one account's checkout as the other. Decide which one wins.
 - **P3 · `collect.Live.branch_head` still looks for local branches beside the top-level workspace
   only** (`config.workspace().parent`); another account's workspace falls back to the GitHub API.
 - **P3 · The web app has no Choose folder…** (the native picker is desktop-only, and main drops a
@@ -500,6 +498,7 @@ fixes it, and move the item here to "Recently done".
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Where a session starts, three decisions (issue #61): Setup's **Issues whose code is in another repository** pairs (`codeRepos`: a tracker's tickets start in the code repository's checkout, as its account, and the prompt names it); picking another account in the Start dialog looks for the folder in that account's workspace (`draft-assign --account`, not after Choose folder… or for a held start); a PR review runs as its PR's repository's account and is looked up in that account's workspace (`checkout --account`). One rule on both sides: `config.start_account` / `startAccount` | branch `worktree-MasterDeck-Terminal-61-start-folder` | — |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |

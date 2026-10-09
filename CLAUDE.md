@@ -356,7 +356,17 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-06)
+## Current state and next steps (2026-10-09)
+
+- **Where a session starts: three decisions (issue #61)** are built on branch
+  `worktree-MasterDeck-Terminal-61-start-folder` (not merged, not installed). One rule decides the
+  account a ticket's session runs as, and its workspace is where the folder is looked for:
+  `config.start_account` (Python) / `startAccount` (TS): the account of the repository the code is
+  in, else the issue's, else the primary. The code repository is a PR review's repository, else
+  Setup's **Issues whose code is in another repository** pair (`codeRepos`), else the issue's.
+  Picking another account in the Start dialog looks again in its workspace (`draft-assign
+  --account`); a PR review asks `master checkout --account`. Checked: the Python suite, typecheck,
+  vitest. Not checked: the isolated app on screen (Setup's pairs, the dialog's line after a pick).
 
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries

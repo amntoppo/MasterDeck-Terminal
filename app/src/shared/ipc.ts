@@ -290,12 +290,14 @@ export interface DeckApi {
   onShowInboxItem(cb: (id: string) => void): () => void;
   approve(id: number): Promise<CliResult>;
   reject(id: number): Promise<CliResult>;
-  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app). */
+  /** `cwd`: a folder the user chose (the desktop's folder picker; ignored from the web app).
+   * `account`: another connected account than the ticket's: its workspace is looked in. */
   draftAssign(
     issue: Ticket,
     title?: string,
     url?: string,
     cwd?: string,
+    account?: string,
   ): Promise<{ ok: true; draft: DraftAssign } | { ok: false; message: string }>;
   setSprint(sprint: string): void;
   /** What earlier sessions on a ticket did (their saved summaries), newest first. */

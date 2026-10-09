@@ -11,8 +11,10 @@ export interface StartFolder {
   workspace?: string
   /** `cwd` is a checkout of `checkoutOf`. */
   found?: boolean
-  /** owner/name of the ticket's repository. */
+  /** owner/name of the repository looked for: the ticket's, or the one its code lives in. */
   checkoutOf?: string
+  /** The ticket's own repository, when its code lives in `checkoutOf` (Setup's "code lives in"). */
+  filedIn?: string
   /** Not found, and the search stopped at a limit after this many folders: there may be one further on. */
   searched?: number
   /** Claude Code may work in `cwd` (see shared/trust.ts); null or missing: not known. */
@@ -25,6 +27,7 @@ export function folderOf(d: DraftAssign): StartFolder {
     ...(d.workspace ? { workspace: d.workspace } : {}),
     ...(typeof d.found === 'boolean' ? { found: d.found } : {}),
     ...(d.checkoutOf ? { checkoutOf: d.checkoutOf } : {}),
+    ...(d.filedIn ? { filedIn: d.filedIn } : {}),
     ...(d.partial && typeof d.searched === 'number' ? { searched: d.searched } : {}),
     ...(d.trusted === true || d.trusted === false || d.trusted === null ? { trusted: d.trusted } : {}),
   }
@@ -59,6 +62,16 @@ export function adoptFresh(proposalCwd: string, fresh: DraftAssign, top: string)
   if (bare(fresh.cwd) === p) return folderOf(fresh)
   const isWorkspace = (!!fresh.workspace && bare(fresh.workspace) === p) || (!!top && bare(top) === p)
   return fresh.found && isWorkspace ? folderOf(fresh) : { cwd: proposalCwd }
+}
+
+/**
+ * After another account is picked in the Start dialog: look for the folder again in that account's
+ * workspace (the session runs there as it), unless the folder is not the resolver's own answer: one
+ * the user chose, a held start's (its folder is the whole start), or a proposal's that names a
+ * folder of its own (`plain`).
+ */
+export function refindOnAccount(f: StartFolder | null, chosen: boolean, held: boolean): boolean {
+  return !!f && !chosen && !held && folderKind(f, false) !== 'plain'
 }
 
 /**
