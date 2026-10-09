@@ -22,6 +22,7 @@ import {
   parseMonitor,
   type MonitorDef,
   findMonitor,
+  LOOP_MEMBER_KINDS,
 } from "./flow";
 
 export const BUILDER_NAME = "md-workflow-builder";
@@ -115,20 +116,28 @@ export function normalizeDraft(raw: unknown): {
   flow: Flow;
   triggers: CustomTrigger[];
   monitors: MonitorDef[];
+  /** What the draft asked for that the format refused: a loop's members, an arrow's kind. */
+  dropped: string[];
 } {
   const o = obj(raw);
   const f = obj(o.flow ?? o);
   const ids = new Map<string, string>();
   const used = new Set<string>();
-  const nodes = (Array.isArray(f.nodes) ? f.nodes : []).map((n, i) => {
-    const r = obj(n);
-    let id = safeId(r.id, i);
-    while (used.has(id)) id = `${id.slice(0, 20)}-${i}`;
-    used.add(id);
-    ids.set(String(r.id ?? ""), id);
-    return { ...r, id };
-  });
-  const edges = (Array.isArray(f.edges) ? f.edges : []).map((e) => {
+  const nodes = (Array.isArray(f.nodes) ? f.nodes : []).map(
+    (n, i): Obj & { id: string } => {
+      const r = obj(n);
+      let id = safeId(r.id, i);
+      while (used.has(id)) id = `${id.slice(0, 20)}-${i}`;
+      used.add(id);
+      ids.set(String(r.id ?? ""), id);
+      return { ...r, id };
+    },
+  );
+  // A loop's members follow their blocks' safe ids, like arrows do (a member may come later).
+  for (const n of nodes)
+    if (n.kind === "loop" && Array.isArray(n.members))
+      n.members = n.members.map((m) => ids.get(String(m)) ?? String(m));
+  const edges = (Array.isArray(f.edges) ? f.edges : []).map((e): Obj => {
     const r = obj(e);
     return {
       ...r,
@@ -137,6 +146,38 @@ export function normalizeDraft(raw: unknown): {
     };
   });
   let flow = parseFlow({ nodes, edges });
+  // parseFlow quietly drops a member that may not repeat; the builder must hear why.
+  const droppedMembers: string[] = [];
+  for (const r of nodes) {
+    const loop = flow.nodes.find((n) => n.id === r.id);
+    if (loop?.kind !== "loop" || !Array.isArray(r.members)) continue;
+    for (const m of r.members as string[]) {
+      if (loop.members.includes(m)) continue;
+      const b = flow.nodes.find((n) => n.id === m);
+      droppedMembers.push(
+        `loop ${loop.id}: member ${m} was left out (${
+          !b
+            ? "no such block"
+            : b.kind === "loop"
+              ? "no loop in a loop"
+              : !(LOOP_MEMBER_KINDS as readonly string[]).includes(b.kind)
+                ? `a ${b.kind} block can't repeat: only ${LOOP_MEMBER_KINDS.join(", ")}`
+                : "it is already in another loop"
+        })`,
+      );
+    }
+  }
+  // An arrow kept with another kind than the draft gave: met / limit leave a loop only, a loop
+  // leaves through then / met / limit, and nothing but then leaves a trigger.
+  const kinds: string[] = [];
+  for (const r of edges) {
+    const want = typeof r.kind === "string" ? r.kind : "then";
+    const got = flow.edges.find((e) => e.from === r.from && e.to === r.to);
+    if (got && got.kind !== want)
+      kinds.push(
+        `arrow ${r.from} → ${r.to}: "${want}" isn't allowed there, read as "${got.kind}" (met and limit leave a loop; ok and fail leave an action)`,
+      );
+  }
   const placed = nodes.some(
     (n) =>
       typeof (n as Obj).x === "number" &&
@@ -157,6 +198,7 @@ export function normalizeDraft(raw: unknown): {
     flow,
     triggers,
     monitors,
+    dropped: [...droppedMembers, ...kinds],
   };
 }
 
@@ -224,7 +266,7 @@ export function checkDraft(
     monitors?: DraftMonitor[];
   } = {},
 ): DraftCheck {
-  const { flow, triggers } = normalizeDraft(raw);
+  const { flow, triggers, dropped: refused } = normalizeDraft(raw);
   const draftMons = (ctx.monitors ?? []).map((m) => m.def);
   const monLib = ctx.monitorLibrary ?? [];
   const f = obj(obj(raw).flow ?? raw);
@@ -237,8 +279,9 @@ export function checkDraft(
   const givenEdges = Array.isArray(f.edges) ? f.edges.length : 0;
   if (flow.edges.length < givenEdges)
     dropped.push(
-      `${givenEdges - flow.edges.length} arrow(s) were left out (unknown block, into a trigger, a loop or a duplicate)`,
+      `${givenEdges - flow.edges.length} arrow(s) were left out (unknown block, into a trigger, a cycle, a duplicate, or out of a loop's block: leave a loop through its met / limit / then arrows)`,
     );
+  dropped.push(...refused);
   const givenTriggers = Array.isArray(obj(raw).triggers)
     ? (obj(raw).triggers as unknown[]).length
     : 0;
@@ -402,7 +445,7 @@ Only write in this folder (\`draft.json\`, \`skills/\`, \`monitors/\`). Don't ed
   name?: string            // a suggested template name
   flow: {
     nodes: Node[]
-    edges: { from: string; to: string; kind: 'then' | 'ok' | 'fail' }[]
+    edges: { from: string; to: string; kind: 'then' | 'ok' | 'fail' | 'met' | 'limit' }[]
   }
   triggers?: CustomTrigger[]   // new triggers this workflow uses (see "Creating triggers")
   monitors?: Monitor[]         // new monitors it arms (see "Creating monitors")
@@ -414,6 +457,10 @@ type Node =
   | { id: string; kind: 'notify'; text: string }
   | { id: string; kind: 'builtin'; builtin: 'ticket' | 'pr-review' | 'pr-watch' }
   | { id: string; kind: 'monitor'; monitor: string; args: string; instructions: string }
+  | { id: string; kind: 'loop'; name: string; members: string[];
+      check: { command: string; output: string; outputMode: 'match' | 'no-match'; timeoutMin: number };
+      agentDone: { on: boolean; goal: string };
+      limits: { iterations: number; minutes: number; stall: number } }   // see "Loops"
 \`\`\`
 
 Ids: short, lowercase letters, digits and dashes (e.g. \`push\`, \`run-tests\`).
@@ -534,8 +581,70 @@ ${builtins}
   block run side by side. Arrows out of a trigger are always \`then\`.
 - \`ok\` (${EDGE_LABEL.ok}) and \`fail\` (${EDGE_LABEL.fail}): from an action, the session follows the one
   that matches how the step went.
+- \`met\` (${EDGE_LABEL.met}) and \`limit\` (${EDGE_LABEL.limit}): only out of a loop block, see "Loops".
 
-No loops, nothing points into a trigger, and every action must be reached from a trigger.
+No cycles: to repeat work use a loop node. Nothing points into a trigger, and every action must be
+reached from a trigger.
+
+## Loops
+
+A \`loop\` block is a frame: the session repeats the blocks listed in its \`members\` until its
+criterion is met or a limit is hit. MasterDeck checks it each time the session finishes a turn
+(its Stop hook): not done yet, the session is told to go on with the next round.
+
+- \`members\`: ids of the blocks inside, as many as needed. Only \`skill\`, \`instruction\`, \`monitor\`
+  and \`notify\` blocks (notify works only after \`needs-you\` or \`idle\`, where loops are refused, so in
+  practice skills, instructions and monitors); no loop in a loop, and a block in one loop only.
+  Arrows between members order a round; nothing else points at a member (an arrow from outside
+  into a member points at the loop instead: a loop always starts at its top).
+- Leaving: a member's arrow to a block outside its frame is dropped. The loop's own arrows lead on:
+  \`met\` when the criterion was met, \`limit\` when a limit stopped it, \`then\` however it ended.
+- The criterion, at least one of:
+  - \`check.command\`: a shell command MasterDeck runs in the session's folder after each round.
+    With \`check.output\` empty it passes on exit code 0; otherwise \`check.output\` is a regular
+    expression on its output that decides alone: \`outputMode\` \`'match'\` passes when it matches,
+    \`'no-match'\` when it no longer does. \`timeoutMin\` 1-9 (default 5): a check that runs longer fails.
+  - \`agentDone\`: \`{ on: true, goal }\`: the session works toward \`goal\` and ends its turn with a
+    line starting \`LOOP DONE:\` and why. With a check command too, both must hold (a LOOP DONE the
+    check does not back is refused).
+- \`limits\`: \`iterations\` 1-100 (default 10); \`minutes\` 0 = off, else up to 1440; \`stall\` 0 = off,
+  else 2-10 (stop when that many rounds in a row leave the same check output and the same code;
+  3 is a good choice). At a limit MasterDeck asks the user in Needs you (they can give it more
+  rounds), so the \`limit\` arrow is only for what the session should do then.
+- \`name\`: short, shown on the frame and in progress ("Fix the tests").
+- Where loops may go: under a trigger the session gets, except \`turn-end\` (a loop there would
+  never end) and never under \`needs-you\` or \`idle\`. One loop open at a time, on the main path:
+  not inside an \`ok\` / \`fail\` branch (MasterDeck can't tell which branch the session took), and
+  never two side by side; a second loop goes after the first, through its \`met\`, \`limit\` or
+  \`then\` arrow.
+
+After a push: until \`npm test\` passes, fix the failing tests; at most 8 rounds; at the limit, tell
+the user what still fails:
+
+\`\`\`json
+{
+  "name": "Green after push",
+  "flow": {
+    "nodes": [
+      { "id": "push", "kind": "trigger", "trigger": "after-push" },
+      { "id": "green", "kind": "loop", "name": "Fix the tests", "members": ["read", "fix"],
+        "check": { "command": "npm test", "output": "", "outputMode": "match", "timeoutMin": 5 },
+        "agentDone": { "on": false, "goal": "" },
+        "limits": { "iterations": 8, "minutes": 0, "stall": 3 } },
+      { "id": "read", "kind": "instruction", "text": "Run npm test and read what failed." },
+      { "id": "fix", "kind": "instruction", "text": "Fix the cause, not the test, then commit." },
+      { "id": "push-fix", "kind": "instruction", "text": "Push the fixes." },
+      { "id": "stuck", "kind": "instruction", "text": "Stop, and tell the user which tests still fail and what you tried." }
+    ],
+    "edges": [
+      { "from": "push", "to": "green", "kind": "then" },
+      { "from": "read", "to": "fix", "kind": "then" },
+      { "from": "green", "to": "push-fix", "kind": "met" },
+      { "from": "green", "to": "stuck", "kind": "limit" }
+    ]
+  }
+}
+\`\`\`
 
 ## Actions
 

@@ -286,7 +286,9 @@ checkout whose branch was once linked to a ticket does not link it.
   builder to resize it (double-click resets it). The session runs with your project settings
   only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
   doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
-  The first time, Claude may ask you to trust its folder.
+  The first time, Claude may ask you to trust its folder. It can draft loops too ("after a push:
+  until `npm test` passes, fix the failing tests; at most 8 rounds"), and the check reports a block
+  it put in a loop that can't repeat there instead of leaving it out quietly.
 - **Custom triggers:** besides the built-in triggers, a workflow can use triggers of your own: a
   Claude Code hook event (before a tool, after it, or when you send a prompt), the tool it applies
   to (e.g. `Bash`, `Edit|Write`), a regular expression on the command, the file path or the prompt,
