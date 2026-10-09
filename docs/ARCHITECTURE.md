@@ -314,7 +314,7 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 One MasterDeck hook per trigger in settings.json reads the session's copy.
 
 **Loops** (a Loop frame, #82). A trigger's step carries its `CompiledLoop`s; when it fires, its hook
-arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json`
+arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json` (written to `<sid>.json.<pid>.tmp`, then renamed)
 (`{loops: [{id, step, state: "open", iteration: 0, startedAt, history: [], reason, lastCheck}]}`)
 and creates an empty progress file `workflows/loops/<sid>-<loop id>.md` (the hook's to fill: Claude
 Code refuses a session's writes under `~/.claude`, so the session never writes it); a loop still

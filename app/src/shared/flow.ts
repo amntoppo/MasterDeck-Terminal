@@ -1348,7 +1348,7 @@ const ARM_FILE =
   `if any(.loops[]; .id? == $n.id and .state? == "open") then . elif any(.loops[]; .id? == $n.id) then .loops |= map(if .id? == $n.id then $fresh else . end) else .loops += [$fresh] end)) as $out | ` +
   `($out | tojson), ($new[] | .id as $i | select(any($cur.loops[]; .id? == $i and .state? == "open") | not) | $i)`;
 /**
- * Arm the loops of the steps that fired (D7): write `<dir>/workflows/loops/<sid>.json` (temp file
+ * Arm the loops of the steps that fired (D7): write `<dir>/workflows/loops/<sid>.json` (a temp file of its own, by pid,
  * and rename) and an empty progress file per loop armed afresh. Every trigger's hook carries it
  * (the hook is one for everyone), so without a loop it costs one grep and writes nothing. A loop
  * file that is not one (corrupt) is replaced: the trigger firing is the start of a run.
@@ -1358,7 +1358,7 @@ const ARM_LOOPS =
   `mkdir -p "$d/workflows/loops"; L="$d/workflows/loops/$sid.json"; ` +
   `cur=$(jq -cse ${q(`if length == 1 and (.[0].loops | type) == "array" then .[0] else empty end`)} "$L" 2>/dev/null) || cur='{"loops":[]}'; ` +
   `out=$(printf '%s' "$cur" | jq -r --argjson new "$new" --argjson now "$(date +%s)000" ${q(ARM_FILE)} 2>/dev/null) && [ -n "$out" ] && ` +
-  `printf '%s\\n' "$out" | head -n 1 > "$L.tmp" && mv "$L.tmp" "$L" && ` +
+  `printf '%s\\n' "$out" | head -n 1 > "$L.$$.tmp" && mv "$L.$$.tmp" "$L" && ` +
   `for id in $(printf '%s\\n' "$out" | tail -n +2); do case "$id" in ""|*[!a-z0-9-]*) continue;; esac; : > "$d/workflows/loops/$sid-$id.md"; done; }`;
 
 /**

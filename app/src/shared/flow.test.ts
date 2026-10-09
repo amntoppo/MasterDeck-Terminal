@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -867,6 +867,31 @@ describe.skipIf(process.platform === "win32")("arming a loop", () => {
     expect(loops[1]).toEqual({ id: "other", state: "limit", iteration: 2 });
     // ponytail: only the latest run of a loop is kept, its notes too.
     expect(readFileSync(join(loopsDir(dir), `${SID}-lp.md`), "utf8")).toBe("");
+  }, 20_000);
+
+  it("arming writes its own temp file: another writer's does not get in its way", async () => {
+    const dir = setup(loopFlow());
+    mkdirSync(loopsDir(dir), { recursive: true });
+    // Another hook's temp name, taken (here: by a folder, so writing to it fails).
+    mkdirSync(join(loopsDir(dir), `${SID}.json.tmp`));
+    fire(dir);
+    expect(readLoops(dir).loops.map((l: { id: string }) => l.id)).toEqual(["lp"]);
+    // Firings at once (hooks of one turn): the file is whole, and no temp file is left.
+    const two = setup(loopFlow());
+    const run = () =>
+      new Promise<void>((done) => {
+        const p = spawn("bash", ["-c", flowTriggerCommand(trig, two, "m")], {
+          cwd: two,
+          env: { ...process.env, TMPDIR: mkdtempSync(join(tmpdir(), "flow-tmp-")) },
+        });
+        p.on("close", () => done());
+        p.stdin.end(
+          JSON.stringify({ session_id: SID, tool_input: { command: "git push" } }),
+        );
+      });
+    await Promise.all([run(), run(), run()]);
+    expect(readLoops(two).loops.map((l: { id: string }) => l.id)).toEqual(["lp"]);
+    expect(readdirSync(loopsDir(two)).filter((n) => n.includes("tmp"))).toEqual([]);
   }, 20_000);
 
   it("a corrupt loop file is replaced when the trigger fires", () => {
