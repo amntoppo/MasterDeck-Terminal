@@ -126,6 +126,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   linkSession: invoke(CH.linkSession),
   peersSet: invoke(CH.peersSet),
   peersSync: invoke(CH.peersSync),
+  modSet: invoke(CH.modSet),
   setBoardOpen: local,
   boardRepos: send(CH.boardRepos),
   boardCreatePlan: blocked,

@@ -1,3 +1,5 @@
+[masterdeck.dev](https://masterdeck.dev) · [Get started](https://masterdeck.dev/docs/) · [All downloads](https://masterdeck.dev/download/)
+
 ## What's new in 0.8.2
 
 - **Windows build.** 0.8.0 and 0.8.1 shipped without the Windows installer; 0.8.2 has both. A

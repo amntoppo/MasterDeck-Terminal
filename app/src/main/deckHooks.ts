@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { applyEventLine, parseRequest, type HookRequest, type HookSessionState } from '@shared/deckHooks'
+import { parseModBeat, type ModBand, type ModBeat, type ModBoard } from '@shared/modBand'
 import { readNewLines, type FollowState } from './files'
 import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
 
@@ -555,7 +556,89 @@ export class DeckHooks {
       // none
     }
   }
+
+  /** What was last written to each band file, so an unchanged state writes nothing. */
+  /** What was last written to each band and board file (`band/<id>`, `boards/<key>`), so an unchanged state writes nothing. */
+  private written = new Map<string, string>()
+
+  /** Write `<folder>/<name>.json` when its text changed (null: the file goes). */
+  private writeIfChanged(folder: string, name: string, value: object | null): void {
+    const p = join(this.dir, folder, `${name}.json`)
+    const k = `${folder}/${name}`
+    if (!value) {
+      if (this.written.delete(k) || existsSync(p)) rm(p)
+      return
+    }
+    const text = JSON.stringify(value)
+    if (this.written.get(k) === text && existsSync(p)) return
+    try {
+      mkdirSync(join(this.dir, folder), { recursive: true })
+      writeFileSync(`${p}.tmp`, text)
+      renameSync(`${p}.tmp`, p)
+      this.written.set(k, text)
+    } catch {
+      // next state
+    }
+  }
+
+  /** Files in `folder` whose name is not in `keep` (and what was written for them). */
+  private prune(folder: string, keep: Set<string>): void {
+    for (const k of this.written.keys()) if (k.startsWith(`${folder}/`) && !keep.has(k.slice(folder.length + 1))) this.written.delete(k)
+    try {
+      for (const n of readdirSync(join(this.dir, folder))) if (n.endsWith('.json') && !keep.has(n.slice(0, -5))) rm(join(this.dir, folder, n))
+    } catch {
+      // none
+    }
+  }
+
+  /** What MasterDeck's mods read for this session (`band/<id>.json`; null: nothing, the file goes). */
+  setBand(sessionId: string, band: ModBand | null): void {
+    if (SID.test(sessionId)) this.writeIfChanged('band', sessionId, band)
+  }
+
+  /** Band files of sessions not live any more. */
+  pruneBands(live: Set<string>): void {
+    this.prune('band', live)
+  }
+
+  /** An account's board as /md-board shows it (`boards/<key>.json`; key: a login, or `_`). */
+  setBoard(key: string, board: ModBoard | null): void {
+    if (BOARD_KEY.test(key)) this.writeIfChanged('boards', key, board)
+  }
+
+  /** Board files no live session reads any more. */
+  pruneBoards(keys: Set<string>): void {
+    this.prune('boards', keys)
+  }
+
+  /** Sessions the mod runs in now, by session id (its fresh heartbeats); old files go after a day. */
+  modBeats(now = Date.now()): Record<string, ModBeat> {
+    const out: Record<string, ModBeat> = {}
+    const dir = join(this.dir, 'mods')
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      return out
+    }
+    for (const n of names) {
+      if (!n.endsWith('.json') || !SID.test(n.slice(0, -5))) continue
+      const p = join(dir, n)
+      try {
+        const beat = parseModBeat(readFileSync(p, 'utf8'), now)
+        if (beat) out[n.slice(0, -5)] = beat
+        else if (now - statSync(p).mtimeMs > 86_400_000) rm(p)
+      } catch {
+        // gone meanwhile
+      }
+    }
+    return out
+  }
 }
+
+const SID = /^[0-9a-f-]{36}$/i
+// A GitHub login (letters, digits, hyphens) or `_`.
+const BOARD_KEY = /^(?:_|[A-Za-z0-9-]{1,39})$/
 
 function alive(pid: number): boolean {
   if (!pid) return false
