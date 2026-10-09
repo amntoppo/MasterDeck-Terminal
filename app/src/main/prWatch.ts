@@ -47,6 +47,8 @@ export interface PrWatchDeps {
   paused: (output?: string) => boolean
   send: (s: Session, text: string) => Promise<CliResult>
   onChange: () => void
+  /** A watched PR was seen merged or closed (the session's lane follows it). */
+  ended?: (url: string) => void
 }
 
 const DONE_MAX = 500
@@ -244,7 +246,10 @@ export class PrWatch {
               w.events += news.length + (summary || ending ? 1 : 0)
               w.lastEventAt = now
             }
-            if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+            if (ending) {
+              this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+              this.deps.ended?.(w.url)
+            }
           })
         }
       }

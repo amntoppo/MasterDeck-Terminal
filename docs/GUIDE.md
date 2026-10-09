@@ -402,7 +402,7 @@ checkout whose branch was once linked to a ticket does not link it.
 - **Session status:** the column and the Details tab show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
-  instructions after its last PR merged; a new PR then shows its own status, and once that is merged
+  instructions after its last PR merged; MasterDeck's own PR watch and monitor messages do not count; a new PR then shows its own status, and once that is merged
   too the session is Merged again, however many PRs it takes), **Approved**, **Changes Requested**,
   **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
   **Working** also while background agents or background commands it started still run (its turn
