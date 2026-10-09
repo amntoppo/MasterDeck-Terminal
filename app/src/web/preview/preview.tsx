@@ -63,7 +63,17 @@ function previewDeck(noBoard: boolean): DeckApi {
     workflowGet: () => ({ hooks: [], skills: [], flow: null, templates: [], triggers: [], monitors: [] }),
     defaultModel: () => null,
     ticketRepoMeta: () => ({ labels: [], milestones: [], assignees: [] }),
-    issueBody: () => ({ ok: true, body: 'Steps to reproduce: sign in from a fresh browser.' }),
+    issueBody: () => ({ ok: true, body: '## Steps\n\n1. Sign in from a fresh browser.\n2. Open **Settings**.\n\nThe page is blank; expected the settings form.' }),
+    // Two on the board (their columns show), one closed, one open off the board.
+    issueSubIssues: () => ({
+      ok: true,
+      subIssues: [
+        { repo: null, number: 118, title: 'Export invoices as CSV', url: 'https://github.com/acme/web/issues/118', state: 'open' },
+        { repo: null, number: 125, title: 'Dark mode for settings', url: 'https://github.com/acme/web/issues/125', state: 'open' },
+        { repo: null, number: 101, title: 'Keep the session cookie across restarts', url: 'https://github.com/acme/web/issues/101', state: 'closed' },
+        { repo: null, number: 102, title: 'Show the sign-in error under the form', url: 'https://github.com/acme/web/issues/102', state: 'open' },
+      ],
+    }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
     // The Start dialog: a draft with no checkout found, so its folder line shows at phone width.
     draftAssign: (t: { number: number; repo: string | null }, title?: string, url?: string) => ({

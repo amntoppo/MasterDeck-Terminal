@@ -6,6 +6,7 @@ import type {
 } from "./boardCreate";
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
+import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
@@ -166,6 +167,7 @@ export const CH = {
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
+  issueSubIssues: "issue:subIssues",
   shellPrepare: "shell:prepare",
   ticketMemory: "ticket:memory",
   assignIssue: "issue:assign",
@@ -311,6 +313,10 @@ export interface DeckApi {
   issueBody(
     ticket: Ticket,
   ): Promise<{ ok: true; body: string } | { ok: false; message: string }>;
+  /** An issue's sub-issues, for the Board's popups (Assign and Start session). A read. */
+  issueSubIssues(
+    ticket: Ticket,
+  ): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }>;
   prSummary(
     url: string,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;

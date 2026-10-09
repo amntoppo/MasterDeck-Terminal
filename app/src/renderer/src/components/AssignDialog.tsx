@@ -15,6 +15,7 @@ import { baseError, branchError, parsePrefs, PERMISSION_MODES, prefsKey, ticketB
 import { AccountBadge, AccountSelect } from "./AccountBits";
 import { TrustNote, useTrust } from "./TrustFix";
 import { MarkdownView } from "./MarkdownView";
+import { SubIssues } from "./SubIssues";
 import { PeerPicker } from "./PeerPicker";
 import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { deck, load, save } from "../deck";
@@ -610,6 +611,7 @@ export function AssignDialog({
                   {Math.min(3, memory.length) === 1 ? "y" : "ies"})
                 </label>
               )}
+              <SubIssues ticket={ticketOf(issue)} state={state} />
             </section>
 
             <section className="sd-sec" aria-label="Where it runs">

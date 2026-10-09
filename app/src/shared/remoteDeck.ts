@@ -38,6 +38,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   ticketMemory: invoke(CH.ticketMemory),
   shellPrepare: blocked,
   issueBody: invoke(CH.issueBody),
+  issueSubIssues: invoke(CH.issueSubIssues),
   prSummary: invoke(CH.prSummary),
   startHere: invoke(CH.startHere),
   sendText: invoke(CH.sendText),
