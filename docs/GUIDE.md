@@ -531,6 +531,22 @@ creation.
   baseline: it's in All time and ticket totals, but not in any day. **USD / Tokens** (top right)
   switches the whole view to tokens: the figures, the chart and both tables (sorted by tokens), with
   dollars as the second figure. The choice is remembered.
+- **Hours (Costs view, desktop only):** the third choice beside USD / Tokens: an *estimate* of how
+  long you worked per GitHub account, per day and per ticket, from when your sessions on this Mac
+  were active (every line of their transcripts and their subagents'). It is not a time tracker. The
+  rule is written next to the numbers: a gap of up to 1 hour between a session's activity counts as
+  working, a longer one does not (pick 15 min, 30 min, 1 h or 2 h; remembered), whether you were there
+  or the session worked on its own. An account counts each minute once, however many of its sessions
+  were active then; a ticket gets its full time, so two tickets worked from 10:00 to 11:00 show 1 h
+  each and 1 h for the account. A session with no ticket counts for its account only. A session's
+  account is the one it was started as, else the account of its folder's repository, else of its
+  ticket's repository (a removed worktree), else (with one account) that account; anything else is
+  listed as **unknown account**. A resumed session is one session: the gap across the resume is
+  filled like any other. All of a session's time goes to the ticket it is linked to now. The numbers
+  refresh every minute while the tab is open. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
+  per account and day, then its tickets) where you choose. Only this Mac's sessions are counted, and
+  only sessions the Costs view knows (those with a status line record). Nothing of it goes to the
+  web app, a phone or the API.
 - **Context warnings:** at the warning level (85% by default), a notification (once), a Needs-you card
   and **Compact now** in the Details tab, which types `/compact`.
 - **Budget per ticket:** past $X (Settings), a notification (once) and a Needs-you card. Board cards show

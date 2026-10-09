@@ -130,6 +130,7 @@ import {
   type RestoreFile,
 } from "@shared/restore";
 import { totalOf, type Tokens, type TokensByDay } from "@shared/tokens";
+import type { HoursSource } from "@shared/hours";
 import {
   pastByIssue,
   type PastSession,
@@ -505,6 +506,41 @@ export class Sources {
         (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
       ),
     );
+  }
+
+  /**
+   * When these sessions were active since `since` (the Costs view's Hours), with what finds each
+   * one's account: its key, folder and ticket. A session with nothing since then is left out.
+   */
+  async hoursActivity(
+    sessionIds: string[],
+    since: number,
+  ): Promise<Record<string, HoursSource>> {
+    const ids = sessionIds.filter(
+      (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
+    );
+    const spans = await this.tokenIndex.activity(ids);
+    const out: Record<string, HoursSource> = {};
+    for (const [id, all] of Object.entries(spans)) {
+      const s = all.filter(([, end]) => end >= since);
+      if (!s.length) continue;
+      const rec = this.costBook[id];
+      out[id] = {
+        spans: s,
+        ticket:
+          rec && rec.issue !== null ? { repo: rec.issueRepo ?? null } : null,
+        key:
+          rec?.key ??
+          this.rawSessions.find((x) => x.sessionId === id)?.key ??
+          id.slice(0, 8),
+        cwd:
+          this.stats[id]?.currentDir ??
+          this.tails[id]?.cwd ??
+          this.transcriptInfo(id)?.cwd ??
+          null,
+      };
+    }
+    return out;
   }
 
   /** The sessions of the last `claude agents` scan; null until one succeeded. */

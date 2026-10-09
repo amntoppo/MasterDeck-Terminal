@@ -488,19 +488,29 @@ fixes it, and move the item here to "Recently done".
 - **The phone API `session.start` has no `peers`.** A session started from a phone cannot be linked at
   start; it can be linked after, from its details.
 
-## Product ideas (from the user, 2026-10-03)
+## Working hours: open points (2026-10-09, issue #64)
 
-- **P2 · Working hours per GitHub account, from tickets worked on.** Estimate time worked per
-  account from what MasterDeck already knows: each session's account (`session-accounts.json`, plan I),
-  its linked ticket (`ticket-links.json`), session activity/turn times and commit times. Show per
-  account per day and per ticket (e.g. in Costs or a new view), exportable. Open questions: how idle
-  time counts, sessions without a ticket, accounts on several machines.
+- **Several machines.** The estimate covers this Mac only. The user wants an account's time from
+  every machine where the same MasterDeck account is connected: each Mac would send its activity
+  spans (account, ticket, start, end) to the backend, a protocol and storage change.
+- **Only sessions in the cost book** (a status line record) are counted: a session that ran without
+  MasterDeck's status line is not seen.
+- **No Hours on the web app or a phone** (`DECK_ACCESS` blocks both channels); open them over the
+  encrypted bridge if the user wants it there.
+- **Commit times are not used**; add them only if turns prove too coarse.
+- **`hoursOrigins` (main/index.ts) has no test**: the pool of four, the skipped missing folder and its
+  own cache were checked by reading only; move it to a module with a fake runner if it grows.
+- **The ticket is the cost book's** (the session's last linked ticket): time before a session was
+  linked counts for that ticket too, and a session relinked to another ticket moves all its time.
+
+## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
 | Session filters (issue #74): a **Filters** line in the Sessions column, closed by default, with the count of filters on, a removable chip for each and Clear all; open, a name/ticket search and Status (lanes and Parked), Account (two or more accounts only), Repo (a worktree counts under its repository) and Starred only, any-of within a kind and all kinds combined (`shared/sessionFilter.ts`, `SessionFilterBar.tsx`); "No sessions match the filters" with Clear filters; Cleanup only offers what is shown; kept in localStorage (`sessionFilter`, `sessionFilterOpen`) | `worktree-MasterDeck-Terminal-74-session-filters`, PR #76 (not merged) | — |
+| Working hours (issue #64; spec in the backend repo): Costs → **Hours** estimates time per GitHub account, day and ticket from session activity on this Mac (`shared/hours.ts`, activity spans in `tokens.json` v2), idle gap 1 h by default, an account counts a minute once and each ticket its full time, "unknown account" listed, **Export CSV…**; desktop only | PR #75, branch `worktree-MasterDeck-Terminal-64-hours` (not merged, installed locally) | spec on `docs/working-hours-64` (not pushed) |
 | Linked sessions (issue #67; spec and plan in `docs/superpowers/`): link running sessions to each other from the Start dialogs or the details panel (`session-peers.json`, `shared/peers.ts`, `main/peers.ts`, up to 8 links); a linked session gets a block of its peers at start, resume and compaction and a note on its next prompt when a peer's summary changes (`deck/peers/<sid>.delta.json`, `PeerSync`, summaries made on Stop, at most every 2 minutes); **Sync now**, with typed delivery to idle peers where hooks are not live; `peerSync.auto` switches the automatic part off | bed46c0, 6c16bb0, d4bd2dc, 4198668, b7e0d37, ed2983e, 32a18cc, 39e979d, 761c118, a2b727c, 80d88ae, and the spec and plan a2931db (`worktree-MasterDeck-Terminal-67-link-sessions`, not merged) | — |
 | Notes (issue #63; the plan is in the backend repo): a panel on the rail (and under More on a phone) for the user's own notes and one note per ticket (**Add note** / **Edit note** in Details, a mark on the Board card); plain text under `<home>/notes/`, one file each, saved 500 ms after typing stops; a save carries its version and a two-place edit asks (Reload / Keep mine); not in `AppState`, the snapshot, a prompt or GitHub; open to the web over the encrypted bridge (list with 120-character previews, a note's text when opened or in a save's conflict answer); a save the store refuses is not retried for ever (Discard), a file that is not a note is left alone; phone sheet that closes when another screen is chosen; from the final review: a save at the latest 2 s after the first unsaved key, a failed disk write is retried and answered without the file's path, a flush when the tab is hidden, the rail's tooltips above the open panel, the phone's More menu above the open sheet | 0e93bb3, 774b374, 30e953e, 50f45b6, 9ff1bbb, db8f97a, 6e3effe, 7b47eac, b886e43, 8c7d56a, b0b7229, 45b81dc (docs), and the final review's fixes (the commit after it): 13 commits (`worktree-MasterDeck-Terminal-63-notes`, not merged) | — |
 | The Start dialog in four groups (Ticket, Where it runs, Options, Instructions), Enter starts; **Create worktree** with branch name and base branch (`main/startWorktree.ts`, made before the session, an error stays in the dialog); **Permission mode** (`--permission-mode` through `master add` / `spawn`); **Assign to me**; **Remember these choices** per repository; the description's **Text / Preview** (`shared/markdown.ts`, `MarkdownView.tsx`). "Move to In Dev" was left out: the board flow does it already (#66) | branch `worktree-MasterDeck-Terminal-66-start-session` | — |

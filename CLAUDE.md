@@ -164,6 +164,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`), `renderer/.../NotesPanel.tsx`; entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`) |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
+| Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
 
@@ -357,6 +358,13 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-09)
+
+- **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
+  (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
+  ticket from session activity on this Mac (idle gap 1 h by default, an account counts a minute once,
+  each ticket its full time, unknown account listed), with CSV export; desktop only. Decisions are on
+  the issue; the spec is in the backend repo (`docs/superpowers/specs/2026-10-09-working-hours-design.md`,
+  branch `docs/working-hours-64`, not pushed). Open points: TODO ("Working hours: open points").
 
 - **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
   (PR #76, draft, not merged; installed locally 2026-10-09): a **Filters** line in the Sessions column, closed by
