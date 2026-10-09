@@ -214,6 +214,12 @@ export interface AppState {
   sessionPrs: Record<string, string[]>;
   /** Sessions linked to each other ("Linked sessions"), by Session.key; symmetric, sorted. */
   peers: Record<string, string[]>;
+  /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
+  modLive?: Record<string, { version: string; claude: string; mods: import("./modBand").ModSeen[] }>;
+  /** The mods switched off per session (Session.key → plugin names), from Session details → Mods (`mod-off.json`). */
+  modOff?: Record<string, string[]>;
+  /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
+  modCatalog?: import("./modBand").ModEntry[];
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */

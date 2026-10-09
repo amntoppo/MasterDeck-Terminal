@@ -58,6 +58,12 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   they stay for use by hand. `skills/master/` is also the `master` CLI (Python,
   `lib/master/`) that the app calls for the ledger, snapshot, board, config and spawning.
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
+- `mods/` — Claude Code mods (a local-folder marketplace, `.claude-plugin/marketplace.json`): the
+  core `mods/masterdeck` (per-session switches, heartbeat) and one mod per feature,
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, `masterdeck-loop`, `masterdeck-board`
+  (see [docs/MODS.md](docs/MODS.md)).
+  `mods/shared/deck.ts` is copied into each by `mods/sync-shared.sh`: edit it there. Check each with
+  `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
 - `.github/workflows/ci.yml` — Python tests, typecheck, vitest, DMG/EXE builds; tags publish a release.
@@ -165,6 +171,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
+| MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -360,7 +367,25 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-09)
+## Current state and next steps (2026-10-10)
+
+- **Claude Code mods (#86)** (merged to `main` through PR #91; the app is installed locally from
+  that branch, the six mods are installed at user scope from `~/.claude/masterdeck/mods`, and
+  `prependPlugins` lists the core): research in
+  [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a `claude --bg` session and draws in
+  `claude attach`. Prototype mods: a core `mods/masterdeck` (per-session switches, heartbeat) and
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, `masterdeck-loop` (`/md-loop`, #82),
+  `masterdeck-board` (`/md-board`), and the app's side
+  (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session). Checked:
+  typecheck, vitest (151 files passed, 2 skipped; 1738 tests passed, 4 skipped), `claude plugin
+  validate` / `test` / tsc for each mod, the Mods tab in the web preview at 1400 and 390 px, and
+  throwaway sessions: the line at 80/110/160 columns, toasts, `/md-note` against a stand-in pump,
+  the pane, MasterDeck closed, a `--plugin-dir` mod refused at start and back after a reload, and
+  with the installed mods the core reporting all three and the ticket line switched off and on at
+  once; `/md-board`'s pane with a sample board, and a `/md-loop` that took two rounds to pass its
+  check. The user saw the line, `/md-ticket` and the pane in a real session. Not checked: the Mods
+  tab in the installed app with real switches, instant typing under the line, Windows. A background session gets the daemon's environment, not the launching shell's
+  (`MASTERDECK_HOME` does not reach the mod there). Open points: TODO ("MasterDeck mod").
 
 - **Where a session starts was checked for real** (issue #59, branch
   `worktree-MasterDeck-Terminal-59-start-for-real`, pushed as a draft PR, not merged; no app code

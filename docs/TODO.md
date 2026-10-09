@@ -563,12 +563,64 @@ fixes it, and move the item here to "Recently done".
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 
+## MasterDeck mod: open points (2026-10-10, issue #86)
+
+See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
+
+- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
+  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
+  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
+  `mods/` in the app (electron-builder `extraResources`).
+- **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
+  `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
+  masterdeck@masterdeck --scope user` (settings.json backed up first as
+  `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
+  nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
+  Updating the copy is by hand until the app installs it.
+- **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
+  `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
+  `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
+  install sets, or a pointer file under `~/.claude`) before isolated E2E tests use it.
+- **The real app writes the band files** (checked on the installed build: one per live session
+  with a ticket, PR or link). The mod's band was seen only against a stand-in deck folder; seeing it
+  in a real ticket session after `/reload-plugins` is the user's check.
+- **Instant typing with a band above the prompt** (`predictiveEcho`) not checked in MasterDeck's pane.
+- **`/md-note` needs `mv` and `rm`** (`$.process.run`): macOS and Linux only; Windows needs
+  `cmd /c move` or a rename in `$.fs`.
+- **A mod switched off while it runs stays until the session starts again**: Claude Code's
+  `/reload-plugins` does not judge a running, unchanged module again. A "Restart to apply" in the Mods
+  tab (stop and resume with no flags, when idle) would close the gap.
+- **Order matters**: the mod judges only what loads after it. `prependPlugins` in user settings is
+  honoured only without managed settings and outside Team/Enterprise sign-in; elsewhere an admin
+  must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
+  the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
+  checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
+  it. Setup should add `prependPlugins` with the install (backup, atomic).
+- **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
+  yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
+  (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
+  check and goal.
+- **`/md-board` is read only** and lists 30 cards a column; moving a card from it is a later step
+  (through BoardFlow, never from the mod).
+- **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
+  account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
+  account). A board file per account and its own current sprint needs a read per account.
+- **Updating the mods needs a reload in every running session** (the copy under
+  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
+  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
+- **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
+- **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
+  a change bumps `v` in both.
+- **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
+  `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
 | Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
