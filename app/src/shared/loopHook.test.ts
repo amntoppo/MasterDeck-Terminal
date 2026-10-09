@@ -130,6 +130,25 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     expect(none.answer.reason).not.toContain('So far')
   })
 
+  it('a closing loop hands over the turn-end plan last, unless another loop opens', () => {
+    const te = 'Workflow step (at the end of a turn):\n1. Update the ticket.'
+    const only = decide({ ...base({ r: { passed: true, exit: 0 } }), turnEnd: te })
+    expect(only.answer.reason).toBe(`Loop "Fix" is done: criterion met after 1 iteration.\nBefore you finish this turn:\n${te}`)
+    expect(only.turnEnd).toBe(true)
+    const d = [def({ then: '3. Open the PR.' })]
+    const both = decide({ ...base({ d, e: { iteration: 9 } }), turnEnd: te })
+    expect(both.answer.reason).toMatch(/After the loop:\n3\. Open the PR\.\nBefore you finish this turn:\nWorkflow step/)
+    // A loop opens next: the turn is still the loops'.
+    const next = [def(), def({ id: 'lb', name: 'B', after: { loop: 'lp', via: 'then' } })]
+    const opened = decide({ ...base({ d: next, r: { passed: true, exit: 0 } }), turnEnd: te })
+    expect(opened.answer.reason).not.toContain('Before you finish')
+    expect(opened.turnEnd).toBe(false)
+    // Still open: never.
+    const open = decide({ ...base(), turnEnd: te })
+    expect(open.answer.reason).not.toContain('Before you finish')
+    expect(open.turnEnd).toBe(false)
+  })
+
   it('counts the extra iterations Run 5 more adds', () => {
     const at = decide(base({ e: { iteration: 9 } }))
     expect(at.file.loops[0].state).toBe('limit')
@@ -152,7 +171,7 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
 
   it('leaves a file with no open loop alone', () => {
     const file = { loops: [entry({ state: 'stopped' }), 3] }
-    expect(decide({ ...base(), file })).toEqual({ file, answer: null, run: null, opened: [], note: null })
+    expect(decide({ ...base(), file })).toEqual({ file, answer: null, run: null, opened: [], note: null, turnEnd: false })
   })
 
   it('stops a loop its workflow no longer has', () => {
@@ -285,6 +304,18 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
     const a = m.answer()
     expect(a.decision).toBe('block')
     expect(a.reason).toBe('Loop "Fix" is done: criterion met after 1 iteration. Now:\n2.met.1. Open the PR.')
+  })
+
+  it('the turn that closes a loop gets the turn-end plan, and its run is logged', () => {
+    const t = setup({ loops: [def({ check: { command: 'true' } as CompiledLoop['check'] })] })
+    const wf = join(t.home, 'workflows', 'sessions', `${SID}.json`)
+    const cur = JSON.parse(readFileSync(wf, 'utf8'))
+    cur.steps.push({ id: 'te-1', trigger: 'turn-end', note: 'Workflow step (at the end of a turn):\n1. Update the ticket.' })
+    writeFileSync(wf, JSON.stringify(cur))
+    const a = t.answer()
+    expect(a.decision).toBe('block')
+    expect(a.reason).toBe('Loop "Fix" is done: criterion met after 1 iteration.\nBefore you finish this turn:\nWorkflow step (at the end of a turn):\n1. Update the ticket.')
+    expect(t.runs().map((r: { trigger: string; ids: string }) => [r.trigger, r.ids.trim()])).toEqual([['loop', 'lp'], ['turn-end', 'te-1']])
   })
 
   it('the output pattern decides, both ways, whatever the exit code', () => {

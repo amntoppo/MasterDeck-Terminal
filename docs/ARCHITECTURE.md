@@ -343,13 +343,17 @@ progress file as `- round N: <text>`. A loop that ends
 opens the loops of its step whose `after` names it by that outcome or by a plain arrow (fresh, with
 empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>`, then
 `After the loop: <then>` (the blocks its plain arrows lead to: `CompiledLoop.then`, loops left out
-as they open themselves), then each next loop's round; with none of these it lets the stop through. A `stopped`
+as they open themselves), then each next loop's round; when it opened no loop, the session's
+turn-end plan last (`Before you finish this turn:` and its turn-end steps' notes, logged as a
+`turn-end` line in `runs.jsonl`), since the turn-end trigger stood aside during the loop and runs
+once a turn; with none of these it lets the stop through. A `stopped`
 loop, a missing or unreadable loop file, or no jq lets the stop through; so does a session workflow
 file (else `workflow.json`) that is missing or that jq cannot read, leaving the loop file as it is;
 a loop that a workflow read without error no longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `runs.jsonl`.
 While a loop is open the loop hook owns the session's stops: the turn-end trigger's hook and the
 deck hook's queue (Stop) exit at once when `workflows/loops/<sid>.json` has an open loop, and go on
-once it is over.
+once it is over (the turn-end trigger only skips turns the loop hook answers: it hands the plan over
+on the closing turn).
 `main/loops.ts` `LoopStore` reads the loop files (cached by mtime; `parseLoopFile` in
 `shared/loops.ts` drops junk entries and never throws) into `AppState.loops`: by session id, at
 most 3 loops each, newest first, closed ones for 24 h, the check's tail cut to 1 KB, names and

@@ -23,14 +23,16 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
 
 /**
  * The decision, one jq program so it can be tested alone. Input:
- * `{file, defs, result, now, sid}`: the loop file, the compiled loops of the open loop's
+ * `{file, defs, result, now, sid, turnEnd}`: the loop file, the compiled loops of the open loop's
  * step (`CompiledLoop[]`, from the session's workflow file), what the turn end found
  * (`{ran, passed, said, exit, tail, hash, ms, progress}`: `progress` is the round's `PROGRESS:`
- * line, "" when it said none), the time in ms and the session id. Output:
- * `{file, answer, run, opened, note}`: the loop file to write, the hook's answer (null lets the stop
+ * line, "" when it said none), the time in ms, the session id and the session's turn-end plan
+ * (its turn-end steps' notes, "" when none). Output:
+ * `{file, answer, run, opened, note, turnEnd}`: the loop file to write, the hook's answer (null lets the stop
  * through), the `runs.jsonl` line (null when nothing ran), the loops opened after this one
  * (their progress files are the shell's to create) and the line the shell appends to the loop's
- * progress file (null when the round said nothing).
+ * progress file (null when the round said nothing); `turnEnd` says the answer carries the turn-end
+ * plan (the shell logs its run).
  *
  * The session never writes the progress file itself: it lives under MasterDeck's home in
  * `~/.claude`, where Claude Code refuses a session's writes. Each round ends with a `PROGRESS:`
@@ -41,7 +43,9 @@ export const loopCommand = (home: string) => `bash '${esc(loopScriptPath(home))}
  * adds), the time limit, the stall limit (the last `stall` hashes equal: check output with
  * durations taken out, and the git fingerprint; only rounds after `stallFrom`, which Run 5 more sets), else the loop goes on. A loop that closes opens
  * the loops of its step that come after it by that outcome or by a plain arrow (S11), and hands
- * over, in order, its met or limit branch, what its plain arrows lead to, and the loops it opened.
+ * over, in order, its met or limit branch, what its plain arrows lead to, and the loops it opened;
+ * when it opened none, the turn-end plan last ("Before you finish this turn:"), even with nothing
+ * else to say: the turn-end hook stood aside on the loop's turns and runs once a turn.
  */
 export const DECIDE = String.raw`
 def plural($n; $w): "\($n) \($w)\(if $n == 1 then "" else "s" end)";
@@ -50,14 +54,14 @@ def progress_ask($w): "\($w) with one line starting \"PROGRESS:\" that says what
 def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt: $now, history: [], reason: null, lastCheck: null};
 . as $in
 | ($in.file.loops | [range(0; length) as $i | select((.[$i] | type) == "object" and .[$i].state == "open") | $i][0]) as $k
-| if $k == null then {file: $in.file, answer: null, run: null, opened: [], note: null} else
+| if $k == null then {file: $in.file, answer: null, run: null, opened: [], note: null, turnEnd: false} else
   $in.file.loops[$k] as $e
   | ([$in.defs[]? | select(.id == $e.id)][0]) as $def
   | if $def == null then
       # The workflow was read and no longer has this loop: nothing could ever end it, so it ends
       # here. (A workflow the shell could not read never gets this far.)
       {file: ($in.file | .loops[$k] = ($e + {state: "stopped", reason: "the workflow no longer has this loop"})),
-       answer: null, opened: [], note: null,
+       answer: null, opened: [], note: null, turnEnd: false,
        run: {at: $in.now, sid: $in.sid, trigger: "loop", ids: $e.id, iteration: ($e.iteration // 0), state: "stopped"}}
     else
       $in.result as $r
@@ -95,6 +99,9 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
       | ($in.file.loops | .[$k] = $out
          | reduce $next[] as $x (.; ($x | fresh($e.step; $in.now)) as $f
              | if any(.[]; .id? == $f.id) then map(if .id? == $f.id then $f else . end) else . + [$f] end)) as $loops
+      # The turn-end plan (the session's turn-end steps): its own hook stands aside while a loop is
+      # open and runs once a turn, so the turn that closes the last loop hands it over here.
+      | (if $d.state != "open" and ($next | length) == 0 then ($in.turnEnd // "") else "" end) as $te
       | (if $d.state == "open" then
           {decision: "block",
            reason: ("↻ Loop \"\($def.name)\": iteration \($n)/\($max)"
@@ -111,16 +118,18 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
         else
           (if $d.state == "met" then $def.met else $def.limit end) as $branch
           | ($def.then // "") as $then
-          | if ($branch | set) or ($then | set) or ($next | length) > 0 then
+          | if ($branch | set) or ($then | set) or ($next | length) > 0 or ($te | set) then
               {decision: "block",
                reason: ("Loop \"\($def.name)\" is \(if $d.state == "met" then "done" else "over" end): \($d.reason)."
                  + (if $branch | set then " Now:\n\($branch)" else "" end)
                  + (if $then | set then "\nAfter the loop:\n\($then)" else "" end)
+                 + (if $te | set then "\nBefore you finish this turn:\n\($te)" else "" end)
                  + ([$next[] | "\nThen the loop \"\(.name)\" starts (MasterDeck checks it each time you finish a turn). Each round:\n\(.plan)\n\(progress_ask("End each round"))"] | join(""))),
                systemMessage: "↻ loop \"\($def.name)\": \($d.reason)"}
             else null end
         end) as $answer
       | {file: ($in.file | .loops = $loops), answer: $answer, opened: [$next[].id],
+         turnEnd: ($te | set),
          note: (if $said then "- round \($n): \($said)" else null end),
          run: {at: $in.now, sid: $in.sid, trigger: "loop", ids: $e.id, iteration: $n, state: $d.state}}
     end
@@ -169,6 +178,9 @@ defs=$(jq -c --argjson e "$e" '[.steps[]? | select(.id == $e.step) | .loops[]?] 
 [ -n "$defs" ] || exit 0
 cmd=''; re=''; mode=match; tmin=5; agent=false
 eval "$(printf '%s' "$defs" | jq -r --argjson e "$e" '[.[] | select(.id == $e.id)][0] // empty | @sh "cmd=\\(.check.command // "") re=\\(.check.output // "") mode=\\(.check.outputMode // "match") tmin=\\(.check.timeoutMin // 5 | tostring) agent=\\(.agentDone.on == true | tostring)"' 2>/dev/null)"
+# The session's turn-end steps: handed over by the turn that closes the last loop.
+te=$(jq -r '[.steps[]? | select(.trigger == "turn-end") | .note | strings] | join("\\n\\n")' "$f" 2>/dev/null)
+teids=$(jq -r '[.steps[]? | select(.trigger == "turn-end") | .id | strings | select(test("^[a-z0-9-]+$"))] | join(" ")' "$f" 2>/dev/null)
 cwd=$(printf '%s' "$in" | jq -r '.cwd // "" | strings' 2>/dev/null)
 [ -n "$cwd" ] && [ -d "$cwd" ] && cd "$cwd"
 # What the agent said: the input's last message (newer Claude Code), else the transcript's last
@@ -223,7 +235,7 @@ rm -f "$o"
 # No progress = the same output (durations taken out) and the same commit and working tree.
 hash=$( { printf '%s' "$tail" | jq -r 'gsub("[0-9]+(\\\\.[0-9]+)? ?m?s\\\\b"; "")' 2>/dev/null; git rev-parse HEAD 2>/dev/null; git --no-optional-locks status --porcelain 2>/dev/null; } | cksum | awk '{print $1}')
 res=$(jq -n --argjson ran "$ran" --argjson passed "$passed" --argjson said "$said" --argjson exit "$ec" --argjson tail "$tail" --arg hash "$hash" --argjson ms "$ms" --arg progress "$prog" '{ran: $ran, passed: $passed, said: $said, exit: $exit, tail: $tail, hash: $hash, ms: $ms, progress: $progress}')
-out=$(jq -nc --argjson file "$cur" --argjson defs "$defs" --argjson result "$res" --argjson now "$(date +%s)000" --arg sid "$sid" '{file: $file, defs: $defs, result: $result, now: $now, sid: $sid} | ${DECIDE.replace(/'/g, `'\\''`)}' 2>/dev/null) || exit 0
+out=$(jq -nc --argjson file "$cur" --argjson defs "$defs" --argjson result "$res" --argjson now "$(date +%s)000" --arg sid "$sid" --arg te "$te" '{file: $file, defs: $defs, result: $result, now: $now, sid: $sid, turnEnd: $te} | ${DECIDE.replace(/'/g, `'\\''`)}' 2>/dev/null) || exit 0
 [ -n "$out" ] || exit 0
 printf '%s' "$out" | jq -c '.file' > "$L.$$.tmp" 2>/dev/null || { rm -f "$L.$$.tmp"; exit 0; }
 # Stop loop or Run 5 more while the check ran (the loop no longer open, or a new start): the
@@ -239,6 +251,8 @@ for id in $(printf '%s' "$out" | jq -r '.opened[]?'); do
   : > "$LD/$sid-$id.md"
 done
 printf '%s' "$out" | jq -c '.run | objects' >> "$H/workflows/runs.jsonl" 2>/dev/null
+# The turn-end plan went out with this answer: logged as the turn-end hook logs it.
+[ "$(printf '%s' "$out" | jq -r '.turnEnd')" = true ] && [ -n "$teids" ] && printf '{"at":%s000,"sid":"%s","trigger":"turn-end","ids":" %s"}\\n' "$(date +%s)" "$sid" "$teids" >> "$H/workflows/runs.jsonl"
 printf '%s' "$out" | jq -c '.answer | objects'
 exit 0
 `

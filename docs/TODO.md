@@ -540,10 +540,12 @@ fixes it, and move the item here to "Recently done".
 
 ## Workflow loops: open points (2026-10-10, issue #82)
 
-- **The turn-end plan can wait one turn after a loop closes.** Stop hooks run side by side, so on
-  the turn that closes a loop the turn-end trigger may still read the loop open and skip; its plan
-  then runs at the next turn end (`ponytail:` in `flowTriggerCommand`). Upgrade: the loop hook hands
-  over the turn-end plan itself when it closes a loop.
+- **The turn-end plan can be handed over twice on the turn that closes a loop.** The loop hook
+  hands the turn-end plan over itself on that turn ("Before you finish this turn:"), since the
+  turn-end trigger, run side by side, usually still reads the loop open and skips. When the loop
+  hook is quick (no check command) and closes the loop first, the trigger sees it closed and
+  hands the plan over too (`ponytail:` in `flowTriggerCommand`). Upgrade: a lock, or a marker the
+  loop hook leaves for that turn.
 
 ## Product ideas (from the user, 2026-10-03)
 

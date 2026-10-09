@@ -284,7 +284,8 @@ checkout whose branch was once linked to a ticket does not link it.
     on the main path: put loops one after another, not side by side or inside an "if it
     worked/failed" branch. While a loop runs, the session can't end its turn until the loop is
     over (MasterDeck checks at each turn end and tells it to go on); **Stop loop** in the
-    session's Details ends it. On a session's own workflow the frame's header shows where it is
+    session's Details ends it. Your *When the session finishes a turn* steps wait while a loop runs and come
+    with the message that ends the last loop. On a session's own workflow the frame's header shows where it is
     (`3/10 · last check failed`).
   - Drag the palette's right edge to make it wider or narrower (remembered; double-click resets).
   - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
