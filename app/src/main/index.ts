@@ -20,6 +20,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
+import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -81,6 +82,7 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
+import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
@@ -245,6 +247,8 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
+const modOff = new ModOff(join(paths.home, "mod-off.json"));
+const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -626,6 +630,36 @@ const sources = new Sources(
             .map((s) => s.sessionId),
         ),
       );
+    // MasterDeck's mods (mods/) read band/<id>.json and boards/<key>.json; the core writes mods/<id>.json.
+    if (sources.isHealthy("agents")) {
+      const live = state.sessions.filter((s) => s.state !== "done");
+      const boardKeys = new Set<string>();
+      for (const s of live) {
+        const key = boardKeyOf(s, state.config);
+        boardKeys.add(key);
+        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s, key), modOff.of(s.key)));
+      }
+      deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      // One board file per account a live session works as (masterdeck-board's /md-board).
+      for (const key of boardKeys) deckHooks.setBoard(key, modBoard(state.board, key, state.config));
+      deckHooks.pruneBoards(boardKeys);
+      if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
+    }
+    state.modOff = modOff.all();
+    const beats = deckHooks.modBeats();
+    state.modLive = Object.fromEntries(
+      state.sessions
+        .filter((s) => beats[s.sessionId])
+        .map((s) => {
+          const b = beats[s.sessionId];
+          return [s.key, { version: b.version, claude: b.claude, mods: b.mods }];
+        }),
+    );
+    // Every mod any session reported, kept so Session details → Mods can list them all.
+    let catalog = modCatalog.entries();
+    for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
+    if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
+    state.modCatalog = catalog;
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -2990,6 +3024,14 @@ function registerIpc(): void {
     peerSync.refreshAll([a, b]);
     return r;
   });
+  // Session details → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
+  reg.handle(CH.modSet, (_e, key: unknown, mod: unknown, on: unknown) => {
+    if (typeof key !== "string" || typeof mod !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
+      return { ok: false, message: "bad session" };
+    if (!modOff.set(key, mod, on)) return { ok: false, message: "Could not save the choice." };
+    sources.changed();
+    return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
+  });
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200
       ? peerSync.syncNow(key)
@@ -3383,6 +3425,12 @@ if (process.platform === "win32")
 
 app.whenReady().then(async () => {
   app.setName("MasterDeck");
+  // A packaged app takes its icon from the bundle (build/icon.icns); `npm run dev` would show
+  // Electron's, so the Dock gets the same icon from the source tree.
+  if (!app.isPackaged && process.platform === "darwin") {
+    const devIcon = join(__dirname, "../../build/icon.png");
+    if (existsSync(devIcon)) app.dock?.setIcon(devIcon);
+  }
   // Token and identity must agree. Judged by the token FILE (not by decrypting it), so a transient
   // Keychain error never signs the user out: a legacy pasted token (no identity) is removed, and an
   // identity whose token file is gone is cleared.

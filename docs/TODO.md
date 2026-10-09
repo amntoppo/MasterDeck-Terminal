@@ -10,6 +10,14 @@ fixes it, and move the item here to "Recently done".
 
 ## Shipping / ops
 
+- **masterdeck.dev in Google (2026-10-10).** The site is live but not indexed yet, and "masterdeck"
+  also names a card trick and a decking brand. Done: structured data, the brand in the home page's
+  h1, sitemap dates, IndexNow on deploy, one address (no workers.dev), links from this repository
+  (website field, description, topics, README, release notes). Left, by hand: add the domain to
+  Google Search Console (Domain property, verified through Cloudflare), submit
+  `https://masterdeck.dev/sitemap-index.xml`, request indexing of the home page, and import it into
+  Bing Webmaster Tools. Then links from elsewhere (a launch post, Claude Code lists) do the most.
+
 - **P2 · First launch after a local reinstall hangs — cause found (2026-10-03).** A stack sample of the
   hung main process shows it inside a JS timer → `SecItemCopyMatching` → `SecKeychainItemCopyContent` →
   `SecurityServer::ClientSession::decrypt` (blocked in `mach_msg`): a synchronous Keychain read
@@ -285,12 +293,18 @@ fixes it, and move the item here to "Recently done".
 
 ## Where a session starts (2026-10-05)
 
-- **P2 · Trust: the first real run** (2026-10-06). The untrusted-folder flow was checked with fake
-  runners and, in the isolated app, a stand-in `claude` and a temp `.claude.json`. Never done: the
-  real `claude` in the tab (its real prompt, then `~/.claude.json` changing under a real
-  `--bg`), and Windows (how Claude Code spells a folder's key there is assumed: forward slashes,
-  compared without case). If Claude Code moves or renames `hasTrustDialogAccepted`, the dialog says
-  nothing (not known) and the refused start still offers the fix; check `trust.py` then.
+- **P3 · Trust on Windows** (2026-10-06; the Mac's first real run is done, #59, 2026-10-09: the
+  dialog's line for a temp checkout, **Open Claude there…** showing Claude Code 2.1.295's real
+  prompt in the tab, the line turning into "can work in … now" once it was accepted, and a real
+  `claude --bg` starting there). Never done: Windows (how Claude Code spells a folder's key there is
+  assumed: forward slashes, compared without case). If Claude Code moves or renames
+  `hasTrustDialogAccepted`, the dialog says nothing (not known) and the refused start still offers
+  the fix; check `trust.py` then.
+- **P3 · Open Claude there… leaves an interactive Claude running in its tab** after the prompt is
+  accepted (a full session in that folder, on the default model and mode, until the user exits it);
+  the dialog only says "You can close that tab". Decide whether the tab should end on its own once
+  the folder is trusted, or whether the tab should run `claude` with a flag that exits after the
+  prompt if Claude Code ever has one.
 - **P3 · A held start does not count in the Needs you badge and sends no notification** (held
   items never do). A start master spawned and Claude Code refused is only seen in the list.
   Decide whether a refused start should be its own kind.
@@ -301,11 +315,30 @@ fixes it, and move the item here to "Recently done".
 - **P3 · The web app cannot re-check trust** (`deck.trust` is the window's): its Start dialog
   shows the line from the draft and leaves Start available.
 
-- **P2 · Start a session from it once.** Seen in the isolated app (2026-10-05): Setup's rows, the
-  Start dialog's found / not found / cut-short lines, the phone width. Never done: pressing Start,
-  the native picker behind **Choose folder…**, a parked session getting its record
-  (`parked-sessions.json` is written by `master spawn`: check that `claude --bg` still prints
-  `backgrounded · <id>`, else the record is keyed by the session's name).
+- **P3 · Choose folder… into a folder that is not the checkout, once** (#59, 2026-10-09). Done for
+  real in the isolated app with the real `claude` ([OPERATIONS](OPERATIONS.md#isolated-e2e-test-recipe),
+  "A real start from the Start dialog"): Start from the dialog put the session in the resolved temp
+  checkout (`claude agents` agrees), `parked-sessions.json` got its record keyed by the background
+  id (`claude --bg` 2.1.295 prints `backgrounded · <id> · <name>` and four hint lines; the real
+  output is in `test_spawn.py`), and a link of the parked session recorded no branch while the
+  same link without the record took the folder's. From a master proposal: the native picker
+  (the user chose in the sheet), the line turning into "the folder you chose (a checkout of
+  acme/tracker)", and Start replacing master's proposal with one that keeps its prompt and model
+  (`--model haiku`), the session running in the chosen folder with its own parked record. The
+  folder chosen was the checkout the sheet opened on, so a start in a folder that is no checkout
+  (the "the folder you chose" line without the repository, no parked record for a workspace) is
+  still only unit-tested.
+- **P3 · A proposal's model is not shown by the Start dialog.** Opened from a proposal that names
+  `--model haiku`, the Model select reads "Default" (the start keeps master's model through
+  `startChoice`; only the picker is silent). Preselect it, or say "master picked Haiku" under it.
+- **P3 · Re-linking a session that no longer owns its branch leaves the old `branches` entry**
+  (`ticket-links.json`): seen when the same session was linked with and without its parked record
+  (branch `""` on the second link, `acme/tracker@feat/someone-elses → #59` still mapped). A
+  session's link that records `""` should drop the branch key its earlier link wrote.
+- **P3 · The app tries to link a session it started to its ticket at once** ("link …: could not
+  read #940" in the log for a fixture ticket), so with `MASTERDECK_BOARD_FIXTURE` a started
+  session is never linked and its card never moves; fine for tests, but worth a word in the
+  recipe. Decide whether a failed first link should be retried on the next poll.
 - **P3 · A workspace that is itself a repository with its clones next to it.** Setup's label says
   repos live "in or next to" the workspace, and `ops.repos()` lists the siblings in that case, but
   `checkout.scan` only looks inside the workspace (it never leaves it). Such a setup gets "No
@@ -560,6 +593,57 @@ fixes it, and move the item here to "Recently done".
   was), the real web app over the bridge, a real phone, Windows, a loop driven by the installed
   app's real hooks (the live runs used `claude -p` with a temp settings file and temp home).
 
+## MasterDeck mod: open points (2026-10-10, issue #86)
+
+See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
+
+- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
+  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
+  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
+  `mods/` in the app (electron-builder `extraResources`).
+- **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
+  `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
+  masterdeck@masterdeck --scope user` (settings.json backed up first as
+  `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
+  nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
+  Updating the copy is by hand until the app installs it.
+- **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
+  `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
+  `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
+  install sets, or a pointer file under `~/.claude`) before isolated E2E tests use it.
+- **The real app writes the band files** (checked on the installed build: one per live session
+  with a ticket, PR or link). The mod's band was seen only against a stand-in deck folder; seeing it
+  in a real ticket session after `/reload-plugins` is the user's check.
+- **Instant typing with a band above the prompt** (`predictiveEcho`) not checked in MasterDeck's pane.
+- **`/md-note` needs `mv` and `rm`** (`$.process.run`): macOS and Linux only; Windows needs
+  `cmd /c move` or a rename in `$.fs`.
+- **A mod switched off while it runs stays until the session starts again**: Claude Code's
+  `/reload-plugins` does not judge a running, unchanged module again. A "Restart to apply" in the Mods
+  tab (stop and resume with no flags, when idle) would close the gap.
+- **Order matters**: the mod judges only what loads after it. `prependPlugins` in user settings is
+  honoured only without managed settings and outside Team/Enterprise sign-in; elsewhere an admin
+  must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
+  the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
+  checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
+  it. Setup should add `prependPlugins` with the install (backup, atomic).
+- **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
+  yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
+  (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
+  check and goal.
+- **`/md-board` is read only** and lists 30 cards a column; moving a card from it is a later step
+  (through BoardFlow, never from the mod).
+- **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
+  account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
+  account). A board file per account and its own current sprint needs a read per account.
+- **Updating the mods needs a reload in every running session** (the copy under
+  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
+  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
+- **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
+- **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
+  a change bumps `v` in both.
+- **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
+  `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
@@ -567,6 +651,10 @@ fixes it, and move the item here to "Recently done".
 | What | MasterDeck | Backend |
 |---|---|---|
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, not installed) | spec + plan L on `docs/agent-loops-82` (not pushed) |
+| MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | branch `feat/app-icon` | — |
+| The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
+| Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
+| Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |
 | Board popups show the description and sub-issues (issue #81): the Assign popup shows the ticket's description (rendered Markdown, as the Start dialog does), and both the Assign popup and the Start dialog list its sub-issues with number, title, status (board column, else Open / Closed), "n / m done", each opening on GitHub; hidden when there are none; the description and the list scroll in their own boxes (`shared/subIssues.ts`, `SubIssues.tsx`, `GitHub.subIssues`, `issue:subIssues`) | branch `worktree-MasterDeck-Terminal-81-board-popup-subissues` (not merged) | — |

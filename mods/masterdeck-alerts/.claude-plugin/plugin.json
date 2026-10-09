@@ -1,0 +1,9 @@
+{
+  "name": "masterdeck-alerts",
+  "displayName": "MasterDeck alerts",
+  "version": "0.5.0",
+  "description": "Toasts in the session when its MasterDeck card moves, a review thread opens, CI fails or passes, or the PR merges",
+  "author": { "name": "MasterDeck" },
+  "repository": "https://github.com/amntoppo/MasterDeck-Terminal",
+  "license": "MIT"
+}

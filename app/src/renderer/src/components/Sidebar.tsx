@@ -973,11 +973,14 @@ export function SessionRow({
           />
         )}
         <span className={`dot st-${status?.key ?? s.state}`} />
-        <span className="label">{s.name}</span>
-        {s.issue !== null && (
-          <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
-        )}
-        <AccountBadge login={s.account} ghActive={s.ghActive} />
+        {/* The name keeps the first line; the ticket and account wrap below it when the rail is narrow. */}
+        <span className="srow-name">
+          <span className="label">{s.name}</span>
+          {s.issue !== null && (
+            <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
+          )}
+          <AccountBadge login={s.account} ghActive={s.ghActive} />
+        </span>
         {loop && (
           <span
             className={`srow-loop ${loop.badge.endsWith("!") ? "limit" : loop.badge.endsWith("✓") ? "met" : ""}`}
