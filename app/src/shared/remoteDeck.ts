@@ -81,6 +81,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   accountFor: invoke(CH.accountFor),
   resumeStopped: invoke(CH.resumeStopped),
   tokensByDay: invoke(CH.tokensByDay),
+  // Working hours stay on the Mac (issue #64): no Hours tab on the web.
+  hoursActivity: blocked,
+  hoursExport: blocked,
   dismissStopped: invoke(CH.dismissStopped),
   assignIssue: invoke(CH.assignIssue),
   assignableUsers: invoke(CH.assignableUsers),

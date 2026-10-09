@@ -164,6 +164,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
+| Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
 
@@ -366,6 +367,21 @@ buttons; it does not go through macOS window drag regions.
   navigation, and sessions adding to notes through the `masterdeck-notes` skill. Not merged, not
   installed (the user's word first). What was checked is in the PR; open points in TODO.
 
+- **Working hours per account** (issue #64) are built on branch `worktree-MasterDeck-Terminal-64-hours` (PR #75, installed locally 2026-10-09)
+  (not merged): the Costs view's **Hours** estimates time per GitHub account, day and
+  ticket from session activity on this Mac (idle gap 1 h by default, an account counts a minute once,
+  each ticket its full time, unknown account listed), with CSV export; desktop only. Decisions are on
+  the issue; the spec is in the backend repo (`docs/superpowers/specs/2026-10-09-working-hours-design.md`,
+  branch `docs/working-hours-64`, not pushed). Open points: TODO ("Working hours: open points").
+
+- **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
+  (PR #76, draft, not merged; installed locally 2026-10-09): a **Filters** line in the Sessions column, closed by
+  default, with chips, Clear all and an empty state; status, account (two or more accounts), repo,
+  starred and a name search, kept in localStorage. Logic in `shared/sessionFilter.ts`, UI in
+  `SessionFilterBar.tsx`. Checked: typecheck, vitest, and the isolated app with a stand-in `claude`
+  listing five fake sessions and two fictional accounts (open/close, picking, AND across kinds, the
+  empty state, chip ×, Clear all, kept after a restart). Not checked: the web app, a phone, Windows,
+  real sessions with recorded accounts.
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
   this line): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the
@@ -385,6 +401,12 @@ buttons; it does not go through macOS window drag regions.
   indicator's card over the panel (nothing was connected), the real web app over the real bridge, a
   real phone, Windows. The Python suite was not run again for the final fixes (no Python changed).
   Open points are in TODO ("Notes: open points").
+- **Remote no longer waits for ever for the session list** (issue #8, branch
+  `worktree-MasterDeck-Terminal-8-remote-waiting`, not merged; 2026-10-09): the
+  status names the `claude agents` error, and after 60 s the line connects anyway (`remoteWait`,
+  `REMOTE_WAIT_MS`); until the first session list no snapshot is sent and commands are answered
+  "still loading" (agents loading) or fail at once with its error (agents failing). PR #77; the
+  first version is installed locally. Checked: typecheck, vitest. Not checked: the isolated app against a local backend with a failing `claude`.
 - **Where things stand:** `main` is pushed and released as **v0.8.2** (2026-10-06; v0.8.0 and v0.8.1 had no Windows build): several GitHub
   accounts (plan I, merge 6a83862), the Board without a GitHub project (plan J, merge 7714ec8), the
   Board's repository view with assignable users per repository (plan K, merge e75ec9c) and a

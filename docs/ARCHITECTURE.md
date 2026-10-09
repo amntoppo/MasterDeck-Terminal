@@ -788,6 +788,29 @@ waits, and writes nothing if accounts appeared meanwhile.
   shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
 
+### Working hours (issue #64)
+
+The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day
+and ticket. `TokenIndex` (`main/tokens.ts`) keeps, next to each transcript file's tokens, its
+activity `spans`: every line with a top-level `timestamp` (the line is parsed; a nested one never
+counts) widens the last span when within `SPAN_GRAIN` (5 min) of it, else opens one (`addMoment`,
+`shared/tokens.ts`). The cache is `tokens.json` version 2; a version 1 file is dropped and every
+transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
+re-asks every minute) answers `{spans, account}` for each session active since `since`:
+`Sources.hoursActivity` gives the spans, key, folder and ticket, main's handler the account
+(`hoursAccount`: recorded in `session-accounts.json` and still connected, else the account of the
+folder's origin repository, else of the ticket's repository, else the only account; else `null`,
+"unknown account"; never the primary as a guess). Origins come from `hoursOrigins`: the state's
+`origins` when known, else `git remote` four at a time for folders that still exist, in a cache of
+its own (`hoursRepos`) so past folders never evict live ones. `shared/hours.ts` `estimateHours` is
+pure: a session's spans (grouped by key, account and ticket, so a resume's new id fills its gap)
+joined across gaps up to the idle gap (at least `SPAN_GRAIN`), then a union per account and per
+(account, ticket), cut at local midnight;
+so an account counts a minute once and each ticket gets its full time. `hoursCsv` writes
+`date,account,ticket,minutes`; `CH.hoursExport` saves it through a save dialog. Both channels are
+`blocked` in `DECK_ACCESS` and refuse a remote call: nothing reaches `AppState`, the snapshot or
+the web.
+
 ## Shared modules (`shared/`)
 
 Pure TypeScript, no electron/node imports in the types, tested with vitest. The main groups:
@@ -795,8 +818,8 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Area | Modules |
 |---|---|
 | Types, IPC, settings | `types.ts` (`AppState`, `Session`, `PaneSpec`…), `ipc.ts`, `settings.ts` (`Settings`, `DEFAULT_SETTINGS`, `normalizeSettings`), `appConfig.ts`, `shortcuts.ts`, `keys.ts` |
-| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
-| Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts`, `costs.ts`, `schedules.ts`, `watches.ts` |
+| Sessions | `agents.ts`, `derive.ts`, `review.ts`, `sessionOrder.ts`, `sessionFilter.ts`, `stars.ts`, `tasks.ts`, `restore.ts`, `pastSessions.ts`, `carry.ts`, `link.ts`, `procs.ts`, `paneCommand.ts` |
+| Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
@@ -815,7 +838,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   and **`MasterPane`** (master-agent's terminal; ★ Master / ⌘⇧M). Dialogs and popups mount at the
   end (`BrowserApproval` only where `can('browserDecide')`, i.e. desktop).
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
-  (`TasksView`), `costs` (`CostsView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
+  (`TasksView`), `costs` (`CostsView`; its Hours choice is `HoursView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).
 - Notes is a panel over the current view, not a view: the Rail's button (`notesOpen` / `onNotes`,
   `aria-pressed`; under More on a phone) toggles and the palette opens `App.tsx`'s `notesAt` (`null` closed,
@@ -888,7 +911,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 |---|---|
 | `settings.json` | `Settings` |
 | `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs, the repository view's issues (`repoIssues`) |
-| `costs.json`, `tokens.json`, `stats/` | cost book, token index, status line output per session |
+| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 2: per transcript file, tokens per day and activity `spans`), status line output per session |
 | `statusline_tee.py` | installed status line tee (settings.json points here) |
 | `inbox.json`, `inbox-events.jsonl` | Needs you state and event log |
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
