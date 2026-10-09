@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, parseConfig, setConfig } from './appConfig'
-import { MOD_BEAT_STALE_MS, MOD_VERSION, bandFor, mergeCatalog, modBand, modRows, modsStale, parseModBeat, type ModSeen } from './modBand'
-import type { Session } from './types'
+import { MOD_BEAT_STALE_MS, MOD_VERSION, bandFor, boardKeyOf, mergeCatalog, modBand, modBoard, modRows, modsStale, parseModBeat, type ModSeen } from './modBand'
+import type { Board, BoardCard, Session } from './types'
 
 const cfg = parseConfig({ config: { owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] } })
 
@@ -59,21 +59,61 @@ describe('modBand', () => {
     expect(b?.pr).toEqual({ number: 90, url: PR, state: null, ci: null, threads: 0, draft: false })
   })
 
-  it('is null for a session with no ticket, PR or linked session, and skips ended peers', () => {
+  it('is there for a session with no ticket, PR or link too (its board key), and skips ended peers', () => {
     setConfig(cfg)
     const s = session({ issue: null })
     const done = session({ key: 'k2', name: 'old', state: 'done' })
-    expect(modBand(state({ sessions: [s, done], peers: { k1: ['k2'] } }), s)).toBeNull()
+    expect(modBand(state({ sessions: [s, done], peers: { k1: ['k2'] } }), s, 'acme')).toEqual({ v: 1, name: 'tracker-12-login', ticket: null, status: null, pr: null, peers: [], boardKey: 'acme' })
+  })
+})
+
+const card = (number: number, status: string | null, over: Partial<BoardCard> = {}): BoardCard => ({
+  number, repo: null, title: `Card ${number}`, url: `https://github.com/acme/tracker/issues/${number}`, status, prs: [], assignees: ['alice'], labels: [], milestone: null, type: null, ...over,
+})
+
+// An account with a GitHub board (without one, tabBoard keeps only the derived cards).
+const boarded = parseConfig({ owner: 'acme', issueRepo: 'tracker', projects: [{ owner: 'acme', number: 1, title: 'Delivery', columns: ['Todo', 'In Dev'] }] })
+
+describe('modBoard', () => {
+  afterEach(() => setConfig(DEFAULT_CONFIG))
+
+  it('gives the board\'s columns in order with their cards, a "No status" column for the rest', () => {
+    setConfig(boarded)
+    const board: Board = { takenAt: null, sprint: 'Sprint 7', columns: ['Todo', 'In Dev'], cards: [card(1, 'In Dev'), card(2, 'Todo'), card(3, null), card(4, 'In Dev', { title: 'x'.repeat(200) })] }
+    const b = modBoard(board, '_', boarded)!
+    expect(b.sprint).toBe('Sprint 7')
+    expect(b.derived).toBe(false)
+    expect(b.columns.map((c) => [c.name, c.count, c.cards.map((x) => x.label)])).toEqual([
+      ['Todo', 1, ['#2']],
+      ['In Dev', 2, ['#1', '#4']],
+      ['No status', 1, ['#3']],
+    ])
+    expect(b.columns[1].cards[1].title.length).toBe(120)
+    expect(modBoard(null, '_', boarded)).toBeNull()
+  })
+
+  it('lists at most 30 cards a column, and counts them all', () => {
+    setConfig(boarded)
+    const cards = Array.from({ length: 45 }, (_, i) => card(i + 1, 'Todo'))
+    const col = modBoard({ takenAt: null, sprint: null, columns: ['Todo'], cards }, '_', boarded)!.columns[0]
+    expect([col.count, col.cards.length]).toEqual([45, 30])
+  })
+
+  it('reads the session\'s account, else the primary\'s', () => {
+    const two = parseConfig({ config: { accounts: [
+      { login: 'alice', primary: true, owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker'] },
+      { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'] },
+    ] } })
+    expect(boardKeyOf(session({ account: 'bob-work' }), two)).toBe('bob-work')
+    expect(boardKeyOf(session(), two)).toBe('alice')
   })
 })
 
 describe('bandFor', () => {
   const band = { v: 1 as const, name: 's', ticket: null, status: 'In Dev', pr: null, peers: [] }
-  it('carries the mods switched off, and writes a band for a session with nothing else to show', () => {
-    expect(bandFor(band, 's', [])).toBe(band)
-    expect(bandFor(null, 's', [])).toBeNull()
-    expect(bandFor(band, 's', ['masterdeck'])).toEqual({ ...band, offMods: ['masterdeck'] })
-    expect(bandFor(null, 'plain', ['token-chart'])).toEqual({ v: 1, name: 'plain', ticket: null, status: null, pr: null, peers: [], offMods: ['token-chart'] })
+  it('carries the mods switched off', () => {
+    expect(bandFor(band, [])).toBe(band)
+    expect(bandFor(band, ['masterdeck-alerts'])).toEqual({ ...band, offMods: ['masterdeck-alerts'] })
   })
 })
 
@@ -112,18 +152,20 @@ describe('modRows', () => {
       ['masterdeck-ticket', 'Ticket line', 'on', false, false, true],
       ['masterdeck-alerts', 'Alerts', 'off', true, false, true],
       ['masterdeck-note', 'Note command', 'not-seen', false, false, true],
+      ['masterdeck-loop', 'Agent loop', 'not-seen', false, false, true],
+      ['masterdeck-board', 'Board', 'not-seen', false, false, true],
       ['blast', 'blast', 'turning-on', false, false, false],
       ['old', 'old', 'not-seen', false, false, false],
       ['replay', 'replay', 'off', true, false, false],
       ['token-chart', 'token-chart', 'off-next-start', true, false, false],
       ['diff', 'diff', 'on', false, true, false],
     ])
-    expect(modRows([], { version: '0.4.0', mods: [] }, []).map((r) => r.name)).toEqual(['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note'])
+    expect(modRows([], { version: '0.4.0', mods: [] }, []).map((r) => r.name)).toEqual(['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note', 'masterdeck-loop', 'masterdeck-board'])
   })
 })
 
 describe('modsStale', () => {
-  const all = ['masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note'].map((n) => seen(n))
+  const all = ['masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note', 'masterdeck-loop', 'masterdeck-board'].map((n) => seen(n))
   it('is true for an older core, or a MasterDeck mod the session has not loaded', () => {
     expect(modsStale({ version: MOD_VERSION, mods: all })).toBe(false)
     expect(modsStale({ version: '0.3.0', mods: all })).toBe(true)

@@ -18,6 +18,8 @@ export type Band = {
     draft: boolean
   } | null
   peers: { name: string; state: string }[]
+  /** The board this session's account sees: `deck/boards/<boardKey>.json` (masterdeck-board). */
+  boardKey?: string
   /** Mods switched off for this session in Session details → Mods, by plugin name. */
   offMods?: string[]
 }

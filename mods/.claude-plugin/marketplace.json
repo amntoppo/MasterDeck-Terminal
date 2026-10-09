@@ -6,6 +6,8 @@
     { "name": "masterdeck", "source": "./masterdeck" },
     { "name": "masterdeck-ticket", "source": "./masterdeck-ticket" },
     { "name": "masterdeck-alerts", "source": "./masterdeck-alerts" },
-    { "name": "masterdeck-note", "source": "./masterdeck-note" }
+    { "name": "masterdeck-note", "source": "./masterdeck-note" },
+    { "name": "masterdeck-loop", "source": "./masterdeck-loop" },
+    { "name": "masterdeck-board", "source": "./masterdeck-board" }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "name": "masterdeck-note",
   "displayName": "MasterDeck note command",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "/md-note <text> adds the text to this session's ticket note in MasterDeck, at once and without a Claude turn",
   "author": { "name": "MasterDeck" },
   "repository": "https://github.com/amntoppo/MasterDeck-Terminal",

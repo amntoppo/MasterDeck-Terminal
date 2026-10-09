@@ -60,7 +60,8 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   (`skills/babysit-proof/` on disk is a leftover `__pycache__` only; the skill was removed in 9329db4.)
 - `mods/` — Claude Code mods (a local-folder marketplace, `.claude-plugin/marketplace.json`): the
   core `mods/masterdeck` (per-session switches, heartbeat) and one mod per feature,
-  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note` (see [docs/MODS.md](docs/MODS.md)).
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, `masterdeck-loop`, `masterdeck-board`
+  (see [docs/MODS.md](docs/MODS.md)).
   `mods/shared/deck.ts` is copied into each by `mods/sync-shared.sh`: edit it there. Check each with
   `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
@@ -373,14 +374,16 @@ buttons; it does not go through macOS window drag regions.
   `~/.claude/masterdeck/mods`, and `prependPlugins` lists the core): research in
   [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a `claude --bg` session and draws in
   `claude attach`. Prototype mods: a core `mods/masterdeck` (per-session switches, heartbeat) and
-  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, and the app's side
+  `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, `masterdeck-loop` (`/md-loop`, #82),
+  `masterdeck-board` (`/md-board`), and the app's side
   (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session). Checked:
-  typecheck, vitest (151 files passed, 2 skipped; 1734 tests passed, 4 skipped), `claude plugin
+  typecheck, vitest (151 files passed, 2 skipped; 1737 tests passed, 4 skipped), `claude plugin
   validate` / `test` / tsc for each mod, the Mods tab in the web preview at 1400 and 390 px, and
   throwaway sessions: the line at 80/110/160 columns, toasts, `/md-note` against a stand-in pump,
   the pane, MasterDeck closed, a `--plugin-dir` mod refused at start and back after a reload, and
   with the installed mods the core reporting all three and the ticket line switched off and on at
-  once. The user saw the line, `/md-ticket` and the pane in a real session. Not checked: the Mods
+  once; `/md-board`'s pane with a sample board, and a `/md-loop` that took two rounds to pass its
+  check. The user saw the line, `/md-ticket` and the pane in a real session. Not checked: the Mods
   tab in the installed app with real switches, instant typing under the line, Windows. A background session gets the daemon's environment, not the launching shell's
   (`MASTERDECK_HOME` does not reach the mod there). Open points: TODO ("MasterDeck mod").
 

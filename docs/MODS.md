@@ -80,10 +80,10 @@ session polling GitHub would burn the rate limit; the mod is a thin reader of wh
 |---|---|---|---|
 | 1 | Bridge: the app writes per-session files, the mod reads them and writes a heartbeat (**built**) | foundation | M |
 | 2 | Ticket band above the prompt (**built**) | high | S |
-| 3 | `/md-note`, `/md-ticket` (**built**), `/md-board` | medium-high | S |
+| 3 | `/md-note`, `/md-ticket`, `/md-board` (**built**) | medium-high | S |
 | 3b | Every mod switched per session from Session details → Mods (**built**: the mod refuses others at `plugin.register`) | medium | M |
 | 4 | Ticket context through `prompt.context` | medium-high | S |
-| 5 | Agent-loop driver and progress band (#82): `turn.complete` runs the check, then submits the next round | high for #82 | M-L |
+| 5 | Agent-loop driver and progress band (#82): `turn.complete` runs the check, then submits the next round (**built**: `masterdeck-loop`) | high for #82 | M-L |
 | 6 | Typing, `/queue` and AskUserQuestion through the mod | high (reliability) | L, in steps |
 | 7 | The deck hook's guards and peer deltas in the mod (Windows) | high on Windows | M |
 | 8 | Toasts for MasterDeck events (**built** for the band's own changes) | medium | S |

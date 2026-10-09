@@ -4,7 +4,7 @@ import type { SeenMod } from '../types'
  * MasterDeck's own mods. They read their switch from the band themselves and go quiet at once, so
  * the core never refuses them (a refused mod comes back only at a reload, a running one never).
  */
-export const FAMILY: readonly string[] = ['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note']
+export const FAMILY: readonly string[] = ['masterdeck', 'masterdeck-ticket', 'masterdeck-alerts', 'masterdeck-note', 'masterdeck-loop', 'masterdeck-board']
 
 /**
  * Whether to refuse a mod as it loads: one the person installed (tier `user`; never a managed or

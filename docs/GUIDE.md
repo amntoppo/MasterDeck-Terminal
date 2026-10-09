@@ -542,6 +542,8 @@ claude plugin install masterdeck@masterdeck
 claude plugin install masterdeck-ticket@masterdeck
 claude plugin install masterdeck-alerts@masterdeck
 claude plugin install masterdeck-note@masterdeck
+claude plugin install masterdeck-loop@masterdeck
+claude plugin install masterdeck-board@masterdeck
 ```
 
 and add `"prependPlugins": ["masterdeck@masterdeck"]` to `~/.claude/settings.json`. Then start or
@@ -557,12 +559,21 @@ linked sessions:
   passes, or the PR merges.
 - **Note command** (`masterdeck-note`): `/md-note <text>` adds the text to the ticket's note in
   Notes at once, without a turn of Claude (macOS and Linux).
+- **Agent loop** (`masterdeck-loop`): `/md-loop [--max N] <check> -- <goal>`, for example
+  `/md-loop npm test -- fix the failing tests`. Claude works on the goal; when its turn ends the check
+  runs in the session's folder; while it fails, Claude gets its last lines and another round, up to N
+  (5 unless you say). A line above the prompt shows the round and what runs, with **Stop**; it ends
+  when the check passes, after N rounds, when you interrupt a round (Esc), press Stop, type
+  `/md-loop stop`, or switch the mod off. `/md-loop` alone says where it stands.
+- **Board** (`masterdeck-board`): `/md-board` opens a pane with the board of the session's account
+  (its sprint, each column with its cards and how many there are), this session's ticket marked.
+  Read only.
 - **MasterDeck core** (`masterdeck`): nothing on screen; it does the switching below and tells
   MasterDeck which mods run in each session.
 
 **Session details → Mods** has a switch per mod, for that session only:
 
-- **MasterDeck** lists the core (always on: it does the switching) and the three feature mods. One
+- **MasterDeck** lists the core (always on: it does the switching) and the five feature mods. One
   switched off stops at once (nothing drawn or toasted, its command does nothing), and comes back at
   once when switched on.
 - **Other mods** lists every other mod MasterDeck has seen in your sessions (yours, marketplace ones,

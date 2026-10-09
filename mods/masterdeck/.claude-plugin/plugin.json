@@ -1,7 +1,7 @@
 {
   "name": "masterdeck",
   "displayName": "MasterDeck",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "MasterDeck's core mod: switches mods on and off per session from MasterDeck and tells it which mods run",
   "author": { "name": "MasterDeck" },
   "repository": "https://github.com/amntoppo/MasterDeck-Terminal",

@@ -44,8 +44,8 @@ async function refresh($: EngineInterface): Promise<void> {
   if (changed) $.ui.invalidate('ui.render')
 }
 
-/** Nothing to show: no band, or switched off here. */
-const isQuiet = () => !now.band || isOff(now.band, NAME)
+/** Nothing to show: no ticket, PR or linked session, or switched off here. */
+const isQuiet = () => !now.band || isOff(now.band, NAME) || (!now.band.ticket && !now.band.pr && !now.band.peers.length)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -61,7 +61,7 @@ export const register: Register = on => {
     if (isOff(now.band, NAME)) return {}
     isHidden = false
     $.ui.invalidate('ui.render')
-    if (!now.band) return { text: 'MasterDeck has no ticket, PR or linked session for this session.' }
+    if (isQuiet()) return { text: 'MasterDeck has no ticket, PR or linked session for this session.' }
     await $.ui.open({ id: PANE, title: 'MasterDeck' })
     return { text: 'Opened the ticket pane.' }
   })

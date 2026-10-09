@@ -1,5 +1,8 @@
+import { primaryLogin } from './accounts'
+import type { AppConfig } from './appConfig'
+import { tabBoard } from './derivedBoard'
 import { sameTicket, ticketLabel, ticketRef, ticketUrl } from './ticket'
-import type { AppState, Session } from './types'
+import type { AppState, Board, Session } from './types'
 
 /**
  * What the MasterDeck mod (mods/masterdeck) draws inside a session: `deck/band/<sessionId>.json`.
@@ -24,6 +27,8 @@ export interface ModBand {
     draft: boolean
   } | null
   peers: { name: string; state: Session['state'] }[]
+  /** The board this session's account sees: `deck/boards/<boardKey>.json` (`modBoard`). */
+  boardKey?: string
   /**
    * Mods switched off for this session in Session details → Mods, by plugin name. MasterDeck's own
    * feature mods read it and go quiet; the core refuses any other when it loads.
@@ -35,7 +40,7 @@ export interface ModBand {
 export const MOD_CORE = 'masterdeck'
 
 /** The mods' version this MasterDeck goes with (each mod's plugin.json; shared/modsShared.test.ts checks). */
-export const MOD_VERSION = '0.4.0'
+export const MOD_VERSION = '0.5.0'
 
 /**
  * The session runs MasterDeck's mods from before they were updated or installed: a running session
@@ -50,12 +55,13 @@ export const MASTERDECK_MODS: readonly { name: string; title: string; about: str
   { name: 'masterdeck-ticket', title: 'Ticket line', about: 'The ticket, its column, the PR and linked sessions above the prompt; /md-ticket' },
   { name: 'masterdeck-alerts', title: 'Alerts', about: 'Toasts when the card moves, a review thread opens, CI changes or the PR merges' },
   { name: 'masterdeck-note', title: 'Note command', about: '/md-note <text> adds to the ticket\'s note in Notes' },
+  { name: 'masterdeck-loop', title: 'Agent loop', about: '/md-loop <check> -- <goal>: rounds until the check passes, with progress above the prompt' },
+  { name: 'masterdeck-board', title: 'Board', about: '/md-board shows this account\'s board in a pane, read only' },
 ]
 
-/** What to write for a session: its band with the mods switched off there (written even with nothing else to show). */
-export function bandFor(band: ModBand | null, name: string, offMods: readonly string[]): ModBand | null {
-  if (!offMods.length) return band
-  return { ...(band ?? { v: 1, name, ticket: null, status: null, pr: null, peers: [] }), offMods: [...offMods] }
+/** What to write for a session: its band with the mods switched off there. */
+export function bandFor(band: ModBand, offMods: readonly string[]): ModBand {
+  return offMods.length ? { ...band, offMods: [...offMods] } : band
 }
 
 /** A mod the MasterDeck mod saw load (or refused) in a session: `plugin.register`. */
@@ -206,8 +212,59 @@ export function parseModBeat(text: string, now: number): ModBeat | null {
   return { version: b.version.slice(0, 40), claude: typeof b.claude === 'string' ? b.claude.slice(0, 40) : '', at: b.at, mods: parseSeen(b.mods) }
 }
 
-/** The band for one session: null when MasterDeck has nothing to show for it (no ticket, no links). */
-export function modBand(state: Pick<AppState, 'sessions' | 'issues' | 'board' | 'prs' | 'prLive' | 'sessionPrs' | 'peers'>, s: Session): ModBand | null {
+/** The board file a session reads: its account's login, else the primary's; `_` with no login known. */
+export function boardKeyOf(s: Session, c: AppConfig): string {
+  return s.account ?? primaryLogin(c) ?? '_'
+}
+
+/** What `/md-board` (mods/masterdeck-board) shows: an account's board, read only. `deck/boards/<key>.json`. */
+export interface ModBoard {
+  v: 1
+  account: string | null
+  sprint: string | null
+  /** The account has no GitHub board: MasterDeck's own columns from its repositories' issues. */
+  derived: boolean
+  columns: { name: string; count: number; cards: { label: string; title: string; url: string; assignees: string[] }[] }[]
+}
+
+/** Cards listed per column (the count says how many there are); a title is cut at this many characters. */
+const BOARD_CARDS = 30
+const BOARD_TITLE = 120
+
+/** The board of the account behind `key` (see boardKeyOf), as `/md-board` shows it; null before a board is read. */
+export function modBoard(board: Board | null, key: string, c: AppConfig): ModBoard | null {
+  const login = key === '_' ? null : key
+  const b = tabBoard(board, login, c)
+  if (!b) return null
+  const names = [...b.columns]
+  const loose = b.cards.filter((x) => !x.status || !names.includes(x.status))
+  if (loose.length) names.push('No status')
+  return {
+    v: 1,
+    account: login,
+    sprint: b.sprint,
+    derived: b.cards.length > 0 && b.cards.every((x) => x.derived),
+    columns: names.map((name) => {
+      const cards = name === 'No status' ? loose : b.cards.filter((x) => x.status === name)
+      return {
+        name,
+        count: cards.length,
+        cards: cards.slice(0, BOARD_CARDS).map((x) => ({
+          label: ticketLabel(x.repo ?? null, x.number),
+          title: x.title.length > BOARD_TITLE ? `${x.title.slice(0, BOARD_TITLE - 1)}…` : x.title,
+          url: x.url,
+          assignees: x.assignees.slice(0, 3),
+        })),
+      }
+    }),
+  }
+}
+
+/**
+ * The band for one session: always one (the ticket, its PR and links when there are, and the board
+ * key for /md-board); the ticket line draws only when it has a ticket, a PR or a link.
+ */
+export function modBand(state: Pick<AppState, 'sessions' | 'issues' | 'board' | 'prs' | 'prLive' | 'sessionPrs' | 'peers'>, s: Session, boardKey?: string): ModBand {
   const peers = (state.peers[s.key] ?? [])
     .map((k) => state.sessions.find((x) => x.key === k))
     .filter((x): x is Session => !!x && x.state !== 'done')
@@ -242,6 +299,5 @@ export function modBand(state: Pick<AppState, 'sessions' | 'issues' | 'board' | 
       draft: live?.isDraft ?? false,
     }
   }
-  if (!ticket && !pr && !peers.length) return null
-  return { v: 1, name: s.name, ticket, status, pr, peers }
+  return { v: 1, name: s.name, ticket, status, pr, peers, ...(boardKey ? { boardKey } : {}) }
 }

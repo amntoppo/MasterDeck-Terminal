@@ -272,6 +272,8 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 | `masterdeck-ticket` | The ticket line above the prompt, its pane, `/md-ticket` |
 | `masterdeck-alerts` | Toasts when the card moves, a review thread opens, CI fails or passes, the PR merges or is linked |
 | `masterdeck-note` | `/md-note <text>`: adds to the ticket's note through the note pump |
+| `masterdeck-loop` | `/md-loop [--max N] <check> -- <goal>`: an agent loop (issue #82) with its progress above the prompt |
+| `masterdeck-board` | `/md-board`: the board of the session's account in a pane, read only |
 
 - **What they share.** A mod may import only its own files, and the engine follows `$` into
   functions of the register file only (a `$` passed to an imported function fails validation). So
@@ -283,10 +285,13 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   session has the daemon's environment, so in practice the latter).
 - **App side.** In the state callback (`main/index.ts`, while `agents` is healthy)
   `DeckHooks.setBand(sessionId, bandFor(modBand(state, s), s.name, modOff.of(s.key)))` writes
-  `deck/band/<sessionId>.json` for every live session that has a ticket, a PR, a linked session or
-  a mod switched off (`shared/modBand.ts` `ModBand`: name, ticket label/ref/title/url, the card's
-  column, the session's newest PR with state, CI, open threads and draft, linked sessions,
-  `offMods`). It is written only when its text changed, and `pruneBands` removes the files of
+  `deck/band/<sessionId>.json` for every live session (`shared/modBand.ts` `ModBand`: name, ticket
+  label/ref/title/url, the card's column, the session's newest PR with state, CI, open threads and
+  draft, linked sessions, `boardKey`, `offMods`). The board files: one per account a live session
+  works as (`boardKeyOf`: the session's account, else the primary's, `_` with none), `deck/boards/
+  <key>.json` (`modBoard`: `tabBoard` of that account, its columns in order with a "No status" one for
+  the rest, at most 30 cards a column with the count, titles cut at 120 characters), written when
+  changed (`DeckHooks.setBoard` / `pruneBoards`, sharing `writeIfChanged` with the bands). It is written only when its text changed, and `pruneBands` removes the files of
   sessions that are no longer live. `DeckHooks.modBeats()` reads the core's heartbeats,
   `deck/mods/<sessionId>.json` (`{v: 1, version, claude, at, mods, ended?}`, `parseModBeat`: fresh
   under 45 s; files older than a day are removed), and the callback puts them in `state.modLive` by
@@ -318,13 +323,26 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   (`deck.sendText`, as **Compact** does). MasterDeck's own switches stay usable then (the choice is in
   the band when the mod loads). `modsShared.test.ts` holds every mod's `version` to `MOD_VERSION`.
 - **masterdeck-ticket**: every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its
-  band into module variables and redraws on a change (`$.ui.invalidate`; a reload refills them at
+  band into module variables and redraws on a change; it draws only for a ticket, a PR or a link (`$.ui.invalidate`; a reload refills them at
   `session.start`). The line above the prompt (`AbovePrompt`, sized to `bodyColumns`: one short line
   under 90 columns, the title when there is room, then **Details** / **Hide**; `hooks/line.ts`
   `segments`) keeps what other mods draw there (`next(e)` under it). `/md-ticket` opens a pane with
   the ticket, its column, the PR (links) and linked sessions.
 - **masterdeck-alerts**: compares two reads of the band (`bandEvents`) and toasts the difference;
   the first read after a load, and the first after it is switched on, toast nothing.
+- **masterdeck-loop** (`hooks/loop.ts`, its `$.state` contract `types/index.d.ts`): `/md-loop
+  [--max N] <check> -- <goal>` (max 5 by default, 20 at most) submits the goal (`$.prompt.submit`,
+  `asUser`, from a timer: never inside a dispatch). The first main-loop turn that starts after a
+  round is submitted is that round's (`turnId`); when it ends (`turn.complete`, not a subagent's)
+  the check runs in the session's folder (`sh -c`, up to 10 minutes, from a timer); exit 0 ends it
+  (`passed`), else the next round is submitted with the check's last 40 lines (`nextPrompt`) until
+  `max` (`gave-up`). An interrupted round (`aborted`), an error or a refusal, `/md-loop stop`, the
+  line's **Stop** and switching the mod off end it (`stopped`, with why). The line above the prompt
+  says where it stands (`progressText`); **Dismiss** clears a finished one. Not yet told to
+  MasterDeck's window or a workflow (#82's canvas): the loop lives in the session.
+- **masterdeck-board**: `/md-board` reads the band's `boardKey` and `deck/boards/<key>.json` and
+  opens a pane (`md-board`) with the account, the sprint, each column with its count and cards, this
+  session's ticket marked; re-read every 5 s; closed when switched off.
 - **masterdeck-note**: `/md-note <text>` writes `note-requests/<id>.part`, renames it to `.json`
   and waits up to 6 s for `note-answers/<id>.json`, else takes the request back by renaming it (the
   mods API has no rename or delete, so these go through `$.process.run(['mv' | 'rm', …])`: macOS and

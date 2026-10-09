@@ -13,11 +13,12 @@ import { deckFolder, deckRead, type DeckRead } from './deck'
  *   stays until the session starts again: a reload does not judge an unchanged module again);
  * - writes `deck/mods/<sessionId>.json` every 15 s: its heartbeat and the mods it saw, which the app
  *   lists in the Mods tab.
- * The features are mods of their own: masterdeck-ticket, masterdeck-alerts, masterdeck-note.
+ * The features are mods of their own: masterdeck-ticket, masterdeck-alerts, masterdeck-note,
+ * masterdeck-loop, masterdeck-board.
  */
 
 // Keep in step with .claude-plugin/plugin.json.
-const VERSION = '0.4.0'
+const VERSION = '0.5.0'
 const BEAT_MS = 15_000
 const READ_MS = 2_000
 

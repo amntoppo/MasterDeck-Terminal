@@ -30,7 +30,7 @@ describe('ModOff', () => {
   it('reads older files (the one MasterDeck mod off) as every feature mod off, and a broken file as empty', () => {
     const file = tmp('mod-off.json')
     writeFileSync(file, JSON.stringify(['abc12345', 7, 'not a key']))
-    const features = ['masterdeck-alerts', 'masterdeck-note', 'masterdeck-ticket']
+    const features = ['masterdeck-alerts', 'masterdeck-board', 'masterdeck-loop', 'masterdeck-note', 'masterdeck-ticket']
     expect(new ModOff(file).all()).toEqual({ abc12345: features })
     writeFileSync(file, JSON.stringify({ abc12345: ['masterdeck', 'token-chart'] }))
     expect(new ModOff(file).all()).toEqual({ abc12345: [...features, 'token-chart'] })

@@ -20,7 +20,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { bandFor, mergeCatalog, modBand } from "@shared/modBand";
+import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -630,9 +630,16 @@ const sources = new Sources(
     // The MasterDeck mod (mods/masterdeck) reads band/<id>.json and writes mods/<id>.json.
     if (sources.isHealthy("agents")) {
       const live = state.sessions.filter((s) => s.state !== "done");
-      for (const s of live)
-        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s), s.name, modOff.of(s.key)));
+      const boardKeys = new Set<string>();
+      for (const s of live) {
+        const key = boardKeyOf(s, state.config);
+        boardKeys.add(key);
+        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s, key), modOff.of(s.key)));
+      }
       deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      // One board file per account a live session works as (masterdeck-board's /md-board).
+      for (const key of boardKeys) deckHooks.setBoard(key, modBoard(state.board, key, state.config));
+      deckHooks.pruneBoards(boardKeys);
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
     state.modOff = modOff.all();
