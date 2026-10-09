@@ -18,6 +18,7 @@ Start here, then read what the task needs:
 | [docs/REMOTE.md](docs/REMOTE.md) | Account, CloudSync, browser bridge, web app, instant typing, remote indicator, message tables |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Build/install/release, web deploy, isolated E2E recipe, measuring upload, troubleshooting |
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
+| [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
@@ -384,10 +385,13 @@ buttons; it does not go through macOS window drag regions.
   `Resources/mods`. Not checked: the reload item with real sessions, an update over the user's
   copy, Windows. Open points: TODO ("Mods install (#93)").
 
-- **masterdeck.dev** is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
-  (deploy and search-engine notes in its README; OPERATIONS § Website). For search: structured data,
-  IndexNow on deploy, and this repository's website field, topics, README and release notes link to
-  it. Google Search Console is still to be set up by hand (TODO).
+- **masterdeck.dev** (issue #89) is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+  (private, `main`; checkout `~/Documents/personal/Masterdeck-Website`; deploy and search-engine notes
+  in its README; OPERATIONS § Website). Live since 2026-10-10 as the Workers `masterdeck-site` and
+  `masterdeck-www`. Built first as `site/` on branch `worktree-MasterDeck-Terminal-89-website`
+  (bbebbb4), then moved out. For search: structured data, IndexNow on deploy, and this repository's
+  website field, topics, README and release notes link to it. Google Search Console is still to be
+  set up by hand (TODO). Agent loops (#82) show as "coming soon" on the site: update it when they ship.
 
 - **MasterDeck has its own icon** (merged to `main` 3ce574c and pushed; installed locally and the
   web app deployed, 2026-10-10): the mark from masterdeck.dev on a dark tile, as the app icon
