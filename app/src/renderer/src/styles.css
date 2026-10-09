@@ -1364,6 +1364,14 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .notes-title, .notes-ticket { flex: none; padding: 10px 14px 6px; border: none; background: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; outline: none; }
 .notes-ticket { font-weight: 500; font-size: 12.5px; color: var(--muted); }
 .notes-body { flex: 1; min-height: 0; resize: none; padding: 6px 14px 10px; border: none; background: none; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; outline: none; }
+/* Write / Preview / Side by side. Side by side widens the panel (only offered at WIDE_QUERY, 1000px). */
+.notes-panel.wide { width: min(860px, calc(100% - var(--rail-w))); }
+.notes-pane { flex: 1; min-height: 0; display: flex; }
+.notes-pane > * { flex: 1 1 0; min-width: 0; }
+.notes-pane.both > .notes-preview { border-left: 1px solid var(--line); }
+.notes-preview { overflow-y: auto; padding: 8px 14px 12px; outline: none; }
+.notes-foot .seg { flex: none; }
+.notes-foot .seg button { padding: 3px 8px; white-space: nowrap; }
 .notes-clash { display: flex; align-items: center; gap: 6px; padding: 7px 10px 7px 14px; border-top: 1px solid var(--amber); color: var(--amber); font-size: 12.5px; }
 .notes-foot { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 10px 8px 14px; border-top: 1px solid var(--line); font-size: 12px; }
 

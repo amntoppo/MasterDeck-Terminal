@@ -686,6 +686,24 @@ A place for what you would otherwise keep in another app: your own notes, and on
   in the list under **Notes**, the one edited last first, with the start of its text. The search
   box above the list finds notes by their titles and texts (every word you type must be in the
   note), and a ticket's note by its ticket too, written `owner/name#12`. **Delete** (under the text) asks first and cannot be undone.
+- **Markdown:** write a note in Markdown (`# headings`, `- lists`, `- [ ] tasks`, `[links](https://…)`,
+  `` `code` ``, `**bold**`, `_italic_`, tables, quotes) and see it rendered. Under the text, **Write**
+  shows the text you edit, **Preview** the note rendered, and **Side by side** (in a window at least
+  1000 px wide) both, with the panel twice as wide. Each window and browser remembers its choice (a
+  new, empty note always opens in **Write**). In the
+  preview a link opens in your browser, never in MasterDeck, and only `https://` links are links. An
+  image (`![name](https://…)`) shows as a link to it: opening a note never loads anything. HTML
+  in a note is never run or drawn: `<b>`, `<img>`, `<script>` and the like show as the text you typed.
+  The list, a ticket's **Details** and the hover text of a card's note mark show the start of a note
+  as plain words (the marks left out). Nothing about the stored note changed: a note written before
+  reads the same (or better: a `- ` line is a list now), and nothing on disk was rewritten.
+- **Notes from a session:** ask any Claude session to "write this to a note" (or "add it to the
+  ticket's note"). MasterDeck installs the `masterdeck-notes` skill: with it a session can make a new
+  note (as many as you ask for, each with its own title), add text at the end of a note it made, or
+  add text at the end of a ticket's note (made when there is none). A session only adds; it never
+  reads your notes, changes what you wrote or deletes anything. The note shows up in the panel at
+  once; if you are typing in that same note, the editor says **Changed elsewhere** as usual. MasterDeck
+  must be running (the session is told when it is not). macOS only for now.
 - **A ticket's note:** one per ticket. In a session's **Details** tab, **Add note** (or **Edit
   note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
   on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
@@ -698,8 +716,9 @@ A place for what you would otherwise keep in another app: your own notes, and on
   editor says so with **Discard**, and keeps your text on screen until you choose. When the Mac
   does not answer (the web app, a lost connection), or could not write the file just then, it says
   **Not saved** and tries again every few seconds.
-- **Every note:** plain text (Markdown with a preview is planned). It is kept on this Mac, in
-  `~/.claude/masterdeck/notes/` (one small file each), never sent to a session or to GitHub, and
+- **Every note:** the text as you typed it (Markdown, shown rendered). It is kept on this Mac, in
+  `~/.claude/masterdeck/notes/` (one small file each), never sent to a session (sessions can add to
+  notes, not read them) or to GitHub, and
   not part of what the phone and API line carries. A browser gets notes only over the end-to-end
   encrypted connection: the list carries the first 120 characters of each; a whole note is sent
   when you open it, and when your save meets a newer version of that note (so the editor can offer
