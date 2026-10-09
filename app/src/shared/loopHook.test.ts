@@ -314,6 +314,26 @@ describe.skipIf(process.platform === 'win32')('the loop hook script', { timeout:
     expect(t.loops()[0].state).toBe('met')
   })
 
+  it('the transcript counts only its last assistant entry: an older claim is not this turn\'s', () => {
+    const t = setup({ loops: [def({ check: { command: '' } as CompiledLoop['check'], agentDone: { on: true, goal: 'g' } })] })
+    const tp = join(t.home, 'transcript.jsonl')
+    const write = (last: object) =>
+      writeFileSync(
+        tp,
+        [
+          { type: 'assistant', message: { content: [{ type: 'text', text: 'LOOP DONE: an old round' }] } },
+          { type: 'user', message: { content: 'go on' } },
+          last,
+        ].map((l) => JSON.stringify(l)).join('\n') + '\n',
+      )
+    // The last one has no text (a tool call): nothing said.
+    write({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } })
+    expect(t.answer({ last_assistant_message: undefined, transcript_path: tp }).reason).toMatch(/Not done yet/)
+    write({ type: 'assistant', message: { content: [{ type: 'text', text: 'Still looking.' }] } })
+    expect(t.answer({ last_assistant_message: undefined, transcript_path: tp }).reason).toMatch(/Not done yet/)
+    expect(t.loops()[0]).toMatchObject({ state: 'open', iteration: 2 })
+  })
+
   it('stops at the iteration limit, with the limit branch when there is one', () => {
     const t = setup({ loops: [def({ limits: { iterations: 2 } as CompiledLoop['limits'] })] })
     expect(t.answer().decision).toBe('block')

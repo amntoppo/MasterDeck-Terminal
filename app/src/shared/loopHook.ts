@@ -156,11 +156,12 @@ cmd=''; re=''; mode=match; tmin=5; agent=false
 eval "$(printf '%s' "$defs" | jq -r --argjson e "$e" '[.[] | select(.id == $e.id)][0] // empty | @sh "cmd=\\(.check.command // "") re=\\(.check.output // "") mode=\\(.check.outputMode // "match") tmin=\\(.check.timeoutMin // 5 | tostring) agent=\\(.agentDone.on == true | tostring)"' 2>/dev/null)"
 cwd=$(printf '%s' "$in" | jq -r '.cwd // "" | strings' 2>/dev/null)
 [ -n "$cwd" ] && [ -d "$cwd" ] && cd "$cwd"
-# What the agent said: the input's last message (newer Claude Code), else the transcript's.
+# What the agent said: the input's last message (newer Claude Code), else the transcript's last
+# assistant entry only (no text there = nothing said: an older entry is an earlier round's).
 msg=$(printf '%s' "$in" | jq -r '.last_assistant_message // "" | strings' 2>/dev/null)
 if [ -z "$msg" ]; then
   tp=$(printf '%s' "$in" | jq -r '.transcript_path // "" | strings' 2>/dev/null)
-  [ -n "$tp" ] && [ -f "$tp" ] && msg=$(tail -n 200 "$tp" | jq -Rrs '[split("\\n")[] | (try fromjson catch null) | objects | select(.type == "assistant") | .message.content | if type == "string" then . elif type == "array" then ([.[]? | objects | select(.type == "text") | .text] | join("\\n")) else "" end | select(. != "")] | last // ""' 2>/dev/null)
+  [ -n "$tp" ] && [ -f "$tp" ] && msg=$(tail -n 200 "$tp" | jq -Rrs '[split("\\n")[] | (try fromjson catch null) | objects | select(.type == "assistant")] | last | (.message.content? // "") | if type == "string" then . elif type == "array" then ([.[]? | objects | select(.type == "text") | .text] | join("\\n")) else "" end' 2>/dev/null)
 fi
 said=false
 printf '%s\\n' "$msg" | grep -q '^LOOP DONE:' && said=true
