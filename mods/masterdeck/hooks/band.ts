@@ -78,7 +78,7 @@ export function segments(band: Band, cols: number, staleFor: number | null): Seg
 
 /** What changed between two reads that the person would want a toast for. */
 export function bandEvents(prev: Band | null, next: Band | null): string[] {
-  if (!prev || !next) return []
+  if (!prev || !next || prev.off || next.off) return []
   const out: string[] = []
   const label = next.ticket?.label ?? next.name
   if (prev.ticket?.ref === next.ticket?.ref && prev.status && next.status && prev.status !== next.status)
@@ -97,6 +97,9 @@ export function bandEvents(prev: Band | null, next: Band | null): string[] {
   }
   return out
 }
+
+/** What the commands answer while the mod is switched off in this session. */
+export const OFF_TEXT = 'The MasterDeck mod is off in this session. Turn it on in MasterDeck: Session details → Turn mod on.'
 
 /** The id of a note request, as MasterDeck's pump takes it (digits-digits-digits). */
 export function noteRequestId(nowMs: number, rand: number): string {

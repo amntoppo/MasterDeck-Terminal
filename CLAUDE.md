@@ -168,7 +168,7 @@ web tabs keep working.
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
-| The MasterDeck mod (inside a session: ticket band, `/md-note`, `/md-ticket`) | `mods/masterdeck` (`hooks/register.tsx`, pure parts `hooks/band.ts`, contract `types/index.d.ts`), the app's side: `shared/modBand.ts` (`modBand`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, the state callback in `main/index.ts` (`state.modLive`), `SessionDetails.tsx` |
+| The MasterDeck mod (inside a session: ticket band, `/md-note`, `/md-ticket`) | `mods/masterdeck` (`hooks/register.tsx`, pure parts `hooks/band.ts`, contract `types/index.d.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, the per-session switch `main/modOff.ts` (`mod-off.json`, `CH.modSet`), the state callback in `main/index.ts` (`state.modLive`, `state.modOff`), `SessionDetails.tsx` (Turn mod off / on) |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -370,8 +370,8 @@ buttons; it does not go through macOS window drag regions.
   pushed; the app is installed locally from it and the mod is installed at user scope from
   `~/.claude/masterdeck/mods`): research in [docs/MODS.md](docs/MODS.md); a probe showed a mod runs in a
   `claude --bg` session and draws in `claude attach`. Prototype `mods/masterdeck` (ticket band,
-  toasts, `/md-ticket`, `/md-note`, heartbeat) and the app's side (`deck/band/<sid>.json`,
-  **Mod live** in Session details). Checked: typecheck, vitest (149 files passed, 2 skipped; 1725
+  toasts, `/md-ticket`, `/md-note`, heartbeat) and the app's side (`deck/band/<sid>.json`, a per-session **Turn mod off / on** in Session details,
+  **Mod live** in Session details). Checked: typecheck, vitest (150 files passed, 2 skipped; 1728
   tests passed, 4 skipped), `claude plugin validate` / `test` (6) / tsc for the mod, and the mod in
   throwaway sessions (background: heartbeat and `ended`; interactive: band at 80/110/160 columns,
   toasts, `/md-note` against a stand-in pump, `/md-ticket` pane, MasterDeck closed); on the installed

@@ -275,7 +275,15 @@ GitHub: the app writes, the mod reads, so one poller serves every session.
   (`{v: 1, version, claude, at, ended?}`, `parseModBeat`: fresh under 45 s, `MOD_BEAT_STALE_MS`;
   files older than a day are removed), and the callback puts them in `state.modLive` by
   `Session.key` (`version`, `claude` only, so a beat does not change the state). Session details
-  shows "Mod live (v…, Claude Code …)".
+  shows "Mod live (v…, Claude Code …)" and, while the mod is live there, **Turn mod off / on**.
+- **Per-session switch.** Claude Code turns a plugin on or off per settings scope only, so "off"
+  is the mod staying quiet: `CH.modSet` (`deck.modSet(key, on)`, open to the web) records the
+  session's `Session.key` in `<home>/mod-off.json` (`main/modOff.ts` `ModOff`, temp file + rename;
+  keys of sessions no longer listed are pruned), calls `sources.changed()`, and the state callback
+  writes the band with `off: true` (`bandFor`: also for a session that has nothing else to show)
+  and puts the keys in `state.modOff`. The mod reads it within 2 s: no band, no toasts, and
+  `/md-ticket`, `/md-note` and the pane answer that it is off. It still writes its heartbeat, so the
+  switch stays on screen.
 - **Mod side** (`hooks/register.tsx`, pure parts in `hooks/band.ts`, its contract in
   `types/index.d.ts`): the deck folder is `$MASTERDECK_HOME/deck`, else `~/.claude/masterdeck/deck`.
   Every 2 s it reads `alive` (older than 30 s: MasterDeck is closed) and its band file into
@@ -964,6 +972,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `account` | `Account.state()` |
 | `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions the MasterDeck mod runs in (fresh heartbeat), by `Session.key`, `{version, claude}` |
+| `modOff` | the state callback, from `ModOff` (`mod-off.json`): the `Session.key`s where the user switched the mod off |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -981,6 +990,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `mod-off.json` | the sessions (`Session.key`) where the MasterDeck mod is switched off in Session details (`main/modOff.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |

@@ -101,6 +101,8 @@ export function SessionDetails({
   const level = contextLevel(stats?.contextPct ?? null);
   const worktrees = state.sessionWorktrees[s.key] ?? [];
   const hook = state.hookInfo[s.key];
+  const modLive = state.modLive?.[s.key];
+  const modOff = !!state.modOff?.includes(s.key);
   const menu = state.menus[s.key];
   const ask = state.asks[s.key];
   const waiting =
@@ -418,13 +420,29 @@ export function SessionDetails({
               Compacted <b>{formatAgo(now - hook.compactedAt)} ago</b>
             </div>
           )}
-          {state.modLive?.[s.key] && (
+          {modLive && (
             <div title="The MasterDeck mod runs inside this session: it shows the ticket above the prompt and adds /md-note and /md-ticket">
-              Mod <b>live</b> (v{state.modLive[s.key].version}, Claude Code {state.modLive[s.key].claude || "?"})
+              Mod <b>{modOff ? "off here" : "live"}</b> (v{modLive.version}, Claude Code {modLive.claude || "?"})
             </div>
           )}
         </div>
         <div className="d-actions">
+          {modLive && (
+            <button
+              className="btn"
+              title={
+                modOff
+                  ? "Show the ticket line, toasts and /md- commands in this session again"
+                  : "Keep the MasterDeck mod quiet in this session: no ticket line, no toasts, no /md- commands"
+              }
+              onClick={async () => {
+                const r = await deck().modSet(s.key, modOff);
+                flash(r.message);
+              }}
+            >
+              {modOff ? "Turn mod on" : "Turn mod off"}
+            </button>
+          )}
           <button
             className={`btn ${(stats?.contextPct ?? 0) >= state.settings.contextWarnPct ? "danger" : ""}`}
             title="Types /compact into the session"

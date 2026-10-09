@@ -216,6 +216,8 @@ export interface AppState {
   peers: Record<string, string[]>;
   /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
   modLive?: Record<string, { version: string; claude: string }>;
+  /** Sessions (Session.key) where the user switched the mod off in Session details (`mod-off.json`). */
+  modOff?: string[];
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */

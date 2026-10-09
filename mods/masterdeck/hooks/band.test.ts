@@ -45,6 +45,9 @@ test('toasts what changed, and nothing on the first read', async () => {
   expect(bandEvents(BAND, next)).toEqual(['#86 moved: In Dev → In Review', 'PR #90: 1 new review thread', 'PR #90: CI failed'])
   expect(bandEvents(next, { ...next, pr: { ...next.pr!, ci: 'success', state: 'MERGED' } })).toEqual(['PR #90: CI passed', 'PR #90 merged'])
   expect(bandEvents({ ...BAND, pr: null }, BAND)).toEqual(['PR #90 is linked to this session'])
+  // Switched off, or just switched back on: nothing to toast.
+  expect(bandEvents(BAND, { ...next, off: true })).toEqual([])
+  expect(bandEvents({ ...BAND, off: true }, next)).toEqual([])
 })
 
 test('makes request ids the app takes, and reads its answers', async () => {

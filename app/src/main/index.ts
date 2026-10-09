@@ -20,7 +20,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { modBand } from "@shared/modBand";
+import { bandFor, modBand } from "@shared/modBand";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -82,6 +82,7 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
+import { ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
@@ -243,6 +244,7 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
+const modOff = new ModOff(join(paths.home, "mod-off.json"));
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -627,9 +629,12 @@ const sources = new Sources(
     // The MasterDeck mod (mods/masterdeck) reads band/<id>.json and writes mods/<id>.json.
     if (sources.isHealthy("agents")) {
       const live = state.sessions.filter((s) => s.state !== "done");
-      for (const s of live) deckHooks.setBand(s.sessionId, modBand(state, s));
+      for (const s of live)
+        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s), s.name, modOff.has(s.key)));
       deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
+    state.modOff = modOff.list();
     const beats = deckHooks.modBeats();
     state.modLive = Object.fromEntries(
       state.sessions
@@ -2875,6 +2880,14 @@ function registerIpc(): void {
     if (on !== true) peerSync.unlinked(a, b);
     peerSync.refreshAll([a, b]);
     return r;
+  });
+  // Session details → Mod on/off: the mod reads it from the session's band file (next state).
+  reg.handle(CH.modSet, (_e, key: unknown, on: unknown) => {
+    if (typeof key !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
+      return { ok: false, message: "bad session" };
+    if (!modOff.set(key, on)) return { ok: false, message: "Could not save the choice." };
+    sources.changed();
+    return { ok: true, message: on ? "The mod is on in this session." : "The mod is off in this session." };
   });
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200

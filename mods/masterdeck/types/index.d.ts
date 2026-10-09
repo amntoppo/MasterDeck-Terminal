@@ -16,6 +16,8 @@ export type Band = {
     draft: boolean
   } | null
   peers: { name: string; state: string }[]
+  /** Switched off in MasterDeck's Session details: draw nothing, toast nothing, commands say so. */
+  off?: true
 }
 
 /** Whether MasterDeck runs (its `deck/alive` is fresh) and, when not, when it last did (0 while it runs). */

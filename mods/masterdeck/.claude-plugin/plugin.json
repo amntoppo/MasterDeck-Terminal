@@ -1,7 +1,7 @@
 {
   "name": "masterdeck",
   "displayName": "MasterDeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows the session's MasterDeck ticket above the prompt and adds /md-ticket and /md-note",
   "author": { "name": "MasterDeck" },
   "repository": "https://github.com/amntoppo/MasterDeck-Terminal",

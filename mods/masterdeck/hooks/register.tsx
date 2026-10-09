@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Band, Link } from '../types'
-import { ALIVE_MS, NARROW_COLS, bandEvents, noteAnswerText, noteRequestId, parseBand, segments } from './band'
+import { ALIVE_MS, NARROW_COLS, OFF_TEXT, bandEvents, noteAnswerText, noteRequestId, parseBand, segments } from './band'
 
 /*
  * MasterDeck's mod. It only reads what the app writes under `<MASTERDECK_HOME>/deck` and never
@@ -15,7 +15,7 @@ import { ALIVE_MS, NARROW_COLS, bandEvents, noteAnswerText, noteRequestId, parse
  */
 
 // Keep in step with .claude-plugin/plugin.json.
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 const PANE = 'md-ticket'
 const BEAT_MS = 15_000
 const READ_MS = 2_000
@@ -85,6 +85,7 @@ async function beat($: EngineInterface, isEnded = false): Promise<void> {
 async function addNote($: EngineInterface, text: string): Promise<string> {
   if (!text.trim()) return 'Usage: /md-note <text>. Adds the text to the note of this session\'s ticket in MasterDeck.'
   const b = await read($, band)
+  if (b?.off) return OFF_TEXT
   if (!b?.ticket) return 'This session has no ticket in MasterDeck, so there is no ticket note to add to.'
   if ((await read($, link)).isOffline) return 'MasterDeck is not running, so nothing was saved.'
   const id = noteRequestId(await $.clock.now(), Math.random())
@@ -128,8 +129,10 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'md-ticket' }, async $ => {
+    const b = await read($, band)
+    if (b?.off) return { text: OFF_TEXT }
     await update($, isHidden, () => false)
-    if (!(await read($, band))) return { text: 'MasterDeck has no ticket, PR or linked session for this session.' }
+    if (!b) return { text: 'MasterDeck has no ticket, PR or linked session for this session.' }
     await $.ui.open({ id: PANE, title: 'MasterDeck' })
     return { text: 'Opened the ticket pane.' }
   })
@@ -138,7 +141,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const b = await read($, band)
-    if (!b || e.props.hasSurvey || (await read($, isHidden))) return next(e)
+    if (!b || b.off || e.props.hasSurvey || (await read($, isHidden))) return next(e)
     const l = await read($, link)
     const now = await $.clock.now()
     const cols = e.props.bodyColumns ?? NARROW_COLS
@@ -164,6 +167,7 @@ export const register: Register = on => {
     const { Box, Text, Link } = $.ui.resolve(e)
     const b = await read($, band)
     if (!b) return <Text dimColor>MasterDeck has nothing for this session.</Text>
+    if (b.off) return <Text dimColor>{OFF_TEXT}</Text>
     const l = await read($, link)
     const pr = b.pr
     return (

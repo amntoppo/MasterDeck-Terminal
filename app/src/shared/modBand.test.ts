@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, parseConfig, setConfig } from './appConfig'
-import { MOD_BEAT_STALE_MS, modBand, parseModBeat } from './modBand'
+import { MOD_BEAT_STALE_MS, bandFor, modBand, parseModBeat } from './modBand'
 import type { Session } from './types'
 
 const cfg = parseConfig({ config: { owner: 'acme', issueRepo: 'tracker', repos: ['acme/tracker', 'acme/api'] } })
@@ -64,6 +64,16 @@ describe('modBand', () => {
     const s = session({ issue: null })
     const done = session({ key: 'k2', name: 'old', state: 'done' })
     expect(modBand(state({ sessions: [s, done], peers: { k1: ['k2'] } }), s)).toBeNull()
+  })
+})
+
+describe('bandFor', () => {
+  const band = { v: 1 as const, name: 's', ticket: null, status: 'In Dev', pr: null, peers: [] }
+  it('marks a band off, and writes one for a session with nothing to show', () => {
+    expect(bandFor(band, 's', false)).toBe(band)
+    expect(bandFor(null, 's', false)).toBeNull()
+    expect(bandFor(band, 's', true)).toEqual({ ...band, off: true })
+    expect(bandFor(null, 'plain', true)).toEqual({ v: 1, name: 'plain', ticket: null, status: null, pr: null, peers: [], off: true })
   })
 })
 

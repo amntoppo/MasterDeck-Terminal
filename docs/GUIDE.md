@@ -552,7 +552,10 @@ PR or with linked sessions:
   Claude (macOS and Linux).
 - **`/md-ticket`** opens the ticket pane.
 - With MasterDeck closed, the line says so and how old its data is.
-- Session details shows **Mod live** for a session the mod runs in.
+- Session details shows **Mod live** for a session the mod runs in, and **Turn mod off** keeps it
+  quiet in that session alone (no line, no toasts; `/md-ticket` and `/md-note` say it is off) until
+  **Turn mod on**. It takes effect within a couple of seconds and lasts across a resume. To remove
+  the mod everywhere, uninstall it (below).
 
 The mod only reads what MasterDeck writes and never talks to GitHub. In a session MasterDeck has
 nothing for, it shows nothing. To remove it: `claude plugin uninstall masterdeck@masterdeck`.

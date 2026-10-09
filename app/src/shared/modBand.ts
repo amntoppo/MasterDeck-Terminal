@@ -24,6 +24,14 @@ export interface ModBand {
     draft: boolean
   } | null
   peers: { name: string; state: Session['state'] }[]
+  /** Switched off in Session details: the mod draws nothing and its commands say so. */
+  off?: true
+}
+
+/** What to write for a session: its band, or, switched off, a band that says only that (always written). */
+export function bandFor(band: ModBand | null, name: string, off: boolean): ModBand | null {
+  if (!off) return band
+  return { ...(band ?? { v: 1, name, ticket: null, status: null, pr: null, peers: [] }), off: true }
 }
 
 /** The mod's heartbeat, `deck/mods/<sessionId>.json`: it runs in that session now. */
