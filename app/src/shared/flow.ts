@@ -744,13 +744,56 @@ function blockText(n: FlowNode, mons: MonitorDef[] = []): string | null {
   }
 }
 
-/**
- * The plan for the blocks after `start`: numbered steps in order; several arrows out of a block
- * run side by side; outcome arrows become "If it worked / If it failed" under the step.
- */
+type LoopNode = Extract<FlowNode, { kind: "loop" }>;
+
+/** What ends a loop, in the words the session reads ("" when nothing does: the check reports it). */
+function loopCriterion(n: LoopNode): string {
+  const cmd = n.check.command.trim();
+  const check = !cmd
+    ? ""
+    : n.check.output
+      ? `the output of \`${cmd}\` must ${n.check.outputMode === "no-match" ? "no longer match" : "match"} \`${n.check.output}\``
+      : `\`${cmd}\` must pass`;
+  const goal = n.agentDone.goal.trim();
+  if (!n.agentDone.on) return check;
+  if (!check)
+    return `you reach this goal: ${goal}; when you have, end your turn with a line starting "LOOP DONE:" and why`;
+  return `${check}, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: ${goal}`;
+}
+
+/** Where a loop's round starts: its members no other member leads to, in the frame's order. */
+function loopEntry(flow: Flow, n: LoopNode): string[] {
+  const inside = new Set(n.members);
+  return n.members.filter(
+    (m) => !flow.edges.some((e) => e.to === m && inside.has(e.from)),
+  );
+}
+
+/** The targets of a block's arrows of one kind. */
+const targets = (flow: Flow, from: string, kind: EdgeKind): string[] =>
+  flow.edges.filter((e) => e.from === from && e.kind === kind).map((e) => e.to);
+
+/** The plan for the blocks after `start` (see `planFrom`). */
 function planLines(
   flow: Flow,
   start: string,
+  mons: MonitorDef[] = [],
+): string[] {
+  return planFrom(
+    flow,
+    flow.edges.filter((e) => e.from === start).map((e) => e.to),
+    mons,
+  );
+}
+
+/**
+ * The plan from the blocks `first`: numbered steps in order; several arrows out of a block run
+ * side by side; outcome arrows become "If it worked / If it failed" under the step; a loop is one
+ * step with its round and what comes after it inside.
+ */
+function planFrom(
+  flow: Flow,
+  first: string[],
   mons: MonitorDef[] = [],
 ): string[] {
   const byId = new Map(flow.nodes.map((n) => [n.id, n]));
@@ -789,6 +832,38 @@ function planLines(
         return;
       }
       const kids = out.get(id) ?? [];
+      if (n.kind === "loop") {
+        numbered.set(id, label);
+        const crit = loopCriterion(n);
+        lines.push(
+          `${indent}${label}. ${i > 1 ? "Then: " : ""}Repeat until the loop "${n.name}" is done (MasterDeck checks it each time you finish a turn${crit ? `: ${crit}` : ""}). Each round:`,
+        );
+        chain(loopEntry(flow, n), `${indent}   `, `${label}.`);
+        lines.push(
+          `${indent}   Write a short note of what you tried to the loop's progress file each round (MasterDeck gives you its path).`,
+        );
+        // Headings only over a branch that says something (a notify block adds nothing here).
+        const over = lines.length;
+        lines.push(`${indent}   When MasterDeck says the loop is over:`);
+        for (const [kind, head] of [
+          ["met", "If the criterion was met:"],
+          ["limit", "If a limit was hit:"],
+        ] as const) {
+          const branch = targets(flow, id, kind);
+          if (!branch.length) continue;
+          const at = lines.length;
+          lines.push(`${indent}     ${head}`);
+          chain(branch, `${indent}       `, `${label}.${kind}.`);
+          if (lines.length === at + 1) lines.pop();
+        }
+        if (lines.length === over + 1) lines.pop();
+        // A plain arrow out of a frame goes on after the loop, however it ended.
+        current = kids
+          .filter((e) => e.kind === "then" && !quiet(e.to))
+          .map((e) => e.to);
+        i++;
+        continue;
+      }
       // A built-in with nothing after it adds nothing to the plan (its hook speaks for itself).
       const text =
         n.kind === "builtin" && !kids.length ? null : blockText(n, mons);
@@ -813,11 +888,7 @@ function planLines(
       i++;
     }
   };
-  chain(
-    (out.get(start) ?? []).map((e) => e.to),
-    "",
-    "",
-  );
+  chain(first, "", "");
   return lines;
 }
 
@@ -834,6 +905,21 @@ export interface CompiledStep {
   notify?: string[];
   /** Custom triggers: what the hook matches (copied from the definition, so a session file has all it needs). */
   custom?: Omit<CustomTrigger, "id" | "name" | "description">;
+  /** The loops under this trigger: everything the loop hook needs, so the session file is enough. */
+  loops?: CompiledLoop[];
+}
+
+export interface CompiledLoop {
+  id: string;
+  name: string;
+  check: LoopNode["check"];
+  agentDone: { on: boolean; goal: string };
+  limits: { iterations: number; minutes: number; stall: number };
+  /** The members' plan, handed back each iteration. */
+  plan: string;
+  /** What to do after: the `met` and `limit` branches' plan text ("" when there is no arrow). */
+  met: string;
+  limit: string;
 }
 
 export interface Problem {
@@ -867,12 +953,20 @@ export function compileFlow(
   const steps: CompiledStep[] = [];
   const problems: Problem[] = [];
   const byId = new Map(flow.nodes.map((n) => [n.id, n]));
+  // What a block leads to: its arrows' targets, and a loop's members (no arrow enters them).
+  const next = (id: string): string[] => {
+    const n = byId.get(id);
+    return [
+      ...flow.edges.filter((e) => e.from === id).map((e) => e.to),
+      ...(n?.kind === "loop" ? n.members : []),
+    ];
+  };
   const reached = new Set<string>();
   const reach = (id: string) => {
-    for (const e of flow.edges.filter((e) => e.from === id))
-      if (!reached.has(e.to)) {
-        reached.add(e.to);
-        reach(e.to);
+    for (const to of next(id))
+      if (!reached.has(to)) {
+        reached.add(to);
+        reach(to);
       }
   };
   for (const n of flow.nodes) {
@@ -891,10 +985,10 @@ export function compileFlow(
     }
     const under = new Set<string>();
     const walk = (id: string) => {
-      for (const e of flow.edges.filter((e) => e.from === id))
-        if (!under.has(e.to)) {
-          under.add(e.to);
-          walk(e.to);
+      for (const to of next(id))
+        if (!under.has(to)) {
+          under.add(to);
+          walk(to);
         }
     };
     walk(n.id);
@@ -929,6 +1023,36 @@ export function compileFlow(
         });
       const lines = planLines(flow, n.id, extraMonitors);
       if (!lines.length) continue;
+      const loopNodes = blocks.filter((b): b is LoopNode => b.kind === "loop");
+      // S6: the turn-end trigger stands aside while a loop is open, so a loop it started would
+      // block every stop for ever: reported, and never armed.
+      if (n.trigger === "turn-end")
+        for (const b of loopNodes)
+          problems.push({
+            node: b.id,
+            text: `A loop under "${info.short}" would never end: put it under another trigger`,
+          });
+      const loops: CompiledLoop[] =
+        n.trigger === "turn-end"
+          ? []
+          : loopNodes.map((b) => ({
+              id: b.id,
+              name: b.name,
+              check: { ...b.check },
+              agentDone: { ...b.agentDone },
+              limits: { ...b.limits },
+              plan: planFrom(flow, loopEntry(flow, b), extraMonitors).join(
+                "\n",
+              ),
+              met: planFrom(flow, targets(flow, b.id, "met"), extraMonitors).join(
+                "\n",
+              ),
+              limit: planFrom(
+                flow,
+                targets(flow, b.id, "limit"),
+                extraMonitors,
+              ).join("\n"),
+            }));
       // Lowercase the first letter, unless it starts an acronym ("SQL migration edited").
       const label = /^[A-Z][A-Z]/.test(info.label)
         ? info.label
@@ -950,7 +1074,8 @@ export function compileFlow(
           }
         : undefined;
       steps.push({
-        id: `${n.id}-${hash(note + (n.pattern ?? "") + (custom ? JSON.stringify(custom) : ""))}`.slice(
+        // A changed loop (a limit, the check) reaches sessions again, like a changed plan.
+        id: `${n.id}-${hash(note + (n.pattern ?? "") + (custom ? JSON.stringify(custom) : "") + (loops.length ? JSON.stringify(loops) : ""))}`.slice(
           0,
           40,
         ),
@@ -958,10 +1083,18 @@ export function compileFlow(
         ...(n.pattern ? { pattern: n.pattern } : {}),
         note,
         ...(custom ? { custom } : {}),
+        // Only when there are any: a flow without loops compiles byte for byte as before.
+        ...(loops.length ? { loops } : {}),
       });
     } else {
+      // No Stop hook drives a deck trigger's blocks: a loop under one could never be enforced.
+      for (const b of blocks.filter((b) => b.kind === "loop"))
+        problems.push({
+          node: b.id,
+          text: "Loops run in the session: put them under a trigger the session gets",
+        });
       const acts = blocks.filter(
-        (b) => b.kind !== "notify" && b.kind !== "builtin",
+        (b) => b.kind !== "notify" && b.kind !== "builtin" && b.kind !== "loop",
       );
       if (n.trigger === "needs-you")
         for (const b of acts)
@@ -1007,6 +1140,7 @@ export function compileFlow(
       problems.push({ node: n.id, text: "Pick a skill" });
     if ((n.kind === "instruction" || n.kind === "notify") && !n.text.trim())
       problems.push({ node: n.id, text: "Empty: write what it says" });
+    if (n.kind === "loop") problems.push(...loopProblems(n));
   }
   const builtins = flow.nodes
     .filter(
@@ -1016,12 +1150,57 @@ export function compileFlow(
   return { steps, builtins, problems };
 }
 
+/** What is wrong with a loop on its own (where it sits is compileFlow's). */
+function loopProblems(n: LoopNode): Problem[] {
+  const out: string[] = [];
+  if (!n.members.length) out.push(`Loop "${n.name}" has no blocks inside`);
+  if (!n.check.command.trim() && !n.agentDone.on)
+    out.push(`Loop "${n.name}" needs a check command or the agent's goal`);
+  if (n.check.output)
+    try {
+      new RegExp(n.check.output);
+    } catch {
+      out.push(
+        `Loop "${n.name}": the output pattern is not a valid regular expression`,
+      );
+    }
+  if (n.agentDone.on && !n.agentDone.goal.trim())
+    out.push(`Loop "${n.name}": write the goal the agent works toward`);
+  return out.map((text) => ({ node: n.id, text }));
+}
+
 /** How many blocks do something (not triggers): a template's size. */
 export const actionCount = (flow: Flow): number =>
   flow.nodes.filter((n) => n.kind !== "trigger").length;
 
 /** Triggers that need a hook (installed once, for everyone; each reads the session's workflow). */
 export const HOOK_TRIGGERS = FLOW_TRIGGERS.filter((t) => t.runner === "hook");
+
+/** The loops of the steps that fired (`$ids`), each with its step's id; nothing when there are none. */
+const ARM_PICK = `($ids | split(" ") | map(select(. != ""))) as $w | [.steps[]? | select(.id as $i | $w | index($i)) | .id as $s | .loops[]? | {id, step: $s}] | select(length > 0)`;
+/**
+ * The loop file with those loops armed (iteration 0), then one line per loop armed afresh. A loop
+ * still open is left as it is: a trigger firing twice does not reset it.
+ * ponytail: a loop armed again replaces its last run (history, notes); keeping older runs needs a
+ * list of runs per loop.
+ */
+const ARM_FILE =
+  `. as $cur | (reduce $new[] as $n (.; {id: $n.id, step: $n.step, state: "open", iteration: 0, startedAt: $now, history: [], reason: null, lastCheck: null} as $fresh | ` +
+  `if any(.loops[]; .id? == $n.id and .state? == "open") then . elif any(.loops[]; .id? == $n.id) then .loops |= map(if .id? == $n.id then $fresh else . end) else .loops += [$fresh] end)) as $out | ` +
+  `($out | tojson), ($new[] | .id as $i | select(any($cur.loops[]; .id? == $i and .state? == "open") | not) | $i)`;
+/**
+ * Arm the loops of the steps that fired (D7): write `<dir>/workflows/loops/<sid>.json` (temp file
+ * and rename) and an empty progress file per loop armed afresh. Every trigger's hook carries it
+ * (the hook is one for everyone), so without a loop it costs one grep and writes nothing. A loop
+ * file that is not one (corrupt) is replaced: the trigger firing is the start of a run.
+ */
+const ARM_LOOPS =
+  `grep -q '"loops"' "$f" 2>/dev/null && new=$(jq -c --arg ids "$ids" ${q(ARM_PICK)} "$f" 2>/dev/null) && [ -n "$new" ] && { ` +
+  `mkdir -p "$d/workflows/loops"; L="$d/workflows/loops/$sid.json"; ` +
+  `cur=$(jq -cse ${q(`if length == 1 and (.[0].loops | type) == "array" then .[0] else empty end`)} "$L" 2>/dev/null) || cur='{"loops":[]}'; ` +
+  `out=$(printf '%s' "$cur" | jq -r --argjson new "$new" --argjson now "$(date +%s)000" ${q(ARM_FILE)} 2>/dev/null) && [ -n "$out" ] && ` +
+  `printf '%s\\n' "$out" | head -n 1 > "$L.tmp" && mv "$L.tmp" "$L" && ` +
+  `for id in $(printf '%s\\n' "$out" | tail -n +2); do case "$id" in ""|*[!a-z0-9-]*) continue;; esac; : > "$d/workflows/loops/$sid-$id.md"; done; }`;
 
 /**
  * The hook for one trigger: reads the session's workflow (`<dir>/workflows/sessions/<id>.json`,
@@ -1083,6 +1262,7 @@ export function flowTriggerCommand(
   lines.push(
     `mkdir -p "$d/workflows" 2>/dev/null; printf '{"at":%s000,"sid":"%s","trigger":"%s","ids":"%s"}\\n' "$(date +%s)" "$sid" ${q(t.id)} "$ids" >> "$d/workflows/runs.jsonl" 2>/dev/null`,
   );
+  lines.push(ARM_LOOPS);
   const text = `([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))`;
   const outp =
     t.id === "turn-end"
@@ -1210,6 +1390,7 @@ export function customTriggerCommand(
       `ids="$ids $id"; done`,
     `[ -n "$ids" ] || exit 0`,
     `mkdir -p "$d/workflows" 2>/dev/null; printf '{"at":%s000,"sid":"%s","trigger":"custom","ids":"%s"}\\n' "$(date +%s)" "$sid" "$ids" >> "$d/workflows/runs.jsonl" 2>/dev/null`,
+    ARM_LOOPS,
     `jq -c --arg ids "$ids" ${q(`($ids | split(" ") | map(select(. != ""))) as $w | {hookSpecificOutput: {hookEventName: ${JSON.stringify(event)}, additionalContext: ([.steps[] | select(.id as $i | $w | index($i)) | .note] | join("\\n\\n"))}}`)} "$f"`,
   ];
   return `${lines.join("; ")} # ${mark}`;

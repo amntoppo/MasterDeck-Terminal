@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { guardedBuiltin } from '@shared/flow'
-import { hookStatus, installDeckHooks, installReviewGate, LEGACY_COMMANDS, migrateLegacyHooks, reviewGateCommand } from './hooks'
+import { hookStatus, installDeckHooks, installReviewGate, installWorkflowHooks, LEGACY_COMMANDS, migrateLegacyHooks, reviewGateCommand } from './hooks'
 
 const TT = '"$HOME/.claude/skills/babysit-ticket/scripts/tt.sh" hook'
 const entry = (command: string, matcher?: string) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] })
@@ -160,5 +160,29 @@ describe.skipIf(process.platform === 'win32')('review gate', () => {
     expect(hookStatus(p).reviewGate).toBe(true)
     installReviewGate(p, d, d, false)
     expect(hookStatus(p).reviewGate).toBe(false)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('installWorkflowHooks', () => {
+  it('rewrites hooks from an older MasterDeck once, then leaves settings.json alone', () => {
+    const d = mkdtempSync(join(tmpdir(), 'wfh-'))
+    const p = join(d, 'settings.json')
+    const backups = join(d, 'backups')
+    writeFileSync(p, JSON.stringify({ model: 'x' }))
+    installWorkflowHooks(p, backups, d, true)
+    // An older trigger hook (here: one without the loop arming) is found by its mark and replaced.
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    s.hooks.PostToolUse[0].hooks[0].command = 'true # masterdeck-workflow:trigger-after-push'
+    writeFileSync(p, JSON.stringify(s))
+    const count = () => readdirSync(backups).length
+    const before = count()
+    installWorkflowHooks(p, backups, d, true)
+    expect(count()).toBe(before + 1)
+    const text = readFileSync(p, 'utf8')
+    expect(text).toContain(`grep -q '\\"loops\\"'`)
+    installWorkflowHooks(p, backups, d, true)
+    expect(count()).toBe(before + 1)
+    expect(readFileSync(p, 'utf8')).toBe(text)
+    expect(JSON.parse(text).model).toBe('x')
   })
 })

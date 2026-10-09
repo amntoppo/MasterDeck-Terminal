@@ -1,10 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   compileFlow,
+  customTriggerCommand,
   defaultFlow,
   edgeId,
   fromSteps,
@@ -14,6 +22,7 @@ import {
   makesCycle,
   newLoop,
   parseFlow,
+  type CustomTrigger,
   type EdgeKind,
   type Flow,
   type FlowNode,
@@ -409,4 +418,357 @@ describe("loops", () => {
     expect(steps).toEqual([]);
     expect(problems.map((p) => p.node)).toEqual(["a", "b"]);
   });
+});
+
+describe("compiling loops", () => {
+  type Loop = Extract<FlowNode, { kind: "loop" }>;
+  const L = (id: string, members: string[], extra: Partial<Loop> = {}) =>
+    ({ ...newLoop(id, 0, 0), members, ...extra }) as FlowNode;
+  const N = (id: string, text: string) =>
+    ({ id, ...at, kind: "notify", text }) as FlowNode;
+  const check = (command: string, output = "", outputMode = "match") => ({
+    check: {
+      command,
+      output,
+      outputMode: outputMode as "match" | "no-match",
+      timeoutMin: 5,
+    },
+  });
+  const fixFlow = (loop: Partial<Loop> = check("npm test")): Flow => ({
+    nodes: [
+      T("t", "after-push"),
+      I("a", "A"),
+      I("b", "B"),
+      I("c", "C"),
+      I("d", "D"),
+      N("n", "Stuck."),
+      L("lp", ["b", "c"], { name: "Fix", ...loop }),
+    ],
+    edges: [
+      e("t", "a"),
+      e("a", "lp"),
+      e("b", "c"),
+      e("lp", "d", "met"),
+      e("lp", "n", "limit"),
+    ],
+  });
+  const loopLine = (loop: Partial<Loop>) =>
+    compileFlow(fixFlow(loop))
+      .steps[0].note.split("\n")
+      .find((l) => l.includes("Repeat until"));
+
+  it("a loop is one numbered step with its members inside", () => {
+    const { steps } = compileFlow(fixFlow());
+    expect(steps[0].note).toBe(
+      [
+        "Workflow step (after a git push):",
+        "1. A",
+        '2. Then: Repeat until the loop "Fix" is done (MasterDeck checks it each time you finish a turn: `npm test` must pass). Each round:',
+        "   2.1. B",
+        "   2.2. Then: C",
+        "   Write a short note of what you tried to the loop's progress file each round (MasterDeck gives you its path).",
+        "   When MasterDeck says the loop is over:",
+        "     If the criterion was met:",
+        "       2.met.1. D",
+        // The limit branch is a notify block, which adds nothing to a hook's plan: no empty heading.
+        "Then carry on with what you were doing.",
+      ].join("\n"),
+    );
+  });
+
+  it("a then arrow out of a loop goes on after it, however it ended", () => {
+    const flow = fixFlow();
+    flow.nodes.push(I("after", "Open the PR."));
+    flow.edges.push(e("lp", "after"));
+    const note = compileFlow(flow).steps[0].note;
+    expect(note).toContain("\n3. Then: Open the PR.\n");
+    expect(note.indexOf("2.met.1. D")).toBeLessThan(note.indexOf("3. Then"));
+  });
+
+  it("says the criterion in words", () => {
+    expect(loopLine(check("npm test"))).toContain(": `npm test` must pass)");
+    expect(loopLine(check("curl -s x", "ready"))).toContain(
+      ": the output of `curl -s x` must match `ready`)",
+    );
+    expect(loopLine(check("curl -s x", "busy", "no-match"))).toContain(
+      ": the output of `curl -s x` must no longer match `busy`)",
+    );
+    expect(
+      loopLine({
+        ...check(""),
+        agentDone: { on: true, goal: "the page loads" },
+      }),
+    ).toContain(
+      ': you reach this goal: the page loads; when you have, end your turn with a line starting "LOOP DONE:" and why)',
+    );
+    expect(
+      loopLine({
+        ...check("npm test"),
+        agentDone: { on: true, goal: "the page loads" },
+      }),
+    ).toContain(
+      ': `npm test` must pass, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: the page loads)',
+    );
+  });
+
+  it("compileFlow puts the loop in its trigger's step", () => {
+    const { steps, problems } = compileFlow(fixFlow());
+    // The notify block under the limit is reported as for any hook trigger.
+    expect(problems.map((p) => p.node)).toEqual(["n"]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].loops).toEqual([
+      {
+        id: "lp",
+        name: "Fix",
+        check: {
+          command: "npm test",
+          output: "",
+          outputMode: "match",
+          timeoutMin: 5,
+        },
+        agentDone: { on: false, goal: "" },
+        limits: { iterations: 10, minutes: 0, stall: 0 },
+        plan: "1. B\n2. Then: C",
+        met: "1. D",
+        limit: "",
+      },
+    ]);
+  });
+
+  it("the step id changes when the loop changes", () => {
+    const one = compileFlow(fixFlow()).steps[0];
+    const two = compileFlow(
+      fixFlow({
+        ...check("npm test"),
+        limits: { iterations: 3, minutes: 0, stall: 0 },
+      }),
+    ).steps[0];
+    expect(two.note).toBe(one.note);
+    expect(two.id).not.toBe(one.id);
+  });
+
+  it("members are reached through their loop", () => {
+    const { problems } = compileFlow(fixFlow());
+    expect(problems.find((p) => /Not connected/.test(p.text))).toBeUndefined();
+  });
+
+  it("reports what is wrong with a loop", () => {
+    const texts = (flow: Flow) => compileFlow(flow).problems.map((p) => p.text);
+    const empty = fixFlow();
+    (empty.nodes.find((n) => n.id === "lp") as Loop).members = [];
+    expect(texts(empty)).toContain('Loop "Fix" has no blocks inside');
+    expect(texts(fixFlow(check("")))).toContain(
+      'Loop "Fix" needs a check command or the agent\'s goal',
+    );
+    expect(texts(fixFlow(check("npm test", "(")))).toContain(
+      'Loop "Fix": the output pattern is not a valid regular expression',
+    );
+    expect(
+      texts(
+        fixFlow({ ...check("npm test"), agentDone: { on: true, goal: " " } }),
+      ),
+    ).toContain('Loop "Fix": write the goal the agent works toward');
+    const under = (trigger: string) =>
+      compileFlow({
+        nodes: [
+          T("t", trigger),
+          I("b", "B"),
+          L("lp", ["b"], { name: "Fix", ...check("npm test") }),
+        ],
+        edges: [e("t", "lp")],
+      });
+    for (const t of ["needs-you", "idle"])
+      expect(under(t).problems.map((p) => p.text)).toContain(
+        "Loops run in the session: put them under a trigger the session gets",
+      );
+    const turn = under("turn-end");
+    expect(turn.problems.map((p) => p.text)).toContain(
+      'A loop under "Turn finished" would never end: put it under another trigger',
+    );
+    // Never armed there.
+    expect(turn.steps[0].loops).toBeUndefined();
+    const loose = compileFlow({
+      nodes: [T("t", "after-push"), I("b", "B"), L("lp", ["b"], check("x"))],
+      edges: [],
+    });
+    expect(
+      loose.problems
+        .filter((p) => /Not connected/.test(p.text))
+        .map((p) => p.node),
+    ).toEqual(["b", "lp"]);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("arming a loop", () => {
+  const SID = "aaaaaaaa-1111-2222-3333-444444444444";
+  const trig = FLOW_TRIGGERS.find((t) => t.id === "after-push")!;
+  const loopFlow = (): Flow => ({
+    nodes: [
+      T("t", "after-push"),
+      I("b", "Fix the cause."),
+      {
+        ...newLoop("lp", 0, 0),
+        name: "Fix",
+        members: ["b"],
+        check: {
+          command: "npm test",
+          output: "",
+          outputMode: "match",
+          timeoutMin: 5,
+        },
+      } as FlowNode,
+    ],
+    edges: [e("t", "lp")],
+  });
+  const setup = (flow: Flow) => {
+    const dir = mkdtempSync(join(tmpdir(), "flow-arm-"));
+    mkdirSync(join(dir, "workflows", "sessions"), { recursive: true });
+    writeFileSync(
+      join(dir, "workflows", "sessions", `${SID}.json`),
+      JSON.stringify(compileFlow(flow)),
+    );
+    return dir;
+  };
+  // A fresh TMPDIR each time: the once-per-commit marks must not hide a second firing.
+  const fire = (dir: string) =>
+    execFileSync("bash", ["-c", flowTriggerCommand(trig, dir, "m")], {
+      cwd: dir,
+      input: JSON.stringify({
+        session_id: SID,
+        tool_input: { command: "git push" },
+      }),
+      env: { ...process.env, TMPDIR: mkdtempSync(join(tmpdir(), "flow-tmp-")) },
+      encoding: "utf8",
+    });
+  const loopsDir = (dir: string) => join(dir, "workflows", "loops");
+  const readLoops = (dir: string) =>
+    JSON.parse(readFileSync(join(loopsDir(dir), `${SID}.json`), "utf8"));
+  const writeLoops = (dir: string, v: object) =>
+    writeFileSync(join(loopsDir(dir), `${SID}.json`), JSON.stringify(v));
+
+  it("firing arms the loop", () => {
+    const dir = setup(loopFlow());
+    const before = Date.now() - 1000;
+    const out = JSON.parse(fire(dir));
+    expect(out.hookSpecificOutput.additionalContext).toContain("Repeat until");
+    const step = compileFlow(loopFlow()).steps[0].id;
+    const { loops } = readLoops(dir);
+    expect(loops).toEqual([
+      {
+        id: "lp",
+        step,
+        state: "open",
+        iteration: 0,
+        startedAt: expect.any(Number),
+        history: [],
+        reason: null,
+        lastCheck: null,
+      },
+    ]);
+    expect(loops[0].startedAt).toBeGreaterThanOrEqual(before);
+    expect(readFileSync(join(loopsDir(dir), `${SID}-lp.md`), "utf8")).toBe("");
+    // Atomic: nothing left behind.
+    expect(readdirSync(loopsDir(dir)).sort()).toEqual([
+      `${SID}-lp.md`,
+      `${SID}.json`,
+    ]);
+  }, 20_000);
+
+  it("firing again does not reset an open loop", () => {
+    const dir = setup(loopFlow());
+    fire(dir);
+    const file = readLoops(dir);
+    file.loops[0].iteration = 3;
+    writeLoops(dir, file);
+    writeFileSync(join(loopsDir(dir), `${SID}-lp.md`), "tried x\n");
+    fire(dir);
+    expect(readLoops(dir)).toEqual(file);
+    expect(readFileSync(join(loopsDir(dir), `${SID}-lp.md`), "utf8")).toBe(
+      "tried x\n",
+    );
+  }, 20_000);
+
+  it("a met loop is armed again", () => {
+    const dir = setup(loopFlow());
+    fire(dir);
+    const file = readLoops(dir);
+    file.loops[0] = {
+      ...file.loops[0],
+      state: "met",
+      iteration: 4,
+      startedAt: 1,
+      reason: "criterion met after 4 iterations",
+      history: [{ n: 1 }],
+    };
+    // Another loop's entry is left as it is.
+    file.loops.push({ id: "other", state: "limit", iteration: 2 });
+    writeLoops(dir, file);
+    writeFileSync(join(loopsDir(dir), `${SID}-lp.md`), "old notes\n");
+    fire(dir);
+    const { loops } = readLoops(dir);
+    expect(loops).toHaveLength(2);
+    expect(loops[0]).toMatchObject({
+      id: "lp",
+      state: "open",
+      iteration: 0,
+      history: [],
+      reason: null,
+    });
+    expect(loops[0].startedAt).toBeGreaterThan(1);
+    expect(loops[1]).toEqual({ id: "other", state: "limit", iteration: 2 });
+    // ponytail: only the latest run of a loop is kept, its notes too.
+    expect(readFileSync(join(loopsDir(dir), `${SID}-lp.md`), "utf8")).toBe("");
+  }, 20_000);
+
+  it("a corrupt loop file is replaced when the trigger fires", () => {
+    const dir = setup(loopFlow());
+    mkdirSync(loopsDir(dir), { recursive: true });
+    writeFileSync(join(loopsDir(dir), `${SID}.json`), "{not json");
+    fire(dir);
+    expect(readLoops(dir).loops.map((l: { id: string }) => l.id)).toEqual([
+      "lp",
+    ]);
+  }, 20_000);
+
+  it("a custom trigger arms its loops too", () => {
+    const always: CustomTrigger = {
+      id: "edit",
+      name: "Edited",
+      description: "",
+      event: "PostToolUse",
+      tool: "Edit",
+      field: "file",
+      pattern: "",
+      output: "",
+      once: "always",
+    };
+    const flow = loopFlow();
+    flow.nodes[0] = T("t", "custom:edit");
+    const dir = mkdtempSync(join(tmpdir(), "flow-arm-"));
+    mkdirSync(join(dir, "workflows", "sessions"), { recursive: true });
+    writeFileSync(
+      join(dir, "workflows", "sessions", `${SID}.json`),
+      JSON.stringify(compileFlow(flow, [always])),
+    );
+    execFileSync("bash", ["-c", customTriggerCommand("PostToolUse", dir, "m")], {
+      cwd: dir,
+      input: JSON.stringify({ session_id: SID, tool_name: "Edit" }),
+      env: { ...process.env, TMPDIR: dir },
+      encoding: "utf8",
+    });
+    expect(readLoops(dir).loops.map((l: { id: string }) => l.id)).toEqual([
+      "lp",
+    ]);
+  }, 20_000);
+
+  it("steps without loops write nothing", () => {
+    const dir = setup({
+      nodes: [T("t", "after-push"), I("b", "Post the URL.")],
+      edges: [e("t", "b")],
+    });
+    expect(
+      JSON.parse(fire(dir)).hookSpecificOutput.additionalContext,
+    ).toContain("Post the URL.");
+    expect(existsSync(loopsDir(dir))).toBe(false);
+  }, 20_000);
 });
