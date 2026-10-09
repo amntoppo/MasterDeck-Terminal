@@ -107,6 +107,13 @@ describe.skipIf(process.platform === 'win32')('DECIDE', () => {
     expect(out.run).toEqual({ at: NOW, sid: SID, trigger: 'loop', ids: 'lp', iteration: 1, state: 'open' })
   })
 
+  it('a failed check with no output says so, with its command and exit code', () => {
+    const out = decide(base({ r: { tail: '\n', exit: 2 } }))
+    expect(out.answer.reason).toContain('The check `false` failed (exit 2, no output).\nGo on')
+    const claim = decide(base({ d: [def({ agentDone: { on: true, goal: 'g' } })], r: { tail: '', exit: 1, said: true } }))
+    expect(claim.answer.reason).toContain('Your LOOP DONE claim was not backed by the check: `false` failed (exit 1, no output).\nGo on')
+  })
+
   it('counts the extra iterations Run 5 more adds', () => {
     const at = decide(base({ e: { iteration: 9 } }))
     expect(at.file.loops[0].state).toBe('limit')

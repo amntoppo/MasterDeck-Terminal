@@ -333,7 +333,8 @@ at most 40 lines / 4 KB; just before the rename it reads the file again and writ
 answers nothing, when the loop is no longer open or has a new `startedAt`: a Stop loop or Run 5
 more during the check stands), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`) and
 answers: an open loop blocks the stop with `↻ Loop "<name>": iteration n/max[, m min left].`, the
-check's output or "not done yet", the round's plan and the progress file's path; a loop that ends
+check's output (one that failed and printed nothing: ``The check `<cmd>` failed (exit N, no
+output).``) or "not done yet", the round's plan and the progress file's path; a loop that ends
 opens the loops of its step whose `after` names it by that outcome or by a plain arrow (fresh, with
 empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>`, then
 `After the loop: <then>` (the blocks its plain arrows lead to: `CompiledLoop.then`, loops left out

@@ -77,6 +77,9 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
            then {state: "limit", reason: "stopped: no progress in \($stall) iterations"}
          else {state: "open", reason: null} end) as $d
       | ($e + {iteration: $n, history: $hist, lastCheck: $h} + $d) as $out
+      # A check that failed and printed nothing (a timeout prints its own line): name it instead.
+      | (($r.tail // "") | test("\\S") | not) as $quiet
+      | "\u0060\($def.check.command)\u0060 failed (exit \($r.exit), no output)." as $why
       | (if $d.state == "open" then []
          else [$in.defs[]? | select(.after.loop? == $e.id and (.after.via == $d.state or .after.via == "then"))
                | select(.id as $i | any($in.file.loops[]; .id? == $i and .state? == "open") | not)] end) as $next
@@ -88,8 +91,8 @@ def fresh($step; $now): {id, step: $step, state: "open", iteration: 0, startedAt
            reason: ("↻ Loop \"\($def.name)\": iteration \($n)/\($max)"
              + (if $mins > 0 then ", \((($mins * 60000 - $elapsed) + 59999) / 60000 | floor | if . < 0 then 0 else . end) min left" else "" end)
              + ". "
-             + (if $r.ran and ($r.passed | not) and $r.said then "Your LOOP DONE claim was not backed by the check:\n\($r.tail)\n"
-                elif $r.ran and ($r.passed | not) then "The check failed:\n\($r.tail)\n"
+             + (if $r.ran and ($r.passed | not) and $r.said then "Your LOOP DONE claim was not backed by the check:\(if $quiet then " \($why)" else "\n\($r.tail)" end)\n"
+                elif $r.ran and ($r.passed | not) then (if $quiet then "The check \($why)\n" else "The check failed:\n\($r.tail)\n" end)
                 elif $agent and ($r.said | not) then "Not done yet. When the goal is reached (\($def.agentDone.goal)), end your turn with a line starting \"LOOP DONE:\" and why.\n"
                 else "Not met yet.\n" end)
              + "Go on with the loop's steps:\n\($def.plan)\nAdd a note of what you tried to \($in.progress)\($e.id).md."),
