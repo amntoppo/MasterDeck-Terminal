@@ -612,16 +612,12 @@ Console). Here only what touches this repository:
 
 See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
 
-- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
-  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
-  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
-  `mods/` in the app (electron-builder `extraResources`).
 - **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
   `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
   masterdeck@masterdeck --scope user` (settings.json backed up first as
   `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
   nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
-  Updating the copy is by hand until the app installs it.
+  An app with #93 replaces that hand copy at launch (no marker) and reads it as installed.
 - **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
   `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
   `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
@@ -640,7 +636,15 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
   the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
   checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
-  it. Setup should add `prependPlugins` with the install (backup, atomic).
+  it. MasterDeck's install adds it now (#93) and says where it is ignored.
+- **Mods install (#93): open points.** Checked with the real `claude` 2.1.296 against a temp
+  `CLAUDE_CONFIG_DIR` in the isolated app (Install, Remove, the backups) and the packaged build's
+  `Resources/mods`; not checked: the Needs-you reload item with real sessions (the isolated app
+  listed none), an app update over an installed copy on the user's machine, Windows (`--json` lines
+  and paths), a managed settings file or a Team plan for real (`prependNote` is unit-tested only).
+  A session whose Claude Code is older than 2.1.287 never sends a heartbeat, so after an install it
+  stays in the reload item until dismissed. The swap of `<home>/mods` leaves a moment with no folder
+  (`ponytail:` in `syncModsFolder`). The isolated app installs mods only with `CLAUDE_CONFIG_DIR` set.
 - **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
   yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
   (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
@@ -650,9 +654,6 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
   account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
   account). A board file per account and its own current sprint needs a read per account.
-- **Updating the mods needs a reload in every running session** (the copy under
-  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
-  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
   a change bumps `v` in both.
@@ -665,6 +666,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |
 | MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | 3d83781, merge 3ce574c | — |

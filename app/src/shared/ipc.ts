@@ -168,6 +168,9 @@ export const CH = {
   peersSet: "peers:set",
   peersSync: "peers:sync",
   modSet: "mod:set",
+  modsInstall: "mods:install",
+  modsUninstall: "mods:uninstall",
+  modsReload: "mods:reload",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
@@ -587,6 +590,12 @@ export interface DeckApi {
   peersSync(sessionKey: string): Promise<CliResult>;
   /** Session details → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
+  /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
+  modsInstall(): Promise<CliResult>;
+  /** Take them out again (every mod, the marketplace, prependPlugins). */
+  modsUninstall(): Promise<CliResult>;
+  /** Type /reload-plugins into every idle session that runs older mods (or none). */
+  modsReload(): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
   /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
   boardRepos(repos: string[]): void;

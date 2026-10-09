@@ -776,6 +776,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
+  mods: "MODS",
   loop: "LOOP",
   "loop-paused": "LOOP",
 };
@@ -1387,6 +1388,8 @@ function ExtraCard({
   const kind =
     i.kind === "account"
       ? "GITHUB"
+      : i.kind === "mods"
+      ? "MODS"
       : i.kind === "loop"
       ? "LOOP AT ITS LIMIT"
       : i.kind === "loop-paused"
@@ -1406,7 +1409,8 @@ function ExtraCard({
       a.type === "compact" ||
       a.type === "login" ||
       a.type === "loop-more" ||
-      a.type === "loop-continue",
+      a.type === "loop-continue" ||
+      a.type === "reload",
   );
   const leave = i.actions.find((a) => a.type === "dismiss");
   const stopLoop = i.actions.find((a) => a.type === "loop-stop");
@@ -1424,7 +1428,8 @@ function ExtraCard({
           i.kind === "idle" ||
           i.kind === "waiting" ||
           i.kind === "loop" ||
-          i.kind === "loop-paused"
+          i.kind === "loop-paused" ||
+          i.kind === "mods"
             ? "var(--amber)"
             : "var(--red)",
       }}

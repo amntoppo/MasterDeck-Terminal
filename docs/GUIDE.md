@@ -579,25 +579,36 @@ after a restart.
 Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
 creation.
 
-## MasterDeck's mods (prototype)
+## MasterDeck's mods
 
 Claude Code mods (Claude Code 2.1.287 or later) that show inside a session what MasterDeck knows
-about it, one mod per feature, each switched on or off per session. They are not installed for you
-yet; to try them:
+about it, one mod per feature, each switched on or off per session.
 
-```bash
-claude plugin marketplace add <path to MasterDeck>/mods
-claude plugin install masterdeck@masterdeck
-claude plugin install masterdeck-ticket@masterdeck
-claude plugin install masterdeck-alerts@masterdeck
-claude plugin install masterdeck-note@masterdeck
-claude plugin install masterdeck-loop@masterdeck
-claude plugin install masterdeck-board@masterdeck
-```
+**Installing them.** Setup's **Mods** step (and Settings → **Hooks, mods & skills** → **Mods**)
+has **Install mods**: one press adds MasterDeck's folder of mods (`~/.claude/masterdeck/mods`) to
+Claude Code as a marketplace, installs every mod for your user, and puts the core first in
+`prependPlugins` in `~/.claude/settings.json`. It checks Claude Code's version first (2.1.287 or
+later) and backs up `settings.json` before every change (`~/.claude/masterdeck/settings.backup.*.json`).
+**Remove** takes the mods, the marketplace and the `prependPlugins` entry out again (the rest of
+your settings stays). **Repair** shows when only part of it is there (a mod switched off by hand,
+`prependPlugins` missing). New sessions load the mods; running ones at a reload.
 
-and add `"prependPlugins": ["masterdeck@masterdeck"]` to `~/.claude/settings.json`. Then start or
-resume a session (or run `/reload-plugins` in one). In a session on a ticket, with a PR or with
-linked sessions:
+**Updates.** Each MasterDeck update copies its mods into `~/.claude/masterdeck/mods`, which Claude
+Code reads in place, so there is nothing to install again. Running sessions keep the older mods
+until they reload their plugins: Needs you then shows a **MODS** item with how many sessions run
+older mods (or none, after an install) and **Reload idle sessions**, which types `/reload-plugins`
+into each one that waits at an empty prompt (never into one asking a question or a permission).
+Settings → Mods has the same button. The others take the new mods when you reload them from
+Session details → Mods, or at their next start.
+
+**Where the order is not yours to set.** With your organization's managed settings in place, or
+signed in to Claude Code with a Team or Enterprise plan, Claude Code ignores `prependPlugins` in
+your own settings: the mods still load, but the core may load after the others and cannot switch
+them per session. Setup and Settings say so; an admin can list `masterdeck@masterdeck` in
+`prependPlugins` in the managed settings.
+
+Then start or resume a session (or run `/reload-plugins` in one). In a session on a ticket, with
+a PR or with linked sessions:
 
 - **Ticket line** (`masterdeck-ticket`): a line above the prompt with the ticket, its board column,
   the PR with its CI and open review threads, and how many sessions are linked; short in a narrow
@@ -638,7 +649,7 @@ linked sessions:
   mod runs there.
 
 The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
-nothing for, they show nothing. To remove one: `claude plugin uninstall <name>@masterdeck`.
+nothing for, they show nothing. To remove them all: **Remove** in Settings → Mods.
 
 ## Cost and context
 
@@ -844,7 +855,7 @@ Stored in `~/.claude/masterdeck/settings.json`.
 
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
-- **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
+- **Hooks, mods & skills:** status lines, not switches (but **Mods**, see MasterDeck's mods). **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
   (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the
   first `gh pr create` of each branch with an instruction to review the diff, then lets the retry (same branch) go through. It is a
@@ -1272,7 +1283,7 @@ cards is in them.
 | `⌘E` | The open session's worktrees (Open in editor) |
 | `⌘⇧M` | Show or hide master |
 | `⌘⇧G` | Refresh from GitHub |
-| `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks & skills, Remote, Keyboard shortcuts, About) |
+| `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks, mods & skills, Remote, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
 Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where

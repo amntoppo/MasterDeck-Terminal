@@ -363,9 +363,43 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 - **The core** writes its heartbeat every 15 s where `deck/alive` exists (`ended: true` at
   `session.end`); what it saw is in `$.state` (`seen`), since a reload does not judge an unchanged
   module again.
-- **Not wired yet:** MasterDeck does not install the mods (by hand: `claude plugin marketplace add
-  <folder>/mods`, `claude plugin install <name>@masterdeck` for each, `prependPlugins` in settings),
-  nothing of the deck hook moved into them, and no Windows path. See TODO ("MasterDeck mod").
+- **Installing the mods** (`main/mods.ts`, `shared/mods.ts`, issue #93). The app ships `mods/`
+  (electron-builder `extraResources`, without tests, `shared/` and `sync-shared.sh`) and at every
+  launch copies it to `<home>/mods` when its content hash differs from the folder's marker
+  (`syncModsFolder`: `.masterdeck-mods.json`, copied to `mods.new` and swapped in; a hand copy there
+  is replaced). Claude Code reads a directory marketplace in place (`claude plugin list` shows
+  `readFromFolder`), so that copy is the update: nothing is installed again. `ModsInstaller.install`
+  checks `claude --version` (`MODS_MIN_CLAUDE`, 2.1.287), backs up settings.json
+  (`settings.backup.<ms>.before-mods.json` in `<home>`; `backupSettings` in `hooks.ts` never
+  overwrites one), runs `claude plugin marketplace add <home>/mods --scope user` (adding it again
+  re-points a `masterdeck` marketplace that came from elsewhere) and `claude plugin install
+  <name>@masterdeck --scope user` for each mod in `marketplace.json`, all with `--json` (the last
+  line's `outcome` / `failureCode`), then puts the core first in `prependPlugins` with the hooks'
+  own atomic write (another backup) and records `<home>/mods-installed.json` (`{at, version}`).
+  `uninstall` runs `claude plugin uninstall` for each (`not_installed` is fine), `claude plugin
+  marketplace remove masterdeck` (`not_configured` is fine) and takes the core out of
+  `prependPlugins` (the key goes when empty); the folder stays. One change at a time.
+  `modsInSettings` reads what is installed from the settings file: the marketplace on this folder,
+  each `enabledPlugins` entry and `prependPlugins` (`installed`, `partial` with what is `missing`,
+  `off`). `prependNote` says when `prependPlugins` is not honoured: a managed settings file
+  (`managedSettingsFiles`: `managed-settings.json` and `managed-settings.d/*.json` per platform) that
+  does not list the core itself, or `claude auth status --json` reporting a `team` / `enterprise`
+  `subscriptionType`. `state.mods` (`ModsStatus`) is read in the state callback at most every 30 s
+  (`modsNow`) and again after each change. `paths.modsSettings` is the file `claude plugin` writes:
+  Claude Code's own, or `$CLAUDE_CONFIG_DIR/settings.json`; null (install refused, with a note) when
+  MasterDeck's settings are kept apart (`MASTERDECK_ISOLATED`, `MASTERDECK_CLAUDE_SETTINGS`) without
+  `CLAUDE_CONFIG_DIR`, since the CLI would write the real one. `CH.modsInstall` / `CH.modsUninstall`
+  are open to the web (fixed commands, `webConfirm` first), as the status line's are.
+- **Reloading after an update.** `modsReloadOffer` (the state's sessions, `DeckHooks.modBeats()`,
+  installed, `installedAt`) lists running sessions (not done or suspended) whose core is older
+  (`modsStale`), or that have no heartbeat and started before MasterDeck installed the mods; the
+  idle ones (state `idle`, no `busyWith`) can be reloaded now. `Sources.setModsReload` puts it into
+  `collectItems` (`modsReload`) as one Needs-you item `mods:<MOD_VERSION>` (kind `mods`, action
+  `reload` while one is idle; a dismissed one stays dismissed until the next version).
+  `reloadMods()` (the `reload` inbox action and `CH.modsReload`, Settings → Mods) types
+  `/reload-plugins` into each idle one through `Sender`, never relayed through master-agent.
+- **Not wired yet:** nothing of the deck hook moved into the mods, and no Windows path. See TODO
+  ("MasterDeck mod").
 
 ### Monitors (watches) and schedules
 
@@ -1129,6 +1163,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
+| `mods` | the state callback, `modsNow()` over `ModsInstaller.status()`: whether MasterDeck's mods are installed in Claude Code, Claude Code's version, the mods' version, `prependNote`, `unavailable` |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -1147,6 +1182,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
+| `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |

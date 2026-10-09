@@ -174,6 +174,7 @@ web tabs keep working.
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
+| Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -378,6 +379,19 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-10)
+
+- **MasterDeck installs, updates and reloads its mods (#93)** (branch
+  `worktree-MasterDeck-Terminal-93-mods-install`, draft PR, not merged, **not installed**: the
+  rebuild of the real app copies over `~/.claude/masterdeck/mods`, so it waits for the user's
+  word). `mods/` ships in the app and is copied to `<home>/mods` at launch when it changed; Setup's
+  **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check, the
+  marketplace, each mod, `prependPlugins`) and remove them, backing up settings.json before every
+  change; a Needs-you **MODS** item offers **Reload idle sessions**; `prependNote` says where
+  `prependPlugins` is ignored. Checked: typecheck, vitest (153 files passed, 2 skipped; 1771 tests
+  passed, 4 skipped), the isolated app with the real `claude` 2.1.296 and a temp `CLAUDE_CONFIG_DIR`
+  (Install, Remove, backups, the real settings.json's hash unchanged), a packaged dir build's
+  `Resources/mods`. Not checked: the reload item with real sessions, an update over the user's
+  copy, Windows. Open points: TODO ("Mods install (#93)").
 
 - **Workflow agent loops (#82)** are built on branch `worktree-MasterDeck-Terminal-82-agent-loops`
   (local `main` merged in at 9e00e29, so it also carries the mods of #86; pushed as PR #101, not

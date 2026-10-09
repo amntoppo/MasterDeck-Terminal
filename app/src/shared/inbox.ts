@@ -15,6 +15,8 @@ import type { ExternalItem } from "./remote";
 import type { GhAccountStatus } from "./accounts";
 import type { ScreenMenu } from "./ask";
 import { heldForTrust, trustLine } from "./trust";
+import { modsReloadText, type ModsReloadOffer } from "./mods";
+import { MOD_VERSION } from "./modBand";
 import type { LoopView } from "./loops";
 
 /**
@@ -38,6 +40,7 @@ export type InboxKind =
   | "waiting" // blocked on a prompt for a while (another terminal)
   | "external" // asked through the remote API
   | "account" // a GitHub account whose token fails
+  | "mods" // running sessions on older MasterDeck mods (after an update or an install)
   | "error" // its turn ended on an API error (rate limit, overload…)
   | "loop" // a workflow loop ended at a limit
   | "loop-paused"; // a workflow loop still open on a session that went quiet
@@ -54,6 +57,7 @@ export type InboxActionType =
   | "start" // open the Start dialog (the renderer does it)
   | "login" // run gh auth login for an account (the renderer opens it)
   | "trust" // open claude in a folder it was not allowed to work in (the renderer opens it)
+  | "reload" // type /reload-plugins into the idle sessions on older mods
   | "loop-more" // a loop that ended at a limit gets 5 more iterations (and the nudge)
   | "loop-continue" // a paused loop: MasterDeck's own "Continue the loop" typed into the idle session
   | "loop-stop" // a paused loop is stopped (as Stop loop in Details)
@@ -76,6 +80,7 @@ export type InboxDetail =
   | { type: "offer"; offer: PrOffer }
   | { type: "external"; item: ExternalItem }
   | { type: "account"; login: string }
+  | { type: "mods"; keys: string[]; idle: string[] }
   | { type: "loop"; loopId: string; reason: string | null };
 
 export interface InboxItem {
@@ -140,6 +145,7 @@ export const PRIORITY: Record<InboxKind, number> = {
   idle: 20,
   held: 10,
   account: 75,
+  mods: 15,
 };
 
 /** What happened when an item goes away without anyone acting on it. */
@@ -159,6 +165,7 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   error: "working again",
   external: "answered elsewhere",
   account: "logged in again",
+  mods: "no session on older mods",
   loop: "the loop is running again",
   "loop-paused": "the loop went on or ended",
 };
@@ -209,6 +216,8 @@ export interface InboxInput {
   ghAccounts?: GhAccountStatus[];
   /** accountNotices: gh's active account is not the primary, master-agent not started as it. */
   accountNotices?: { id: string; text: string }[];
+  /** Running sessions on older MasterDeck mods (modsReloadOffer). */
+  modsReload?: ModsReloadOffer | null;
   /** Workflow loops by session id (`AppState.loops`): one that ended at a limit is an item. */
   loops?: Record<string, LoopView[]>;
   now: number;
@@ -530,6 +539,23 @@ export function collectItems(x: InboxInput): InboxItem[] {
       detail: { type: "account", login: "" },
     });
 
+  // MasterDeck's mods were updated (or installed): running sessions take them at a reload. One item
+  // per mods version, so a dismissed one stays dismissed until the next update.
+  if (x.modsReload)
+    out.push({
+      id: `mods:${MOD_VERSION}`,
+      kind: "mods",
+      priority: PRIORITY.mods,
+      sessionKey: null,
+      ticket: null,
+      title: "MasterDeck's mods",
+      body: modsReloadText(x.modsReload),
+      actions: x.modsReload.idle.length
+        ? [{ type: "reload", label: `Reload ${x.modsReload.idle.length === 1 ? "the idle session" : `${x.modsReload.idle.length} idle sessions`}`, primary: true }]
+        : [],
+      detail: { type: "mods", keys: x.modsReload.keys, idle: x.modsReload.idle },
+    });
+
   // API items stay while open, even if their session ended (the key is dropped so no card opens it).
   const external: InboxItem[] = [];
   for (const e of x.external ?? []) {
@@ -571,6 +597,7 @@ const RUNS_IN_MAIN = new Set<InboxActionType>([
   "compact",
   "approve",
   "send",
+  "reload",
   "loop-more",
   "loop-continue",
 ]);

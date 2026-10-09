@@ -91,11 +91,12 @@ session polling GitHub would burn the rate limit; the mod is a thin reader of wh
 
 ## How MasterDeck should ship it
 
-- Bundle `mods/` with the app and copy it under `MASTERDECK_HOME/mods/` as a local-folder
-  marketplace; install with `claude plugin marketplace add <folder>` and
-  `claude plugin install masterdeck@masterdeck --scope user`, from Setup and a Settings switch
-  (backups, as for hooks). An app update rewrites the folder; sessions take it at `/reload-plugins`
-  or their next start.
+- **Built (#93):** the app bundles `mods/` and copies it to `MASTERDECK_HOME/mods/` (a
+  local-folder marketplace read in place); Setup's Mods step and Settings install it with
+  `claude plugin marketplace add <folder>` and `claude plugin install <name>@masterdeck --scope
+  user` for each mod, plus `prependPlugins` (backups, as for hooks), and remove it again. An app
+  update rewrites the folder; Needs you offers `/reload-plugins` for idle sessions on older mods
+  (ARCHITECTURE, "Installing the mods").
 - Trust the mod only per session, by its heartbeat: anywhere without one (older Claude Code,
   `disableAllHooks`, a policy, a failed load) the deck hook keeps working as today.
 - Coexist with the user's mods: pass every event on with `next(e)` (no denies but the guards

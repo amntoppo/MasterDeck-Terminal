@@ -104,11 +104,15 @@ Or build it yourself (see [Develop](#develop)).
       (see [Board View](docs/GUIDE.md#board-view)). Settings → Set up MasterDeck shows the same step. With two or more accounts, an
       **Account** menu picks whose repositories and boards you are choosing; a repository can be under
       one account only (others show it as "in <login>").
-   4. **Preferences.** The folder master and new shells start in (where your repos are; with two or more GitHub accounts, also a folder for each other account's repos), whether to
+   4. **Mods.** Optional: **Install mods** puts MasterDeck's Claude Code mods (the ticket line above
+      the prompt, alerts, `/md-note`, `/md-loop`, `/md-board`) into Claude Code for your user, at once
+      (Claude Code 2.1.287 or later; `~/.claude/settings.json` is backed up first). See
+      [MasterDeck's mods](docs/GUIDE.md#masterdecks-mods).
+   5. **Preferences.** The folder master and new shells start in (where your repos are; with two or more GitHub accounts, also a folder for each other account's repos), whether to
       use a master-agent, and notifications for new Needs-you items.
 
    Later, Settings → **Set up MasterDeck** opens the same sections as one page (Tools, GitHub accounts,
-   Repos & boards, Preferences): change any of them and Save.
+   Repos & boards, Mods, Preferences): change any of them and Save (Mods installs or removes at once).
 
    Then the **Skills** popup (later: 🧩 Skills in the sidebar) lists the bundled skills: add or
    remove each one. They are optional, for use by hand: MasterDeck moves the board, watches PRs and
