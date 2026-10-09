@@ -375,6 +375,14 @@ buttons; it does not go through macOS window drag regions.
   the issue; the spec is in the backend repo (`docs/superpowers/specs/2026-10-09-working-hours-design.md`,
   branch `docs/working-hours-64`, not pushed). Open points: TODO ("Working hours: open points").
 
+- **Session filters (#74)** are built on branch `worktree-MasterDeck-Terminal-74-session-filters`
+  (PR #76, draft, not merged; installed locally 2026-10-09): a **Filters** line in the Sessions column, closed by
+  default, with chips, Clear all and an empty state; status, account (two or more accounts), repo,
+  starred and a name search, kept in localStorage. Logic in `shared/sessionFilter.ts`, UI in
+  `SessionFilterBar.tsx`. Checked: typecheck, vitest, and the isolated app with a stand-in `claude`
+  listing five fake sessions and two fictional accounts (open/close, picking, AND across kinds, the
+  empty state, chip ×, Clear all, kept after a restart). Not checked: the web app, a phone, Windows,
+  real sessions with recorded accounts.
 - **Notes** (issue #63) are built on branch `worktree-MasterDeck-Terminal-63-notes` (13 commits from
   0e93bb3: twelve to the docs commit 45b81dc, then the final review's fixes, the commit that carries
   this line): not merged, not pushed, **not installed** (Step 8, the rebuild and relaunch of the

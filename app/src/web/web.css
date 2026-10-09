@@ -73,6 +73,8 @@
 .app.phone .rb:hover::after { display: none; }
 html.phone .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
 .app.phone .col-btn, .app.phone .icon-btn, .app.phone .card-x { min-width: 36px; min-height: 36px; }
+/* A filter chip's ×: a 36px target that does not make the one-line bar taller. */
+.app.phone .sfilter-chip button { min-width: 36px; min-height: 36px; margin: -12px -8px -12px -6px; }
 .app.phone .srow { padding: 10px 12px; }
 html.phone input, html.phone textarea, html.phone select { font-size: 16px !important; }
 
