@@ -1405,6 +1405,8 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .rec-pop .input { width: 100%; margin: 6px 0 8px; }
 .rec-head { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 .rec-tell { font-size: 11px; color: var(--amber); margin: 8px 0 0; }
+.janitor-meetings-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.janitor-meetings-msg { font-size: 12px; margin: 0 0 8px; }
 .rec-msg { font-size: 11px; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 /* Two or more GitHub accounts: the account a session works as, at its top. */

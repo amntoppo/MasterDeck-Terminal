@@ -11,6 +11,7 @@ import type { Settings } from "./settings";
 import type { MeetingsAnswer, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
 import type { ExportKind, MeetingGetAnswer, MeetingsListAnswer } from "./meetingsPage";
+import type { CleanRequest, MeetingsCleanAnswer, MeetingsJanitorAnswer } from "./meetingJanitor";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
@@ -227,6 +228,8 @@ export const CH = {
   meetingsDeleteAudio: "meetings:deleteAudio",
   meetingsExport: "meetings:export",
   meetingsChanged: "meetings:changed",
+  meetingsJanitor: "meetings:janitor",
+  meetingsClean: "meetings:clean",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -473,6 +476,13 @@ export interface DeckApi {
   meetingsExport(id: string, kind: ExportKind): Promise<{ ok: boolean; message?: string }>;
   /** A meeting changed (its state, title, transcript) or, null, the list did. The window only. */
   onMeetingsChanged(cb: (c: { id: string | null }) => void): () => void;
+  /** Janitor → Meetings (macOS, the window only): every meeting with its audio's and transcript's size. */
+  meetingsJanitor(): Promise<MeetingsJanitorAnswer>;
+  /**
+   * Janitor's Delete audio / Delete meetings on the picked meetings (the window asked first). The
+   * meeting being recorded is skipped; notes stay.
+   */
+  meetingsClean(req: CleanRequest): Promise<MeetingsCleanAnswer>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

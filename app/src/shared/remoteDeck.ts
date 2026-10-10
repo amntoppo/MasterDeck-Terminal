@@ -91,6 +91,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   meetingsDeleteAudio: blocked,
   meetingsExport: blocked,
   onMeetingsChanged: blocked,
+  // Janitor → Meetings: the Mac's window only, like the page.
+  meetingsJanitor: blocked,
+  meetingsClean: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),

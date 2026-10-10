@@ -1,4 +1,4 @@
-import { copyFileSync, lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { dirname } from 'node:path'
 import {
@@ -28,6 +28,7 @@ import {
   type MeetingsListAnswer,
   type MeetingsResult,
 } from '@shared/meetingsPage'
+import { AUDIO_SWEEP_EVERY_MS, AUDIO_SWEEP_FIRST_MS, audioExpired, cleanRequest, janitorRows, type MeetingsCleanAnswer, type MeetingsJanitorAnswer } from '@shared/meetingJanitor'
 import type { AppState } from '@shared/types'
 import { isRemote } from './ipcRegistry'
 import type { NotesStore } from './notes'
@@ -372,6 +373,7 @@ export class MeetingsIpc {
    * chunk stays for the next start). Only what was loaded: a quit never loads main/meetings/.
    */
   quit(): void {
+    this.stopBackground()
     this.svc?.transcriber.stop()
     this.svc?.matcher?.stop()
     this.engineMod?.killRunning()
@@ -415,6 +417,11 @@ export class MeetingsIpc {
   private async pageStore(): Promise<MeetingStore> {
     if (this.svc) return this.svc.store
     if (meetingsAgreed({ meetings: this.d.meetings() })) return (await this.loadService()).store
+    return this.bareStore()
+  }
+
+  /** The meetings on disk alone: no queue, nothing transcribed. */
+  private bareStore(): Promise<MeetingStore> {
     this.bare ??= this.once(
       (async () => {
         const load = this.d.loadService ?? (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }))
@@ -487,11 +494,24 @@ export class MeetingsIpc {
     })
     if (!yes) return { ok: false, message: 'cancelled' }
     if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
-    this.svc?.transcriber.forget(x.m.id)
-    const res = x.store.delete(x.m.id)
+    return this.dropMeeting(x.store, x.m.id)
+  }
+
+  /** The one way a meeting goes (the page, Janitor): out of the queue, off disk, its item gone. Its notes stay. */
+  private dropMeeting(store: MeetingStore, id: string): MeetingsResult {
+    this.svc?.transcriber.forget(id)
+    const res = store.delete(id)
     if (!res.ok) return res
-    this.d.notices?.clear(x.m.id)
-    this.d.changed?.(x.m.id)
+    this.d.notices?.clear(id)
+    this.d.changed?.(id)
+    return { ok: true }
+  }
+
+  /** The one way a meeting's audio goes (the page, Janitor, the timer); the transcript and notes stay. */
+  private dropAudio(store: MeetingStore, id: string): MeetingsResult {
+    const res = store.deleteAudio(id)
+    if (!res.ok) return res
+    this.d.changed?.(id)
     return { ok: true }
   }
 
@@ -507,10 +527,7 @@ export class MeetingsIpc {
     })
     if (!yes) return { ok: false, message: 'cancelled' }
     if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
-    const res = x.store.deleteAudio(x.m.id)
-    if (!res.ok) return res
-    this.d.changed?.(x.m.id)
-    return { ok: true }
+    return this.dropAudio(x.store, x.m.id)
   }
 
   /** Export the transcript as Markdown or the audio as .webm, to a file the user picks in a save dialog. */
@@ -524,6 +541,110 @@ export class MeetingsIpc {
     const path = await this.d.saveFile?.({ defaultName: exportName(x.m, k), kind: k })
     if (!path) return { ok: false, message: 'cancelled' }
     return k === 'md' ? writeExport(path, (tmp) => writeFileSync(tmp, meetingMarkdown(x.m))) : writeExport(path, (tmp) => copyFileSync(audio!, tmp))
+  }
+
+  // ── Janitor → Meetings (spec §7) ───────────────────────────────────────────
+
+  /** Every meeting with its audio's and transcript's size (the one being recorded marked). */
+  async janitor(e: unknown): Promise<MeetingsJanitorAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    const store = await this.pageStore()
+    return { ok: true, rows: janitorRows(store.sizes(), this.rec?.recording ? this.rec.meetingId : null) }
+  }
+
+  /**
+   * Janitor's Delete audio / Delete meetings on the picked meetings, after a native question (as the
+   * page's deletes; over 10 the window had the count typed first). The meeting being recorded is
+   * skipped; a meeting goes the page's way (dropMeeting) and its notes stay.
+   */
+  async clean(e: unknown, raw: unknown): Promise<MeetingsCleanAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    const req = cleanRequest(raw)
+    if (!req) return { ok: false, message: 'Not a cleanup.' }
+    const store = await this.pageStore()
+    const can = (id: string) => !this.recordingNow(id) && !!store.get(id)
+    const n = req.ids.filter(can).length
+    if (n === 0) return { ok: true, done: 0, skipped: req.ids.length }
+    const many = n === 1 ? 'this meeting' : `${n} meetings`
+    const yes = await this.d.confirm?.(
+      req.what === 'audio'
+        ? { message: `Delete the audio of ${many}?`, detail: 'The transcripts and the notes they added stay.', button: 'Delete audio' }
+        : {
+            message: n === 1 ? 'Delete this meeting?' : `Delete ${n} meetings?`,
+            detail: 'Their transcripts and audio are removed. The notes they added stay: they are your notes now.',
+            button: n === 1 ? 'Delete meeting' : 'Delete meetings',
+          },
+    )
+    if (!yes) return { ok: false, message: 'cancelled' }
+    let done = 0
+    let skipped = 0
+    let message: string | undefined
+    for (const id of req.ids) {
+      // Checked again: one may have gone while the question was open.
+      if (!can(id)) {
+        skipped++
+        continue
+      }
+      const res = req.what === 'audio' ? this.dropAudio(store, id) : this.dropMeeting(store, id)
+      if (res.ok) done++
+      else {
+        skipped++
+        message ??= res.message
+      }
+    }
+    if (done) this.d.changed?.(null)
+    return { ok: true, done, skipped, ...(message ? { message } : {}) }
+  }
+
+  /**
+   * Delete audio after (Settings → Meetings): removes the audio of meetings older than that, never a
+   * transcript. Uses the store already loaded, else the bare store, and that only when the meetings
+   * folder exists: the timer loads nothing on a Mac that never recorded. Returns how many it removed.
+   */
+  async sweepAudio(): Promise<number> {
+    if (this.d.platform !== 'darwin') return 0
+    const days = this.d.meetings().deleteAudioAfterDays
+    if (days === null) return 0
+    if (!this.svc && !existsSync(this.d.meetingsDir)) return 0
+    const store = this.svc?.store ?? (await this.bareStore())
+    const rows = janitorRows(store.sizes(), this.rec?.recording ? this.rec.meetingId : null)
+    let n = 0
+    for (const id of audioExpired(rows, days, (this.d.now ?? Date.now)())) {
+      if (this.recordingNow(id)) continue
+      const res = this.dropAudio(store, id)
+      if (res.ok) n++
+      else console.error(`meetings: delete audio after: ${res.message}`)
+    }
+    if (n) this.d.changed?.(null)
+    return n
+  }
+
+  private sweepTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Called once the app is ready: the Delete audio after timer, first AUDIO_SWEEP_FIRST_MS after
+   * start, then daily. Only timers: nothing is loaded or asked until one fires.
+   */
+  background(): void {
+    if (this.d.platform !== 'darwin' || this.sweepTimer) return
+    const sweep = () => void this.sweepAudio().catch((err) => console.error(`meetings: delete audio after: ${String(err)}`))
+    this.sweepTimer = setTimeout(() => {
+      sweep()
+      this.sweepTimer = setInterval(sweep, AUDIO_SWEEP_EVERY_MS)
+      this.sweepTimer.unref?.()
+    }, AUDIO_SWEEP_FIRST_MS)
+    this.sweepTimer.unref?.()
+  }
+
+  /** Stop the timers (quit, tests). */
+  stopBackground(): void {
+    if (this.sweepTimer) {
+      clearTimeout(this.sweepTimer)
+      clearInterval(this.sweepTimer)
+    }
+    this.sweepTimer = null
   }
 
   /**

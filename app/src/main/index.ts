@@ -2233,6 +2233,8 @@ function registerIpc(): void {
   reg.handle(CH.meetingsDelete, (e, id: unknown) => meetings.delete(e, id));
   reg.handle(CH.meetingsDeleteAudio, (e, id: unknown) => meetings.deleteAudio(e, id));
   reg.handle(CH.meetingsExport, (e, id: unknown, kind: unknown) => meetings.export(e, id, kind));
+  reg.handle(CH.meetingsJanitor, (e) => meetings.janitor(e));
+  reg.handle(CH.meetingsClean, (e, req: unknown) => meetings.clean(e, req));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3793,6 +3795,8 @@ app.whenReady().then(async () => {
   // partition and only while the user agrees. Sets handlers only; asks macOS nothing.
   guardSessions(app, session, () => meetingsAgreed(sources.getSettings()));
   createWindow();
+  // Meetings' Delete audio after timer: timers only now; the first look is minutes later.
+  meetings.background();
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
   );

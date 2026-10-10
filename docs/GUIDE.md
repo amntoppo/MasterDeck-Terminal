@@ -769,6 +769,12 @@ nothing for, they show nothing. To remove one: `claude plugin uninstall <name>@m
   skill: SAFE, PUSHED, DIRTY, UNPUSHED, or IN USE (a live session works there). Remove works for SAFE
   and PUSHED; DIRTY and UNPUSHED need the name typed; IN USE can't be removed. Branches are never
   deleted. Parked sessions can be removed too (their transcripts stay).
+- **Janitor → Meetings** (macOS, in MasterDeck's window only): every recorded meeting with its date,
+  title, audio size and transcript size, and the totals. **Older than 7 / 30 / 90 days** picks those
+  meetings (or tick them by hand); **Delete audio** removes their recordings and keeps the
+  transcripts, **Delete meetings** removes transcripts and audio. The notes a meeting added always
+  stay: they are your notes. MasterDeck asks on the Mac first; more than 10 at once need the number
+  typed. The meeting being recorded can't be picked. Works after **Turn off meetings** too.
 - **Templates:** the Start dialog's Template… menu inserts a saved snippet ("TDD, small PR",
   "Investigate only", "Fix and open PR", "Pair with me", plus yours). **Save as template** stores the
   current text in `~/.claude/masterdeck/templates.json`.
@@ -947,7 +953,9 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   most; pick one when every meeting is in the same language.
 - **Offer to record** (on by default): offer to record when a meeting app is in a call.
 - **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
-  transcript and notes stay.
+  transcript and notes stay. MasterDeck checks a few minutes after it starts and then once a day,
+  and removes only audio (a transcript is never removed by a timer; Janitor → Meetings does that
+  when you ask). The meeting being recorded is left alone.
 - **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
   offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay. macOS keeps the permissions it gave until you remove them in
   System Settings.

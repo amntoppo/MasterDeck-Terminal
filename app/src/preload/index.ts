@@ -96,6 +96,8 @@ const api: DeckApi = {
   meetingsDeleteAudio: (id) => ipcRenderer.invoke(CH.meetingsDeleteAudio, id),
   meetingsExport: (id, kind) => ipcRenderer.invoke(CH.meetingsExport, id, kind),
   onMeetingsChanged: (cb) => listen(CH.meetingsChanged, cb),
+  meetingsJanitor: () => ipcRenderer.invoke(CH.meetingsJanitor),
+  meetingsClean: (req) => ipcRenderer.invoke(CH.meetingsClean, req),
   onNotesChanged: (cb) => listen(CH.notesChanged, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),

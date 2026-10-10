@@ -1328,6 +1328,31 @@ waits, and writes nothing if accounts appeared meanwhile.
   `audio.webm` and `notes/*.json` into `MASTERDECK_HOME`, each checked as its store reads it, never
   over a file that is there. OPERATIONS § Meetings: the fixture.
 
+### Meetings: Janitor and Delete audio after (issue #102)
+
+- `shared/meetingJanitor.ts`: `JanitorMeetingRow` (`id`, `title`, `started`, `audioBytes`,
+  `transcriptBytes`, `recording`), `janitorRows(store.sizes(), recordingId)`, `pickOlder(rows, days,
+  now)` (started more than `days` ago, never the one recording), `janitorTotals(rows, ids?)`,
+  `needsTypedCount(n)` (over `TYPED_CONFIRM_OVER` 10), `cleanRequest(raw)` (`{ ids, what: 'audio' |
+  'meetings' }`, every id `MEETING_ID`, at most `CLEAN_MAX`), `audioExpired(rows, days, now)` (the
+  timer's pick: older, with audio; none for `null`), `sizeLabel`.
+- `meetingsJanitor()` (`meetings:janitor`) and `meetingsClean(req)` (`meetings:clean`), both
+  `blocked`, refused from a browser and off macOS; they use `pageStore()`, so they work after Turn
+  off meetings like the page. `clean` asks a native question first (`deps.confirm`; the renderer's
+  `webConfirm` is a no-op in the window, and over 10 the Janitor has the count typed before it),
+  skips the meeting being recorded and ones gone meanwhile, and removes through the page's own paths
+  (`dropMeeting`: `transcriber.forget`, `store.delete`, the Needs-you item cleared; `dropAudio`).
+  Notes stay.
+- The **Delete audio after** timer: `MeetingsIpc.background()` (called once in `whenReady`, after
+  `createWindow`; macOS only) sets timers only: `sweepAudio()` first `AUDIO_SWEEP_FIRST_MS` (5 min)
+  after start, then every day (unref'd). `sweepAudio` does nothing for `deleteAudioAfterDays: null`;
+  it uses the loaded service's store, else the bare store, and that only when the meetings folder
+  exists (a Mac that never recorded loads nothing); it removes audio only (`dropAudio`), never a
+  transcript, never the recording's. `quit()` clears the timers.
+- UI: `JanitorMeetings` in `HygieneViews.tsx` (under Parked sessions, when `meetingsHere()`):
+  totals, **Older than 7 / 30 / 90 days**, a checkbox per row, **Delete audio** / **Delete
+  meetings**, the typed count over 10; it reloads on `meetings:changed`.
+
 ### Working hours (issue #64)
 
 The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day
