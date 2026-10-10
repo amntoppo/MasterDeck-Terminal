@@ -33,6 +33,7 @@ import {
   ipcMain,
   net,
   Notification,
+  protocol,
   safeStorage,
   session,
   shell,
@@ -88,6 +89,9 @@ import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
 import { MeetingNotices } from "./meetingNotices";
+import { serveMeetingAudio } from "./meetingMedia";
+import { copyMeetingsFixture } from "./meetingsFixture";
+import { MEDIA_SCHEME } from "@shared/meetingsPage";
 import { claudeOnce } from "./claudeOnce";
 import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
@@ -255,6 +259,14 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
 const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
+// Test aid: MASTERDECK_MEETINGS_FIXTURE=<dir> (isolated launches only) puts a meeting and its note
+// on disk, before the notes are read.
+try {
+  const id = copyMeetingsFixture(process.env, paths.home);
+  if (id) console.log(`meetings fixture: ${id}`);
+} catch (e) {
+  console.error(`meetings fixture: ${String(e)}`);
+}
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -2215,6 +2227,12 @@ function registerIpc(): void {
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
   reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
   reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
+  reg.handle(CH.meetingsList, (e, from: unknown, to: unknown) => meetings.list(e, from, to));
+  reg.handle(CH.meetingsGet, (e, id: unknown) => meetings.get(e, id));
+  reg.handle(CH.meetingsRename, (e, id: unknown, title: unknown) => meetings.rename(e, id, title));
+  reg.handle(CH.meetingsDelete, (e, id: unknown) => meetings.delete(e, id));
+  reg.handle(CH.meetingsDeleteAudio, (e, id: unknown) => meetings.deleteAudio(e, id));
+  reg.handle(CH.meetingsExport, (e, id: unknown, kind: unknown) => meetings.export(e, id, kind));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3385,6 +3403,28 @@ const meetings = new MeetingsIpc({
       claudeOnce({ run, claude: claudeBin, ...o, projectsDir: paths.projectsDir, prefix: "masterdeck-meeting-" }),
   },
   notices: meetingNotices,
+  // The Meetings page: changes to the window only; its questions and save dialogs on the Mac.
+  changed: (id) => win?.webContents.send(CH.meetingsChanged, { id }),
+  confirm: async (o) => {
+    if (!win) return false;
+    const choice = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["Cancel", o.button],
+      defaultId: 0,
+      cancelId: 0,
+      message: o.message,
+      detail: o.detail,
+    });
+    return choice.response === 1;
+  },
+  saveFile: async (o) => {
+    if (!win) return null;
+    const r = await dialog.showSaveDialog(win, {
+      defaultPath: join(app.getPath("downloads"), o.defaultName),
+      filters: o.kind === "md" ? [{ name: "Markdown", extensions: ["md"] }] : [{ name: "WebM audio", extensions: ["webm"] }],
+    });
+    return r.canceled || !r.filePath ? null : r.filePath;
+  },
   notice: (text) => {
     if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
   },
@@ -3563,6 +3603,12 @@ async function setupCheck(): Promise<SetupCheck> {
   };
 }
 
+// The Meetings page's audio (spec §6): a scheme the player can stream and seek in. Registered
+// before ready, as Electron requires; served on the window's session only (below).
+protocol.registerSchemesAsPrivileged([
+  { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+]);
+
 // Windows shows notifications only for an app with this id (the one the installer registers).
 if (process.platform === "win32")
   app.setAppUserModelId("io.github.amntoppo.masterdeck");
@@ -3587,6 +3633,9 @@ app.whenReady().then(async () => {
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
+  // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
+  // session only: the capture window's partition has no such scheme, and the web bridge never relays it.
+  session.defaultSession.protocol.handle(MEDIA_SCHEME, (req) => serveMeetingAudio(req, (id) => meetings.audioFile(id)));
   // Links made by babysit-ticket before MasterDeck kept its own: copied once.
   try {
     if (linkStore.importOnce()) sources.reloadLinks();

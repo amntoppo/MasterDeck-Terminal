@@ -1244,8 +1244,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   Meetings](masterdeck://meetings/<id>?t=<s>)` at the first quote. Every piece of untrusted text goes
   through `mdText` (escapes the marks that make links, images, emphasis and tags, and a line start
   that would be a heading, list or quote; a bare https address stays a visible address). The note is
-  drawn with `MarkdownView html={false}`, whose `safeHref` links only https: until the Meetings page
-  (Task 8) handles `masterdeck://`, the link shows as its text.
+  drawn with `MarkdownView html={false}`, whose `safeHref` links only https; the one other address
+  a link may carry is exactly this one (`meetingLink`, see "Meetings: the page").
 - `main/meetings/matcher.ts` (`Matcher`, loaded with the store and transcriber by `loadService`): one
   meeting at a time. It waits up to 5 minutes for a state whose `sources.agents` is ok (`deps.state`
   in `index.ts`: `latest`), then one `claude -p --model sonnet --no-session-persistence` per part,
@@ -1272,6 +1272,61 @@ waits, and writes nothing if accounts appeared meanwhile.
   window opens the meeting), `rematch`, `retry`, all through `runInboxAction`, refused for a remote
   client there and for a browser in `inboxActCall`. Off the backend: `toRemoteSnapshot` leaves the
   kind out. A web tab shows the card with Dismiss only.
+
+### Meetings: the page (issue #102)
+
+- Channels (all `blocked` in `DECK_ACCESS`; `MeetingsIpc` refuses any OS but macOS and
+  `isRemote(e)`): `meetingsList(from, to)` (`meetings:list`: the meetings that started in
+  `[from, to)`, newest first, at most 500, as `MeetingRow`s without transcripts, plus `agreed`),
+  `meetingsGet(id)` (`meetings:get`: the whole `Meeting` and whether `audio.webm` is there; it also
+  calls `seen(id)`, so opening a meeting resolves its "notes added" item), `meetingsRename(id,
+  title)` (`cleanTitle`, `titleBy: 'user'`), `meetingsDelete(id)` and `meetingsDeleteAudio(id)`
+  (a native question in main, `deps.confirm`; refused while that meeting is recorded; delete calls
+  `transcriber.forget(id)` before `MeetingStore.delete` and clears its Needs-you item; the notes it
+  added stay), `meetingsExport(id, 'md' | 'audio')` (a save dialog, `deps.saveFile`; the Markdown is
+  `meetingMarkdown`, the audio a copy; written as a temp file next to the pick, then renamed), and
+  the event `onMeetingsChanged` (`meetings:changed`, `{ id | null }`, to the window only: the
+  transcriber's and matcher's `onChange`, the recorder's (null), rename, delete). Every id goes
+  through `MEETING_ID` before the store.
+- The page's store (`MeetingsIpc.pageStore`): with the consent, the service's (`loadService`, so
+  what a quit or a crash left is transcribed when the page opens, as the quit dialog promises).
+  Without it (never agreed, or after Turn off meetings) a bare `MeetingStore`: stored meetings are
+  listed, read, exported and deleted, nothing is queued, transcribed or recorded. Match again and
+  Try again still need the consent.
+- Audio: `masterdeck-media://meeting/<id>/audio` (`MEDIA_SCHEME`, `meetingAudioUrl` in
+  `shared/meetingsPage.ts`). `protocol.registerSchemesAsPrivileged` (standard, secure, stream,
+  supportFetchAPI) at the top of `main/index.ts`, before ready; `session.defaultSession.protocol.handle`
+  in `whenReady`, so only the window's session has it (the capture partition and the web bridge
+  never do). `serveMeetingAudio` (`main/meetingMedia.ts`): GET or HEAD, the URL exactly that shape
+  (`audioId`), the path from `MeetingsIpc.audioFile` (macOS, a meeting the store holds, its folder a
+  real directory and `audio.webm` a regular file, never a link), else 404; `Range` (`parseRange`:
+  `a-`, `a-b`, `-n`) answers 206 with `Content-Range`, one that cannot be met 416 (`bytes */size`),
+  several ranges the whole file; always `Accept-Ranges: bytes`. The body streams from
+  `createReadStream`. The window's CSP (`renderer/index.html`) has `media-src 'self' masterdeck-media:`.
+- `shared/meetingsPage.ts`: `meetingRow`, `stateView` (Recording, Transcribing d/t, the wait,
+  Matching, Done, Failed with `retry` or `rematch` by `MATCH_FAILED`), `meetingLengthMs` (paused
+  time left out), `monthGrid` (six weeks from a Monday), `gridRange`, `markedDays`, `presetRange`
+  (Today, This week from Monday, Last 30 days; all end at tonight's midnight), `customRange`,
+  `lineAt` (the playing line: the last that started at or before the time), `searchLines`,
+  `highlightParts`, `stepHit`, `lineMatches` (chips per line), `meetingMarkdown`, `exportName`
+  (letters, digits, spaces, `_` and `-` only).
+- `renderer/.../MeetingsView.tsx` (view `meetings`, `App.tsx`; rail icon between Notes and Workflow
+  and ⌘K **Go to Meetings**, both only when `meetingsHere()` in `renderer/src/meetingLinks.ts`: macOS,
+  not the web; not in `WEB_VIEWS`, `SCREEN_NEEDS.meetings` is `meetingsList`). Three list calls per
+  change (the range, the month grid's marks, any meeting at all for the empty page), all again on
+  `meetings:changed`; the open meeting re-reads on a change of its id. The player is an `<audio>`
+  on the scheme; a recorder's WebM has no duration at first, so the seek bar uses the meeting's
+  length until the element reports one.
+- `masterdeck://meetings/<id>?t=<s>` links: `meetingLink` (`shared/markdown.ts`) accepts exactly
+  that shape (an id matching `m-<32 hex>`, `t` up to six digits), and `parseInline` makes it a link in
+  a `[text](…)` only (a bare one stays text); `safeHref` stays https only. `MarkdownView`'s `Link`
+  turns it into an in-app link in the window (`openMeetingAt` → the opener `App.tsx` sets:
+  Meetings view, that meeting and time, the Notes panel closed) and plain text on the web. Needs
+  you's **Open** (`MeetingCard` → `onOpenMeeting`) opens the same way.
+- Test aid: `MASTERDECK_MEETINGS_FIXTURE=<dir>` with `MASTERDECK_ISOLATED=1`
+  (`main/meetingsFixture.ts`, run in `index.ts` before the notes are read): copies `meeting.json`,
+  `audio.webm` and `notes/*.json` into `MASTERDECK_HOME`, each checked as its store reads it, never
+  over a file that is there. OPERATIONS § Meetings: the fixture.
 
 ### Working hours (issue #64)
 

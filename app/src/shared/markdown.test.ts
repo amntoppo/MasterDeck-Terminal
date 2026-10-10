@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_MARKDOWN, markdownText, parseInline, parseMarkdown, safeHref, safeImage, type Block, type Inline } from './markdown'
+import { MAX_MARKDOWN, markdownText, meetingLink, parseInline, parseMarkdown, safeHref, safeImage, type Block, type Inline } from './markdown'
 
 const t = (v: string): Inline => ({ t: 'text', v })
 const p = (...c: Inline[]): Block => ({ t: 'para', c })
@@ -216,5 +216,39 @@ describe('markdownText', () => {
   })
   it('keeps tags as text', () => {
     expect(markdownText('a <img src="https://e.x/i.png" alt="z"> <br> b')).toBe('a <img src="https://e.x/i.png" alt="z"> <br> b')
+  })
+})
+
+describe('meeting links', () => {
+  const t = (v: string): Inline => ({ t: 'text', v })
+  const id = 'm-' + 'a1'.repeat(16)
+  const href = `masterdeck://meetings/${id}?t=75`
+
+  it('exactly masterdeck://meetings/<id>?t=<seconds> is a link, in notes and in issues', () => {
+    expect(meetingLink(href)).toEqual({ id, t: 75 })
+    const link = [{ t: 'link', href, c: [t('Open in Meetings')] }]
+    expect(parseInline(`[Open in Meetings](${href})`, 0, false)).toEqual(link)
+    expect(parseInline(`[Open in Meetings](${href})`)).toEqual(link)
+  })
+
+  it('any other masterdeck: address, or another shape, is no link (a note shows what was typed)', () => {
+    for (const bad of [
+      `masterdeck://meetings/${id}`,
+      `masterdeck://meetings/${id}?t=75&x=1`,
+      `masterdeck://meetings/${id}?t=-1`,
+      `masterdeck://meetings/${id}?t=1234567`,
+      `masterdeck://meetings/m-${'A'.repeat(32)}?t=1`,
+      `masterdeck://meetings/../notes?t=1`,
+      `masterdeck://settings/${id}?t=1`,
+      `masterdeck-media://meeting/${id}/audio`,
+      `MASTERDECK://meetings/${id}?t=1`,
+    ]) {
+      expect(meetingLink(bad), bad).toBeNull()
+      expect(parseInline(`[x](${bad})`, 0, false), bad).toEqual([t(`[x](${bad})`)])
+    }
+    // safeHref is still https only, and a bare masterdeck address is text.
+    expect(safeHref(href)).toBeNull()
+    expect(parseInline(`see ${href}`, 0, false)).toEqual([t(`see ${href}`)])
+    expect(parseInline(`<${href}>`, 0, false)).toEqual([t(`<${href}>`)])
   })
 })

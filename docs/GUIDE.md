@@ -1004,8 +1004,7 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
   - **From:** the meeting's title and when it was, then what was said about it in a few sentences,
   - **Action items**, when there were any,
   - the lines themselves, quoted with who spoke and when (`> **Others** 12:04 — …`),
-  - **Open in Meetings**, to open the meeting at the first quoted line (it becomes a link with the
-    Meetings page; until then it shows as text).
+  - **Open in Meetings**, to open the meeting at the first quoted line on the Meetings page.
   What Claude or the meeting said shows as plain text: it cannot make a hidden link, an image or a
   heading in your note. A web address someone said stays a visible address.
 - The meeting also gets a title from Claude (unless you named it) and a summary.
@@ -1014,10 +1013,40 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
 - If the matching fails (Claude could not be reached, took longer than 5 minutes, or did not answer
   in the asked form), nothing is written and the meeting says why.
 
+### The Meetings page (macOS)
+
+The waveform in the rail, between Notes and Workflow (also ⌘K **Go to Meetings**). Only in
+MasterDeck's window on a Mac: the web app has no Meetings page, and a meeting's transcript and
+audio never reach a browser or a phone.
+
+- **Left:** a month calendar (‹ ›), days with meetings marked with a dot, and the range: **Today**,
+  **This week**, **Last 30 days** (the default) or **Custom**, with its **From** and **To**. A click
+  on a day shows that day. Under it the meetings of the range, newest first: title, date, length,
+  how many notes it added, and its state (**Recording**, **Transcribing 3/12**, **Waiting for the
+  speech model**, **Matching**, **Done**, **Failed** with **Try again** or **Match again**).
+- **Right, the meeting:** its title (click it to rename; Enter keeps it, Escape goes back), date,
+  length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
+  (each opens the note).
+- **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
+  bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view; a click on a
+  line plays from there. Lines Claude matched to a session or ticket carry its chip (click it for
+  the note).
+- **Search the transcript:** the words are marked in every line, **↑ / ↓** (or Enter, Shift+Enter)
+  go from one to the next, the count shows where you are.
+- **Match again** (asks Claude again; needs Settings → Meetings turned on), **Export transcript**
+  (a Markdown file), **Export audio** (the `.webm`), **Delete audio** (the transcript and notes
+  stay) and **Delete meeting** (the transcript and audio go; the notes it added stay, they are your
+  notes now). Both deletes ask first; neither works while that meeting is being recorded.
+- **Open in Meetings** in a meeting's note opens this page at that line's time (in the window; the
+  web shows the words only). **Open** on a meeting's Needs-you item opens it here too.
+- Before you set meetings up, the page says what it is for and has **Set up meetings**. After
+  **Turn off meetings** the meetings you kept are still listed, played, exported and deleted here;
+  nothing is recorded or transcribed.
+
 ### Meetings in Needs you
 
-- **Meeting '<title>': notes added to 3 sessions** (and tickets): **Open** opens it (until the
-  Meetings page is there, the Notes panel), **Dismiss** leaves it. It goes once opened.
+- **Meeting '<title>': notes added to 3 sessions** (and tickets): **Open** opens it on the
+  Meetings page, **Dismiss** leaves it. It goes once opened.
 - **Could not be matched: <why>**: **Match again**.
 - **Transcription failed: <why>**: **Try again** (also from the notification's button).
 - These are on the Mac only: they are not sent to a phone, and a browser shows them with Dismiss

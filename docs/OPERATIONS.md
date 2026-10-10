@@ -389,6 +389,31 @@ thrown away. It needs the model's size plus 200 MB free. One downloads at a time
 by hand, put the file there under the same name (it is ready when its size matches). To remove
 one: **Remove** on the screen, or delete the file while MasterDeck is closed.
 
+## Meetings: the fixture
+
+The Meetings page can be checked in the isolated app without recording anything:
+`MASTERDECK_MEETINGS_FIXTURE=$PWD/test/fixtures/meetings` (from `app/`, with `MASTERDECK_ISOLATED=1`)
+copies `test/fixtures/meetings/meeting.json` (a fictional "Acme web standup", 9 October 2026, six
+lines, one match), `audio.webm` (7.5 s of tones, one per line, about 28 KB) and the note it added
+(`notes/`) into `MASTERDECK_HOME` at start; a file already there is left as it is (so a renamed or
+deleted one stays that way until the next fresh `MASTERDECK_HOME`).
+
+- `audio.webm` is made by `npx electron scripts/meeting-fixture.cjs` (from `app/`): with ffmpeg on
+  the PATH by ffmpeg, else by Electron's own MediaRecorder from an oscillator (no microphone), which
+  writes WebM as the real recorder does: no duration and no cues at first. Seeking still works.
+- `deck.meetingsConsent(true)` in the isolated app stores the consent and asks macOS nothing (the
+  isolated settings file). Never press Record or any Allow there.
+- Native questions (Delete audio, Delete meeting) and save dialogs (Export): launch with
+  `--inspect=127.0.0.1:9334` and replace `require('electron').dialog.showMessageBox` /
+  `showSaveDialog` in main for the run.
+- The Range answers: CDP `Network.enable` on the page shows the player's `masterdeck-media://`
+  requests (`Range: bytes=0-` → 206 with `Content-Range`); another path or an unknown id is 404.
+- Checked this way (2026-10-10): the list, the calendar's mark, Today / This week / Last 30 days / a
+  day / Custom, play, seek, the playing line, click a line, 1.5x, ±15 s, search with ↑/↓, rename,
+  Export transcript and audio, Delete audio, Delete meeting (the note stayed), a note's **Open in
+  Meetings** link (Meetings at 0:02, the Notes panel closed), Needs you's Open, ⌘K Go to Meetings,
+  the empty page with **Set up meetings** after Turn off.
+
 ## Measuring upload
 
 What the Mac sends to the backend (CloudSync + browser bridge share the main process socket):

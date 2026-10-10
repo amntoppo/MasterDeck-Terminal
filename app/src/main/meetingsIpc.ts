@@ -1,5 +1,9 @@
+import { copyFileSync, lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { dirname } from 'node:path'
 import {
   CAPTURE_PARTITION,
+  cleanTitle,
   IDLE_LIVE,
   MEETING_ID,
   MEETINGS_CONSENT_VERSION,
@@ -14,6 +18,16 @@ import {
 } from '@shared/meetings'
 import { defaultModel, MODEL_OPS, MODELS, modelById, type ModelOp, type ModelProgress, type ModelsAnswer } from '@shared/meetingModels'
 import { MATCH_FAILED } from '@shared/meetingMatch'
+import {
+  EXPORT_KINDS,
+  exportName,
+  meetingMarkdown,
+  meetingRow,
+  type ExportKind,
+  type MeetingGetAnswer,
+  type MeetingsListAnswer,
+  type MeetingsResult,
+} from '@shared/meetingsPage'
 import type { AppState } from '@shared/types'
 import { isRemote } from './ipcRegistry'
 import type { NotesStore } from './notes'
@@ -99,6 +113,39 @@ export interface MeetingsDeps {
   matching?: MatchingDeps
   /** Needs you: notes added, matching or transcription failed. */
   notices?: NoticesLike
+  /** A meeting changed (or, null, the list): the Meetings page reads it again. To the window only. */
+  changed?(id: string | null): void
+  /** Ask in the window (a native dialog): true when the user pressed `button`. */
+  confirm?(o: { message: string; detail: string; button: string }): Promise<boolean>
+  /** A save dialog for an export: the path picked, or null. */
+  saveFile?(o: { defaultName: string; kind: ExportKind }): Promise<string | null>
+}
+
+/** The page's list holds at most this many meetings of a range (newest first). */
+const LIST_MAX = 500
+
+const isFileAt = (p: string): boolean => {
+  try {
+    return lstatSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+/** Write a file the user picked atomically: a temp file next to it, then a rename. */
+function writeExport(path: string, write: (tmp: string) => void): MeetingsResult {
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    write(tmp)
+    renameSync(tmp, path)
+    return { ok: true }
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true })
+    } catch {}
+    const code = (e as { code?: string })?.code
+    return { ok: false, message: code === 'ENOSPC' ? 'The disk is full.' : code === 'EACCES' || code === 'EPERM' ? 'MasterDeck may not write there.' : 'Could not save the file.' }
+  }
 }
 
 /**
@@ -116,6 +163,8 @@ export class MeetingsIpc {
   private recorder: Promise<RecorderLike> | null = null
   /** The recorder once loaded (live() and the quit check read it without waiting). */
   private rec: RecorderLike | null = null
+  /** The meetings on disk alone (the page without consent): no queue, nothing transcribed. */
+  private bare: Promise<MeetingStore> | null = null
   constructor(private d: MeetingsDeps) {}
 
   /** A load that failed is not kept: the next call loads again (a full disk now is not one for ever). */
@@ -192,6 +241,7 @@ export class MeetingsIpc {
             state: () => m.state(),
             claude: (o) => m.claude(o),
             notice: (n) => this.d.notices?.set(n),
+            onChange: (id) => this.d.changed?.(id),
             now: this.d.now,
           })
         : null
@@ -207,7 +257,10 @@ export class MeetingsIpc {
       transcribe: (o) => engine.transcribe(o),
       live: () => this.rec?.meetingId ?? null,
       onTranscribed,
-      onChange: (id) => this.noticeOf(store, id),
+      onChange: (id) => {
+        this.noticeOf(store, id)
+        this.d.changed?.(id)
+      },
       now: this.d.now,
     })
     this.svc = { store, transcriber, matcher }
@@ -258,7 +311,10 @@ export class MeetingsIpc {
             },
             page: this.d.capturePage(),
             preload: this.d.capturePreload,
-            onChange: () => this.d.onLive(),
+            onChange: () => {
+              this.d.onLive()
+              this.d.changed?.(null)
+            },
             notice: (t) => this.d.notice(t),
             // Each chunk is transcribed as it closes; the end finishes the meeting.
             onChunk: (c) => service.transcriber.add(c),
@@ -346,6 +402,147 @@ export class MeetingsIpc {
     const res = svc.matcher.rematch(id)
     if (res.ok) this.d.notices?.clear(id)
     return res
+  }
+
+  // ── The Meetings page (spec §6) ────────────────────────────────────────────
+
+  /**
+   * The store the page reads. With the consent it is the service's (loading it, so what a quit or
+   * a crash left is transcribed now, as the quit dialog promises). Without it (never agreed, or
+   * after Turn off meetings) the stored meetings can still be read, exported and deleted, but
+   * nothing is queued, transcribed or recorded: the store alone is loaded.
+   */
+  private async pageStore(): Promise<MeetingStore> {
+    if (this.svc) return this.svc.store
+    if (meetingsAgreed({ meetings: this.d.meetings() })) return (await this.loadService()).store
+    this.bare ??= this.once(
+      (async () => {
+        const load = this.d.loadService ?? (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }))
+        return new (await load()).MeetingStore(this.d.meetingsDir)
+      })(),
+      () => (this.bare = null),
+    )
+    return this.bare
+  }
+
+  /** The meeting a page call names, or a refusal. */
+  private async pageMeeting(e: unknown, id: unknown) {
+    const r = this.refused(e)
+    if (r) return r
+    if (typeof id !== 'string' || !MEETING_ID.test(id)) return { ok: false as const, message: 'No such meeting.' }
+    const store = await this.pageStore()
+    const m = store.get(id)
+    return m ? { ok: true as const, store, m } : { ok: false as const, message: 'No such meeting.' }
+  }
+
+  /** The meetings that started in [from, to), newest first, without their transcripts. */
+  async list(e: unknown, from: unknown, to: unknown): Promise<MeetingsListAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+    if (!ok(from) || !ok(to) || to < from) return { ok: false, message: 'Not a range.' }
+    // ponytail: every meeting file is read for each list (fine for hundreds); upgrade: an index file.
+    const meetings = (await this.pageStore()).list(from, to).slice(0, LIST_MAX).map(meetingRow)
+    return { ok: true, meetings, agreed: meetingsAgreed({ meetings: this.d.meetings() }) }
+  }
+
+  /** One meeting with its transcript; opening it resolves its "notes added" item in Needs you. */
+  async get(e: unknown, id: unknown): Promise<MeetingGetAnswer> {
+    const x = await this.pageMeeting(e, id)
+    if (!x.ok) return x
+    this.seen(x.m.id)
+    const audio = x.store.audioPath(x.m.id)
+    return { ok: true, meeting: x.m, audio: !!audio && isFileAt(audio) }
+  }
+
+  /** Whether this meeting is the one being recorded now. */
+  private recordingNow(id: string): boolean {
+    return !!this.rec?.recording && this.rec.meetingId === id
+  }
+
+  /** A title the user typed ('' leaves it unnamed). */
+  async rename(e: unknown, id: unknown, title: unknown): Promise<MeetingsResult> {
+    const t = cleanTitle(title)
+    if (t === null) return { ok: false, message: 'Not a title.' }
+    const x = await this.pageMeeting(e, id)
+    if (!x.ok) return x
+    const u = x.store.update(x.m.id, (m) => ({ ...m, title: t, titleBy: t ? 'user' : null }))
+    if (!u.ok) return u
+    this.d.changed?.(x.m.id)
+    return { ok: true }
+  }
+
+  /**
+   * Delete a meeting after a native question: its file, audio and chunks; nothing of it stays
+   * queued. The notes it added stay (they are the user's notes now; the question says so).
+   */
+  async delete(e: unknown, id: unknown): Promise<MeetingsResult> {
+    const x = await this.pageMeeting(e, id)
+    if (!x.ok) return x
+    if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
+    const yes = await this.d.confirm?.({
+      message: x.m.title ? `Delete the meeting “${x.m.title}”?` : 'Delete this meeting?',
+      detail: 'Its transcript and audio are removed. The notes it added stay: they are your notes now.',
+      button: 'Delete meeting',
+    })
+    if (!yes) return { ok: false, message: 'cancelled' }
+    if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
+    this.svc?.transcriber.forget(x.m.id)
+    const res = x.store.delete(x.m.id)
+    if (!res.ok) return res
+    this.d.notices?.clear(x.m.id)
+    this.d.changed?.(x.m.id)
+    return { ok: true }
+  }
+
+  /** Delete a meeting's audio after a native question; the transcript and notes stay. */
+  async deleteAudio(e: unknown, id: unknown): Promise<MeetingsResult> {
+    const x = await this.pageMeeting(e, id)
+    if (!x.ok) return x
+    if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
+    const yes = await this.d.confirm?.({
+      message: x.m.title ? `Delete the audio of “${x.m.title}”?` : 'Delete the audio of this meeting?',
+      detail: 'The transcript and the notes it added stay.',
+      button: 'Delete audio',
+    })
+    if (!yes) return { ok: false, message: 'cancelled' }
+    if (this.recordingNow(x.m.id)) return { ok: false, message: 'Stop the recording first.' }
+    const res = x.store.deleteAudio(x.m.id)
+    if (!res.ok) return res
+    this.d.changed?.(x.m.id)
+    return { ok: true }
+  }
+
+  /** Export the transcript as Markdown or the audio as .webm, to a file the user picks in a save dialog. */
+  async export(e: unknown, id: unknown, kind: unknown): Promise<MeetingsResult> {
+    if (!EXPORT_KINDS.includes(kind as ExportKind)) return { ok: false, message: 'Not an export.' }
+    const x = await this.pageMeeting(e, id)
+    if (!x.ok) return x
+    const k = kind as ExportKind
+    const audio = x.store.audioPath(x.m.id)
+    if (k === 'audio' && (!audio || !isFileAt(audio))) return { ok: false, message: 'This meeting has no audio.' }
+    const path = await this.d.saveFile?.({ defaultName: exportName(x.m, k), kind: k })
+    if (!path) return { ok: false, message: 'cancelled' }
+    return k === 'md' ? writeExport(path, (tmp) => writeFileSync(tmp, meetingMarkdown(x.m))) : writeExport(path, (tmp) => copyFileSync(audio!, tmp))
+  }
+
+  /**
+   * The audio file the media scheme may serve for an id: the store's audio.webm of a meeting it
+   * holds, in a real folder (not a link), else null. The window's session only (main/meetingMedia.ts).
+   */
+  async audioFile(id: string): Promise<string | null> {
+    if (this.d.platform !== 'darwin' || !MEETING_ID.test(id)) return null
+    const store = await this.pageStore()
+    if (!store.get(id)) return null
+    const p = store.audioPath(id)
+    if (!p) return null
+    try {
+      const dir = lstatSync(dirname(p))
+      if (!dir.isDirectory() || dir.isSymbolicLink()) return null
+    } catch {
+      return null
+    }
+    return isFileAt(p) ? p : null
   }
 
   /** Open on a meeting's item: it has been seen. */

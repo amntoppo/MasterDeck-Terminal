@@ -5,6 +5,7 @@ import { rank } from '@shared/fuzzy'
 import type { AppState, Issue, Session } from '@shared/types'
 import { actionOk } from '../web'
 import { canRecord } from './RecordMeeting'
+import { meetingsHere } from '../meetingLinks'
 
 export type PaletteAction =
   | 'refresh'
@@ -16,6 +17,7 @@ export type PaletteAction =
   | 'view:janitor'
   | 'view:history'
   | 'view:workflow'
+  | 'view:meetings'
   | 'notes'
   | 'record-meeting'
   | 'broadcast'
@@ -54,6 +56,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['view:history', 'History: search every session', 'full-text over transcripts · ⌘⇧F'],
   ['view:workflow', 'Go to Workflow', 'issue to merged PR, hooks, your own steps'],
   ['notes', 'Notes', 'write something down, for you or for a ticket'],
+  ['view:meetings', 'Go to Meetings', 'transcripts and audio of your recorded meetings'],
   ['record-meeting', 'Record meeting', 'your microphone and the Mac’s sound, on this Mac'],
   ['broadcast', 'Broadcast a message…', 'to several sessions'],
   ['standup', 'Standup…', "yesterday's commits, PRs and reports"],
@@ -81,7 +84,7 @@ export function CommandPalette({ state, onClose, onAction, onOpenSession, onIssu
       onClose()
       fn()
     }
-    const items: Item[] = ACTIONS.filter(([id]) => (id !== 'start-master' || state.config.masterEnabled) && (id !== 'record-meeting' || canRecord()) && actionOk(id)).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
+    const items: Item[] = ACTIONS.filter(([id]) => (id !== 'start-master' || state.config.masterEnabled) && (id !== 'record-meeting' || canRecord()) && (id !== 'view:meetings' || meetingsHere()) && actionOk(id)).map(([id, label, hint]) => ({ id: `a:${id}`, group: 'Action', label, hint, run: done(() => onAction(id)) }))
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
       items.push({

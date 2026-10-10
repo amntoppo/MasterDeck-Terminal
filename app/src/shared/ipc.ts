@@ -10,6 +10,7 @@ import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
 import type { MeetingsAnswer, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
+import type { ExportKind, MeetingGetAnswer, MeetingsListAnswer } from "./meetingsPage";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
@@ -219,6 +220,13 @@ export const CH = {
   meetingsPause: "meetings:pause",
   meetingsRetry: "meetings:retry",
   meetingsRematch: "meetings:rematch",
+  meetingsList: "meetings:list",
+  meetingsGet: "meetings:get",
+  meetingsRename: "meetings:rename",
+  meetingsDelete: "meetings:delete",
+  meetingsDeleteAudio: "meetings:deleteAudio",
+  meetingsExport: "meetings:export",
+  meetingsChanged: "meetings:changed",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -449,6 +457,22 @@ export interface DeckApi {
   meetingsRetry(id: string): Promise<{ ok: boolean; message?: string }>;
   /** Match again: the meeting's notes the user never edited are removed, then it is matched to sessions again (one claude -p). */
   meetingsRematch(id: string): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * The Meetings page (macOS, the window only): the meetings that started in [from, to), newest
+   * first, without transcripts. Works after Turn off meetings too (nothing is recorded then).
+   */
+  meetingsList(from: number, to: number): Promise<MeetingsListAnswer>;
+  /** One meeting with its transcript; marks its "notes added" Needs-you item seen. */
+  meetingsGet(id: string): Promise<MeetingGetAnswer>;
+  meetingsRename(id: string, title: string): Promise<{ ok: boolean; message?: string }>;
+  /** Delete a meeting after a native question on the Mac (its notes stay). */
+  meetingsDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Delete a meeting's audio after a native question (the transcript stays). */
+  meetingsDeleteAudio(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Save the transcript (Markdown) or the audio (.webm) through a save dialog. */
+  meetingsExport(id: string, kind: ExportKind): Promise<{ ok: boolean; message?: string }>;
+  /** A meeting changed (its state, title, transcript) or, null, the list did. The window only. */
+  onMeetingsChanged(cb: (c: { id: string | null }) => void): () => void;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

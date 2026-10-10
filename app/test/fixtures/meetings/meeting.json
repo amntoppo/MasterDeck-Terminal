@@ -1,0 +1,24 @@
+{
+  "id": "m-ac3e000000000000000000000000f1c5",
+  "title": "Acme web standup",
+  "titleBy": "user",
+  "started": 1791532800000,
+  "ended": 1791532807500,
+  "pausedMs": 0,
+  "apps": ["Zoom"],
+  "state": "done",
+  "model": "base.en",
+  "language": "en",
+  "segments": [
+    { "start": 200, "end": 1100, "speaker": "you", "text": "Morning all. Quick standup for acme/web today." },
+    { "start": 1400, "end": 2300, "speaker": "others", "text": "Alice here. The login redirect fix for issue 42 is ready for review." },
+    { "start": 2600, "end": 3500, "speaker": "you", "text": "Great, I will look at the pull request after this call." },
+    { "start": 3800, "end": 4700, "speaker": "others", "text": "Bob: the release notes still need the new settings screen." },
+    { "start": 5000, "end": 5900, "speaker": "you", "text": "Let us ship the release on Thursday then." },
+    { "start": 6200, "end": 7100, "speaker": "others", "text": "Sounds good. That is all from me." }
+  ],
+  "summary": "Alice has the **login redirect fix** (acme/web#42) ready for review; the release ships on Thursday once the notes cover the new settings screen.",
+  "matches": [{ "label": "acme/web#42 · Fix the login redirect", "noteId": "n-ac3e0000000000000000000000000a01", "segments": [1, 2] }],
+  "progress": { "done": 2, "total": 2, "wait": null },
+  "error": null
+}

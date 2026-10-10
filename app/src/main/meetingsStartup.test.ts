@@ -162,7 +162,7 @@ describe('the startup rule', () => {
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {
     const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('guardSessions(app, session,')
-    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause', 'meetingsRetry'])
+    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause', 'meetingsRetry', 'meetingsRematch', 'meetingsList', 'meetingsGet', 'meetingsRename', 'meetingsDelete', 'meetingsDeleteAudio', 'meetingsExport'])
       expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
   })
 

@@ -54,7 +54,8 @@ export type View =
   | "costs"
   | "janitor"
   | "history"
-  | "workflow";
+  | "workflow"
+  | "meetings";
 
 interface Props {
   state: AppState;

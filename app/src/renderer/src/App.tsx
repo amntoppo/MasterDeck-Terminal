@@ -23,6 +23,8 @@ import {
 } from "./components/CommandPalette";
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
+import { MeetingsView, type MeetingTarget } from "./components/MeetingsView";
+import { meetingsHere, setMeetingOpener } from "./meetingLinks";
 import { PrsView } from "./components/PrsView";
 import { BrowserApproval } from "./components/BrowserApproval";
 import { WebConfirm } from "./components/WebConfirm";
@@ -194,6 +196,7 @@ export function App() {
         "janitor",
         "workflow",
         "settings",
+        ...(meetingsHere() ? (["meetings"] as View[]) : []),
       ] as View[]
     ).includes(v as View)
       ? (v as View)
@@ -247,6 +250,19 @@ export function App() {
   const [sideDragging, setSideDragging] = useState(false);
   // The Notes panel: null closed, {} the list, or the note to open.
   const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
+  /** The Meetings page's meeting to open (a note's link, Needs you's Open). */
+  const [meetingAt, setMeetingAt] = useState<MeetingTarget | null>(null);
+  // A note's masterdeck://meetings/<id>?t= link (MarkdownView) and Needs you's Open land here; the
+  // Notes panel closes so the meeting shows.
+  const openMeeting = (id: string, t: number | null) => {
+    setMeetingAt({ id, t, at: Date.now() });
+    setView("meetings");
+    setNotesAt(null);
+  };
+  useEffect(() => {
+    setMeetingOpener(openMeeting);
+    return () => setMeetingOpener(null);
+  }, []);
   const notes = useNotes(!!state);
   // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
@@ -1116,9 +1132,7 @@ export function App() {
         onView={setView}
         onTool={(a) => runAction(a)}
         onStartWith={startWithInstructions}
-        // ponytail: the Meetings page does not exist yet (plan L, task 8 adds the `meetings` view and
-        // opens the meeting there); until then Open shows the notes, where the meeting's notes are.
-        onOpenMeeting={() => setNotesAt((n) => n ?? {})}
+        onOpenMeeting={(id) => openMeeting(id, null)}
         onSessionAction={(sess, a) => {
           if (a === "close-tab") closeTab(`tab:${sess.key}`);
           else {
@@ -1216,6 +1230,15 @@ export function App() {
       )}
       {view === "janitor" && <JanitorView state={state} />}
       {view === "workflow" && <WorkflowView state={state} />}
+      {view === "meetings" && meetingsHere() && (
+        <MeetingsView
+          agreed={meetingsAgreed(state.settings)}
+          target={meetingAt}
+          onSetup={openMeetingsSetup}
+          onNote={setNotesAt}
+          notes={notes.metas}
+        />
+      )}
       {view === "settings" && (
         <SettingsView
           settings={state.settings}
