@@ -5,13 +5,13 @@ import { storedNote } from '@shared/notes'
 
 /**
  * Test aid for the isolated app (OPERATIONS § the meetings fixture): MASTERDECK_MEETINGS_FIXTURE=<dir>
- * with MASTERDECK_ISOLATED=1 copies `<dir>/meeting.json`, `<dir>/audio.webm` and any
+ * with MASTERDECK_ISOLATED=1 and MASTERDECK_HOME set (never the real ~/.claude/masterdeck) copies `<dir>/meeting.json`, `<dir>/audio.webm` and any
  * `<dir>/notes/*.json` into MASTERDECK_HOME at start. Each file is checked as the store would read
  * it, and nothing already there is overwritten. Asks macOS nothing and loads no meetings code.
  */
 export function copyMeetingsFixture(env: NodeJS.ProcessEnv, home: string): string | null {
   const dir = env.MASTERDECK_MEETINGS_FIXTURE
-  if (!dir || env.MASTERDECK_ISOLATED !== '1') return null
+  if (!dir || env.MASTERDECK_ISOLATED !== '1' || !env.MASTERDECK_HOME) return null
   const raw = JSON.parse(readFileSync(join(dir, 'meeting.json'), 'utf8')) as { id?: unknown }
   const id = typeof raw.id === 'string' ? raw.id : ''
   if (!storedMeeting(raw, id)) throw new Error('meeting.json is not a meeting')

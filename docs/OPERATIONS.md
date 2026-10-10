@@ -392,7 +392,7 @@ one: **Remove** on the screen, or delete the file while MasterDeck is closed.
 ## Meetings: the fixture
 
 The Meetings page can be checked in the isolated app without recording anything:
-`MASTERDECK_MEETINGS_FIXTURE=$PWD/test/fixtures/meetings` (from `app/`, with `MASTERDECK_ISOLATED=1`)
+`MASTERDECK_MEETINGS_FIXTURE=$PWD/test/fixtures/meetings` (from `app/`, with `MASTERDECK_ISOLATED=1` and `MASTERDECK_HOME` set)
 copies `test/fixtures/meetings/meeting.json` (a fictional "Acme web standup", 9 October 2026, six
 lines, one match), `audio.webm` (7.5 s of tones, one per line, about 28 KB) and the note it added
 (`notes/`) into `MASTERDECK_HOME` at start; a file already there is left as it is (so a renamed or

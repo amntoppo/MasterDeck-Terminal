@@ -134,6 +134,9 @@ export interface MeetingsDeps {
   ps?: () => Promise<string>
 }
 
+/** How long the media scheme reuses the audio path it found for a meeting (a seek makes many Range requests). */
+const AUDIO_CACHE_MS = 10_000
+
 /** The page's list holds at most this many meetings of a range (newest first). */
 const LIST_MAX = 500
 
@@ -183,6 +186,8 @@ export class MeetingsIpc {
   private watch: OfferWatch | null = null
   /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
   private generation = 0
+  /** audioFile's answers for a while: the meeting's JSON is not read again for every Range request. */
+  private audioCache = new Map<string, { path: string; until: number }>()
   constructor(private d: MeetingsDeps) {}
 
   /** A load that failed is not kept: the next call loads again (a full disk now is not one for ever). */
@@ -605,6 +610,7 @@ export class MeetingsIpc {
   /** The one way a meeting goes (the page, Janitor): out of the queue, off disk, its item gone. Its notes stay. */
   private dropMeeting(store: MeetingStore, id: string): MeetingsResult {
     this.svc?.transcriber.forget(id)
+    this.audioCache.delete(id)
     // A match on it writes nothing now (and so drops none of the notes it added).
     this.svc?.matcher?.forget(id)
     const res = store.delete(id)
@@ -616,6 +622,7 @@ export class MeetingsIpc {
 
   /** The one way a meeting's audio goes (the page, Janitor, the timer); the transcript and notes stay. */
   private dropAudio(store: MeetingStore, id: string): MeetingsResult {
+    this.audioCache.delete(id)
     const res = store.deleteAudio(id)
     if (!res.ok) return res
     this.d.changed?.(id)
@@ -766,10 +773,20 @@ export class MeetingsIpc {
    */
   async audioFile(id: string): Promise<string | null> {
     if (this.d.platform !== 'darwin' || !MEETING_ID.test(id)) return null
-    const store = await this.pageStore()
-    if (!store.get(id)) return null
-    const p = store.audioPath(id)
-    if (!p) return null
+    const now = Date.now()
+    // Which meeting's audio path is cached (reading the meeting's JSON, a long transcript, is the
+    // costly part); the folder and the file are checked again on every request, and opened with
+    // O_NOFOLLOW by serveMeetingAudio.
+    const hit = this.audioCache.get(id)
+    let p = hit && hit.until > now ? hit.path : null
+    if (!p) {
+      const store = await this.pageStore()
+      if (!store.get(id)) return null
+      p = store.audioPath(id)
+      if (!p) return null
+      if (this.audioCache.size > 50) this.audioCache.clear()
+      this.audioCache.set(id, { path: p, until: now + AUDIO_CACHE_MS })
+    }
     try {
       const dir = lstatSync(dirname(p))
       if (!dir.isDirectory() || dir.isSymbolicLink()) return null

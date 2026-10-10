@@ -1,4 +1,4 @@
-import { createReadStream, lstatSync } from 'node:fs'
+import { closeSync, constants, createReadStream, fstatSync, openSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { MEETING_ID } from '@shared/meetings'
 import { MEDIA_SCHEME } from '@shared/meetingsPage'
@@ -7,7 +7,8 @@ import { MEDIA_SCHEME } from '@shared/meetingsPage'
  * The window's audio (spec §6, "Audio in the window"): `masterdeck-media://meeting/<id>/audio`
  * answers with that meeting's audio.webm, in byte ranges so the player can seek. Nothing else is
  * reachable through the scheme: the URL must be exactly that shape, the id must match MEETING_ID,
- * and the file must be the one the meetings store names for it (a regular file, not a link). It is
+ * and the file must be the one the meetings store names for it (a regular file, not a link: it is
+ * opened with O_NOFOLLOW, checked with fstat and streamed from that same descriptor). It is
  * registered on the window's session only; the capture window's partition and the web bridge never
  * have it.
  */
@@ -56,17 +57,28 @@ export async function serveMeetingAudio(
   if (!id) return notFound()
   const path = await audioFile(id)
   if (!path) return notFound()
+  // One descriptor for the check and the read: nothing can swap the file in between.
+  let fd: number
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch {
+    return notFound()
+  }
   let size: number
   try {
-    const st = lstatSync(path)
-    if (!st.isFile()) return notFound()
+    const st = fstatSync(fd)
+    if (!st.isFile()) throw new Error('not a file')
     size = st.size
   } catch {
+    closeSync(fd)
     return notFound()
   }
   const base = { 'Content-Type': 'audio/webm', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' }
   const range = parseRange(req.headers.get('range'), size)
-  if (range === 'bad') return new Response(null, { status: 416, headers: { ...base, 'Content-Range': `bytes */${size}` } })
+  if (range === 'bad') {
+    closeSync(fd)
+    return new Response(null, { status: 416, headers: { ...base, 'Content-Range': `bytes */${size}` } })
+  }
   const { start, end } = range ?? { start: 0, end: size - 1 }
   const length = size === 0 ? 0 : end - start + 1
   const headers = {
@@ -74,6 +86,11 @@ export async function serveMeetingAudio(
     'Content-Length': String(length),
     ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}),
   }
-  const body = req.method === 'HEAD' || length === 0 ? null : (Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream<Uint8Array>)
+  if (req.method === 'HEAD' || length === 0) {
+    closeSync(fd)
+    return new Response(null, { status: range ? 206 : 200, headers })
+  }
+  // The stream closes the descriptor when it ends, fails or is cancelled.
+  const body = Readable.toWeb(createReadStream('', { fd, start, end, autoClose: true })) as ReadableStream<Uint8Array>
   return new Response(body, { status: range ? 206 : 200, headers })
 }

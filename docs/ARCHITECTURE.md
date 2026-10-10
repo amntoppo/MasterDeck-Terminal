@@ -1313,8 +1313,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   (`audioId`), the path from `MeetingsIpc.audioFile` (macOS, a meeting the store holds, its folder a
   real directory and `audio.webm` a regular file, never a link), else 404; `Range` (`parseRange`:
   `a-`, `a-b`, `-n`) answers 206 with `Content-Range`, one that cannot be met 416 (`bytes */size`),
-  several ranges the whole file; always `Accept-Ranges: bytes`. The body streams from
-  `createReadStream`. The window's CSP (`renderer/index.html`) has `media-src 'self' masterdeck-media:`.
+  several ranges the whole file; always `Accept-Ranges: bytes`. The file is opened once
+  (`O_NOFOLLOW`), checked with `fstat` (a regular file) and streamed from that descriptor, so
+  nothing can swap it between the check and the read. `audioFile` keeps the path it found for a
+  meeting 10 s (`AUDIO_CACHE_MS`; a delete forgets it), so a seek's Range requests do not read the
+  meeting's JSON each time; the folder and file checks still run on every request. The window's CSP (`renderer/index.html`) has `media-src 'self' masterdeck-media:`.
 - `shared/meetingsPage.ts`: `meetingRow`, `stateView` (Recording, Transcribing d/t, the wait,
   Matching, Done, Failed with `retry` or `rematch` by `MATCH_FAILED`), `meetingLengthMs` (paused
   time left out), `monthGrid` (six weeks from a Monday), `gridRange`, `markedDays`, `presetRange`
@@ -1336,7 +1339,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   turns it into an in-app link in the window (`openMeetingAt` → the opener `App.tsx` sets:
   Meetings view, that meeting and time, the Notes panel closed) and plain text on the web. Needs
   you's **Open** (`MeetingCard` → `onOpenMeeting`) opens the same way.
-- Test aid: `MASTERDECK_MEETINGS_FIXTURE=<dir>` with `MASTERDECK_ISOLATED=1`
+- Test aid: `MASTERDECK_MEETINGS_FIXTURE=<dir>` with `MASTERDECK_ISOLATED=1` and `MASTERDECK_HOME` set
   (`main/meetingsFixture.ts`, run in `index.ts` before the notes are read): copies `meeting.json`,
   `audio.webm` and `notes/*.json` into `MASTERDECK_HOME`, each checked as its store reads it, never
   over a file that is there. OPERATIONS § Meetings: the fixture.

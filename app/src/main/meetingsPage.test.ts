@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -256,24 +256,51 @@ describe('the media scheme’s file', () => {
     symlinkSync(other, join(p.dir, id))
     expect(await p.ipc.audioFile(id)).toBeNull()
   })
+
+  it('reads the meeting once for many requests; the folder and file are checked each time; a delete forgets it', async () => {
+    const p = page()
+    const id = p.make('A', 1000)
+    p.store.appendAudio(id, new Uint8Array([1]))
+    // The first loads the service (its queue reads the meetings at start); the rest read nothing.
+    expect(await p.ipc.audioFile(id)).toBe(join(p.dir, id, 'audio.webm'))
+    const get = vi.spyOn(MeetingStore.prototype, 'get')
+    for (let i = 0; i < 5; i++) expect(await p.ipc.audioFile(id)).toBe(join(p.dir, id, 'audio.webm'))
+    expect(get).not.toHaveBeenCalled()
+    // Swapped for a link meanwhile: refused at once, the cache does not skip the check.
+    const other = mkdtempSync(join(tmpdir(), 'md-meetings-other-'))
+    dirs.push(other)
+    writeFileSync(join(other, 'audio.webm'), 'secret')
+    const real = join(p.dir, `${id}-moved`)
+    renameSync(join(p.dir, id), real)
+    symlinkSync(other, join(p.dir, id))
+    expect(await p.ipc.audioFile(id)).toBeNull()
+    rmSync(join(p.dir, id))
+    renameSync(real, join(p.dir, id))
+    expect(await p.ipc.audioFile(id)).toBe(join(p.dir, id, 'audio.webm'))
+    expect(await p.ipc.deleteAudio(local, id)).toEqual({ ok: true })
+    expect(await p.ipc.audioFile(id)).toBeNull()
+    get.mockRestore()
+  })
 })
 
 describe('the isolated app’s fixture', () => {
   const fixture = join(__dirname, '../../test/fixtures/meetings')
 
-  it('copies the meeting, its audio and its note, only with MASTERDECK_ISOLATED=1, never over a file', () => {
+  it('copies the meeting, its audio and its note, only with MASTERDECK_ISOLATED=1 and MASTERDECK_HOME, never over a file', () => {
     const home = mkdtempSync(join(tmpdir(), 'md-meetings-fixture-'))
     dirs.push(home)
-    expect(copyMeetingsFixture({ MASTERDECK_MEETINGS_FIXTURE: fixture }, home)).toBeNull()
+    expect(copyMeetingsFixture({ MASTERDECK_MEETINGS_FIXTURE: fixture, MASTERDECK_HOME: home }, home)).toBeNull()
+    expect(copyMeetingsFixture({ MASTERDECK_MEETINGS_FIXTURE: fixture, MASTERDECK_ISOLATED: '1' }, home)).toBeNull()
     expect(existsSync(join(home, 'meetings'))).toBe(false)
-    const id = copyMeetingsFixture({ MASTERDECK_MEETINGS_FIXTURE: fixture, MASTERDECK_ISOLATED: '1' }, home)!
+    const env = { MASTERDECK_MEETINGS_FIXTURE: fixture, MASTERDECK_ISOLATED: '1', MASTERDECK_HOME: home }
+    const id = copyMeetingsFixture(env, home)!
     const store = new MeetingStore(join(home, 'meetings'))
     expect(store.get(id)?.title).toBe('Acme web standup')
     expect(readFileSync(join(home, 'meetings', id, 'audio.webm')).length).toBeGreaterThan(1000)
     expect(readFileSync(join(home, 'meetings', id, 'audio.webm')).length).toBeLessThan(50 * 1024)
     expect(existsSync(join(home, 'notes', 'n-ac3e0000000000000000000000000a01.json'))).toBe(true)
     store.update(id, (m) => ({ ...m, title: 'Renamed' }))
-    copyMeetingsFixture({ MASTERDECK_MEETINGS_FIXTURE: fixture, MASTERDECK_ISOLATED: '1' }, home)
+    copyMeetingsFixture(env, home)
     expect(store.get(id)?.title).toBe('Renamed')
   })
 })

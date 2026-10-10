@@ -106,4 +106,15 @@ describe('serveMeetingAudio', () => {
     symlinkSync(join(dir, 'elsewhere'), file)
     expect((await serveMeetingAudio(req(URL), store)).status).toBe(404)
   })
+
+  it('reads from the descriptor it checked: a file swapped for a link afterwards changes nothing; a folder is 404', async () => {
+    const r = await serveMeetingAudio(req(URL, 'bytes=0-4'), store)
+    rmSync(file)
+    writeFileSync(join(dir, 'elsewhere'), 'secret')
+    symlinkSync(join(dir, 'elsewhere'), file)
+    expect([...Buffer.from(await r.arrayBuffer())]).toEqual([0, 1, 2, 3, 4])
+    rmSync(file)
+    mkdirSync(file)
+    expect((await serveMeetingAudio(req(URL), store)).status).toBe(404)
+  })
 })
