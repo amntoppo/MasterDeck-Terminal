@@ -77,8 +77,9 @@ cd app
 npm install          # postinstall runs electron-builder install-app-deps (node-pty for Electron)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.node.json + tsconfig.web.json; must be clean
-npm test             # vitest: ~1500 tests in ~133 files (~45 s); predictiveEcho alone ~30 s
+npm test             # vitest: ~2200 tests in ~183 files (~35 s); predictiveEcho alone ~30 s
 npm run build        # electron-vite build → out/
+scripts/whisper.sh   # macOS: whisper-cli for Meetings into resources/whisper/<arch>/ (before packaging; needs cmake)
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
 npm run dev:web      # web app dev server (MD_API=http://localhost:8787 for a local backend)
 npm run deploy:web   # build:web + wrangler deploy -c web/wrangler.jsonc (only when asked)
@@ -171,7 +172,8 @@ web tabs keep working.
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
-| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
+| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`, `sessionNotes`; a note's `link` (the session and/or ticket an `n-` note is about) and `meeting` (set by `NotesStore.addMeetingNote` alone)), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `shared/noteFilter.ts` (the panel's All · Mine · Tickets · Sessions · Meetings, the Notes tab's meeting dot), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (the one editor: Write / Preview / Side by side, `MarkdownView` with `html={false}`); Session details → **Notes n**: `renderer/.../SessionNotes.tsx` (read only; Edit and New note open the panel); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
+| Meetings (macOS; record, transcribe on the Mac, match to sessions; issue #102) | IPC and lazy loading: `main/meetingsIpc.ts` (`MeetingsIpc`; the only importer of `main/meetings/`, by dynamic `import()`); `main/meetings/gate.ts` (consent, permissions), `recorder.ts` (capture window, chunks, `audio.webm`), `store.ts` (`MASTERDECK_HOME/meetings`), `transcriber.ts` (queue, crash recovery), `matcher.ts` (the one `claude -p`, meeting notes), `models.ts` + `whisper.ts` (speech models, `whisper-cli`), `apps.ts` (the offer's process check); `main/meetingMedia.ts` (`masterdeck-media://` audio), `main/meetingNotices.ts` (Needs you), `main/meetingsFixture.ts`, `main/claudeOnce.ts` (`claude -p` from an empty temp folder); `shared/meetings.ts` (types, settings, consent, `systemAudioPath`), `meetingAudio.ts`, `meetingModels.ts`, `meetingMatch.ts` (candidates, answer check, `MATCH_FAILED`), `meetingsPage.ts`, `meetingJanitor.ts`, `meetingApps.ts` (Zoom, Webex); capture window: `renderer/capture.html`, `renderer/src/capture.ts`, `renderer/src/pcmWorklet.ts`, `preload/capture.ts`; UI: `renderer/.../MeetingsSetup.tsx` (Settings → Meetings), `RecordMeeting.tsx`, `MeetingsView.tsx` (the page), Janitor's section in `HygieneViews.tsx`; `scripts/whisper.sh`, `scripts/meeting-fixture.cjs`; ARCHITECTURE "Meetings: …", OPERATIONS "Meetings: …" |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
@@ -211,6 +213,8 @@ there. Isolate with:
 | `MASTERDECK_NO_SKILLS=1`, `MASTERDECK_NO_HOOK=1` | skip installing skills / the status line and deck hooks |
 | `MASTERDECK_SETUP_MISSING=jq,claude` | Setup's tools step reports these as missing (the install flow) |
 | `MASTERDECK_TEST_NO_ATTACH=1`, `MASTERDECK_BOARD_FIXTURE=<json>`, `MASTERDECK_REPO_FIXTURE=<json>` | refuse `claude attach`; use a fixture board; use a fixture answer for the Board's repository view |
+| `MASTERDECK_MEETINGS_FIXTURE=<dir>` | isolated launches only (`MASTERDECK_ISOLATED=1` and `MASTERDECK_HOME`): copies a stored meeting, its audio and its note (`test/fixtures/meetings`) into the home before the notes are read (OPERATIONS § Meetings: the fixture) |
+| `MASTERDECK_WHISPER` | the `whisper-cli` Meetings run (before the app's own and one on the PATH): a stand-in for tests |
 
 Note: an isolated app still lists the user's real sessions (`claude agents`, `~/.claude/projects`).
 Look, don't touch.
@@ -368,6 +372,21 @@ buttons; it does not go through macOS window drag regions.
   path (`diskError`): the editor retries those and only those on a timer; keep a new store failure
   on the right side of that line. The rail (z-index 41) is above the panel (40), and the phone's tab
   bar (47) above its sheets (45, 46): a popout of either must stay visible over an open panel.
+  `NoteMeta` (the list and change event, so web tabs too) also carries a note's `link` (the linked
+  session's key and name, a ticket) and `meeting` (the meeting's id, title and time): anything new
+  in `Note` reaches the web unless `noteMeta` leaves it out.
+
+- **Meetings ask macOS nothing before consent.** No startup path may call `askForMediaAccess`,
+  `getUserMedia`, `getDisplayMedia` or `desktopCapturer`; `main/meetings/` is loaded only by
+  dynamic `import()` in `main/meetingsIpc.ts` (no static import anywhere), and
+  `main/meetingsStartup.test.ts` fails otherwise. macOS only (hidden on Windows and the web: every
+  `meetings:*` channel is `blocked`). Transcripts and audio are private like notes (never in
+  `AppState`, the snapshot, GitHub or a session's prompt); the only thing that leaves the Mac is the
+  one `claude -p` per meeting (`claudeOnce`, matching), which the consent names. An ad-hoc signed
+  build changes signature with every build, so macOS may ask for (or silently stop honouring) both
+  permissions after each update or local rebuild. Never press **Record** or **Allow** in a
+  test or an agent's run, not even in the isolated app (the real prompts are the user's); use `MASTERDECK_MEETINGS_FIXTURE`
+  for the page and Janitor.
 
 ## Style
 
@@ -378,6 +397,24 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-10)
+
+- **Meetings (#102)** are built on branch `worktree-MasterDeck-Terminal-102-meetings` (from 537cd0f,
+  the capture notes, to the docs commit that carries this line): not merged, not pushed, installed
+  locally (2026-10-10). Settings → **Meetings** (consent first, then the microphone, the Mac's sound,
+  a speech model, offers), **Record** in the rail (a capture window: microphone and system audio
+  apart as You / Others, 30-second chunks, `audio.webm`), whisper.cpp on the Mac per chunk, one
+  `claude -p` per meeting that adds notes to the sessions and tickets it was about (Needs you lists
+  them), the **Meetings** page (dates, transcript, audio, search, Match again, Export, Delete),
+  Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; and for
+  notes: a note's `link` and `meeting`, Session details → **Notes n**, the panel's filters. Spec in
+  the backend repo (`docs/superpowers/specs/2026-10-10-meetings-design.md`, branch
+  `docs/meetings-102`, not pushed). Checked: typecheck, vitest (181 files passed, 2 skipped; 2184
+  tests passed, 4 skipped; one run had `claudeOnce.test.ts`'s kill-timing test fail under load and
+  pass alone and on the next full run), `npm run build`, and the isolated app: Settings → Meetings
+  up to the consent, the Meetings page with `MASTERDECK_MEETINGS_FIXTURE` (list, transcript,
+  audio, search), Janitor's Meetings section. Not checked: any real capture or permission prompt, a
+  real transcription with a downloaded model, a real `claude -p` match, Zoom's and Webex's real
+  process names in a call; Windows is not supported. Open points: TODO ("Meetings (#102): open points").
 
 - **Workflow agent loops (#82)** are built on branch `worktree-MasterDeck-Terminal-82-agent-loops`
   (local `main` merged in at 9e00e29, so it also carries the mods of #86; pushed as PR #101, not

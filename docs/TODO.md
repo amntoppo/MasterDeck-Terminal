@@ -659,12 +659,47 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
   `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
 
+## Meetings (#102): open points (2026-10-10)
+
+Spec in the backend repo (`docs/superpowers/specs/2026-10-10-meetings-design.md`); ARCHITECTURE and
+OPERATIONS, "Meetings: …".
+
+- **A real capture is the user's, on the packaged app.** Never run by a test or an agent: the
+  microphone prompt, the System Audio Recording prompt (14.2+; Screen Recording on 13 to 14.1),
+  `setDisplayMediaRequestHandler`'s `request.frame` with `audio: 'loopback'`, the PCM worklet
+  loading from `file://` in the packaged capture window, and `getDisplayMedia` run through
+  `executeJavaScript` with a user gesture. Only unit tests and the fixture cover them.
+- **Permissions after every update.** The ad-hoc signature changes with each build, so macOS may
+  ask again, or show "granted" while capture is silent (the Record probe says so). A Developer ID
+  signature fixes it (as it would the keychain prompt under Shipping / ops); a stable self-signed
+  identity would help local builds.
+- **The offer knows Zoom and Webex only**, and their process names (`CptHost` / `aomhost`,
+  `Meeting Center`) are unverified on a real call. Teams, Slack huddles and Google Meet are not
+  detected; the upgrade is Core Audio's "microphone in use by another process"
+  (`kAudioDevicePropertyDeviceIsRunningSomewhere`) through a small Swift helper.
+- **Speakers are You and Others only**: no diarization of the others.
+- **Seeking in long recordings**: `audio.webm` is written as MediaRecorder writes it (no duration,
+  no cues); seeking in a long meeting is unmeasured. A remux at Stop (or cues) would fix it.
+- **No React tests for `MeetingsView`**: its logic is in `shared/meetingsPage.ts` (tested); the
+  view itself was checked only in the isolated app with the fixture.
+- **`.tmp` leftovers in the meetings folders** (an atomic write cut short) are left alone, not
+  removed.
+- **Delete audio after keeps running after Turn off meetings** (intended: it only removes the
+  stored audio the user asked to age out).
+- **A quit while `claude -p` matches** kills it now (the runner's AbortSignal); the meeting is
+  matched again when meetings load next. Not seen on a real quit.
+- **Match quality is unmeasured**: no real meeting has gone through `claude -p` yet; precision of
+  the notes, the part size (about 100 000 characters) and the candidate cap (200) are guesses.
+- **`claudeOnce.test.ts`'s kill test** failed once under a loaded full run (it passed alone and on
+  the next run): its timing may need more room.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, and the docs commit after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |
 | MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | 3d83781, merge 3ce574c | — |

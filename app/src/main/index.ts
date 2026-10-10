@@ -270,8 +270,9 @@ try {
   console.error(`meetings fixture: ${String(e)}`);
 }
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
-// and in this change event (a note's title and 120-character preview, to the window and to web
-// tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
+// and in this change event (a note's NoteMeta: its title, 120-character preview, ticket, `link` (the
+// session's key and name, a ticket) and `meeting` (id, title, time), to the window and to web tabs
+// that subscribed; never the text). Sessions may add to them (pumpNoteRequests) but never read them.
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
