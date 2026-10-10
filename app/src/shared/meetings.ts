@@ -206,7 +206,7 @@ export interface Meeting {
   ended: number | null
   /** Time the recording was paused, in ms: the transcript's times and the audio leave it out. */
   pausedMs: number
-  /** Meeting apps seen while recording (the offer, a later step). */
+  /** The meeting app whose call was offered when the recording started (main/meetings/apps.ts). */
   apps: string[]
   state: MeetingState
   /** The speech model and language the recording started with (Settings → Meetings). */
@@ -353,7 +353,7 @@ export interface MeetingLive {
   paused: boolean
   /** Time recorded so far, in ms, as of the last change (what the rail shows while paused). */
   elapsed: number
-  /** The offer to record a call (a later step); null now. */
+  /** The meeting app in a call that MasterDeck offers to record (main/meetings/apps.ts), or null; null while recording. */
   offer: string | null
 }
 export const IDLE_LIVE: MeetingLive = { recording: false, since: null, paused: false, elapsed: 0, offer: null }

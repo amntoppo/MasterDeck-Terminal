@@ -29,6 +29,7 @@ import {
   type MeetingsResult,
 } from '@shared/meetingsPage'
 import { AUDIO_SWEEP_EVERY_MS, AUDIO_SWEEP_FIRST_MS, audioExpired, cleanRequest, janitorRows, type MeetingsCleanAnswer, type MeetingsJanitorAnswer } from '@shared/meetingJanitor'
+import { OFFER_POLL_MS } from '@shared/meetingApps'
 import type { AppState } from '@shared/types'
 import { isRemote } from './ipcRegistry'
 import type { NotesStore } from './notes'
@@ -41,10 +42,12 @@ import type { Recorder } from './meetings/recorder'
 import type { MeetingStore } from './meetings/store'
 import type { Transcriber } from './meetings/transcriber'
 import type { Matcher } from './meetings/matcher'
+import type { OfferWatch } from './meetings/apps'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
 type RecorderModule = typeof import('./meetings/recorder')
+type AppsModule = typeof import('./meetings/apps')
 type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber') & Partial<typeof import('./meetings/matcher')>
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
 export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId'>
@@ -120,6 +123,12 @@ export interface MeetingsDeps {
   confirm?(o: { message: string; detail: string; button: string }): Promise<boolean>
   /** A save dialog for an export: the path picked, or null. */
   saveFile?(o: { defaultName: string; kind: ExportKind }): Promise<string | null>
+  /** The offer: a meeting app is in a call (a macOS notification; its click shows the Record popout). */
+  offer?(app: string): void
+  /** How main/meetings/apps.ts is loaded (tests count it); default a dynamic import. */
+  loadApps?: () => Promise<AppsModule>
+  /** The offer's `ps -axo comm` (tests pass sample output); default apps.ts's psComm. */
+  ps?: () => Promise<string>
 }
 
 /** The page's list holds at most this many meetings of a range (newest first). */
@@ -166,6 +175,9 @@ export class MeetingsIpc {
   private rec: RecorderLike | null = null
   /** The meetings on disk alone (the page without consent): no queue, nothing transcribed. */
   private bare: Promise<MeetingStore> | null = null
+  /** The offer's watch, once loaded (after consent, with timers only before). */
+  private offers: Promise<OfferWatch> | null = null
+  private watch: OfferWatch | null = null
   constructor(private d: MeetingsDeps) {}
 
   /** A load that failed is not kept: the next call loads again (a full disk now is not one for ever). */
@@ -333,7 +345,8 @@ export class MeetingsIpc {
   /** AppState.meetingLive: null off macOS; idle until the recorder was ever loaded. */
   live(): MeetingLive | null {
     if (this.d.platform !== 'darwin') return null
-    return this.rec?.live() ?? IDLE_LIVE
+    const live = this.rec?.live() ?? IDLE_LIVE
+    return { ...live, offer: live.recording ? null : (this.watch?.offered ?? null) }
   }
 
   /** Whether a meeting is being recorded now (quitting asks first). */
@@ -346,7 +359,54 @@ export class MeetingsIpc {
     const r = this.refused(e)
     if (r) return r
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
-    return (await this.loadRecorder()).start(title)
+    const app = this.watch?.offered ?? null
+    const res = await (await this.loadRecorder()).start(title)
+    if (res.ok) {
+      // Recorded from the offer (or with one showing): the call's app is the meeting's, and the chip goes.
+      if (app && res.id) this.svc?.store.update(res.id, (m) => ({ ...m, apps: [app] }))
+      this.watch?.dismiss()
+    }
+    return res
+  }
+
+  /** Not now on the offer: the chip goes, and this call is not offered again. */
+  async notNow(e: unknown): Promise<{ ok: true } | { ok: false; message: string }> {
+    const r = this.refused(e)
+    if (r) return r
+    this.watch?.dismiss()
+    return { ok: true }
+  }
+
+  /**
+   * The offer's watch: loaded and started only on macOS, with the consent (background() a while
+   * after start, or I agree). Each look checks the consent, Offer to record and the recording again.
+   */
+  startOffers(): void {
+    if (this.d.platform !== 'darwin' || !meetingsAgreed({ meetings: this.d.meetings() })) return
+    const load = this.d.loadApps ?? (() => import('./meetings/apps'))
+    this.offers ??= this.once(
+      load().then((mod) => {
+        const w = new mod.OfferWatch({
+          ps: this.d.ps ?? mod.psComm,
+          allowed: () => this.d.platform === 'darwin' && meetingsAgreed({ meetings: this.d.meetings() }) && this.d.meetings().offer,
+          recording: () => this.recording,
+          offer: (app) => {
+            this.d.onLive()
+            this.d.offer?.(app)
+          },
+          clear: () => this.d.onLive(),
+        })
+        this.watch = w
+        return w
+      }),
+      () => (this.offers = null),
+    )
+    void this.offers.then((w) => w.start()).catch((err) => console.error(`meetings: offer: ${String(err)}`))
+  }
+
+  /** Turn off meetings (and quit): no more looks; the chip goes. */
+  stopOffers(): void {
+    this.watch?.stop()
   }
 
   async stop(e: unknown): Promise<RecordAnswer> {
@@ -374,6 +434,7 @@ export class MeetingsIpc {
    */
   quit(): void {
     this.stopBackground()
+    this.stopOffers()
     this.svc?.transcriber.stop()
     this.svc?.matcher?.stop()
     this.engineMod?.killRunning()
@@ -622,13 +683,17 @@ export class MeetingsIpc {
   }
 
   private sweepTimer: ReturnType<typeof setTimeout> | null = null
+  private offerTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Called once the app is ready: the Delete audio after timer, first AUDIO_SWEEP_FIRST_MS after
-   * start, then daily. Only timers: nothing is loaded or asked until one fires.
+   * start, then daily; and the offer's watch OFFER_POLL_MS after start, when the consent holds.
+   * Only timers: nothing is loaded or asked until one fires.
    */
   background(): void {
     if (this.d.platform !== 'darwin' || this.sweepTimer) return
+    this.offerTimer = setTimeout(() => this.startOffers(), OFFER_POLL_MS)
+    this.offerTimer.unref?.()
     const sweep = () => void this.sweepAudio().catch((err) => console.error(`meetings: delete audio after: ${String(err)}`))
     this.sweepTimer = setTimeout(() => {
       sweep()
@@ -645,6 +710,8 @@ export class MeetingsIpc {
       clearInterval(this.sweepTimer)
     }
     this.sweepTimer = null
+    if (this.offerTimer) clearTimeout(this.offerTimer)
+    this.offerTimer = null
   }
 
   /**
@@ -703,7 +770,10 @@ export class MeetingsIpc {
         ? { ...m, consentAt: (this.d.now ?? Date.now)(), consentVersion: MEETINGS_CONSENT_VERSION }
         : { ...m, consentAt: null, consentVersion: 0 },
     )
-    if (agree) this.warmService()
+    if (agree) {
+      this.warmService()
+      this.startOffers()
+    } else this.stopOffers()
     return this.withModel((await this.loadGate()).setup())
   }
 

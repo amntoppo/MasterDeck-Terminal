@@ -230,6 +230,8 @@ export const CH = {
   meetingsChanged: "meetings:changed",
   meetingsJanitor: "meetings:janitor",
   meetingsClean: "meetings:clean",
+  meetingsNotNow: "meetings:notNow",
+  meetingsShowRecord: "meetings:showRecord",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -483,6 +485,10 @@ export interface DeckApi {
    * meeting being recorded is skipped; notes stay.
    */
   meetingsClean(req: CleanRequest): Promise<MeetingsCleanAnswer>;
+  /** Not now on the offer to record a call (AppState.meetingLive.offer): it goes, and that call is not offered again. */
+  meetingsNotNow(): Promise<{ ok: boolean; message?: string }>;
+  /** The offer's notification was clicked: show the rail's Record popout. The window only. */
+  onMeetingsShowRecord(cb: () => void): () => void;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

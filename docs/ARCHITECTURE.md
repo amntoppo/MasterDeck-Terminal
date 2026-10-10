@@ -1353,6 +1353,29 @@ waits, and writes nothing if accounts appeared meanwhile.
   totals, **Older than 7 / 30 / 90 days**, a checkbox per row, **Delete audio** / **Delete
   meetings**, the typed count over 10; it reloads on `meetings:changed`.
 
+### Meetings: the offer (issue #102)
+
+- `shared/meetingApps.ts`: `MEETING_APPS` (a `ponytail:` list: Zoom by `CptHost` / `aomhost`
+  inside `zoom.us.app`, Webex by `Meeting Center` under a Webex folder; Teams and Slack have no
+  call-only process and are left out; the upgrade is Core Audio's "device running somewhere"),
+  `callApps(psOut)` (the executable's own name and its app's path, each app once), `offerText`,
+  `OFFER_POLL_MS` 10 s.
+- `main/meetings/apps.ts`: `psComm()` (one `execFile('/bin/ps', ['-axo', 'comm'])`, 5 s timeout)
+  and `OfferWatch` (`tick`, `dismiss`, `start`, `stop`, `offered`): a look only while `allowed()`
+  (macOS, consent, `settings.meetings.offer`) and not `recording()`; an app in a call now and not at
+  the last look is a new call, offered once (one chip at a time); the apps in a call are kept while
+  not looking, so a call is not new after a recording; the chip goes when its call ends.
+- `MeetingsIpc`: `startOffers()` loads `apps.ts` (dynamic import, `deps.loadApps`) only on macOS
+  with the consent: from `background()` `OFFER_POLL_MS` after start, and from `consent(true)`;
+  `consent(false)` and `quit()` call `stopOffers()`. `live().offer` is the offered app (null while
+  recording). `start()` (the chip's Record, the popout's) notes the offered app in the meeting's
+  `apps` and dismisses the chip; `notNow(e)` (`meetings:notNow`, `blocked`) dismisses it.
+  `deps.offer(app)` (`index.ts`) shows a macOS notification whose click shows the window and sends
+  `meetings:showRecord` (event, `blocked`): `App.tsx` opens the Record popout.
+- UI: `RecordMeeting.tsx` draws the chip (`.rec-offer`) when `live.offer` is set and the popout is
+  closed: the words, **Record** (`meetingsStart()`), **Not now** (`meetingsNotNow()`), "Tell the
+  others you are recording."
+
 ### Working hours (issue #64)
 
 The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day

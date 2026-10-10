@@ -92,6 +92,7 @@ import { MeetingNotices } from "./meetingNotices";
 import { serveMeetingAudio } from "./meetingMedia";
 import { copyMeetingsFixture } from "./meetingsFixture";
 import { MEDIA_SCHEME } from "@shared/meetingsPage";
+import { offerText } from "@shared/meetingApps";
 import { claudeOnce } from "./claudeOnce";
 import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
@@ -2235,6 +2236,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsExport, (e, id: unknown, kind: unknown) => meetings.export(e, id, kind));
   reg.handle(CH.meetingsJanitor, (e) => meetings.janitor(e));
   reg.handle(CH.meetingsClean, (e, req: unknown) => meetings.clean(e, req));
+  reg.handle(CH.meetingsNotNow, (e) => meetings.notNow(e));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3429,6 +3431,20 @@ const meetings = new MeetingsIpc({
   },
   notice: (text) => {
     if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
+  },
+  // The offer: a notification only; its click shows the window's Record popout. Nothing records
+  // until the user presses Record there or on the rail's chip.
+  offer: (app) => {
+    if (SMOKE || !Notification.isSupported()) return;
+    const n = new Notification({ title: "MasterDeck · Meetings", body: offerText(app) });
+    n.on("click", () => {
+      if (!win) return;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send(CH.meetingsShowRecord);
+    });
+    n.show();
   },
   restart: async () => {
     if (!win) return false;

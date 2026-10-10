@@ -951,7 +951,8 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   "Speech engine missing" means this copy of MasterDeck has no speech engine: reinstall it.
 - **Language:** what your meetings are spoken in. **Detect automatically** (the default) works for
   most; pick one when every meeting is in the same language.
-- **Offer to record** (on by default): offer to record when a meeting app is in a call.
+- **Offer to record** (on by default): offer to record when a meeting app is in a call (see
+  **The offer** under Record a meeting).
 - **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
   transcript and notes stay. MasterDeck checks a few minutes after it starts and then once a day,
   and removes only audio (a transcript is never removed by a timer; Janitor → Meetings does that
@@ -980,6 +981,14 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
   **Stop recording and quit** (what was recorded is kept). **Restart** on Settings → Meetings asks
   the same, with **Stop recording and restart**. A crash keeps everything recorded up to
   the last 30 seconds.
+- **The offer:** once you agreed on Settings → Meetings and with **Offer to record** on, MasterDeck
+  looks every 10 seconds at which programs run (their names only) while nothing is being recorded.
+  When Zoom or Webex joins a call, a notification says "Zoom call: record it?" (a click brings
+  MasterDeck up with the Record popout open) and a chip by the Record button asks the same, with
+  **Record** and **Not now**. It is asked once per call: after Not now, or after a recording, the
+  same call is not offered again. It never starts recording by itself. Microsoft Teams, Slack
+  huddles and calls in a browser (Google Meet) are not noticed: use Record. **Turn off meetings**
+  stops the looking.
 - The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy
   (`audio.webm`) and 30-second pieces that are turned into the transcript.
 

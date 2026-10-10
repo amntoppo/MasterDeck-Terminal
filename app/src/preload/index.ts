@@ -98,6 +98,8 @@ const api: DeckApi = {
   onMeetingsChanged: (cb) => listen(CH.meetingsChanged, cb),
   meetingsJanitor: () => ipcRenderer.invoke(CH.meetingsJanitor),
   meetingsClean: (req) => ipcRenderer.invoke(CH.meetingsClean, req),
+  meetingsNotNow: () => ipcRenderer.invoke(CH.meetingsNotNow),
+  onMeetingsShowRecord: (cb) => listen(CH.meetingsShowRecord, cb),
   onNotesChanged: (cb) => listen(CH.notesChanged, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),

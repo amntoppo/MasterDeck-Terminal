@@ -263,6 +263,11 @@ export function App() {
     setMeetingOpener(openMeeting);
     return () => setMeetingOpener(null);
   }, []);
+  // The offer's notification was clicked (the window only): show the Record popout.
+  useEffect(() => {
+    if (isWeb() || !can("onMeetingsShowRecord")) return;
+    return deck().onMeetingsShowRecord(() => setRecordOpen(true));
+  }, []);
   const notes = useNotes(!!state);
   // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>

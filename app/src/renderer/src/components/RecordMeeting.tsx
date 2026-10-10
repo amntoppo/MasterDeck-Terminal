@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { MEETING_TITLE_MAX, recordClock as clock, recordedMs, type MeetingLive, type RecordAnswer } from '@shared/meetings'
+import { offerText } from '@shared/meetingApps'
 import { deck } from '../deck'
 import { can } from '../web'
 
@@ -19,6 +20,8 @@ interface Props {
 /**
  * The rail's Record item (spec §2): a title (optional) and Record; while recording, red with the
  * time, and Pause / Stop. Under it, every time: "Tell the others you are recording."
+ * When a meeting app is in a call (live.offer), a chip asks "Zoom call: record it?" with Record
+ * (the same start as the popout's) and Not now; nothing records without that press.
  */
 export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
   const [title, setTitle] = useState('')
@@ -66,6 +69,7 @@ export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
     }
   }
 
+  const offer = !recording && agreed ? (live?.offer ?? null) : null
   const time = live && recording ? clock(recordedMs(live, now)) : ''
   const label = recording ? `${live?.paused ? 'Paused' : 'Recording'} ${time}` : 'Record meeting'
   return (
@@ -129,6 +133,25 @@ export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
               </div>
             </form>
           )}
+          <p className="rec-tell">Tell the others you are recording.</p>
+          {message && (
+            <p className="rec-msg" role="status">
+              {message}
+            </p>
+          )}
+        </div>
+      )}
+      {offer && !open && (
+        <div className="rec-pop rec-offer" role="dialog" aria-label={offerText(offer)}>
+          <div className="rec-head">{offerText(offer)}</div>
+          <div className="f-row">
+            <button className="btn primary" disabled={busy} onClick={() => void act(() => deck().meetingsStart())}>
+              Record
+            </button>
+            <button className="btn" disabled={busy} onClick={() => void deck().meetingsNotNow()}>
+              Not now
+            </button>
+          </div>
           <p className="rec-tell">Tell the others you are recording.</p>
           {message && (
             <p className="rec-msg" role="status">
