@@ -1,8 +1,8 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { findWhisper, parseWhisperJson, transcribe, whisperThreads, type WhisperWhere } from './whisper'
+import { dirname, join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { findWhisper, killRunning, parseWhisperJson, transcribe, whisperThreads, type WhisperWhere } from './whisper'
 
 let root: string
 beforeEach(() => {
@@ -72,8 +72,18 @@ describe('parseWhisperJson', () => {
       { start: 0, end: 2500, text: 'Hello alice.' },
       { start: 4000, end: 6120, text: 'The acme ticket is done.' },
     ])
-    expect(parseWhisperJson('not json')).toEqual([])
     expect(parseWhisperJson('{"transcription": 3}')).toEqual([])
+  })
+
+  it('a raw tab or newline in the text (whisper-cli leaves them unescaped) is read as a space', () => {
+    const raw = '{"transcription": [{"offsets": {"from": 0, "to": 900}, "text": " ship\tit\nnow"}]}'
+    expect(() => JSON.parse(raw)).toThrow()
+    expect(parseWhisperJson(raw)).toEqual([{ start: 0, end: 900, text: 'ship it now' }])
+  })
+
+  it('a file that is not JSON is a failure, not silence', () => {
+    expect(() => parseWhisperJson('not json')).toThrow(/could not be read/)
+    expect(() => parseWhisperJson('{"transcription": [')).toThrow(/could not be read/)
   })
 })
 
@@ -106,6 +116,28 @@ describe('transcribe', () => {
     await expect(transcribe({ bin: quiet, wav: 'a.wav', model: 'm.bin', language: 'auto', threads: 1 })).rejects.toThrow(/no transcript/)
     const hung = script(join(root, 'h', 'whisper-cli'), 'sleep 30')
     await expect(transcribe({ bin: hung, wav: 'a.wav', model: 'm.bin', language: 'auto', threads: 1, timeoutMs: 300 })).rejects.toThrow(/failed/)
+  }, 20_000)
+
+  it('garbage in the JSON file rejects', async () => {
+    const bin = script(join(root, 'g', 'whisper-cli'), `of=""; while [ $# -gt 0 ]; do [ "$1" = "-of" ] && of="$2"; shift; done\nprintf '{"transcription": [garbage' > "$of.json"`)
+    await expect(transcribe({ bin, wav: 'a.wav', model: 'm.bin', language: 'auto', threads: 1 })).rejects.toThrow(/could not be read/)
+  }, 20_000)
+
+  it('killRunning stops a running whisper-cli and removes its temp folder', async () => {
+    const seen = join(root, 'k', 'of.txt')
+    const bin = script(
+      join(root, 'k', 'whisper-cli'),
+      `of=""; while [ $# -gt 0 ]; do [ "$1" = "-of" ] && of="$2"; shift; done\nprintf '%s' "$of" > "${seen}"\nsleep 30`,
+    )
+    const run = transcribe({ bin, wav: 'a.wav', model: 'm.bin', language: 'auto', threads: 1 })
+    await vi.waitFor(() => expect(existsSync(seen) && readFileSync(seen, 'utf8').length > 0).toBe(true), { timeout: 5000 })
+    const tmp = dirname(readFileSync(seen, 'utf8'))
+    expect(existsSync(tmp)).toBe(true)
+    killRunning()
+    await expect(run).rejects.toThrow(/failed \(SIGKILL\)/)
+    expect(existsSync(tmp)).toBe(false)
+    // Nothing left to stop: a second call does nothing.
+    killRunning()
   }, 20_000)
 
   it('leaves two cores to the Mac', () => {

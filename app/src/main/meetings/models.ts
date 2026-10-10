@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, renameSync, statSync, statfsSync, unlinkSync } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { open, type FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MODELS, modelById, type ModelProgress, type SpeechModel } from '@shared/meetingModels'
 
 export interface ModelStoreDeps {
-  /** Default: the global fetch (follows Hugging Face's redirect to its CDN). */
+  /**
+   * Every request the store makes goes through this (main passes Electron's net.fetch, which uses
+   * the system's proxy). Default: the global fetch. Both follow Hugging Face's redirect to its CDN.
+   */
   fetch?: (url: string, init: { signal: AbortSignal }) => Promise<Response>
   now?: () => number
   /** Free bytes where the models go; default statfs. null: unknown (the download is tried). */
@@ -87,7 +90,14 @@ export class ModelStore {
         report({ state: r.cancelled ? 'cancelled' : 'failed', message: r.message })
         return r
       }
-      renameSync(part, join(this.dir, m.file))
+      try {
+        renameSync(part, join(this.dir, m.file))
+      } catch {
+        rmQuiet(part)
+        const message = 'Could not put the model in its folder.'
+        report({ state: 'failed', message })
+        return { ok: false, message }
+      }
       report({ state: 'done', received: m.bytes })
       return { ok: true }
     } finally {
@@ -119,31 +129,57 @@ export class ModelStore {
     } catch {
       return signal.aborted ? cancelled : { ok: false, message: 'Could not reach the model server. Check the connection and try again.' }
     }
-    if (!res.ok || !res.body) return { ok: false, message: `The model server answered ${res.status}.` }
+    if (!res.ok || !res.body) {
+      // Not read: let the connection go.
+      await res.body?.cancel().catch(() => {})
+      return { ok: false, message: `The model server answered ${res.status}.` }
+    }
+    const diskError: DownloadResult = { ok: false, message: 'Could not write the model to disk. Check the free space and try again.' }
     const hash = createHash('sha256')
-    const fh = await open(part, 'w')
+    let fh: FileHandle
+    try {
+      fh = await open(part, 'w')
+    } catch {
+      await res.body.cancel().catch(() => {})
+      return diskError
+    }
     let n = 0
     let last = 0
+    const reader = res.body.getReader()
     try {
-      const reader = res.body.getReader()
       for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
+        let chunk: ReadableStreamReadResult<Uint8Array>
+        try {
+          chunk = await reader.read()
+        } catch {
+          return signal.aborted ? cancelled : { ok: false, message: 'The download stopped. Try again.' }
+        }
+        if (chunk.done) break
+        const value = chunk.value
         n += value.byteLength
         if (n > m.bytes) {
           await reader.cancel().catch(() => {})
           return { ok: false, message: 'The download was larger than the model: thrown away.' }
         }
         hash.update(value)
-        await fh.write(value)
+        try {
+          await writeAll(fh, value)
+        } catch {
+          await reader.cancel().catch(() => {})
+          return diskError
+        }
         received(n)
         if (now() - last >= PROGRESS_MS) {
           last = now()
           tick()
         }
       }
-    } catch {
-      return signal.aborted ? cancelled : { ok: false, message: 'The download stopped. Try again.' }
+      // On disk before the rename makes it a model.
+      try {
+        await fh.sync()
+      } catch {
+        return diskError
+      }
     } finally {
       await fh.close().catch(() => {})
     }
@@ -151,6 +187,16 @@ export class ModelStore {
     if (n !== m.bytes) return { ok: false, message: 'The download stopped before the end. Try again.' }
     if (hash.digest('hex') !== m.sha256) return { ok: false, message: 'The downloaded model is not the expected file: thrown away.' }
     return { ok: true }
+  }
+
+  /**
+   * Removes the `.part` of every model that is not downloading now: what a quit or a crash in the
+   * middle of a download left behind. Only the names MODELS gives are touched.
+   */
+  cleanParts(): void {
+    for (const m of MODELS) {
+      if (this.running?.id !== m.id) rmQuiet(join(this.dir, `${m.file}.part`))
+    }
   }
 
   /** Stops the running download (its `.part` is removed). */
@@ -172,6 +218,16 @@ export class ModelStore {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return { ok: false, message: 'Could not remove the model.' }
     }
     return { ok: true }
+  }
+}
+
+/** fh.write may write less than it was given (a full disk): the rest goes after it, or it throws. */
+async function writeAll(fh: FileHandle, data: Uint8Array): Promise<void> {
+  let off = 0
+  while (off < data.byteLength) {
+    const { bytesWritten } = await fh.write(data, off, data.byteLength - off)
+    if (bytesWritten <= 0) throw new Error('nothing written')
+    off += bytesWritten
   }
 }
 

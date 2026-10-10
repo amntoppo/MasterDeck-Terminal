@@ -1,5 +1,5 @@
 import { spawn, type SpawnOptions } from 'node:child_process'
-import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, rmSync, statSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { availableParallelism, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -61,13 +61,19 @@ const LANGUAGE = /^(auto|[a-z]{2,3})$/
 /** whisper.cpp's marker for a stretch of silence: not words anyone said. */
 const BLANK = /^\[BLANK_AUDIO\]$/
 
-/** whisper-cli's `-oj` file: `transcription[].offsets` (ms) and `text`. Anything else is skipped. */
+/**
+ * whisper-cli's `-oj` file: `transcription[].offsets` (ms) and `text`. Rows of another shape are
+ * skipped; a file that is not JSON throws (a failed chunk, not a silent one). whisper-cli (1.9.4)
+ * escapes only `"` and `\` in its text, so a raw tab or newline in what was heard would break
+ * JSON.parse: control characters are read as spaces first (JSON's own whitespace is one too).
+ */
 export function parseWhisperJson(raw: string): Segment[] {
   let j: unknown
   try {
-    j = JSON.parse(raw)
+    // eslint-disable-next-line no-control-regex
+    j = JSON.parse(raw.replace(/[\u0000-\u001f]/g, ' '))
   } catch {
-    return []
+    throw new Error('whisper-cli wrote a transcript that could not be read.')
   }
   const list = (j as { transcription?: unknown })?.transcription
   if (!Array.isArray(list)) return []
@@ -95,6 +101,29 @@ export interface TranscribeOptions {
   timeoutMs?: number
 }
 
+/** The whisper-cli runs in progress: process group id → their temp folder. */
+const running = new Map<number, string>()
+
+/**
+ * Stops every whisper-cli still running (its whole process group) and removes their temp folders,
+ * for a quit: the transcribe() calls then fail. Errors are ignored (a process that ended already).
+ */
+export function killRunning(): void {
+  for (const [pid, dir] of running) {
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      // Gone already.
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // transcribe()'s own clean-up tries again.
+    }
+  }
+  running.clear()
+}
+
 /**
  * Transcribes one WAV file with whisper-cli at low priority (`nice`): `-oj -of <tmp>` writes the
  * JSON that is read back, so nothing whisper prints is parsed.
@@ -110,6 +139,12 @@ export async function transcribe(o: TranscribeOptions): Promise<Segment[]> {
       // Its own process group, so a timeout stops whatever it started too.
       const opts: SpawnOptions = { stdio: ['ignore', 'ignore', 'pipe'], detached: true }
       const p = nice ? spawn(nice, ['-n', '10', o.bin, ...args], opts) : spawn(o.bin, args, opts)
+      const pid = p.pid
+      if (pid) running.set(pid, dir)
+      const done = () => {
+        clearTimeout(timer)
+        if (pid) running.delete(pid)
+      }
       let err = ''
       p.stderr?.on('data', (d: Buffer) => {
         // The last lines only: enough to say why it failed.
@@ -123,11 +158,11 @@ export async function transcribe(o: TranscribeOptions): Promise<Segment[]> {
         }
       }, o.timeoutMs ?? 600_000)
       p.on('error', (e) => {
-        clearTimeout(timer)
+        done()
         reject(new Error(`whisper-cli did not start: ${e.message}`))
       })
       p.on('close', (code, signal) => {
-        clearTimeout(timer)
+        done()
         if (code === 0) resolve()
         else reject(new Error(`whisper-cli failed (${signal ?? code}): ${err.trim().split('\n').slice(-3).join(' ')}`))
       })

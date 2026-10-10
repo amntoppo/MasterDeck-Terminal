@@ -6,7 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // A tiny stand-in for the real models: the store checks whatever MODELS says.
 const fake = vi.hoisted(() => {
   const body = new Uint8Array(1000).map((_, i) => i % 251)
-  return { body }
+  /** When set, each file write writes at most this many bytes (a disk that takes less at once). */
+  return { body, shortWrites: 0, syncs: 0 }
+})
+vi.mock('node:fs/promises', async (orig) => {
+  const real = await orig<typeof import('node:fs/promises')>()
+  const open: typeof real.open = async (...a) => {
+    const fh = await real.open(...a)
+    const write = fh.write.bind(fh) as (d: Uint8Array, off: number, len: number) => Promise<{ bytesWritten: number }>
+    const sync = fh.sync.bind(fh)
+    return Object.assign(fh, {
+      write: (d: Uint8Array, off: number, len: number) => write(d, off, fake.shortWrites ? Math.min(len, fake.shortWrites) : len),
+      sync: () => (fake.syncs++, sync()),
+    })
+  }
+  return { ...real, open, default: { ...real, open } }
 })
 vi.mock('@shared/meetingModels', async (orig) => {
   const real = await orig<typeof import('@shared/meetingModels')>()
@@ -133,6 +147,66 @@ describe('ModelStore', () => {
     expect(store.remove('base')).toEqual({ ok: true })
     expect(store.remove('../notes.txt')).toMatchObject({ ok: false })
     expect(store.path('../notes.txt')).toBeNull()
+  })
+
+  it('cleanParts removes leftover .part files, not the one downloading, nothing else', async () => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'ggml-other.bin.part'), 'x')
+    writeFileSync(join(dir, 'notes.txt.part'), 'mine')
+    let release!: () => void
+    const hold = new Promise<void>((r) => (release = r))
+    const store = new ModelStore(dir, { fetch: async () => streamed(fake.body, { hold }), freeBytes: () => null })
+    const run = store.download('base')
+    await vi.waitFor(() => expect(existsSync(join(dir, 'ggml-base.bin.part'))).toBe(true))
+    store.cleanParts()
+    expect(readdirSync(dir).sort()).toEqual(['ggml-base.bin.part', 'notes.txt.part'])
+    release()
+    expect(await run).toEqual({ ok: true })
+    writeFileSync(join(dir, 'ggml-base.bin.part'), 'x')
+    store.cleanParts()
+    expect(readdirSync(dir).sort()).toEqual(['ggml-base.bin', 'notes.txt.part'])
+  })
+
+  it('a .part or a model that cannot be written fails without a path in the message', async () => {
+    mkdirSync(join(dir, 'ggml-base.bin.part'), { recursive: true })
+    const s1 = new ModelStore(dir, { fetch: async () => streamed(fake.body), freeBytes: () => null })
+    const r1 = await s1.download('base')
+    expect(r1).toMatchObject({ ok: false, message: expect.stringMatching(/Could not write the model/) })
+    expect((r1 as { message: string }).message).not.toContain(dir)
+    rmSync(join(dir, 'ggml-base.bin.part'), { recursive: true })
+    // Where the model goes is a folder with something in it: the rename fails.
+    mkdirSync(join(dir, 'ggml-base.bin', 'x'), { recursive: true })
+    const states: string[] = []
+    const r2 = await s1.download('base', (p) => states.push(p.state))
+    expect(r2).toEqual({ ok: false, message: 'Could not put the model in its folder.' })
+    expect(states.at(-1)).toBe('failed')
+    expect(existsSync(join(dir, 'ggml-base.bin.part'))).toBe(false)
+  })
+
+  it('a server error answer is not read: its body is cancelled', async () => {
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull: () => new Promise(() => {}),
+      cancel: () => {
+        cancelled = true
+      },
+    })
+    const store = new ModelStore(dir, { fetch: async () => new Response(body, { status: 503 }), freeBytes: () => null })
+    expect(await store.download('base')).toMatchObject({ ok: false, message: 'The model server answered 503.' })
+    expect(cancelled).toBe(true)
+  })
+
+  it('a write that takes only part of a piece goes on with the rest, and the file is synced', async () => {
+    fake.shortWrites = 37
+    fake.syncs = 0
+    try {
+      const store = new ModelStore(dir, { fetch: async () => streamed(fake.body), freeBytes: () => null })
+      expect(await store.download('base')).toEqual({ ok: true })
+      expect(readFileSync(join(dir, 'ggml-base.bin'))).toEqual(Buffer.from(fake.body))
+      expect(fake.syncs).toBe(1)
+    } finally {
+      fake.shortWrites = 0
+    }
   })
 
   it('a file of the wrong size is not ready', () => {
