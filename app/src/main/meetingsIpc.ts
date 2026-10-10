@@ -64,7 +64,10 @@ export interface MatchingDeps {
   /** The latest AppState once the session list was read; null before. */
   state(): AppState | null
   notes: Pick<NotesStore, 'addMeetingNote' | 'dropMeetingNotes' | 'meetingNotes' | 'get'>
-  claude(o: { model: string; prompt: string; timeoutMs: number }): Promise<RunResult>
+  /** One claude -p; aborting the signal kills it (a quit, Turn off meetings). */
+  claude(o: { model: string; prompt: string; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult>
+  /** Once, when matching is loaded: what a run cut short by an earlier quit left in the temp folder. */
+  tidy?(): void
 }
 
 /** The meetings' Needs-you items (main/meetingNotices.ts). */
@@ -178,6 +181,8 @@ export class MeetingsIpc {
   /** The offer's watch, once loaded (after consent, with timers only before). */
   private offers: Promise<OfferWatch> | null = null
   private watch: OfferWatch | null = null
+  /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
+  private generation = 0
   constructor(private d: MeetingsDeps) {}
 
   /** A load that failed is not kept: the next call loads again (a full disk now is not one for ever). */
@@ -239,6 +244,7 @@ export class MeetingsIpc {
   }
 
   private async makeService(): Promise<MeetingsService> {
+    const gen = this.generation
     const { store: models, mod: engine } = await this.loadEngine()
     const load =
       this.d.loadService ??
@@ -246,6 +252,13 @@ export class MeetingsIpc {
     const mod = await load()
     const store = new mod.MeetingStore(this.d.meetingsDir)
     const m = this.d.matching
+    if (m?.tidy) {
+      try {
+        m.tidy()
+      } catch (e) {
+        console.error(`meetings: tidy: ${String(e)}`)
+      }
+    }
     const matcher =
       m && mod.Matcher
         ? new mod.Matcher({
@@ -254,6 +267,7 @@ export class MeetingsIpc {
             state: () => m.state(),
             claude: (o) => m.claude(o),
             notice: (n) => this.d.notices?.set(n),
+            clearNotice: (id, kind) => void this.d.notices?.clear(id, kind),
             onChange: (id) => this.d.changed?.(id),
             now: this.d.now,
           })
@@ -276,9 +290,31 @@ export class MeetingsIpc {
       },
       now: this.d.now,
     })
-    this.svc = { store, transcriber, matcher }
+    const svc = { store, transcriber, matcher }
+    if (gen !== this.generation) {
+      // Turned off while it loaded: its store may be read, but nothing is queued or matched.
+      transcriber.stop()
+      matcher?.stop()
+      return svc
+    }
+    this.svc = svc
     transcriber.start()
-    return this.svc
+    return svc
+  }
+
+  /**
+   * Turn off meetings: the queue and matching stop now (a whisper-cli and a claude -p running are
+   * killed) and the loaded service goes. What they left on disk (chunks, a meeting `matching`) is
+   * picked up when the consent is given again.
+   */
+  private dropService(): void {
+    this.generation++
+    const svc = this.svc
+    this.svc = null
+    this.service = null
+    svc?.transcriber.stop()
+    svc?.matcher?.stop()
+    this.engineMod?.killRunning()
   }
 
   /** A transcription that failed is a Needs-you item (Try again); once it goes on, the item goes. */
@@ -329,9 +365,10 @@ export class MeetingsIpc {
               this.d.changed?.(null)
             },
             notice: (t) => this.d.notice(t),
-            // Each chunk is transcribed as it closes; the end finishes the meeting.
-            onChunk: (c) => service.transcriber.add(c),
-            onEnded: (id) => service.transcriber.ended(id),
+            // Each chunk is transcribed as it closes; the end finishes the meeting. The service of
+            // now (a Turn off and a new consent load another); none: the next one finds it on disk.
+            onChunk: (c) => this.svc?.transcriber.add(c),
+            onEnded: (id) => this.svc?.transcriber.ended(id),
             now: this.d.now,
           })
         })
@@ -360,6 +397,8 @@ export class MeetingsIpc {
     if (r) return r
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
     const app = this.watch?.offered ?? null
+    // After a Turn off and a new consent the recorder stays, the queue is loaded again.
+    await this.loadService()
     const res = await (await this.loadRecorder()).start(title)
     if (res.ok) {
       // Recorded from the offer (or with one showing): the call's app is the meeting's, and the chip goes.
@@ -430,7 +469,9 @@ export class MeetingsIpc {
 
   /**
    * will-quit: the queue starts nothing more and every whisper-cli still running is killed (its
-   * chunk stays for the next start). Only what was loaded: a quit never loads main/meetings/.
+   * chunk stays for the next start), as is a claude -p of matching (the meeting stays `matching`;
+   * its temp folder is removed by claudeOnce, else by tidy at the next load). Only what was
+   * loaded: a quit never loads main/meetings/.
    */
   quit(): void {
     this.stopBackground()
@@ -447,7 +488,10 @@ export class MeetingsIpc {
     if (typeof id !== 'string' || !MEETING_ID.test(id)) return { ok: false, message: 'No such meeting.' }
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
     const res = (await this.loadService()).transcriber.retry(id)
-    if (res.ok) this.d.notices?.clear(id, 'failed')
+    if (res.ok) {
+      this.d.notices?.clear(id, 'failed')
+      this.d.notices?.clear(id, 'unmatched')
+    }
     return res
   }
 
@@ -561,6 +605,8 @@ export class MeetingsIpc {
   /** The one way a meeting goes (the page, Janitor): out of the queue, off disk, its item gone. Its notes stay. */
   private dropMeeting(store: MeetingStore, id: string): MeetingsResult {
     this.svc?.transcriber.forget(id)
+    // A match on it writes nothing now (and so drops none of the notes it added).
+    this.svc?.matcher?.forget(id)
     const res = store.delete(id)
     if (!res.ok) return res
     this.d.notices?.clear(id)
@@ -754,8 +800,8 @@ export class MeetingsIpc {
   }
 
   /**
-   * I agree (true) stores the consent; Turn off meetings (false) stops a recording, then clears it
-   * and leaves the stored meetings.
+   * I agree (true) stores the consent; Turn off meetings (false) stops a recording, then clears it,
+   * stops transcription and matching (dropService) and leaves the stored meetings.
    */
   async consent(e: unknown, agree: unknown): Promise<MeetingsAnswer> {
     const r = this.refused(e)
@@ -773,7 +819,10 @@ export class MeetingsIpc {
     if (agree) {
       this.warmService()
       this.startOffers()
-    } else this.stopOffers()
+    } else {
+      this.stopOffers()
+      this.dropService()
+    }
     return this.withModel((await this.loadGate()).setup())
   }
 

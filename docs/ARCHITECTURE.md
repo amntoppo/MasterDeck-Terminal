@@ -1120,7 +1120,12 @@ waits, and writes nothing if accounts appeared meanwhile.
   started; a pause or Stop pressed while it loads goes in front of the start script instead, and the
   page keeps it (`CaptureControl` in `shared/meetingAudio.ts`) until its streams open, so a track
   starts paused or the page ends at once. **Turn off meetings** during a recording stops it first
-  (`stop('consent')`), then clears the consent. Stop waits up to
+  (`stop('consent')`), then clears the consent and drops the service (`dropService`): the queue and
+  the matcher stop, a running whisper-cli (`killRunning`) and `claude -p` (its `AbortSignal`) are
+  killed, and `svc` / `service` go, so nothing is transcribed or sent to Claude after it. What they
+  left on disk (chunks, a meeting `matching`) is taken by the next service, loaded at the next
+  consent; a service still loading then is stopped, not kept. The recorder stays loaded (its IPC
+  listeners are registered once) and hands chunks to the service of now (`this.svc`). Stop waits up to
   10 s for the window's `ended`, then the meeting gets `ended`, `pausedMs` and state `transcribing`
   (or `failed` with "Nothing was recorded." when no chunk came). Past `MEETING_MAX_MS` (4 h, checked
   every 10 s) it stops with a notice. A window that ends by itself (`mic-refused`, `mic-ended`, a
@@ -1210,9 +1215,12 @@ waits, and writes nothing if accounts appeared meanwhile.
   matcher again. `loadEngine()` passes `deps.fetch` (`index.ts`: Electron's `net.fetch`) to
   `ModelStore` and runs `cleanParts()`; a download is refused before the pick is stored when one is
   running.
-- `will-quit` calls `meetings.quit()`: the queue starts nothing more and `killRunning()` stops
-  whisper-cli (only if those modules were loaded; a run killed then is not a failure, its chunk is
-  transcribed at the next start).
+- `will-quit` calls `meetings.quit()`: the queue starts nothing more, `killRunning()` stops
+  whisper-cli and `Matcher.stop()` aborts the `claude -p` running (only if those modules were
+  loaded; a run killed then is not a failure: its chunk is transcribed, its meeting matched, at the
+  next start). `claudeOnce` still removes its temp folder after the kill; a folder a quit left
+  anyway is removed by `MatchingDeps.tidy` (`tidyScratch` in `main/claudeOnce.ts`:
+  `<tmpdir>/masterdeck-meeting-*` older than 15 minutes) when matching loads next.
 - A load of the engine, the service or the recorder that failed is not kept (`MeetingsIpc.once`):
   the next call loads again.
 
@@ -1243,7 +1251,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   lines as quotes (`> **Others** 12:04 — …`, stopping before `NOTE_BODY_MAX`), and `[Open in
   Meetings](masterdeck://meetings/<id>?t=<s>)` at the first quote. Every piece of untrusted text goes
   through `mdText` (escapes the marks that make links, images, emphasis and tags, and a line start
-  that would be a heading, list or quote; a bare https address stays a visible address). The note is
+  that would be a heading, list or quote, each with an escape `parseInline` reads back, `\:` and
+  `\=` included; a bare https address stays a visible address). The note is
   drawn with `MarkdownView html={false}`, whose `safeHref` links only https; the one other address
   a link may carry is exactly this one (`meetingLink`, see "Meetings: the page").
 - `main/meetings/matcher.ts` (`Matcher`, loaded with the store and transcriber by `loadService`): one
@@ -1259,7 +1268,10 @@ waits, and writes nothing if accounts appeared meanwhile.
   timeout, no text, no valid JSON) leaves it `failed` with an error starting `MATCH_FAILED` ("Could
   not match: ") and nothing written. Nothing said: `done` without asking. `addMeetingNote` strips
   control characters from the title and body and cuts the title at `NOTE_TITLE_MAX` (machine-made
-  text), and `asNoteMeeting` needs `at > 0`.
+  text), and `asNoteMeeting` needs `at > 0`. A run that worked clears the meeting's `unmatched`
+  item (`clearNotice`), with or without notes. Before it drops any note it checks again that the
+  meeting is there and still `matching`, and a meeting deleted while queued or matched
+  (`Matcher.forget`, from `MeetingsIpc.dropMeeting`) gets nothing written: the notes it added stay.
 - `meetingsRematch(id)` (`meetings:rematch`, `blocked`; refused off macOS, from a browser, for a bad
   id, before consent) → `Matcher.rematch`: a `done` meeting or one whose matching failed; it drops the
   unedited notes first (refused when one could not be removed), sets `matching` and matches.
@@ -1268,7 +1280,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   30 days; outside `main/meetings/` because `Sources.build()` reads it through `setMeetingNotices`).
   The matcher sets `added` (counts of session and ticket notes) or `unmatched` (the reason);
   `MeetingsIpc` sets `failed` from the transcriber's `onChange` for a transcription failure and
-  clears it once the meeting goes on. Actions: `open` (`meetings.seen`: the item resolves; the
+  clears it once the meeting goes on; Try again clears `failed` and `unmatched`. Actions: `open` (`meetings.seen`: the item resolves; the
   window opens the meeting), `rematch`, `retry`, all through `runInboxAction`, refused for a remote
   client there and for a browser in `inboxActCall`. Off the backend: `toRemoteSnapshot` leaves the
   kind out. A web tab shows the card with Dismiss only.
@@ -1319,7 +1331,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   length until the element reports one.
 - `masterdeck://meetings/<id>?t=<s>` links: `meetingLink` (`shared/markdown.ts`) accepts exactly
   that shape (an id matching `m-<32 hex>`, `t` up to six digits), and `parseInline` makes it a link in
-  a `[text](…)` only (a bare one stays text); `safeHref` stays https only. `MarkdownView`'s `Link`
+  a `[text](…)` only (a bare one stays text), and only with `html: false` (a note; in an issue's
+  body it shows the words only); `safeHref` stays https only. `MarkdownView`'s `Link`
   turns it into an in-app link in the window (`openMeetingAt` → the opener `App.tsx` sets:
   Meetings view, that meeting and time, the Notes panel closed) and plain text on the web. Needs
   you's **Open** (`MeetingCard` → `onOpenMeeting`) opens the same way.

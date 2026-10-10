@@ -224,11 +224,16 @@ describe('meeting links', () => {
   const id = 'm-' + 'a1'.repeat(16)
   const href = `masterdeck://meetings/${id}?t=75`
 
-  it('exactly masterdeck://meetings/<id>?t=<seconds> is a link, in notes and in issues', () => {
+  it('exactly masterdeck://meetings/<id>?t=<seconds> is a link in a note; in an issue (html) only its words', () => {
     expect(meetingLink(href)).toEqual({ id, t: 75 })
     const link = [{ t: 'link', href, c: [t('Open in Meetings')] }]
     expect(parseInline(`[Open in Meetings](${href})`, 0, false)).toEqual(link)
-    expect(parseInline(`[Open in Meetings](${href})`)).toEqual(link)
+    expect(parseInline(`[Open in Meetings](${href})`)).toEqual([t('Open in Meetings')])
+    expect(parseMarkdown(`see [Open](${href})`)).toEqual([{ t: 'para', c: [t('see Open')] }])
+  })
+
+  it('\\: and \\= are escapes (a summary starting with a colon shows no backslash)', () => {
+    expect(parseInline('\\: Ship it \\= now', 0, false)).toEqual([t(': Ship it = now')])
   })
 
   it('any other masterdeck: address, or another shape, is no link (a note shows what was typed)', () => {

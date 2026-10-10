@@ -591,7 +591,7 @@ describe('transcription wiring', () => {
         return notices.length !== before
       },
     }
-    const claude = vi.fn(async () => ({
+    const claude = vi.fn(async (_o?: { signal?: AbortSignal }) => ({
       code: 0,
       stdout: JSON.stringify({ title: 'Hello', summary: 'Hi.', matches: [{ candidate: 'c1', segments: [[0, 0]], summary: 'Said hello.', actions: [], confidence: 'high' }] }),
       stderr: '',
@@ -639,6 +639,106 @@ describe('transcription wiring', () => {
     expect(await t.ipc.retry(local, f.meeting.id)).toEqual({ ok: true })
     expect(t.notices.filter((n) => n.kind === 'failed')).toEqual([])
     await vi.waitFor(() => expect(svc.store.get(f.meeting.id)?.state).toBe('done'))
+    t.cleanup()
+  })
+
+  it('Turn off meetings stops the queue and matching now (whisper and claude killed), drops the service; the next consent picks up what is on disk', async () => {
+    const t = await withMatching()
+    let signal: AbortSignal | undefined
+    t.claude.mockImplementationOnce(
+      (o?: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          signal = o?.signal
+          o?.signal?.addEventListener('abort', () => resolve({ code: -4, stdout: '', stderr: 'aborted' }))
+        }),
+    )
+    const svc = await t.ipc.loadService()
+    await t.ipc.model(local, 'download', 'base')
+    const m = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    svc.store.update(m.meeting.id, (x) => ({ ...x, state: 'matching', ended: x.started + 1000, segments: [{ start: 0, end: 500, speaker: 'you', text: 'hello alice' }] }))
+    void svc.matcher!.match(m.meeting.id)
+    await vi.waitFor(() => expect(t.claude).toHaveBeenCalledTimes(1))
+
+    expect(await t.ipc.consent(local, false)).toMatchObject({ ok: true, agreed: false })
+    expect(signal?.aborted).toBe(true)
+    expect(t.calls).toContain('killRunning')
+    // The old queue takes nothing more: a chunk written now is not transcribed.
+    const f = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!f.ok) throw new Error(f.message)
+    svc.store.writeChunk(f.meeting.id, 'you', 0, new Uint8Array([1]))
+    svc.store.update(f.meeting.id, (x) => ({ ...x, state: 'transcribing', ended: x.started + 1000 }))
+    svc.transcriber.add({ id: f.meeting.id, track: 'you', seq: 0 })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(t.transcribe).not.toHaveBeenCalled()
+    expect(svc.store.get(m.meeting.id)?.state).toBe('matching')
+    expect(t.notes.meetingNotes(m.meeting.id)).toEqual([])
+    // The page still reads the meetings (the store alone).
+    expect(await t.ipc.list(local, 0, Number.MAX_SAFE_INTEGER)).toMatchObject({ ok: true, agreed: false })
+
+    // A new consent loads a new queue: the chunk is transcribed and the meeting left matching is matched.
+    await t.ipc.consent(local, true)
+    const again = await t.ipc.loadService()
+    expect(again).not.toBe(svc)
+    await vi.waitFor(() => expect(again.store.get(f.meeting.id)?.state).toBe('done'))
+    await vi.waitFor(() => expect(again.store.get(m.meeting.id)?.state).toBe('done'))
+    expect(t.transcribe).toHaveBeenCalledTimes(1)
+    expect(t.notes.meetingNotes(m.meeting.id)).toHaveLength(1)
+    t.cleanup()
+  })
+
+  it('a quit kills the claude -p of matching; the meeting stays matching', async () => {
+    const t = await withMatching()
+    let signal: AbortSignal | undefined
+    t.claude.mockImplementationOnce(
+      (o?: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          signal = o?.signal
+          o?.signal?.addEventListener('abort', () => resolve({ code: -4, stdout: '', stderr: 'aborted' }))
+        }),
+    )
+    const svc = await t.ipc.loadService()
+    const m = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    svc.store.update(m.meeting.id, (x) => ({ ...x, state: 'matching', ended: x.started + 1000, segments: [{ start: 0, end: 500, speaker: 'you', text: 'hello alice' }] }))
+    const run = svc.matcher!.match(m.meeting.id)
+    await vi.waitFor(() => expect(t.claude).toHaveBeenCalledTimes(1))
+    t.ipc.quit()
+    expect(signal?.aborted).toBe(true)
+    await run
+    expect(svc.store.get(m.meeting.id)?.state).toBe('matching')
+    expect(t.notices).toEqual([])
+    t.cleanup()
+  })
+
+  it('matching runs tidy once when it loads', async () => {
+    const tidy = vi.fn()
+    const t = withService(agreed, {}, { matching: { state: () => null, notes: { addMeetingNote: vi.fn(), dropMeetingNotes: vi.fn(), meetingNotes: vi.fn(), get: vi.fn() } as never, claude: vi.fn(), tidy } })
+    await t.ipc.loadService()
+    await t.ipc.loadService()
+    expect(tidy).toHaveBeenCalledTimes(1)
+    t.cleanup()
+  })
+
+  it('Try again and a match that worked clear an old "could not match" item', async () => {
+    const t = await withMatching()
+    const svc = await t.ipc.loadService()
+    const m = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    svc.store.update(m.meeting.id, (x) => ({ ...x, state: 'matching', ended: x.started + 1000, segments: [{ start: 0, end: 500, speaker: 'you', text: 'hello alice' }] }))
+    t.claude.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ title: '', summary: 'Hi.', matches: [] }), stderr: '' })
+    t.notices.push({ meetingId: m.meeting.id, title: '', at: 1, kind: 'unmatched', reason: 'boom' })
+    await svc.matcher!.match(m.meeting.id)
+    expect(svc.store.get(m.meeting.id)?.state).toBe('done')
+    expect(t.notices).toEqual([])
+    // A failed transcription with a stale item from before: Try again clears both kinds.
+    const f = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!f.ok) throw new Error(f.message)
+    svc.store.writeChunk(f.meeting.id, 'you', 0, new Uint8Array([1]))
+    svc.store.update(f.meeting.id, (x) => ({ ...x, state: 'failed', ended: x.started + 1000, error: 'Transcription failed: x' }))
+    t.notices.push({ meetingId: f.meeting.id, title: '', at: 1, kind: 'unmatched', reason: 'old' })
+    expect(await t.ipc.retry(local, f.meeting.id)).toEqual({ ok: true })
+    expect(t.notices.filter((n) => n.meetingId === f.meeting.id)).toEqual([])
     t.cleanup()
   })
 

@@ -247,4 +247,79 @@ describe('Matcher', () => {
     await q.m.match(other.id)
     expect(store.get(other.id)?.state).toBe('matching')
   })
+
+  it('a meeting deleted during a pending match keeps the notes it added, and nothing is written', async () => {
+    let release: (r: RunResult) => void = () => {}
+    const t = setup()
+    const meeting = transcribed()
+    await t.m.match(meeting.id)
+    const before = notes.meetingNotes(meeting.id).map((x) => x.id)
+    expect(before).toHaveLength(2)
+    t.claude.mockImplementationOnce(() => new Promise<RunResult>((r) => (release = r)))
+    expect(t.m.rematch(meeting.id)).toEqual({ ok: true })
+    await vi.waitFor(() => expect(t.claude).toHaveBeenCalledTimes(2))
+    // Delete as MeetingsIpc does: forget, then the file goes.
+    t.m.forget(meeting.id)
+    expect(store.delete(meeting.id).ok).toBe(true)
+    release({ code: 0, stdout: answer(), stderr: '' })
+    await t.m.match('m-' + 'f'.repeat(32))
+    expect(notes.meetingNotes(meeting.id).map((x) => x.id)).toEqual(before)
+    expect(store.get(meeting.id)).toBeNull()
+  })
+
+  it('a meeting no longer matching when Claude answers keeps its notes', async () => {
+    let release: (r: RunResult) => void = () => {}
+    const t = setup()
+    const meeting = transcribed()
+    await t.m.match(meeting.id)
+    const before = notes.meetingNotes(meeting.id).map((x) => x.id)
+    t.claude.mockImplementationOnce(() => new Promise<RunResult>((r) => (release = r)))
+    expect(t.m.rematch(meeting.id)).toEqual({ ok: true })
+    await vi.waitFor(() => expect(t.claude).toHaveBeenCalledTimes(2))
+    store.update(meeting.id, (x) => ({ ...x, state: 'done' }))
+    release({ code: 0, stdout: answer({ summary: 'Other.' }), stderr: '' })
+    await t.m.match('m-' + 'f'.repeat(32))
+    expect(notes.meetingNotes(meeting.id).map((x) => x.id)).toEqual(before)
+    expect(store.get(meeting.id)?.summary).toBe('The login bug and rate limits.')
+  })
+
+  it('stop() kills the claude -p running now; the meeting stays matching', async () => {
+    let signal: AbortSignal | undefined
+    const claude = vi.fn(
+      (o: { signal?: AbortSignal }) =>
+        new Promise<RunResult>((resolve) => {
+          signal = o.signal
+          o.signal?.addEventListener('abort', () => resolve({ code: -4, stdout: '', stderr: 'aborted' }))
+        }),
+    )
+    const notices: MeetingNotice[] = []
+    const m = new Matcher({ store, notes, state: () => STATE, claude, notice: (n) => notices.push(n), now: () => clock, wait: async () => {} })
+    const meeting = transcribed()
+    const run = m.match(meeting.id)
+    await vi.waitFor(() => expect(claude).toHaveBeenCalledTimes(1))
+    m.stop()
+    expect(signal?.aborted).toBe(true)
+    await run
+    expect(store.get(meeting.id)?.state).toBe('matching')
+    expect(notices).toEqual([])
+    expect(notes.meetingNotes(meeting.id)).toEqual([])
+  })
+
+  it('a match that worked clears an old "could not match" item, with or without notes', async () => {
+    const cleared: string[] = []
+    const m = new Matcher({
+      store,
+      notes,
+      state: () => STATE,
+      claude: async () => ({ code: 0, stdout: answer({ matches: [] }), stderr: '' }),
+      notice: () => {},
+      clearNotice: (id, kind) => cleared.push(`${id}:${kind}`),
+      now: () => clock,
+      wait: async () => {},
+    })
+    const meeting = transcribed()
+    await m.match(meeting.id)
+    expect(store.get(meeting.id)?.state).toBe('done')
+    expect(cleared).toEqual([`${meeting.id}:unmatched`])
+  })
 })

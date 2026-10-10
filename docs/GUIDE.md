@@ -958,7 +958,9 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   and removes only audio (a transcript is never removed by a timer; Janitor → Meetings does that
   when you ask). The meeting being recorded is left alone.
 - **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
-  offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay. macOS keeps the permissions it gave until you remove them in
+  offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay.
+  Transcribing and matching stop at once: nothing more is transcribed or sent to Claude until you
+  agree again, and then they go on where they stopped. macOS keeps the permissions it gave until you remove them in
   System Settings.
 
 macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.

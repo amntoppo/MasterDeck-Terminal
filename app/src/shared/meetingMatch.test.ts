@@ -14,7 +14,7 @@ import {
   type Candidate,
 } from './meetingMatch'
 import type { Segment } from './meetings'
-import { parseMarkdown } from './markdown'
+import { markdownText, parseMarkdown } from './markdown'
 import type { AppState, Issue, Pr, Session } from './types'
 
 const sess = (key: string, o: Partial<Session> = {}): Session => ({
@@ -330,7 +330,10 @@ describe('small helpers', () => {
   it('mdText escapes marks and line starts; meetingWhen and meetingHref', () => {
     expect(mdText('a *b* [c](d) <e>\nnext')).toBe('a \\*b\\* \\[c\\](d) \\<e\\> next')
     expect(mdText('# x')).toBe('\\# x')
-    expect(mdText('1. x')).toBe('\\1. x')
+    expect(mdText('1. x')).toBe('1\\. x')
+    // Every escape mdText writes reads back as the text itself, at a line's start too.
+    for (const s of [': starts with a colon', '= equals', '1. one', '2) two', '# h', '> q', '+ p', '- m', 'a|b ~c~ !d'])
+      expect(markdownText(mdText(s)), s).toBe(s)
     expect(meetingWhen(new Date(2026, 0, 2, 3, 4).getTime())).toBe('2026-01-02 03:04')
     expect(meetingHref('m-x', 12.7)).toBe('masterdeck://meetings/m-x?t=12')
   })

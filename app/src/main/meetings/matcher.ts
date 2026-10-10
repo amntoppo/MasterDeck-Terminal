@@ -33,9 +33,11 @@ export interface MatcherDeps {
   /** The latest AppState once the session list was read; null before. */
   state(): AppState | null
   /** One `claude -p` (main/claudeOnce.ts in the app; a fake in tests): the prompt in, Claude's text out. */
-  claude(o: { model: string; prompt: string; timeoutMs: number }): Promise<RunResult>
+  claude(o: { model: string; prompt: string; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult>
   /** Needs you: notes added, or the meeting could not be matched. */
   notice(n: MeetingNotice): void
+  /** A Needs-you item of the meeting goes (a match that worked clears an old "could not match"). */
+  clearNotice?(meetingId: string, kind: MeetingNotice['kind']): void
   onChange?(id: string): void
   now?: () => number
   wait?: (ms: number) => Promise<void>
@@ -69,12 +71,17 @@ export class Matcher {
   private chain: Promise<void> = Promise.resolve()
   private queued = new Set<string>()
   private stopped = false
+  /** Meetings deleted while queued or matched: nothing is written for them. */
+  private forgotten = new Set<string>()
+  /** The claude -p running now: stop() kills it. */
+  private running: AbortController | null = null
 
   constructor(private d: MatcherDeps) {}
 
   /** The transcriber handed over a meeting in `matching`. */
   match(id: string): Promise<void> {
     if (this.stopped || this.queued.has(id)) return this.chain
+    this.forgotten.delete(id)
     this.queued.add(id)
     this.chain = this.chain.then(async () => {
       try {
@@ -83,6 +90,7 @@ export class Matcher {
         this.fail(id, String(e))
       } finally {
         this.queued.delete(id)
+        this.forgotten.delete(id)
       }
     })
     return this.chain
@@ -105,9 +113,24 @@ export class Matcher {
     return { ok: true }
   }
 
-  /** Quitting: nothing more starts. A meeting left `matching` is matched at the next start. */
+  /**
+   * Quitting or Turn off meetings: nothing more starts and a claude -p running now is killed. A
+   * meeting left `matching` is matched at the next start (or the next consent).
+   */
   stop(): void {
     this.stopped = true
+    this.running?.abort()
+  }
+
+  /** A meeting was deleted: a run on it writes nothing (no notes dropped, none added). */
+  forget(id: string): void {
+    if (this.queued.has(id)) this.forgotten.add(id)
+  }
+
+  /** Whether a run on this meeting must stop: quitting, deleted, or no longer `matching`. */
+  private gone(id: string): boolean {
+    if (this.stopped || this.forgotten.has(id)) return true
+    return this.d.store.get(id)?.state !== 'matching'
   }
 
   private async readyState(): Promise<AppState | null> {
@@ -121,6 +144,7 @@ export class Matcher {
   }
 
   private fail(id: string, why: string): void {
+    if (this.stopped || this.forgotten.has(id) || !this.d.store.get(id)) return
     const reason = matchReason(why)
     const u = this.d.store.update(id, (x) => ({ ...x, state: 'failed', error: `${MATCH_FAILED}${reason}` }))
     if (!u.ok) return
@@ -136,18 +160,28 @@ export class Matcher {
       // Nothing was said: nothing to match, nothing to ask.
       this.d.store.update(id, (x) => ({ ...x, state: 'done', matches: [] }))
       this.d.onChange?.(id)
+      this.d.clearNotice?.(id, 'unmatched')
       return
     }
     const state = await this.readyState()
-    if (this.stopped) return
+    if (this.stopped || this.gone(id)) return
     if (!state) return this.fail(id, 'MasterDeck has not read its sessions yet.')
     const candidates = candidatesOf(state)
     const parts = transcriptParts(m.segments)
     const answers: Answer[] = []
     for (const [n, p] of parts.entries()) {
-      const r = await this.d.claude({ model: MATCH_MODEL, prompt: matchPrompt(candidates, m.segments, { ...p, n: n + 1, of: parts.length }), timeoutMs: MATCH_TIMEOUT_MS })
-      // Quitting: the meeting stays `matching`, and the next start matches it.
+      const ac = new AbortController()
+      this.running = ac
+      let r: RunResult
+      try {
+        r = await this.d.claude({ model: MATCH_MODEL, prompt: matchPrompt(candidates, m.segments, { ...p, n: n + 1, of: parts.length }), timeoutMs: MATCH_TIMEOUT_MS, signal: ac.signal })
+      } finally {
+        if (this.running === ac) this.running = null
+      }
+      // Quitting or turned off: the meeting stays `matching`, and the next start matches it.
       if (this.stopped) return
+      // Deleted (or no longer matching) while Claude read: nothing to write.
+      if (this.gone(id)) return
       if (r.code !== 0) return this.fail(id, r.code === -2 ? 'Claude took longer than 5 minutes.' : (r.stderr || r.stdout || `claude exited ${r.code}`).slice(0, 1000))
       if (!r.stdout.trim()) return this.fail(id, 'Claude gave no answer.')
       const c = checkAnswer(r.stdout, candidates, p)
@@ -160,6 +194,8 @@ export class Matcher {
 
   private async write(m: Meeting, candidates: Candidate[], answer: Answer): Promise<void> {
     const id = m.id
+    // Checked before its notes go: a meeting deleted meanwhile keeps the notes it added (they are the user's).
+    if (this.gone(id)) return
     const drop = this.d.notes.dropMeetingNotes(id, true)
     if (drop.failed.length) return this.fail(id, 'Could not remove the notes it added before.')
     // The title as it is now: the user may have named it while Claude read.
@@ -205,6 +241,7 @@ export class Matcher {
     }))
     if (!u.ok) return this.fail(id, u.message)
     this.d.onChange?.(id)
+    this.d.clearNotice?.(id, 'unmatched')
     if (sessions + tickets) this.d.notice({ meetingId: id, title: u.meeting.title, at: (this.d.now ?? Date.now)(), kind: 'added', sessions, tickets })
   }
 }

@@ -1,8 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { claudeOnce } from './claudeOnce'
+import { claudeOnce, tidyScratch } from './claudeOnce'
 import { makeRunner } from './run'
 
 let root: string
@@ -34,4 +34,33 @@ describe('claudeOnce', () => {
     expect(existsSync(cwd!)).toBe(false)
     expect(readdirSync(projects)).toEqual(['-kept'])
   }, 20_000)
+
+  it('an abort kills claude at once (code -4) and still removes its folder', async () => {
+    const log = join(root, 'cwd.txt')
+    const bin = join(root, 'claude')
+    writeFileSync(bin, `#!/bin/bash\npwd > "${log}"\nexec sleep 30\n`)
+    chmodSync(bin, 0o755)
+    const ac = new AbortController()
+    const t0 = Date.now()
+    const p = claudeOnce({ run: makeRunner(() => process.env), claude: bin, model: 'sonnet', prompt: 'x', timeoutMs: 20_000, projectsDir: null, prefix: 'md-once-abort-', signal: ac.signal })
+    for (let i = 0; i < 200 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 10))
+    ac.abort()
+    expect(await p).toMatchObject({ code: -4 })
+    expect(Date.now() - t0).toBeLessThan(10_000)
+    expect(existsSync(readFileSync(log, 'utf8').trim())).toBe(false)
+  }, 20_000)
+})
+
+describe('tidyScratch', () => {
+  it('removes old folders of the prefix and their empty project folders; a new one and others stay', () => {
+    const tmp = join(root, 'tmp')
+    const projects = join(root, 'projects')
+    for (const d of ['masterdeck-meeting-old', 'masterdeck-meeting-new', 'other-old']) mkdirSync(join(tmp, d), { recursive: true })
+    mkdirSync(join(projects, '-tmp-masterdeck-meeting-old'), { recursive: true })
+    const old = (Date.now() - 3_600_000) / 1000
+    for (const d of ['masterdeck-meeting-old', 'other-old']) utimesSync(join(tmp, d), old, old)
+    tidyScratch('masterdeck-meeting-', projects, 600_000, Date.now(), tmp)
+    expect(readdirSync(tmp).sort()).toEqual(['masterdeck-meeting-new', 'other-old'])
+    expect(readdirSync(projects)).toEqual([])
+  })
 })

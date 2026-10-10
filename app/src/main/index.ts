@@ -93,7 +93,7 @@ import { serveMeetingAudio } from "./meetingMedia";
 import { copyMeetingsFixture } from "./meetingsFixture";
 import { MEDIA_SCHEME } from "@shared/meetingsPage";
 import { offerText } from "@shared/meetingApps";
-import { claudeOnce } from "./claudeOnce";
+import { claudeOnce, tidyScratch } from "./claudeOnce";
 import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
@@ -3405,6 +3405,9 @@ const meetings = new MeetingsIpc({
     notes,
     claude: (o) =>
       claudeOnce({ run, claude: claudeBin, ...o, projectsDir: paths.projectsDir, prefix: "masterdeck-meeting-" }),
+    // A quit may end MasterDeck before claudeOnce removes its folder: folders older than a run can
+    // last (MATCH_TIMEOUT_MS is 5 minutes; main/meetings/ is not imported here) go at the next load.
+    tidy: () => tidyScratch("masterdeck-meeting-", paths.projectsDir, 15 * 60_000),
   },
   notices: meetingNotices,
   // The Meetings page: changes to the window only; its questions and save dialogs on the Mac.

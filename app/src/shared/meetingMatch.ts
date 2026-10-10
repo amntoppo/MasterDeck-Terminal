@@ -321,7 +321,7 @@ export function mdText(s: string): string {
     out += esc(one.slice(at, m.index)) + m[0]
     at = m.index + m[0].length
   }
-  return (out + esc(one.slice(at))).replace(/^([#+\-=>:]|\d+[.)])/, '\\$1')
+  return (out + esc(one.slice(at))).replace(/^([#+\-=>:])/, '\\$1').replace(/^(\d+)([.)])/, '$1\\$2')
 }
 /** What parseInline (shared/markdown.ts) links as a bare address. */
 const BARE_HTTPS = /(?<![A-Za-z0-9])https:\/\/[^\s<>]+/g
