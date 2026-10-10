@@ -3363,8 +3363,8 @@ const confirmStopRecording = oneAtATime(async (parent: BrowserWindow | null, the
     message: "A meeting is being recorded.",
     detail:
       then === "restart"
-        ? "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs. Terminals in MasterDeck close; Claude sessions keep running in the background."
-        : "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs.",
+        ? "Stopping keeps what was recorded; the transcript is made the next time MasterDeck starts. Terminals in MasterDeck close; Claude sessions keep running in the background."
+        : "Stopping keeps what was recorded; the transcript is made the next time MasterDeck starts.",
   };
   const choice = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
   if (choice.response !== 1) return false;

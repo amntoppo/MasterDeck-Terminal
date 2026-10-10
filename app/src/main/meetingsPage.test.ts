@@ -246,7 +246,8 @@ describe('the media scheme’s file', () => {
     expect(await page(agreed, { platform: 'linux' }).ipc.audioFile(id)).toBeNull()
   })
 
-  it('a meeting folder that is a link elsewhere is not served', async () => {
+  // Symlinks need extra rights on Windows: POSIX only.
+  it.skipIf(process.platform === 'win32')('a meeting folder that is a link elsewhere is not served', async () => {
     const p = page()
     const id = p.make('A', 1000)
     const other = mkdtempSync(join(tmpdir(), 'md-meetings-other-'))
@@ -257,7 +258,7 @@ describe('the media scheme’s file', () => {
     expect(await p.ipc.audioFile(id)).toBeNull()
   })
 
-  it('reads the meeting once for many requests; the folder and file are checked each time; a delete forgets it', async () => {
+  it.skipIf(process.platform === 'win32')('reads the meeting once for many requests; the folder and file are checked each time; a delete forgets it', async () => {
     const p = page()
     const id = p.make('A', 1000)
     p.store.appendAudio(id, new Uint8Array([1]))

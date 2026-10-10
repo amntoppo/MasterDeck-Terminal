@@ -11,7 +11,8 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('claudeOnce', () => {
+// Stand-in claudes are bash scripts: POSIX only (as the repo's other bash tests).
+describe.skipIf(process.platform === 'win32')('claudeOnce', () => {
   it('runs a stand-in claude from an empty temp folder with the prompt on stdin, then removes the folder and its empty project folder', async () => {
     const projects = join(root, 'projects')
     mkdirSync(join(projects, '-kept'), { recursive: true })
@@ -36,18 +37,28 @@ describe('claudeOnce', () => {
   }, 20_000)
 
   it('an abort kills claude at once (code -4) and still removes its folder', async () => {
-    const log = join(root, 'cwd.txt')
     const bin = join(root, 'claude')
-    writeFileSync(bin, `#!/bin/bash\npwd > "${log}"\nexec sleep 30\n`)
+    writeFileSync(bin, `#!/bin/bash\nexec sleep 30\n`)
     chmodSync(bin, 0o755)
     const ac = new AbortController()
-    const t0 = Date.now()
-    const p = claudeOnce({ run: makeRunner(() => process.env), claude: bin, model: 'sonnet', prompt: 'x', timeoutMs: 20_000, projectsDir: null, prefix: 'md-once-abort-', signal: ac.signal })
-    for (let i = 0; i < 200 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 10))
-    ac.abort()
-    expect(await p).toMatchObject({ code: -4 })
-    expect(Date.now() - t0).toBeLessThan(10_000)
-    expect(existsSync(readFileSync(log, 'utf8').trim())).toBe(false)
+    const real = makeRunner(() => process.env)
+    let cwd: string | undefined
+    let abortedAt = 0
+    // Abort shortly after the spawn, without waiting on anything the script writes.
+    const run: typeof real = (cmd, args, opts) => {
+      cwd = opts?.cwd
+      setTimeout(() => {
+        abortedAt = Date.now()
+        ac.abort()
+      }, 50)
+      return real(cmd, args, opts)
+    }
+    const r = await claudeOnce({ run, claude: bin, model: 'sonnet', prompt: 'x', timeoutMs: 20_000, projectsDir: null, prefix: 'md-once-abort-', signal: ac.signal })
+    expect(r).toMatchObject({ code: -4 })
+    expect(abortedAt).toBeGreaterThan(0)
+    expect(Date.now() - abortedAt).toBeLessThan(5_000)
+    expect(cwd).toMatch(/md-once-abort-/)
+    expect(existsSync(cwd!)).toBe(false)
   }, 20_000)
 })
 

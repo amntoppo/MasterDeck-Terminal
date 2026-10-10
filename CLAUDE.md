@@ -77,7 +77,7 @@ cd app
 npm install          # postinstall runs electron-builder install-app-deps (node-pty for Electron)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.node.json + tsconfig.web.json; must be clean
-npm test             # vitest: ~2200 tests in ~183 files (~35 s); predictiveEcho alone ~30 s
+npm test             # vitest: ~2200 tests in ~184 files (~35 s); predictiveEcho alone ~30 s
 npm run build        # electron-vite build → out/
 scripts/whisper.sh   # macOS: whisper-cli for Meetings into resources/whisper/<arch>/ (before packaging; needs cmake)
 npm run build:web    # web app → out/web (MD_API must be https:// in production)
@@ -408,9 +408,11 @@ buttons; it does not go through macOS window drag regions.
   Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; and for
   notes: a note's `link` and `meeting`, Session details → **Notes n**, the panel's filters. Spec in
   the backend repo (`docs/superpowers/specs/2026-10-10-meetings-design.md`, branch
-  `docs/meetings-102`, not pushed). Checked: typecheck, vitest (181 files passed, 2 skipped; 2184
-  tests passed, 4 skipped; one run had `claudeOnce.test.ts`'s kill-timing test fail under load and
-  pass alone and on the next full run), `npm run build`, and the isolated app: Settings → Meetings
+  `docs/meetings-102`, not pushed). What a quit or a crash left is transcribed at the next start
+  once agreed (`background()` loads the queue; no gate, nothing asked of macOS), and Turn off
+  cancels a model download and keeps the pick from before it. Checked: typecheck, vitest twice
+  after the final review's fixes (182 files passed, 2 skipped; 2189 tests passed, 4 skipped, both
+  runs), `npm run build`, and the isolated app: Settings → Meetings
   up to the consent, the Meetings page with `MASTERDECK_MEETINGS_FIXTURE` (list, transcript,
   audio, search), Janitor's Meetings section. Not checked: any real capture or permission prompt, a
   real transcription with a downloaded model, a real `claude -p` match, Zoom's and Webex's real

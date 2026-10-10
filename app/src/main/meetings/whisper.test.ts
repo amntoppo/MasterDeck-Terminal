@@ -47,7 +47,8 @@ describe('findWhisper', () => {
     ...over,
   })
 
-  it('MASTERDECK_WHISPER first, then the app’s own, then PATH; none is null', () => {
+  // Bash stand-ins and the executable bit: POSIX only.
+  it.skipIf(process.platform === 'win32')('MASTERDECK_WHISPER first, then the app’s own, then PATH; none is null', () => {
     const own = script(join(root, 'own', 'whisper-cli'), 'exit 0')
     const bundled = script(join(root, 'Resources', 'whisper', 'arm64', 'whisper-cli'), 'exit 0')
     const dev = script(join(root, 'app', 'resources', 'whisper', 'arm64', 'whisper-cli'), 'exit 0')
@@ -87,7 +88,8 @@ describe('parseWhisperJson', () => {
   })
 })
 
-describe('transcribe', () => {
+// Bash stand-ins for whisper-cli: POSIX only.
+describe.skipIf(process.platform === 'win32')('transcribe', () => {
   it('runs whisper-cli with the model, the file, JSON out, the language and the threads', async () => {
     const bin = fakeWhisper(join(root, 'w'))
     const segs = await transcribe({ bin, wav: '/tmp/acme/chunk-0001.wav', model: '/tmp/acme/ggml-base.bin', language: 'en', threads: 3 })
@@ -140,6 +142,9 @@ describe('transcribe', () => {
     killRunning()
   }, 20_000)
 
+})
+
+describe('whisperThreads', () => {
   it('leaves two cores to the Mac', () => {
     expect(whisperThreads(10)).toBe(8)
     expect(whisperThreads(2)).toBe(1)

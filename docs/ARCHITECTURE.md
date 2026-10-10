@@ -1094,7 +1094,7 @@ waits, and writes nothing if accounts appeared meanwhile.
 - Channels: `meetingsModel(op, id?)` (`meetings:model`; `status`, `pick`, `download`, `cancel`,
   `remove`) answers `ModelsAnswer`; `pick` and `download` need the consent and store
   `settings.meetings.model` through `MeetingsIpc` (`setMeetings`), and `download` runs in the
-  background, its progress sent to the window only (`meetings:modelProgress`, not `emit`).
+  background (Turn off meetings cancels it and puts back the pick from before it), its progress sent to the window only (`meetings:modelProgress`, not `emit`).
   `meetingsRestart()` (`meetings:restart`): a native confirmation (while recording, the recording's
   question instead, with **Stop recording and restart**), then `app.relaunch()` + `app.quit()`
   (quit, so `will-quit` still cleans up; relaunch only once nothing can refuse the quit). Closing
@@ -1141,7 +1141,9 @@ waits, and writes nothing if accounts appeared meanwhile.
   `contextIsolation`, `sandbox`, no node, `backgroundThrottling: false`, autoplay without a gesture,
   no navigation, no new windows), page `renderer/capture.html` + `renderer/src/capture.ts` (a second
   renderer entry in `electron.vite.config.ts`), preload `preload/capture.ts` (a second preload entry:
-  `window.capture.chunk / audio / level / ended`, `ipcRenderer.send` only). The page opens the
+  `window.capture.chunk / audio / level / ended`, `ipcRenderer.send` only; it imports nothing but
+  `electron` and types, its channels written out, since the two preload inputs share chunks and a
+  sandboxed preload can require no chunk: `preload/capture.test.ts`). The page opens the
   microphone (`getUserMedia`, echo cancellation) and the Mac's sound (`getDisplayMedia`, asked
   first, both at once: it needs the user activation), an `AudioContext` at 16 kHz and one
   `AudioWorklet` per track (`renderer/src/pcmWorklet.ts`, loaded with `?worker&url` as a module in
@@ -1208,7 +1210,9 @@ waits, and writes nothing if accounts appeared meanwhile.
   `transcribing` again and its chunks are queued.
 - `MeetingsIpc.loadService()` loads `store.ts` and `transcriber.ts` dynamically, once, after
   consent: the first Record (`loadRecorder` waits for it, and the recorder uses its store), Settings
-  → Meetings (`setup`, `consent(true)`), Try again. Loading runs `start()`: a meeting left
+  → Meetings (`setup`, `consent(true)`), Try again, and `background()` when the app is ready (so
+  what a quit or a crash left is transcribed at the next start without opening Meetings; it loads
+  no gate and asks macOS nothing). Loading runs `start()`: a meeting left
   `recording` with no live recorder (a crash, a forced quit) gets an `ended` from what was saved and
   becomes `transcribing` (or `failed`, "Nothing was recorded.", with no chunk and no line); the
   chunks left on disk are queued first, oldest meeting first; a meeting left `matching` goes to the

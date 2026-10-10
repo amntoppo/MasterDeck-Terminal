@@ -558,6 +558,67 @@ describe('transcription wiring', () => {
     t.cleanup()
   })
 
+  it('background() with the consent transcribes what a quit left, without Meetings opened: no gate, nothing asked of macOS', async () => {
+    const t = withService(agreed)
+    const { MeetingStore } = await import('./meetings/store')
+    const store = new MeetingStore(t.dir)
+    const m = store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    store.writeChunk(m.meeting.id, 'you', 0, new Uint8Array([1]))
+    await t.ipc.model(local, 'download', 'base')
+    t.ipc.background()
+    await vi.waitFor(() => expect(store.get(m.meeting.id)?.state).toBe('done'))
+    expect(t.transcribe).toHaveBeenCalledTimes(1)
+    // The gate (loaded once per file, so its import count says nothing here) was never asked for.
+    expect(t.ipc.loaded).toBe(false)
+    for (const f of Object.values(electron)) expect(f).not.toHaveBeenCalled()
+    t.ipc.quit()
+    t.cleanup()
+  })
+
+  it('background() before consent loads no queue', async () => {
+    const t = withService(DEFAULT_MEETINGS)
+    t.ipc.background()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(t.calls).toEqual([])
+    t.ipc.quit()
+    t.cleanup()
+  })
+
+  it('Turn off meetings cancels a model download running and does not keep its pick', async () => {
+    let finish: ((r: { ok: boolean; cancelled?: boolean; message?: string }) => void) | null = null
+    const calls: string[] = []
+    class SlowStore {
+      ready = () => false
+      path = (id: string) => `/models/${id}.bin`
+      status = () => ({ models: [], downloading: finish ? { id: 'base', received: 0, total: 1, state: 'downloading' } : null })
+      download = (id: string) => (calls.push(`download:${id}`), new Promise((r) => (finish = r)))
+      cancel = () => {
+        calls.push('cancel')
+        finish?.({ ok: false, cancelled: true, message: 'Download cancelled.' })
+        finish = null
+        return true
+      }
+      remove = () => ({ ok: true })
+      cleanParts = () => {}
+    }
+    const t = withService({ ...agreed, model: 'large-v3-turbo-q5_0' }, {}, {
+      loadEngine: async () => ({ ModelStore: SlowStore, findWhisper: () => null, transcribe: vi.fn(), killRunning: () => {} }) as never,
+    })
+    expect(await t.ipc.model(local, 'download', 'base')).toMatchObject({ ok: true, picked: 'base' })
+    expect(t.meetings().model).toBe('base')
+    await t.ipc.consent(local, false)
+    expect(calls).toEqual(['download:base', 'cancel'])
+    expect(t.meetings()).toMatchObject({ consentAt: null, model: 'large-v3-turbo-q5_0' })
+    // With no download running, Turn off keeps the pick.
+    await t.ipc.consent(local, true)
+    await t.ipc.model(local, 'pick', 'base')
+    await t.ipc.consent(local, false)
+    expect(t.meetings().model).toBe('base')
+    t.ipc.quit()
+    t.cleanup()
+  })
+
   it('a download while one runs is refused before the pick is stored', async () => {
     const t = withService({ ...agreed, model: 'large-v3-turbo-q5_0' }, { downloading: true })
     expect(await t.ipc.model(local, 'download', 'base')).toMatchObject({ ok: true, message: 'A speech model is downloading already.', picked: 'large-v3-turbo-q5_0' })

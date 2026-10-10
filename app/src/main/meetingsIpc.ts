@@ -174,6 +174,8 @@ export class MeetingsIpc {
   private engine: Promise<{ store: ModelStore; mod: EngineModule }> | null = null
   /** The engine module once loaded (a quit stops its whisper-cli runs without waiting). */
   private engineMod: EngineModule | null = null
+  /** The download running and the pick it replaced (Turn off cancels it and puts that pick back). */
+  private downloadPick: { id: string; prev: string | null } | null = null
   private service: Promise<MeetingsService> | null = null
   private svc: MeetingsService | null = null
   private recorder: Promise<RecorderLike> | null = null
@@ -240,7 +242,7 @@ export class MeetingsIpc {
 
   /**
    * The meetings on disk and the transcription queue, loaded once, only after consent (the first
-   * Record, Settings → Meetings, Try again). Loading it finishes what a crash or a quit left: the
+   * Record, Settings → Meetings, Try again, or background() at start). Loading it finishes what a crash or a quit left: the
    * chunks on disk are queued first.
    */
   loadService(): Promise<MeetingsService> {
@@ -746,10 +748,13 @@ export class MeetingsIpc {
   /**
    * Called once the app is ready: the Delete audio after timer, first AUDIO_SWEEP_FIRST_MS after
    * start, then daily; and the offer's watch OFFER_POLL_MS after start, when the consent holds.
-   * Only timers: nothing is loaded or asked until one fires.
+   * With the consent it also loads the transcription queue now, so what a quit or a crash left is
+   * transcribed without opening Meetings (no gate, nothing asked of macOS, no capture). Without it,
+   * only timers: nothing is loaded or asked until one fires.
    */
   background(): void {
     if (this.d.platform !== 'darwin' || this.sweepTimer) return
+    this.warmService()
     this.offerTimer = setTimeout(() => this.startOffers(), OFFER_POLL_MS)
     this.offerTimer.unref?.()
     const sweep = () => void this.sweepAudio().catch((err) => console.error(`meetings: delete audio after: ${String(err)}`))
@@ -832,11 +837,18 @@ export class MeetingsIpc {
     // Turn off during a recording: it stops first (its last chunks are written while the consent
     // still holds), then the consent goes. Nothing is recorded after turning off.
     if (!agree && this.rec?.recording) await this.rec.stop('consent')
+    // Turn off during a model download: it is cancelled, and the pick it made is not kept.
+    const dl = agree ? null : this.downloadPick
+    if (!agree && this.engine) {
+      const engine = await this.engine.catch(() => null)
+      engine?.store.cancel()
+    }
+    this.downloadPick = agree ? this.downloadPick : null
     const m = this.d.meetings()
     this.d.setMeetings(
       agree
         ? { ...m, consentAt: (this.d.now ?? Date.now)(), consentVersion: MEETINGS_CONSENT_VERSION }
-        : { ...m, consentAt: null, consentVersion: 0 },
+        : { ...m, consentAt: null, consentVersion: 0, ...(dl && m.model === dl.id ? { model: dl.prev } : {}) },
     )
     if (agree) {
       this.warmService()
@@ -898,6 +910,7 @@ export class MeetingsIpc {
     const { store } = await this.loadEngine()
     // Checked before the pick is stored: a refused download changes nothing.
     if (op === 'download' && store.status().downloading) return this.models('A speech model is downloading already.')
+    const prev = this.d.meetings().model
     this.d.setMeetings({ ...this.d.meetings(), model: m.id })
     if (op === 'pick') {
       // A model already on disk: meetings waiting for one go on.
@@ -905,12 +918,17 @@ export class MeetingsIpc {
       return this.models()
     }
     // Not awaited: a download takes minutes; its end arrives as a progress with state done/failed.
+    const dl = { id: m.id, prev }
+    this.downloadPick = dl
     void store
       .download(m.id, (p) => this.d.progress(p))
       .then((res) => {
         if (res.ok) this.svc?.transcriber.modelReady()
       })
       .catch((err) => this.d.progress({ id: m.id, received: 0, total: m.bytes, state: 'failed', message: String(err) }))
+      .finally(() => {
+        if (this.downloadPick === dl) this.downloadPick = null
+      })
     return this.models()
   }
 

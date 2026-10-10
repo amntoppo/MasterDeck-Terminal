@@ -93,7 +93,8 @@ describe('serveMeetingAudio', () => {
     expect((await serveMeetingAudio(req(URL, undefined, 'POST'), store)).status).toBe(405)
   })
 
-  it('404 for any other URL (the store is never asked), a meeting the store does not hold, or no regular file', async () => {
+  // Symlinks need extra rights on Windows: POSIX only.
+  it.skipIf(process.platform === 'win32')('404 for any other URL (the store is never asked), a meeting the store does not hold, or no regular file', async () => {
     asked.length = 0
     expect((await serveMeetingAudio(req(`masterdeck-media://meeting/${ID}.json`), store)).status).toBe(404)
     expect((await serveMeetingAudio(req('masterdeck-media://meeting/../../etc/passwd'), store)).status).toBe(404)
@@ -107,7 +108,7 @@ describe('serveMeetingAudio', () => {
     expect((await serveMeetingAudio(req(URL), store)).status).toBe(404)
   })
 
-  it('reads from the descriptor it checked: a file swapped for a link afterwards changes nothing; a folder is 404', async () => {
+  it.skipIf(process.platform === 'win32')('reads from the descriptor it checked: a file swapped for a link afterwards changes nothing; a folder is 404', async () => {
     const r = await serveMeetingAudio(req(URL, 'bytes=0-4'), store)
     rmSync(file)
     writeFileSync(join(dir, 'elsewhere'), 'secret')

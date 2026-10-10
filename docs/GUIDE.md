@@ -960,7 +960,8 @@ first-run Setup, so nobody who never wants meetings is asked anything.
 - **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
   offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay.
   Transcribing and matching stop at once: nothing more is transcribed or sent to Claude until you
-  agree again, and then they go on where they stopped. macOS keeps the permissions it gave until you remove them in
+  agree again, and then they go on where they stopped. A speech model downloading then is cancelled,
+  and the model picked before it stays picked. macOS keeps the permissions it gave until you remove them in
   System Settings.
 
 macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.
@@ -1009,7 +1010,8 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
 - If turning a piece into text fails, the meeting says why and keeps the pieces; **Try again**
   starts again where it stopped.
 - If MasterDeck quits or crashes during a recording or a transcript, the pieces on disk are turned
-  into text first the next time you use Meetings (Settings → Meetings, or Record).
+  into text the next time MasterDeck starts (once you agreed on Settings → Meetings), without
+  opening Meetings. Starting asks macOS nothing and records nothing.
 
 ### After the transcript: notes in your sessions
 

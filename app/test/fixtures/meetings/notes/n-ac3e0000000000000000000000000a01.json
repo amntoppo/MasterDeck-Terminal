@@ -1,9 +1,19 @@
 {
   "id": "n-ac3e0000000000000000000000000a01",
-  "title": "Acme web standup: acme/web#42",
-  "body": "**From:** Acme web standup · 2026-10-09 10:00\n\nAlice has the login redirect fix ready for review.\n\n> **Others** 0:01 Alice here. The login redirect fix for issue 42 is ready for review.\n> **You** 0:02 Great, I will look at the pull request after this call.\n\n[Open in Meetings](masterdeck://meetings/m-ac3e000000000000000000000000f1c5?t=2)",
+  "title": "Acme web standup",
+  "body": "**From:** Acme web standup · 2026-10-09 08:00\n\nAlice has the login redirect fix ready for review.\n\n> **Others** 0:01 — Alice here. The login redirect fix for issue 42 is ready for review.\n> **You** 0:02 — Great, I will look at the pull request after this call.\n\n[Open in Meetings](masterdeck://meetings/m-ac3e000000000000000000000000f1c5?t=1)",
   "ticket": null,
-  "meeting": { "id": "m-ac3e000000000000000000000000f1c5", "title": "Acme web standup", "at": 1791532807500 },
+  "link": {
+    "ticket": {
+      "repo": "acme/web",
+      "number": 42
+    }
+  },
+  "meeting": {
+    "id": "m-ac3e000000000000000000000000f1c5",
+    "title": "Acme web standup",
+    "at": 1791532800000
+  },
   "created": 1791532809000,
   "updated": 1791532809000
 }
