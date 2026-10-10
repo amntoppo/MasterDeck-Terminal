@@ -74,6 +74,13 @@ describe('chunkSegments', () => {
       { start: 2 * CHUNK_MS + 10, end: 2 * CHUNK_MS + 20, speaker: 'others', text: 'a b' },
     ])
   })
+
+  it('a start stays inside its chunk, and an end is never before its start', () => {
+    expect(chunkSegments([{ start: CHUNK_MS + 50, end: CHUNK_MS + 90, text: 'late' }, { start: 500, end: 200, text: 'back' }], 'you', 1)).toEqual([
+      { start: 2 * CHUNK_MS - 1, end: 2 * CHUNK_MS + 90, speaker: 'you', text: 'late' },
+      { start: CHUNK_MS + 500, end: CHUNK_MS + 500, speaker: 'you', text: 'back' },
+    ])
+  })
 })
 
 describe('Transcriber', () => {
@@ -115,7 +122,7 @@ describe('Transcriber', () => {
     expect(store.get(m.id)?.progress).toEqual({ done: 1, total: 1, wait: null })
   })
 
-  it('a failure keeps the chunk and marks the meeting failed; others go on; Try again finishes it', async () => {
+  it('a failed chunk stays; the meeting\'s other chunks go on; failed at the end; Try again reruns only what is on disk', async () => {
     const a = make()
     const b = make()
     const { t, w } = queue()
@@ -133,14 +140,16 @@ describe('Transcriber', () => {
     expect(failed.state).toBe('failed')
     // One line, no control character, no home folder.
     expect(failed.error).toBe('Transcription failed: whisper-cli failed (1): bad audio in ~/chunk')
-    // The failed chunk and the one after it are still on disk; the meeting's later chunk did not run.
-    expect(w.calls).toEqual(['you-0', 'others-0', 'you-0'])
-    expect([onDisk(a.id, 'others', 0), onDisk(a.id, 'you', 1)]).toEqual([true, true])
+    // The meeting's later chunk ran; only the failed one is still on disk.
+    expect(w.calls).toEqual(['you-0', 'others-0', 'you-1', 'you-0'])
+    expect([onDisk(a.id, 'you', 0), onDisk(a.id, 'others', 0), onDisk(a.id, 'you', 1)]).toEqual([false, true, false])
+    expect(failed.segments.map((s) => s.text)).toEqual(['you-0 said en', 'you-1 said en'])
 
     expect(t.retry(b.id)).toMatchObject({ ok: false })
     expect(t.retry(a.id)).toEqual({ ok: true })
     expect(store.get(a.id)).toMatchObject({ state: 'transcribing', error: null })
     await vi.waitFor(() => expect(store.get(a.id)?.state).toBe('done'))
+    expect(w.calls.slice(4)).toEqual(['others-0'])
     expect(store.get(a.id)!.segments.map((s) => s.text)).toEqual(['you-0 said en', 'others-0 said en', 'you-1 said en'])
     expect(store.get(a.id)!.progress).toEqual({ done: 3, total: 3, wait: null })
   })
@@ -205,6 +214,93 @@ describe('Transcriber', () => {
     // The meeting being recorded is left alone.
     expect(store.get(live.id)?.state).toBe('recording')
     expect(onDisk(live.id, 'you', 0)).toBe(true)
+  })
+
+  it('a meeting with no model waits; the chunks of meetings with one go past it', async () => {
+    const a = make({ model: 'large' })
+    const b = make({ model: 'large' })
+    const c = make()
+    let large: string | null = null
+    const { t, w } = queue({ modelPath: (m) => (m.model === 'large' ? large : '/models/ggml-base.bin') })
+    t.add(chunk(a.id, 'you', 0))
+    t.add(chunk(b.id, 'you', 0))
+    t.add(chunk(c.id, 'you', 0))
+    for (const m of [a, b, c]) {
+      endRecording(m.id)
+      t.ended(m.id)
+    }
+    await vi.waitFor(() => expect(store.get(c.id)?.state).toBe('done'))
+    expect(w.calls).toEqual(['you-0'])
+    // Each waiting meeting says so.
+    for (const m of [a, b]) expect(store.get(m.id)).toMatchObject({ state: 'transcribing', progress: { done: 0, total: 1, wait: WAIT_MODEL } })
+    large = '/models/ggml-large.bin'
+    t.modelReady()
+    await vi.waitFor(() => expect([store.get(a.id)?.state, store.get(b.id)?.state]).toEqual(['done', 'done']))
+    expect(store.get(a.id)?.progress).toEqual({ done: 1, total: 1, wait: null })
+  })
+
+  it('no meeting list is read per chunk; leftovers are asked for one meeting only', async () => {
+    const m = make()
+    const list = vi.spyOn(store, 'list')
+    const left = vi.spyOn(store, 'leftovers')
+    const { t } = queue()
+    t.add(chunk(m.id, 'you', 0))
+    t.add(chunk(m.id, 'others', 0))
+    endRecording(m.id)
+    t.ended(m.id)
+    await vi.waitFor(() => expect(store.get(m.id)?.state).toBe('done'))
+    expect(list).not.toHaveBeenCalled()
+    expect(left.mock.calls.every((a) => a[0] === m.id)).toBe(true)
+  })
+
+  it('a meeting failed while recording (no engine) is queued again in full when its recording ends', async () => {
+    const m = make()
+    let bin: string | null = null
+    let live: string | null = m.id
+    const { t, w } = queue({ engine: () => bin, live: () => live })
+    t.add(chunk(m.id, 'you', 0))
+    await vi.waitFor(() => expect(store.get(m.id)?.state).toBe('failed'))
+    // Still recording: a later chunk is kept on disk, not transcribed.
+    t.add(chunk(m.id, 'others', 0))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(w.calls).toEqual([])
+    expect(onDisk(m.id, 'others', 0)).toBe(true)
+    // The recorder's Stop puts it back to transcribing; ended() takes every chunk on disk.
+    bin = '/acme/whisper-cli'
+    live = null
+    store.update(m.id, (x) => ({ ...x, ended: clock, state: 'transcribing', error: null }))
+    t.ended(m.id)
+    await vi.waitFor(() => expect(store.get(m.id)?.state).toBe('done'))
+    expect(w.calls).toEqual(['you-0', 'others-0'])
+  })
+
+  it('forget drops a meeting from the queue', async () => {
+    const a = make()
+    const b = make()
+    const { t, w, setModel } = queue()
+    setModel(null)
+    t.add(chunk(a.id, 'you', 0))
+    t.add(chunk(b.id, 'you', 0))
+    t.forget(a.id)
+    setModel('/models/ggml-base.bin')
+    t.modelReady()
+    await vi.waitFor(() => expect(store.get(b.id)?.progress?.done).toBe(1))
+    expect(w.calls).toEqual(['you-0'])
+    expect(onDisk(a.id, 'you', 0)).toBe(true)
+  })
+
+  it('after stop nothing finishes, hands over or is tried again', () => {
+    const done = make({ state: 'transcribing', ended: clock })
+    const failed = make({ state: 'failed', ended: clock, error: 'x', segments: [{ start: 0, end: 5, speaker: 'you', text: 'hi' }] })
+    const handed: string[] = []
+    const { t } = queue({ onTranscribed: (id) => handed.push(id) })
+    t.stop()
+    t.ended(done.id)
+    t.start()
+    expect(t.retry(failed.id)).toMatchObject({ ok: false })
+    expect(handed).toEqual([])
+    expect(store.get(done.id)?.state).toBe('transcribing')
+    expect(store.get(failed.id)?.state).toBe('failed')
   })
 
   it('a meeting left matching is handed to the matcher again at start', () => {

@@ -93,6 +93,11 @@ describe('MeetingStore', () => {
     const left = new MeetingStore(dir).leftovers().map((l) => `${l.id === a.id ? 'a' : 'b'}:${l.track}-${l.seq}`)
     const ofA = ['a:you-0', 'a:you-1', 'a:others-1']
     expect(left).toEqual(a.id < b.id ? [...ofA, 'b:others-0'] : ['b:others-0', ...ofA])
+    // One meeting's only; a bad id or no meeting file: none.
+    expect(store.leftovers(b.id).map((l) => `${l.track}-${l.seq}`)).toEqual(['others-0'])
+    expect(store.leftovers(a.id).map((l) => `${l.track}-${l.seq}`)).toEqual(['you-0', 'you-1', 'others-1'])
+    expect(store.leftovers('../x')).toEqual([])
+    expect(store.leftovers('m-' + '0'.repeat(32))).toEqual([])
     store.removeChunk(a.id, 'you', 0)
     expect(store.leftovers().some((l) => l.id === a.id && l.track === 'you' && l.seq === 0)).toBe(false)
   })

@@ -52,7 +52,9 @@ const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g
 export function chunkSegments(heard: HeardSegment[], track: Speaker, seq: number): Segment[] {
   const offset = seq * CHUNK_MS
   return heard
-    .map((h) => ({ start: offset + h.start, end: offset + h.end, speaker: track, text: h.text.replace(CONTROLS, ' ').trim().slice(0, SEGMENT_TEXT_MAX) }))
+    // A start past the chunk's end would put the line in the next chunk (and a rerun of that one would drop it).
+    .map((h) => ({ h, start: offset + Math.min(Math.max(0, h.start), CHUNK_MS - 1) }))
+    .map(({ h, start }) => ({ start, end: Math.max(start, offset + h.end), speaker: track, text: h.text.replace(CONTROLS, ' ').trim().slice(0, SEGMENT_TEXT_MAX) }))
     .filter((s) => s.text)
 }
 
@@ -65,19 +67,28 @@ function reason(e: unknown): string {
 }
 
 /**
- * The transcription queue (spec §3): one whisper-cli at a time, first in first out. Each closed
- * chunk becomes the meeting's transcript lines (offset seq × CHUNK_MS, speaker from its track),
- * then its WAV is removed. Once a recording ended and its last chunk is text, the two tracks are
- * merged by time and the meeting goes on to matching. A failure keeps the chunk and marks the
- * meeting failed with the reason; retry() queues it again. With no speech model on disk the queue
- * waits (the meeting says so) until modelReady().
+ * The transcription queue (spec §3): one whisper-cli at a time, first in first out among the
+ * meetings that can go on. Each closed chunk becomes the meeting's transcript lines (offset
+ * seq × CHUNK_MS, speaker from its track), then its WAV is removed. Once a recording ended and its
+ * last chunk is text, the two tracks are merged by time and the meeting goes on to matching.
+ *
+ * A meeting with no speech model on disk waits (it says so) until modelReady(), and the chunks of
+ * other meetings go past it. A chunk that fails stays on disk and the meeting's other chunks go on;
+ * once nothing of it waits, the meeting is failed with the first reason, and retry() reruns the
+ * chunks still on disk. A missing whisper-cli fails the meeting at once (every chunk would).
  */
 export class Transcriber {
   private queue: Chunk[] = []
   private queued = new Set<string>()
   /** Chunks made text in this run whose WAV could not be removed: never queued twice. */
   private done = new Set<string>()
+  /** Chunks that failed in this run: not queued again until the meeting is failed (then retry takes them). */
+  private skipped = new Set<string>()
+  /** Per meeting, the first chunk failure: the meeting fails with it once nothing of it waits. */
+  private failures = new Map<string, string>()
   private busy = false
+  /** Something was queued while the loop ran: it looks again before it rests. */
+  private again = false
   private stopped = false
   private running: Chunk | null = null
 
@@ -89,12 +100,13 @@ export class Transcriber {
    * whose chunks were all text already are finished, and one left `matching` is handed over again.
    */
   start(): void {
+    if (this.stopped) return
     const live = this.d.live()
-    const left = this.d.store.leftovers()
-    const oldestFirst = this.d.store.list().reverse()
-    for (const m of oldestFirst) {
+    const left = new Map<string, Leftover[]>()
+    for (const c of this.d.store.leftovers()) left.set(c.id, [...(left.get(c.id) ?? []), c])
+    for (const m of this.d.store.list().reverse()) {
       if (m.id === live) continue
-      const chunks = left.filter((c) => c.id === m.id)
+      const chunks = left.get(m.id) ?? []
       if (m.state === 'recording') this.recover(m, chunks)
       const now = this.d.store.get(m.id)
       if (!now) continue
@@ -131,6 +143,7 @@ export class Transcriber {
 
   /** The recorder ended this meeting: finish it when nothing of it waits. */
   ended(id: string): void {
+    if (this.stopped) return
     this.finishIfDone(id)
   }
 
@@ -144,22 +157,32 @@ export class Transcriber {
     this.stopped = true
   }
 
+  /** A meeting was deleted: nothing of it is queued, and nothing remembered of it is kept. */
+  forget(id: string): void {
+    this.dropMeeting(id)
+    const mine = `${id}/`
+    for (const set of [this.done, this.skipped]) for (const k of [...set]) if (k.startsWith(mine)) set.delete(k)
+    this.failures.delete(id)
+  }
+
   /** Try again on a failed meeting: its chunks on disk are queued again (or, all text already, it is finished). */
   retry(id: string): { ok: true } | { ok: false; message: string } {
+    if (this.stopped) return { ok: false, message: 'MasterDeck is quitting.' }
     const m = this.d.store.get(id)
     if (!m) return { ok: false, message: 'No such meeting.' }
     if (m.state !== 'failed') return { ok: false, message: 'Only a meeting whose transcription failed is tried again.' }
     if (this.d.live() === id) return { ok: false, message: 'The meeting is being recorded.' }
-    const chunks = this.d.store.leftovers().filter((c) => c.id === id)
+    const chunks = this.d.store.leftovers(id)
     if (!chunks.length && !m.segments.length) return { ok: false, message: 'Nothing was recorded to transcribe.' }
     const u = this.d.store.update(id, (x) => ({ ...x, state: 'transcribing', error: null }))
     if (!u.ok) return u
+    this.failures.delete(id)
     for (const c of chunks) {
       this.done.delete(keyOf(c))
+      this.skipped.delete(keyOf(c))
       this.enqueue(c)
     }
     this.setProgress(id)
-    this.d.onChange?.(id)
     this.finishIfDone(id)
     this.pump()
     return { ok: true }
@@ -167,7 +190,7 @@ export class Transcriber {
 
   private enqueue(c: Chunk): boolean {
     const k = keyOf(c)
-    if (this.queued.has(k) || this.done.has(k)) return false
+    if (this.queued.has(k) || this.done.has(k) || this.skipped.has(k)) return false
     this.queued.add(k)
     this.queue.push({ id: c.id, track: c.track, seq: c.seq })
     return true
@@ -194,39 +217,70 @@ export class Transcriber {
     this.d.onChange?.(id)
   }
 
+  /** The meeting is failed: nothing of it waits, and what failed may be queued again (retry, or the recording's end). */
   private fail(id: string, why: string): void {
     this.dropMeeting(id)
+    this.failures.delete(id)
+    const mine = `${id}/`
+    for (const k of [...this.skipped]) if (k.startsWith(mine)) this.skipped.delete(k)
     this.d.store.update(id, (m) => ({ ...m, state: 'failed', error: why, progress: m.progress ? { ...m.progress, wait: null } : null }))
     this.d.onChange?.(id)
   }
 
   private pump(): void {
-    if (this.busy || this.stopped || !this.queue.length) return
+    if (this.stopped || !this.queue.length) return
+    if (this.busy) {
+      this.again = true
+      return
+    }
     this.busy = true
     void this.loop()
       .catch((e) => console.error(`meetings: transcription queue: ${String(e)}`))
       .finally(() => {
         this.busy = false
+        if (this.again) this.pump()
       })
   }
 
-  private async loop(): Promise<void> {
-    while (!this.stopped && this.queue.length) {
-      const c = this.queue[0]
-      const m = this.d.store.get(c.id)
+  /**
+   * The first queued chunk that can run now. On the way, chunks with nothing to do (a meeting
+   * deleted or failed meanwhile, no WAV) leave the queue, and each meeting with no speech model
+   * says it waits; its chunks stay where they are.
+   */
+  private next(): { c: Chunk; m: Meeting; wav: string; model: string } | null {
+    const waiting = new Set<string>()
+    const gone = new Set<string>()
+    const read = new Map<string, Meeting | null>()
+    let found: { c: Chunk; m: Meeting; wav: string; model: string } | null = null
+    for (const c of [...this.queue]) {
+      if (waiting.has(c.id)) continue
+      if (!read.has(c.id)) read.set(c.id, this.d.store.get(c.id))
+      const m = read.get(c.id) ?? null
       const wav = this.d.store.chunkPath(c.id, c.track, c.seq)
-      // Gone (deleted, failed meanwhile) or no file: nothing to do for this chunk.
       if (!m || (m.state !== 'transcribing' && m.state !== 'recording') || !wav || !existsSync(wav)) {
         this.shift(c)
-        if (m) this.finishIfDone(c.id)
+        if (m) gone.add(c.id)
         continue
       }
       const model = this.d.modelPath(m)
       if (!model) {
-        // Waits at the head of the queue: modelReady() starts it again.
+        waiting.add(c.id)
         if (m.progress?.wait !== WAIT_MODEL) this.setProgress(c.id, { wait: WAIT_MODEL })
-        return
+        continue
       }
+      found = { c, m, wav, model }
+      break
+    }
+    for (const id of gone) this.finishIfDone(id)
+    return found
+  }
+
+  private async loop(): Promise<void> {
+    while (!this.stopped) {
+      this.again = false
+      const next = this.next()
+      if (!next) return
+      const { c, m, wav, model } = next
       if (m.progress?.wait) this.setProgress(c.id, { wait: null })
       const bin = this.d.engine()
       if (!bin) {
@@ -240,7 +294,15 @@ export class Transcriber {
       } catch (e) {
         // A quit killed it: the chunk stays and the next start takes it.
         if (this.stopped) return
-        this.fail(c.id, reason(e))
+        this.running = null
+        // The chunk stays on disk; the meeting's other chunks go on, and it fails once they are done.
+        this.shift(c)
+        if (this.d.store.get(c.id)) {
+          this.skipped.add(keyOf(c))
+          if (!this.failures.has(c.id)) this.failures.set(c.id, reason(e))
+          this.setProgress(c.id)
+          this.finishIfDone(c.id)
+        }
         continue
       } finally {
         this.running = null
@@ -259,7 +321,8 @@ export class Transcriber {
         return { ...x, segments, progress: { done, total: done + this.pending(c.id), wait: null } }
       })
       if (!u.ok) {
-        this.fail(c.id, `Transcription failed: ${u.message}`)
+        // Deleted while whisper ran: nothing to write to.
+        if (this.d.store.get(c.id)) this.fail(c.id, `Transcription failed: ${u.message}`)
         continue
       }
       this.done.add(keyOf(c))
@@ -279,18 +342,24 @@ export class Transcriber {
     this.queued.delete(keyOf(c))
   }
 
-  /** The recording ended and every chunk is text: one transcript by time, then matching (or done). */
+  /**
+   * The recording ended and nothing of the meeting waits: a chunk failed, and it is failed with
+   * the reason; else one transcript by time, then matching (or done).
+   */
   private finishIfDone(id: string): void {
+    if (this.stopped) return
     const m = this.d.store.get(id)
     if (!m || m.state !== 'transcribing' || this.d.live() === id) return
     if (this.pending(id) || (this.running && this.running.id === id)) return
     // A chunk on disk the queue never heard of (written while it was not loaded): take it first.
-    const missed = this.d.store.leftovers().filter((c) => c.id === id && this.enqueue(c))
+    const missed = this.d.store.leftovers(id).filter((c) => this.enqueue(c))
     if (missed.length) {
       this.setProgress(id)
       this.pump()
       return
     }
+    const failed = this.failures.get(id)
+    if (failed) return this.fail(id, failed)
     const next = this.d.onTranscribed ? 'matching' : 'done'
     const u = this.d.store.update(id, (x) => ({
       ...x,
@@ -307,6 +376,7 @@ export class Transcriber {
   }
 
   private handOver(id: string): void {
+    if (this.stopped) return
     if (!this.d.onTranscribed) {
       this.d.store.update(id, (x) => ({ ...x, state: 'done' }))
       this.d.onChange?.(id)

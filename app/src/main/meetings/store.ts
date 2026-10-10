@@ -207,11 +207,27 @@ export class MeetingStore {
     }
   }
 
-  /** The chunks still on disk (a crash, or not transcribed yet), for meetings that exist: by meeting, then sequence, you first. */
-  leftovers(): Leftover[] {
+  /**
+   * The chunks still on disk (a crash, or not transcribed yet): by meeting, then sequence, you
+   * first. With an id, that meeting's only. Folder listings only: a meeting counts when its file is
+   * there, and no meeting file is read, so the transcriber may ask once per chunk.
+   */
+  leftovers(id?: string): Leftover[] {
+    let ids: string[]
+    if (id !== undefined) ids = MEETING_ID.test(id) && isFile(this.file(id)) ? [id] : []
+    else {
+      try {
+        ids = readdirSync(this.dir).flatMap((n) => {
+          const m = MEETING_FILE.exec(n)
+          return m && isFile(join(this.dir, n)) ? [m[1]!] : []
+        })
+      } catch {
+        return []
+      }
+    }
     const out: Leftover[] = []
-    for (const m of this.list()) {
-      const dir = join(this.folder(m.id), 'chunks')
+    for (const mid of ids) {
+      const dir = join(this.folder(mid), 'chunks')
       let names: string[]
       try {
         names = readdirSync(dir)
@@ -221,7 +237,7 @@ export class MeetingStore {
       for (const n of names) {
         const c = CHUNK_FILE.exec(n)
         const p = join(dir, n)
-        if (c && isFile(p)) out.push({ id: m.id, track: c[1] as Speaker, seq: Number(c[2]), path: p })
+        if (c && isFile(p)) out.push({ id: mid, track: c[1] as Speaker, seq: Number(c[2]), path: p })
       }
     }
     return out.sort((a, b) => (a.id === b.id ? a.seq - b.seq || (a.track === b.track ? 0 : a.track === 'you' ? -1 : 1) : a.id < b.id ? -1 : 1))
