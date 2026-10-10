@@ -147,3 +147,241 @@ export function privacyPane(kind: 'mic' | 'screen', path: SystemAudioPath): stri
   const anchor = kind === 'mic' ? 'Privacy_Microphone' : path === 'tap' ? 'Privacy_AudioCapture' : 'Privacy_ScreenCapture'
   return `x-apple.systempreferences:com.apple.preference.security?${anchor}`
 }
+
+// ── Recording (spec §2, §8) ─────────────────────────────────────────────────
+
+/** A meeting's life: recorded, its chunks turned into text, matched to sessions, then done (or failed with a reason). */
+export type MeetingState = 'recording' | 'transcribing' | 'matching' | 'done' | 'failed'
+export const MEETING_STATES: readonly MeetingState[] = ['recording', 'transcribing', 'matching', 'done', 'failed']
+/** Who spoke: the microphone (you) or the sound the Mac played (the others). Also a chunk's track. */
+export type Speaker = 'you' | 'others'
+export const TRACKS: readonly Speaker[] = ['you', 'others']
+
+/** One line of the transcript; start and end in ms from the start of the recording (paused time not counted). */
+export interface Segment {
+  start: number
+  end: number
+  speaker: Speaker
+  text: string
+}
+
+/** What the matching call (a later step) tied to a session, ticket or PR: its label, the note it wrote, the segment indexes. */
+export interface MeetingMatch {
+  label: string
+  noteId: string | null
+  segments: number[]
+}
+
+/** MASTERDECK_HOME/meetings/<id>.json */
+export interface Meeting {
+  id: string
+  /** '' until the user or Claude names it. */
+  title: string
+  /** Who named it; null: no one yet (Claude may propose one). */
+  titleBy: 'user' | 'claude' | null
+  started: number
+  /** Null while recording. */
+  ended: number | null
+  /** Time the recording was paused, in ms: the transcript's times and the audio leave it out. */
+  pausedMs: number
+  /** Meeting apps seen while recording (the offer, a later step). */
+  apps: string[]
+  state: MeetingState
+  /** The speech model and language the recording started with (Settings → Meetings). */
+  model: string | null
+  language: string
+  segments: Segment[]
+  summary: string | null
+  matches: MeetingMatch[]
+  /** Why it failed, or what went wrong while recording; plain text MasterDeck wrote. */
+  error: string | null
+}
+
+/** Stops a recording (spec §2: a notice says so). */
+export const MEETING_MAX_MS = 4 * 60 * 60 * 1000
+/** One WAV per track per 30 s, transcribed as it closes. A chunk's offset is seq × CHUNK_MS. */
+export const CHUNK_MS = 30_000
+export const SAMPLE_RATE = 16_000
+export const CHUNK_SAMPLES = (SAMPLE_RATE * CHUNK_MS) / 1000
+/** A 30-second 16 kHz mono Int16 WAV is 960,044 bytes. */
+export const CHUNK_MAX_BYTES = 1024 * 1024
+/** 4 hours of 30-second chunks is 480, with room. */
+export const CHUNK_SEQ_MAX = 1000
+/** The playback copy (audio.webm): Opus at 32 kbit/s, sent in 10-second slices. */
+export const AUDIO_SLICE_MS = 10_000
+export const AUDIO_BITS = 32_000
+export const AUDIO_SLICE_MAX_BYTES = 1024 * 1024
+/** 4 hours at 32 kbit/s is about 58 MB; a file past this is not appended to. */
+export const AUDIO_MAX_BYTES = 200 * 1024 * 1024
+export const MEETING_SEGMENTS_MAX = 20_000
+export const SEGMENT_TEXT_MAX = 2000
+export const MEETING_SUMMARY_MAX = 4000
+export const MEETING_ERROR_MAX = 500
+
+const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
+const LINE_CONTROL = /[\x00-\x1f\x7f-\x9f]/
+const time = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+
+/** A title from the window: trimmed, one line, at most MEETING_TITLE_MAX; null when it is not one. '' is no title. */
+export function cleanTitle(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return ''
+  if (typeof raw !== 'string') return null
+  const t = raw.trim()
+  if (t.length > MEETING_TITLE_MAX || LINE_CONTROL.test(t)) return null
+  return t
+}
+
+function asSegment(v: unknown): Segment | null {
+  const s = record(v)
+  if (!s || !time(s.start) || !time(s.end) || s.end < s.start) return null
+  if (s.speaker !== 'you' && s.speaker !== 'others') return null
+  if (typeof s.text !== 'string' || s.text.length > SEGMENT_TEXT_MAX || CONTROL.test(s.text)) return null
+  return { start: s.start, end: s.end, speaker: s.speaker, text: s.text }
+}
+
+function asMatch(v: unknown, segments: number): MeetingMatch | null {
+  const m = record(v)
+  if (!m || typeof m.label !== 'string' || m.label.length > 300 || LINE_CONTROL.test(m.label)) return null
+  if (m.noteId !== null && (typeof m.noteId !== 'string' || !/^[nt]-[\w-]{1,200}$/.test(m.noteId))) return null
+  if (!Array.isArray(m.segments) || m.segments.length > segments) return null
+  if (!m.segments.every((i) => Number.isInteger(i) && i >= 0 && i < segments)) return null
+  return { label: m.label, noteId: m.noteId, segments: m.segments as number[] }
+}
+
+/** A meeting file as read from disk, or null when it is not a meeting MasterDeck wrote under this id (never overwritten then). */
+export function storedMeeting(raw: unknown, id: string): Meeting | null {
+  const o = record(raw)
+  if (!o || o.id !== id || !MEETING_ID.test(id)) return null
+  const title = typeof o.title === 'string' ? cleanTitle(o.title) : null
+  if (title === null || title !== o.title) return null
+  if (o.titleBy !== 'user' && o.titleBy !== 'claude' && o.titleBy !== null) return null
+  if (!time(o.started) || !(o.ended === null || (time(o.ended) && o.ended >= o.started))) return null
+  if (!time(o.pausedMs)) return null
+  if (!Array.isArray(o.apps) || o.apps.length > 20 || !o.apps.every((a) => typeof a === 'string' && a.length <= 60 && !LINE_CONTROL.test(a))) return null
+  if (!MEETING_STATES.includes(o.state as MeetingState)) return null
+  if (o.model !== null && (typeof o.model !== 'string' || !MODEL_NAME.test(o.model))) return null
+  if (typeof o.language !== 'string' || !LANGUAGE.test(o.language)) return null
+  if (!Array.isArray(o.segments) || o.segments.length > MEETING_SEGMENTS_MAX) return null
+  const segments: Segment[] = []
+  for (const s of o.segments) {
+    const seg = asSegment(s)
+    if (!seg) return null
+    segments.push(seg)
+  }
+  if (o.summary !== null && (typeof o.summary !== 'string' || o.summary.length > MEETING_SUMMARY_MAX || CONTROL.test(o.summary))) return null
+  if (!Array.isArray(o.matches) || o.matches.length > 200) return null
+  const matches: MeetingMatch[] = []
+  for (const m of o.matches) {
+    const match = asMatch(m, segments.length)
+    if (!match) return null
+    matches.push(match)
+  }
+  if (o.error !== null && (typeof o.error !== 'string' || o.error.length > MEETING_ERROR_MAX || CONTROL.test(o.error))) return null
+  return {
+    id,
+    title,
+    titleBy: o.titleBy,
+    started: o.started,
+    ended: o.ended,
+    pausedMs: o.pausedMs,
+    apps: o.apps as string[],
+    state: o.state as MeetingState,
+    model: o.model,
+    language: o.language,
+    segments,
+    summary: o.summary,
+    matches,
+    error: o.error,
+  }
+}
+
+/** Both tracks' segments as one transcript, by start time; where both talk at once both lines stay (you first on a tie). */
+export function mergeSegments(you: Segment[], others: Segment[]): Segment[] {
+  const all = [...you.map((s) => ({ ...s, speaker: 'you' as const })), ...others.map((s) => ({ ...s, speaker: 'others' as const }))]
+  // Array.prototype.sort is stable: within a track the order it came in stays.
+  return all.sort((a, b) => a.start - b.start || (a.speaker === b.speaker ? 0 : a.speaker === 'you' ? -1 : 1))
+}
+
+/**
+ * The rail's recording indicator (AppState.meetingLive; the window only, never in a snapshot).
+ * `since` is when the recording would have started had it never been paused, so while it runs the
+ * time recorded is now − since; while paused it is `elapsed`.
+ */
+export interface MeetingLive {
+  recording: boolean
+  since: number | null
+  paused: boolean
+  /** Time recorded so far, in ms, as of the last change (what the rail shows while paused). */
+  elapsed: number
+  /** The offer to record a call (a later step); null now. */
+  offer: string | null
+}
+export const IDLE_LIVE: MeetingLive = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+
+/** Time recorded so far: frozen while paused. */
+export const recordedMs = (live: MeetingLive, now: number): number => (live.paused || live.since === null ? live.elapsed : Math.max(0, now - live.since))
+
+/** The rail's time: 12:34, or 1:02:03 past an hour. */
+export function recordClock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(s / 3600)
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(h ? 2 : 1, '0')
+  return `${h ? `${h}:` : ''}${mm}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** The answer of meetings:start / stop / pause. */
+export type RecordAnswer = { ok: true; live: MeetingLive; id?: string; message?: string } | { ok: false; message: string }
+
+/** Languages on Settings → Meetings (whisper.cpp's codes); 'auto' lets whisper detect it per chunk. */
+export const MEETING_LANGUAGES: readonly [string, string][] = [
+  ['auto', 'Detect automatically'],
+  ['en', 'English'],
+  ['de', 'German'],
+  ['fr', 'French'],
+  ['es', 'Spanish'],
+  ['it', 'Italian'],
+  ['pt', 'Portuguese'],
+  ['nl', 'Dutch'],
+  ['sv', 'Swedish'],
+  ['da', 'Danish'],
+  ['no', 'Norwegian'],
+  ['fi', 'Finnish'],
+  ['pl', 'Polish'],
+  ['cs', 'Czech'],
+  ['ru', 'Russian'],
+  ['uk', 'Ukrainian'],
+  ['tr', 'Turkish'],
+  ['el', 'Greek'],
+  ['ar', 'Arabic'],
+  ['he', 'Hebrew'],
+  ['hi', 'Hindi'],
+  ['ja', 'Japanese'],
+  ['ko', 'Korean'],
+  ['zh', 'Chinese'],
+  ['id', 'Indonesian'],
+  ['vi', 'Vietnamese'],
+  ['th', 'Thai'],
+]
+
+// ── The capture window's messages (main/meetings/recorder.ts; never on DeckApi) ──
+
+export const CAPTURE_CH = {
+  /** capture → main: one 30-second WAV of a track ({ id, track, seq }, bytes). */
+  chunk: 'meetings:chunk',
+  /** capture → main: a 10-second slice of audio.webm (id, bytes). */
+  audio: 'meetings:audio',
+  /** capture → main: a track's loudness (RMS 0..1; -1: the track is missing or ended). */
+  level: 'meetings:level',
+  /** capture → main: the capture window is done (one of CAPTURE_ENDS). */
+  ended: 'meetings:ended',
+  /** main → capture: pause, resume, stop. */
+  command: 'meetings:captureCommand',
+} as const
+
+export type CaptureCommand = 'pause' | 'resume' | 'stop'
+/** Why the capture window ended: Stop pressed, the probe's second is over, or what went wrong. */
+export const CAPTURE_ENDS = ['stopped', 'probe', 'no-track', 'mic-refused', 'mic-ended', 'error'] as const
+export type CaptureEnd = (typeof CAPTURE_ENDS)[number]
+export const asCaptureEnd = (v: unknown): CaptureEnd => (CAPTURE_ENDS.includes(v as CaptureEnd) ? (v as CaptureEnd) : 'error')
+/** Below this RMS the probe heard nothing (digital silence is 0; a quiet room on a live track is above it). */
+export const PROBE_SILENCE = 0.0005

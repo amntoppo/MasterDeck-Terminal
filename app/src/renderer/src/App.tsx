@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionForIssue, sessionTicket } from "@shared/derive";
 import { mergePresence } from "@shared/remotePresence";
+import { meetingsAgreed } from "@shared/meetings";
 import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
@@ -221,6 +222,8 @@ export function App() {
     section: SettingsSection;
     at: number;
   } | null>(null);
+  /** The rail's Record popout (also ⌘K "Record meeting"). */
+  const [recordOpen, setRecordOpen] = useState(false);
   const [dialog, setDialog] = useState<
     | "broadcast"
     | "standup"
@@ -893,8 +896,18 @@ export function App() {
     );
   }
 
+  /** Settings → Meetings (Record before consent goes there). */
+  const openMeetingsSetup = () => {
+    setRecordOpen(false);
+    setSettingsAt({ section: "meetings", at: Date.now() });
+    setView("settings");
+  };
   const runAction = (a: PaletteAction | "palette") => {
     if (a === "palette") setPalette(true);
+    else if (a === "record-meeting") {
+      if (meetingsAgreed(state.settings) || state.meetingLive?.recording) setRecordOpen(true);
+      else openMeetingsSetup();
+    }
     else if (a === "refresh") void deck().refresh();
     else if (a === "view:history") setHistoryOpen(true);
     else if (a.startsWith("view:")) setView(a.slice(5) as View);
@@ -1068,6 +1081,13 @@ export function App() {
       <Rail
         view={view}
         onView={setView}
+        meeting={{
+          live: state.meetingLive,
+          agreed: meetingsAgreed(state.settings),
+          open: recordOpen,
+          setOpen: setRecordOpen,
+          onSetup: openMeetingsSetup,
+        }}
         notesOpen={!!notesAt}
         onNotes={() => setNotesAt((n) => (n ? null : {}))}
         remote={remote}

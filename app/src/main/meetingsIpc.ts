@@ -1,11 +1,14 @@
 import {
   CAPTURE_PARTITION,
+  IDLE_LIVE,
   MEETINGS_CONSENT_VERSION,
   MEETINGS_MAC_ONLY,
   mediaAllowed,
   meetingsAgreed,
+  type MeetingLive,
   type MeetingsAnswer,
   type MeetingsSettings,
+  type RecordAnswer,
 } from '@shared/meetings'
 import { defaultModel, MODEL_OPS, MODELS, modelById, type ModelOp, type ModelProgress, type ModelsAnswer } from '@shared/meetingModels'
 import { isRemote } from './ipcRegistry'
@@ -13,9 +16,13 @@ import { isRemote } from './ipcRegistry'
 import type { MeetingsGate } from './meetings/gate'
 import type { ModelStore } from './meetings/models'
 import type { WhisperWhere } from './meetings/whisper'
+import type { Recorder } from './meetings/recorder'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
+type RecorderModule = typeof import('./meetings/recorder') & typeof import('./meetings/store')
+/** The part of the recorder MeetingsIpc uses (tests pass a fake). */
+export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording'>
 
 export interface MeetingsDeps {
   platform: string
@@ -40,6 +47,17 @@ export interface MeetingsDeps {
   restart(): Promise<boolean>
   /** How main/meetings/models.ts and whisper.ts are loaded (tests pass a fake fetch through it). */
   loadEngine?: () => Promise<EngineModule>
+  /** MASTERDECK_HOME/meetings */
+  meetingsDir: string
+  /** The capture window's page (dev server URL or built file) and its preload. */
+  capturePage: () => { url: string } | { file: string }
+  capturePreload: string
+  /** The recording started, paused or stopped (AppState.meetingLive is read again). */
+  onLive(): void
+  /** A recording stopped by itself: tell the user (a macOS notification). */
+  notice(text: string): void
+  /** How the recorder is made (tests pass a fake; default: main/meetings/recorder.ts and store.ts, loaded now). */
+  makeRecorder?: (o: { gate: MeetingsGate; engine: ModelStore }) => Promise<RecorderLike>
 }
 
 /**
@@ -50,6 +68,9 @@ export interface MeetingsDeps {
 export class MeetingsIpc {
   private gate: Promise<MeetingsGate> | null = null
   private engine: Promise<{ store: ModelStore; mod: EngineModule }> | null = null
+  private recorder: Promise<RecorderLike> | null = null
+  /** The recorder once loaded (live() and the quit check read it without waiting). */
+  private rec: RecorderLike | null = null
   constructor(private d: MeetingsDeps) {}
 
   /** Whether main/meetings/ was loaded (the startup test). */
@@ -85,6 +106,78 @@ export class MeetingsIpc {
     return this.engine
   }
 
+  /**
+   * The recorder (main/meetings/recorder.ts), loaded once, after consent, at the first Record or
+   * the first Allow of the Mac's sound; it fills the gate's probeSystemAudio.
+   */
+  loadRecorder(): Promise<RecorderLike> {
+    this.recorder ??= Promise.all([this.loadGate(), this.loadEngine()]).then(async ([gate, { store: engine }]) => {
+      const make =
+        this.d.makeRecorder ??
+        (async () => {
+          const mod: RecorderModule = { ...(await import('./meetings/recorder')), ...(await import('./meetings/store')) }
+          return new mod.Recorder({
+            store: new mod.MeetingStore(this.d.meetingsDir),
+            agreed: () => meetingsAgreed({ meetings: this.d.meetings() }),
+            model: () => this.d.meetings().model,
+            language: () => this.d.meetings().language,
+            modelReady: () => {
+              const m = this.d.meetings().model
+              return !!m && engine.ready(m)
+            },
+            page: this.d.capturePage(),
+            preload: this.d.capturePreload,
+            onChange: () => this.d.onLive(),
+            notice: (t) => this.d.notice(t),
+            now: this.d.now,
+          })
+        })
+      const rec = await make({ gate, engine })
+      gate.probeSystemAudio = () => rec.probe()
+      this.rec = rec
+      return rec
+    })
+    return this.recorder
+  }
+
+  /** AppState.meetingLive: null off macOS; idle until the recorder was ever loaded. */
+  live(): MeetingLive | null {
+    if (this.d.platform !== 'darwin') return null
+    return this.rec?.live() ?? IDLE_LIVE
+  }
+
+  /** Whether a meeting is being recorded now (quitting asks first). */
+  get recording(): boolean {
+    return this.rec?.recording ?? false
+  }
+
+  /** Record (the rail, ⌘K). Recording without a speech model is allowed: the transcript waits, and the answer says so. */
+  async start(e: unknown, title?: unknown): Promise<RecordAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
+    return (await this.loadRecorder()).start(title)
+  }
+
+  async stop(e: unknown): Promise<RecordAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    if (!this.rec) return { ok: false, message: 'Nothing is being recorded.' }
+    return this.rec.stop()
+  }
+
+  async pause(e: unknown, paused: unknown): Promise<RecordAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    if (!this.rec) return { ok: false, message: 'Nothing is being recorded.' }
+    return this.rec.pause(paused)
+  }
+
+  /** Quitting while recording (after the user said yes): the last chunks are written first. */
+  async stopForQuit(): Promise<void> {
+    if (this.rec?.recording) await this.rec.stop('quit')
+  }
+
   /** The gate's answer with whether the picked model is on disk. */
   private async withModel(a: MeetingsAnswer): Promise<MeetingsAnswer> {
     if (!a.ok || !a.model.name) return a
@@ -116,6 +209,8 @@ export class MeetingsIpc {
     if (kind !== 'mic' && kind !== 'screen') return { ok: false, message: 'Not a permission.' }
     // Checked here too, so a refusal never loads the gate.
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first.' }
+    // The Mac's sound is checked by a 1-second capture: the recorder provides it.
+    if (kind === 'screen') await this.loadRecorder()
     return this.withModel(await (await this.loadGate()).permission(kind))
   }
 

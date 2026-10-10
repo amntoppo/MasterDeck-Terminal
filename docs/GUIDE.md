@@ -916,7 +916,7 @@ Stored in `~/.claude/masterdeck/settings.json`.
 
 ### Settings → Meetings (macOS)
 
-Where meetings are set up (issue #102; recording itself comes in a later version). Only on a Mac,
+Where meetings are set up (issue #102). Only on a Mac,
 only in MasterDeck's own window: the web app and Windows do not show it. It is not part of the
 first-run Setup, so nobody who never wants meetings is asked anything.
 
@@ -930,9 +930,10 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   macOS's own prompt; once refused, **Open System Settings** opens Privacy & Security → Microphone.
 - **Sound from the Mac** (the other people in the call): on macOS 14.2 and later this is the
   **System Audio Recording Only** permission, which no app can read, so the status is the last
-  check MasterDeck made ("Not checked yet" until then). For now **Allow** opens System Settings at
-  Screen & System Audio Recording; the 1-second check that brings up macOS's prompt comes with
-  recording. On macOS 13 to 14.1 it is the Screen & System Audio Recording permission. macOS 12 and
+  check MasterDeck made ("Not checked yet" until then). **Allow** listens to the Mac's sound for one
+  second (play something while it does); the first time, that brings up macOS's prompt. "No sound
+  came through" means it heard nothing: allow MasterDeck in System Settings, restart it and try
+  again. On macOS 13 to 14.1 it is the Screen & System Audio Recording permission. macOS 12 and
   older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it:
   when the check heard nothing or the permission was refused, **Restart MasterDeck** does it (after
   asking; terminals in MasterDeck close, Claude sessions keep running).
@@ -942,6 +943,8 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   (nothing of yours is sent there), shows its progress and can be cancelled; a file that is not
   exactly the expected one is thrown away. **Ready** means it is on disk; **Remove** deletes it.
   "Speech engine missing" means this copy of MasterDeck has no speech engine: reinstall it.
+- **Language:** what your meetings are spoken in. **Detect automatically** (the default) works for
+  most; pick one when every meeting is in the same language.
 - **Offer to record** (on by default): offer to record when a meeting app is in a call.
 - **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
   transcript and notes stay.
@@ -950,6 +953,26 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   System Settings.
 
 macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.
+
+### Record a meeting (macOS)
+
+- **Record** is the round button in the rail, under the tools (also ⌘K **Record meeting**). It is
+  there only in MasterDeck's window on a Mac. Before you agreed on Settings → Meetings it opens that
+  screen; the microphone must be allowed there too.
+- Its popout takes an optional title, then **Record**. Under it, every time: **Tell the others you
+  are recording.** No one in the meeting is told by MasterDeck.
+- It records your microphone (**You**) and the sound the Mac plays (**Others**: the people in the
+  call) apart, on this Mac. Without a speech model it still records, and says the transcript waits
+  until one is downloaded.
+- While recording, the button is red with the time recorded. Its popout has **Pause** / **Resume**
+  and **Stop**; paused time is not recorded. macOS shows its own recording indicators too.
+- One recording at a time. After 4 hours it stops by itself and says so. If the microphone goes
+  away (unplugged, taken by another app), the recording stops and a notification says why.
+- Quitting MasterDeck or closing its window while recording asks first: **Keep recording**, or
+  **Stop recording and quit** (what was recorded is kept). A crash keeps everything recorded up to
+  the last 30 seconds.
+- The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy
+  (`audio.webm`) and 30-second pieces that are turned into the transcript.
 
 ## Account
 

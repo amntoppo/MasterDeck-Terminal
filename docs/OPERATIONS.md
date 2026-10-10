@@ -314,6 +314,15 @@ Permission: System Audio Recording Only. It needs `NSAudioCaptureUsageDescriptio
 Info.plist, and the helper must be signed inside the bundle, so macOS counts MasterDeck as the
 responsible process.
 
+**As built** (`main/meetings/recorder.ts`, `renderer/src/capture.ts`): the shape above, with
+these choices. The page is started by `executeJavaScript(..., true)` so `getDisplayMedia` has a
+user gesture; frames are compared by `processId` / `routingId` (WebFrameMain wrappers may differ
+as objects); the window has `autoplayPolicy: 'no-user-gesture-required'`; the AudioContext asks
+for 16 kHz (Chromium resamples the streams; `Resampler` covers another rate); the AudioWorklet is
+bundled with `?worker&url` into `out/renderer/assets/pcmWorklet-*.js` and loaded from `file://`
+(not yet run in a packaged app). `npm run build` builds both renderer pages (`index.html`,
+`capture.html`) and both preloads (`index.js`, `capture.js`).
+
 **Checked by the user** (on the packaged app, after Task 5):
 
 - The microphone prompt appears on **Allow microphone**, and the status turns granted.
@@ -322,6 +331,9 @@ responsible process.
 - `video: request.frame` + `loopback` gives an audio track (else switch to the `getSources` shape).
 - After a rebuild and reinstall: whether the grants survive, and what the silent-track message says.
 - The speakers keep playing during a recording.
+- A real recording: the hidden window opens no window, the worklet loads from `file://`, chunks
+  appear in `meetings/<id>/chunks/` every 30 s per track, `audio.webm` grows every 10 s and plays,
+  Pause leaves a gap out of both, Stop closes the window within a second or two.
 
 ## Meetings: speech engine and models
 

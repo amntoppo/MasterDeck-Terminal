@@ -1395,6 +1395,18 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .ri-name { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
 .ri-sub { font-size: 11px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ri-dot { animation: none; opacity: 1; } }
+/* Record a meeting (RecordMeeting.tsx): the rail item, red with the time while recording, and its popout. */
+.rec { position: relative; flex: none; }
+.rb.rec-on { flex-direction: column; gap: 3px; height: 40px; color: var(--red); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: mon-blink 1.4s ease-in-out infinite; }
+.rec-dot.paused { animation: none; opacity: .45; }
+.rec-time { font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
+.rec-pop { position: absolute; left: 44px; top: 0; z-index: 60; width: 260px; background: var(--bg-4); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.35); -webkit-app-region: no-drag; }
+.rec-pop .input { width: 100%; margin: 6px 0 8px; }
+.rec-head { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.rec-tell { font-size: 11px; color: var(--amber); margin: 8px 0 0; }
+.rec-msg { font-size: 11px; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 /* Two or more GitHub accounts: the account a session works as, at its top. */
 .pane-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; min-width: 0; }
 .pane-head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

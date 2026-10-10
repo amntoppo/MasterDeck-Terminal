@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/settings'
-import type { MeetingsAnswer, MeetingsSettings, MeetingsSetupInfo, SoundStatus } from '@shared/meetings'
+import { MEETING_LANGUAGES, type MeetingsAnswer, type MeetingsSettings, type MeetingsSetupInfo, type SoundStatus } from '@shared/meetings'
 import { modelSize, type ModelOp, type ModelProgress, type ModelsAnswer, type ModelsInfo } from '@shared/meetingModels'
 import { deck } from '../deck'
 import { Field } from './AccountPanel'
@@ -203,7 +203,7 @@ export function MeetingsSetup({ settings, save }: { settings: Settings; save: (n
         label="Sound from the Mac"
         hint={
           info.systemAudio === 'tap'
-            ? "The other people in the call. macOS: System Audio Recording Only. macOS may want MasterDeck restarted after you allow it."
+            ? "The other people in the call. macOS: System Audio Recording Only. Play something (a video, music) when you press Allow: the check listens for one second. macOS may want MasterDeck restarted after you allow it."
             : info.systemAudio === 'screen'
               ? 'The other people in the call. macOS: Screen & System Audio Recording. macOS may want MasterDeck restarted after you allow it.'
               : 'This macOS cannot record the sound the Mac plays: meetings record your microphone only.'
@@ -219,6 +219,15 @@ export function MeetingsSetup({ settings, save }: { settings: Settings; save: (n
         )}
       </Field>
       <ModelRow />
+      <Field label="Language" hint="What the meetings are spoken in. Automatic detection works for most; pick one when a meeting is in one language.">
+        <select className="input" aria-label="Meeting language" value={m.language} onChange={(e) => setM({ language: e.target.value })}>
+          {(MEETING_LANGUAGES.some(([c]) => c === m.language) ? MEETING_LANGUAGES : [...MEETING_LANGUAGES, [m.language, m.language] as [string, string]]).map(([code, label]) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </Field>
       <Field label="Offer to record" hint="When a meeting app is in a call, offer to record it.">
         <button className={`switch ${m.offer ? 'on' : ''}`} role="switch" aria-checked={m.offer} aria-label="Offer to record" onClick={() => setM({ offer: !m.offer })} />
       </Field>

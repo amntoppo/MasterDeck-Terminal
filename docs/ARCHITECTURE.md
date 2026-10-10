@@ -1054,14 +1054,15 @@ waits, and writes nothing if accounts appeared meanwhile.
   `{ ok: false, message }`. `MeetingsIpc` (`main/meetingsIpc.ts`, registered in `index.ts`) refuses
   any OS but macOS ("Meetings work on macOS only.") and `isRemote(e)`, and refuses a permission
   without consent before loading anything.
-- `main/meetings/gate.ts` (`MeetingsGate`) is the only code that calls `systemPreferences` or
-  opens a privacy pane. `MeetingsIpc.loadGate()` loads it with a dynamic `import()` the first time
+- `main/meetings/gate.ts` (`MeetingsGate`) asks macOS for the grants and opens the privacy
+  panes (the recorder only reads the microphone's grant before a start). `MeetingsIpc.loadGate()` loads it with a dynamic `import()` the first time
   Settings → Meetings asks for its state or after consent; nothing else imports `main/meetings/`
   (`main/meetingsStartup.test.ts` checks it, and that no other main file names a media API).
   `setup()` only reads (`getMediaAccessStatus`). `permission('mic')` calls `askForMediaAccess`, or
   opens `Privacy_Microphone` once refused. `permission('screen')`: on macOS 14.2+ (Core Audio tap,
   System Audio Recording Only, which no API reads) runs `probeSystemAudio`, the recorder's 1-second
-  capture, and stores `{ at, ok }` in `settings.meetings.systemAudio`; with no probe yet it opens
+  capture (`Recorder.probe`, wired by `MeetingsIpc.loadRecorder`, which `permission('screen')`
+  loads first), and stores `{ at, ok }` in `settings.meetings.systemAudio`; with no probe it opens
   `Privacy_AudioCapture` and the status stays `not-checked`. On 13 to 14.1 it is
   `getMediaAccessStatus('screen')` (`Privacy_ScreenCapture`).
 - `Settings.meetings` (`MeetingsSettings`: `consentAt`, `consentVersion`, `model`, `language`,
@@ -1096,6 +1097,75 @@ waits, and writes nothing if accounts appeared meanwhile.
   `app.quit()` (quit, so `will-quit` still cleans up). All `blocked`. `MeetingsIpc.loadEngine()`
   loads `models.ts` and `whisper.ts` dynamically, like the gate; `setup()` fills `model.ready` from
   the store once a model is picked.
+
+### Meetings: recording (issue #102)
+
+- Channels: `meetingsStart(title?)` (`meetings:start`), `meetingsStop()` (`meetings:stop`),
+  `meetingsPause(paused)` (`meetings:pause`), invokes, `blocked` in `DECK_ACCESS`, answering a
+  `RecordAnswer` (`{ ok: true, live, id?, message? }` or `{ ok: false, message }`). `MeetingsIpc`
+  refuses another OS, `isRemote(e)` and no consent before loading anything; `loadRecorder()` loads
+  `main/meetings/recorder.ts` and `store.ts` dynamically (once, at the first Record or the first
+  Allow of the Mac's sound) and sets the gate's `probeSystemAudio`. Recording with no speech model
+  on disk is allowed; the answer's `message` says the transcript waits.
+- `main/meetings/recorder.ts` (`Recorder`): one recording or one probe at a time. `start(title?)`
+  refuses without consent or the microphone's grant (`getMediaAccessStatus`, never a prompt),
+  makes the meeting (`MeetingStore.create`, state `recording`), opens the capture window and starts
+  it with `executeJavaScript('window.mdCapture.record(id)', true)` (a user gesture, which
+  `getDisplayMedia` wants). `pause(bool)` / `stop()` send `mdCapture.command(...)`; Stop waits up to
+  10 s for the window's `ended`, then the meeting gets `ended`, `pausedMs` and state `transcribing`
+  (or `failed` with "Nothing was recorded." when no chunk came). Past `MEETING_MAX_MS` (4 h, checked
+  every 10 s) it stops with a notice. A window that ends by itself (`mic-refused`, `mic-ended`, a
+  crash, `render-process-gone`) finishes the meeting with a reason in `error` and a notice; what was
+  written stays. `probe()`: a capture window in probe mode, true when its `ended` is `probe` and the
+  loudest `level` was above `PROBE_SILENCE` (60 s wait for macOS's prompt); during a recording,
+  whether the others' track has come through. `live()` is `AppState.meetingLive`.
+- It sets `setDisplayMediaRequestHandler` on `session.fromPartition('meetings-capture')`
+  (`useSystemPicker: false`): it answers `{ video: request.frame, audio: 'loopback' }` only for the
+  capture window's own main frame (compared by `processId` / `routingId`) while the consent holds,
+  else `{}`. The capture page stops the video track at once.
+- The capture window: a hidden `BrowserWindow` (`show: false`, partition `meetings-capture`,
+  `contextIsolation`, `sandbox`, no node, `backgroundThrottling: false`, autoplay without a gesture,
+  no navigation, no new windows), page `renderer/capture.html` + `renderer/src/capture.ts` (a second
+  renderer entry in `electron.vite.config.ts`), preload `preload/capture.ts` (a second preload entry:
+  `window.capture.chunk / audio / level / ended`, `ipcRenderer.send` only). The page opens the
+  microphone (`getUserMedia`, echo cancellation) and the Mac's sound (`getDisplayMedia`), an
+  `AudioContext` at 16 kHz and one `AudioWorklet` per track (`renderer/src/pcmWorklet.ts`, loaded
+  with `?worker&url`: mono blocks of 2048 frames, a `flush` at Stop); `shared/meetingAudio.ts`
+  (`Resampler` if the context is not 16 kHz, `toInt16`, `Chunker`, `wav`) cuts 30-second WAVs
+  (`CHUNK_MS`; a chunk's offset is `seq × CHUNK_MS`). A `MediaRecorder` on both tracks mixed
+  (`audio/webm;codecs=opus`, 32 kbit/s, 10-second slices) sends the playback copy. Levels go out
+  every 500 ms (-1: no track). Pause stops taking samples and pauses the `MediaRecorder`, so the
+  chunks and the audio leave the paused time out alike.
+- Messages from the capture window (`CAPTURE_CH` in `shared/meetings.ts`, `ipcMain.on`, never on
+  `DeckApi`): each is dropped unless its sender is the capture window's own main frame. `meetings:chunk`
+  `({ id, track, seq }, bytes)`: the recording's id, `you` or `others`, a sequence number above the
+  last written for that track, and `checkWav` (exactly a 16 kHz mono 16-bit WAV, at most
+  `CHUNK_MAX_BYTES` 1 MB); a failed write stops the recording with the reason. `meetings:audio`
+  `(id, bytes)`: at most 1 MB, appended (a failed append loses the playback copy from there; the
+  chunks go on). `meetings:level` `('others', rms)`. `meetings:ended` (one of `CAPTURE_ENDS`).
+- `main/meetings/store.ts` (`MeetingStore(dir)`, `MASTERDECK_HOME/meetings`): `get`, `list(from,
+  to)` (newest first; files that are not `m-<32 hex>.json` meetings skipped), `create`, `update(id,
+  fn)` (re-checked with `storedMeeting`, temp file + rename; never over a file that is not a
+  meeting), `chunkPath(id, track, seq)` (null unless `MEETING_ID`, a track and `0..CHUNK_SEQ_MAX`),
+  `writeChunk` (temp + rename, never over an existing chunk), `audioPath`, `appendAudio` (capped at
+  `AUDIO_MAX_BYTES`), `leftovers()` (the chunks still on disk, by meeting, sequence, you first),
+  `removeChunk`, `sizes()` (audio, transcript, chunks per meeting, for Janitor), `deleteAudio`,
+  `delete` (only the files it knows by name; a folder it does not empty stays). Disk errors are
+  said without a path.
+- `shared/meetings.ts`: `Meeting` (spec §8: `title`, `titleBy` `user` / `claude` / null, `started`,
+  `ended`, `pausedMs`, `apps`, `state` (`recording`, `transcribing`, `matching`, `done`, `failed`),
+  `model`, `language`, `segments`, `summary`, `matches`, `error`), `Segment` (`{ start, end, speaker:
+  'you' | 'others', text }`, ms), `storedMeeting(raw, id)`, `mergeSegments(you, others)` (by start,
+  overlaps kept, you first on a tie), `cleanTitle`, the limits, `MeetingLive`, `recordedMs`,
+  `recordClock`, `MEETING_LANGUAGES` (Settings → Meetings' Language).
+- `index.ts`: `state.meetingLive = meetings.live()` in the state callback; the recorder's changes
+  call `sources.changed()`. Quitting (`before-quit`) or closing the window while recording asks
+  first with a native dialog (Keep recording / Stop recording and quit), then `stopForQuit()` writes
+  the last chunks. `activate` checks `win`, not `getAllWindows()` (the capture window is one).
+  Notices are macOS notifications.
+- UI: `RecordMeeting.tsx` in `Rail.tsx` (after the tools; macOS and the window only, `canRecord`);
+  ⌘K **Record meeting** (`record-meeting`, hidden on the web) opens its popout, or Settings →
+  Meetings before consent.
 
 ### Working hours (issue #64)
 
@@ -1213,6 +1283,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
+| `meetingLive` | the state callback, from `MeetingsIpc.live()` (`Recorder.live()`): `{ recording, since, paused, elapsed, offer }` (`elapsed` as of the last change, so it does not tick; the rail counts from `since`), idle until a recorder was loaded, null off macOS; never in `toRemoteSnapshot` |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -1233,6 +1304,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
+| `meetings/` | `<id>.json` per meeting (`m-<32 hex>`; temp file + rename), `<id>/audio.webm` (the playback copy, appended every 10 s), `<id>/chunks/<you|others>-<seq>.wav` (30-second 16 kHz WAVs until transcribed), `models/` (speech models). Private like notes (`main/meetings/store.ts`) |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |

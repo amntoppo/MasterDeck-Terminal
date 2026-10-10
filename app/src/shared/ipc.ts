@@ -8,7 +8,7 @@ import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
-import type { MeetingsAnswer } from "./meetings";
+import type { MeetingsAnswer, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
@@ -214,6 +214,9 @@ export const CH = {
   meetingsModel: "meetings:model",
   meetingsModelProgress: "meetings:modelProgress",
   meetingsRestart: "meetings:restart",
+  meetingsStart: "meetings:start",
+  meetingsStop: "meetings:stop",
+  meetingsPause: "meetings:pause",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -430,6 +433,16 @@ export interface DeckApi {
   onMeetingsModelProgress(cb: (p: ModelProgress) => void): () => void;
   /** Restart MasterDeck after a confirmation on the Mac (macOS may want it after a permission). */
   meetingsRestart(): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * Record a meeting (the rail, ⌘K; macOS, the window only, after consent and the microphone's
+   * grant). The title is optional. Without a speech model it records anyway and says the
+   * transcript waits. AppState.meetingLive follows.
+   */
+  meetingsStart(title?: string): Promise<RecordAnswer>;
+  /** Stop: the last chunks are written, then transcription takes over. */
+  meetingsStop(): Promise<RecordAnswer>;
+  /** Pause (true) or resume (false): the paused time is left out of the audio and the transcript. */
+  meetingsPause(paused: boolean): Promise<RecordAnswer>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

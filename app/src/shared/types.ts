@@ -220,6 +220,11 @@ export interface AppState {
   modOff?: Record<string, string[]>;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
   modCatalog?: import("./modBand").ModEntry[];
+  /**
+   * A meeting being recorded (the rail's indicator), set in the state callback from the recorder.
+   * Null off macOS. Never in toRemoteSnapshot; the web app does not show it.
+   */
+  meetingLive?: import("./meetings").MeetingLive | null;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */

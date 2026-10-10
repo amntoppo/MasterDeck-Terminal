@@ -94,6 +94,7 @@ const ACTION_NEEDS: Partial<Record<PaletteAction, Need>> = {
   settings: { screen: 'settings' },
   skills: { screen: 'skills' },
   notes: { screen: 'notes' },
+  'record-meeting': { method: 'meetingsStart' },
 }
 export const actionOk = (a: PaletteAction) =>
   !isWeb() || (a.startsWith('view:') && a !== 'view:history' ? screenOk(a.slice(5) as View) : ok(ACTION_NEEDS[a]))

@@ -663,6 +663,8 @@ const sources = new Sources(
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
     state.modCatalog = catalog;
+    // The rail's recording indicator (never in toRemoteSnapshot).
+    state.meetingLive = meetings.live();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -2186,6 +2188,9 @@ function registerIpc(): void {
   reg.handle(CH.meetingsPermission, (e, kind: unknown) => meetings.permission(e, kind));
   reg.handle(CH.meetingsModel, (e, op: unknown, id: unknown) => meetings.model(e, op, id));
   reg.handle(CH.meetingsRestart, (e) => meetings.restart(e));
+  reg.handle(CH.meetingsStart, (e, title: unknown) => meetings.start(e, title));
+  reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
+  reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3275,9 +3280,37 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL)
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(__dirname, "../renderer/index.html"));
+  // Closing the window while recording: ask first (the hidden capture window would keep the app,
+  // and the recording, running with no window to stop it).
+  win.on("close", (e) => {
+    if (quitConfirmed || !meetings.recording || !win) return;
+    e.preventDefault();
+    void confirmStopRecording(win).then((stop) => {
+      if (stop) win?.close();
+    });
+  });
   win.on("closed", () => {
     win = null;
   });
+}
+
+/** Set once the user said to stop the recording and quit (or close): nothing asks again. */
+let quitConfirmed = false;
+/** "A meeting is being recorded": stop it (the last chunks are written) and go on, or keep recording. */
+async function confirmStopRecording(parent: BrowserWindow | null): Promise<boolean> {
+  const opts = {
+    type: "question" as const,
+    buttons: ["Keep recording", "Stop recording and quit"],
+    defaultId: 0,
+    cancelId: 0,
+    message: "A meeting is being recorded.",
+    detail: "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs.",
+  };
+  const choice = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+  if (choice.response !== 1) return false;
+  quitConfirmed = true;
+  await meetings.stopForQuit().catch((e) => console.error(`meetings: stop on quit: ${String(e)}`));
+  return true;
 }
 
 // Settings → Meetings (issue #102). Its handlers load main/meetings/ on their first call only:
@@ -3301,6 +3334,18 @@ const meetings = new MeetingsIpc({
   }),
   // The window only: a model download is not the browser's business.
   progress: (p) => win?.webContents.send(CH.meetingsModelProgress, p),
+  meetingsDir: join(paths.home, "meetings"),
+  // The hidden capture window (main/meetings/recorder.ts): its page and its own preload.
+  capturePage: () =>
+    process.env.ELECTRON_RENDERER_URL
+      ? { url: `${process.env.ELECTRON_RENDERER_URL}/capture.html` }
+      : { file: join(__dirname, "../renderer/capture.html") },
+  capturePreload: join(__dirname, "../preload/capture.js"),
+  // AppState.meetingLive is read in the state callback: send the state again now.
+  onLive: () => sources.changed(),
+  notice: (text) => {
+    if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
+  },
   restart: async () => {
     if (!win) return false;
     const choice = await dialog.showMessageBox(win, {
@@ -3713,11 +3758,21 @@ app.whenReady().then(async () => {
     }, 8000);
   }
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // Not getAllWindows(): the hidden meetings capture window is one.
+    if (!win) createWindow();
   });
 });
 
 app.on("window-all-closed", () => app.quit());
+
+// Quitting while a meeting is recorded asks first, in the window (spec §2).
+app.on("before-quit", (e) => {
+  if (quitConfirmed || !meetings.recording) return;
+  e.preventDefault();
+  void confirmStopRecording(win).then((stop) => {
+    if (stop) app.quit();
+  });
+});
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {

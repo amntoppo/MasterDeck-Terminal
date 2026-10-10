@@ -22,20 +22,40 @@ vi.mock('./meetings/gate', async (orig) => {
   return orig()
 })
 
-import { guardSessions, MeetingsIpc, type PermissionSession } from './meetingsIpc'
+import { guardSessions, MeetingsIpc, type PermissionSession, type RecorderLike } from './meetingsIpc'
 
 const MEDIA_APIS = ['askForMediaAccess', 'getUserMedia', 'getDisplayMedia', 'desktopCapturer', 'getMediaAccessStatus']
 
-function mainSources(dir = __dirname): string[] {
+function mainSources(dir = __dirname, ext = /\.ts$/): string[] {
   return readdirSync(dir).flatMap((f) => {
     const p = join(dir, f)
-    if (statSync(p).isDirectory()) return mainSources(p)
-    return /\.ts$/.test(f) && !/\.test\.ts$/.test(f) ? [p] : []
+    if (statSync(p).isDirectory()) return mainSources(p, ext)
+    return ext.test(f) && !/\.test\.tsx?$/.test(f) ? [p] : []
   })
+}
+
+/** A recorder that records nothing: what MeetingsIpc asks of it. */
+function fakeRecorder() {
+  const calls: string[] = []
+  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+  const probeResult = { ok: false }
+  const rec: RecorderLike & { calls: string[]; probeResult: { ok: boolean } } = {
+    calls,
+    probeResult,
+    recording: false,
+    live: () => live,
+    start: async (t?: unknown) => (calls.push(`start:${String(t)}`), { ok: true, live }),
+    stop: async (why?: string) => (calls.push(`stop:${why ?? 'user'}`), { ok: true, live }),
+    pause: async (p: unknown) => (calls.push(`pause:${String(p)}`), { ok: true, live }),
+    probe: async () => (calls.push('probe'), probeResult.ok),
+  }
+  return rec
 }
 
 function setup(over: Partial<{ platform: string; meetings: MeetingsSettings; version: string }> = {}) {
   let m: MeetingsSettings = over.meetings ?? DEFAULT_MEETINGS
+  const recorder = fakeRecorder()
+  let made = 0
   const ipc = new MeetingsIpc({
     platform: over.platform ?? 'darwin',
     meetings: () => m,
@@ -49,8 +69,14 @@ function setup(over: Partial<{ platform: string; meetings: MeetingsSettings; ver
     whisper: () => ({ env: {}, resourcesPath: '/nonexistent', appRoot: '/nonexistent', packaged: true, arch: 'arm64', pathEnv: '' }),
     progress: () => {},
     restart: async () => false,
+    meetingsDir: '/nonexistent/meetings',
+    capturePage: () => ({ file: '/nonexistent/capture.html' }),
+    capturePreload: '/nonexistent/capture.js',
+    onLive: () => {},
+    notice: () => {},
+    makeRecorder: async () => (made++, recorder),
   })
-  return { ipc, meetings: () => m }
+  return { ipc, meetings: () => m, recorder, made: () => made }
 }
 const agreed = { ...DEFAULT_MEETINGS, consentAt: 1, consentVersion: MEETINGS_CONSENT_VERSION }
 const local = {} // the window's IPC event
@@ -133,7 +159,21 @@ describe('the startup rule', () => {
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {
     const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('guardSessions(app, session,')
-    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart']) expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
+    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause'])
+      expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
+  })
+
+  it('in the renderer, only the capture window names a capture API; its preload only sends', () => {
+    const renderer = join(__dirname, '../renderer/src')
+    const named = mainSources(renderer, /\.tsx?$/)
+      .filter((f) => ['getUserMedia', 'getDisplayMedia', 'desktopCapturer', 'askForMediaAccess'].some((api) => readFileSync(f, 'utf8').includes(api)))
+      .map((f) => relative(renderer, f))
+    expect(named).toEqual(['capture.ts'])
+    const pre = readFileSync(join(__dirname, '../preload/capture.ts'), 'utf8')
+    expect(pre.match(/ipcRenderer\.\w+/g)?.every((m) => m === 'ipcRenderer.send')).toBe(true)
+    expect(pre).not.toMatch(/\bfrom ['"](?!electron['"]|@shared\/meetings['"]|@shared\/meetingAudio['"])/)
+    // The main window's preload does not load the capture one, and the capture page is its own entry.
+    expect(readFileSync(join(__dirname, '../preload/index.ts'), 'utf8')).not.toContain('capture')
   })
 
   it('what startup runs (the handlers object and the session guard) asks macOS nothing and loads nothing', () => {
@@ -207,17 +247,23 @@ describe('meetings:* handlers', () => {
     expect(r).toMatchObject({ ok: true, mic: 'denied' })
   })
 
-  it("the Mac's sound on 14.2+: System Settings until the probe exists, then the probe's result is stored", async () => {
-    const { ipc, meetings } = setup({ meetings: agreed })
-    expect(await ipc.permission(local, 'screen')).toMatchObject({ ok: true, screen: 'not-checked' })
-    expect(electron.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture')
-    const gate = await ipc.loadGate()
-    gate.probeSystemAudio = async () => false
+  it("the Mac's sound on 14.2+: Allow runs the recorder's probe and stores its result", async () => {
+    const { ipc, meetings, recorder } = setup({ meetings: agreed })
     expect(await ipc.permission(local, 'screen')).toMatchObject({ ok: true, screen: 'silent' })
+    expect(recorder.calls).toEqual(['probe'])
     expect(meetings().systemAudio).toEqual({ at: 1000, ok: false })
-    gate.probeSystemAudio = async () => true
+    recorder.probeResult.ok = true
     expect(await ipc.permission(local, 'screen')).toMatchObject({ ok: true, screen: 'granted' })
     expect(electron.askForMediaAccess).not.toHaveBeenCalled()
+    expect(electron.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('without the recorder (none could be made) Allow for the sound opens System Settings', async () => {
+    const { ipc } = setup({ meetings: agreed })
+    const gate = await ipc.loadGate()
+    gate.probeSystemAudio = null
+    expect(await gate.permission('screen')).toMatchObject({ ok: true, screen: 'not-checked' })
+    expect(electron.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture')
   })
 
   it("the Mac's sound on 13 to 14.1 is the Screen Recording grant", async () => {
@@ -305,6 +351,11 @@ describe('meetings:model and meetings:restart', () => {
       whisper: () => ({ env: {}, resourcesPath: '', appRoot: '', packaged: true, arch: 'arm64', pathEnv: '' }),
       progress: (p) => progress.push(p),
       restart: async () => (restarted++, true),
+      meetingsDir: '/nonexistent/meetings',
+      capturePage: () => ({ file: '/nonexistent/capture.html' }),
+      capturePreload: '/nonexistent/capture.js',
+      onLive: () => {},
+      notice: () => {},
       loadEngine: async () =>
         ({ ModelStore: FakeStore, findWhisper: () => ('engine' in over ? over.engine : '/acme/whisper-cli') }) as never,
     })
@@ -347,5 +398,35 @@ describe('meetings:model and meetings:restart', () => {
     const t = withEngine(agreed)
     expect(await t.ipc.restart(local)).toEqual({ ok: true })
     expect(t.restarted()).toBe(1)
+  })
+})
+
+describe('meetings:start / stop / pause', () => {
+  it('refused off macOS, from a browser and before consent, without loading the recorder', async () => {
+    const win = setup({ platform: 'win32', meetings: agreed })
+    expect(await win.ipc.start(local)).toEqual({ ok: false, message: MEETINGS_MAC_ONLY })
+    expect(win.ipc.live()).toBeNull()
+    const mac = setup({ meetings: agreed })
+    for (const r of [await mac.ipc.start(remote, 'x'), await mac.ipc.stop(remote), await mac.ipc.pause(remote, true)]) expect(r.ok).toBe(false)
+    const before = setup()
+    expect(await before.ipc.start(local)).toMatchObject({ ok: false, message: expect.stringContaining('Agree') })
+    for (const t of [win, mac, before]) {
+      expect(t.made()).toBe(0)
+      expect(t.ipc.loaded).toBe(false)
+    }
+    expect(mac.ipc.live()).toEqual({ recording: false, since: null, paused: false, elapsed: 0, offer: null })
+    for (const f of Object.values(electron)) expect(f).not.toHaveBeenCalled()
+  })
+
+  it('after consent: start loads the recorder once; stop and pause go to it', async () => {
+    const t = setup({ meetings: agreed })
+    expect(await t.ipc.stop(local)).toMatchObject({ ok: false })
+    await t.ipc.start(local, 'Standup')
+    await t.ipc.pause(local, true)
+    await t.ipc.stop(local)
+    await t.ipc.start(local)
+    expect(t.made()).toBe(1)
+    expect(t.recorder.calls).toEqual(['start:Standup', 'pause:true', 'stop:user', 'start:undefined'])
+    expect(t.ipc.recording).toBe(false)
   })
 })

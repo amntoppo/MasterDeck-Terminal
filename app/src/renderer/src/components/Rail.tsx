@@ -3,6 +3,8 @@ import { formatRefreshed } from '@shared/format'
 import { describeDevice, showRemoteDot, type Presence } from '@shared/remotePresence'
 import type { View } from './Sidebar'
 import { isWeb, screenOk } from '../web'
+import { RecordMeeting } from './RecordMeeting'
+import type { MeetingLive } from '@shared/meetings'
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
@@ -49,6 +51,14 @@ interface Props {
   /** The Notes panel is open. */
   notesOpen: boolean
   onNotes: () => void
+  /** Record a meeting (macOS, the window only; RecordMeeting hides itself elsewhere). */
+  meeting?: {
+    live: MeetingLive | null | undefined
+    agreed: boolean
+    open: boolean
+    setOpen: (open: boolean) => void
+    onSetup: () => void
+  }
 }
 
 /** The blinking amber dot (only while something remote is connected) and its hover/focus card. */
@@ -123,7 +133,7 @@ const ACTIONS: [RailAction, string, string][] = [
 ]
 
 /** The Command Center rail: views on top, tools, then actions and Settings at the bottom. */
-export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes }: Props) {
+export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes, meeting }: Props) {
   const viewBtn = (v: View, label: string, hint = '', badge = 0) => (
     <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${label}  ${hint}` : label} aria-label={label} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
       <RailIcon name={v} />
@@ -144,6 +154,7 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
           viewBtn(v, label)
         ),
       )}
+      {meeting && <RecordMeeting {...meeting} />}
       <div style={{ flex: 1 }} />
       <RemoteIndicator remote={remote} onRemote={onRemote} />
       {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label, hint]) => (
