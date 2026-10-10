@@ -974,6 +974,20 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
 - The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy
   (`audio.webm`) and 30-second pieces that are turned into the transcript.
 
+### After Stop: the transcript
+
+- Each 30-second piece is turned into text on this Mac as soon as it is recorded, one at a time and
+  at low priority, so the transcript is ready about a minute after **Stop**. Nothing is sent
+  anywhere for this. A piece that is text is removed; the playback copy stays.
+- Lines say who spoke: **You** (your microphone) or **Others** (the sound the Mac played), in order
+  of time. When both talk at once, both lines stay.
+- Without a speech model the meeting waits ("Waiting for the speech model") and goes on by itself
+  once you download one on Settings → Meetings.
+- If turning a piece into text fails, the meeting says why and keeps the pieces; **Try again**
+  starts again where it stopped.
+- If MasterDeck quits or crashes during a recording or a transcript, the pieces on disk are turned
+  into text first the next time you use Meetings (Settings → Meetings, or Record).
+
 ## Account
 
 Settings → Account is where this Mac signs in to your MasterDeck account (needed for Remote).

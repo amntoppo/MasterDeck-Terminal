@@ -87,6 +87,7 @@ const api: DeckApi = {
   meetingsStart: (title) => ipcRenderer.invoke(CH.meetingsStart, title),
   meetingsStop: () => ipcRenderer.invoke(CH.meetingsStop),
   meetingsPause: (paused) => ipcRenderer.invoke(CH.meetingsPause, paused),
+  meetingsRetry: (id) => ipcRenderer.invoke(CH.meetingsRetry, id),
   onNotesChanged: (cb) => listen(CH.notesChanged, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),

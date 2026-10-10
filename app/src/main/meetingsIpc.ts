@@ -1,6 +1,7 @@
 import {
   CAPTURE_PARTITION,
   IDLE_LIVE,
+  MEETING_ID,
   MEETINGS_CONSENT_VERSION,
   MEETINGS_MAC_ONLY,
   mediaAllowed,
@@ -14,15 +15,23 @@ import { defaultModel, MODEL_OPS, MODELS, modelById, type ModelOp, type ModelPro
 import { isRemote } from './ipcRegistry'
 // Types only: erased from the build, so this file never loads main/meetings/ by itself.
 import type { MeetingsGate } from './meetings/gate'
-import type { ModelStore } from './meetings/models'
+import type { ModelStore, ModelStoreDeps } from './meetings/models'
 import type { WhisperWhere } from './meetings/whisper'
 import type { Recorder } from './meetings/recorder'
+import type { MeetingStore } from './meetings/store'
+import type { Transcriber } from './meetings/transcriber'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
-type RecorderModule = typeof import('./meetings/recorder') & typeof import('./meetings/store')
+type RecorderModule = typeof import('./meetings/recorder')
+type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber')
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
-export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording'>
+export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId'>
+/** The meetings on disk and the transcription queue, loaded together after consent. */
+export interface MeetingsService {
+  store: MeetingStore
+  transcriber: Transcriber
+}
 
 export interface MeetingsDeps {
   platform: string
@@ -47,6 +56,10 @@ export interface MeetingsDeps {
   restart(): Promise<boolean>
   /** How main/meetings/models.ts and whisper.ts are loaded (tests pass a fake fetch through it). */
   loadEngine?: () => Promise<EngineModule>
+  /** The model downloads' fetch (main passes Electron's net.fetch: the system's proxy); default the global fetch. */
+  fetch?: ModelStoreDeps['fetch']
+  /** How main/meetings/store.ts and transcriber.ts are loaded; default a dynamic import. */
+  loadService?: () => Promise<ServiceModule>
   /** MASTERDECK_HOME/meetings */
   meetingsDir: string
   /** The capture window's page (dev server URL or built file) and its preload. */
@@ -57,7 +70,9 @@ export interface MeetingsDeps {
   /** A recording stopped by itself: tell the user (a macOS notification). */
   notice(text: string): void
   /** How the recorder is made (tests pass a fake; default: main/meetings/recorder.ts and store.ts, loaded now). */
-  makeRecorder?: (o: { gate: MeetingsGate; engine: ModelStore }) => Promise<RecorderLike>
+  makeRecorder?: (o: { gate: MeetingsGate; engine: ModelStore; service: MeetingsService }) => Promise<RecorderLike>
+  /** A meeting is all text and `matching`: the matcher takes it (a later step). Unset: the meeting is done there. */
+  onTranscribed?: (id: string) => void
 }
 
 /**
@@ -68,6 +83,10 @@ export interface MeetingsDeps {
 export class MeetingsIpc {
   private gate: Promise<MeetingsGate> | null = null
   private engine: Promise<{ store: ModelStore; mod: EngineModule }> | null = null
+  /** The engine module once loaded (a quit stops its whisper-cli runs without waiting). */
+  private engineMod: EngineModule | null = null
+  private service: Promise<MeetingsService> | null = null
+  private svc: MeetingsService | null = null
   private recorder: Promise<RecorderLike> | null = null
   /** The recorder once loaded (live() and the quit check read it without waiting). */
   private rec: RecorderLike | null = null
@@ -102,8 +121,50 @@ export class MeetingsIpc {
   /** The model store and whisper finder, loaded once (with the gate: never at startup). */
   loadEngine(): Promise<{ store: ModelStore; mod: EngineModule }> {
     const load = this.d.loadEngine ?? (async () => ({ ...(await import('./meetings/models')), ...(await import('./meetings/whisper')) }))
-    this.engine ??= load().then((mod) => ({ mod, store: new mod.ModelStore(this.d.modelsDir) }))
+    this.engine ??= load().then((mod) => {
+      const store = new mod.ModelStore(this.d.modelsDir, this.d.fetch ? { fetch: this.d.fetch } : {})
+      // What a quit or a crash in the middle of a download left (nothing downloads yet).
+      store.cleanParts()
+      this.engineMod = mod
+      return { mod, store }
+    })
     return this.engine
+  }
+
+  /**
+   * The meetings on disk and the transcription queue, loaded once, only after consent (the first
+   * Record, Settings → Meetings, Try again). Loading it finishes what a crash or a quit left: the
+   * chunks on disk are queued first.
+   */
+  loadService(): Promise<MeetingsService> {
+    this.service ??= this.loadEngine().then(async ({ store: models, mod: engine }) => {
+      const load = this.d.loadService ?? (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }))
+      const mod = await load()
+      const store = new mod.MeetingStore(this.d.meetingsDir)
+      const transcriber = new mod.Transcriber({
+        store,
+        // The model the meeting was recorded with, else the one picked now: the first on disk.
+        modelPath: (m) => {
+          for (const name of [m.model, this.d.meetings().model]) if (name && models.ready(name)) return models.path(name)
+          return null
+        },
+        engine: () => engine.findWhisper(this.d.whisper()),
+        transcribe: (o) => engine.transcribe(o),
+        live: () => this.rec?.meetingId ?? null,
+        onTranscribed: this.d.onTranscribed,
+        now: this.d.now,
+      })
+      this.svc = { store, transcriber }
+      transcriber.start()
+      return this.svc
+    })
+    return this.service
+  }
+
+  /** Load the service in the background when the consent holds (errors only logged). */
+  private warmService(): void {
+    if (!meetingsAgreed({ meetings: this.d.meetings() })) return
+    this.loadService().catch((err) => console.error(`meetings: could not load: ${String(err)}`))
   }
 
   /**
@@ -111,13 +172,13 @@ export class MeetingsIpc {
    * the first Allow of the Mac's sound; it fills the gate's probeSystemAudio.
    */
   loadRecorder(): Promise<RecorderLike> {
-    this.recorder ??= Promise.all([this.loadGate(), this.loadEngine()]).then(async ([gate, { store: engine }]) => {
+    this.recorder ??= Promise.all([this.loadGate(), this.loadEngine(), this.loadService()]).then(async ([gate, { store: engine }, service]) => {
       const make =
         this.d.makeRecorder ??
         (async () => {
-          const mod: RecorderModule = { ...(await import('./meetings/recorder')), ...(await import('./meetings/store')) }
+          const mod: RecorderModule = await import('./meetings/recorder')
           return new mod.Recorder({
-            store: new mod.MeetingStore(this.d.meetingsDir),
+            store: service.store,
             agreed: () => meetingsAgreed({ meetings: this.d.meetings() }),
             model: () => this.d.meetings().model,
             language: () => this.d.meetings().language,
@@ -129,10 +190,13 @@ export class MeetingsIpc {
             preload: this.d.capturePreload,
             onChange: () => this.d.onLive(),
             notice: (t) => this.d.notice(t),
+            // Each chunk is transcribed as it closes; the end finishes the meeting.
+            onChunk: (c) => service.transcriber.add(c),
+            onEnded: (id) => service.transcriber.ended(id),
             now: this.d.now,
           })
         })
-      const rec = await make({ gate, engine })
+      const rec = await make({ gate, engine, service })
       gate.probeSystemAudio = () => rec.probe()
       this.rec = rec
       return rec
@@ -178,6 +242,24 @@ export class MeetingsIpc {
     if (this.rec?.recording) await this.rec.stop('quit')
   }
 
+  /**
+   * will-quit: the queue starts nothing more and every whisper-cli still running is killed (its
+   * chunk stays for the next start). Only what was loaded: a quit never loads main/meetings/.
+   */
+  quit(): void {
+    this.svc?.transcriber.stop()
+    this.engineMod?.killRunning()
+  }
+
+  /** Try again on a meeting whose transcription failed (the Meetings page, Needs you). The window only. */
+  async retry(e: unknown, id: unknown): Promise<{ ok: true } | { ok: false; message: string }> {
+    const r = this.refused(e)
+    if (r) return r
+    if (typeof id !== 'string' || !MEETING_ID.test(id)) return { ok: false, message: 'No such meeting.' }
+    if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
+    return (await this.loadService()).transcriber.retry(id)
+  }
+
   /** The gate's answer with whether the picked model is on disk. */
   private async withModel(a: MeetingsAnswer): Promise<MeetingsAnswer> {
     if (!a.ok || !a.model.name) return a
@@ -186,7 +268,11 @@ export class MeetingsIpc {
   }
 
   async setup(e: unknown): Promise<MeetingsAnswer> {
-    return this.refused(e) ?? this.withModel((await this.loadGate()).setup())
+    const r = this.refused(e)
+    if (r) return r
+    // Settings → Meetings after consent: what a crash left gets transcribed now.
+    this.warmService()
+    return this.withModel((await this.loadGate()).setup())
   }
 
   /** I agree (true) stores the consent; Turn off meetings (false) clears it and leaves the stored meetings. */
@@ -200,6 +286,7 @@ export class MeetingsIpc {
         ? { ...m, consentAt: (this.d.now ?? Date.now)(), consentVersion: MEETINGS_CONSENT_VERSION }
         : { ...m, consentAt: null, consentVersion: 0 },
     )
+    if (agree) this.warmService()
     return this.withModel((await this.loadGate()).setup())
   }
 
@@ -250,14 +337,22 @@ export class MeetingsIpc {
       return this.models(res.ok ? undefined : res.message)
     }
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first.' }
-    this.d.setMeetings({ ...this.d.meetings(), model: m.id })
-    if (op === 'pick') return this.models()
     const { store } = await this.loadEngine()
-    if (store.status().downloading) return this.models('A speech model is downloading already.')
+    // Checked before the pick is stored: a refused download changes nothing.
+    if (op === 'download' && store.status().downloading) return this.models('A speech model is downloading already.')
+    this.d.setMeetings({ ...this.d.meetings(), model: m.id })
+    if (op === 'pick') {
+      // A model already on disk: meetings waiting for one go on.
+      if (store.ready(m.id)) this.svc?.transcriber.modelReady()
+      return this.models()
+    }
     // Not awaited: a download takes minutes; its end arrives as a progress with state done/failed.
-    void store.download(m.id, (p) => this.d.progress(p)).catch((err) =>
-      this.d.progress({ id: m.id, received: 0, total: m.bytes, state: 'failed', message: String(err) }),
-    )
+    void store
+      .download(m.id, (p) => this.d.progress(p))
+      .then((res) => {
+        if (res.ok) this.svc?.transcriber.modelReady()
+      })
+      .catch((err) => this.d.progress({ id: m.id, received: 0, total: m.bytes, state: 'failed', message: String(err) }))
     return this.models()
   }
 

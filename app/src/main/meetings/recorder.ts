@@ -118,6 +118,11 @@ export class Recorder {
     return this.rec !== null
   }
 
+  /** The meeting being recorded now (the transcriber leaves it `recording` until it ends). */
+  get meetingId(): string | null {
+    return this.rec?.id ?? null
+  }
+
   live(): MeetingLive {
     const r = this.rec
     if (!r) return IDLE_LIVE

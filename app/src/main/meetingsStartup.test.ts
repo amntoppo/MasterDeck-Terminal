@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MEETINGS, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, type MeetingsSettings } from '@shared/meetings'
@@ -43,6 +44,7 @@ function fakeRecorder() {
     calls,
     probeResult,
     recording: false,
+    meetingId: null,
     live: () => live,
     start: async (t?: unknown) => (calls.push(`start:${String(t)}`), { ok: true, live }),
     stop: async (why?: string) => (calls.push(`stop:${why ?? 'user'}`), { ok: true, live }),
@@ -159,7 +161,7 @@ describe('the startup rule', () => {
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {
     const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('guardSessions(app, session,')
-    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause'])
+    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause', 'meetingsRetry'])
       expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
   })
 
@@ -337,6 +339,7 @@ describe('meetings:model and meetings:restart', () => {
         return { ok: true }
       }
       cancel = () => (calls.push('cancel'), true)
+      cleanParts = () => {}
       remove = (id: string) => (calls.push(`remove:${id}`), { ok: true })
     }
     const ipc = new MeetingsIpc({
@@ -428,5 +431,135 @@ describe('meetings:start / stop / pause', () => {
     expect(t.made()).toBe(1)
     expect(t.recorder.calls).toEqual(['start:Standup', 'pause:true', 'stop:user', 'start:undefined'])
     expect(t.ipc.recording).toBe(false)
+  })
+})
+
+describe('transcription wiring', () => {
+  function withService(m: MeetingsSettings, over: Partial<{ platform: string; downloading: boolean }> = {}) {
+    let cur = m
+    const dir = mkdtempSync(join(tmpdir(), 'md-meetings-ipc-'))
+    const calls: string[] = []
+    const made: unknown[] = []
+    let ready = false
+    const fetch = vi.fn()
+    class FakeStore {
+      constructor(_dir: string, deps: unknown) {
+        made.push(deps)
+      }
+      ready = () => ready
+      path = (id: string) => `/models/${id}.bin`
+      status = () => ({ models: [], downloading: over.downloading ? { id: 'base', received: 0, total: 1, state: 'downloading' } : null })
+      download = async (id: string) => {
+        calls.push(`download:${id}`)
+        ready = true
+        return { ok: true }
+      }
+      cancel = () => true
+      remove = () => ({ ok: true })
+      cleanParts = () => calls.push('cleanParts')
+    }
+    const transcribe = vi.fn(async () => [{ start: 0, end: 500, text: 'hello alice' }])
+    const ipc = new MeetingsIpc({
+      platform: over.platform ?? 'darwin',
+      meetings: () => cur,
+      setMeetings: (n) => {
+        cur = n
+      },
+      macosVersion: () => '14.4.1',
+      arch: 'arm64',
+      modelsDir: join(dir, 'models'),
+      whisper: () => ({ env: {}, resourcesPath: '', appRoot: '', packaged: true, arch: 'arm64', pathEnv: '' }),
+      progress: () => {},
+      restart: async () => false,
+      meetingsDir: dir,
+      capturePage: () => ({ file: '/nonexistent/capture.html' }),
+      capturePreload: '/nonexistent/capture.js',
+      onLive: () => {},
+      notice: () => {},
+      fetch,
+      makeRecorder: async () => fakeRecorder(),
+      loadEngine: async () =>
+        ({ ModelStore: FakeStore, findWhisper: () => '/acme/whisper-cli', transcribe, killRunning: () => calls.push('killRunning') }) as never,
+    })
+    return { ipc, calls, made, fetch, transcribe, dir, meetings: () => cur, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
+  }
+
+  it('a quit before anything was loaded loads nothing', () => {
+    const t = withService(agreed)
+    t.ipc.quit()
+    expect(t.ipc.loaded).toBe(false)
+    expect(t.calls).toEqual([])
+    t.cleanup()
+  })
+
+  it('the model store gets main’s fetch and cleans its parts; a quit kills whisper-cli and stops the queue', async () => {
+    const t = withService(agreed)
+    const svc = await t.ipc.loadService()
+    expect(t.made).toEqual([{ fetch: t.fetch }])
+    expect(t.calls).toEqual(['cleanParts'])
+    t.ipc.quit()
+    expect(t.calls).toEqual(['cleanParts', 'killRunning'])
+    // The queue was stopped: a new chunk is not transcribed.
+    const m = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    svc.store.writeChunk(m.meeting.id, 'you', 0, new Uint8Array([1]))
+    svc.transcriber.add({ id: m.meeting.id, track: 'you', seq: 0 })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(t.transcribe).not.toHaveBeenCalled()
+    t.cleanup()
+  })
+
+  it('Settings → Meetings after consent loads the queue; a meeting waits for the model and goes on when its download ends', async () => {
+    const t = withService(agreed)
+    // Left by a crash before this start.
+    const { MeetingStore } = await import('./meetings/store')
+    const store = new MeetingStore(t.dir)
+    const m = store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    store.writeChunk(m.meeting.id, 'others', 0, new Uint8Array([1]))
+    await t.ipc.setup(local)
+    await vi.waitFor(() => expect(store.get(m.meeting.id)?.progress?.wait).toBe('Waiting for the speech model'))
+    expect(store.get(m.meeting.id)?.state).toBe('transcribing')
+    await t.ipc.model(local, 'download', 'base')
+    await vi.waitFor(() => expect(store.get(m.meeting.id)?.state).toBe('done'))
+    expect(store.get(m.meeting.id)?.segments).toEqual([{ start: 0, end: 500, speaker: 'others', text: 'hello alice' }])
+    expect(t.transcribe).toHaveBeenCalledWith(expect.objectContaining({ bin: '/acme/whisper-cli', model: '/models/base.bin', language: 'auto' }))
+    t.cleanup()
+  })
+
+  it('before consent, Settings → Meetings loads no queue', async () => {
+    const t = withService(DEFAULT_MEETINGS)
+    await t.ipc.setup(local)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(t.calls).not.toContain('cleanParts')
+    t.cleanup()
+  })
+
+  it('a download while one runs is refused before the pick is stored', async () => {
+    const t = withService({ ...agreed, model: 'large-v3-turbo-q5_0' }, { downloading: true })
+    expect(await t.ipc.model(local, 'download', 'base')).toMatchObject({ ok: true, message: 'A speech model is downloading already.', picked: 'large-v3-turbo-q5_0' })
+    expect(t.meetings().model).toBe('large-v3-turbo-q5_0')
+    expect(t.calls).not.toContain('download:base')
+    t.cleanup()
+  })
+
+  it('meetings:retry: refused off macOS, from a browser, for a bad id and before consent, without loading', async () => {
+    const linux = withService(agreed, { platform: 'linux' })
+    expect(await linux.ipc.retry(local, 'm-' + 'a'.repeat(32))).toEqual({ ok: false, message: MEETINGS_MAC_ONLY })
+    const t = withService(agreed)
+    expect(await t.ipc.retry(remote, 'm-' + 'a'.repeat(32))).toMatchObject({ ok: false })
+    expect(await t.ipc.retry(local, '../x')).toEqual({ ok: false, message: 'No such meeting.' })
+    const before = withService(DEFAULT_MEETINGS)
+    expect(await before.ipc.retry(local, 'm-' + 'a'.repeat(32))).toMatchObject({ ok: false, message: expect.stringContaining('Agree') })
+    expect([...linux.calls, ...t.calls, ...before.calls]).toEqual([])
+    expect(await t.ipc.retry(local, 'm-' + 'a'.repeat(32))).toEqual({ ok: false, message: 'No such meeting.' })
+    for (const x of [linux, t, before]) x.cleanup()
+  })
+
+  it('index.ts: will-quit calls meetings.quit(); model downloads use net.fetch', () => {
+    const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
+    const quit = src.slice(src.indexOf('app.on("will-quit"'))
+    expect(quit.slice(0, quit.indexOf('});'))).toContain('meetings.quit();')
+    expect(src).toContain('fetch: (url, init) => net.fetch(url, init),')
   })
 })

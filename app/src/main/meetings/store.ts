@@ -136,6 +136,7 @@ export class MeetingStore {
       segments: [],
       summary: null,
       matches: [],
+      progress: null,
       error: null,
     }
     try {

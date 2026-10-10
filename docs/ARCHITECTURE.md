@@ -1154,7 +1154,7 @@ waits, and writes nothing if accounts appeared meanwhile.
   said without a path.
 - `shared/meetings.ts`: `Meeting` (spec §8: `title`, `titleBy` `user` / `claude` / null, `started`,
   `ended`, `pausedMs`, `apps`, `state` (`recording`, `transcribing`, `matching`, `done`, `failed`),
-  `model`, `language`, `segments`, `summary`, `matches`, `error`), `Segment` (`{ start, end, speaker:
+  `model`, `language`, `segments`, `summary`, `matches`, `progress`, `error`), `Segment` (`{ start, end, speaker:
   'you' | 'others', text }`, ms), `storedMeeting(raw, id)`, `mergeSegments(you, others)` (by start,
   overlaps kept, you first on a tie), `cleanTitle`, the limits, `MeetingLive`, `recordedMs`,
   `recordClock`, `MEETING_LANGUAGES` (Settings → Meetings' Language).
@@ -1166,6 +1166,42 @@ waits, and writes nothing if accounts appeared meanwhile.
 - UI: `RecordMeeting.tsx` in `Rail.tsx` (after the tools; macOS and the window only, `canRecord`);
   ⌘K **Record meeting** (`record-meeting`, hidden on the web) opens its popout, or Settings →
   Meetings before consent.
+
+### Meetings: transcription (issue #102)
+
+- `main/meetings/transcriber.ts` (`Transcriber`): the queue, one `whisper-cli` at a time, first in
+  first out. The recorder's `onChunk` calls `add({ id, track, seq })` for each chunk on disk, and its
+  `onEnded` calls `ended(id)`. A run takes the meeting's own model if it is on disk, else the one
+  picked now (`modelPath`), and the meeting's language; `chunkSegments` adds the offset `seq ×
+  CHUNK_MS` and the track as speaker (control characters become spaces, empty lines go). The lines
+  are written with `store.update` (a chunk's earlier lines are replaced, so a run again never
+  doubles them; at most `MEETING_SEGMENTS_MAX`), then the WAV is removed. Once the meeting is no
+  longer the one recording and none of its chunks wait (a chunk on disk the queue never heard of is
+  queued first), its lines are merged by time (`mergeSegments`) and it becomes `matching` and goes
+  to `onTranscribed(id)` (the matcher, a later step), or `done` when none is set.
+- `Meeting.progress` (`MeetingProgress`: `done`, `total`, `wait`; null before the first chunk and in
+  older files) is what the Meetings page shows: chunks done, chunks known (grows while recording),
+  and why it waits. With no model on disk the head of the queue waits, the meeting stays
+  `transcribing` with `wait` "Waiting for the speech model", and `modelReady()` (a finished
+  download, or picking a model already on disk) starts it again.
+- A failure (whisper-cli's error, the engine missing, a write refused) keeps the chunk, drops the
+  meeting's other queued chunks (they stay on disk) and sets `failed` with the reason in `error`
+  (one line, the home folder as `~`). `meetingsRetry(id)` (`meetings:retry`, `blocked`; refused off
+  macOS, from a browser, for an id that is not `MEETING_ID` and before consent) → `retry(id)`:
+  only a `failed` meeting not being recorded, with chunks on disk or lines already; it is
+  `transcribing` again and its chunks are queued.
+- `MeetingsIpc.loadService()` loads `store.ts` and `transcriber.ts` dynamically, once, after
+  consent: the first Record (`loadRecorder` waits for it, and the recorder uses its store), Settings
+  → Meetings (`setup`, `consent(true)`), Try again. Loading runs `start()`: a meeting left
+  `recording` with no live recorder (a crash, a forced quit) gets an `ended` from what was saved and
+  becomes `transcribing` (or `failed`, "Nothing was recorded.", with no chunk and no line); the
+  chunks left on disk are queued first, oldest meeting first; a meeting left `matching` goes to the
+  matcher again. `loadEngine()` passes `deps.fetch` (`index.ts`: Electron's `net.fetch`) to
+  `ModelStore` and runs `cleanParts()`; a download is refused before the pick is stored when one is
+  running.
+- `will-quit` calls `meetings.quit()`: the queue starts nothing more and `killRunning()` stops
+  whisper-cli (only if those modules were loaded; a run killed then is not a failure, its chunk is
+  transcribed at the next start).
 
 ### Working hours (issue #64)
 

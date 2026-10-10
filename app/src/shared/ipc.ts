@@ -217,6 +217,7 @@ export const CH = {
   meetingsStart: "meetings:start",
   meetingsStop: "meetings:stop",
   meetingsPause: "meetings:pause",
+  meetingsRetry: "meetings:retry",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -443,6 +444,8 @@ export interface DeckApi {
   meetingsStop(): Promise<RecordAnswer>;
   /** Pause (true) or resume (false): the paused time is left out of the audio and the transcript. */
   meetingsPause(paused: boolean): Promise<RecordAnswer>;
+  /** Try again on a meeting whose transcription failed: its chunks still on disk are queued again. */
+  meetingsRetry(id: string): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

@@ -31,6 +31,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  net,
   Notification,
   safeStorage,
   session,
@@ -2191,6 +2192,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsStart, (e, title: unknown) => meetings.start(e, title));
   reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
+  reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3324,6 +3326,8 @@ const meetings = new MeetingsIpc({
   macosVersion: () => process.getSystemVersion(),
   arch: process.arch,
   modelsDir: join(paths.home, "meetings", "models"),
+  // Model downloads go through Electron's network stack (the system's proxy and certificates).
+  fetch: (url, init) => net.fetch(url, init),
   whisper: () => ({
     env: process.env,
     resourcesPath: process.resourcesPath,
@@ -3782,4 +3786,6 @@ app.on("will-quit", () => {
   watches.killAll();
   ptys.closeAll();
   sources.stop();
+  // Kills a whisper-cli still running (its chunk is transcribed at the next start); loads nothing.
+  meetings.quit();
 });

@@ -31,6 +31,7 @@ const meeting = (over: Partial<Meeting> = {}): Meeting => ({
   segments: [{ start: 0, end: 900, speaker: 'you', text: 'Hello alice' }],
   summary: null,
   matches: [{ label: 'acme/web#3', noteId: 'n-1', segments: [0] }],
+  progress: { done: 1, total: 2, wait: null },
   error: null,
   ...over,
 })
@@ -40,6 +41,9 @@ describe('storedMeeting', () => {
     const m = meeting()
     expect(storedMeeting(JSON.parse(JSON.stringify(m)), ID)).toEqual(m)
     expect(storedMeeting(meeting({ ended: null, state: 'recording', titleBy: null, title: '' }), ID)).not.toBeNull()
+    // Files from before progress: read as none.
+    const { progress: _, ...old } = m
+    expect(storedMeeting(old, ID)).toEqual({ ...m, progress: null })
   })
 
   it('anything else is not a meeting (and so never overwritten)', () => {
@@ -64,6 +68,9 @@ describe('storedMeeting', () => {
       { ...meeting(), matches: [{ label: 'x', noteId: '../n', segments: [] }] },
       { ...meeting(), error: 5 },
       { ...meeting(), apps: 'zoom' },
+      { ...meeting(), progress: { done: -1, total: 2, wait: null } },
+      { ...meeting(), progress: { done: 1, total: 2, wait: 'a\nb' } },
+      { ...meeting(), progress: { done: 1, total: 2 } },
     ]
     for (const b of bad) expect(storedMeeting(b, ID), JSON.stringify(b)).toBeNull()
     expect(storedMeeting({ ...meeting(), id: '../etc' }, '../etc')).toBeNull()

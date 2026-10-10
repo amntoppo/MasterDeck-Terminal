@@ -172,6 +172,18 @@ export interface MeetingMatch {
   segments: number[]
 }
 
+/**
+ * How far the transcript is (the Meetings page shows "Transcribing 3/12"): chunks done, chunks
+ * known so far (it grows while recording), and why it waits, when it does ("Waiting for the
+ * speech model").
+ */
+export interface MeetingProgress {
+  done: number
+  total: number
+  wait: string | null
+}
+export const MEETING_WAIT_MAX = 200
+
 /** MASTERDECK_HOME/meetings/<id>.json */
 export interface Meeting {
   id: string
@@ -193,6 +205,8 @@ export interface Meeting {
   segments: Segment[]
   summary: string | null
   matches: MeetingMatch[]
+  /** The transcription's progress; null before the first chunk (and in files written before it). */
+  progress: MeetingProgress | null
   /** Why it failed, or what went wrong while recording; plain text MasterDeck wrote. */
   error: string | null
 }
@@ -277,6 +291,9 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
     matches.push(match)
   }
   if (o.error !== null && (typeof o.error !== 'string' || o.error.length > MEETING_ERROR_MAX || CONTROL.test(o.error))) return null
+  // Missing in the files of the first recordings: no progress then.
+  const progress = o.progress === undefined || o.progress === null ? null : asProgress(o.progress)
+  if (progress === undefined) return null
   return {
     id,
     title,
@@ -291,8 +308,19 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
     segments,
     summary: o.summary,
     matches,
+    progress,
     error: o.error,
   }
+}
+
+const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 10 * CHUNK_SEQ_MAX
+
+/** A stored progress, or undefined when it is not one. */
+function asProgress(v: unknown): MeetingProgress | undefined {
+  const p = record(v)
+  if (!p || !count(p.done) || !count(p.total)) return undefined
+  if (p.wait !== null && (typeof p.wait !== 'string' || p.wait.length > MEETING_WAIT_MAX || LINE_CONTROL.test(p.wait))) return undefined
+  return { done: p.done, total: p.total, wait: p.wait }
 }
 
 /** Both tracks' segments as one transcript, by start time; where both talk at once both lines stay (you first on a tie). */

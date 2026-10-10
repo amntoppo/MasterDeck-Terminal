@@ -81,6 +81,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   meetingsStart: blocked,
   meetingsStop: blocked,
   meetingsPause: blocked,
+  meetingsRetry: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),
