@@ -86,7 +86,7 @@ describe('candidatesOf', () => {
     expect(c[0]!.info).toEqual({
       kind: 'session',
       name: 'fix-login',
-      folder: 'web',
+      repo: 'acme/web',
       branch: 'fix/login',
       ticket: { ref: 'acme/web#12', title: 'Login breaks' },
       prs: [{ number: 40, title: 'Fix the login' }],
@@ -97,6 +97,33 @@ describe('candidatesOf', () => {
     expect(c[2]!.link).toEqual({ ticket: { repo: 'acme/web', number: 41 } })
     // No full path reaches the prompt.
     expect(JSON.stringify(c.map((x) => x.info))).not.toContain('/Users/')
+  })
+
+  it("a session's repository: its worktree's, else its PR's; never a folder's own name (the home folder is the user's name)", () => {
+    const c = candidatesOf(
+      fixture({
+        sessions: [
+          sess('wt', { name: 'in-worktree', cwd: '/Users/alice/work/web/.claude/worktrees/x/app' }),
+          sess('home', { name: 'at-home', cwd: '/Users/alice' }),
+          sess('plain', { name: 'plain', cwd: '/Users/alice/work/api' }),
+        ],
+        git: { 'id-wt': { dir: '/Users/alice/work/web/.claude/worktrees/x/app', branch: 'x', ahead: 0, behind: 0, added: 0, removed: 0, files: 0 } },
+        sessionWorktrees: { wt: [{ path: '/Users/alice/work/web/.claude/worktrees/x', repo: 'web', branch: 'x' }], home: [{ path: '/elsewhere', repo: 'other', branch: null }] },
+        sessionPrs: { 'id-plain': ['https://github.com/acme/api/pull/7'] },
+      }),
+    )
+    expect(c.slice(0, 3).map((x) => [x.label, x.info.repo])).toEqual([
+      ['Session in-worktree', 'web'],
+      ['Session at-home', null],
+      ['Session plain', 'acme/api'],
+    ])
+    expect(JSON.stringify(c.map((x) => x.info))).not.toContain('alice')
+  })
+
+  it('a sprint ticket that a PR candidate closes is not a second candidate (one note per ticket)', () => {
+    const c = candidatesOf(fixture({ prs: [pr(44, { title: 'Dark mode PR', refsIssue: 13, refsRepo: 'acme/web' })] }))
+    expect(c.map((x) => x.label)).toEqual(['Session fix-login', 'Session old-work', 'PR acme/web#44 Dark mode PR', 'Ticket acme/web#14 Mine'])
+    expect(c[2]!.link).toEqual({ ticket: { repo: 'acme/web', number: 13 } })
   })
 
   it('cuts to 200 and strips control characters from names and titles', () => {
@@ -242,7 +269,8 @@ describe('meetingNoteBody', () => {
     const body = meetingNoteBody({ meeting: { id, title: 'Standup', started: new Date(2026, 9, 10, 9, 5).getTime() }, match, segments })
     expect(body).toBe(
       [
-        '**From:** Standup · 2026-10-10 09:05\nThe login bug.',
+        '**From:** Standup · 2026-10-10 09:05',
+        'The login bug.',
         '**Action items**\n- Fix login by Friday',
         '> **You** 1:04 — Login is broken\n> **Others** 1:05 — I will fix it',
         `[Open in Meetings](masterdeck://meetings/${id}?t=64)`,
@@ -251,22 +279,42 @@ describe('meetingNoteBody', () => {
     expect(matchIndexes(match, segments.length)).toEqual([1, 2])
   })
 
-  it('what Claude or the meeting said cannot become a hidden link, an image, a heading or a tag in the note (a bare https address stays visible)', () => {
-    const evil = { ...match, summary: '[Click](https://evil.example) ![x](https://evil.example/i.png) <img src=x>', actions: ['# Heading', '- [ ] task'] }
-    const body = meetingNoteBody({ meeting: { id, title: '[t](https://evil.example)', started: 1 }, match: evil, segments: [seg(0), seg(1, '**bold** [x](https://evil.example)'), seg(2)] })
-    const links: string[] = []
+  /** What a note draws that the text did not show as it is: a link whose words are not its address, an image, a heading, a table (the meeting's own link left out). */
+  const hidden = (body: string): string[] => {
+    const out: string[] = []
     const walk = (v: unknown): void => {
       if (Array.isArray(v)) return v.forEach(walk)
       if (v && typeof v === 'object') {
         const o = v as Record<string, unknown>
         const shown = Array.isArray(o.c) && o.c.length === 1 && (o.c[0] as { v?: string }).v
-        if ((o.t === 'link' && shown !== o.href) || o.t === 'image') links.push(String(o.href ?? o.src))
-        if (o.t === 'heading') links.push('heading')
+        if ((o.t === 'link' && shown !== o.href && !String(o.href).startsWith('masterdeck://')) || o.t === 'image') out.push(String(o.href ?? o.src))
+        if (o.t === 'heading' || o.t === 'table') out.push(String(o.t))
         Object.values(o).forEach(walk)
       }
     }
     walk(parseMarkdown(body, { html: false }))
-    expect(links).toEqual([])
+    return out
+  }
+  /** Every link's address in a note. */
+  const hrefs = (body: string): string[] => JSON.stringify(parseMarkdown(body, { html: false })).match(/"href":"[^"]*"/g) ?? []
+
+  it('what Claude or the meeting said cannot become a hidden link, an image, a heading or a tag in the note (a bare https address stays visible)', () => {
+    const evil = { ...match, summary: '[Click](https://evil.example) ![x](https://evil.example/i.png) <img src=x>', actions: ['# Heading', '- [ ] task'] }
+    const body = meetingNoteBody({ meeting: { id, title: '[t](https://evil.example)', started: 1 }, match: evil, segments: [seg(0), seg(1, '**bold** [x](https://evil.example)'), seg(2)] })
+    expect(hidden(body)).toEqual([])
+  })
+
+  it('a bare https address keeps its address; one wrapped in marks still makes no hidden link', () => {
+    const body = (summary: string) => meetingNoteBody({ meeting: { id, title: 'T', started: 1 }, match: { ...match, summary }, segments })
+    expect(hrefs(body('See https://x.com/a_b now'))).toContain('"href":"https://x.com/a_b"')
+    for (const s of ['<https://evil.com>', 'https://evil.com/[x](https://a.com)', 'xhttps://evil.com/[x](https://a.com)', 'https://a.com<[x](https://evil.com)', '_https://a.com/*b*_'])
+      expect(hidden(body(s)), s).toEqual([])
+  })
+
+  it('a | in the title and a summary line of dashes make no table; a leading : is escaped', () => {
+    const body = meetingNoteBody({ meeting: { id, title: 'a | b', started: 1 }, match: { ...match, summary: ':-- | --:' }, segments })
+    expect(hidden(body)).toEqual([])
+    expect(body.split('\n\n')[1]).toBe('\\:-- \\| --:')
   })
 
   it('stops quoting before a note is too long', () => {

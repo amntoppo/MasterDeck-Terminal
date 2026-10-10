@@ -97,9 +97,7 @@ export class Matcher {
     const matchFailed = m.state === 'failed' && !!m.error?.startsWith(MATCH_FAILED)
     if (m.state !== 'done' && !matchFailed)
       return { ok: false, message: m.state === 'failed' ? 'Its transcription failed: try that again first.' : 'The meeting is not transcribed yet.' }
-    // The same check match() makes, here too, so the answer says it.
-    const drop = this.d.notes.dropMeetingNotes(id, true)
-    if (drop.failed.length) return { ok: false, message: 'Could not remove the notes it added before; nothing was matched again.' }
+    // Its notes stay until Claude has answered: write() replaces them, so a failed run loses nothing.
     const u = this.d.store.update(id, (x) => ({ ...x, state: 'matching', error: null }))
     if (!u.ok) return u
     this.d.onChange?.(id)

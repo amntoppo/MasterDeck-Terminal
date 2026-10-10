@@ -195,13 +195,31 @@ describe('Matcher', () => {
     expect(store.get(meeting.id)!.matches[0]!.noteId).toBe(login!.id)
   })
 
-  it('Match again goes no further when an earlier note could not be removed', async () => {
+  it('a failed Match again keeps the notes of the run before', async () => {
+    let fail = false
+    const t = setup(() => (fail ? { code: 1, stdout: '', stderr: 'boom' } : { code: 0, stdout: answer(), stderr: '' }))
+    const meeting = transcribed()
+    await t.m.match(meeting.id)
+    const before = notes.meetingNotes(meeting.id).map((x) => x.id)
+    expect(before).toHaveLength(2)
+    fail = true
+    expect(t.m.rematch(meeting.id)).toEqual({ ok: true })
+    // Nothing is removed before Claude has answered.
+    expect(notes.meetingNotes(meeting.id).map((x) => x.id)).toEqual(before)
+    await vi.waitFor(() => expect(store.get(meeting.id)?.state).toBe('failed'))
+    expect(store.get(meeting.id)!.error).toBe(`${MATCH_FAILED}boom`)
+    expect(notes.meetingNotes(meeting.id).map((x) => x.id)).toEqual(before)
+  })
+
+  it('a good answer goes no further when an earlier note could not be removed', async () => {
     const t = setup()
     const meeting = transcribed()
     await t.m.match(meeting.id)
     const drop = vi.spyOn(notes, 'dropMeetingNotes').mockReturnValue({ removed: [], failed: ['n-x'] })
-    expect(t.m.rematch(meeting.id)).toEqual({ ok: false, message: 'Could not remove the notes it added before; nothing was matched again.' })
-    expect(store.get(meeting.id)?.state).toBe('done')
+    expect(t.m.rematch(meeting.id)).toEqual({ ok: true })
+    await vi.waitFor(() => expect(store.get(meeting.id)?.state).toBe('failed'))
+    expect(store.get(meeting.id)!.error).toBe(`${MATCH_FAILED}Could not remove the notes it added before.`)
+    expect(notes.meetingNotes(meeting.id)).toHaveLength(2)
     drop.mockRestore()
   })
 

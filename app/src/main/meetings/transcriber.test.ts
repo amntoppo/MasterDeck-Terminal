@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MATCH_FAILED } from '@shared/meetingMatch'
 import { CHUNK_MS, type Meeting, type Speaker } from '@shared/meetings'
 import { MeetingStore } from './store'
 import { chunkSegments, Transcriber, WAIT_MODEL, type TranscriberDeps } from './transcriber'
@@ -159,6 +160,13 @@ describe('Transcriber', () => {
     const { t } = queue()
     expect(t.retry(m.id)).toEqual({ ok: false, message: 'Nothing was recorded to transcribe.' })
     expect(t.retry('m-' + '0'.repeat(32))).toMatchObject({ ok: false })
+  })
+
+  it('Try again on a meeting whose matching failed is refused (Match again is the way)', () => {
+    const m = make({ state: 'failed', ended: clock, error: `${MATCH_FAILED}Claude gave no answer.` })
+    const { t } = queue()
+    expect(t.retry(m.id)).toEqual({ ok: false, message: 'Use Match again.' })
+    expect(store.get(m.id)!.state).toBe('failed')
   })
 
   it('no speech engine: failed with a plain reason', async () => {

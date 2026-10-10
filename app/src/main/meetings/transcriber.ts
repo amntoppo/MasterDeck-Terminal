@@ -11,6 +11,7 @@ import {
   type Segment,
   type Speaker,
 } from '@shared/meetings'
+import { MATCH_FAILED } from '@shared/meetingMatch'
 import type { Leftover, MeetingStore } from './store'
 import type { Segment as HeardSegment, TranscribeOptions } from './whisper'
 
@@ -171,6 +172,8 @@ export class Transcriber {
     const m = this.d.store.get(id)
     if (!m) return { ok: false, message: 'No such meeting.' }
     if (m.state !== 'failed') return { ok: false, message: 'Only a meeting whose transcription failed is tried again.' }
+    // All text already, its matching failed: Match again (Matcher.rematch) is the way, not a second transcription.
+    if (m.error?.startsWith(MATCH_FAILED)) return { ok: false, message: 'Use Match again.' }
     if (this.d.live() === id) return { ok: false, message: 'The meeting is being recorded.' }
     const chunks = this.d.store.leftovers(id)
     if (!chunks.length && !m.segments.length) return { ok: false, message: 'Nothing was recorded to transcribe.' }

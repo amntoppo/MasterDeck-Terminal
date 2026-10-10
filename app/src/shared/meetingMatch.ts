@@ -47,12 +47,31 @@ export interface Candidate {
 const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g
 /** One line of text from the state (a name, a GitHub title): no control characters, cut. */
 const line = (s: string | null | undefined, max: number): string => (s ?? '').replace(CONTROLS, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
-/** A folder's last part: the prompt never gets a full path (it names the user's home). */
-const folderName = (p: string): string => line(p.split(/[\\/]/).filter(Boolean).pop() ?? '', 100)
+const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+const GITHUB_REPO = /^https:\/\/github\.com\/([A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100})\//
 const FULL_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 const ref = (t: Ticket): string => `${fullRepo(t.repo)}#${t.number}`
 
-type MatchState = Pick<AppState, 'sessions' | 'git' | 'sessionPrs' | 'prLive' | 'prs' | 'issues' | 'board'> & Partial<Pick<AppState, 'repoView'>>
+type MatchState = Pick<AppState, 'sessions' | 'git' | 'sessionPrs' | 'prLive' | 'prs' | 'issues' | 'board'> & Partial<Pick<AppState, 'repoView' | 'sessionWorktrees'>>
+
+/**
+ * The repository a session works in, for the prompt: the worktree it is in (its main checkout's
+ * name), else its first PR's repository. Never a folder's own name (a session in the home folder
+ * would send the user's name), and nothing when neither is known.
+ */
+function sessionRepo(state: MatchState, s: AppState['sessions'][number]): string | null {
+  const dir = norm(state.git[s.sessionId]?.dir ?? s.cwd)
+  const wt = (state.sessionWorktrees?.[s.key] ?? []).find((w) => {
+    const p = norm(w.path)
+    return !!p && (dir === p || dir.startsWith(`${p}/`))
+  })
+  if (wt?.repo) return line(wt.repo, 100) || null
+  for (const url of state.sessionPrs[s.sessionId] ?? []) {
+    const m = GITHUB_REPO.exec(url)
+    if (m) return m[1]!
+  }
+  return null
+}
 
 /**
  * Who a meeting may be matched to: the listed sessions (state.sessions, which already leaves out
@@ -85,7 +104,7 @@ export function candidatesOf(state: MatchState): Candidate[] {
       info: {
         kind: 'session',
         name,
-        folder: folderName(state.git[s.sessionId]?.dir ?? s.cwd),
+        repo: sessionRepo(state, s),
         branch: line(state.git[s.sessionId]?.branch, 200) || null,
         ticket: t ? { ref: ref(t), title: line(ticketTitle(t, ...titled), 200) } : null,
         prs,
@@ -99,6 +118,8 @@ export function candidatesOf(state: MatchState): Candidate[] {
     if (!own || !FULL_REPO.test(own)) continue
     const closes: Ticket | null = p.refsIssue !== null ? { repo: p.refsRepo ?? null, number: p.refsIssue } : null
     if (closes && taken.has(ticketKey(closes.repo, closes.number))) continue
+    // One note per ticket per meeting: the sprint ticket this PR closes is this candidate already.
+    if (closes) taken.add(ticketKey(closes.repo, closes.number))
     out.push({
       kind: 'pr',
       label: line(`PR ${own}#${p.number} ${p.title}`, 300),
@@ -286,13 +307,24 @@ export function mergeAnswers(answers: Answer[]): Answer {
  * Text from the transcript or the answer as Markdown that shows as the same text: every mark that
  * could make a link, an image, emphasis or a tag is escaped, and a line can't start a heading, list,
  * quote or table. A bare https address stays a visible address (MarkdownView links only https, and
- * shows where it goes).
+ * shows where it goes): the parser links it before it reads escapes, so it is left as it is (an
+ * escape in it would end up in the address) and only the text around it is escaped. It is left
+ * alone only where the parser links it (not after a letter or digit, up to a space, `<` or `>`);
+ * anywhere else it is escaped like the rest, so no mark in it can make a link of its own.
  */
 export function mdText(s: string): string {
-  return line(s, 10_000)
-    .replace(/[\\`*_[\]<>!~|]/g, (c) => `\\${c}`)
-    .replace(/^([#+\-=>]|\d+[.)])/, '\\$1')
+  const esc = (t: string) => t.replace(/[\\`*_[\]<>!~|]/g, (c) => `\\${c}`)
+  const one = line(s, 10_000)
+  let out = ''
+  let at = 0
+  for (const m of one.matchAll(BARE_HTTPS)) {
+    out += esc(one.slice(at, m.index)) + m[0]
+    at = m.index + m[0].length
+  }
+  return (out + esc(one.slice(at))).replace(/^([#+\-=>:]|\d+[.)])/, '\\$1')
 }
+/** What parseInline (shared/markdown.ts) links as a bare address. */
+const BARE_HTTPS = /(?<![A-Za-z0-9])https:\/\/[^\s<>]+/g
 
 /** A meeting's date and time as a note shows it: 2026-10-10 14:05 (this Mac's time). */
 export function meetingWhen(ms: number): string {
@@ -310,9 +342,9 @@ export const meetingHref = (id: string, seconds: number): string => `masterdeck:
  * untrusted text goes through mdText. The quotes stop before NOTE_BODY_MAX.
  */
 export function meetingNoteBody(o: { meeting: { id: string; title: string; started: number }; match: MatchAnswer; segments: Segment[] }): string {
-  const head = [`**From:** ${mdText(o.meeting.title)} · ${meetingWhen(o.meeting.started)}`]
-  if (o.match.summary) head.push(mdText(o.match.summary))
-  const out = [head.join('\n')]
+  // The summary is a paragraph of its own: a line under the title's could make the two a table.
+  const out = [`**From:** ${mdText(o.meeting.title)} · ${meetingWhen(o.meeting.started)}`]
+  if (o.match.summary) out.push(mdText(o.match.summary))
   if (o.match.actions.length) out.push(['**Action items**', ...o.match.actions.map((a) => `- ${mdText(a)}`)].join('\n'))
   let first: number | null = null
   const quotes: string[] = []
@@ -331,6 +363,7 @@ export function meetingNoteBody(o: { meeting: { id: string; title: string; start
       size += q.length + 1
     }
   if (quotes.length) out.push(quotes.join('\n'))
+  // A masterdeck:// address: the window opens the Meetings page there (it routes the click itself); the web shows the words only.
   out.push(`[Open in Meetings](${meetingHref(o.meeting.id, (first ?? 0) / 1000)})`)
   return out.join('\n\n')
 }
