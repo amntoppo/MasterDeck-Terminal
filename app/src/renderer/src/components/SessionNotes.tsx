@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Note, NoteMeta } from '@shared/notes'
 import type { NoteTarget } from '@shared/noteEditor'
-import { meetingDay, sessionLink } from '@shared/noteFilter'
+import { meetingDay, NOTE_REREAD_MS, sessionLink, shownNote } from '@shared/noteFilter'
 import { formatAgo } from '@shared/format'
 import type { Ticket } from '@shared/ticket'
 import type { Session } from '@shared/types'
@@ -24,23 +24,41 @@ interface Props {
 export function SessionNotes({ session: s, ticket, list, onNote }: Props) {
   const now = useNow()
   const [picked, setPicked] = useState<string | null>(null)
-  const meta = list.find((m) => m.id === picked) ?? list[0] ?? null
+  const meta = shownNote(list, picked)
   const [note, setNote] = useState<Note | null>(null)
   const [failed, setFailed] = useState(false)
+  const lastRead = useRef<string | null>(null)
 
-  // The full text is read when picked, and again when it changes (`updated` names a version).
+  // The full text is read when picked, and again when it changes (`updated` names a version). A change comes with
+  // every autosave while the note is edited, so that re-read waits until the edits pause; the first read does not.
   const id = meta?.id ?? null
   const version = meta?.updated ?? 0
   useEffect(() => {
-    if (!id) return setNote(null)
+    if (!id) {
+      lastRead.current = null
+      return setNote(null)
+    }
     let live = true
-    setFailed(false)
-    void deck()
-      .notesGet(id)
-      .then((n) => live && setNote(n))
-      .catch(() => live && setFailed(true))
+    const read = () =>
+      void deck()
+        .notesGet(id)
+        .then((n) => {
+          if (!live) return
+          // null: the note is gone or unreadable; say so rather than load for ever.
+          if (!n) return setFailed(true)
+          lastRead.current = n.id
+          setFailed(false)
+          setNote(n)
+          setPicked(n.id)
+        })
+        .catch(() => live && setFailed(true))
+    const again = lastRead.current === id
+    if (!again) setFailed(false)
+    const timer = again ? setTimeout(read, NOTE_REREAD_MS) : null
+    if (!timer) read()
     return () => {
       live = false
+      if (timer) clearTimeout(timer)
     }
   }, [id, version])
 

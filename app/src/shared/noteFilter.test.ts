@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterNotes, isNoteFilter, meetingDay, meetingDot, newestMeetingNote, noteIn, sessionLink } from './noteFilter'
+import { filterNotes, isNoteFilter, meetingDay, meetingDot, newestMeetingNote, noteIn, sessionLink, shownNote } from './noteFilter'
 import { noteMeta, type Note, type NoteMeta } from './notes'
 
 const meta = (id: string, over: Partial<Note> = {}): NoteMeta =>
@@ -64,10 +64,24 @@ describe('sessionLink', () => {
   it('a name made safe for one line, cut to the limit', () => {
     expect(sessionLink({ key: 'bg-1', name: `a\tb${'x'.repeat(300)}` }, null)?.session?.name).toHaveLength(200)
     expect(sessionLink({ key: 'bg-1', name: 'a\nb' }, null)?.session?.name).toBe('a b')
+    expect(sessionLink({ key: 'bg-1', name: 'a\nb\tc\x7fd' }, null)?.session?.name).toBe('a b c d')
   })
   it('a key the store would refuse leaves the session out', () => {
     expect(sessionLink({ key: 'a b', name: 'x' }, { repo: null, number: 3 })).toEqual({ ticket: { repo: null, number: 3 } })
     expect(sessionLink({ key: 'a b', name: 'x' }, null)).toBeUndefined()
+  })
+})
+
+describe('shownNote', () => {
+  it('the first note until one is picked', () => {
+    expect(shownNote(all, null)).toBe(mine)
+    expect(shownNote([], null)).toBeNull()
+  })
+  it('the picked note stays when a newer one comes first', () => {
+    expect(shownNote([fromMeeting, ...all], aboutSession.id)).toBe(aboutSession)
+  })
+  it('the first again when the picked note is gone', () => {
+    expect(shownNote([ticketNote, mine], aboutSession.id)).toBe(ticketNote)
   })
 })
 

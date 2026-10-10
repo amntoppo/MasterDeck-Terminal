@@ -75,6 +75,7 @@ export function Inspector({
         {shown === "details" &&
           (session ? (
             <SessionDetails
+              key={session.key}
               session={session}
               state={state}
               onDetach={onDetach}

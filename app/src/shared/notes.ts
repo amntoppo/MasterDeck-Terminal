@@ -91,8 +91,9 @@ export const NOTE_ID = /^(?:n-[0-9a-f]{32}|t-[a-z0-9-]{1,39}~[a-z0-9._-]{1,100}~
 
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
 /** For one-line names (a session's, a meeting's title): no tab or line break either. */
-const CONTROL_LINE = /[\x00-\x1f\x7f-\x9f]/
-const SESSION_KEY = /^[A-Za-z0-9._:-]{1,200}$/
+export const CONTROL_LINE = /[\x00-\x1f\x7f-\x9f]/
+/** The session keys a note's link takes (`Session.key`). */
+export const SESSION_KEY = /^[A-Za-z0-9._:-]{1,200}$/
 export const NOTE_LINK_NAME_MAX = 200
 const FULL_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 

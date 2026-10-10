@@ -1,4 +1,4 @@
-import { NOTE_LINK_NAME_MAX, type NoteLinkInput, type NoteMeta } from './notes'
+import { CONTROL_LINE, NOTE_LINK_NAME_MAX, SESSION_KEY, type NoteLinkInput, type NoteMeta } from './notes'
 import type { Ticket } from './ticket'
 
 /** The Notes panel's filter chips. */
@@ -46,13 +46,22 @@ export const newestMeetingNote = (list: NoteMeta[]): number => list.reduce((t, m
 /** A meeting note came since the tab was last open (`seen`: what newestMeetingNote was then; null: never opened). */
 export const meetingDot = (list: NoteMeta[], seen: number | null): boolean => newestMeetingNote(list) > (seen ?? 0)
 
-const SESSION_KEY = /^[A-Za-z0-9._:-]{1,200}$/
-const CONTROL_LINE = /[\x00-\x1f\x7f-\x9f]/g
+const CONTROL_LINES = new RegExp(CONTROL_LINE.source, 'g')
+
+/**
+ * The note a session's Notes tab shows: the picked one while it is listed, else the first (the ticket's note, else the
+ * newest). Once shown, a note becomes the picked one, so a note that arrives later never takes its place.
+ */
+export const shownNote = (list: NoteMeta[], picked: string | null): NoteMeta | null =>
+  list.find((m) => m.id === picked) ?? list[0] ?? null
+
+/** How long the tab waits after a change to the shown note before reading it again (an autosave every few seconds). */
+export const NOTE_REREAD_MS = 1500
 
 /** What a new note from a session's Details is about: the session (when its key is one the store takes) and its ticket. */
 export function sessionLink(s: { key: string; name: string }, ticket: Ticket | null): NoteLinkInput | undefined {
   const link: NoteLinkInput = {}
-  if (SESSION_KEY.test(s.key)) link.session = { key: s.key, name: s.name.replace(CONTROL_LINE, ' ').slice(0, NOTE_LINK_NAME_MAX) }
+  if (SESSION_KEY.test(s.key)) link.session = { key: s.key, name: s.name.replace(CONTROL_LINES, ' ').slice(0, NOTE_LINK_NAME_MAX) }
   if (ticket) link.ticket = ticket
   return link.session || link.ticket ? link : undefined
 }

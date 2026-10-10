@@ -130,9 +130,11 @@ export function SessionDetails({
   // (per session and per viewer: the window and each browser keep their own).
   const notesOn = !!onNote && can("notesList");
   const myNotes = notesOn ? sessionNotes(notes ?? [], s, t, fullRepo) : [];
+  // ponytail: one md.sessionNotesSeen.<key> per session ever opened on its Notes tab, never pruned (a number each);
+  // upgrade: drop the keys of sessions no longer listed. The Inspector keys this component by session, so `seen` is
+  // read once per session.
   const seenKey = `md.sessionNotesSeen.${s.key}`;
   const [seen, setSeen] = useState<number | null>(() => load<number | null>(seenKey, null));
-  useEffect(() => setSeen(load<number | null>(seenKey, null)), [seenKey]);
   const newest = newestMeetingNote(myNotes);
   useEffect(() => {
     if (tab !== "notes" || !newest || newest === seen) return;
