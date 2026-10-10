@@ -222,7 +222,8 @@ export interface AppState {
   modCatalog?: import("./modBand").ModEntry[];
   /**
    * A meeting being recorded (the rail's indicator), set in the state callback from the recorder.
-   * Null off macOS. Never in toRemoteSnapshot; the web app does not show it.
+   * Null off macOS. Never in toRemoteSnapshot; approved web tabs get it with the rest of the state
+   * (harmless: it only says a recording runs), and the web app does not show it.
    */
   meetingLive?: import("./meetings").MeetingLive | null;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */

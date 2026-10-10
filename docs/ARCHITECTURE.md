@@ -1093,8 +1093,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   `remove`) answers `ModelsAnswer`; `pick` and `download` need the consent and store
   `settings.meetings.model` through `MeetingsIpc` (`setMeetings`), and `download` runs in the
   background, its progress sent to the window only (`meetings:modelProgress`, not `emit`).
-  `meetingsRestart()` (`meetings:restart`): a native confirmation, then `app.relaunch()` +
-  `app.quit()` (quit, so `will-quit` still cleans up). All `blocked`. `MeetingsIpc.loadEngine()`
+  `meetingsRestart()` (`meetings:restart`): a native confirmation (while recording, the recording's
+  question instead, with **Stop recording and restart**), then `app.relaunch()` + `app.quit()`
+  (quit, so `will-quit` still cleans up; relaunch only once nothing can refuse the quit). Closing
+  the window, quitting and Restart share one pending recording question (`oneAtATime` in
+  `shared/meetings.ts`). All `blocked`. `MeetingsIpc.loadEngine()`
   loads `models.ts` and `whisper.ts` dynamically, like the gate; `setup()` fills `model.ready` from
   the store once a model is picked.
 
@@ -1111,7 +1114,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   refuses without consent or the microphone's grant (`getMediaAccessStatus`, never a prompt),
   makes the meeting (`MeetingStore.create`, state `recording`), opens the capture window and starts
   it with `executeJavaScript('window.mdCapture.record(id)', true)` (a user gesture, which
-  `getDisplayMedia` wants). `pause(bool)` / `stop()` send `mdCapture.command(...)`; Stop waits up to
+  `getDisplayMedia` wants). `pause(bool)` / `stop()` send `mdCapture.command(...)` once the page was
+  started; a pause or Stop pressed while it loads goes in front of the start script instead, and the
+  page keeps it (`CaptureControl` in `shared/meetingAudio.ts`) until its streams open, so a track
+  starts paused or the page ends at once. **Turn off meetings** during a recording stops it first
+  (`stop('consent')`), then clears the consent. Stop waits up to
   10 s for the window's `ended`, then the meeting gets `ended`, `pausedMs` and state `transcribing`
   (or `failed` with "Nothing was recorded." when no chunk came). Past `MEETING_MAX_MS` (4 h, checked
   every 10 s) it stops with a notice. A window that ends by itself (`mic-refused`, `mic-ended`, a
@@ -1128,14 +1135,16 @@ waits, and writes nothing if accounts appeared meanwhile.
   no navigation, no new windows), page `renderer/capture.html` + `renderer/src/capture.ts` (a second
   renderer entry in `electron.vite.config.ts`), preload `preload/capture.ts` (a second preload entry:
   `window.capture.chunk / audio / level / ended`, `ipcRenderer.send` only). The page opens the
-  microphone (`getUserMedia`, echo cancellation) and the Mac's sound (`getDisplayMedia`), an
-  `AudioContext` at 16 kHz and one `AudioWorklet` per track (`renderer/src/pcmWorklet.ts`, loaded
-  with `?worker&url`: mono blocks of 2048 frames, a `flush` at Stop); `shared/meetingAudio.ts`
+  microphone (`getUserMedia`, echo cancellation) and the Mac's sound (`getDisplayMedia`, asked
+  first, both at once: it needs the user activation), an `AudioContext` at 16 kHz and one
+  `AudioWorklet` per track (`renderer/src/pcmWorklet.ts`, loaded with `?worker&url` as a module in
+  dev and build: `worker.format: 'es'`; mono blocks of 2048 frames; `pause` posts what it buffered
+  and drops the input until `resume`, `flush` at Stop); `shared/meetingAudio.ts`
   (`Resampler` if the context is not 16 kHz, `toInt16`, `Chunker`, `wav`) cuts 30-second WAVs
   (`CHUNK_MS`; a chunk's offset is `seq × CHUNK_MS`). A `MediaRecorder` on both tracks mixed
   (`audio/webm;codecs=opus`, 32 kbit/s, 10-second slices) sends the playback copy. Levels go out
-  every 500 ms (-1: no track). Pause stops taking samples and pauses the `MediaRecorder`, so the
-  chunks and the audio leave the paused time out alike.
+  every 500 ms (-1: no track). Pause pauses the worklets and the `MediaRecorder`, so the chunks and
+  the audio leave the paused time out alike (Stop while paused sends nothing recorded since).
 - Messages from the capture window (`CAPTURE_CH` in `shared/meetings.ts`, `ipcMain.on`, never on
   `DeckApi`): each is dropped unless its sender is the capture window's own main frame. `meetings:chunk`
   `({ id, track, seq }, bytes)`: the recording's id, `you` or `others`, a sequence number above the

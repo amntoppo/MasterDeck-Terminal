@@ -63,7 +63,15 @@ interface Recording {
   done: Promise<CaptureEnd>
   timer: NodeJS.Timeout
   stopping: Promise<void> | null
+  /**
+   * The page is loaded and was started: commands go to it from now on. Before, a script would be
+   * lost (the page is not there yet); the start script carries the pause or stop instead.
+   */
+  pageStarted: boolean
 }
+
+/** Why a recording stops: Stop, the 4-hour limit, a full disk, quitting, or Turn off meetings. */
+export type StopWhy = 'user' | 'limit' | 'disk' | 'quit' | 'consent'
 
 const ENDED_TEXT: Partial<Record<CaptureEnd, string>> = {
   'mic-refused': 'The microphone could not be opened. Allow it on Settings → Meetings.',
@@ -74,6 +82,9 @@ const ENDED_TEXT: Partial<Record<CaptureEnd, string>> = {
 /** The same frame: WebFrameMain wrappers are compared by what names the frame, not by object. */
 const sameFrame = (a: { processId: number; routingId: number } | null | undefined, b: { processId: number; routingId: number } | null | undefined): boolean =>
   !!a && !!b && a.processId === b.processId && a.routingId === b.routingId
+
+/** The page's command call, as a statement (CaptureCommand is one of three fixed words). */
+const cmd = (c: CaptureCommand): string => `window.mdCapture.command(${JSON.stringify(c)});`
 
 const bytesOf = (v: unknown): Uint8Array | null =>
   v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v) : null
@@ -165,11 +176,14 @@ export class Recorder {
     return w
   }
 
-  /** Load the page, then start it with a user gesture (getDisplayMedia wants one). */
-  private async run(w: BrowserWindow, call: string): Promise<void> {
+  /**
+   * Load the page, then start it with a user gesture (getDisplayMedia wants one). The script is
+   * made once the page is there, so it carries what happened while it loaded.
+   */
+  private async run(w: BrowserWindow, call: () => string): Promise<void> {
     const p = this.d.page
     await ('url' in p ? w.loadURL(p.url) : w.loadFile(p.file))
-    if (!w.isDestroyed()) await w.webContents.executeJavaScript(call, true)
+    if (!w.isDestroyed()) await w.webContents.executeJavaScript(call(), true)
   }
 
   private close(): void {
@@ -207,6 +221,7 @@ export class Recorder {
         if (this.rec === rec && recordedMs(this.live(), this.now()) >= MEETING_MAX_MS) void this.stop('limit')
       }, 10_000),
       stopping: null,
+      pageStarted: false,
     }
     this.rec = rec
     // A window that ends by itself (an unplugged microphone, a crash) finishes the meeting.
@@ -215,8 +230,13 @@ export class Recorder {
     })
     const w = this.open(() => rec.ended('error'))
     this.d.onChange()
-    // The id is MEETING_ID (hex): nothing of the user's reaches this script.
-    this.run(w, `window.mdCapture.record(${JSON.stringify(id)})`).catch(() => rec.ended('error'))
+    // The id is MEETING_ID (hex): nothing of the user's reaches this script. A pause or a Stop
+    // pressed while the page loaded goes first (the page keeps it until its streams open).
+    this.run(w, () => {
+      rec.pageStarted = true
+      const first = rec.stopping ? cmd('stop') : rec.pausedAt !== null ? cmd('pause') : ''
+      return `${first}window.mdCapture.record(${JSON.stringify(id)})`
+    }).catch(() => rec.ended('error'))
     return {
       ok: true,
       id,
@@ -225,9 +245,10 @@ export class Recorder {
     }
   }
 
-  private command(c: CaptureCommand): void {
+  /** To the page once it was started; before, the start script carries it (run). */
+  private command(r: Recording, c: CaptureCommand): void {
     const w = this.win
-    if (w && !w.isDestroyed()) void w.webContents.executeJavaScript(`window.mdCapture.command(${JSON.stringify(c)})`).catch(() => {})
+    if (r.pageStarted && w && !w.isDestroyed()) void w.webContents.executeJavaScript(cmd(c).slice(0, -1)).catch(() => {})
   }
 
   async pause(paused: unknown): Promise<RecordAnswer> {
@@ -236,24 +257,24 @@ export class Recorder {
     if (!r || r.stopping) return { ok: false, message: 'Nothing is being recorded.' }
     if (paused && r.pausedAt === null) {
       r.pausedAt = this.now()
-      this.command('pause')
+      this.command(r, 'pause')
     } else if (!paused && r.pausedAt !== null) {
       r.resumedAt = this.now()
       r.pausedMs += r.resumedAt - r.pausedAt
       r.pausedAt = null
-      this.command('resume')
+      this.command(r, 'resume')
     }
     this.d.onChange()
     return { ok: true, live: this.live() }
   }
 
   /** Stop: the window sends its last chunks and the last audio slice, then closes. */
-  async stop(why: 'user' | 'limit' | 'disk' | 'quit' = 'user'): Promise<RecordAnswer> {
+  async stop(why: StopWhy = 'user'): Promise<RecordAnswer> {
     const r = this.rec
     if (!r) return { ok: false, message: 'Nothing is being recorded.' }
     if (!r.stopping) {
       r.stopping = (async () => {
-        this.command('stop')
+        this.command(r, 'stop')
         const wait = new Promise<CaptureEnd>((res) => setTimeout(() => res('error'), this.d.stopWaitMs ?? 10_000))
         const reason = await Promise.race([r.done, wait])
         await this.finish(r, reason === 'stopped' ? 'stopped' : reason, why)
@@ -264,7 +285,7 @@ export class Recorder {
   }
 
   /** The meeting goes on to transcription (or fails when nothing was recorded); the window closes. */
-  private async finish(r: Recording, reason: CaptureEnd, why: 'user' | 'limit' | 'disk' | 'quit' = 'user'): Promise<void> {
+  private async finish(r: Recording, reason: CaptureEnd, why: StopWhy = 'user'): Promise<void> {
     if (this.rec !== r) return
     clearInterval(r.timer)
     const now = this.now()
@@ -339,7 +360,7 @@ export class Recorder {
     const p: { promise: Promise<boolean>; max: number; ended: (r: CaptureEnd) => void } = { promise: Promise.resolve(false), max: 0, ended: (r) => ended(r) }
     p.promise = (async () => {
       const w = this.open(() => p.ended('error'))
-      this.run(w, 'window.mdCapture.probe()').catch(() => p.ended('error'))
+      this.run(w, () => 'window.mdCapture.probe()').catch(() => p.ended('error'))
       // The wait covers macOS's prompt, which the first capture brings up.
       const wait = new Promise<CaptureEnd>((res) => setTimeout(() => res('error'), this.d.probeWaitMs ?? 60_000))
       const reason = await Promise.race([done, wait])

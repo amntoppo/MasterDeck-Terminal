@@ -949,7 +949,7 @@ first-run Setup, so nobody who never wants meetings is asked anything.
 - **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
   transcript and notes stay.
 - **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
-  offers; recorded meetings stay. macOS keeps the permissions it gave until you remove them in
+  offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay. macOS keeps the permissions it gave until you remove them in
   System Settings.
 
 macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.
@@ -969,7 +969,8 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
 - One recording at a time. After 4 hours it stops by itself and says so. If the microphone goes
   away (unplugged, taken by another app), the recording stops and a notification says why.
 - Quitting MasterDeck or closing its window while recording asks first: **Keep recording**, or
-  **Stop recording and quit** (what was recorded is kept). A crash keeps everything recorded up to
+  **Stop recording and quit** (what was recorded is kept). **Restart** on Settings → Meetings asks
+  the same, with **Stop recording and restart**. A crash keeps everything recorded up to
   the last 30 seconds.
 - The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy
   (`audio.webm`) and 30-second pieces that are turned into the transcript.

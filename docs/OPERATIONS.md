@@ -319,8 +319,10 @@ these choices. The page is started by `executeJavaScript(..., true)` so `getDisp
 user gesture; frames are compared by `processId` / `routingId` (WebFrameMain wrappers may differ
 as objects); the window has `autoplayPolicy: 'no-user-gesture-required'`; the AudioContext asks
 for 16 kHz (Chromium resamples the streams; `Resampler` covers another rate); the AudioWorklet is
-bundled with `?worker&url` into `out/renderer/assets/pcmWorklet-*.js` and loaded from `file://`
-(not yet run in a packaged app). `npm run build` builds both renderer pages (`index.html`,
+bundled with `?worker&url` (`worker.format: 'es'`, so a module in the build as in dev, where vite
+serves it as `?worker_file&type=module` with `import env.mjs`, never `importScripts`) into
+`out/renderer/assets/pcmWorklet-*.js` next to `capture-*.js` and loaded from `file://` (not yet run
+in a packaged app or in `npm run dev`). `npm run build` builds both renderer pages (`index.html`,
 `capture.html`) and both preloads (`index.js`, `capture.js`).
 
 **Checked by the user** (on the packaged app, after Task 5):

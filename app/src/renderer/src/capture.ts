@@ -1,11 +1,12 @@
 /// <reference types="vite/client" />
 import workletUrl from './pcmWorklet.ts?worker&url'
-import { Chunker, Resampler, rms, toInt16, wav, type CaptureBridge } from '@shared/meetingAudio'
+import { CaptureControl, Chunker, Resampler, rms, toInt16, wav, type CaptureBridge } from '@shared/meetingAudio'
 import { AUDIO_BITS, AUDIO_SLICE_MS, SAMPLE_RATE, type CaptureCommand, type CaptureEnd, type Speaker } from '@shared/meetings'
 
 // The meetings capture window (hidden; main/meetings/recorder.ts opens it at Record and closes it
 // at Stop). Main starts it with window.mdCapture.record(id) or .probe(), and sends pause, resume
-// and stop through window.mdCapture.command. Everything it records goes to main through
+// and stop through window.mdCapture.command (kept until the streams are open: CaptureControl).
+// Everything it records goes to main through
 // window.capture (preload/capture.ts); it keeps nothing.
 
 declare global {
@@ -25,16 +26,21 @@ class Tap {
   private sum = 0
   private count = 0
   private flushed: (() => void) | null = null
-  paused = false
 
   constructor(
     readonly track: Speaker,
     private id: string,
     ctx: AudioContext,
     src: MediaStreamAudioSourceNode,
+    paused: boolean,
   ) {
     this.resampler = ctx.sampleRate === SAMPLE_RATE ? null : new Resampler(ctx.sampleRate)
-    this.node = new AudioWorkletNode(ctx, 'md-pcm', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+    this.node = new AudioWorkletNode(ctx, 'md-pcm', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: { paused },
+    })
     src.connect(this.node)
     // The worklet writes silence: connected only so the graph pulls it.
     this.node.connect(ctx.destination)
@@ -44,8 +50,12 @@ class Tap {
     }
   }
 
+  /** The worklet holds the pause: it posts what it buffered before it, then drops the input. */
+  pause(paused: boolean): void {
+    this.node.port.postMessage(paused ? 'pause' : 'resume')
+  }
+
   private take(block: Float32Array): void {
-    if (this.paused) return
     for (let i = 0; i < block.length; i++) this.sum += block[i] * block[i]
     this.count += block.length
     const samples = this.resampler ? this.resampler.push(block) : block
@@ -78,9 +88,11 @@ class Tap {
 
 let stopping: Promise<void> | null = null
 let stopFn: ((reason: CaptureEnd) => Promise<void>) | null = null
-let commandFn: ((c: CaptureCommand) => void) | null = null
-/** Stop came before the streams were open: stop as soon as they are. */
-let stopAsked = false
+/** Pause and stop: kept while the page waits for its streams, applied when they open. */
+const control = new CaptureControl()
+const stopAll = (...streams: (MediaStream | null)[]) => {
+  for (const s of streams) for (const t of s?.getTracks() ?? []) t.stop()
+}
 
 const endOnce = (() => {
   let done = false
@@ -106,17 +118,22 @@ async function systemAudio(): Promise<MediaStream | null> {
 }
 
 async function record(id: string): Promise<void> {
+  if (control.stopped) return endOnce('stopped')
+  // The Mac's sound first: getDisplayMedia wants the user activation executeJavaScript gave, and
+  // waiting for the microphone (macOS may be asking) could use it up. Both are asked at once.
+  const sysAsked = systemAudio()
   let mic: MediaStream
   try {
     mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
   } catch {
+    stopAll(await sysAsked)
     return endOnce('mic-refused')
   }
-  if (stopAsked) {
-    for (const t of mic.getTracks()) t.stop()
+  const sys = await sysAsked
+  if (control.stopped) {
+    stopAll(mic, sys)
     return endOnce('stopped')
   }
-  const sys = await systemAudio()
   if (!sys) window.capture.level('others', -1)
   try {
     const ctx = new AudioContext({ sampleRate: SAMPLE_RATE })
@@ -124,7 +141,9 @@ async function record(id: string): Promise<void> {
     await ctx.resume()
     const micSrc = ctx.createMediaStreamSource(mic)
     const sysSrc = sys ? ctx.createMediaStreamSource(sys) : null
-    const taps = [new Tap('you', id, ctx, micSrc), ...(sysSrc ? [new Tap('others', id, ctx, sysSrc)] : [])]
+    // A pause that came while the streams were opening holds from the first frame.
+    const paused = control.paused
+    const taps = [new Tap('you', id, ctx, micSrc, paused), ...(sysSrc ? [new Tap('others', id, ctx, sysSrc, paused)] : [])]
     // The playback copy: both tracks mixed, Opus, appended by main every 10 s.
     const mix = ctx.createMediaStreamDestination()
     micSrc.connect(mix)
@@ -137,22 +156,23 @@ async function record(id: string): Promise<void> {
       slices = slices.then(async () => window.capture.audio(id, new Uint8Array(await e.data.arrayBuffer())))
     }
     recorder.start(AUDIO_SLICE_MS)
+    if (paused) recorder.pause()
     const levels = setInterval(() => {
       for (const t of taps) window.capture.level(t.track, t.level())
     }, LEVEL_MS)
 
-    commandFn = (c) => {
+    control.attach((c) => {
       if (c === 'stop') return void stopFn?.('stopped')
       const pause = c === 'pause'
-      for (const t of taps) t.paused = pause
+      for (const t of taps) t.pause(pause)
       if (pause && recorder.state === 'recording') recorder.pause()
       if (!pause && recorder.state === 'paused') recorder.resume()
-    }
+    })
     stopFn = (reason) =>
       (stopping ??= (async () => {
         clearInterval(levels)
-        // The last frames count even when paused: they were recorded before the pause.
-        for (const t of taps) t.paused = false
+        // The worklets' last frames. Still paused: they posted what they had at the pause and
+        // dropped the input since, so nothing recorded while paused is sent.
         for (const t of taps) await t.flush()
         if (recorder.state !== 'inactive')
           await new Promise<void>((res) => {
@@ -160,15 +180,15 @@ async function record(id: string): Promise<void> {
             recorder.stop()
           })
         await slices
-        for (const t of [...mic.getTracks(), ...(sys?.getTracks() ?? [])]) t.stop()
+        stopAll(mic, sys)
         await ctx.close().catch(() => {})
         endOnce(reason)
       })())
     mic.getAudioTracks()[0]?.addEventListener('ended', () => void stopFn?.('mic-ended'))
     sys?.getAudioTracks()[0]?.addEventListener('ended', () => window.capture.level('others', -1))
-    if (stopAsked) void stopFn('stopped')
+    if (control.stopped) void stopFn('stopped')
   } catch {
-    for (const t of [...mic.getTracks(), ...(sys?.getTracks() ?? [])]) t.stop()
+    stopAll(mic, sys)
     endOnce('error')
   }
 }
@@ -206,8 +226,5 @@ async function probe(): Promise<void> {
 window.mdCapture = {
   record,
   probe,
-  command: (c) => {
-    if (commandFn) return commandFn(c)
-    if (c === 'stop') stopAsked = true
-  },
+  command: (c) => control.take(c),
 }

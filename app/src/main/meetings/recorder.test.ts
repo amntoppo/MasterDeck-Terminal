@@ -10,7 +10,7 @@ const fake = vi.hoisted(() => {
   type Handler = (...a: unknown[]) => void
   const ipc = new Map<string, Handler>()
   const wins: FakeWin[] = []
-  const state = { mic: 'granted', displayHandler: null as null | ((req: unknown, cb: (s: unknown) => void) => void), handlerOpts: null as unknown }
+  const state = { hold: null as Promise<void> | null, mic: 'granted', displayHandler: null as null | ((req: unknown, cb: (s: unknown) => void) => void), handlerOpts: null as unknown }
   class FakeWin {
     opts: Record<string, unknown>
     destroyed = false
@@ -39,6 +39,8 @@ const fake = vi.hoisted(() => {
       this.loaded = u
     }
     async loadFile(f: string) {
+      // A page that is still loading (state.hold): no script reaches it yet.
+      await state.hold
       this.loaded = f
     }
     isDestroyed() {
@@ -76,6 +78,7 @@ beforeEach(() => {
   fake.ipc.clear()
   fake.wins.length = 0
   fake.state.mic = 'granted'
+  fake.state.hold = null
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -201,6 +204,8 @@ describe('Recorder', () => {
     const t = setup()
     const r = await t.rec.start()
     const id = r.ok ? r.id! : ''
+    // The page is loaded and started (a pause before that: the next test).
+    await flush()
     t.send(CAPTURE_CH.chunk, t.ev(), { id, track: 'you', seq: 0 }, wav(new Int16Array(4)))
     clock += 5000
     expect(await t.rec.pause(true)).toMatchObject({ ok: true, live: { paused: true, elapsed: 5000 } })
@@ -226,6 +231,43 @@ describe('Recorder', () => {
     expect(t.chunks).toEqual(['you-0', 'you-1'])
     expect(t.notices).toEqual([])
     expect(await t.rec.stop()).toMatchObject({ ok: false })
+  })
+
+  it('a pause pressed while the page loads goes in with the start; later commands go as before', async () => {
+    let loaded = () => {}
+    fake.state.hold = new Promise<void>((res) => (loaded = res))
+    const t = setup()
+    const r = await t.rec.start()
+    const id = r.ok ? r.id! : ''
+    expect(await t.rec.pause(true)).toMatchObject({ ok: true, live: { paused: true } })
+    await flush()
+    // Nothing was sent to a page that is not there.
+    expect(t.win().scripts).toEqual([])
+    loaded()
+    await flush()
+    expect(t.win().scripts).toEqual([`window.mdCapture.command("pause");window.mdCapture.record("${id}") [gesture]`])
+    await t.rec.pause(false)
+    await flush()
+    expect(t.win().scripts.at(-1)).toBe('window.mdCapture.command("resume")')
+  })
+
+  it('a Stop pressed while the page loads goes in with the start; the page ends at once', async () => {
+    let loaded = () => {}
+    fake.state.hold = new Promise<void>((res) => (loaded = res))
+    const t = setup()
+    const r = await t.rec.start()
+    const id = r.ok ? r.id! : ''
+    const w = t.win()
+    await t.rec.pause(true)
+    const stopped = t.rec.stop()
+    await flush()
+    expect(w.scripts).toEqual([])
+    loaded()
+    await flush()
+    expect(w.scripts).toEqual([`window.mdCapture.command("stop");window.mdCapture.record("${id}") [gesture]`])
+    t.send(CAPTURE_CH.ended, t.ev(w), 'stopped')
+    expect(await stopped).toMatchObject({ ok: true, live: { recording: false } })
+    expect(t.store.get(id)).toMatchObject({ state: 'failed', error: 'Nothing was recorded.' })
   })
 
   it('a window that never answers Stop is closed anyway', async () => {

@@ -1,4 +1,4 @@
-import { CHUNK_MAX_BYTES, CHUNK_SAMPLES, SAMPLE_RATE, type CaptureEnd, type Speaker } from './meetings'
+import { CHUNK_MAX_BYTES, CHUNK_SAMPLES, SAMPLE_RATE, type CaptureCommand, type CaptureEnd, type Speaker } from './meetings'
 
 /** What the capture window's preload (preload/capture.ts) gives its page as `window.capture`: send only. */
 export interface CaptureBridge {
@@ -145,5 +145,28 @@ export class Chunker {
     const out = { seq: this.seq++, samples: this.buf.slice(0, this.n) }
     this.n = 0
     return out
+  }
+}
+
+/**
+ * The capture page's pause and stop as main sent them. A command can arrive while the page still
+ * waits for the microphone and the Mac's sound (macOS may be asking); it is kept here and applied
+ * when the streams open, so a pause or a stop is never lost and the page never records while main
+ * shows "Paused".
+ */
+export class CaptureControl {
+  paused = false
+  stopped = false
+  private on: ((c: CaptureCommand) => void) | null = null
+
+  take(c: CaptureCommand): void {
+    if (c === 'stop') this.stopped = true
+    else this.paused = c === 'pause'
+    this.on?.(c)
+  }
+
+  /** The streams are open: they read paused / stopped now, and each later command goes to fn. */
+  attach(fn: (c: CaptureCommand) => void): void {
+    this.on = fn
   }
 }

@@ -20,6 +20,10 @@ export default defineConfig({
   renderer: {
     plugins: [react()],
     resolve: { alias: { '@shared': resolve('src/shared') } },
+    // The capture page's AudioWorklet (pcmWorklet.ts?worker&url): a module in the build as in
+    // `npm run dev` (vite serves a worker file as a module there). A worklet scope has no
+    // importScripts, and addModule loads modules.
+    worker: { format: 'es' },
     build: {
       rollupOptions: {
         // capture.html: the hidden meetings capture window (main/meetings/recorder.ts), no UI.

@@ -40,7 +40,7 @@ function fakeRecorder() {
   const calls: string[] = []
   const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
   const probeResult = { ok: false }
-  const rec: RecorderLike & { calls: string[]; probeResult: { ok: boolean } } = {
+  const rec: Omit<RecorderLike, 'recording'> & { recording: boolean; calls: string[]; probeResult: { ok: boolean } } = {
     calls,
     probeResult,
     recording: false,
@@ -229,6 +229,27 @@ describe('meetings:* handlers', () => {
     expect(await ipc.consent(local, false)).toMatchObject({ ok: true, agreed: false })
     expect(meetings()).toMatchObject({ consentAt: null, consentVersion: 0, offer: true })
     expect(electron.askForMediaAccess).not.toHaveBeenCalled()
+  })
+
+  it('Turn off during a recording stops it first, while the consent still holds', async () => {
+    const t = setup({ meetings: agreed })
+    await t.ipc.start(local, 'Standup')
+    let agreedAtStop: number | null = null
+    t.recorder.recording = true
+    t.recorder.stop = async (why?: string) => {
+      t.recorder.calls.push(`stop:${why}`)
+      agreedAtStop = t.meetings().consentAt
+      t.recorder.recording = false
+      return { ok: true, live: t.recorder.live() }
+    }
+    expect(await t.ipc.consent(local, false)).toMatchObject({ ok: true, agreed: false })
+    expect(t.recorder.calls).toEqual(['start:Standup', 'stop:consent'])
+    expect(agreedAtStop).toBe(1)
+    expect(t.meetings()).toMatchObject({ consentAt: null })
+    // Nothing recording: Turn off stops nothing.
+    await t.ipc.consent(local, true)
+    await t.ipc.consent(local, false)
+    expect(t.recorder.calls).toEqual(['start:Standup', 'stop:consent'])
   })
 
   it('an older consent version is no consent', async () => {

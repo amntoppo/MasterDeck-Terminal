@@ -7,6 +7,7 @@ import {
   MEETING_LANGUAGES,
   MEETING_TITLE_MAX,
   mergeSegments,
+  oneAtATime,
   normalizeMeetings,
   recordClock,
   recordedMs,
@@ -14,7 +15,7 @@ import {
   type Meeting,
   type Segment,
 } from './meetings'
-import { checkWav, Chunker, Resampler, rms, toInt16, wav, WAV_HEADER } from './meetingAudio'
+import { CaptureControl, checkWav, Chunker, Resampler, rms, toInt16, wav, WAV_HEADER } from './meetingAudio'
 
 const ID = 'm-' + 'a'.repeat(32)
 const meeting = (over: Partial<Meeting> = {}): Meeting => ({
@@ -179,5 +180,52 @@ describe('the rail’s time', () => {
   it('recordedMs runs from since, and is frozen while paused', () => {
     expect(recordedMs({ recording: true, since: 1000, paused: false, elapsed: 0, offer: null }, 6000)).toBe(5000)
     expect(recordedMs({ recording: true, since: 1000, paused: true, elapsed: 4000, offer: null }, 99_000)).toBe(4000)
+  })
+})
+
+describe('CaptureControl (the capture page keeps pause and stop until its streams open)', () => {
+  it('keeps the last pause state and a stop, then hands each later command on', () => {
+    const c = new CaptureControl()
+    c.take('pause')
+    c.take('resume')
+    c.take('pause')
+    expect(c).toMatchObject({ paused: true, stopped: false })
+    const seen: string[] = []
+    c.attach((x) => seen.push(x))
+    c.take('resume')
+    c.take('stop')
+    expect(seen).toEqual(['resume', 'stop'])
+    expect(c).toMatchObject({ paused: false, stopped: true })
+  })
+})
+
+describe('oneAtATime', () => {
+  it('shares one pending call, and calls again once it is done', async () => {
+    let calls = 0
+    let answer = (_v: boolean) => {}
+    const ask = oneAtATime(async (what: string) => {
+      calls++
+      return new Promise<boolean>((res) => (answer = (v) => res(v && what === 'quit')))
+    })
+    const a = ask('quit')
+    const b = ask('restart')
+    expect(a).toBe(b)
+    answer(true)
+    expect(await Promise.all([a, b])).toEqual([true, true])
+    expect(calls).toBe(1)
+    const c = ask('restart')
+    answer(true)
+    expect(await c).toBe(false)
+    expect(calls).toBe(2)
+  })
+
+  it('a failed call frees the next one', async () => {
+    let n = 0
+    const f = oneAtATime(async () => {
+      if (n++ === 0) throw new Error('no')
+      return n
+    })
+    await expect(f()).rejects.toThrow('no')
+    expect(await f()).toBe(2)
   })
 })

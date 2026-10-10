@@ -275,11 +275,17 @@ export class MeetingsIpc {
     return this.withModel((await this.loadGate()).setup())
   }
 
-  /** I agree (true) stores the consent; Turn off meetings (false) clears it and leaves the stored meetings. */
+  /**
+   * I agree (true) stores the consent; Turn off meetings (false) stops a recording, then clears it
+   * and leaves the stored meetings.
+   */
   async consent(e: unknown, agree: unknown): Promise<MeetingsAnswer> {
     const r = this.refused(e)
     if (r) return r
     if (typeof agree !== 'boolean') return { ok: false, message: 'Not a consent.' }
+    // Turn off during a recording: it stops first (its last chunks are written while the consent
+    // still holds), then the consent goes. Nothing is recorded after turning off.
+    if (!agree && this.rec?.recording) await this.rec.stop('consent')
     const m = this.d.meetings()
     this.d.setMeetings(
       agree

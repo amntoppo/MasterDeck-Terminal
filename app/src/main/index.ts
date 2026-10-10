@@ -87,7 +87,7 @@ import { Superseded } from "./superseded";
 import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
-import { keepMeetings, meetingsAgreed } from "@shared/meetings";
+import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -3298,22 +3298,29 @@ function createWindow(): void {
 
 /** Set once the user said to stop the recording and quit (or close): nothing asks again. */
 let quitConfirmed = false;
-/** "A meeting is being recorded": stop it (the last chunks are written) and go on, or keep recording. */
-async function confirmStopRecording(parent: BrowserWindow | null): Promise<boolean> {
+/**
+ * "A meeting is being recorded": stop it (the last chunks are written) and go on, or keep
+ * recording. One question at a time: closing the window, quitting and Restart while it is open
+ * get the same answer instead of a second dialog.
+ */
+const confirmStopRecording = oneAtATime(async (parent: BrowserWindow | null, then: "quit" | "restart" = "quit"): Promise<boolean> => {
   const opts = {
     type: "question" as const,
-    buttons: ["Keep recording", "Stop recording and quit"],
+    buttons: ["Keep recording", then === "restart" ? "Stop recording and restart" : "Stop recording and quit"],
     defaultId: 0,
     cancelId: 0,
     message: "A meeting is being recorded.",
-    detail: "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs.",
+    detail:
+      then === "restart"
+        ? "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs. Terminals in MasterDeck close; Claude sessions keep running in the background."
+        : "Stopping keeps what was recorded; the transcript is made the next time MasterDeck runs.",
   };
   const choice = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
   if (choice.response !== 1) return false;
   quitConfirmed = true;
   await meetings.stopForQuit().catch((e) => console.error(`meetings: stop on quit: ${String(e)}`));
   return true;
-}
+});
 
 // Settings → Meetings (issue #102). Its handlers load main/meetings/ on their first call only:
 // nothing at startup asks macOS for the microphone or the screen (spec §1, meetingsStartup.test.ts).
@@ -3352,15 +3359,22 @@ const meetings = new MeetingsIpc({
   },
   restart: async () => {
     if (!win) return false;
-    const choice = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: ["Cancel", "Restart"],
-      defaultId: 1,
-      cancelId: 0,
-      message: "Restart MasterDeck?",
-      detail: "Terminals in MasterDeck close. Claude sessions keep running in the background.",
-    });
-    if (choice.response !== 1) return false;
+    // While recording, the recording's question is the only one (it stops the recording and says
+    // Restart); else the plain one.
+    if (!meetings.recording) {
+      const choice = await dialog.showMessageBox(win, {
+        type: "question",
+        buttons: ["Cancel", "Restart"],
+        defaultId: 1,
+        cancelId: 0,
+        message: "Restart MasterDeck?",
+        detail: "Terminals in MasterDeck close. Claude sessions keep running in the background.",
+      });
+      if (choice.response !== 1) return false;
+    }
+    // A recording (one may have started while the plain question was open) asks first; relaunch
+    // only once the quit can no longer be refused, so a "Keep recording" leaves no relaunch behind.
+    if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart"))) return false;
     // quit, not exit: will-quit still closes the terminals and the remote line.
     app.relaunch();
     app.quit();

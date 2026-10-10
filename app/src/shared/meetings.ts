@@ -331,7 +331,9 @@ export function mergeSegments(you: Segment[], others: Segment[]): Segment[] {
 }
 
 /**
- * The rail's recording indicator (AppState.meetingLive; the window only, never in a snapshot).
+ * The rail's recording indicator (AppState.meetingLive). Never in toRemoteSnapshot; it does reach
+ * approved web tabs with the rest of the state (the bridge's state event), which only tells them a
+ * recording runs: the web app shows nothing of it and cannot start, pause or stop one.
  * `since` is when the recording would have started had it never been paused, so while it runs the
  * time recorded is now − since; while paused it is `elapsed`.
  */
@@ -355,6 +357,23 @@ export function recordClock(ms: number): string {
   const h = Math.floor(s / 3600)
   const mm = String(Math.floor((s % 3600) / 60)).padStart(h ? 2 : 1, '0')
   return `${h ? `${h}:` : ''}${mm}:${String(s % 60).padStart(2, '0')}`
+}
+
+/**
+ * One call at a time: while fn's promise is pending every call gets that same promise (later
+ * arguments are ignored). Quitting, closing the window and Restart share one "A meeting is being
+ * recorded" question this way.
+ */
+export function oneAtATime<A extends unknown[], T>(fn: (...a: A) => Promise<T>): (...a: A) => Promise<T> {
+  let pending: Promise<T> | null = null
+  return (...a) =>
+    (pending ??= (async () => {
+      try {
+        return await fn(...a)
+      } finally {
+        pending = null
+      }
+    })())
 }
 
 /** The answer of meetings:start / stop / pause. */
