@@ -7,15 +7,17 @@ import { deck, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
 import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
+import { MeetingsSetup } from './MeetingsSetup'
 
 export type SettingsSection = Section
-type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
+type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'meetings' | 'hooks' | 'remote' | 'keys' | 'about'
 
 const SECTIONS: [Section, string][] = [
   ['account', 'Account'],
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
+  ['meetings', 'Meetings'],
   ['hooks', 'Hooks & skills'],
   ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
@@ -24,6 +26,8 @@ const SECTIONS: [Section, string][] = [
 
 /** Settings as a page (Command Center): sections on the left; changes save as you make them. */
 export function SettingsView({ settings, state, onSetup, onSkills, initial }: { settings: Settings; state: AppState; onSetup: () => void; onSkills: () => void; initial?: { section: Section; at: number } | null }) {
+  // Meetings are recorded on a Mac, from its own window (never the web app, never Windows).
+  const sections = SECTIONS.filter(([k]) => k !== 'meetings' || (deck().platform === 'darwin' && can('meetingsSetup')))
   const [section, setSection] = useState<Section>(initial?.section ?? 'general')
   useEffect(() => {
     if (initial) setSection(initial.section)
@@ -142,6 +146,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         </Field>
       </>
     ),
+    meetings: section === 'meetings' && sections.some(([k]) => k === 'meetings') ? <MeetingsSetup settings={s} save={put} /> : null,
     hooks: (
       <>
         <Field label="Status line" hint="Exact cost and context for every session (a status line command in Claude Code's settings).">
@@ -273,7 +278,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         <div className="eyebrow" style={{ padding: '0 12px 8px' }}>
           Settings
         </div>
-        {SECTIONS.map(([k, label]) => (
+        {sections.map(([k, label]) => (
           <button key={k} className={section === k ? 'on' : ''} aria-current={section === k ? 'page' : undefined} onClick={() => setSection(k)}>
             {label}
           </button>

@@ -71,6 +71,10 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   notesSearch: invoke(CH.notesSearch),
   notesSave: invoke(CH.notesSave),
   notesDelete: invoke(CH.notesDelete),
+  // Meetings are set up and recorded on the Mac only (issue #102): its microphone, its consent.
+  meetingsSetup: blocked,
+  meetingsConsent: blocked,
+  meetingsPermission: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),

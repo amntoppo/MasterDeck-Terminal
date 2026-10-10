@@ -33,6 +33,11 @@ mac:
   # Hardened runtime is for notarization (Developer ID); with an ad-hoc signature it would block
   # loading the app's own libraries.
   hardenedRuntime: false
+  # Meetings (Settings → Meetings, after consent): without the microphone key macOS ends the app
+  # on access; without the audio capture key the Mac's sound records as silence (macOS 14.2+).
+  extendInfo:
+    NSMicrophoneUsageDescription: MasterDeck records meetings only when you press Record.
+    NSAudioCaptureUsageDescription: MasterDeck records meetings only when you press Record.
 win:
   target:
     - target: nsis

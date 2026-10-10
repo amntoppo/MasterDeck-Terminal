@@ -78,6 +78,9 @@ const api: DeckApi = {
   notesSearch: (query) => ipcRenderer.invoke(CH.notesSearch, query),
   notesSave: (input) => ipcRenderer.invoke(CH.notesSave, input),
   notesDelete: (id) => ipcRenderer.invoke(CH.notesDelete, id),
+  meetingsSetup: () => ipcRenderer.invoke(CH.meetingsSetup),
+  meetingsConsent: (agree) => ipcRenderer.invoke(CH.meetingsConsent, agree),
+  meetingsPermission: (kind) => ipcRenderer.invoke(CH.meetingsPermission, kind),
   onNotesChanged: (cb) => listen(CH.notesChanged, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),

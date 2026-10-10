@@ -41,7 +41,12 @@ never throws: missing binary = code -1, timeout = -2), `MasterCli`, `PtyManager`
    `refreshHooks()` again), workflow migration + hook sync, then the PR watch (`prWatch.load()`,
    `setWatchInfo`/`setWatchedPrs`, `prWatch.poll` every 60 s, delivery in the 1 s timer).
 6. A 1 s timer reading tickets the Board's session created and the workflow builder's draft.
-7. `createWindow()`, then the accounts (`refreshAccounts`, awaiting only the local `gh auth token` reads; the `gh api user` checks, and `migrateAccounts` once, run in the background — an older config becomes one account from gh's active login and the global git identity, `config.backup.<ts>.json` kept), `sources.start()`, `syncRemote()`.
+7. `guardSessions` (`main/meetingsIpc.ts`): permission request and check handlers on the default
+   session, the `meetings-capture` partition and any session made later. `media` and
+   `display-capture` are refused everywhere but that partition, and there only while
+   `meetingsAgreed(settings)`; every other permission is allowed, as with no handler. It only sets
+   handlers: nothing at startup asks macOS for anything (see "Meetings: the permission gate").
+8. `createWindow()`, then the accounts (`refreshAccounts`, awaiting only the local `gh auth token` reads; the `gh api user` checks, and `migrateAccounts` once, run in the background — an older config becomes one account from gh's active login and the global git identity, `config.backup.<ts>.json` kept), `sources.start()`, `syncRemote()`.
 
 Env aids handled here: `MASTERDECK_USER_DATA`, `MASTERDECK_SMOKE`, `MASTERDECK_CAPTURE`
 (+ `_JS`, `_WAIT`, and a `test:shot` IPC handler while capturing). `will-quit` stops the cloud line,
@@ -1039,6 +1044,33 @@ waits, and writes nothing if accounts appeared meanwhile.
   gh accounts and gh login (`ghUser`, `ghAccounts`, `ghOwners`, `onGhLogin`), board creation (`boardCreatePlan`, `boardCreate`, `boardCreateRetry`, `onBoardCreateProgress`), folder picker, editor,
   shell prepare, auto-open). `ARG_FIX` reshapes
   arguments the preload defaults (`inboxAct`, `sessionWorkflowSave`).
+
+### Meetings: the permission gate (issue #102)
+
+- Channels: `meetingsSetup()` (`meetings:setup`), `meetingsConsent(agree)` (`meetings:consent`),
+  `meetingsPermission('mic' | 'screen')` (`meetings:permission`), invokes, all `blocked` in
+  `DECK_ACCESS`. Each answers a `MeetingsAnswer` (`shared/meetings.ts`): `MeetingsSetupInfo`
+  (`mac`, `agreed`, `mic`, `screen`, `systemAudio` path, `model`, `settings`, `message?`) or
+  `{ ok: false, message }`. `MeetingsIpc` (`main/meetingsIpc.ts`, registered in `index.ts`) refuses
+  any OS but macOS ("Meetings work on macOS only.") and `isRemote(e)`, and refuses a permission
+  without consent before loading anything.
+- `main/meetings/gate.ts` (`MeetingsGate`) is the only code that calls `systemPreferences` or
+  opens a privacy pane. `MeetingsIpc.loadGate()` loads it with a dynamic `import()` the first time
+  Settings → Meetings asks for its state or after consent; nothing else imports `main/meetings/`
+  (`main/meetingsStartup.test.ts` checks it, and that no other main file names a media API).
+  `setup()` only reads (`getMediaAccessStatus`). `permission('mic')` calls `askForMediaAccess`, or
+  opens `Privacy_Microphone` once refused. `permission('screen')`: on macOS 14.2+ (Core Audio tap,
+  System Audio Recording Only, which no API reads) runs `probeSystemAudio`, the recorder's 1-second
+  capture, and stores `{ at, ok }` in `settings.meetings.systemAudio`; with no probe yet it opens
+  `Privacy_AudioCapture` and the status stays `not-checked`. On 13 to 14.1 it is
+  `getMediaAccessStatus('screen')` (`Privacy_ScreenCapture`).
+- `Settings.meetings` (`MeetingsSettings`: `consentAt`, `consentVersion`, `model`, `language`,
+  `offer`, `deleteAudioAfterDays`, `systemAudio`), `normalizeMeetings` (older files read with
+  `DEFAULT_MEETINGS`), `meetingsAgreed` (`consentVersion === MEETINGS_CONSENT_VERSION`).
+  `setSettings` goes through `keepMeetings`: the window cannot change the consent or the sound check
+  (only `meetings:*` can), a browser changes no meetings setting.
+- `electron-builder.yml` `mac.extendInfo`: `NSMicrophoneUsageDescription`,
+  `NSAudioCaptureUsageDescription`. UI: `MeetingsSetup.tsx` in `SettingsView` (darwin only).
 
 ### Working hours (issue #64)
 

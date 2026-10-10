@@ -8,6 +8,7 @@ import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
+import type { MeetingsAnswer } from "./meetings";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
@@ -206,6 +207,9 @@ export const CH = {
   notesSearch: "notes:search",
   notesSave: "notes:save",
   notesDelete: "notes:delete",
+  meetingsSetup: "meetings:setup",
+  meetingsConsent: "meetings:consent",
+  meetingsPermission: "meetings:permission",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -402,6 +406,18 @@ export interface DeckApi {
   /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * Settings → Meetings' state (macOS, the window only). Reads macOS's grants without asking
+   * anything (getMediaAccessStatus).
+   */
+  meetingsSetup(): Promise<MeetingsAnswer>;
+  /** I agree (true) or Turn off meetings (false): stores or clears the consent. Asks macOS nothing. */
+  meetingsConsent(agree: boolean): Promise<MeetingsAnswer>;
+  /**
+   * Allow the microphone or the Mac's sound, only after consent: asks macOS (the microphone's
+   * prompt), checks the sound, or opens System Settings at its pane when the grant was refused.
+   */
+  meetingsPermission(kind: "mic" | "screen"): Promise<MeetingsAnswer>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

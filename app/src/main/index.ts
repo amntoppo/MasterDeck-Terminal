@@ -33,6 +33,7 @@ import {
   ipcMain,
   Notification,
   safeStorage,
+  session,
   shell,
 } from "electron";
 import {
@@ -84,6 +85,8 @@ import {
 import { Superseded } from "./superseded";
 import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
+import { guardSessions, MeetingsIpc } from "./meetingsIpc";
+import { keepMeetings, meetingsAgreed } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -2177,6 +2180,10 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
   });
+  // Meetings: the window's only (blocked on the web; each refuses a browser and any OS but macOS).
+  reg.handle(CH.meetingsSetup, (e) => meetings.setup(e));
+  reg.handle(CH.meetingsConsent, (e, agree: unknown) => meetings.consent(e, agree));
+  reg.handle(CH.meetingsPermission, (e, kind: unknown) => meetings.permission(e, kind));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -2519,11 +2526,13 @@ function registerIpc(): void {
     return r.filePath;
   });
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
-  reg.handle(CH.setSettings, (e, s: unknown) =>
-    sources.setSettings(
-      isRemote(e) ? remoteSettings(s, sources.getSettings()) : s,
-    ),
-  );
+  reg.handle(CH.setSettings, (e, s: unknown) => {
+    const cur = sources.getSettings();
+    // The meetings consent and sound check change only through meetings:*; a browser changes no meetings setting.
+    return sources.setSettings(
+      keepMeetings(isRemote(e) ? remoteSettings(s, cur) : s, cur.meetings, isRemote(e)),
+    );
+  });
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"
       ? id.startsWith("pr:")
@@ -3269,6 +3278,17 @@ function createWindow(): void {
   });
 }
 
+// Settings → Meetings (issue #102). Its handlers load main/meetings/ on their first call only:
+// nothing at startup asks macOS for the microphone or the screen (spec §1, meetingsStartup.test.ts).
+const meetings = new MeetingsIpc({
+  platform: process.platform,
+  meetings: () => sources.getSettings().meetings,
+  setMeetings: (m) => {
+    sources.setSettings({ ...sources.getSettings(), meetings: m });
+  },
+  macosVersion: () => process.getSystemVersion(),
+});
+
 /** What Setup needs to know: which tools are on PATH and who gh is logged in as. */
 /** One tool of Setup's first step. */
 async function setupTool(
@@ -3596,6 +3616,9 @@ app.whenReady().then(async () => {
       console.error(`workflow draft: ${String(e)}`);
     }
   }, 1000);
+  // The microphone and screen capture: never for the window, only for the meetings capture
+  // partition and only while the user agrees. Sets handlers only; asks macOS nothing.
+  guardSessions(app, session, () => meetingsAgreed(sources.getSettings()));
   createWindow();
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),

@@ -914,6 +914,36 @@ Stored in `~/.claude/masterdeck/settings.json`.
   an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
   session itself.
 
+### Settings → Meetings (macOS)
+
+Where meetings are set up (issue #102; recording itself comes in a later version). Only on a Mac,
+only in MasterDeck's own window: the web app and Windows do not show it. It is not part of the
+first-run Setup, so nobody who never wants meetings is asked anything.
+
+- **The consent card comes first.** It says what is recorded (your microphone and the sound the
+  Mac plays, from Record until Stop), where it stays (this Mac only), what leaves the Mac (once per
+  meeting the transcript's text and the list of your sessions, tickets and PRs go to Anthropic, to
+  find what relates to which session), and that **no one in the meeting is told**: recording people
+  without telling them is illegal in many places, and telling them is your job. **I agree** stores
+  the time and the card's version in `settings.json`; a new version of the card asks again.
+- **Microphone:** its status (Not asked yet, Allowed, Refused). **Allow microphone** brings up
+  macOS's own prompt; once refused, **Open System Settings** opens Privacy & Security → Microphone.
+- **Sound from the Mac** (the other people in the call): on macOS 14.2 and later this is the
+  **System Audio Recording Only** permission, which no app can read, so the status is the last
+  check MasterDeck made ("Not checked yet" until then). For now **Allow** opens System Settings at
+  Screen & System Audio Recording; the 1-second check that brings up macOS's prompt comes with
+  recording. On macOS 13 to 14.1 it is the Screen & System Audio Recording permission. macOS 12 and
+  older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it.
+- **Speech model:** set up in a later step.
+- **Offer to record** (on by default): offer to record when a meeting app is in a call.
+- **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
+  transcript and notes stay.
+- **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
+  offers; recorded meetings stay. macOS keeps the permissions it gave until you remove them in
+  System Settings.
+
+macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.
+
 ## Account
 
 Settings → Account is where this Mac signs in to your MasterDeck account (needed for Remote).

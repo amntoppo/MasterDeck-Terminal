@@ -1,3 +1,5 @@
+import { DEFAULT_MEETINGS, normalizeMeetings, type MeetingsSettings } from './meetings'
+
 export interface Settings {
   idleNudgeMinutes: number
   budgetPerTicketUsd: number
@@ -18,6 +20,8 @@ export interface Settings {
   remoteEnabled: boolean
   /** Web terminal: show typed characters at once, corrected when the Mac's output arrives (predictive local echo). */
   instantTyping: boolean
+  /** Settings → Meetings (macOS): the consent, the speech model, offers, how long audio is kept. */
+  meetings: MeetingsSettings
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   watchPrs: true,
   remoteEnabled: false,
   instantTyping: true,
+  meetings: DEFAULT_MEETINGS,
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -54,5 +59,6 @@ export function normalizeSettings(raw: unknown): Settings {
     watchPrs: typeof r.watchPrs === 'boolean' ? r.watchPrs : DEFAULT_SETTINGS.watchPrs,
     remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
     instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
+    meetings: normalizeMeetings(r.meetings),
   }
 }

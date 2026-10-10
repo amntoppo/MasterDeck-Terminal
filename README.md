@@ -219,6 +219,10 @@ changes after the first one), so the web app and the API can show them; never te
 Terminal output and anything typed in the web app travel end-to-end encrypted between the approved browser and your Mac; the
 server relays them without being able to read them. Switching Remote off or signing out stops all of it.
 
+MasterDeck asks macOS for the microphone and the Mac's sound (for meetings) only on Settings →
+Meetings, after you agree to how meetings work and press Allow there: never at launch, never from
+the web app. Until then it only reads whether they were given.
+
 ## License
 
 [MIT](LICENSE)

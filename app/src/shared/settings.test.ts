@@ -38,3 +38,14 @@ describe('watch new PRs', () => {
     expect(normalizeSettings({ watchPrs: 'no' }).watchPrs).toBe(true)
   })
 })
+
+describe('meetings', () => {
+  it('a settings file from before meetings reads with the defaults', () => {
+    const old = { idleNudgeMinutes: 30, dockBadge: false, remoteEnabled: true }
+    expect(normalizeSettings(old).meetings).toEqual(DEFAULT_SETTINGS.meetings)
+    expect(normalizeSettings(old)).toMatchObject(old)
+  })
+  it('keeps a stored consent', () => {
+    expect(normalizeSettings({ meetings: { consentAt: 10, consentVersion: 1, offer: false } }).meetings).toMatchObject({ consentAt: 10, consentVersion: 1, offer: false })
+  })
+})
