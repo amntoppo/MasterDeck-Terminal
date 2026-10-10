@@ -1,11 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AskPanel } from "./AskPanel";
 import { StatusDialog } from "./StatusDialog";
 import {
+  fullRepo,
   sameTicket,
   ticketLabel,
   ticketUrl,
-  type Ticket,
 } from "@shared/ticket";
 import { sessionTicket } from "@shared/derive";
 import { formatAgo, formatDiff, formatPct } from "@shared/format";
@@ -14,9 +14,11 @@ import { formatTokens, tokenSum, tokenTitle } from "@shared/tokens";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { STEPS, taskStep } from "@shared/tasks";
 import type { AppState, Session } from "@shared/types";
-import { deck, useNow } from "../deck";
+import { deck, load, save, useNow } from "../deck";
 import { ticketNote } from "../notes";
-import type { NoteMeta } from "@shared/notes";
+import { sessionNotes, type NoteMeta } from "@shared/notes";
+import type { NoteTarget } from "@shared/noteEditor";
+import { meetingDot, newestMeetingNote } from "@shared/noteFilter";
 import { can } from "../web";
 import { toggleStar, useStars } from "../stars";
 import { webConfirm } from "../webConfirm";
@@ -25,6 +27,7 @@ import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
 import { SessionMods } from "./SessionMods";
+import { SessionNotes } from "./SessionNotes";
 import { peerRows } from "./peersView";
 
 interface Props {
@@ -35,8 +38,8 @@ interface Props {
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
   notes?: NoteMeta[];
-  /** Open the ticket's note (absent: Notes is not available here). */
-  onNote?: (t: Ticket) => void;
+  /** Open the Notes panel at a note, a ticket's note or a new note (absent: Notes is not available here). */
+  onNote?: (t: NoteTarget) => void;
 }
 
 /**
@@ -58,7 +61,7 @@ export function SessionDetails({
   const [statusOpen, setStatusOpen] = useState(false);
   const [peersOpen, setPeersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [tab, setTab] = useState<"session" | "mods">("session");
+  const [tab, setTab] = useState<"session" | "notes" | "mods">("session");
   const since = useStateSince(s);
   const starred = useStars().includes(s.key);
   const status = sessionStatus(
@@ -123,18 +126,46 @@ export function SessionDetails({
     flash(r.ok ? r.message : `Editor: ${r.message}`);
   };
 
+  // The session's notes, and a dot for a meeting note that came since its Notes tab was last open
+  // (per session and per viewer: the window and each browser keep their own).
+  const notesOn = !!onNote && can("notesList");
+  const myNotes = notesOn ? sessionNotes(notes ?? [], s, t, fullRepo) : [];
+  const seenKey = `md.sessionNotesSeen.${s.key}`;
+  const [seen, setSeen] = useState<number | null>(() => load<number | null>(seenKey, null));
+  useEffect(() => setSeen(load<number | null>(seenKey, null)), [seenKey]);
+  const newest = newestMeetingNote(myNotes);
+  useEffect(() => {
+    if (tab !== "notes" || !newest || newest === seen) return;
+    save(seenKey, newest);
+    setSeen(newest);
+  }, [tab, newest, seen, seenKey]);
+  const dot = tab !== "notes" && meetingDot(myNotes, seen);
+
   const tabs = (
     <div className="d-tabs">
       <div className="seg" role="tablist" aria-label="Details">
         <button role="tab" aria-selected={tab === "session"} className={tab === "session" ? "on" : undefined} onClick={() => setTab("session")}>
           Session
         </button>
+        {notesOn && (
+          <button role="tab" aria-selected={tab === "notes"} className={tab === "notes" ? "on" : undefined} onClick={() => setTab("notes")}>
+            Notes{myNotes.length ? ` · ${myNotes.length}` : ""}
+            {dot && <i className="d-tab-dot" aria-label="New from a meeting" title="A note from a meeting came since you last looked" />}
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "mods"} className={tab === "mods" ? "on" : undefined} onClick={() => setTab("mods")}>
           Mods{state.modOff?.[s.key]?.length ? ` · ${state.modOff[s.key].length} off` : ""}
         </button>
       </div>
     </div>
   );
+  if (tab === "notes" && notesOn && onNote)
+    return (
+      <div className="details">
+        {tabs}
+        <SessionNotes session={s} ticket={t} list={myNotes} onNote={onNote} />
+      </div>
+    );
   if (tab === "mods")
     return (
       <div className="details">
@@ -251,7 +282,7 @@ export function SessionDetails({
           return (
             <div className="d-note">
               {tn && <div className="d-note-text">{tn.preview}</div>}
-              <button className="d-link" onClick={() => onNote(t)}>
+              <button className="d-link" onClick={() => onNote({ ticket: t })}>
                 {tn ? "Edit note" : "Add note"}
               </button>
             </div>

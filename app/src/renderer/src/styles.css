@@ -1442,6 +1442,23 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .notes-foot .seg button { padding: 3px 8px; white-space: nowrap; }
 .notes-clash { display: flex; align-items: center; gap: 6px; padding: 7px 10px 7px 14px; border-top: 1px solid var(--amber); color: var(--amber); font-size: 12.5px; }
 .notes-foot { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 10px 8px 14px; border-top: 1px solid var(--line); font-size: 12px; }
+/* All · Mine · Tickets · Sessions · Meetings; and on a row, what the note is about and the meeting it came from. */
+.notes-filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 4px; }
+.notes-filters .chip { font: inherit; font-size: 11.5px; padding: 2px 9px; cursor: pointer; color: var(--muted); }
+.notes-filters .chip:hover { color: var(--text); border-color: var(--muted); }
+.notes-filters .chip.on { color: #0b1020; }
+.note-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; margin: 2px 0 1px; }
+.note-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 7px; border-radius: 9px; border: 1px solid var(--line-2); font-size: 10.5px; line-height: 16px; color: var(--muted); font-weight: 500; }
+.note-chip.meeting { color: var(--purple); border-color: rgba(176, 140, 255, .45); }
+.notes-about { padding-bottom: 0; }
+.notes-about b { color: var(--text); font-weight: 600; }
+
+/* Session details → Notes: the session's notes, the picked one read only below. */
+.d-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--purple); vertical-align: 2px; }
+.s-notes-list { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.s-note { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.s-note-t { font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-note-body { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* A ticket's note: in Details, and a mark on its Board card's top row (faint until hovered when there is no note yet). */
 .d-note { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }

@@ -541,7 +541,14 @@ those never saved since: `updated === created`). `storedNote` refuses a bad link
 either on a ticket note. `NoteMeta` carries both (the web gets them with the list); `matches` also
 searches the session's name, the linked ticket and the meeting's title. `sessionNotes(metas, session,
 ticket, repoOf)` is a session's notes: its ticket's note first, then the notes whose `link.session.key`
-is the session's or whose `link.ticket` is its ticket, newest first, each once.
+is the session's or whose `link.ticket` is its ticket, newest first, each once. Session details →
+Notes (`renderer/.../SessionNotes.tsx`) lists them and renders the picked one read only
+(`notesGet`, `MarkdownView html={false}`); **Edit** and **New note** set the panel's `NoteTarget`
+(App's `setNotesAt`), so the window's one `NoteEditor` is the only editor. `shared/noteFilter.ts`
+holds the panel's filters (`noteIn`, `filterNotes`), the tab's meeting dot (`meetingDot` against
+`md.sessionNotesSeen.<key>`, the newest meeting note's `created` when the tab was last open: the
+Mac's clock, never the browser's) and `sessionLink` (a new note's link, the key checked as the store
+checks it).
 
 A note's body is Markdown source, stored as typed. It is drawn by `MarkdownView` with `html={false}`:
 `parseMarkdown(text, { html: false })` builds a tree of blocks and inlines, React draws elements from

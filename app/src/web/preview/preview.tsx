@@ -71,6 +71,27 @@ function previewDeck(noBoard: boolean): DeckApi {
   // Notes in memory: what the Mac's store does, in the shapes of DeckApi, so the panel can be looked at.
   const notes = new Map<string, Note>()
   const noteCbs = new Set<(c: NoteChange) => void>()
+  // The first session's Details → Notes: its ticket's note, a note about the session, and one from a meeting (newer than
+  // anything this browser has seen, so the tab has its dot); and one note of the user's own.
+  {
+    const s = SESSIONS[0]
+    // On the hour: the same times after a reload, so the dot stays off once the tab was opened.
+    const at = Math.floor(Date.now() / 3_600_000) * 3_600_000
+    const seed = (n: Note) => notes.set(n.id, n)
+    seed({ id: ticketNoteId('acme/web', s.issue ?? 112)!, title: '', body: 'Waiting on **alice** for the redirect rules.', ticket: { repo: 'acme/web', number: s.issue ?? 112 }, created: at - 3 * 86_400_000, updated: at - 2 * 3_600_000 })
+    seed({ id: `n-${'1'.repeat(32)}`, title: 'Try the cookie fix', body: 'Before the PR:\n\n- [ ] clear the cache\n- [x] sign in twice', ticket: null, link: { session: { key: s.key, name: s.name } }, created: at - 86_400_000, updated: at - 5 * 3_600_000 })
+    seed({
+      id: `n-${'2'.repeat(32)}`,
+      title: 'Standup: login redirect',
+      body: '**From:** Standup · this morning\nThe redirect loses the return path on Safari.\n\n**Action items**\n- keep `?next=` on the way back\n\n> **Others** 10:04 — the redirect drops the query on Safari\n> **You** 10:05 — I will look at it today',
+      ticket: null,
+      link: { session: { key: s.key, name: s.name }, ticket: { repo: 'acme/web', number: s.issue ?? 112 } },
+      meeting: { id: `m-${'a'.repeat(32)}`, title: 'Standup', at: at - 3 * 3_600_000 },
+      created: at - 2 * 3_600_000 + 1,
+      updated: at - 2 * 3_600_000 + 1,
+    })
+    seed({ id: `n-${'3'.repeat(32)}`, title: 'Tomorrow', body: 'Ask for a review of the billing export.', ticket: null, created: at - 4 * 86_400_000, updated: at - 4 * 86_400_000 })
+  }
   const noteSave = (i: NoteInput) => {
     const id = i.id ?? (i.ticket ? ticketNoteId(i.ticket.repo ?? 'acme/web', i.ticket.number) : null) ?? `n-${Math.random().toString(16).slice(2).padEnd(32, '0')}`
     const old = notes.get(id)
@@ -82,6 +103,11 @@ function previewDeck(noBoard: boolean): DeckApi {
     }
     const now = Date.now()
     const note: Note = { id, title: i.title, body: i.body, ticket: i.ticket ? { repo: i.ticket.repo ?? 'acme/web', number: i.ticket.number } : null, created: old?.created ?? now, updated: Math.max(now, (old?.updated ?? 0) + 1) }
+    // As the store: a new note takes the editor's link (its ticket named in full), a stored one keeps its own, and
+    // `meeting` is never the editor's.
+    const link = old ? old.link : i.link ? { ...i.link, ticket: i.link.ticket ? { repo: i.link.ticket.repo ?? 'acme/web', number: i.link.ticket.number } : undefined } : null
+    if (link) note.link = link
+    if (old?.meeting) note.meeting = old.meeting
     notes.set(id, note)
     const meta = noteMeta(note)
     for (const cb of noteCbs) cb({ id, meta })

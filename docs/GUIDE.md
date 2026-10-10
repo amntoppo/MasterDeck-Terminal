@@ -15,7 +15,8 @@ One window for all your Claude Code sessions, laid out as a command center:
     name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
-    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**
+    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions; beside it
+    the session's **Notes** and **Mods**), **Queue**
     and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
 - **Master:** master-agent's terminal in its own column at the far right, on every screen. The
   **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
@@ -820,6 +821,21 @@ A place for what you would otherwise keep in another app: your own notes, and on
   note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
   on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
   the ticket and its title. It is listed under **Tickets**. Emptying it removes it.
+- **A session's notes (Session details → Notes):** the Details tab has three tabs, **Session**,
+  **Notes** and **Mods**. **Notes** reads **Notes · 3** when the session has notes: its ticket's
+  note (listed first, as **Ticket note**), the notes about the session, and the notes about its
+  ticket, newest first. A note that came from a meeting carries a **Meeting · 9 Oct** chip, and a
+  dot on the tab says one came since you last opened that session's Notes tab (each window and
+  browser keeps its own). Pick a note to read it, rendered, below the list. **Edit** opens it in the
+  Notes panel; **New note** opens the panel on a new note about this session (and its ticket),
+  which the editor shows as **About login-redirect · #112**. Editing is always in the panel, so a
+  note is never open in two editors at once. The web app's Details has the same tab.
+- **Filters:** under the search box, **All · Mine · Tickets · Sessions · Meetings**. **Mine** is your
+  own notes, about nothing in particular; **Tickets** a ticket's note or a note about a ticket;
+  **Sessions** the notes about a session; **Meetings** the notes that came from a meeting. A note can
+  be in several (a meeting note about a session and its ticket is in all three). Each window and
+  browser remembers its choice. A row shows the session a note is about, and the meeting it came
+  from, as chips. The search also finds a note by the session's name and the meeting's title.
 - **In the web app:** the same panel and the same notes. When a note is changed in two places at
   once (the Mac and a browser), the editor says **Changed elsewhere** and asks: **Reload** takes
   the other version, **Keep mine** saves yours over it. A note deleted elsewhere says so, and you

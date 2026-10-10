@@ -1375,7 +1375,7 @@ export function App() {
         <Inspector
           state={state}
           notes={notes.metas}
-          onNote={(t) => setNotesAt({ ticket: t })}
+          onNote={setNotesAt}
           session={
             activeKey
               ? (state.sessions.find((x) => x.key === activeKey) ?? null)

@@ -3,7 +3,7 @@ import { SessionDetails } from "./SessionDetails";
 import { SummaryPanel } from "./SummaryPanel";
 import type { AppState, Session } from "@shared/types";
 import type { NoteMeta } from "@shared/notes";
-import type { Ticket } from "@shared/ticket";
+import type { NoteTarget } from "@shared/noteEditor";
 
 export type InspectorTab = "details" | "queue" | "summary";
 
@@ -19,7 +19,8 @@ interface Props {
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
   notes?: NoteMeta[];
-  onNote?: (t: Ticket) => void;
+  /** Open the Notes panel at what Details asks for (a note, a ticket's note, a new note about the session). */
+  onNote?: (t: NoteTarget) => void;
 }
 
 /**
