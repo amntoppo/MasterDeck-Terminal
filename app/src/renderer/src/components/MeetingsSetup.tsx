@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/settings'
 import type { MeetingsAnswer, MeetingsSettings, MeetingsSetupInfo, SoundStatus } from '@shared/meetings'
+import { modelSize, type ModelOp, type ModelProgress, type ModelsAnswer, type ModelsInfo } from '@shared/meetingModels'
 import { deck } from '../deck'
 import { Field } from './AccountPanel'
 
@@ -22,6 +23,88 @@ const DELETE_AFTER: [number | null, string][] = [
   [365, 'A year'],
   [null, 'Never'],
 ]
+
+const percent = (p: ModelProgress) => (p.total > 0 ? Math.floor((p.received / p.total) * 100) : 0)
+
+/**
+ * The speech model: Best or Fast, downloaded once from whisper.cpp's model repository and checked
+ * against its SHA-256. The pick is stored by meetings:model (settings.meetings.model).
+ */
+function ModelRow() {
+  const [info, setInfo] = useState<ModelsInfo | null>(null)
+  const [progress, setProgress] = useState<ModelProgress | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const take = (r: ModelsAnswer) => {
+    if (r.ok) {
+      setInfo(r)
+      setProgress(r.downloading)
+    }
+    setMessage(r.message ?? null)
+  }
+  const call = (op: ModelOp, id?: string) => void deck().meetingsModel(op, id).then(take)
+  useEffect(() => {
+    call('status')
+    return deck().onMeetingsModelProgress((p) => {
+      setProgress(p.state === 'downloading' ? p : null)
+      if (p.state === 'failed') setMessage(p.message ?? 'The download failed.')
+      if (p.state !== 'downloading') void deck().meetingsModel('status').then((r) => r.ok && setInfo(r))
+    })
+  }, [])
+
+  if (!info)
+    return (
+      <Field label="Speech model" hint="Turns the audio into text on this Mac.">
+        <span className="muted">{message ?? 'Loading…'}</span>
+      </Field>
+    )
+  const id = info.picked ?? info.suggested
+  const model = info.models.find((m) => m.id === id) ?? info.models[0]
+  const running = progress?.state === 'downloading' ? progress : null
+  return (
+    <Field
+      label="Speech model"
+      hint={`Turns the audio into text on this Mac. ${model.hint} Downloaded once from whisper.cpp's model page on Hugging Face; nothing is sent there.`}
+    >
+      {!info.engine && <span className="bad">Speech engine missing: reinstall MasterDeck.</span>}
+      <select className="input" aria-label="Speech model" value={model.id} disabled={!!running} onChange={(e) => call('pick', e.target.value)}>
+        {info.models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {`${m.label} · ${modelSize(m.bytes)}${m.ready ? ' · downloaded' : ''}`}
+          </option>
+        ))}
+      </select>
+      {running ? (
+        <>
+          <progress max={100} value={percent(running)} style={{ width: 120 }} aria-label="Download progress" />
+          <span className="muted">
+            {percent(running)}% of {modelSize(running.total)}
+            {running.id !== model.id ? ` (${info.models.find((m) => m.id === running.id)?.label ?? running.id})` : ''}
+          </span>
+          <button className="btn" onClick={() => call('cancel')}>
+            Cancel
+          </button>
+        </>
+      ) : model.ready ? (
+        <>
+          <span className="ok">Ready</span>
+          <button className="btn" onClick={() => call('remove', model.id)}>
+            Remove
+          </button>
+        </>
+      ) : (
+        <button className="btn primary" onClick={() => call('download', model.id)}>
+          Download {modelSize(model.bytes)}
+        </button>
+      )}
+      {message && (
+        <span className="muted" role="status">
+          {message}
+        </span>
+      )}
+    </Field>
+  )
+}
 
 /**
  * Settings → Meetings (macOS, the window only). The consent card comes first: nothing here asks
@@ -129,10 +212,13 @@ export function MeetingsSetup({ settings, save }: { settings: Settings; save: (n
         <span className={info.screen === 'granted' ? 'ok' : 'muted'}>{STATUS[info.screen]}</span>
         <span style={{ flex: 1 }} />
         {soundButton}
+        {(info.screen === 'silent' || info.screen === 'denied') && (
+          <button className="btn" disabled={busy} onClick={() => void deck().meetingsRestart().then((r) => !r.ok && r.message !== 'cancelled' && setMessage(r.message ?? null))}>
+            Restart MasterDeck
+          </button>
+        )}
       </Field>
-      <Field label="Speech model" hint="Turns the audio into text on this Mac.">
-        <span className="muted">Set up in a later step</span>
-      </Field>
+      <ModelRow />
       <Field label="Offer to record" hint="When a meeting app is in a call, offer to record it.">
         <button className={`switch ${m.offer ? 'on' : ''}`} role="switch" aria-checked={m.offer} aria-label="Offer to record" onClick={() => setM({ offer: !m.offer })} />
       </Field>

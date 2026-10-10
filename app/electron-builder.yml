@@ -38,6 +38,14 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: MasterDeck records meetings only when you press Record.
     NSAudioCaptureUsageDescription: MasterDeck records meetings only when you press Record.
+  # Meetings' speech engine, built by scripts/whisper.sh (CI runs it before dist:mac): each
+  # architecture's DMG carries its own whisper-cli. Missing (a local build without the script):
+  # Settings → Meetings says "Speech engine missing".
+  extraResources:
+    - from: resources/whisper/${arch}
+      to: whisper/${arch}
+      filter:
+        - whisper-cli
 win:
   target:
     - target: nsis

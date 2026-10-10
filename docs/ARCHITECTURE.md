@@ -1072,6 +1072,31 @@ waits, and writes nothing if accounts appeared meanwhile.
 - `electron-builder.yml` `mac.extendInfo`: `NSMicrophoneUsageDescription`,
   `NSAudioCaptureUsageDescription`. UI: `MeetingsSetup.tsx` in `SettingsView` (darwin only).
 
+### Meetings: speech engine and models (issue #102)
+
+- `shared/meetingModels.ts`: `MODELS` (Best `large-v3-turbo-q5_0`, Fast `base`: `id` (what
+  `settings.meetings.model` keeps), `file`, `bytes`, `sha256`, `url`), `modelById`,
+  `defaultModel(arch)` (arm64 Best, else Fast), `ModelsInfo` / `ModelProgress`.
+- `main/meetings/models.ts` (`ModelStore(dir)`, dir `MASTERDECK_HOME/meetings/models`):
+  `path(id)`, `ready(id)` (the file has the expected size), `status()`, `download(id, onProgress)`
+  (refused while one runs; free space checked; streamed to `<file>.part` with a running SHA-256,
+  cut off past the expected size, then size and hash checked and renamed; progress at most every
+  250 ms plus a last `done` / `failed` / `cancelled`), `cancel()`, `remove(id)`. It only touches
+  the files `MODELS` names and their `.part`.
+- `main/meetings/whisper.ts`: `findWhisper(where)` (`MASTERDECK_WHISPER`, the bundled
+  `whisper/<arch>/whisper-cli`, PATH), `transcribe({ bin, wav, model, language })` →
+  `Segment[]` (`{ start, end, text }`, ms) via `-oj -of <tmp>` under `nice`, threads
+  `whisperThreads()` = cores − 2 (at least 1), a timeout that kills its process group,
+  `parseWhisperJson`. Building the binary: OPERATIONS § Meetings: speech engine and models.
+- Channels: `meetingsModel(op, id?)` (`meetings:model`; `status`, `pick`, `download`, `cancel`,
+  `remove`) answers `ModelsAnswer`; `pick` and `download` need the consent and store
+  `settings.meetings.model` through `MeetingsIpc` (`setMeetings`), and `download` runs in the
+  background, its progress sent to the window only (`meetings:modelProgress`, not `emit`).
+  `meetingsRestart()` (`meetings:restart`): a native confirmation, then `app.relaunch()` +
+  `app.quit()` (quit, so `will-quit` still cleans up). All `blocked`. `MeetingsIpc.loadEngine()`
+  loads `models.ts` and `whisper.ts` dynamically, like the gate; `setup()` fills `model.ready` from
+  the store once a model is picked.
+
 ### Working hours (issue #64)
 
 The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day

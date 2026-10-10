@@ -933,8 +933,15 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   check MasterDeck made ("Not checked yet" until then). For now **Allow** opens System Settings at
   Screen & System Audio Recording; the 1-second check that brings up macOS's prompt comes with
   recording. On macOS 13 to 14.1 it is the Screen & System Audio Recording permission. macOS 12 and
-  older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it.
-- **Speech model:** set up in a later step.
+  older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it:
+  when the check heard nothing or the permission was refused, **Restart MasterDeck** does it (after
+  asking; terminals in MasterDeck close, Claude sessions keep running).
+- **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
+  accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
+  first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
+  (nothing of yours is sent there), shows its progress and can be cancelled; a file that is not
+  exactly the expected one is thrown away. **Ready** means it is on disk; **Remove** deletes it.
+  "Speech engine missing" means this copy of MasterDeck has no speech engine: reinstall it.
 - **Offer to record** (on by default): offer to record when a meeting app is in a call.
 - **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
   transcript and notes stay.

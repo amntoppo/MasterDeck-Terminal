@@ -44,6 +44,11 @@ function setup(over: Partial<{ platform: string; meetings: MeetingsSettings; ver
     },
     macosVersion: () => over.version ?? '14.4.1',
     now: () => 1000,
+    arch: 'arm64',
+    modelsDir: '/nonexistent/meetings/models',
+    whisper: () => ({ env: {}, resourcesPath: '/nonexistent', appRoot: '/nonexistent', packaged: true, arch: 'arm64', pathEnv: '' }),
+    progress: () => {},
+    restart: async () => false,
   })
   return { ipc, meetings: () => m }
 }
@@ -110,7 +115,7 @@ describe('the startup rule', () => {
       if (hit) throw new Error(`${rel} imports main/meetings/ at load: ${hit[0].trim()}`)
       for (const m of src.matchAll(DYNAMIC_MEETINGS)) if (m) dynamic.push(rel)
     }
-    expect(dynamic).toEqual(['meetingsIpc.ts'])
+    expect([...new Set(dynamic)]).toEqual(['meetingsIpc.ts'])
   })
 
   it('index.ts guards the sessions before it opens the first window', () => {
@@ -128,7 +133,7 @@ describe('the startup rule', () => {
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {
     const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('guardSessions(app, session,')
-    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission']) expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
+    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart']) expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
   })
 
   it('what startup runs (the handlers object and the session guard) asks macOS nothing and loads nothing', () => {
@@ -268,5 +273,79 @@ describe('guardSessions', () => {
       expect(capture.asked(p)).toEqual({ request: true, check: true })
     }
     for (const p of ['notifications', 'clipboard-sanitized-write', 'fullscreen']) expect(win.asked(p)).toEqual({ request: true, check: true })
+  })
+})
+
+describe('meetings:model and meetings:restart', () => {
+  function withEngine(m: MeetingsSettings, over: Partial<{ platform: string; engine: string | null }> = {}) {
+    let cur = m
+    const calls: string[] = []
+    const progress: unknown[] = []
+    let restarted = 0
+    class FakeStore {
+      ready = (id: string) => id === 'base'
+      status = () => ({ models: [{ id: 'large-v3-turbo-q5_0', ready: false }, { id: 'base', ready: true }], downloading: null })
+      download = async (id: string, cb: (p: unknown) => void) => {
+        calls.push(`download:${id}`)
+        cb({ id, state: 'done' })
+        return { ok: true }
+      }
+      cancel = () => (calls.push('cancel'), true)
+      remove = (id: string) => (calls.push(`remove:${id}`), { ok: true })
+    }
+    const ipc = new MeetingsIpc({
+      platform: over.platform ?? 'darwin',
+      meetings: () => cur,
+      setMeetings: (n) => {
+        cur = n
+      },
+      macosVersion: () => '14.4.1',
+      arch: 'arm64',
+      modelsDir: '/nonexistent',
+      whisper: () => ({ env: {}, resourcesPath: '', appRoot: '', packaged: true, arch: 'arm64', pathEnv: '' }),
+      progress: (p) => progress.push(p),
+      restart: async () => (restarted++, true),
+      loadEngine: async () =>
+        ({ ModelStore: FakeStore, findWhisper: () => ('engine' in over ? over.engine : '/acme/whisper-cli') }) as never,
+    })
+    return { ipc, calls, progress, meetings: () => cur, restarted: () => restarted }
+  }
+
+  it('refused from a browser and off macOS; actions are checked', async () => {
+    expect(await withEngine(agreed, { platform: 'linux' }).ipc.model(local, 'status')).toEqual({ ok: false, message: MEETINGS_MAC_ONLY })
+    const t = withEngine(agreed)
+    expect(await t.ipc.model(remote, 'download', 'base')).toMatchObject({ ok: false })
+    expect(await t.ipc.restart(remote)).toMatchObject({ ok: false })
+    expect(await t.ipc.model(local, 'rm -rf')).toMatchObject({ ok: false, message: 'Not a model action.' })
+    expect(await t.ipc.model(local, 'download', '../x')).toMatchObject({ ok: false, message: 'Not a speech model.' })
+    expect(t.calls).toEqual([])
+    expect(t.restarted()).toBe(0)
+  })
+
+  it('status: the models, the suggested one, the engine', async () => {
+    const r = await withEngine(DEFAULT_MEETINGS, { engine: null }).ipc.model(local, 'status')
+    expect(r).toMatchObject({ ok: true, picked: null, suggested: 'large-v3-turbo-q5_0', engine: false, downloading: null })
+    if (r.ok) expect(r.models.map((m) => [m.label, m.ready])).toEqual([['Best', false], ['Fast', true]])
+  })
+
+  it('pick and download need the consent; download picks, starts and reports', async () => {
+    const before = withEngine(DEFAULT_MEETINGS)
+    expect(await before.ipc.model(local, 'download', 'base')).toMatchObject({ ok: false })
+    expect(before.calls).toEqual([])
+    const t = withEngine(agreed)
+    expect(await t.ipc.model(local, 'pick', 'large-v3-turbo-q5_0')).toMatchObject({ ok: true, picked: 'large-v3-turbo-q5_0' })
+    expect(await t.ipc.model(local, 'download', 'base')).toMatchObject({ ok: true, picked: 'base' })
+    await vi.waitFor(() => expect(t.progress).toEqual([{ id: 'base', state: 'done' }]))
+    expect(t.meetings().model).toBe('base')
+    expect(await t.ipc.setup(local)).toMatchObject({ ok: true, model: { name: 'base', ready: true } })
+    await t.ipc.model(local, 'cancel')
+    await t.ipc.model(local, 'remove', 'base')
+    expect(t.calls).toEqual(['download:base', 'cancel', 'remove:base'])
+  })
+
+  it('restart asks (deps) and is the window’s only', async () => {
+    const t = withEngine(agreed)
+    expect(await t.ipc.restart(local)).toEqual({ ok: true })
+    expect(t.restarted()).toBe(1)
   })
 })

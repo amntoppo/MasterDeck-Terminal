@@ -9,6 +9,7 @@ import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
 import type { MeetingsAnswer } from "./meetings";
+import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
@@ -210,6 +211,9 @@ export const CH = {
   meetingsSetup: "meetings:setup",
   meetingsConsent: "meetings:consent",
   meetingsPermission: "meetings:permission",
+  meetingsModel: "meetings:model",
+  meetingsModelProgress: "meetings:modelProgress",
+  meetingsRestart: "meetings:restart",
   notesChanged: "notes:changed",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
@@ -418,6 +422,14 @@ export interface DeckApi {
    * prompt), checks the sound, or opens System Settings at its pane when the grant was refused.
    */
   meetingsPermission(kind: "mic" | "screen"): Promise<MeetingsAnswer>;
+  /**
+   * The speech model (Settings → Meetings): its state, pick one (stored as settings.meetings.model),
+   * download it (also picks it; progress through onMeetingsModelProgress), cancel, remove.
+   */
+  meetingsModel(op: ModelOp, id?: string): Promise<ModelsAnswer>;
+  onMeetingsModelProgress(cb: (p: ModelProgress) => void): () => void;
+  /** Restart MasterDeck after a confirmation on the Mac (macOS may want it after a permission). */
+  meetingsRestart(): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */

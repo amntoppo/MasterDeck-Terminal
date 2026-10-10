@@ -37,7 +37,8 @@ open /Applications/MasterDeck.app
   needed) / `npm run dist:win -- --publish never`. Then `install-app-deps` again.
 - Packaging config: `app/electron-builder.yml` (appId `io.github.amntoppo.masterdeck`, ad-hoc
   signature `identity: "-"`, no hardened runtime, node-pty unpacked from asar, `statusline_tee.py`
-  and `../skills` as extra resources without tests/caches).
+  and `../skills` as extra resources without tests/caches; on macOS also `resources/whisper/<arch>`,
+  meetings' speech engine, when `scripts/whisper.sh` built it: see "Meetings: speech engine and models").
 - Icons: `app/build/icon.icns` (macOS, also the DMG), `icon.ico` (Windows), `icon.png` / `icon.svg`
   (the source tile; `npm run dev` puts it in the Dock), and the web app's `src/web/public/favicon.svg`,
   `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` and `manifest.webmanifest`. All are made by
@@ -321,6 +322,58 @@ responsible process.
 - `video: request.frame` + `loopback` gives an audio track (else switch to the `getSources` shape).
 - After a rebuild and reinstall: whether the grants survive, and what the silent-track message says.
 - The speakers keep playing during a recording.
+
+## Meetings: speech engine and models
+
+Meetings are transcribed on the Mac by `whisper-cli` from [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+(issue #102, spec §3). No Python, no network once the model is on disk.
+
+**Building whisper-cli.** `app/scripts/whisper.sh [arm64|x64]` (default: this Mac's) clones the
+pinned tag (`WHISPER_TAG`, now `v1.9.4`) into `app/resources/whisper/.src`, stops if the tag is not
+the pinned commit (`WHISPER_COMMIT`), builds the `whisper-cli` target with CMake and copies it to
+`app/resources/whisper/<arch>/whisper-cli` (about 4 MB arm64, 3 MB x64). The whole folder is
+git-ignored. The build is static (`BUILD_SHARED_LIBS=OFF`), portable (`GGML_NATIVE=OFF`), macOS
+12+, Accelerate for BLAS, Metal on arm64 with the shaders embedded (`GGML_METAL_EMBED_LIBRARY`),
+and CPU only on x64 (cross-built with `CMAKE_OSX_ARCHITECTURES=x86_64`, AVX2/FMA/F16C, so a Mac
+from 2013 or later). The script fails if `otool -L` names anything outside `/usr/lib` and
+`/System/Library`; it strips the binary and signs it ad hoc again (Apple Silicon runs nothing
+unsigned). It needs git, `cmake` (`brew install cmake`) and Xcode's command line tools. To move to
+another release, change both pins together.
+
+```bash
+cd app && ./scripts/whisper.sh arm64 && ./scripts/whisper.sh x64
+otool -L resources/whisper/arm64/whisper-cli   # libSystem, libc++, libobjc, Accelerate, Foundation, Metal, MetalKit, CoreFoundation
+```
+
+- CI's macOS job runs it for arm64 and x64 before `dist:mac` (it installs `cmake` with Homebrew
+  when the runner has none); the Windows job skips it.
+- `electron-builder.yml` `mac.extraResources` ships `resources/whisper/${arch}` as
+  `Contents/Resources/whisper/<arch>/whisper-cli`, so each DMG carries only its own. A local
+  `--mac dir` build without the script has none: Settings → Meetings says "Speech engine missing".
+- Where the app looks (`findWhisper`, `main/meetings/whisper.ts`): `MASTERDECK_WHISPER` (when set
+  but not runnable, nothing else is tried), then the app's own (packaged: `Resources/whisper/<arch>/`;
+  `npm run dev`: `app/resources/whisper/<arch>/`), then `whisper-cli` on the login shell's PATH
+  (Homebrew's `whisper-cpp`).
+- It runs as `nice -n 10 whisper-cli -m <model> -f <chunk.wav> -oj -of <tmp>/out -l <lang|auto>
+  -t <cores-2> -np` in its own process group (a timeout stops all of it); the JSON's
+  `transcription[].offsets` (ms) and `text` are read back, `[BLANK_AUDIO]` dropped.
+
+**Models.** Downloaded on Settings → Meetings from
+`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/<file>` into
+`MASTERDECK_HOME/meetings/models/` (default `~/.claude/masterdeck/meetings/models/`):
+
+| Pick | File | Bytes | Default on |
+|---|---|---|---|
+| Best | `ggml-large-v3-turbo-q5_0.bin` | 574,041,195 | Apple Silicon |
+| Fast | `ggml-base.bin` | 147,951,465 | Intel |
+
+Their sizes and SHA-256 are in `shared/meetingModels.ts`, copied from the repository's LFS listing
+(`curl -s https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main`: `lfs.oid`, `lfs.size`;
+the same as the `x-linked-etag` / `x-linked-size` headers of a `curl -I` of the file). A download
+streams to `<file>.part`, hashed while written, and is renamed only when both match; anything else is
+thrown away. It needs the model's size plus 200 MB free. One downloads at a time. To get a model
+by hand, put the file there under the same name (it is ready when its size matches). To remove
+one: **Remove** on the screen, or delete the file while MasterDeck is closed.
 
 ## Measuring upload
 

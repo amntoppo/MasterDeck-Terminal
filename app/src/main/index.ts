@@ -2184,6 +2184,8 @@ function registerIpc(): void {
   reg.handle(CH.meetingsSetup, (e) => meetings.setup(e));
   reg.handle(CH.meetingsConsent, (e, agree: unknown) => meetings.consent(e, agree));
   reg.handle(CH.meetingsPermission, (e, kind: unknown) => meetings.permission(e, kind));
+  reg.handle(CH.meetingsModel, (e, op: unknown, id: unknown) => meetings.model(e, op, id));
+  reg.handle(CH.meetingsRestart, (e) => meetings.restart(e));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3287,6 +3289,34 @@ const meetings = new MeetingsIpc({
     sources.setSettings({ ...sources.getSettings(), meetings: m });
   },
   macosVersion: () => process.getSystemVersion(),
+  arch: process.arch,
+  modelsDir: join(paths.home, "meetings", "models"),
+  whisper: () => ({
+    env: process.env,
+    resourcesPath: process.resourcesPath,
+    appRoot: app.getAppPath(),
+    packaged: app.isPackaged,
+    arch: process.arch,
+    pathEnv,
+  }),
+  // The window only: a model download is not the browser's business.
+  progress: (p) => win?.webContents.send(CH.meetingsModelProgress, p),
+  restart: async () => {
+    if (!win) return false;
+    const choice = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Cancel", "Restart"],
+      defaultId: 1,
+      cancelId: 0,
+      message: "Restart MasterDeck?",
+      detail: "Terminals in MasterDeck close. Claude sessions keep running in the background.",
+    });
+    if (choice.response !== 1) return false;
+    // quit, not exit: will-quit still closes the terminals and the remote line.
+    app.relaunch();
+    app.quit();
+    return true;
+  },
 });
 
 /** What Setup needs to know: which tools are on PATH and who gh is logged in as. */
