@@ -445,7 +445,12 @@ export class MeetingsIpc {
       }),
       () => (this.offers = null),
     )
-    void this.offers.then((w) => w.start()).catch((err) => console.error(`meetings: offer: ${String(err)}`))
+    // The consent may have been withdrawn (Turn off) while the module loaded: then no looks.
+    void this.offers
+      .then((w) => {
+        if (meetingsAgreed({ meetings: this.d.meetings() })) w.start()
+      })
+      .catch((err) => console.error(`meetings: offer: ${String(err)}`))
   }
 
   /** Turn off meetings (and quit): no more looks; the chip goes. */

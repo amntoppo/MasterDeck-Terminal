@@ -94,7 +94,7 @@ import { copyMeetingsFixture } from "./meetingsFixture";
 import { MEDIA_SCHEME } from "@shared/meetingsPage";
 import { offerText } from "@shared/meetingApps";
 import { claudeOnce, tidyScratch } from "./claudeOnce";
-import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
+import { keepMeetings, meetingsAgreed, oneAtATime, webState } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -221,7 +221,8 @@ const reg = new IpcRegistry(ipcMain);
 function emit(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args);
   try {
-    bridge?.event(channel, args);
+    // Web tabs get the state without the offered call app (webState).
+    bridge?.event(channel, channel === CH.state && args[0] ? [webState(args[0] as AppState), ...args.slice(1)] : args);
   } catch (e) {
     // Never let a browser problem break delivery to the Mac's own window.
     console.error(`browser bridge: ${String(e)}`);
@@ -408,6 +409,9 @@ function notify(events: NotifyEvent[]): void {
   for (const e of events.slice(0, 4)) {
     const n = new Notification({ title: e.title, body: e.body, silent: false });
     n.on("click", () => reveal(e.target));
+    // Kept until it closes, so its click handler is not garbage-collected (`shown`, below).
+    n.on("close", () => shown.delete(n));
+    shown.add(n);
     n.show();
   }
 }
@@ -818,6 +822,8 @@ function reveal(target: NotifyEvent["target"]): void {
 
 /** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
 const shown = new Set<Notification>();
+/** The meeting offer's notification, kept for the same reason. */
+let offerNote: Notification | null = null;
 
 /**
  * A new Needs-you item's notification (Settings: "Notify me…"). Clicking it opens the item. On
@@ -2078,7 +2084,7 @@ function workspaceFolders(): string[] {
 }
 
 function registerIpc(): void {
-  reg.handle(CH.getState, () => latest);
+  reg.handle(CH.getState, (e) => (latest && isRemote(e) ? webState(latest) : latest));
   reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
@@ -3440,6 +3446,11 @@ const meetings = new MeetingsIpc({
   offer: (app) => {
     if (SMOKE || !Notification.isSupported()) return;
     const n = new Notification({ title: "MasterDeck · Meetings", body: offerText(app) });
+    // Kept (one offer at a time) so its click handler is not garbage-collected before a click.
+    offerNote = n;
+    n.on("close", () => {
+      if (offerNote === n) offerNote = null;
+    });
     n.on("click", () => {
       if (!win) return;
       if (win.isMinimized()) win.restore();

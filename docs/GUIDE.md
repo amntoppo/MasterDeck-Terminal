@@ -988,7 +988,10 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
   When Zoom or Webex joins a call, a notification says "Zoom call: record it?" (a click brings
   MasterDeck up with the Record popout open) and a chip by the Record button asks the same, with
   **Record** and **Not now**. It is asked once per call: after Not now, or after a recording, the
-  same call is not offered again. It never starts recording by itself. Microsoft Teams, Slack
+  same call is not offered again (a call app gone for 20 seconds or less, such as a move to a
+  breakout room, is still the same call). With two calls at once, the second is offered after the
+  first chip goes. It never starts recording by itself. The web app is never told which call app is
+  in use. Microsoft Teams, Slack
   huddles and calls in a browser (Google Meet) are not noticed: use Record. **Turn off meetings**
   stops the looking.
 - The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy

@@ -342,8 +342,9 @@ export function mergeSegments(you: Segment[], others: Segment[]): Segment[] {
 
 /**
  * The rail's recording indicator (AppState.meetingLive). Never in toRemoteSnapshot; it does reach
- * approved web tabs with the rest of the state (the bridge's state event), which only tells them a
- * recording runs: the web app shows nothing of it and cannot start, pause or stop one.
+ * approved web tabs with the rest of the state (the bridge's state event, through webState, which
+ * blanks `offer`), so they learn only that a recording runs, never which call app is in use: the
+ * web app shows nothing of it and cannot start, pause or stop one.
  * `since` is when the recording would have started had it never been paused, so while it runs the
  * time recorded is now − since; while paused it is `elapsed`.
  */
@@ -357,6 +358,12 @@ export interface MeetingLive {
   offer: string | null
 }
 export const IDLE_LIVE: MeetingLive = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+
+/** The state as web tabs get it: the offered call app (which app the user is in a call with) stays on the Mac. */
+export function webState<T extends { meetingLive?: MeetingLive | null }>(state: T): T {
+  if (!state?.meetingLive || state.meetingLive.offer === null) return state
+  return { ...state, meetingLive: { ...state.meetingLive, offer: null } }
+}
 
 /** Time recorded so far: frozen while paused. */
 export const recordedMs = (live: MeetingLive, now: number): number => (live.paused || live.since === null ? live.elapsed : Math.max(0, now - live.since))

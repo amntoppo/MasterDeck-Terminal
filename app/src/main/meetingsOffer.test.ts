@@ -25,7 +25,7 @@ const remote = { remote: true }
 
 afterEach(() => vi.useRealTimers())
 
-function offer(m: MeetingsSettings = agreed, platform = 'darwin') {
+function offer(m: MeetingsSettings = agreed, platform = 'darwin', gate?: Promise<void>) {
   let settings = m
   let appsLoads = 0
   const offers: string[] = []
@@ -83,7 +83,7 @@ function offer(m: MeetingsSettings = agreed, platform = 'darwin') {
           stop() {}
         },
       }) as never,
-    loadApps: async () => (appsLoads++, appsModule),
+    loadApps: async () => (appsLoads++, await gate, appsModule),
     ps,
     offer: (a) => offers.push(a),
   })
@@ -189,6 +189,22 @@ describe('the offer in MeetingsIpc', () => {
     // A fresh start: the call still going is offered again once.
     expect(t.offers).toEqual(['Zoom', 'Zoom'])
     expect(t.appsLoads()).toBe(1)
+    t.ipc.quit()
+  })
+
+  it('Turn off while the watch loads: it never starts', async () => {
+    vi.useFakeTimers()
+    let open!: () => void
+    const t = offer(agreed, 'darwin', new Promise<void>((r) => (open = r)))
+    t.ipc.startOffers()
+    await t.ipc.consent(local, false)
+    open()
+    await vi.advanceTimersByTimeAsync(5 * OFFER_POLL_MS)
+    expect(t.appsLoads()).toBe(1)
+    expect(t.ps).not.toHaveBeenCalled()
+    expect(t.offers).toEqual([])
+    // No timer left behind (each look would refuse, but nothing should be looking).
+    expect((t.ipc as unknown as { watch: { running: boolean } }).watch.running).toBe(false)
     t.ipc.quit()
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  webState,
   DEFAULT_MEETINGS,
   keepMeetings,
   mediaAllowed,
@@ -94,5 +95,24 @@ describe('the Mac sound', () => {
     expect(privacyPane('mic', 'tap')).toBe('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone')
     expect(privacyPane('screen', 'tap')).toMatch(/\?Privacy_AudioCapture$/)
     expect(privacyPane('screen', 'screen')).toMatch(/\?Privacy_ScreenCapture$/)
+  })
+})
+
+describe('webState', () => {
+  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: 'Zoom' }
+  it('blanks the offered call app and leaves the rest', () => {
+    const s = { sessions: [1], meetingLive: live }
+    const w = webState(s)
+    expect(w).toEqual({ sessions: [1], meetingLive: { ...live, offer: null } })
+    // The Mac's own state is untouched.
+    expect(s.meetingLive.offer).toBe('Zoom')
+  })
+  it('passes a state with no offer through as it is', () => {
+    const s = { meetingLive: { ...live, offer: null } }
+    expect(webState(s)).toBe(s)
+    const n = { meetingLive: null }
+    expect(webState(n)).toBe(n)
+    const u = {}
+    expect(webState(u)).toBe(u)
   })
 })

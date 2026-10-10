@@ -1384,16 +1384,24 @@ waits, and writes nothing if accounts appeared meanwhile.
   `OFFER_POLL_MS` 10 s.
 - `main/meetings/apps.ts`: `psComm()` (one `execFile('/bin/ps', ['-axo', 'comm'])`, 5 s timeout)
   and `OfferWatch` (`tick`, `dismiss`, `start`, `stop`, `offered`): a look only while `allowed()`
-  (macOS, consent, `settings.meetings.offer`) and not `recording()`; an app in a call now and not at
-  the last look is a new call, offered once (one chip at a time); the apps in a call are kept while
-  not looking, so a call is not new after a recording; the chip goes when its call ends.
+  (macOS, consent, `settings.meetings.offer`) and not `recording()`, and none after `stop()` (a
+  `stopped` flag checked after the ps); an app in a call now that is not in `inCall` is a new call,
+  offered once. `inCall` holds the offered apps with a miss count: a call ends only after
+  `MISSES_TO_END` (3) looks without it, so a helper restart or a breakout move is not offered again.
+  One chip at a time: an app found while another's chip shows is not added to `inCall`, so it is
+  offered once that chip goes, if its call still runs. `inCall` is kept while not looking, so a call
+  is not new after a recording; the chip goes when its call ends.
 - `MeetingsIpc`: `startOffers()` loads `apps.ts` (dynamic import, `deps.loadApps`) only on macOS
-  with the consent: from `background()` `OFFER_POLL_MS` after start, and from `consent(true)`;
-  `consent(false)` and `quit()` call `stopOffers()`. `live().offer` is the offered app (null while
+  with the consent: from `background()` `OFFER_POLL_MS` after start, and from `consent(true)`; the
+  watch starts only if the consent still holds once the module loaded; `consent(false)` and `quit()`
+  call `stopOffers()`. `live().offer` is the offered app (null while
   recording). `start()` (the chip's Record, the popout's) notes the offered app in the meeting's
   `apps` and dismisses the chip; `notNow(e)` (`meetings:notNow`, `blocked`) dismisses it.
-  `deps.offer(app)` (`index.ts`) shows a macOS notification whose click shows the window and sends
-  `meetings:showRecord` (event, `blocked`): `App.tsx` opens the Record popout.
+  `deps.offer(app)` (`index.ts`) shows a macOS notification (kept in `offerNote` so its click
+  handler is not garbage-collected) whose click shows the window and sends `meetings:showRecord`
+  (event, `blocked`): `App.tsx` opens the Record popout. Web tabs never learn the call app: the
+  state the bridge sends (`emit`'s state event and a remote `getState`) goes through `webState`
+  (`shared/meetings.ts`), which sets `meetingLive.offer` to null.
 - UI: `RecordMeeting.tsx` draws the chip (`.rec-offer`) when `live.offer` is set and the popout is
   closed: the words, **Record** (`meetingsStart()`), **Not now** (`meetingsNotNow()`), "Tell the
   others you are recording."

@@ -20,18 +20,28 @@ export interface OfferWatchDeps {
   clear(): void
 }
 
+/** Looks in a row an app must be missing before its call counts as ended (a helper restarting, a breakout room). */
+export const MISSES_TO_END = 3
+
 /**
  * The offer (spec §2): every OFFER_POLL_MS, while allowed and nothing records, one `ps`. An app that
- * was not in a call at the last look and is now is a new call: one offer, and never again for that
- * call (Not now, Record, or an offer already showing for another app). It only offers; recording
+ * is in a call now and was not at the last looks is a new call: one offer, and never again for that
+ * call (Not now, Record). A call counts as ended only after MISSES_TO_END looks without it, so a
+ * call helper that blinks out for a look is not offered again. An app found while another's offer
+ * shows waits: it is offered once that chip goes, if its call still runs. It only offers; recording
  * starts from the user's Record alone.
  */
 export class OfferWatch {
-  /** The apps in a call at the last look. Kept while not looking, so a call is not new after a recording. */
-  private inCall = new Set<string>()
+  /**
+   * The apps whose call was offered (or ran through a recording), with how many looks in a row each
+   * has been missing. Kept while not looking, so a call is not new after a recording.
+   */
+  private inCall = new Map<string, number>()
   private shown: string | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private busy = false
+  /** stop() ran: a look whose ps was still running offers nothing. */
+  private stopped = false
 
   constructor(private d: OfferWatchDeps) {}
 
@@ -62,14 +72,21 @@ export class OfferWatch {
     }
     // Things may have changed while ps ran.
     if (!this.d.allowed() || this.d.recording()) return this.drop()
+    if (this.stopped) return
     const now = callApps(out)
     if (this.shown && !now.includes(this.shown)) this.drop()
+    for (const [app, misses] of this.inCall) {
+      if (now.includes(app)) this.inCall.set(app, 0)
+      else if (misses + 1 >= MISSES_TO_END) this.inCall.delete(app)
+      else this.inCall.set(app, misses + 1)
+    }
     for (const app of now) {
+      // One chip at a time: an app not offered yet stays out of inCall, so it is offered next.
       if (this.inCall.has(app) || this.shown) continue
       this.shown = app
+      this.inCall.set(app, 0)
       this.d.offer(app)
     }
-    this.inCall = new Set(now)
   }
 
   /** Not now, or Record pressed: the chip goes; this call is not offered again. */
@@ -79,6 +96,7 @@ export class OfferWatch {
 
   start(every = OFFER_POLL_MS): void {
     if (this.timer) return
+    this.stopped = false
     this.timer = setInterval(() => void this.tick(), every)
     this.timer.unref?.()
   }
@@ -87,6 +105,7 @@ export class OfferWatch {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    this.stopped = true
     this.inCall.clear()
     this.drop()
   }

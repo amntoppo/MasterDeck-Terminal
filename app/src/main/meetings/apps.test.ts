@@ -49,12 +49,35 @@ describe('OfferWatch', () => {
     expect(t.w.offered).toBeNull()
     await t.w.tick()
     expect(t.offers).toEqual(['Zoom'])
-    // The call ends, a new one begins.
+    // The call ends (three looks without it), a new one begins.
     t.out(IDLE)
+    await t.w.tick()
+    await t.w.tick()
     await t.w.tick()
     t.out(ZOOM)
     await t.w.tick()
     expect(t.offers).toEqual(['Zoom', 'Zoom'])
+  })
+
+  it('an app missing for one or two looks is the same call: not offered again', async () => {
+    const t = watch()
+    t.out(ZOOM)
+    await t.w.tick()
+    t.w.dismiss()
+    // The helper restarts (or moves to a breakout room): gone for two looks, back on the third.
+    t.out(IDLE)
+    await t.w.tick()
+    await t.w.tick()
+    t.out(ZOOM)
+    await t.w.tick()
+    expect(t.offers).toEqual(['Zoom'])
+    // Missing again for two looks: the count began afresh when it came back.
+    t.out(IDLE)
+    await t.w.tick()
+    await t.w.tick()
+    t.out(ZOOM)
+    await t.w.tick()
+    expect(t.offers).toEqual(['Zoom'])
   })
 
   it('the chip goes when the offered call ends', async () => {
@@ -67,19 +90,32 @@ describe('OfferWatch', () => {
     expect(t.clears()).toBe(1)
   })
 
-  it('one chip at a time: a second app in a call meanwhile is not offered later', async () => {
+  it('one chip at a time: a second app in a call meanwhile is offered once the first chip goes', async () => {
     const t = watch()
     t.out(BOTH)
     await t.w.tick()
     expect(t.offers).toEqual(['Zoom'])
+    await t.w.tick()
+    expect(t.offers).toEqual(['Zoom'])
+    t.w.dismiss()
+    await t.w.tick()
+    expect(t.offers).toEqual(['Zoom', 'Webex'])
+    expect(t.w.offered).toBe('Webex')
+    // Neither is offered again while their calls last.
+    t.w.dismiss()
+    await t.w.tick()
+    expect(t.offers).toEqual(['Zoom', 'Webex'])
+  })
+
+  it('a second app whose call ended while the first chip showed is not offered', async () => {
+    const t = watch()
+    t.out(BOTH)
+    await t.w.tick()
+    t.out(ZOOM)
+    await t.w.tick()
     t.w.dismiss()
     await t.w.tick()
     expect(t.offers).toEqual(['Zoom'])
-    t.out(ZOOM)
-    await t.w.tick()
-    t.out(BOTH)
-    await t.w.tick()
-    expect(t.offers).toEqual(['Zoom', 'Webex'])
   })
 
   it('nothing before consent or with offers off: no ps at all', async () => {
@@ -119,6 +155,18 @@ describe('OfferWatch', () => {
     })
     await t.w.tick()
     expect(t.offers).toEqual([])
+  })
+
+  it('stop while ps runs: that look offers nothing', async () => {
+    const t = watch()
+    t.out(ZOOM)
+    t.ps.mockImplementationOnce(async () => {
+      t.w.stop()
+      return ZOOM
+    })
+    await t.w.tick()
+    expect(t.offers).toEqual([])
+    expect(t.w.offered).toBeNull()
   })
 
   it('a failed ps offers nothing and the next look works', async () => {
