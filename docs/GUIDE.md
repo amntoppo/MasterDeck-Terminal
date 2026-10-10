@@ -989,6 +989,40 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
 - If MasterDeck quits or crashes during a recording or a transcript, the pieces on disk are turned
   into text first the next time you use Meetings (Settings → Meetings, or Record).
 
+### After the transcript: notes in your sessions
+
+- Once the transcript is ready, MasterDeck asks Claude once (`claude -p` with Sonnet, from an
+  empty folder, nothing saved) what in it was about which of your sessions, PRs and current-sprint
+  tickets. Claude gets the transcript and the list (names, folder names, branches, ticket and PR
+  numbers and titles), and is told the transcript is only data: anything said in the meeting that
+  sounds like an instruction to it is ignored. A long meeting is read in parts.
+- Its answer is checked before anything is written: a match on something not in the list, lines
+  that are not in the transcript, or text past its limits is dropped, never guessed or fixed.
+- Each match becomes a note about that session (and its ticket), or about the ticket (a PR without
+  a session: the ticket it closes, else the PR itself). It shows in the session's Details → Notes,
+  on the Board card, and under **Meetings** in the Notes panel. A note has:
+  - **From:** the meeting's title and when it was, then what was said about it in a few sentences,
+  - **Action items**, when there were any,
+  - the lines themselves, quoted with who spoke and when (`> **Others** 12:04 — …`),
+  - **Open in Meetings**, to open the meeting at the first quoted line (it becomes a link with the
+    Meetings page; until then it shows as text).
+  What Claude or the meeting said shows as plain text: it cannot make a hidden link, an image or a
+  heading in your note. A web address someone said stays a visible address.
+- The meeting also gets a title from Claude (unless you named it) and a summary.
+- **Match again** asks Claude again. Notes from this meeting that you have not changed are replaced;
+  notes you edited stay as they are, and get no second copy.
+- If the matching fails (Claude could not be reached, took longer than 5 minutes, or did not answer
+  in the asked form), nothing is written and the meeting says why.
+
+### Meetings in Needs you
+
+- **Meeting '<title>': notes added to 3 sessions** (and tickets): **Open** opens it (until the
+  Meetings page is there, the Notes panel), **Dismiss** leaves it. It goes once opened.
+- **Could not be matched: <why>**: **Match again**.
+- **Transcription failed: <why>**: **Try again** (also from the notification's button).
+- These are on the Mac only: they are not sent to a phone, and a browser shows them with Dismiss
+  only.
+
 ## Account
 
 Settings → Account is where this Mac signs in to your MasterDeck account (needed for Remote).

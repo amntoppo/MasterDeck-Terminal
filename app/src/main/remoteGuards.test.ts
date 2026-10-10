@@ -75,6 +75,11 @@ it('an inbox action from the web app takes the path it always did; only opening 
   // Open Claude there… opens a tab on the Mac: never for a browser, whatever the item says.
   expect(inboxActCall(true, 'i1', 'trust', {})).toEqual({ ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' })
   expect(inboxActCall(false, 'i1', 'trust', {})).toEqual({ ok: true, id: 'i1', type: 'trust', payload: {} })
+  // A meeting's Match again and Try again: the Mac's window only.
+  for (const type of ['rematch', 'retry']) {
+    expect(inboxActCall(true, 'i1', type, {})).toEqual({ ok: false, message: 'Do this in MasterDeck on the Mac.' })
+    expect(inboxActCall(false, 'i1', type, {})).toEqual({ ok: true, id: 'i1', type, payload: {} })
+  }
   for (const [id, type] of [[1, 'approve'], ['i1', null], [undefined, undefined]])
     expect(inboxActCall(false, id, type, {})).toEqual({ ok: false, message: 'bad inbox action' })
 })

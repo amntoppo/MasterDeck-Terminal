@@ -7,12 +7,17 @@ import {
   mediaAllowed,
   meetingsAgreed,
   type MeetingLive,
+  type MeetingNotice,
   type MeetingsAnswer,
   type MeetingsSettings,
   type RecordAnswer,
 } from '@shared/meetings'
 import { defaultModel, MODEL_OPS, MODELS, modelById, type ModelOp, type ModelProgress, type ModelsAnswer } from '@shared/meetingModels'
+import { MATCH_FAILED } from '@shared/meetingMatch'
+import type { AppState } from '@shared/types'
 import { isRemote } from './ipcRegistry'
+import type { NotesStore } from './notes'
+import type { RunResult } from './run'
 // Types only: erased from the build, so this file never loads main/meetings/ by itself.
 import type { MeetingsGate } from './meetings/gate'
 import type { ModelStore, ModelStoreDeps } from './meetings/models'
@@ -20,17 +25,34 @@ import type { WhisperWhere } from './meetings/whisper'
 import type { Recorder } from './meetings/recorder'
 import type { MeetingStore } from './meetings/store'
 import type { Transcriber } from './meetings/transcriber'
+import type { Matcher } from './meetings/matcher'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
 type RecorderModule = typeof import('./meetings/recorder')
-type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber')
+type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber') & Partial<typeof import('./meetings/matcher')>
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
 export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId'>
 /** The meetings on disk and the transcription queue, loaded together after consent. */
 export interface MeetingsService {
   store: MeetingStore
   transcriber: Transcriber
+  /** Null when MeetingsIpc was made without `matching` (the meeting is done once it is text). */
+  matcher: Matcher | null
+}
+
+/** What matching needs from the rest of main (spec §4): the state, the notes, one claude -p. */
+export interface MatchingDeps {
+  /** The latest AppState once the session list was read; null before. */
+  state(): AppState | null
+  notes: Pick<NotesStore, 'addMeetingNote' | 'dropMeetingNotes' | 'meetingNotes' | 'get'>
+  claude(o: { model: string; prompt: string; timeoutMs: number }): Promise<RunResult>
+}
+
+/** The meetings' Needs-you items (main/meetingNotices.ts). */
+export interface NoticesLike {
+  set(n: MeetingNotice): void
+  clear(meetingId: string, kind?: MeetingNotice['kind']): boolean
 }
 
 export interface MeetingsDeps {
@@ -71,8 +93,12 @@ export interface MeetingsDeps {
   notice(text: string): void
   /** How the recorder is made (tests pass a fake; default: main/meetings/recorder.ts and store.ts, loaded now). */
   makeRecorder?: (o: { gate: MeetingsGate; engine: ModelStore; service: MeetingsService }) => Promise<RecorderLike>
-  /** A meeting is all text and `matching`: the matcher takes it (a later step). Unset: the meeting is done there. */
+  /** A meeting is all text and `matching`: this takes it instead of the matcher (tests). */
   onTranscribed?: (id: string) => void
+  /** Matching and its notes; unset (and no onTranscribed): a meeting is done once it is text. */
+  matching?: MatchingDeps
+  /** Needs you: notes added, matching or transcription failed. */
+  notices?: NoticesLike
 }
 
 /**
@@ -91,6 +117,12 @@ export class MeetingsIpc {
   /** The recorder once loaded (live() and the quit check read it without waiting). */
   private rec: RecorderLike | null = null
   constructor(private d: MeetingsDeps) {}
+
+  /** A load that failed is not kept: the next call loads again (a full disk now is not one for ever). */
+  private once<T>(p: Promise<T>, clear: () => void): Promise<T> {
+    p.catch(() => clear())
+    return p
+  }
 
   /** Whether main/meetings/ was loaded (the startup test). */
   get loaded(): boolean {
@@ -121,13 +153,16 @@ export class MeetingsIpc {
   /** The model store and whisper finder, loaded once (with the gate: never at startup). */
   loadEngine(): Promise<{ store: ModelStore; mod: EngineModule }> {
     const load = this.d.loadEngine ?? (async () => ({ ...(await import('./meetings/models')), ...(await import('./meetings/whisper')) }))
-    this.engine ??= load().then((mod) => {
-      const store = new mod.ModelStore(this.d.modelsDir, this.d.fetch ? { fetch: this.d.fetch } : {})
-      // What a quit or a crash in the middle of a download left (nothing downloads yet).
-      store.cleanParts()
-      this.engineMod = mod
-      return { mod, store }
-    })
+    this.engine ??= this.once(
+      load().then((mod) => {
+        const store = new mod.ModelStore(this.d.modelsDir, this.d.fetch ? { fetch: this.d.fetch } : {})
+        // What a quit or a crash in the middle of a download left (nothing downloads yet).
+        store.cleanParts()
+        this.engineMod = mod
+        return { mod, store }
+      }),
+      () => (this.engine = null),
+    )
     return this.engine
   }
 
@@ -137,28 +172,58 @@ export class MeetingsIpc {
    * chunks on disk are queued first.
    */
   loadService(): Promise<MeetingsService> {
-    this.service ??= this.loadEngine().then(async ({ store: models, mod: engine }) => {
-      const load = this.d.loadService ?? (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }))
-      const mod = await load()
-      const store = new mod.MeetingStore(this.d.meetingsDir)
-      const transcriber = new mod.Transcriber({
-        store,
-        // The model the meeting was recorded with, else the one picked now: the first on disk.
-        modelPath: (m) => {
-          for (const name of [m.model, this.d.meetings().model]) if (name && models.ready(name)) return models.path(name)
-          return null
-        },
-        engine: () => engine.findWhisper(this.d.whisper()),
-        transcribe: (o) => engine.transcribe(o),
-        live: () => this.rec?.meetingId ?? null,
-        onTranscribed: this.d.onTranscribed,
-        now: this.d.now,
-      })
-      this.svc = { store, transcriber }
-      transcriber.start()
-      return this.svc
-    })
+    this.service ??= this.once(this.makeService(), () => (this.service = null))
     return this.service
+  }
+
+  private async makeService(): Promise<MeetingsService> {
+    const { store: models, mod: engine } = await this.loadEngine()
+    const load =
+      this.d.loadService ??
+      (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')), ...(await import('./meetings/matcher')) }))
+    const mod = await load()
+    const store = new mod.MeetingStore(this.d.meetingsDir)
+    const m = this.d.matching
+    const matcher =
+      m && mod.Matcher
+        ? new mod.Matcher({
+            store,
+            notes: m.notes,
+            state: () => m.state(),
+            claude: (o) => m.claude(o),
+            notice: (n) => this.d.notices?.set(n),
+            now: this.d.now,
+          })
+        : null
+    const onTranscribed = this.d.onTranscribed ?? (matcher ? (id: string) => void matcher.match(id) : undefined)
+    const transcriber = new mod.Transcriber({
+      store,
+      // The model the meeting was recorded with, else the one picked now: the first on disk.
+      modelPath: (x) => {
+        for (const name of [x.model, this.d.meetings().model]) if (name && models.ready(name)) return models.path(name)
+        return null
+      },
+      engine: () => engine.findWhisper(this.d.whisper()),
+      transcribe: (o) => engine.transcribe(o),
+      live: () => this.rec?.meetingId ?? null,
+      onTranscribed,
+      onChange: (id) => this.noticeOf(store, id),
+      now: this.d.now,
+    })
+    this.svc = { store, transcriber, matcher }
+    transcriber.start()
+    return this.svc
+  }
+
+  /** A transcription that failed is a Needs-you item (Try again); once it goes on, the item goes. */
+  private noticeOf(store: MeetingStore, id: string): void {
+    const n = this.d.notices
+    if (!n) return
+    const m = store.get(id)
+    if (!m) return void n.clear(id)
+    if (m.state === 'failed' && m.error && !m.error.startsWith(MATCH_FAILED))
+      n.set({ meetingId: id, title: m.title, at: (this.d.now ?? Date.now)(), kind: 'failed', reason: m.error })
+    else if (m.state !== 'failed') n.clear(id, 'failed')
   }
 
   /** Load the service in the background when the consent holds (errors only logged). */
@@ -172,7 +237,12 @@ export class MeetingsIpc {
    * the first Allow of the Mac's sound; it fills the gate's probeSystemAudio.
    */
   loadRecorder(): Promise<RecorderLike> {
-    this.recorder ??= Promise.all([this.loadGate(), this.loadEngine(), this.loadService()]).then(async ([gate, { store: engine }, service]) => {
+    this.recorder ??= this.once(this.makeRecorder(), () => (this.recorder = null))
+    return this.recorder
+  }
+
+  private makeRecorder(): Promise<RecorderLike> {
+    return Promise.all([this.loadGate(), this.loadEngine(), this.loadService()]).then(async ([gate, { store: engine }, service]) => {
       const make =
         this.d.makeRecorder ??
         (async () => {
@@ -201,7 +271,6 @@ export class MeetingsIpc {
       this.rec = rec
       return rec
     })
-    return this.recorder
   }
 
   /** AppState.meetingLive: null off macOS; idle until the recorder was ever loaded. */
@@ -248,6 +317,7 @@ export class MeetingsIpc {
    */
   quit(): void {
     this.svc?.transcriber.stop()
+    this.svc?.matcher?.stop()
     this.engineMod?.killRunning()
   }
 
@@ -257,7 +327,30 @@ export class MeetingsIpc {
     if (r) return r
     if (typeof id !== 'string' || !MEETING_ID.test(id)) return { ok: false, message: 'No such meeting.' }
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
-    return (await this.loadService()).transcriber.retry(id)
+    const res = (await this.loadService()).transcriber.retry(id)
+    if (res.ok) this.d.notices?.clear(id, 'failed')
+    return res
+  }
+
+  /**
+   * Match again (the Meetings page, Needs you; the window only): this meeting's notes the user never
+   * edited are removed, then it is matched as if it had just been transcribed.
+   */
+  async rematch(e: unknown, id: unknown): Promise<{ ok: true } | { ok: false; message: string }> {
+    const r = this.refused(e)
+    if (r) return r
+    if (typeof id !== 'string' || !MEETING_ID.test(id)) return { ok: false, message: 'No such meeting.' }
+    if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first (Settings → Meetings).' }
+    const svc = await this.loadService()
+    if (!svc.matcher) return { ok: false, message: 'Matching is not set up.' }
+    const res = svc.matcher.rematch(id)
+    if (res.ok) this.d.notices?.clear(id)
+    return res
+  }
+
+  /** Open on a meeting's item: it has been seen. */
+  seen(id: string): void {
+    this.d.notices?.clear(id, 'added')
   }
 
   /** The gate's answer with whether the picked model is on disk. */

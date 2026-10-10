@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { outline, summaryPrompt, type SessionSummary } from '@shared/summary'
+import { claudeOnce } from './claudeOnce'
 import type { Runner } from './run'
 
 /** A cheap, quick model is plenty for a summary. */
@@ -17,23 +17,6 @@ export class Summaries {
     /** ~/.claude/projects: Claude Code makes a folder there even for a session it doesn't save. */
     private projectsDir: string | null = null,
   ) {}
-
-  /** The empty project folder `claude -p` left for the scratch directory (never one with transcripts). */
-  private tidy(scratch: string): void {
-    if (!this.projectsDir) return
-    const tag = basename(scratch)
-    try {
-      for (const d of readdirSync(this.projectsDir)) {
-        if (!d.endsWith(tag)) continue
-        const p = join(this.projectsDir, d)
-        const hasTranscript = (dir: string): boolean =>
-          readdirSync(dir, { withFileTypes: true }).some((e) => (e.isDirectory() ? hasTranscript(join(dir, e.name)) : e.name.endsWith('.jsonl')))
-        if (!hasTranscript(p)) rmSync(p, { recursive: true, force: true })
-      }
-    } catch {
-      // nothing to tidy
-    }
-  }
 
   private file(sessionId: string): string | null {
     return /^[0-9a-f-]{36}$/i.test(sessionId) ? join(this.dir, `${sessionId}.json`) : null
@@ -58,7 +41,6 @@ export class Summaries {
     if (!f) return { ok: false, message: 'bad session id' }
     if (this.busy.has(o.sessionId)) return { ok: false, message: 'already summarizing' }
     this.busy.add(o.sessionId)
-    const scratch = mkdtempSync(join(tmpdir(), 'masterdeck-summary-'))
     try {
       const size = statSync(o.transcript).size
       const body = outline(readFileSync(o.transcript, 'utf8').split('\n'))
@@ -71,10 +53,14 @@ export class Summaries {
           if (d.code === 0) diffStat = d.stdout.trim().split('\n').slice(-25).join('\n')
         }
       }
-      const r = await this.run(this.claude(), ['-p', '--model', MODEL, '--no-session-persistence'], {
-        cwd: scratch,
-        stdin: summaryPrompt(o.name, o.issue, o.prs, diffStat, body),
+      const r = await claudeOnce({
+        run: this.run,
+        claude: this.claude(),
+        model: MODEL,
+        prompt: summaryPrompt(o.name, o.issue, o.prs, diffStat, body),
         timeoutMs: 180_000,
+        projectsDir: this.projectsDir,
+        prefix: 'masterdeck-summary-',
       })
       const text = r.stdout.trim()
       if (r.code !== 0 || !text) return { ok: false, message: (r.stderr || r.stdout || `claude exited ${r.code}`).trim().slice(0, 300) }
@@ -87,8 +73,6 @@ export class Summaries {
       return { ok: false, message: String(e) }
     } finally {
       this.busy.delete(o.sessionId)
-      rmSync(scratch, { recursive: true, force: true })
-      this.tidy(scratch)
     }
   }
 }

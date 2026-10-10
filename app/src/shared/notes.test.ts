@@ -113,7 +113,7 @@ describe('storedNote', () => {
     for (const over of [
       { link: 'x' }, { link: {} }, { link: { session: { key: '/etc', name: 'n' } } }, { link: { ticket: { repo: 'web', number: 7 } } },
       { link: { ticket: { repo: 'acme/web', number: 0 } } }, { meeting: { ...M, id: '../m' } }, { meeting: { ...M, title: 'x'.repeat(121) } },
-      { meeting: { ...M, at: 'today' } }, { meeting: 'm' },
+      { meeting: { ...M, at: 'today' } }, { meeting: { ...M, at: 0 } }, { meeting: 'm' },
     ])
       expect(storedNote({ ...note(), ...over }, note().id), JSON.stringify(over)).toBeNull()
   })

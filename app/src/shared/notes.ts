@@ -90,6 +90,8 @@ export type NoteChange = { id: string; meta: NoteMeta } | { id: string; deleted:
 export const NOTE_ID = /^(?:n-[0-9a-f]{32}|t-[a-z0-9-]{1,39}~[a-z0-9._-]{1,100}~[1-9][0-9]{0,8})$/
 
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
+/** Every character CONTROL refuses: machine-made text (a meeting's note) loses them instead of being refused. */
+export const CONTROL_ALL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
 /** For one-line names (a session's, a meeting's title): no tab or line break either. */
 export const CONTROL_LINE = /[\x00-\x1f\x7f-\x9f]/
 /** The session keys a note's link takes (`Session.key`). */
@@ -116,7 +118,7 @@ function asNoteTicket(v: unknown): NoteTicket | null {
 export function asNoteMeeting(v: unknown): NoteMeeting | null {
   if (!isObject(v) || typeof v.id !== 'string' || typeof v.title !== 'string') return null
   if (!MEETING_ID.test(v.id) || v.title.length > MEETING_TITLE_MAX || CONTROL_LINE.test(v.title)) return null
-  if (typeof v.at !== 'number' || !Number.isFinite(v.at)) return null
+  if (typeof v.at !== 'number' || !Number.isFinite(v.at) || v.at <= 0) return null
   return { id: v.id, title: v.title, at: v.at }
 }
 

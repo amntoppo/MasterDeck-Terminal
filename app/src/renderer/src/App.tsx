@@ -1116,6 +1116,9 @@ export function App() {
         onView={setView}
         onTool={(a) => runAction(a)}
         onStartWith={startWithInstructions}
+        // ponytail: the Meetings page does not exist yet (plan L, task 8 adds the `meetings` view and
+        // opens the meeting there); until then Open shows the notes, where the meeting's notes are.
+        onOpenMeeting={() => setNotesAt((n) => n ?? {})}
         onSessionAction={(sess, a) => {
           if (a === "close-tab") closeTab(`tab:${sess.key}`);
           else {

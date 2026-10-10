@@ -313,3 +313,41 @@ describe('a loop paused on an idle session', () => {
     expect(a.id).not.toBe(b.id)
   })
 })
+
+describe('meeting items', () => {
+  const M = 'm-' + 'a'.repeat(32)
+  const items = (meetings: InboxInput['meetings']) => collectItems(input({ meetings }))
+
+  it('notes added: Open and Dismiss, counted per session and ticket; no session needed', () => {
+    const [i] = items([{ meetingId: M, title: 'Standup', at: 5, kind: 'added', sessions: 3, tickets: 1 }])
+    expect(i).toMatchObject({
+      id: `meeting:added:${M}:5`,
+      kind: 'meeting',
+      sessionKey: null,
+      title: "Meeting 'Standup'",
+      body: 'Notes added to 3 sessions and 1 ticket.',
+      actions: [{ type: 'open', label: 'Open', primary: true }, { type: 'dismiss', label: 'Dismiss' }],
+      detail: { type: 'meeting', meetingId: M, notice: 'added' },
+    })
+    expect(items([{ meetingId: M, title: '', at: 5, kind: 'added', sessions: 1, tickets: 0 }])[0]).toMatchObject({ title: "Meeting 'Untitled'", body: 'Notes added to 1 session.' })
+    expect(allowed(i!, 'open')).toBe(true)
+    expect(allowed(i!, 'reply')).toBe(false)
+    // Open runs in the window: the notification has no button for it.
+    expect(inboxNotice({ item: i!, state: 'open', firstSeen: 0, lastSeen: 0 })).toMatchObject({ title: "Meeting 'Standup'", action: null, target: { needsYou: true } })
+  })
+
+  it('could not be matched: Match again; transcription failed: Try again', () => {
+    const [u, f] = items([
+      { meetingId: M, title: 'Standup', at: 6, kind: 'unmatched', reason: 'Claude gave no answer.' },
+      { meetingId: 'm-' + 'b'.repeat(32), title: 'Sync', at: 7, kind: 'failed', reason: 'Transcription failed: whisper crashed' },
+    ])
+    expect(u).toMatchObject({ body: 'Could not be matched: Claude gave no answer.', actions: [{ type: 'rematch', label: 'Match again', primary: true }, { type: 'dismiss' }] })
+    expect(f).toMatchObject({ body: 'Transcription failed: whisper crashed', actions: [{ type: 'retry', label: 'Try again', primary: true }, { type: 'dismiss' }] })
+    expect(items([{ meetingId: M, title: 'x', at: 1, kind: 'failed', reason: 'The disk is full.' }])[0]!.body).toBe('Transcription failed: The disk is full.')
+    expect(allowed(u!, 'rematch')).toBe(true)
+    expect(allowed(u!, 'retry')).toBe(false)
+    expect(inboxNotice({ item: f!, state: 'open', firstSeen: 0, lastSeen: 0 })?.action).toMatchObject({ type: 'retry' })
+    expect(PRIORITY.meeting).toBeLessThan(PRIORITY.input)
+    expect(RESOLVED_BECAUSE.meeting).toBeTruthy()
+  })
+})

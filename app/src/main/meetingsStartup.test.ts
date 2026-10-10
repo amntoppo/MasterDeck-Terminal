@@ -23,7 +23,8 @@ vi.mock('./meetings/gate', async (orig) => {
   return orig()
 })
 
-import { guardSessions, MeetingsIpc, type PermissionSession, type RecorderLike } from './meetingsIpc'
+import { guardSessions, MeetingsIpc, type MeetingsDeps, type PermissionSession, type RecorderLike } from './meetingsIpc'
+import type { MeetingNotice } from '@shared/meetings'
 
 const MEDIA_APIS = ['askForMediaAccess', 'getUserMedia', 'getDisplayMedia', 'desktopCapturer', 'getMediaAccessStatus']
 
@@ -456,7 +457,7 @@ describe('meetings:start / stop / pause', () => {
 })
 
 describe('transcription wiring', () => {
-  function withService(m: MeetingsSettings, over: Partial<{ platform: string; downloading: boolean }> = {}) {
+  function withService(m: MeetingsSettings, over: Partial<{ platform: string; downloading: boolean }> = {}, extra: Partial<MeetingsDeps> = {}) {
     let cur = m
     const dir = mkdtempSync(join(tmpdir(), 'md-meetings-ipc-'))
     const calls: string[] = []
@@ -501,6 +502,7 @@ describe('transcription wiring', () => {
       makeRecorder: async () => fakeRecorder(),
       loadEngine: async () =>
         ({ ModelStore: FakeStore, findWhisper: () => '/acme/whisper-cli', transcribe, killRunning: () => calls.push('killRunning') }) as never,
+      ...extra,
     })
     return { ipc, calls, made, fetch, transcribe, dir, meetings: () => cur, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
   }
@@ -575,6 +577,98 @@ describe('transcription wiring', () => {
     expect([...linux.calls, ...t.calls, ...before.calls]).toEqual([])
     expect(await t.ipc.retry(local, 'm-' + 'a'.repeat(32))).toEqual({ ok: false, message: 'No such meeting.' })
     for (const x of [linux, t, before]) x.cleanup()
+  })
+
+  /** Matching with a stand-in claude, the real notes store and the notices in a list. */
+  async function withMatching() {
+    const { NotesStore } = await import('./notes')
+    const notices: MeetingNotice[] = []
+    const list = {
+      set: (n: MeetingNotice) => void (notices.splice(0, notices.length, ...notices.filter((x) => x.meetingId !== n.meetingId)), notices.push(n)),
+      clear: (id: string, kind?: MeetingNotice['kind']) => {
+        const before = notices.length
+        notices.splice(0, notices.length, ...notices.filter((x) => x.meetingId !== id || (kind !== undefined && x.kind !== kind)))
+        return notices.length !== before
+      },
+    }
+    const claude = vi.fn(async () => ({
+      code: 0,
+      stdout: JSON.stringify({ title: 'Hello', summary: 'Hi.', matches: [{ candidate: 'c1', segments: [[0, 0]], summary: 'Said hello.', actions: [], confidence: 'high' }] }),
+      stderr: '',
+    }))
+    const dir = mkdtempSync(join(tmpdir(), 'md-meetings-notes-'))
+    const notes = new NotesStore(dir)
+    const state = { sessions: [{ key: 'k1', sessionId: 's1', name: 'alice-work', kind: 'background', bgId: 'k1', pid: 1, cwd: '/w', state: 'idle', rawState: 'idle', startedAt: 1, issue: null }], git: {}, sessionPrs: {}, prLive: {}, prs: [], issues: [], board: null } as never
+    const t = withService(agreed, {}, { matching: { state: () => state, notes, claude }, notices: list })
+    return { ...t, notes, notices, claude, cleanup: () => (t.cleanup(), rmSync(dir, { recursive: true, force: true })) }
+  }
+
+  it('a transcribed meeting is matched: a note about the session and a Needs-you item; a failed chunk is Try again', async () => {
+    const t = await withMatching()
+    const svc = await t.ipc.loadService()
+    expect(svc.matcher).not.toBeNull()
+    const m = svc.store.create({ title: '', titleBy: null, model: 'base', language: 'auto' })
+    if (!m.ok) throw new Error(m.message)
+    svc.store.writeChunk(m.meeting.id, 'you', 0, new Uint8Array([1]))
+    // The model is on disk: the chunk goes now.
+    await t.ipc.model(local, 'download', 'base')
+    svc.transcriber.add({ id: m.meeting.id, track: 'you', seq: 0 })
+    svc.store.update(m.meeting.id, (x) => ({ ...x, state: 'transcribing', ended: x.started + 1000 }))
+    svc.transcriber.ended(m.meeting.id)
+    await vi.waitFor(() => expect(svc.store.get(m.meeting.id)?.state).toBe('done'))
+    expect(t.claude).toHaveBeenCalledTimes(1)
+    expect(t.notes.meetingNotes(m.meeting.id)).toHaveLength(1)
+    expect(t.notices).toEqual([expect.objectContaining({ meetingId: m.meeting.id, kind: 'added', sessions: 1, tickets: 0 })])
+    // Open on its item marks it seen.
+    t.ipc.seen(m.meeting.id)
+    expect(t.notices).toEqual([])
+    // Match again: the unedited note is replaced, not doubled.
+    expect(await t.ipc.rematch(local, m.meeting.id)).toEqual({ ok: true })
+    await vi.waitFor(() => expect(svc.store.get(m.meeting.id)?.state).toBe('done'))
+    expect(t.notes.meetingNotes(m.meeting.id)).toHaveLength(1)
+
+    // A chunk whisper cannot read: the meeting fails and Needs you offers Try again.
+    t.transcribe.mockRejectedValueOnce(new Error('bad wav'))
+    const f = svc.store.create({ title: 'Sync', titleBy: 'user', model: 'base', language: 'auto' })
+    if (!f.ok) throw new Error(f.message)
+    svc.store.writeChunk(f.meeting.id, 'you', 0, new Uint8Array([1]))
+    svc.store.update(f.meeting.id, (x) => ({ ...x, state: 'transcribing', ended: x.started + 1000 }))
+    svc.transcriber.add({ id: f.meeting.id, track: 'you', seq: 0 })
+    await vi.waitFor(() => expect(svc.store.get(f.meeting.id)?.state).toBe('failed'))
+    expect(t.notices.filter((n) => n.meetingId === f.meeting.id)).toEqual([expect.objectContaining({ kind: 'failed', reason: 'Transcription failed: bad wav' })])
+    expect(await t.ipc.retry(local, f.meeting.id)).toEqual({ ok: true })
+    expect(t.notices.filter((n) => n.kind === 'failed')).toEqual([])
+    await vi.waitFor(() => expect(svc.store.get(f.meeting.id)?.state).toBe('done'))
+    t.cleanup()
+  })
+
+  it('meetings:rematch: refused off macOS, from a browser, for a bad id and before consent, without loading', async () => {
+    const id = 'm-' + 'a'.repeat(32)
+    const linux = withService(agreed, { platform: 'linux' })
+    expect(await linux.ipc.rematch(local, id)).toEqual({ ok: false, message: MEETINGS_MAC_ONLY })
+    const t = withService(agreed)
+    expect(await t.ipc.rematch(remote, id)).toMatchObject({ ok: false })
+    expect(await t.ipc.rematch(local, '../x')).toEqual({ ok: false, message: 'No such meeting.' })
+    const before = withService(DEFAULT_MEETINGS)
+    expect(await before.ipc.rematch(local, id)).toMatchObject({ ok: false, message: expect.stringContaining('Agree') })
+    expect([...linux.calls, ...t.calls, ...before.calls]).toEqual([])
+    // Made without matching: it says so.
+    expect(await t.ipc.rematch(local, id)).toEqual({ ok: false, message: 'Matching is not set up.' })
+    for (const x of [linux, t, before]) x.cleanup()
+  })
+
+  it('a load that failed is not kept: the next call loads again', async () => {
+    let tries = 0
+    const t = withService(agreed, {}, {
+      loadService: async () => {
+        if (++tries === 1) throw new Error('disk')
+        return { ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }
+      },
+    })
+    await expect(t.ipc.loadService()).rejects.toThrow('disk')
+    await expect(t.ipc.loadService()).resolves.toMatchObject({ matcher: null })
+    expect(tries).toBe(2)
+    t.cleanup()
   })
 
   it('index.ts: will-quit calls meetings.quit(); model downloads use net.fetch', () => {

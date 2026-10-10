@@ -173,6 +173,16 @@ export interface MeetingMatch {
 }
 
 /**
+ * A meeting's Needs-you item (spec §10), kept by main/meetingNotices.ts: notes were added (Open),
+ * matching failed (Match again), transcription failed (Try again). One per meeting; `at` makes a
+ * new one a new item. Never in toRemoteSnapshot (shared/remoteSnapshot.ts leaves the kind out).
+ */
+export type MeetingNotice =
+  | { meetingId: string; title: string; at: number; kind: 'added'; sessions: number; tickets: number }
+  | { meetingId: string; title: string; at: number; kind: 'unmatched' | 'failed'; reason: string }
+export const MEETING_NOTICE_KINDS = ['added', 'unmatched', 'failed'] as const
+
+/**
  * How far the transcript is (the Meetings page shows "Transcribing 3/12"): chunks done, chunks
  * known so far (it grows while recording), and why it waits, when it does ("Waiting for the
  * speech model").

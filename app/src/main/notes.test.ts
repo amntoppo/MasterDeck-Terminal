@@ -309,8 +309,17 @@ describe('links and meetings', () => {
     expect(body.endsWith('x')).toBe(true)
     expect(s.addMeetingNote({ title: 't', body: 'b', link: LINK, meeting: { ...M, id: '../m' } })).toEqual({ ok: false, message: 'Not a meeting.' })
     expect(s.addMeetingNote({ title: 't', body: 'b', link: {}, meeting: M })).toMatchObject({ ok: false })
-    expect(s.addMeetingNote({ title: 't', body: 'b\x1b[31m', link: LINK, meeting: M })).toMatchObject({ ok: false })
+    expect(s.addMeetingNote({ title: 't', body: 'b', link: LINK, meeting: { ...M, at: 0 } })).toEqual({ ok: false, message: 'Not a meeting.' })
     expect(s.addMeetingNote({ title: 't', body: 'b', link: { session: { key: '/etc', name: 'x' } }, meeting: M })).toMatchObject({ ok: false })
+  })
+
+  it('addMeetingNote takes machine-made text: control characters go, a long title is cut', () => {
+    const s = open()
+    const m = saved(s.addMeetingNote({ title: `a\x1b[31m\tb\n${'t'.repeat(300)}`, body: 'said\x1b[31m red\x07\n\tnext', link: LINK, meeting: M }))
+    const n = s.get(m.id)!
+    expect(n.title.startsWith('a[31m b ')).toBe(true)
+    expect(n.title.length).toBe(200)
+    expect(n.body).toBe('said[31m red\n\tnext')
   })
 
   it('meetingNotes lists a meeting\'s notes; dropMeetingNotes leaves the edited ones when asked', () => {

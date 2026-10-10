@@ -16,6 +16,7 @@ import type { GhAccountStatus } from "./accounts";
 import type { ScreenMenu } from "./ask";
 import { heldForTrust, trustLine } from "./trust";
 import type { LoopView } from "./loops";
+import type { MeetingNotice } from "./meetings";
 
 /**
  * Needs you, as one inbox: every item the user may act on, built in one place (the main process)
@@ -40,7 +41,8 @@ export type InboxKind =
   | "account" // a GitHub account whose token fails
   | "error" // its turn ended on an API error (rate limit, overload…)
   | "loop" // a workflow loop ended at a limit
-  | "loop-paused"; // a workflow loop still open on a session that went quiet
+  | "loop-paused" // a workflow loop still open on a session that went quiet
+  | "meeting"; // a meeting's notes were added, or it could not be matched or transcribed
 
 export type InboxActionType =
   | "reply" // text typed into the session
@@ -57,6 +59,8 @@ export type InboxActionType =
   | "loop-more" // a loop that ended at a limit gets 5 more iterations (and the nudge)
   | "loop-continue" // a paused loop: MasterDeck's own "Continue the loop" typed into the idle session
   | "loop-stop" // a paused loop is stopped (as Stop loop in Details)
+  | "rematch" // a meeting that could not be matched is matched again (the window only)
+  | "retry" // a meeting whose transcription failed is transcribed again (the window only)
   // Leave it: listed where the card shows it as a button; the store dismisses, as for every item.
   | "dismiss"
   | "open"; // open the session (the renderer does it)
@@ -76,7 +80,8 @@ export type InboxDetail =
   | { type: "offer"; offer: PrOffer }
   | { type: "external"; item: ExternalItem }
   | { type: "account"; login: string }
-  | { type: "loop"; loopId: string; reason: string | null };
+  | { type: "loop"; loopId: string; reason: string | null }
+  | { type: "meeting"; meetingId: string; notice: MeetingNotice["kind"] };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -140,6 +145,7 @@ export const PRIORITY: Record<InboxKind, number> = {
   idle: 20,
   held: 10,
   account: 75,
+  meeting: 35,
 };
 
 /** What happened when an item goes away without anyone acting on it. */
@@ -161,6 +167,7 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   account: "logged in again",
   loop: "the loop is running again",
   "loop-paused": "the loop went on or ended",
+  meeting: "opened, or the meeting changed",
 };
 
 /** An open loop's session quiet this long is a "loop paused" item. */
@@ -211,6 +218,8 @@ export interface InboxInput {
   accountNotices?: { id: string; text: string }[];
   /** Workflow loops by session id (`AppState.loops`): one that ended at a limit is an item. */
   loops?: Record<string, LoopView[]>;
+  /** Meetings' items (main/meetingNotices.ts). */
+  meetings?: MeetingNotice[];
   now: number;
 }
 
@@ -530,6 +539,8 @@ export function collectItems(x: InboxInput): InboxItem[] {
       detail: { type: "account", login: "" },
     });
 
+  for (const n of x.meetings ?? []) out.push(meetingItem(n));
+
   // API items stay while open, even if their session ended (the key is dropped so no card opens it).
   const external: InboxItem[] = [];
   for (const e of x.external ?? []) {
@@ -554,6 +565,52 @@ export function collectItems(x: InboxInput): InboxItem[] {
   return [...out.filter((i) => i.sessionKey === null || byKey.has(i.sessionKey)), ...external].sort((a, b) => b.priority - a.priority);
 }
 
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/** A meeting's item (spec §10): its title is the meeting's; Open, Match again and Try again run in the window only. */
+export function meetingItem(n: MeetingNotice): InboxItem {
+  const base = {
+    id: `meeting:${n.kind}:${n.meetingId}:${n.at}`,
+    kind: "meeting" as const,
+    priority: PRIORITY.meeting,
+    sessionKey: null,
+    ticket: null,
+    title: `Meeting '${n.title || "Untitled"}'`,
+    detail: { type: "meeting" as const, meetingId: n.meetingId, notice: n.kind },
+  };
+  if (n.kind === "added") {
+    const to = [
+      ...(n.sessions ? [plural(n.sessions, "session")] : []),
+      ...(n.tickets ? [plural(n.tickets, "ticket")] : []),
+    ].join(" and ");
+    return {
+      ...base,
+      body: `Notes added to ${to || "no session"}.`,
+      actions: [
+        { type: "open", label: "Open", primary: true },
+        { type: "dismiss", label: "Dismiss" },
+      ],
+    };
+  }
+  if (n.kind === "unmatched")
+    return {
+      ...base,
+      body: `Could not be matched: ${n.reason}`,
+      actions: [
+        { type: "rematch", label: "Match again", primary: true },
+        { type: "dismiss", label: "Dismiss" },
+      ],
+    };
+  return {
+    ...base,
+    body: /^transcription failed/i.test(n.reason) ? n.reason : `Transcription failed: ${n.reason}`,
+    actions: [
+      { type: "retry", label: "Try again", primary: true },
+      { type: "dismiss", label: "Dismiss" },
+    ],
+  };
+}
+
 /** A new item's notification: its text, the item (clicking opens it), and what it can do from the
  * notification itself (macOS: a button for its main action, a reply field for a question). Held
  * items (parked on purpose) get none. */
@@ -573,6 +630,8 @@ const RUNS_IN_MAIN = new Set<InboxActionType>([
   "send",
   "loop-more",
   "loop-continue",
+  "rematch",
+  "retry",
 ]);
 
 export function inboxNotice(e: InboxEntry): InboxNotice | null {

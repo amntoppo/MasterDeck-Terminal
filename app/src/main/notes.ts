@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { appendText } from '@shared/noteRequest'
 import type { Ticket } from '@shared/ticket'
 import {
-  NOTES_MAX, NOTE_BODY_MAX, NOTE_ID, NOTE_QUERY_MAX, asNoteMeeting, cleanNote, matches, noteMeta, sortNotes, storedNote,
+  CONTROL_ALL, NOTES_MAX, NOTE_BODY_MAX, NOTE_ID, NOTE_QUERY_MAX, NOTE_TITLE_MAX, asNoteMeeting, cleanNote, matches, noteMeta, sortNotes, storedNote,
   ticketNoteId, type Note, type NoteChange, type NoteLink, type NoteLinkInput, type NoteMeeting, type NoteMeta, type NoteTicket,
   type SaveResult,
 } from '@shared/notes'
@@ -201,12 +201,15 @@ export class NotesStore {
    * transcript, not text the user typed).
    */
   addMeetingNote(o: { title: string; body: string; link: NoteLink | NoteLinkInput; meeting: NoteMeeting }): SaveResult {
-    let body = typeof o?.body === 'string' ? o.body.replace(/\r\n?/g, '\n') : o?.body
+    // Machine-made text: control characters go and a long title is cut, where an editor's save is refused.
+    let body = typeof o?.body === 'string' ? o.body.replace(/\r\n?/g, '\n').replace(CONTROL_ALL, '') : o?.body
     if (typeof body === 'string' && body.length > NOTE_BODY_MAX) {
       const at = body.lastIndexOf('\n', NOTE_BODY_MAX)
       body = body.slice(0, at > 0 ? at : NOTE_BODY_MAX)
     }
-    const c = cleanNote({ title: o?.title, body, link: o?.link, base: null })
+    const title =
+      typeof o?.title === 'string' ? o.title.replace(/[\r\n\t]/g, ' ').replace(CONTROL_ALL, '').slice(0, NOTE_TITLE_MAX) : o?.title
+    const c = cleanNote({ title, body, link: o?.link, base: null })
     if (!c.ok) return c
     const meeting = asNoteMeeting(o.meeting)
     if (!meeting) return { ok: false, message: 'Not a meeting.' }

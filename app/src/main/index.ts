@@ -87,6 +87,8 @@ import { Superseded } from "./superseded";
 import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
+import { MeetingNotices } from "./meetingNotices";
+import { claudeOnce } from "./claudeOnce";
 import { keepMeetings, meetingsAgreed, oneAtATime } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
@@ -785,6 +787,9 @@ sources.setSessionAccount(
   (s) => sessionAccounts.ghActive(s),
 );
 sources.setSuperseded(() => superseded.ids());
+// Meetings' Needs-you items: a small file of their own, read here (it asks macOS nothing).
+const meetingNotices = new MeetingNotices(join(paths.home, "meeting-notices.json"), () => sources.changed());
+sources.setMeetingNotices(() => meetingNotices.list());
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
 function reveal(target: NotifyEvent["target"]): void {
@@ -1352,6 +1357,22 @@ async function runInboxAction(
       const r = loopStore.stop(s.sessionId, d.loopId);
       if (r.ok) sources.pollLoops();
       return r;
+    }
+    case "open":
+    case "rematch":
+    case "retry": {
+      // Meetings are the Mac's window only: a browser or a phone neither opens nor matches them.
+      if (d.type !== "meeting") return { ok: false, message: `${type} is done in the window` };
+      if (remote) return { ok: false, message: "Do this in MasterDeck on the Mac." };
+      if (type === "open") {
+        // The window opens the meeting itself; this marks the item seen, so it resolves.
+        meetings.seen(d.meetingId);
+        return { ok: true, message: "opened" };
+      }
+      const r = type === "rematch" ? await meetings.rematch({}, d.meetingId) : await meetings.retry({}, d.meetingId);
+      return r.ok
+        ? { ok: true, message: type === "rematch" ? "matching again" : "transcribing again" }
+        : { ok: false, message: r.message };
     }
     case "login": {
       if (d.type !== "account")
@@ -2193,6 +2214,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
   reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
+  reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3354,6 +3376,15 @@ const meetings = new MeetingsIpc({
   capturePreload: join(__dirname, "../preload/capture.js"),
   // AppState.meetingLive is read in the state callback: send the state again now.
   onLive: () => sources.changed(),
+  // Matching (spec §4): the session list as last built (once `claude agents` was read), the notes,
+  // and one claude -p from an empty temp folder. The transcript reaches only that prompt.
+  matching: {
+    state: () => (latest && latest.sources.agents === "ok" ? latest : null),
+    notes,
+    claude: (o) =>
+      claudeOnce({ run, claude: claudeBin, ...o, projectsDir: paths.projectsDir, prefix: "masterdeck-meeting-" }),
+  },
+  notices: meetingNotices,
   notice: (text) => {
     if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
   },
