@@ -56,14 +56,48 @@ beforeEach(() => {
   electron.getMediaAccessStatus.mockImplementation(() => 'not-determined')
 })
 
+// A static `import … from` / `export … from` of main/meetings/ at any relative depth, over the
+// whole file (a clause may span lines); `import type` / `export type` are erased and allowed.
+const STATIC_MEETINGS =
+  /^\s*(?:(?:import|export)\s+(?!type\b)(?:[\w$*,\s]|\{[^}]*\})*\bfrom\s*|import\s*)["'](?:\.\.?\/)+meetings\//m
+const DYNAMIC_MEETINGS = /(?<!typeof )\bimport\(\s*["'](?:\.\.?\/)+meetings\//g
+
 describe('the startup rule', () => {
-  it('no main-process file outside main/meetings/ names a media API', () => {
-    for (const f of mainSources()) {
+  it('no main-process or preload file outside main/meetings/ names a media API', () => {
+    const preload = join(__dirname, '../preload')
+    const files = [...mainSources(), ...mainSources(preload)]
+    expect(files.some((f) => f.startsWith(preload))).toBe(true)
+    for (const f of files) {
       const rel = relative(__dirname, f)
       if (rel.startsWith('meetings/')) continue
       const src = readFileSync(f, 'utf8')
       for (const api of MEDIA_APIS) expect(src.includes(api), `${rel} names ${api}`).toBe(false)
     }
+  })
+
+  it('the static-import check catches what a line-by-line check missed', () => {
+    const caught = [
+      'import {\n  MeetingsGate,\n  type Grant,\n} from "./meetings/gate";',
+      "export { MeetingsGate } from './meetings/gate'",
+      "export * from './meetings/gate'",
+      "import { MeetingsGate } from '../meetings/gate'",
+      "import Gate, * as all from '../../meetings/gate'",
+      "import './meetings/gate'",
+    ]
+    // The check this replaced, run on each line: it let every one of these through.
+    const perLine = /^\s*import\s+(?!type\b).*from\s+["']\.\/meetings\//
+    for (const s of caught) {
+      expect(STATIC_MEETINGS.test(s), s).toBe(true)
+      expect(s.split('\n').some((l) => perLine.test(l)), s).toBe(false)
+    }
+    const allowed = [
+      "import type { Gate } from './meetings/gate'",
+      'export type {\n  Gate,\n} from "../meetings/gate"',
+      "const gate = await import('./meetings/gate')",
+      "type G = typeof import('./meetings/gate')",
+      "import { x } from './notmeetings/gate'",
+    ]
+    for (const s of allowed) expect(STATIC_MEETINGS.test(s), s).toBe(false)
   })
 
   it('main/meetings/ is never imported statically; one dynamic import, in meetingsIpc.ts', () => {
@@ -72,12 +106,23 @@ describe('the startup rule', () => {
       const rel = relative(__dirname, f)
       if (rel.startsWith('meetings/')) continue
       const src = readFileSync(f, 'utf8')
-      for (const line of src.split('\n')) {
-        if (/^\s*import\s+(?!type\b).*from\s+["']\.\/meetings\//.test(line)) throw new Error(`${rel} imports main/meetings/ at load: ${line}`)
-        if (/(?<!typeof )\bimport\(\s*["']\.\/meetings\//.test(line)) dynamic.push(rel)
-      }
+      const hit = STATIC_MEETINGS.exec(src)
+      if (hit) throw new Error(`${rel} imports main/meetings/ at load: ${hit[0].trim()}`)
+      for (const m of src.matchAll(DYNAMIC_MEETINGS)) if (m) dynamic.push(rel)
     }
     expect(dynamic).toEqual(['meetingsIpc.ts'])
+  })
+
+  it('index.ts guards the sessions before it opens the first window', () => {
+    const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
+    const ready = src.indexOf('app.whenReady().then(')
+    expect(ready).toBeGreaterThan(-1)
+    const body = src.slice(ready)
+    const firstWindow = body.indexOf('createWindow()')
+    const guard = body.indexOf('guardSessions(')
+    expect(firstWindow).toBeGreaterThan(-1)
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(firstWindow)
   })
 
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {

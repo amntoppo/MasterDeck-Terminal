@@ -63,6 +63,13 @@ describe('mediaAllowed', () => {
       expect(mediaAllowed(p, true, true)).toBe(true)
     }
     expect(mediaAllowed('notifications', false, false)).toBe(true)
+    expect(mediaAllowed('clipboard-sanitized-write', false, false)).toBe(true)
+  })
+
+  it('never a clipboard read, in any partition, agreed or not', () => {
+    for (const p of ['clipboard-read', 'deprecated-sync-clipboard-read'])
+      for (const [inCapture, ok] of [[false, false], [true, true], [false, true], [true, false]])
+        expect(mediaAllowed(p, inCapture, ok), `${p} ${inCapture} ${ok}`).toBe(false)
   })
 })
 

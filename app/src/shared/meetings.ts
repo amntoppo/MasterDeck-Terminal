@@ -91,10 +91,15 @@ export function keepMeetings(next: unknown, current: MeetingsSettings, remote: b
 
 /**
  * Whether a web contents may have a permission. The microphone and screen capture (`media`,
- * `display-capture`) only in the capture window's partition and only while the user agrees;
- * everything else as Electron allows it with no handler (MasterDeck had none before meetings).
+ * `display-capture`) only in the capture window's partition and only while the user agrees.
+ * Reading the clipboard (`clipboard-read`, `deprecated-sync-clipboard-read`) never: Electron with
+ * no handler refuses the sync read and may or may not grant the async one, while the window and
+ * the web app only write to it (`navigator.clipboard.writeText`); a yes here could only widen what
+ * a page may do. Everything else is granted, as Electron does with no handler (MasterDeck had none
+ * before meetings).
  */
 export function mediaAllowed(permission: string, inCapture: boolean, agreed: boolean): boolean {
+  if (permission === 'clipboard-read' || permission === 'deprecated-sync-clipboard-read') return false
   if (permission !== 'media' && permission !== 'display-capture') return true
   return inCapture && agreed
 }
