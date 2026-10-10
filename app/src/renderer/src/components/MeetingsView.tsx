@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Meeting } from '@shared/meetings'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Meeting, Segment } from '@shared/meetings'
 import type { NoteMeta } from '@shared/notes'
 import type { NoteTarget } from '@shared/noteEditor'
 import {
@@ -54,6 +54,17 @@ const SKIP_S = 15
 const when = (ms: number) =>
   `${new Date(ms).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}, ${new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+/** The page's list answers at most this many (MeetingsIpc's LIST_MAX): a union that full is read range by range. */
+const LIST_MAX = 500
+/** meetings:changed comes for every transcribed chunk: the page reads again once per this long. */
+const CHANGED_MS = 250
+
+/** What changed since the page last read: these meetings, or (all) the list itself. */
+interface Changed {
+  ids: string[]
+  all: boolean
+  n: number
+}
 
 /**
  * The Meetings page (spec §6; the Mac's window only): dates and meetings on the left, the meeting
@@ -74,32 +85,67 @@ export function MeetingsView({ agreed, target, onSetup, onNote, notes }: Props) 
   const [selected, setSelected] = useState<string | null>(target?.id ?? null)
   const [tick, setTick] = useState(0)
 
-  // The lists: the range, the month's marks, and whether any meeting is stored at all (the empty page).
+  // The lists: the range, the month's marks, and whether any meeting is stored at all (the empty
+  // page). One call over both spans (main reads every meeting file per call); each is cut from it.
+  // Only a union at the list's limit (older ones may be cut) is read span by span, and the whole
+  // history only when the union is empty.
   useEffect(() => {
     let alive = true
     const g = gridRange(month.y, month.m)
-    void Promise.all([deck().meetingsList(range.from, range.to), deck().meetingsList(g.from, g.to), deck().meetingsList(0, Number.MAX_SAFE_INTEGER)]).then(([a, b, all]) => {
+    const from = Math.min(range.from, g.from)
+    const to = Math.max(range.to, g.to)
+    const within = (list: MeetingRow[], a: number, b: number) => list.filter((x) => x.started >= a && x.started < b)
+    void (async () => {
+      const u = await deck().meetingsList(from, to)
       if (!alive) return
-      if (!a.ok) return setError(a.message)
+      if (!u.ok) return setError(u.message)
+      let inRange = within(u.meetings, range.from, range.to)
+      let inGrid = within(u.meetings, g.from, g.to)
+      if (u.meetings.length >= LIST_MAX) {
+        const [a, b] = await Promise.all([deck().meetingsList(range.from, range.to), deck().meetingsList(g.from, g.to)])
+        if (!alive) return
+        if (a.ok) inRange = a.meetings
+        if (b.ok) inGrid = b.meetings
+      }
+      let anyAt = u.meetings.length > 0
+      if (!anyAt) {
+        const all = await deck().meetingsList(0, Number.MAX_SAFE_INTEGER)
+        if (!alive) return
+        anyAt = all.ok && all.meetings.length > 0
+      }
       setError(null)
-      setRows(a.meetings)
-      if (b.ok) setMarks(markedDays(b.meetings))
-      if (all.ok) setAny(all.meetings.length > 0)
-    })
+      setRows(inRange)
+      setMarks(markedDays(inGrid))
+      setAny(anyAt)
+    })()
     return () => {
       alive = false
     }
   }, [range.from, range.to, month.y, month.m, tick])
 
-  const [changed, setChanged] = useState<{ id: string | null; n: number }>({ id: null, n: 0 })
-  useEffect(
-    () =>
-      deck().onMeetingsChanged((c) => {
+  // Changes come in bursts (a chunk, its progress, matching): read again once per CHANGED_MS.
+  const [changed, setChanged] = useState<Changed>({ ids: [], all: false, n: 0 })
+  useEffect(() => {
+    let ids = new Set<string>()
+    let all = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = deck().onMeetingsChanged((c) => {
+      if (c.id === null) all = true
+      else ids.add(c.id)
+      timer ??= setTimeout(() => {
+        const next = { ids: [...ids], all }
+        ids = new Set()
+        all = false
+        timer = null
         setTick((t) => t + 1)
-        setChanged((x) => ({ id: c.id, n: x.n + 1 }))
-      }),
-    [],
-  )
+        setChanged((x) => ({ ...next, n: x.n + 1 }))
+      }, CHANGED_MS)
+    })
+    return () => {
+      off()
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
 
   // A link or Needs you: that meeting, its month, and a range that holds it.
   useEffect(() => {
@@ -286,7 +332,7 @@ function ListRow({ row, now, on, agreed, onOpen }: { row: MeetingRow; now: numbe
 interface DetailProps {
   id: string
   seek: MeetingTarget | null
-  changed: { id: string | null; n: number }
+  changed: Changed
   agreed: boolean
   notes: NoteMeta[] | null
   onNote: (t: NoteTarget) => void
@@ -324,7 +370,7 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
   }, [id])
   useEffect(() => void load(), [load])
   useEffect(() => {
-    if (changed.n && (changed.id === id || changed.id === null)) void load()
+    if (changed.n && (changed.all || changed.ids.includes(id))) void load()
   }, [changed, id, load])
 
   // A link's time: shown and scrolled to at once, played from there once the audio can seek.
@@ -344,17 +390,29 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
   const length = m ? meetingLengthMs(m, Date.now()) : 0
   const total = dur ?? length
 
-  // The playing line stays in view (only while playing or after a jump: never fights a scroll by hand).
+  // The playing line stays in view (only while playing or after a jump: never fights a scroll by
+  // hand). A scroll the page made itself is told apart from the user's (wheel, keys, scrollbar,
+  // touch) by `auto`: a scroll event soon after one of ours is ours.
   const follow = useRef(true)
+  const auto = useRef(0)
+  const scrollTo = (i: number, block: ScrollLogicalPosition) => {
+    const el = lines.current?.querySelector(`[data-i="${i}"]`)
+    if (!el) return
+    auto.current = performance.now()
+    el.scrollIntoView({ block })
+  }
   useEffect(() => {
     if (playingLine < 0 || !follow.current) return
-    lines.current?.querySelector(`[data-i="${playingLine}"]`)?.scrollIntoView({ block: 'nearest' })
+    scrollTo(playingLine, 'nearest')
   }, [playingLine])
   useEffect(() => {
     if (hit < 0 || hits[hit] === undefined) return
     follow.current = false
-    lines.current?.querySelector(`[data-i="${hits[hit]}"]`)?.scrollIntoView({ block: 'center' })
+    scrollTo(hits[hit]!, 'center')
   }, [hit, hits])
+  const onScroll = () => {
+    if (performance.now() - auto.current > 200) follow.current = false
+  }
   useEffect(() => setHit(hits.length ? 0 : -1), [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function goTo(ms: number) {
@@ -375,6 +433,27 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
     if (a.paused) void a.play().catch(() => {})
     else a.pause()
   }
+  // Stable for the memo'd lines: they call the latest playFrom / onNote / toggle.
+  const latest = useRef({ playFrom, onNote, toggle })
+  latest.current = { playFrom, onNote, toggle }
+  const onLinePlay = useCallback((ms: number) => latest.current.playFrom(ms), [])
+  const onLineNote = useCallback((nid: string) => latest.current.onNote({ id: nid }), [])
+
+  // Space plays and pauses, unless focus is where Space types or presses (a field, a button).
+  useEffect(() => {
+    if (!audioOk) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(t.tagName))) return
+      e.preventDefault()
+      latest.current.toggle()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [audioOk])
+  const hitSet = useMemo(() => new Set(hits), [hits])
+  const active = playingLine >= 0 && (playing || cur > 0) ? playingLine : -1
 
   const rename = async () => {
     if (!m || title.trim() === m.title) return
@@ -552,41 +631,116 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
           ↓
         </button>
       </div>
-      <div className="mt-lines" ref={lines} onWheel={() => (follow.current = false)}>
+      <div className="mt-lines" ref={lines} onScroll={onScroll} onWheel={() => (follow.current = false)}>
         {segments.length === 0 && <div className="muted mt-none">{busy ? 'The transcript appears here as it is written.' : 'Nothing was transcribed.'}</div>}
-        {segments.map((s, i) => {
-          const isHit = hits[hit] === i
-          return (
-            <div
-              key={i}
-              data-i={i}
-              className={`mt-line ${i === playingLine && (playing || cur > 0) ? 'playing' : ''} ${isHit ? 'hit' : ''}`}
-              onClick={() => audioOk && playFrom(s.start)}
-              title={audioOk ? 'Play from here' : undefined}
-            >
-              <span className={`mt-spk ${s.speaker}`}>{s.speaker === 'you' ? 'You' : 'Others'}</span>
-              <span className="mono mt-at">{lineClock(s.start)}</span>
-              <span className="mt-text">
-                {highlightParts(s.text, query).map((p, j) => (p.hit ? <mark key={j}>{p.text}</mark> : <span key={j}>{p.text}</span>))}
-                {(chips.get(i) ?? []).map((c: { label: string; noteId: string | null }, j: number) => (
-                  <button
-                    key={`c${j}`}
-                    className="chip btnlike mt-chip"
-                    disabled={!c.noteId}
-                    title={c.noteId ? 'Open the note' : c.label}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (c.noteId) onNote({ id: c.noteId })
-                    }}
-                  >
-                    {c.label}
-                  </button>
-                ))}
-              </span>
-            </div>
-          )
-        })}
+        <Lines
+          segments={segments}
+          active={active}
+          hitLine={hit >= 0 ? (hits[hit] ?? -1) : -1}
+          hitSet={hitSet}
+          query={query}
+          chips={chips}
+          audioOk={audioOk}
+          onPlay={onLinePlay}
+          onNote={onLineNote}
+        />
       </div>
     </div>
   )
 }
+
+type Chip = { label: string; noteId: string | null }
+const NO_CHIPS: Chip[] = []
+
+interface LinesProps {
+  segments: Segment[]
+  /** The playing line, or -1. */
+  active: number
+  /** The search hit picked now, or -1. */
+  hitLine: number
+  hitSet: Set<number>
+  query: string
+  chips: Map<number, Chip[]>
+  audioOk: boolean
+  onPlay: (ms: number) => void
+  onNote: (noteId: string) => void
+}
+
+/**
+ * The transcript (up to 20,000 lines). Memo'd: a time update that keeps the playing line renders
+ * nothing here, and one that moves it re-renders only the old and the new line.
+ */
+const Lines = memo(function Lines({ segments, active, hitLine, hitSet, query, chips, audioOk, onPlay, onNote }: LinesProps) {
+  return (
+    <>
+      {segments.map((s, i) => (
+        <Line
+          key={i}
+          i={i}
+          s={s}
+          playing={i === active}
+          hit={i === hitLine}
+          query={hitSet.has(i) ? query : ''}
+          chips={chips.get(i) ?? NO_CHIPS}
+          audioOk={audioOk}
+          onPlay={onPlay}
+          onNote={onNote}
+        />
+      ))}
+    </>
+  )
+})
+
+interface LineProps {
+  i: number
+  s: Segment
+  playing: boolean
+  hit: boolean
+  /** The search, only when this line matches it (so typing re-renders only the lines it marks). */
+  query: string
+  chips: Chip[]
+  audioOk: boolean
+  onPlay: (ms: number) => void
+  onNote: (noteId: string) => void
+}
+
+/** One transcript line: a click or Enter plays from it. */
+const Line = memo(function Line({ i, s, playing, hit, query, chips, audioOk, onPlay, onNote }: LineProps) {
+  return (
+    <div
+      data-i={i}
+      className={`mt-line ${playing ? 'playing' : ''} ${hit ? 'hit' : ''}`}
+      onClick={() => audioOk && onPlay(s.start)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && audioOk && e.target === e.currentTarget) {
+          e.preventDefault()
+          onPlay(s.start)
+        }
+      }}
+      tabIndex={audioOk ? 0 : undefined}
+      role={audioOk ? 'button' : undefined}
+      aria-current={playing ? 'true' : undefined}
+      title={audioOk ? 'Play from here' : undefined}
+    >
+      <span className={`mt-spk ${s.speaker}`}>{s.speaker === 'you' ? 'You' : 'Others'}</span>
+      <span className="mono mt-at">{lineClock(s.start)}</span>
+      <span className="mt-text">
+        {highlightParts(s.text, query).map((p, j) => (p.hit ? <mark key={j}>{p.text}</mark> : <span key={j}>{p.text}</span>))}
+        {chips.map((c, j) => (
+          <button
+            key={`c${j}`}
+            className="chip btnlike mt-chip"
+            disabled={!c.noteId}
+            title={c.noteId ? 'Open the note' : c.label}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (c.noteId) onNote(c.noteId)
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </span>
+    </div>
+  )
+})

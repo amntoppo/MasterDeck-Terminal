@@ -1047,8 +1047,9 @@ audio never reach a browser or a phone.
   length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
   (each opens the note).
 - **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
-  bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view; a click on a
-  line plays from there. Lines Claude matched to a session or ticket carry its chip (click it for
+  bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view until you
+  scroll; a click on a line (or Enter on it, with Tab to get there) plays from there, and Space plays
+  or pauses when you are not typing in a field. Lines Claude matched to a session or ticket carry its chip (click it for
   the note).
 - **Search the transcript:** the words are marked in every line, **↑ / ↓** (or Enter, Shift+Enter)
   go from one to the next, the count shows where you are.

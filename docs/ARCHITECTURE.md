@@ -1327,9 +1327,15 @@ waits, and writes nothing if accounts appeared meanwhile.
   (letters, digits, spaces, `_` and `-` only).
 - `renderer/.../MeetingsView.tsx` (view `meetings`, `App.tsx`; rail icon between Notes and Workflow
   and ⌘K **Go to Meetings**, both only when `meetingsHere()` in `renderer/src/meetingLinks.ts`: macOS,
-  not the web; not in `WEB_VIEWS`, `SCREEN_NEEDS.meetings` is `meetingsList`). Three list calls per
-  change (the range, the month grid's marks, any meeting at all for the empty page), all again on
-  `meetings:changed`; the open meeting re-reads on a change of its id. The player is an `<audio>`
+  not the web; not in `WEB_VIEWS`, `SCREEN_NEEDS.meetings` is `meetingsList`). One list call over
+  the range and the month grid together, each cut from it (both read on their own only when the
+  answer is at the list's 500; all of history only when it is empty, for the empty page), again on
+  `meetings:changed`, which is gathered for 250 ms (a burst of chunk updates is one read); the
+  open meeting re-reads when its id is among them. The transcript (up to 20,000 lines) is a memo'd
+  `Lines` of memo'd `Line`s: a time update re-renders only the line that stops and the one that
+  starts playing, and typing a search only the lines it marks. A line is focusable (Enter plays
+  from it); Space plays and pauses unless focus is in a field or on a button; following the playing
+  line stops at any scroll the page did not make itself. The player is an `<audio>`
   on the scheme; a recorder's WebM has no duration at first, so the seek bar uses the meeting's
   length until the element reports one.
 - `masterdeck://meetings/<id>?t=<s>` links: `meetingLink` (`shared/markdown.ts`) accepts exactly
