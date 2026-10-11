@@ -154,6 +154,9 @@ export const CH = {
   workflowTemplateDelete: "workflow:templateDelete",
   sessionWorkflowGet: "workflow:sessionGet",
   workflowStatus: "workflow:status",
+  workflowLoopHistory: "workflow:loopHistory",
+  workflowLoopStop: "workflow:loopStop",
+  workflowLoopMore: "workflow:loopMore",
   workflowBuilderPrepare: "workflow:builderPrepare",
   workflowDraft: "workflow:draft",
   workflowDraftGet: "workflow:draftGet",
@@ -165,6 +168,9 @@ export const CH = {
   peersSet: "peers:set",
   peersSync: "peers:sync",
   modSet: "mod:set",
+  modsInstall: "mods:install",
+  modsUninstall: "mods:uninstall",
+  modsReload: "mods:reload",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
   issueBody: "issue:body",
@@ -543,6 +549,15 @@ export interface DeckApi {
   workflowTriggerDelete(id: string): Promise<CliResult>;
   /** What a session's workflow last did (the Workflow line in Details). */
   workflowStatus(sessionId: string): Promise<WorkflowStatus | null>;
+  /** A workflow loop's every round and the end of its progress file. */
+  workflowLoopHistory(
+    sessionId: string,
+    loopId: string,
+  ): Promise<import("./loops").LoopHistory>;
+  /** Stop a running workflow loop (the session's next turn end lets it finish). */
+  workflowLoopStop(sessionId: string, loopId: string): Promise<CliResult>;
+  /** Give a loop stopped at a limit 5 more iterations, and nudge the session if it is idle. */
+  workflowLoopMore(sessionId: string, loopId: string): Promise<CliResult>;
   /** A session's own workflow; null while it follows the default. */
   sessionWorkflowGet(sessionId: string): Promise<WorkflowDoc | null>;
   /** Change a session's workflow (`from`: the template it now comes from, if one was applied). */
@@ -575,6 +590,12 @@ export interface DeckApi {
   peersSync(sessionKey: string): Promise<CliResult>;
   /** Session details → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
+  /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
+  modsInstall(): Promise<CliResult>;
+  /** Take them out again (every mod, the marketplace, prependPlugins). */
+  modsUninstall(): Promise<CliResult>;
+  /** Type /reload-plugins into every idle session that runs older mods (or none). */
+  modsReload(): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
   /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
   boardRepos(repos: string[]): void;

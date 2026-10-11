@@ -220,10 +220,14 @@ export interface AppState {
   modOff?: Record<string, string[]>;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
   modCatalog?: import("./modBand").ModEntry[];
+  /** Whether MasterDeck's mods are installed in Claude Code (Settings, Setup → Mods); set in the state callback. */
+  mods?: import("./mods").ModsStatus;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */
   schedules: Record<string, ScheduleInfo[]>;
+  /** Workflow loops by session id (shared/loops: at most 3 each, closed ones for a day). */
+  loops: Record<string, import("./loops").LoopView[]>;
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;

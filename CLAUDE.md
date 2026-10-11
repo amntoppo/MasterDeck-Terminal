@@ -18,6 +18,7 @@ Start here, then read what the task needs:
 | [docs/REMOTE.md](docs/REMOTE.md) | Account, CloudSync, browser bridge, web app, instant typing, remote indicator, message tables |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Build/install/release, web deploy, isolated E2E recipe, measuring upload, troubleshooting |
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
+| [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
@@ -173,6 +174,7 @@ web tabs keep working.
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
+| Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -297,6 +299,14 @@ buttons; it does not go through macOS window drag regions.
   remote sends are never relayed through master-agent (`sendMasterUp(true, …)` is false).
 - **Claude Code's TUI runs on the alternate screen** (`?1049h`) with mouse/focus/bracketed-paste
   modes; instant typing only observes there until it has seen 3 exact echoes.
+- **Claude Code ends a turn after eight Stop-hook blocks in a row without a tool call**
+  (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises it; MasterDeck does not set it). A workflow loop
+  (`workflows/loop.sh`, `shared/loopHook.ts`) blocks every stop while it is open, so a loop that
+  only talks pauses there: it stays `open` and goes on counting at its next turn end, and nothing
+  wakes the session. After 5 quiet minutes Needs you shows a `loop-paused` item (**Continue** types
+  MasterDeck's fixed `Continue the loop "<name>".`, **Stop loop**). A loop that keeps going without
+  changing anything is ended by the stall limit (3 rounds on a new Loop frame; a saved loop without
+  the field keeps 0, off). Never rely on `stop_hook_active` to end a loop; its iteration counter does.
 - **A Board tab without a GitHub board is derived, not stored.** `boardless(login, cfg)` (TS) /
   `config.boardless(view)` (Python) is the one check. `master board` sends such an account's
   repository issues as cards with `derived: true` and no status; `Sources.build()` gives them a column
@@ -368,7 +378,13 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-10)
+## Current state and next steps (2026-10-12)
+
+- **The README is rewritten for developers (#90)** (merged to `main` from branch
+  `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in
+  `docs/images/` (four copied from the website, `accounts-setup.svg` drawn in the same style), a
+  Quick start, links to masterdeck.dev and the docs. Checked: every local link and guide anchor,
+  masterdeck.dev's pages answer. Not checked: the render on GitHub (needs a push).
 
 - **Costs time filter** (issue #88) is merged to `main` (from branch
   `worktree-MasterDeck-Terminal-88-costs-timeline`, not pushed) and installed locally (2026-10-12): presets and a custom range in the Costs view, costs and tokens kept
@@ -376,10 +392,44 @@ buttons; it does not go through macOS window drag regions.
   vitest, and the web preview (`/?preview` now has fixture cost history) at 1400 px and 390 px.
   Open points are in TODO ("Costs time filter").
 
-- **masterdeck.dev** is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
-  (deploy and search-engine notes in its README; OPERATIONS § Website). For search: structured data,
-  IndexNow on deploy, and this repository's website field, topics, README and release notes link to
-  it. Google Search Console is still to be set up by hand (TODO).
+- **MasterDeck installs, updates and reloads its mods (#93)** (branch
+  `worktree-MasterDeck-Terminal-93-mods-install`, draft PR, not merged, **not installed**: the
+  rebuild of the real app copies over `~/.claude/masterdeck/mods`, so it waits for the user's
+  word). `mods/` ships in the app and is copied to `<home>/mods` at launch when it changed; Setup's
+  **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check, the
+  marketplace, each mod, `prependPlugins`) and remove them, backing up settings.json before every
+  change; a Needs-you **MODS** item offers **Reload idle sessions**; `prependNote` says where
+  `prependPlugins` is ignored. Checked: typecheck, vitest (153 files passed, 2 skipped; 1771 tests
+  passed, 4 skipped), the isolated app with the real `claude` 2.1.296 and a temp `CLAUDE_CONFIG_DIR`
+  (Install, Remove, backups, the real settings.json's hash unchanged), a packaged dir build's
+  `Resources/mods`. Not checked: the reload item with real sessions, an update over the user's
+  copy, Windows. Open points: TODO ("Mods install (#93)").
+
+- **Workflow agent loops (#82)** are built on branch `worktree-MasterDeck-Terminal-82-agent-loops`
+  (local `main` merged in at 9e00e29, so it also carries the mods of #86; pushed as PR #101, not
+  merged; **installed locally 2026-10-10**, which added the loop Stop hook to the real
+  `~/.claude/settings.json`). It sits beside the `/md-loop` mod (#86, `mods/masterdeck-loop`), a
+  separate loop typed in one session; the two share no code (#100). A
+  Loop frame on the Workflow canvas; `workflows/loop.sh` (generated by `shared/loopHook.ts`,
+  installed with mark `masterdeck-workflow:loop`, timeout 600) blocks the session's stop until the
+  check passes / the agent says `LOOP DONE:` or a limit is hit; state in
+  `workflows/loops/<sid>.json` → `LoopStore` → `AppState.loops`. Design on the issue; spec and plan L
+  in the backend repo (`docs/agent-loops-82`, not pushed). Checked: typecheck, vitest (155 files
+  passed, 2 skipped; 1858 tests passed, 4 skipped), `build:web`, the canvas and Details in the web
+  preview (1280 x 900, 390 x 844) and the isolated app with a stand-in `claude`, and three live
+  loops with haiku in `claude -p` (temp settings file and home, `--setting-sources project`): met
+  on the third round with the met branch run, stopped at 2/2 rounds, and `PROGRESS:` lines carried
+  between rounds. Not checked: the installed app's real hooks driving a loop, the window's native
+  Stop loop dialog, the real web app over the bridge, a phone, Windows. Open points: TODO
+  ("Workflow loops: open points").
+
+- **masterdeck.dev** (issue #89) is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+  (private, `main`; checkout `~/Documents/personal/Masterdeck-Website`; deploy and search-engine notes
+  in its README; OPERATIONS § Website). Live since 2026-10-10 as the Workers `masterdeck-site` and
+  `masterdeck-www`. Built first as `site/` on branch `worktree-MasterDeck-Terminal-89-website`
+  (bbebbb4), then moved out. For search: structured data, IndexNow on deploy, and this repository's
+  website field, topics, README and release notes link to it. Google Search Console is still to be
+  set up by hand (TODO). Agent loops (#82) show as "coming soon" on the site: update it when they ship.
 
 - **MasterDeck has its own icon** (merged to `main` 3ce574c and pushed; installed locally and the
   web app deployed, 2026-10-10): the mark from masterdeck.dev on a dark tile, as the app icon

@@ -571,20 +571,55 @@ fixes it, and move the item here to "Recently done".
 - **The ticket is the cost book's** (the session's last linked ticket): time before a session was
   linked counts for that ticket too, and a session relinked to another ticket moves all its time.
 
+## Workflow loops: open points (2026-10-10, issue #82)
+
+- **The turn-end plan can be handed over twice on the turn that closes a loop.** The loop hook
+  hands the turn-end plan over itself on that turn ("Before you finish this turn:"), since the
+  turn-end trigger, run side by side, usually still reads the loop open and skips. When the loop
+  hook is quick (no check command) and closes the loop first, the trigger sees it closed and
+  hands the plan over too (`ponytail:` in `flowTriggerCommand`). Upgrade: a lock, or a marker the
+  loop hook leaves for that turn.
+- **Two ways to loop.** The workflow Loop frame (this) and the `/md-loop` mod (#86) both run a
+  check after a turn and give Claude another round, with their own state, wording and progress
+  line. Decide whether to keep both, or have one drive the other (e.g. the mod's band shows a
+  workflow loop's `AppState.loops`, and `/md-loop` arms a one-off Loop frame). A session running
+  both at once would get two "keep going" messages.
+- **Two triggers arming loops at the same moment can lose one.** Each arming reads the loop file,
+  changes it and renames it in (`"$L.$$.tmp"`): the same Bash call matching two triggers that both
+  hold loops can drop one arming. The app's Stop loop / Run 5 more and the hook are handled (the
+  hook re-reads before its rename); the arming side needs a lock file.
+- **The phone API cannot run Run 5 more / Continue / Stop loop.** The protocol's `INBOX_ACTIONS`
+  lacks them (no protocol change in v1); the web app over the bridge and notifications can.
+  Loop state is not in `RemoteSnapshot` either (spec S10).
+- **Not in v1:** a cost limit, a fresh session per iteration, nested loops, loops in an
+  "if it worked / failed" branch or side by side (the check refuses them), loops under the
+  needs-you / idle / turn-end triggers.
+- **Not checked:** the window's native Stop loop dialog (CDP cannot press it; the web's confirm
+  was), the real web app over the bridge, a real phone, Windows, a loop driven by the installed
+  app's real hooks (the live runs used `claude -p` with a temp settings file and temp home).
+
+## Website: open points (2026-10-10, issue #89)
+
+The site moved to [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website); its README
+lists its open points (real screenshots, Always Use HTTPS for the zone, analytics, Google Search
+Console). Here only what touches this repository:
+
+- **Agent loops (#82)** are "coming soon" on the site: update it when they ship.
+- **The README's images** (issue #90) are copies of the site's drawn screens in `docs/images/`, plus
+  `accounts-setup.svg` drawn the same way for the README only: replace all five with real
+  screenshots (the hero, `sessions-list.svg`, could be a GIF), here and on the site together.
+- **Redeploy the site after each release** so Download and the changelog show it (OPERATIONS).
+
 ## MasterDeck mod: open points (2026-10-10, issue #86)
 
 See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
 
-- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
-  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
-  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
-  `mods/` in the app (electron-builder `extraResources`).
 - **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
   `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
   masterdeck@masterdeck --scope user` (settings.json backed up first as
   `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
   nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
-  Updating the copy is by hand until the app installs it.
+  An app with #93 replaces that hand copy at launch (no marker) and reads it as installed.
 - **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
   `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
   `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
@@ -603,7 +638,15 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
   the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
   checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
-  it. Setup should add `prependPlugins` with the install (backup, atomic).
+  it. MasterDeck's install adds it now (#93) and says where it is ignored.
+- **Mods install (#93): open points.** Checked with the real `claude` 2.1.296 against a temp
+  `CLAUDE_CONFIG_DIR` in the isolated app (Install, Remove, the backups) and the packaged build's
+  `Resources/mods`; not checked: the Needs-you reload item with real sessions (the isolated app
+  listed none), an app update over an installed copy on the user's machine, Windows (`--json` lines
+  and paths), a managed settings file or a Team plan for real (`prependNote` is unit-tested only).
+  A session whose Claude Code is older than 2.1.287 never sends a heartbeat, so after an install it
+  stays in the reload item until dismissed. The swap of `<home>/mods` leaves a moment with no folder
+  (`ponytail:` in `syncModsFolder`). The isolated app installs mods only with `CLAUDE_CONFIG_DIR` set.
 - **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
   yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
   (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
@@ -613,9 +656,6 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
   account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
   account). A board file per account and its own current sprint needs a read per account.
-- **Updating the mods needs a reload in every running session** (the copy under
-  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
-  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
   a change bumps `v` in both.
@@ -641,8 +681,12 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
 | Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
-| MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | branch `feat/app-icon` | — |
+| MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |
+| Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
+| The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |
+| MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | 3d83781, merge 3ce574c | — |
 | The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
 | Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
 | Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |

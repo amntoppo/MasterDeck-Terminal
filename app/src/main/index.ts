@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -145,7 +146,11 @@ import {
   syncSkills,
   writeRemoved,
 } from "./skills";
+import { ModsInstaller } from "./mods";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
+import { LoopStore } from "./loops";
+import { LoopQueue } from "./loopQueue";
+import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
 import {
   DEFAULT_TEMPLATE,
@@ -246,6 +251,48 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
 const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
+// MasterDeck's mods in Claude Code (Setup / Settings → Mods): its folder, install and uninstall.
+const mods = new ModsInstaller({
+  run,
+  claude: () => claudeBin,
+  bundled: paths.bundledMods,
+  folder: paths.modsDir,
+  settings: paths.modsSettings,
+  refused: paths.modsSettings
+    ? null
+    : "This test app keeps Claude Code's settings apart: set CLAUDE_CONFIG_DIR to try mods in it.",
+  backupDir: paths.home,
+  installedFile: join(paths.home, "mods-installed.json"),
+});
+let modsStatus: ModsStatus = MODS_OFF;
+let modsReadAt = 0;
+/** What of the mods settings.json has, read again at most every 30 s (it changes by hand too). */
+function modsNow(fresh = false): ModsStatus {
+  if (fresh || Date.now() - modsReadAt > 30_000) {
+    modsStatus = mods.status();
+    modsReadAt = Date.now();
+  }
+  return modsStatus;
+}
+/** Running sessions on older mods (or none, started before the install). */
+const modsOffer = (sessions: Session[]) =>
+  modsReloadOffer(sessions, deckHooks.modBeats(), modsNow().state === "installed", mods.installedAt());
+/** Type /reload-plugins into each idle session the offer names, one after another. */
+async function reloadMods(): Promise<CliResult> {
+  const offer = latest ? modsOffer(latest.sessions) : null;
+  const idle = (offer?.idle ?? []).flatMap((k) => latest?.sessions.find((s) => s.key === k) ?? []);
+  if (!idle.length) return { ok: false, message: "No idle session runs older mods." };
+  const failed: string[] = [];
+  // Never relayed through master-agent: its message would not run the command.
+  for (const s of idle) {
+    const r = await sender.send(s, "/reload-plugins", false);
+    if (!r.ok) failed.push(r.message);
+  }
+  const done = idle.length - failed.length;
+  return failed.length
+    ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
+    : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
+}
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
 // tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
@@ -657,6 +704,7 @@ const sources = new Sources(
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
     state.modCatalog = catalog;
+    state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -670,6 +718,11 @@ const sources = new Sources(
       console.error(`PR watch: ${String(e)}`);
     }
     void linkedSteps.deliver(state.sessions);
+    try {
+      pumpLoopQueue(state);
+    } catch (e) {
+      console.error(`queue after a loop: ${String(e)}`);
+    }
     emit(CH.state, state);
     // The session list is in: commands that waited while MasterDeck was closed can run now.
     if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
@@ -1291,6 +1344,8 @@ async function runInboxAction(
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "reload":
+      return d.type === "mods" ? reloadMods() : { ok: false, message: "not a mods item" };
     case "trust": {
       const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
       if (!held) return { ok: false, message: "not a start Claude Code refused" };
@@ -1308,6 +1363,36 @@ async function runInboxAction(
         return { ok: false, message: "no session owns this PR; start one" };
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
+    }
+    case "loop-more": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const r = loopStore.more(s.sessionId, d.loopId);
+      if (!r.ok) return r;
+      sources.pollLoops();
+      return nudgeLoop(s.sessionId, r.name ?? "loop", remote);
+    }
+    case "loop-continue": {
+      // A paused loop: the same fixed text as Run 5 more's nudge, typed only into an idle session.
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      if (v?.state !== "open") return { ok: false, message: "the loop is not running" };
+      return nudgeLoop(s.sessionId, v.name, remote, "the session is working; the loop goes on at its next turn end");
+    }
+    case "loop-stop": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      // From a browser the web UI asked first; the window asks here.
+      if (v && !remote && !(await confirmLoopStop(v.name)))
+        return { ok: false, message: "cancelled" };
+      const r = loopStore.stop(s.sessionId, d.loopId);
+      if (r.ok) sources.pollLoops();
+      return r;
     }
     case "login": {
       if (d.type !== "account")
@@ -1708,6 +1793,73 @@ function clearDraft(): void {
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
 let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
+/** Workflow loops (`workflows/loops/`): names and limits from each session's compiled workflow. */
+const loopStore = new LoopStore(paths.home, (sid) =>
+  workflows()
+    .compiledFor(sid)
+    .flatMap((s) => s.loops ?? []),
+);
+sources.setLoopStore(loopStore);
+
+/**
+ * Run 5 more's nudge (the Details action and the Needs-you one): MasterDeck's own fixed text, so
+ * the loop's next round happens. Only an idle session gets it; a busy one meets the reopened loop
+ * at its next turn end anyway.
+ */
+async function nudgeLoop(
+  sessionId: string,
+  name: string,
+  remote: boolean,
+  busy = "5 more iterations; the loop goes on at the next turn end",
+): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.sessionId === sessionId);
+  if (!s || s.state !== "idle") return { ok: true, message: busy };
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+}
+/**
+ * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
+ * after a loop closed on an idle session).
+ */
+async function sendNextQueued(s: Session): Promise<CliResult> {
+  const next = shiftQueue(s.sessionId);
+  if (next === null) return { ok: false, message: "the queue is empty" };
+  const masterUp =
+    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const r = await sender.send(s, next, !!masterUp);
+  // Not sent: back to the front, so the Stop hook still runs it later.
+  if (!r.ok) unshiftQueue(s.sessionId, next);
+  return r;
+}
+/**
+ * The queue after a loop (#82): the deck hook's Stop skipped the turn that closed the loop (it saw
+ * the loop open), so a session left idle with prompts queued gets the next one here, once.
+ */
+const loopQueue = new LoopQueue();
+function pumpLoopQueue(state: AppState): void {
+  if (process.platform === "win32") return;
+  for (const s of loopQueue.tick(
+    state.loops,
+    state.sessions,
+    (sid) => (deckHooks.ownsQueue(sid) ? readQueue(sid).length : 0),
+    (sid) => deckHooks.queueServedAt(sid),
+    Date.now(),
+  ))
+    void sendNextQueued(s).then((r) => {
+      if (!r.ok) console.error(`queue after a loop: ${r.message}`);
+    });
+}
+/** The window's ask before Stop loop (Details, Needs you): a stopped loop cannot be given more. */
+async function confirmLoopStop(name: string): Promise<boolean> {
+  const choice = await dialog.showMessageBox(win!, {
+    type: "warning",
+    buttons: ["Cancel", "Stop loop"],
+    defaultId: 0,
+    cancelId: 0,
+    message: `Stop the loop “${name}”?`,
+    detail: "The session finishes its turn and the loop does not go on.",
+  });
+  return choice.response === 1;
+}
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
@@ -1717,6 +1869,12 @@ const syncWorkflowHooks = () => {
   const customs = workflows().triggers();
   setCustomTriggers(customs);
   setMonitors(workflows().monitors());
+  // The loop hook's script first, so its Stop hook entry never points at a missing file.
+  try {
+    workflows().setupLoopHook();
+  } catch (e) {
+    return { ok: false, message: `could not write the loop hook: ${String(e)}` };
+  }
   return installWorkflowHooks(
     paths.claudeSettings,
     paths.home,
@@ -1974,14 +2132,7 @@ function registerIpc(): void {
   reg.handle(CH.queueSendNext, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
-    const next = shiftQueue(s.sessionId);
-    if (next === null) return { ok: false, message: "the queue is empty" };
-    const masterUp =
-      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    const r = await sender.send(s, next, !!masterUp);
-    // Not sent: back to the front, so the Stop hook still runs it later.
-    if (!r.ok) unshiftQueue(s.sessionId, next);
-    return r;
+    return sendNextQueued(s);
   });
   reg.handle(CH.getSettings, () => sources.getSettings());
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
@@ -2820,6 +2971,29 @@ function registerIpc(): void {
     syncWorkflowHooks();
     return { ok: true, message: "trigger deleted" };
   });
+  // Workflow loops: ids are checked by the store (session id, loop id shapes); the state shows
+  // the change at once.
+  reg.handle(CH.workflowLoopHistory, (_e, sid: unknown, id: unknown) =>
+    loopStore.history(sid, id),
+  );
+  reg.handle(CH.workflowLoopStop, async (e, sid: unknown, id: unknown) => {
+    // A stopped loop cannot be given more: ask, as Stop session does. From a browser the web UI
+    // asked first; no native dialog on the Mac.
+    const v = validSessionId(sid) && validLoopId(id)
+      ? latest?.loops?.[sid]?.find((x) => x.id === id && x.state === "open")
+      : undefined;
+    if (v && !isRemote(e) && !(await confirmLoopStop(v.name)))
+      return { ok: false, message: "cancelled" };
+    const r = loopStore.stop(sid, id);
+    if (r.ok) sources.pollLoops();
+    return r;
+  });
+  reg.handle(CH.workflowLoopMore, async (e, sid: unknown, id: unknown) => {
+    const r = loopStore.more(sid, id);
+    if (!r.ok) return r;
+    sources.pollLoops();
+    return nudgeLoop(sid as string, r.name ?? "loop", isRemote(e));
+  });
   reg.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
     const s = latest?.sessions.find((x) => x.sessionId === sid);
@@ -2905,6 +3079,15 @@ function registerIpc(): void {
     sources.changed();
     return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
   });
+  // Setup / Settings → Mods. Fixed claude commands only (the web asked with webConfirm first).
+  const modsChanged = (r: CliResult): CliResult => {
+    modsNow(true);
+    sources.changed();
+    return r;
+  };
+  reg.handle(CH.modsInstall, async () => modsChanged(await mods.install()));
+  reg.handle(CH.modsUninstall, async () => modsChanged(await mods.uninstall()));
+  reg.handle(CH.modsReload, () => reloadMods());
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200
       ? peerSync.syncNow(key)
@@ -3353,6 +3536,17 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
+  // MasterDeck's mods: its folder is the marketplace Claude Code reads in place, so this version's
+  // mods reach every session at its next reload (Needs you offers one for idle sessions).
+  if (!SMOKE) {
+    const r = mods.syncFolder();
+    if (r.error) console.error(r.error);
+  }
+  sources.setModsReload(modsOffer);
+  void mods.refresh().then(() => {
+    modsNow(true);
+    sources.changed();
+  });
   // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
   // that work itself now; the skills stay for use by hand.
   if (

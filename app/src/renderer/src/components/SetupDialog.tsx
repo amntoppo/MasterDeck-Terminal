@@ -11,11 +11,12 @@ import { webConfirm } from '../webConfirm'
 import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
+import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { canAdvance } from './stepRules'
 import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
 
 
-const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
+const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Mods', 'Preferences'] as const
 
 const INSTALLER_PANE = 'setup:installer'
 const GH_LOGIN_PANE = 'setup:gh-login'
@@ -40,8 +41,8 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 ]
 
 /**
- * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the GitHub accounts, the
- * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
+ * First-run setup (a six-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the GitHub accounts, the
+ * owner / issue repository / board with its statuses, MasterDeck's mods (installed at once, not at Save), then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master and MasterDeck share.
  */
@@ -308,6 +309,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
     !ghHere ? 'on your Mac' : connected.length ? connected.map((c) => c.login).join(', ') : accounts === null ? '—' : 'none connected',
     primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(selectedBoards).length} board${Object.keys(selectedBoards).length === 1 ? '' : 's'}`}` : 'none chosen',
+    state.mods?.state === 'installed' ? 'installed' : state.mods?.state === 'partial' ? 'partly installed' : 'not installed',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
   // Next from Repos & boards needs a repository under the primary account (on screen or not).
@@ -716,6 +718,17 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
         )}
 
         {step === 4 && (
+          <>
+            <div className="meta">{MODS_ABOUT}</div>
+            <div className="meta">
+              Optional. Installing adds MasterDeck's folder of mods to Claude Code and turns them on for your user; Remove (here or in
+              Settings) takes them out again. New sessions load them; running ones at a reload.
+            </div>
+            <ModsPanel state={state} />
+          </>
+        )}
+
+        {step === 5 && (
           <>
             <label>Workspace (master and new shells start here; your repos live in or next to it)</label>
             <div className="row-inputs">

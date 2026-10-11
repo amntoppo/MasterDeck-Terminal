@@ -195,7 +195,11 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 
 ### Hooks
 
-- `main/hooks.ts` edits `~/.claude/settings.json` (backups, atomic writes, marker per hook):
+- `main/hooks.ts` edits `~/.claude/settings.json` (backups, atomic writes, marker per hook).
+  `installWorkflowHooks` puts in one hook per trigger (timeout 10 s), one per custom trigger event,
+  and the workflow loop's Stop hook (`loopCommand`, mark `masterdeck-workflow:loop`, timeout 600 s);
+  all carry `masterdeck-workflow:`, so one check sees them up to date and one removal takes them out.
+  Also
   `hookStatus` (`HookStatus`: `queue` = something runs `/queue`: the deck hook with no skill queue
   hook beside it, or both skill queue hooks; `foreignQueue` = any queue skill hook, e.g. a
   hand-installed `$HOME/.claude/hooks/queue-submit.sh`; `reviewGate` = `REVIEW_MARK` in
@@ -232,7 +236,16 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   claimed by rename to `.taken` → `queue-answers/<id>.json` (see Queue). `queue-off` (written when
   `hooks.ts` `hookStatus().foreignQueue` sees the queue skill's own hooks in settings.json; worked
   out again whenever settings.json's mtime changes) leaves `/queue`
-  to those hooks.
+  to those hooks. While a workflow loop is open (`<home>/workflows/loops/<sid>.json`, passed in as
+  `hookScript`'s `loopsDir`), Stop hands nothing over: the queue waits until the loop is over. Stop
+hooks run side by side, so on the turn that closes the loop the deck hook usually still reads it
+open and skips; when that stop goes through, the session is left idle with prompts queued.
+`main/loopQueue.ts` (`LoopQueue`, ticked from the state callback in `main/index.ts`) notices a
+session's open loop going away, waits up to 2 minutes for the session to be `idle`, and then, once
+per closing, sends its next queued prompt as **Send next** does (`sendNextQueued`: `shiftQueue`,
+`Sender`, back to the front when the send fails), only while the deck hook owns the session's queue
+(`DeckHooks.ownsQueue`: no `queue-off`, not a legacy session) and when `pumpQueue` served the
+session no prompt since the closing (`queueServedAt`; 30 s slack).
   `shared/deckHooks.ts` parses events into per-session hook state (compacting, failures, stops).
 - Master reports guard: `installDeckHooks` also registers `"<home>/deck/hook.sh" MasterReport` as a
   PreToolUse hook on `SendMessage` (marker `/deck/hook.sh" MasterReport`, timeout 10 s; part of
@@ -350,9 +363,43 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 - **The core** writes its heartbeat every 15 s where `deck/alive` exists (`ended: true` at
   `session.end`); what it saw is in `$.state` (`seen`), since a reload does not judge an unchanged
   module again.
-- **Not wired yet:** MasterDeck does not install the mods (by hand: `claude plugin marketplace add
-  <folder>/mods`, `claude plugin install <name>@masterdeck` for each, `prependPlugins` in settings),
-  nothing of the deck hook moved into them, and no Windows path. See TODO ("MasterDeck mod").
+- **Installing the mods** (`main/mods.ts`, `shared/mods.ts`, issue #93). The app ships `mods/`
+  (electron-builder `extraResources`, without tests, `shared/` and `sync-shared.sh`) and at every
+  launch copies it to `<home>/mods` when its content hash differs from the folder's marker
+  (`syncModsFolder`: `.masterdeck-mods.json`, copied to `mods.new` and swapped in; a hand copy there
+  is replaced). Claude Code reads a directory marketplace in place (`claude plugin list` shows
+  `readFromFolder`), so that copy is the update: nothing is installed again. `ModsInstaller.install`
+  checks `claude --version` (`MODS_MIN_CLAUDE`, 2.1.287), backs up settings.json
+  (`settings.backup.<ms>.before-mods.json` in `<home>`; `backupSettings` in `hooks.ts` never
+  overwrites one), runs `claude plugin marketplace add <home>/mods --scope user` (adding it again
+  re-points a `masterdeck` marketplace that came from elsewhere) and `claude plugin install
+  <name>@masterdeck --scope user` for each mod in `marketplace.json`, all with `--json` (the last
+  line's `outcome` / `failureCode`), then puts the core first in `prependPlugins` with the hooks'
+  own atomic write (another backup) and records `<home>/mods-installed.json` (`{at, version}`).
+  `uninstall` runs `claude plugin uninstall` for each (`not_installed` is fine), `claude plugin
+  marketplace remove masterdeck` (`not_configured` is fine) and takes the core out of
+  `prependPlugins` (the key goes when empty); the folder stays. One change at a time.
+  `modsInSettings` reads what is installed from the settings file: the marketplace on this folder,
+  each `enabledPlugins` entry and `prependPlugins` (`installed`, `partial` with what is `missing`,
+  `off`). `prependNote` says when `prependPlugins` is not honoured: a managed settings file
+  (`managedSettingsFiles`: `managed-settings.json` and `managed-settings.d/*.json` per platform) that
+  does not list the core itself, or `claude auth status --json` reporting a `team` / `enterprise`
+  `subscriptionType`. `state.mods` (`ModsStatus`) is read in the state callback at most every 30 s
+  (`modsNow`) and again after each change. `paths.modsSettings` is the file `claude plugin` writes:
+  Claude Code's own, or `$CLAUDE_CONFIG_DIR/settings.json`; null (install refused, with a note) when
+  MasterDeck's settings are kept apart (`MASTERDECK_ISOLATED`, `MASTERDECK_CLAUDE_SETTINGS`) without
+  `CLAUDE_CONFIG_DIR`, since the CLI would write the real one. `CH.modsInstall` / `CH.modsUninstall`
+  are open to the web (fixed commands, `webConfirm` first), as the status line's are.
+- **Reloading after an update.** `modsReloadOffer` (the state's sessions, `DeckHooks.modBeats()`,
+  installed, `installedAt`) lists running sessions (not done or suspended) whose core is older
+  (`modsStale`), or that have no heartbeat and started before MasterDeck installed the mods; the
+  idle ones (state `idle`, no `busyWith`) can be reloaded now. `Sources.setModsReload` puts it into
+  `collectItems` (`modsReload`) as one Needs-you item `mods:<MOD_VERSION>` (kind `mods`, action
+  `reload` while one is idle; a dismissed one stays dismissed until the next version).
+  `reloadMods()` (the `reload` inbox action and `CH.modsReload`, Settings → Mods) types
+  `/reload-plugins` into each idle one through `Sender`, never relayed through master-agent.
+- **Not wired yet:** nothing of the deck hook moved into the mods, and no Windows path. See TODO
+  ("MasterDeck mod").
 
 ### Monitors (watches) and schedules
 
@@ -396,11 +443,95 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 
 `main/workflow.ts` `WorkflowStore` under `<home>`: `workflow.json` (Default), `workflows/templates/`,
 `workflows/sessions/<sessionId>.json` (each session's copy), `workflows/triggers/` (custom
-triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.jsonl`,
+triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.jsonl`, `workflows/loop.sh`,
+`workflows/loops/` (`<sid>.json`, the loops; `<sid>-<loop id>.md`, their progress files),
 `workflows/pending.json`. The flow model, compiler and checks are `shared/flow.ts`,
 `shared/flowBuilder.ts` (builder drafts in `<home>/workflow-builder/`), `shared/flowTrack.ts`
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
+
+**Loops** (a Loop frame, #82). A trigger's step carries its `CompiledLoop`s; when it fires, its hook
+arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json` (written to `<sid>.json.<pid>.tmp`, then renamed)
+(`{loops: [{id, step, state: "open", iteration: 0, startedAt, history: [], reason, lastCheck}]}`)
+and creates an empty progress file `workflows/loops/<sid>-<loop id>.md` (the hook's to fill: Claude
+Code refuses a session's writes under `~/.claude`, so the session never writes it); a loop still
+open is left as it is. `workflows/loop.sh`, generated by `loopScript(home)` in `shared/loopHook.ts` (written by
+`WorkflowStore.setupLoopHook`, mode 755, only when its text changed, each time `syncWorkflowHooks`
+runs; installed by `installWorkflowHooks` as a Stop hook, mark `masterdeck-workflow:loop`, timeout
+600 s: the check may take up to 540), runs at every turn end, ignoring `stop_hook_active` (the iteration counter is the guard). It takes the first open
+loop, reads what the agent said (`last_assistant_message`, else the text of the transcript's last
+assistant entry, nothing when that entry has none; `LOOP DONE:` must start a line), and runs the check command in the session's folder in its own
+process group (`set -m`: macOS has no `timeout` or `setsid`) under its time limit (`timeoutMin`, at
+most 540 s; a timeout fails the check and kills what it started). With the agent's goal on and
+nothing said, the check is not run. The decision is one jq program (`DECIDE`): met; else
+`limits.iterations` + `extra` (Run 5 more) reached; else the time limit; else stall (the last N
+hashes of the output tail, durations taken out, plus `git rev-parse HEAD` and `git status
+--porcelain`, equal). It writes the loop file (temp + rename; history keeps 50 entries, a tail is
+at most 40 lines / 4 KB; just before the rename it reads the file again and writes nothing, and
+answers nothing, when the loop is no longer open or has a new `startedAt`: a Stop loop or Run 5
+more during the check stands), one `runs.jsonl` line (`trigger: "loop"`, `iteration`, `state`; `WorkflowStore.lastRun` skips these, so the Workflow line in Details stays on the step that armed the loop) and
+answers: an open loop blocks the stop with `↻ Loop "<name>": iteration n/max[, m min left].`, the
+check's output (one that failed and printed nothing: ``The check `<cmd>` failed (exit N, no
+output).``) or "not done yet", "So far" (the last three rounds' `PROGRESS:` lines), the round's
+plan and the ask to end the turn with a `PROGRESS:` line. The round's `PROGRESS:` line (the first
+line of what the agent said that starts with it, control characters and blank runs made one
+space, at most 300 characters) goes into its history entry (`progress`) and is appended to the
+progress file as `- round N: <text>`. A loop that ends
+opens the loops of its step whose `after` names it by that outcome or by a plain arrow (fresh, with
+empty progress files) and blocks with `Loop "<name>" is done|over: <reason>. Now: <branch>`, then
+`After the loop: <then>` (the blocks its plain arrows lead to: `CompiledLoop.then`, loops left out
+as they open themselves), then each next loop's round; when it opened no loop, the session's
+turn-end plan last (`Before you finish this turn:` and its turn-end steps' notes, logged as a
+`turn-end` line in `runs.jsonl`), since the turn-end trigger stood aside during the loop and runs
+once a turn; with none of these it lets the stop through. A `stopped`
+loop, a missing or unreadable loop file, or no jq lets the stop through; so does a session workflow
+file (else `workflow.json`) that is missing or that jq cannot read, leaving the loop file as it is;
+a loop that a workflow read without error no longer has is set `stopped`. It writes nothing outside `workflows/loops/` and `runs.jsonl`.
+While a loop is open the loop hook owns the session's stops: the turn-end trigger's hook and the
+deck hook's queue (Stop) exit at once when `workflows/loops/<sid>.json` has an open loop, and go on
+once it is over (the turn-end trigger only skips turns the loop hook answers: it hands the plan over
+on the closing turn).
+`main/loops.ts` `LoopStore` reads the loop files (cached by mtime; `parseLoopFile` in
+`shared/loops.ts` drops junk entries and never throws) into `AppState.loops`: by session id, at
+most 3 loops each, newest first, closed ones for 24 h, the check's tail cut to 1 KB, names and
+limits from the session's compiled workflow (`loopViews`; `LoopView.minutes` is the time limit, so
+nothing in the state ticks). The files change from the hooks, outside the app: the 1 s deck poll
+also asks `LoopStore.changed()` (the folder's names and mtimes) and rebuilds the state when they
+moved. Its two writes (temp file + rename): **Stop loop** (`stop`: only an open loop, `state:
+"stopped"`, reason `stopped by you`, `endedAt`) and **Run 5 more** (`more`: only a `limit` loop,
+and only while no other loop of the session is open: `extra += 5`, `state: "open"`, `startedAt`
+reset to now so a time limit is not hit again at once, and `stallFrom` set to the iteration, so
+`DECIDE` counts only later rounds toward the stall limit). Run 5 more also types
+`Continue the loop "<name>".` (`loopNudge`: fixed text, the name cleaned of control characters and
+a leading `/` or `!`) into the session through `Sender` when it is idle (`nudgeLoop` in
+`main/index.ts`, shared with the Needs-you action); a busy session meets the reopened loop at its
+next turn end. Needs you (`collectItems` in `shared/inbox.ts`) has two loop kinds: `loop` (a loop
+at a limit: `loop-more`, dismiss, open) and `loop-paused` (an open loop whose session is `idle`,
+not waiting on its own watch, and quiet for `LOOP_PAUSED_MS`, 5 minutes, by `lastActivity`; the id
+carries that time, so a new quiet spell is a new item: `loop-continue`, the same `nudgeLoop`, and
+`loop-stop`, `LoopStore.stop` after the window's own confirm, `confirmLoopStop`). `newLoop` starts
+with a stall limit of 3; `parseFlow` keeps 0 for a loop saved without one.
+
+**The Loop frame on the canvas.** `FlowEditor.tsx` draws a loop node as a React Flow node of type
+`frame` (`Frame`: `width`/`height` from the node's `w`/`h`, `zIndex: -1`, listed first, dragged by
+its header only via `dragHandle: ".ff-head"`; the box itself has `pointer-events: none` so blocks
+and arrows inside stay clickable; `NodeResizeControl` at the bottom-right corner; the editor sets
+`elevateNodesOnSelect={false}` so a selected frame never covers its blocks). Members stay ordinary
+nodes with absolute positions; the rules live in `shared/flowFrame.ts` (pure, tested):
+`insideFrame` (a block's centre in the frame's box), `membersAfterDrop` (on `onNodeDragStop` and on
+add: a block joins the frame it lands in and leaves the one it left; a trigger, built-in or loop is
+put back right of the frame with a note; a frame put down takes in the blocks under it),
+`refitFrame` (after a resize), `moveFrame` (a frame's position change moves its members),
+`frameArrow` (an arrow into a member goes to its frame; out of a member to outside is refused),
+`frameEdges` (`parseFlow`'s edge rules applied after membership changes, dropping an arrow that
+would close a cycle; a drop that loses arrows says so), `edgeKindFrom` / `framedEdgeKinds` (from a
+frame the toolbar's *if it worked / failed* read *when met / at the limit*), and the header text
+(`frameHeader`, `frameLive`). `layoutFlow` (`shared/flow.ts`) places a frame like a block, its
+members inside it in rows and columns of their own, and sizes it around them (`BLOCK_W/H`,
+`FRAME_PAD`, `FRAME_HEAD`); a flow without a loop is laid out exactly as before. The session's own
+editor (`SessionWorkflowDialog`) passes `state.loops[sessionId]` as `loops`, and the frame's header
+adds the round (`3/10 · last check failed`, pulsing while open). The web preview (`/?preview`) has
+a workflow with a loop and a session in round 3 to look at.
 
 ### Notes
 
@@ -899,6 +1030,11 @@ waits, and writes nothing if accounts appeared meanwhile.
 - Create a GitHub board: `boardCreatePlan(account?)` (a read), `boardCreate({account?, title})`, `boardCreateRetry(account?)` and the event `onBoardCreateProgress` (`board:createProgress`, sent to the Mac's window only). All four are `blocked` in `DECK_ACCESS`, and the handlers refuse a remote caller as well: the confirmation is main's native dialog, and the usual fix (the `project` scope) needs a terminal on the Mac.
 - Assign popup: `assignableUsers(repo)` (`issue:assignable`, invoke, `remote` in `DECK_ACCESS`: a read, the repository is checked in `AssignableUsers.get`).
 - Description and sub-issues of a ticket (Assign popup, Start dialog): `issueBody(ticket)` (`issue:body`) and `issueSubIssues(ticket)` (`issue:subIssues`), both invokes, `remote` in `DECK_ACCESS` (reads), routed `forCard`. `GitHub.subIssues` reads `repos/<repo>/issues/<n>/sub_issues?per_page=100` (GitHub allows 100 sub-issues per issue, so one page), cached 5 minutes, flattened by `SUB_ISSUES_JQ` and parsed by `parseSubIssues` (`shared/subIssues.ts`; a sub-issue in another repository keeps its owner/name, a URL that is not github.com is dropped). `SubIssues.tsx` reads them when the popup opens and gives each its column from `state.board` (or the repository view) by `ticketKey`, else Open / Closed (`subIssueRows`); "done" is closed, as GitHub counts it (`subIssueProgress`). Nothing about sub-issues enters `AppState`.
+- Workflow loops: `workflowLoopHistory(sid, loopId)` (`workflow:loopHistory`: every round and the
+  last 64 KB of the progress file), `workflowLoopStop` (`workflow:loopStop`) and `workflowLoopMore`
+  (`workflow:loopMore`), invokes, `remote` in `DECK_ACCESS`. `LoopStore` checks the session id
+  (`validSessionId`) and the loop id (`^[a-z0-9-]{1,24}$`) and refuses a stop of a loop that is not
+  open and more for one not at a limit; the web cannot type anything: the nudge is MasterDeck's text.
 - Repository view: `boardRepos(repos)` (`board:repos`, fire-and-forget, `remote` in `DECK_ACCESS`: it is a read, and main checks the list with `cleanRepos`).
 - Main registers handlers only via `IpcRegistry` (`reg.handle` / `reg.on`) so the browser bridge
   can `reg.call(ch, args)` the same function with a frozen `{remote: true}` event. `isRemote(e)`
@@ -965,7 +1101,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
-| Workflows, hooks | `flow.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
+| Workflows, hooks | `flow.ts`, `flowFrame.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
 | Notes | `notes.ts` (types, limits, `NOTE_ID`, `cleanNote`, `storedNote`, `incoming`), `noteEditor.ts` (`NoteEditor`: the editor's saves, switches and conflicts, without its screen) |
@@ -1036,6 +1172,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
 | `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, `ticket-links.json` |
 | `watches`, `schedules` | `Watches.info()` + `PrWatch.info()` (`pr:<url>` rows), transcripts |
+| `loops` | `LoopStore.views()` over `workflows/loops/<sid>.json` (3 per session, closed ones for 24 h, tail 1 KB) |
 | `sources`, `errors`, `missingBinaries`, `ghCache` | health of each poll, `readGhCacheStatus()` |
 | `settings`, `config`, `skills`, `hooks`, `statuslineInstalled`, `masterWorkspace` | `settings.json`, `~/.claude/master/config.json`, `syncSkills`, `hookStatus` |
 | `stoppedByRestart`, `restoring` | `running-sessions.json` |
@@ -1046,6 +1183,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
+| `mods` | the state callback, `modsNow()` over `ModsInstaller.status()`: whether MasterDeck's mods are installed in Claude Code, Claude Code's version, the mods' version, `prependNote`, `unavailable` |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -1064,6 +1202,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
+| `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
@@ -1072,7 +1211,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
-| `workflow.json`, `workflows/` | workflows (see above) |
+| `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |

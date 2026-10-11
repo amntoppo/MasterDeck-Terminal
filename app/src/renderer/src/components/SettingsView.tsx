@@ -7,6 +7,7 @@ import { deck, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
 import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
+import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 
 export type SettingsSection = Section
 type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
@@ -16,7 +17,7 @@ const SECTIONS: [Section, string][] = [
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
-  ['hooks', 'Hooks & skills'],
+  ['hooks', 'Hooks, mods & skills'],
   ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
   ['about', 'About'],
@@ -174,6 +175,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         </Field>
         <Field label="MasterDeck hook" hint="Permissions from Needs you, exact status, API errors, compactions and ticket context. Installed at launch (macOS and Linux).">
           <span className="ok">Managed by MasterDeck</span>
+        </Field>
+        <Field label="Mods" hint={`${MODS_ABOUT} An app update brings new mods; running sessions take them at a reload.`}>
+          <ModsPanel state={state} />
         </Field>
         <Field label="Skills" hint="The bundled skills, for use by hand. MasterDeck needs none of them.">
           <button className="btn" onClick={onSkills}>

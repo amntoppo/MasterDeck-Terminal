@@ -130,6 +130,10 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.workflowTriggerDelete, id),
   workflowDraftDiscard: () => ipcRenderer.invoke(CH.workflowDraftDiscard),
   workflowStatus: (sid) => ipcRenderer.invoke(CH.workflowStatus, sid),
+  workflowLoopHistory: (sid, id) =>
+    ipcRenderer.invoke(CH.workflowLoopHistory, sid, id),
+  workflowLoopStop: (sid, id) => ipcRenderer.invoke(CH.workflowLoopStop, sid, id),
+  workflowLoopMore: (sid, id) => ipcRenderer.invoke(CH.workflowLoopMore, sid, id),
   sessionWorkflowGet: (sid) => ipcRenderer.invoke(CH.sessionWorkflowGet, sid),
   sessionWorkflowSave: (sid, steps, from) =>
     ipcRenderer.invoke(CH.sessionWorkflowSave, sid, steps, from ?? null),
@@ -141,6 +145,9 @@ const api: DeckApi = {
   peersSet: (a, b, on) => ipcRenderer.invoke(CH.peersSet, a, b, on),
   peersSync: (key) => ipcRenderer.invoke(CH.peersSync, key),
   modSet: (key, mod, on) => ipcRenderer.invoke(CH.modSet, key, mod, on),
+  modsInstall: () => ipcRenderer.invoke(CH.modsInstall),
+  modsUninstall: () => ipcRenderer.invoke(CH.modsUninstall),
+  modsReload: () => ipcRenderer.invoke(CH.modsReload),
   setBoardOpen: (open) => ipcRenderer.send(CH.boardOpen, open),
   boardRepos: (repos) => ipcRenderer.send(CH.boardRepos, repos),
   boardCreatePlan: (account) => ipcRenderer.invoke(CH.boardCreatePlan, account),

@@ -15,6 +15,7 @@ import {
   getSmoothStepPath,
   Handle,
   MarkerType,
+  NodeResizeControl,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -52,7 +53,22 @@ import {
   findMonitor,
   monitorList,
   type MonitorDef,
+  newLoop,
 } from "@shared/flow";
+import {
+  edgeKindFrom,
+  frameArrow,
+  frameCriterion,
+  frameEdges,
+  frameHeader,
+  frameLive,
+  framedEdgeKinds,
+  membersAfterDrop,
+  moveFrame,
+  refitFrame,
+  type LoopNode,
+} from "@shared/flowFrame";
+import type { LoopView } from "@shared/loops";
 
 export type Skill = { name: string; description: string; source?: string };
 
@@ -93,7 +109,8 @@ type Drop =
   | { kind: "skill"; skill: string }
   | { kind: "instruction" }
   | { kind: "notify" }
-  | { kind: "monitor"; monitor: string };
+  | { kind: "monitor"; monitor: string }
+  | { kind: "loop" };
 
 /** The palette's default width (px). */
 const PAL_W = 176;
@@ -139,6 +156,8 @@ function makeNode(d: Drop, x: number, y: number): FlowNode {
         args: "",
         instructions: "",
       };
+    case "loop":
+      return newLoop(id, x, y);
   }
 }
 
@@ -150,6 +169,10 @@ type BlockData = {
   problem: string | null;
   readOnly: boolean;
   onDelete: (id: string) => void;
+  /** A session's run of this loop (its own workflow only). */
+  live?: LoopView;
+  /** A frame's new size, while its corner is dragged and at the end (`done`). */
+  onResize?: (id: string, w: number, h: number, done: boolean) => void;
 };
 
 const KIND_LABEL: Record<FlowNode["kind"], string> = {
@@ -159,6 +182,7 @@ const KIND_LABEL: Record<FlowNode["kind"], string> = {
   notify: "Notify",
   builtin: "Built-in",
   monitor: "Monitor",
+  loop: "Loop",
 };
 
 function blockTitle(
@@ -181,6 +205,8 @@ function blockTitle(
       return (
         findMonitor(n.monitor, mons)?.name ?? `Unknown monitor ${n.monitor}`
       );
+    case "loop":
+      return n.name;
   }
 }
 
@@ -198,6 +224,7 @@ function blockSub(n: FlowNode): string | null {
   if (n.kind === "builtin") return "run by MasterDeck";
   if (n.kind === "monitor")
     return `watches${n.args.trim() ? ` · ${n.args.trim()}` : ""}${n.instructions.trim() ? ` · ${n.instructions.trim()}` : ""}`;
+  if (n.kind === "loop") return `until ${frameCriterion(n)}`;
   return null;
 }
 
@@ -239,10 +266,70 @@ const Block = memo(function Block({
   );
 });
 
+/**
+ * A Loop frame: a box drawn under its members (they are blocks of their own, kept inside it by
+ * `flowFrame`), dragged by its header, resized from its bottom-right corner. Arrows enter it on
+ * the left and leave on the right (when met / at the limit / then).
+ */
+const Frame = memo(function Frame({
+  data,
+  selected,
+}: NodeProps<Node<BlockData>>) {
+  const n = data.node as LoopNode;
+  const v = data.live;
+  return (
+    <div
+      className={`ff ${selected ? "sel" : ""} ${data.problem ? "bad" : ""} ${v?.state === "open" ? "live" : ""}`}
+    >
+      <Handle type="target" position={Position.Left} className="fh" />
+      <div className="ff-head" title={data.problem ?? frameHeader(n)}>
+        <span className="ff-title">
+          {frameHeader(n)}
+          {v && <span className={`ff-live st-${v.state}`}> · {frameLive(v)}</span>}
+        </span>
+        {data.problem && <span className="fb-warn">!</span>}
+        {!data.readOnly && (
+          <button
+            className="fb-x nodrag"
+            title="Remove the loop (its blocks stay)"
+            aria-label="Remove loop"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDelete(n.id);
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {!n.members.length && (
+        <div className="ff-empty">Drag blocks in here to repeat them</div>
+      )}
+      {!data.readOnly && (
+        <NodeResizeControl
+          className="ff-resize"
+          position="bottom-right"
+          minWidth={200}
+          minHeight={120}
+          onResize={(_, p) =>
+            data.onResize?.(n.id, Math.round(p.width), Math.round(p.height), false)
+          }
+          onResizeEnd={(_, p) =>
+            data.onResize?.(n.id, Math.round(p.width), Math.round(p.height), true)
+          }
+        />
+      )}
+      <Handle type="source" position={Position.Right} className="fh" />
+    </div>
+  );
+});
+
 const EDGE_COLOR: Record<EdgeKind, string> = {
   then: "var(--accent)",
   ok: "var(--green)",
   fail: "var(--red)",
+  met: "var(--green)",
+  limit: "var(--amber)",
 };
 
 /** An arrow: "then" solid; outcome arrows dashed, green or red, with their label. */
@@ -278,7 +365,7 @@ function Arrow(p: EdgeProps<Edge<{ kind: EdgeKind }>>) {
   );
 }
 
-const nodeTypes = { block: Block };
+const nodeTypes = { block: Block, frame: Frame };
 const edgeTypes = { arrow: Arrow };
 
 interface Props {
@@ -292,6 +379,8 @@ interface Props {
   extraMonitors?: MonitorDef[];
   /** Shown above the canvas on the right (Save state, buttons). */
   toolbar?: React.ReactNode;
+  /** A session's loops (its own workflow): their frames show the round they are at. */
+  loops?: LoopView[];
 }
 
 /**
@@ -316,6 +405,7 @@ function Editor({
   toolbar,
   extraTriggers = [],
   extraMonitors = [],
+  loops,
 }: Props) {
   const [flow, setFlowRaw] = useState<Flow>(initial);
   const [sel, setSel] = useState<{ type: "node" | "edge"; id: string } | null>(
@@ -356,8 +446,15 @@ function Editor({
   const remove = useCallback(
     (ids: string[]) => {
       const gone = new Set(ids);
+      // A removed frame leaves its blocks; a removed block leaves its frame.
       setFlow((f) => ({
-        nodes: f.nodes.filter((n) => !gone.has(n.id)),
+        nodes: f.nodes
+          .filter((n) => !gone.has(n.id))
+          .map((n) =>
+            n.kind === "loop" && n.members.some((m) => gone.has(m))
+              ? { ...n, members: n.members.filter((m) => !gone.has(m)) }
+              : n,
+          ),
         edges: f.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to)),
       }));
       setSel((s) => (s && gone.has(s.id) ? null : s));
@@ -365,28 +462,58 @@ function Editor({
     [setFlow],
   );
 
+  // A frame's corner dragged: its size, and at the end the blocks now in it.
+  const resize = useCallback(
+    (id: string, w: number, h: number, done: boolean) =>
+      setFlow((f) => {
+        const next = {
+          ...f,
+          nodes: f.nodes.map((n) =>
+            n.id === id && n.kind === "loop" ? { ...n, w, h } : n,
+          ),
+        };
+        return done ? refitFrame(next, id) : next;
+      }),
+    [setFlow],
+  );
   const nodes: Node<BlockData>[] = useMemo(
     () =>
-      flow.nodes.map((n) => ({
-        id: n.id,
-        type: "block",
-        position: { x: n.x, y: n.y },
-        selected: sel?.type === "node" && sel.id === n.id,
-        data: {
-          node: n,
-          extra: extraTriggers,
-          mons: extraMonitors,
-          problem: problemOf.get(n.id) ?? null,
-          readOnly: !!readOnly,
-          onDelete: (id: string) => remove([id]),
-        },
-      })),
+      // Frames first: drawn under the blocks in them.
+      [...flow.nodes]
+        .sort((a, b) => Number(b.kind === "loop") - Number(a.kind === "loop"))
+        .map((n) => ({
+          id: n.id,
+          type: n.kind === "loop" ? "frame" : "block",
+          position: { x: n.x, y: n.y },
+          ...(n.kind === "loop"
+            ? {
+                width: n.w,
+                height: n.h,
+                zIndex: -1,
+                dragHandle: ".ff-head",
+              }
+            : {}),
+          selected: sel?.type === "node" && sel.id === n.id,
+          data: {
+            node: n,
+            extra: extraTriggers,
+            mons: extraMonitors,
+            problem: problemOf.get(n.id) ?? null,
+            readOnly: !!readOnly,
+            onDelete: (id: string) => remove([id]),
+            ...(n.kind === "loop"
+              ? { live: loops?.find((v) => v.id === n.id), onResize: resize }
+              : {}),
+          },
+        })),
     [
       flow.nodes,
       sel,
       problemOf,
       readOnly,
       remove,
+      resize,
+      loops,
       extraTriggers,
       extraMonitors,
     ],
@@ -423,20 +550,49 @@ function Editor({
         .map((c) => c.id);
       if (removed.length) remove(removed);
       if (moves.size)
-        setFlow((f) => ({
-          ...f,
-          nodes: f.nodes.map((n) =>
-            moves.has(n.id)
-              ? {
-                  ...n,
-                  x: Math.round(moves.get(n.id)!.x),
-                  y: Math.round(moves.get(n.id)!.y),
-                }
-              : n,
-          ),
-        }));
+        setFlow((f) => {
+          // A frame moves its members with it; a block moved itself (selected along with its
+          // frame) then goes where it was dragged.
+          let next = f;
+          for (const n of f.nodes)
+            if (n.kind === "loop" && moves.has(n.id))
+              next = moveFrame(
+                next,
+                n.id,
+                Math.round(moves.get(n.id)!.x) - n.x,
+                Math.round(moves.get(n.id)!.y) - n.y,
+              );
+          return {
+            ...next,
+            nodes: next.nodes.map((n) =>
+              moves.has(n.id) && n.kind !== "loop"
+                ? {
+                    ...n,
+                    x: Math.round(moves.get(n.id)!.x),
+                    y: Math.round(moves.get(n.id)!.y),
+                  }
+                : n,
+            ),
+          };
+        });
     },
     [remove, setFlow],
+  );
+  // A block dropped in a frame joins it, dragged out it leaves; what may not be in one goes back.
+  const onNodeDragStop = useCallback(
+    (_: unknown, _node: Node, dragged: Node[]) => {
+      let next = flow;
+      let note: string | null = null;
+      for (const d of dragged) {
+        const r = membersAfterDrop(next, d.id);
+        next = r.flow;
+        note = r.note ?? note;
+      }
+      if (next !== flow) setFlow(next);
+      if (note) flash(note);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [flow, setFlow],
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -457,27 +613,23 @@ function Editor({
   const connect = useCallback(
     (c: Connection) => {
       if (!c.source || !c.target || c.source === c.target) return;
-      const target = flow.nodes.find((n) => n.id === c.target);
+      // An arrow into a block in a loop enters the loop; one out of it must stay inside.
+      const fa = frameArrow(flow, c.source, c.target);
+      if ("refuse" in fa) return flash(fa.refuse);
+      const { from, to } = fa;
+      const target = flow.nodes.find((n) => n.id === to);
       if (target?.kind === "trigger")
         return flash("A trigger starts a workflow: nothing points into it");
-      if (flow.edges.some((e) => e.from === c.source && e.to === c.target))
-        return;
-      if (makesCycle(flow, c.source, c.target))
-        return flash("That arrow would make a loop");
-      const fromTrigger =
-        flow.nodes.find((n) => n.id === c.source)?.kind === "trigger";
-      const kind: EdgeKind = fromTrigger ? "then" : arrowKind;
+      if (flow.edges.some((e) => e.from === from && e.to === to)) return;
+      if (makesCycle(flow, from, to))
+        return flash("That arrow would make a cycle");
+      const kind = edgeKindFrom(
+        flow.nodes.find((n) => n.id === from)?.kind,
+        arrowKind,
+      );
       setFlow((f) => ({
         ...f,
-        edges: [
-          ...f.edges,
-          {
-            id: edgeId(c.source!, c.target!),
-            from: c.source!,
-            to: c.target!,
-            kind,
-          },
-        ],
+        edges: [...f.edges, { id: edgeId(from, to), from, to, kind }],
       }));
     },
     [flow, arrowKind, setFlow],
@@ -501,7 +653,7 @@ function Editor({
       y = at.y - 30;
     } else if (after) {
       const kids = flow.edges.filter((e) => e.from === after.id).length;
-      x = after.x + 260;
+      x = after.x + (after.kind === "loop" ? after.w + 70 : 260);
       y = after.y + kids * 100;
     } else {
       x =
@@ -511,16 +663,28 @@ function Editor({
         110;
     }
     const n = makeNode(d, Math.round(x), Math.round(y));
-    const kind: EdgeKind = after?.kind === "trigger" ? "then" : arrowKind;
-    setFlow((f) => ({
-      nodes: [...f.nodes, n],
-      edges: after
-        ? [
-            ...f.edges,
-            { id: edgeId(after.id, n.id), from: after.id, to: n.id, kind },
-          ]
-        : f.edges,
-    }));
+    // Dropped in a frame, it joins it; a new frame dropped over blocks takes them in.
+    const placed = membersAfterDrop(
+      { ...flow, nodes: [...flow.nodes, n] },
+      n.id,
+    );
+    let next = placed.flow;
+    if (placed.note) flash(placed.note);
+    const fa = after && frameArrow(next, after.id, n.id);
+    if (fa && !("refuse" in fa) && !makesCycle(next, fa.from, fa.to))
+      next = {
+        ...next,
+        edges: [
+          ...next.edges,
+          {
+            id: edgeId(fa.from, fa.to),
+            from: fa.from,
+            to: fa.to,
+            kind: edgeKindFrom(after!.kind, arrowKind),
+          },
+        ],
+      };
+    setFlow(frameEdges(next));
     setSel({ type: "node", id: n.id });
     setTimeout(
       () =>
@@ -619,17 +783,20 @@ function Editor({
               role="radiogroup"
               aria-label="Kind of new arrows"
             >
-              {(["then", "ok", "fail"] as EdgeKind[]).map((k) => (
+              {/* From a selected frame the outcome kinds read "when met" / "at the limit". */}
+              {framedEdgeKinds(selNode?.kind).map((k) => (
                 <button
                   key={k}
                   role="radio"
-                  aria-checked={arrowKind === k}
-                  className={`${arrowKind === k ? "on" : ""} k-${k}`}
-                  onClick={() => setArrowKind(k)}
+                  aria-checked={edgeKindFrom(selNode?.kind, arrowKind) === k}
+                  className={`${edgeKindFrom(selNode?.kind, arrowKind) === k ? "on" : ""} k-${k}`}
+                  onClick={() => setArrowKind(edgeKindFrom("skill", k))}
                   title={
                     k === "then"
                       ? "Do the next block after this one"
-                      : `Follow this arrow ${EDGE_LABEL[k]} (outcome arrows start from an action, not a trigger)`
+                      : k === "met" || k === "limit"
+                        ? `Leave the loop this way ${EDGE_LABEL[k]}`
+                        : `Follow this arrow ${EDGE_LABEL[k]} (outcome arrows start from an action, not a trigger; from a loop they read "when met" / "at the limit")`
                   }
                 >
                   {EDGE_LABEL[k]}
@@ -687,6 +854,8 @@ function Editor({
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={readOnly ? undefined : onNodesChange}
+            onNodeDragStop={readOnly ? undefined : onNodeDragStop}
+            elevateNodesOnSelect={false}
             onEdgesChange={readOnly ? undefined : onEdgesChange}
             onConnect={readOnly ? undefined : connect}
             onPaneClick={() => setSel(null)}
@@ -727,9 +896,8 @@ function Editor({
               ) : selEdge ? (
                 <EdgeForm
                   edge={selEdge}
-                  fromTrigger={
-                    flow.nodes.find((n) => n.id === selEdge.from)?.kind ===
-                    "trigger"
+                  fromKind={
+                    flow.nodes.find((n) => n.id === selEdge.from)?.kind
                   }
                   onKind={(k) => setEdgeKind(selEdge.id, k)}
                   onDelete={() => (
@@ -854,6 +1022,12 @@ function Palette({
         "Notify me",
         "fp-notify",
         "A desktop notification (after Needs you or Idle)",
+      )}
+      {item(
+        { kind: "loop" },
+        "Loop",
+        "fp-loop",
+        "Repeat blocks until a check passes or a limit is hit",
       )}
       {monitorList().length > 0 && (
         <>
@@ -1146,6 +1320,7 @@ function NodeForm({
           using this workflow; its hook then skips them.
         </div>
       )}
+      {n.kind === "loop" && <LoopForm node={n} onChange={onChange} />}
       <div className="meta fs-tip">
         Drag from the dot on the right of a block to another block to add an
         arrow. Select a block or arrow and press Delete to remove it.
@@ -1154,17 +1329,197 @@ function NodeForm({
   );
 }
 
+/** A number field kept in range (an empty or bad entry falls back to `dflt`). */
+function NumField({
+  value,
+  min,
+  max,
+  dflt,
+  onChange,
+  label,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  dflt: number;
+  onChange: (n: number) => void;
+  label: string;
+}) {
+  return (
+    <input
+      className="fs-input"
+      type="number"
+      min={min}
+      max={max}
+      aria-label={label}
+      value={value}
+      onChange={(e) => {
+        const v = Number(e.target.value);
+        onChange(
+          Number.isFinite(v) && e.target.value !== ""
+            ? Math.max(min, Math.min(max, Math.round(v)))
+            : dflt,
+        );
+      }}
+    />
+  );
+}
+
+/** A Loop frame's settings: its name, what ends it, and its limits. */
+function LoopForm({
+  node: n,
+  onChange,
+}: {
+  node: LoopNode;
+  onChange: (p: Partial<FlowNode>) => void;
+}) {
+  const check = (p: Partial<LoopNode["check"]>) =>
+    onChange({ check: { ...n.check, ...p } } as Partial<FlowNode>);
+  const limits = (p: Partial<LoopNode["limits"]>) =>
+    onChange({ limits: { ...n.limits, ...p } } as Partial<FlowNode>);
+  const mode = !n.check.output
+    ? "exit"
+    : n.check.outputMode === "no-match"
+      ? "no-match"
+      : "match";
+  return (
+    <>
+      <div className="meta">
+        The session repeats the blocks inside the frame. Each time it finishes
+        a turn, MasterDeck checks whether the loop is done; until it is, the
+        session can't end its turn.
+      </div>
+      <label>Name</label>
+      <input
+        className="fs-input"
+        value={n.name}
+        maxLength={60}
+        placeholder="e.g. Fix the tests"
+        onChange={(e) => onChange({ name: e.target.value } as Partial<FlowNode>)}
+      />
+      <label>Check command</label>
+      <input
+        className="fs-input mono"
+        value={n.check.command}
+        maxLength={500}
+        placeholder="e.g. npm test (empty: no command)"
+        onChange={(e) => check({ command: e.target.value })}
+      />
+      {n.check.command.trim() && (
+        <>
+          <label>Passes when</label>
+          <select
+            className="fsel full"
+            value={mode}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "exit") check({ output: "", outputMode: "match" });
+              else
+                check({
+                  output: n.check.output || "PASS",
+                  outputMode: v === "no-match" ? "no-match" : "match",
+                });
+            }}
+          >
+            <option value="exit">it exits with code 0</option>
+            <option value="match">its output matches</option>
+            <option value="no-match">its output no longer matches</option>
+          </select>
+          {mode !== "exit" && (
+            <input
+              className="fs-input mono"
+              value={n.check.output}
+              maxLength={300}
+              aria-label="Output pattern"
+              placeholder="A regular expression"
+              onChange={(e) => check({ output: e.target.value })}
+            />
+          )}
+          <label>Time limit for the check (minutes)</label>
+          <NumField
+            label="Time limit for the check"
+            value={n.check.timeoutMin}
+            min={1}
+            max={9}
+            dflt={5}
+            onChange={(v) => check({ timeoutMin: v })}
+          />
+        </>
+      )}
+      <label className="fs-check">
+        <input
+          type="checkbox"
+          checked={n.agentDone.on}
+          onChange={(e) =>
+            onChange({
+              agentDone: { ...n.agentDone, on: e.target.checked },
+            } as Partial<FlowNode>)
+          }
+        />
+        Agent says it's done
+      </label>
+      {n.agentDone.on && (
+        <textarea
+          className="fs-text"
+          value={n.agentDone.goal}
+          maxLength={1000}
+          aria-label="Goal"
+          placeholder='The goal, e.g. "every page loads without console errors". The session ends its turn with a line starting LOOP DONE: when it has reached it.'
+          onChange={(e) =>
+            onChange({
+              agentDone: { ...n.agentDone, goal: e.target.value },
+            } as Partial<FlowNode>)
+          }
+        />
+      )}
+      <label>Max iterations</label>
+      <NumField
+        label="Max iterations"
+        value={n.limits.iterations}
+        min={1}
+        max={100}
+        dflt={10}
+        onChange={(v) => limits({ iterations: v })}
+      />
+      <label>Max minutes (0: no limit)</label>
+      <NumField
+        label="Max minutes"
+        value={n.limits.minutes}
+        min={0}
+        max={1440}
+        dflt={0}
+        onChange={(v) => limits({ minutes: v })}
+      />
+      <label>Stop after this many rounds with no progress (0: off)</label>
+      <NumField
+        label="Rounds with no progress"
+        value={n.limits.stall}
+        min={0}
+        max={10}
+        dflt={0}
+        onChange={(v) => limits({ stall: v === 1 ? 2 : v })}
+      />
+      <div className="meta">
+        Draw arrows out of the frame with <b>when met</b> and{" "}
+        <b>at the limit</b> (pick them in New arrows while the loop is
+        selected). Stop loop in the session's Details ends a running loop.
+      </div>
+    </>
+  );
+}
+
 function EdgeForm({
   edge,
-  fromTrigger,
+  fromKind,
   onKind,
   onDelete,
 }: {
   edge: { kind: EdgeKind };
-  fromTrigger: boolean;
+  fromKind: FlowNode["kind"] | undefined;
   onKind: (k: EdgeKind) => void;
   onDelete: () => void;
 }) {
+  const fromTrigger = fromKind === "trigger";
   return (
     <div className="fs-form">
       <div className="fs-head">
@@ -1176,7 +1531,7 @@ function EdgeForm({
       </div>
       <label>Follow it</label>
       <div className="seg flow-kinds vertical">
-        {(["then", "ok", "fail"] as EdgeKind[]).map((k) => (
+        {framedEdgeKinds(fromKind).map((k) => (
           <button
             key={k}
             className={`${edge.kind === k ? "on" : ""} k-${k}`}
@@ -1190,7 +1545,9 @@ function EdgeForm({
       <div className="meta">
         {fromTrigger
           ? 'Arrows from a trigger start the plan: always "then".'
-          : "Outcome arrows: the session follows the one that matches how the step went. Several arrows of the same kind run side by side."}
+          : fromKind === "loop"
+            ? 'Arrows out of a loop: "when met" is followed once its criterion is met, "at the limit" when a limit stopped it, "then" either way.'
+            : "Outcome arrows: the session follows the one that matches how the step went. Several arrows of the same kind run side by side."}
       </div>
     </div>
   );

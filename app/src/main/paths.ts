@@ -26,6 +26,13 @@ export interface Paths {
   skillsDir: string
   /** The shared config (GitHub owner, board, statuses, workspace). */
   config: string
+  /** Claude Code mods shipped with the app (mods/; copied into modsDir). */
+  bundledMods: string
+  /** MasterDeck's copy of its mods: the local-folder marketplace Claude Code reads. */
+  modsDir: string
+  /** The settings file `claude plugin` writes (Claude Code's own, or CLAUDE_CONFIG_DIR's); null when
+   * MasterDeck's settings are kept apart without CLAUDE_CONFIG_DIR: the CLI would write the real one. */
+  modsSettings: string | null
 }
 
 /**
@@ -62,5 +69,12 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
     bundledSkills,
     skillsDir,
     config: process.env.MASTER_CONFIG || join(masterHome, 'config.json'),
+    bundledMods: packaged ? join(resourcesPath, 'mods') : resolve(appRoot, '..', 'mods'),
+    modsDir: join(home, 'mods'),
+    modsSettings: process.env.CLAUDE_CONFIG_DIR
+      ? join(process.env.CLAUDE_CONFIG_DIR, 'settings.json')
+      : claudeSettings === join(h, '.claude', 'settings.json')
+        ? claudeSettings
+        : null,
   }
 }
