@@ -424,6 +424,31 @@ export function webState<T extends { meetingLive?: MeetingLive | null }>(state: 
   return { ...state, meetingLive: { ...live, offer: null, mic: live.mic ? { ...live.mic, app: null } : null } }
 }
 
+/**
+ * The Record popout's mic line. `settings`: the line asks for Settings → Meetings (Accessibility).
+ * A web tab has no app name (webState): it says "the meeting app".
+ */
+export function micLine(mic: MicLive | null | undefined): { text: string; settings: boolean } | null {
+  if (!mic) return null
+  const say = (text: string, settings = false) => ({ text, settings })
+  if (mic.manualOff) return say('Mic: off in the recording.')
+  if (mic.mode === 'always') return say('Mic: always recorded.')
+  const app = mic.app ?? 'the meeting app'
+  switch (mic.reason) {
+    case 'not-trusted':
+      return say('Mic: recorded. Allow Accessibility in Settings → Meetings to follow your mute.', true)
+    case 'no-app':
+      return say('Mic: recorded. No meeting app found.')
+    case 'unreadable':
+      return say(`Mic: recorded. Can't see your mute in ${app}.`)
+    case 'no-helper':
+      return say('Mic: recorded. The mute reader is missing; reinstall MasterDeck.')
+  }
+  if (mic.state === 'muted') return say(`Mic: muted in ${app} — not recorded`)
+  if (mic.state === 'unmuted') return say(`Mic: on in ${app}`)
+  return say('Mic: recorded.')
+}
+
 /** Time recorded so far: frozen while paused. */
 export const recordedMs = (live: MeetingLive, now: number): number => (live.paused || live.since === null ? live.elapsed : Math.max(0, now - live.since))
 

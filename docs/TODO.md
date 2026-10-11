@@ -694,12 +694,34 @@ OPERATIONS, "Meetings: …".
 - **Match quality is unmeasured**: no real meeting has gone through `claude -p` yet; precision of
   the notes, the part size (about 100 000 characters) and the candidate cap (200) are guesses.
 
+### The mic follows the meeting app's mute (Plan M): open points (2026-10-12)
+
+Plan M in the backend repo (`docs/superpowers/plans/2026-10-12-plan-m-meetings-mute.md`);
+ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
+
+- **The apps' real labels are unverified.** md-mute's rules for Zoom, Teams, Webex and Google Meet
+  (in a browser) were written from documentation, not read from a real call; the first real check
+  is the user's, on the installed app.
+- **Localized meeting apps read unknown**: the rules match English labels (ASCII prefixes), so a
+  Zoom in another language keeps the mic (recorded), as unknown always does.
+- **Whether the Accessibility grant to MasterDeck reaches md-mute** (TCC's responsible process for a
+  helper the app spawns) is unverified; if not, the popout says "Allow Accessibility" for ever.
+- **Allow again after each update**: the ad-hoc signature changes with every build, so macOS drops
+  the Accessibility grant (as the other permissions); a Developer ID signature fixes it.
+- **A dead md-mute is not restarted** until the next resume or recording: the mic is recorded
+  ("The mute reader is missing") until then.
+- **Partly gated chunks can still give whisper filler**: a chunk that is all zeros skips whisper,
+  but one muted for most of its 30 seconds is transcribed and may get a made-up line.
+- **The popout's mic line and switch were not seen on screen** (they show only while recording,
+  which no test or agent may start): typecheck and `micLine`'s tests only.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, and the UI commit after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
 | Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |

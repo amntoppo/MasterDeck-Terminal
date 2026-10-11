@@ -419,6 +419,17 @@ buttons; it does not go through macOS window drag regions.
   audio, search), Janitor's Meetings section. Not checked: any real capture or permission prompt, a
   real transcription with a downloaded model, a real `claude -p` match, Zoom's and Webex's real
   process names in a call; Windows is not supported. Open points: TODO ("Meetings (#102): open points").
+  **The mic follows the meeting app's mute** (Plan M, 2026-10-12; fc97904, a321ec6, 0466563 and
+  the UI commit after them, same branch, not installed yet): `md-mute` reads the meeting app's mute
+  through Accessibility while recording, a gate keeps your mic out while muted (unknown keeps it),
+  Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility** row, the
+  Record popout's mic line (`micLine` in `shared/meetings.ts`) and **Mic off in the recording**, a
+  struck mic on the rail's red time. Checked: typecheck, vitest (186 files passed, 2 skipped; 2247
+  tests passed, 4 skipped), `npm run build`, and Settings
+  → Meetings' new rows in the isolated app after consent (no Allow pressed). Not checked: anything
+  while recording (the popout's line and switch, the rail mark: typecheck and `micLine`'s tests
+  only), the Accessibility prompt, whether its grant reaches the helper, any real meeting app's
+  labels. Open points: TODO ("The mic follows the meeting app's mute").
 
 - **Workflow agent loops (#82)** are built on branch `worktree-MasterDeck-Terminal-82-agent-loops`
   (local `main` merged in at 9e00e29, so it also carries the mods of #86; pushed as PR #101, not

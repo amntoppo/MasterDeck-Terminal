@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MEETING_TITLE_MAX, recordClock as clock, recordedMs, type MeetingLive, type RecordAnswer } from '@shared/meetings'
+import { MEETING_TITLE_MAX, micLine, recordClock as clock, recordedMs, type MeetingLive, type RecordAnswer } from '@shared/meetings'
 import { offerText } from '@shared/meetingApps'
 import { deck } from '../deck'
 import { can } from '../web'
@@ -20,6 +20,8 @@ interface Props {
 /**
  * The rail's Record item (spec §2): a title (optional) and Record; while recording, red with the
  * time, and Pause / Stop. Under it, every time: "Tell the others you are recording."
+ * While recording the popout also says what happens to your mic (micLine) and has the switch Mic
+ * off in the recording (meetings:micOff); the rail's red time gets a struck mic while it is out.
  * When a meeting app is in a call (live.offer), a chip asks "Zoom call: record it?" with Record
  * (the same start as the popout's) and Not now; nothing records without that press.
  */
@@ -71,7 +73,11 @@ export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
 
   const offer = !recording && agreed ? (live?.offer ?? null) : null
   const time = live && recording ? clock(recordedMs(live, now)) : ''
-  const label = recording ? `${live?.paused ? 'Paused' : 'Recording'} ${time}` : 'Record meeting'
+  const mic = recording ? (live?.mic ?? null) : null
+  const line = micLine(mic)
+  // Paused already says nothing goes in: the struck mic is for a recording that runs without you.
+  const micOut = !!mic && !mic.kept && !live?.paused
+  const label = recording ? `${live?.paused ? 'Paused' : 'Recording'} ${time}${micOut ? ', mic off' : ''}` : 'Record meeting'
   return (
     <div className="rec" ref={box}>
       <button
@@ -83,7 +89,14 @@ export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
       >
         {recording ? (
           <>
-            <span className={`rec-dot ${live?.paused ? 'paused' : ''}`} />
+            <span className="rec-marks">
+              <span className={`rec-dot ${live?.paused ? 'paused' : ''}`} />
+              {micOut && (
+                <svg className="rec-micoff" width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} role="img" aria-label="Mic off in the recording">
+                  <path d="M9 9V5a3 3 0 0 1 6 0v6M5 11a7 7 0 0 0 11.5 5.4M19 11a7 7 0 0 1-.4 2.3M12 18v3M3 3l18 18" />
+                </svg>
+              )}
+            </span>
             <span className="rec-time">{time}</span>
           </>
         ) : (
@@ -108,6 +121,38 @@ export function RecordMeeting({ live, agreed, open, setOpen, onSetup }: Props) {
                   Stop
                 </button>
               </div>
+              {mic && line && (
+                <>
+                  <p className={`rec-mic ${mic.kept ? '' : 'off'}`} role="status">
+                    {line.text}
+                    {line.settings && (
+                      <>
+                        {' '}
+                        <button
+                          className="link-btn"
+                          onClick={() => {
+                            setOpen(false)
+                            onSetup()
+                          }}
+                        >
+                          Open Settings
+                        </button>
+                      </>
+                    )}
+                  </p>
+                  <label className="rec-switch">
+                    <span>Mic off in the recording</span>
+                    <button
+                      className={`switch ${mic.manualOff ? 'on' : ''}`}
+                      role="switch"
+                      aria-checked={mic.manualOff}
+                      aria-label="Mic off in the recording"
+                      disabled={busy}
+                      onClick={() => void act(() => deck().meetingsMicOff(!mic.manualOff))}
+                    />
+                  </label>
+                </>
+              )}
             </>
           ) : (
             <form

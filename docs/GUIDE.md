@@ -943,6 +943,16 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it:
   when the check heard nothing or the permission was refused, **Restart MasterDeck** does it (after
   asking; terminals in MasterDeck close, Claude sessions keep running).
+- **Your microphone:** **Follow the meeting app's mute** (the default) keeps your mic out of the
+  recording while the meeting app has you muted, and puts it back when you unmute. **Always
+  record** records it the whole time. When MasterDeck can't see the mute (Accessibility not
+  allowed, no meeting app found, a control it can't read), your mic is recorded, as with Always
+  record, and the Record popout says why.
+- **Accessibility** (shown with Follow): how MasterDeck reads the mute. It reads only the meeting
+  app's mute button, nothing else on screen, and only while a meeting is being recorded. **Allow**
+  brings up macOS's prompt the first time; after that it opens System Settings → Privacy & Security
+  → Accessibility, where you switch MasterDeck on. Like the other permissions, macOS may want it
+  allowed again after an update.
 - **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
   accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
   first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
@@ -978,6 +988,14 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
   until one is downloaded.
 - While recording, the button is red with the time recorded. Its popout has **Pause** / **Resume**
   and **Stop**; paused time is not recorded. macOS shows its own recording indicators too.
+- **Your mic while recording:** the popout has one line about it. "Mic: muted in Zoom — not
+  recorded" and "Mic: on in Zoom" while it follows your mute; "Mic: always recorded." with Always
+  record. When the mute can't be followed the line says your mic is recorded and why: Accessibility
+  not allowed (with **Open Settings**, to Settings → Meetings), no meeting app found, the mute not
+  visible in the app, or the mute reader missing (reinstall MasterDeck).
+- **Mic off in the recording** (a switch in the popout) keeps your mic out until you switch it back
+  or the recording ends, whatever the meeting app says; each new recording starts with the switch off.
+  While your mic is out of a running recording, the red time in the rail shows a struck mic.
 - One recording at a time. After 4 hours it stops by itself and says so. If the microphone goes
   away (unplugged, taken by another app), the recording stops and a notification says why.
 - Quitting MasterDeck or closing its window while recording asks first: **Keep recording**, or

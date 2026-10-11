@@ -1409,6 +1409,11 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .janitor-meetings-msg { font-size: 12px; margin: 0 0 8px; }
 .rec-offer { border-color: var(--amber); }
 .rec-msg { font-size: 11px; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
+.rec-marks { display: flex; align-items: center; gap: 3px; }
+.rec-micoff { color: var(--red); flex: none; }
+.rec-mic { font-size: 11px; color: var(--muted); margin: 8px 0 0; overflow-wrap: anywhere; }
+.rec-mic.off { color: var(--text); }
+.rec-switch { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 /* Two or more GitHub accounts: the account a session works as, at its top. */
 .pane-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; min-width: 0; }

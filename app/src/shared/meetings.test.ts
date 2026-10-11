@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   webState,
+  micLine,
+  type MicLive,
   DEFAULT_MEETINGS,
   keepMeetings,
   mediaAllowed,
@@ -131,5 +133,32 @@ describe('webState', () => {
 describe('privacyPane: Accessibility', () => {
   it('opens Privacy_Accessibility', () => {
     expect(privacyPane('accessibility', 'tap')).toBe('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+  })
+})
+
+describe('micLine', () => {
+  const mic = (p: Partial<MicLive>): MicLive => ({ mode: 'follow', app: 'Zoom', state: 'unknown', manualOff: false, kept: true, reason: null, ...p })
+  const text = (p: Partial<MicLive>) => micLine(mic(p))?.text
+
+  it('nothing while nothing records', () => {
+    expect(micLine(null)).toBeNull()
+    expect(micLine(undefined)).toBeNull()
+  })
+  it('follows the app: muted, on, and no app name on the web', () => {
+    expect(text({ state: 'muted', kept: false })).toBe('Mic: muted in Zoom — not recorded')
+    expect(text({ state: 'unmuted' })).toBe('Mic: on in Zoom')
+    expect(text({ state: 'muted', app: null })).toBe('Mic: muted in the meeting app — not recorded')
+    expect(text({ state: 'unknown' })).toBe('Mic: recorded.')
+  })
+  it('says why the mute is not known; only Accessibility points at Settings', () => {
+    expect(micLine(mic({ reason: 'not-trusted' }))).toEqual({ text: 'Mic: recorded. Allow Accessibility in Settings → Meetings to follow your mute.', settings: true })
+    expect(micLine(mic({ reason: 'no-app', app: null }))).toEqual({ text: 'Mic: recorded. No meeting app found.', settings: false })
+    expect(text({ reason: 'unreadable' })).toBe("Mic: recorded. Can't see your mute in Zoom.")
+    expect(text({ reason: 'no-helper' })).toBe('Mic: recorded. The mute reader is missing; reinstall MasterDeck.')
+  })
+  it('always mode and the switch come first', () => {
+    expect(text({ mode: 'always', state: 'unknown' })).toBe('Mic: always recorded.')
+    expect(text({ manualOff: true, kept: false, state: 'unmuted' })).toBe('Mic: off in the recording.')
+    expect(text({ manualOff: true, mode: 'always', kept: false })).toBe('Mic: off in the recording.')
   })
 })

@@ -218,6 +218,30 @@ export function MeetingsSetup({ settings, save }: { settings: Settings; save: (n
           </button>
         )}
       </Field>
+      <Field
+        label="Your microphone"
+        hint={
+          m.mic === 'follow'
+            ? "Muted in the meeting app, your mic stays out of the recording. If MasterDeck can't see the mute, it records your mic."
+            : 'Your mic is recorded the whole time, muted in the meeting app or not.'
+        }
+      >
+        <select className="input" aria-label="Your microphone" value={m.mic} onChange={(e) => setM({ mic: e.target.value === 'always' ? 'always' : 'follow' })}>
+          <option value="follow">Follow the meeting app's mute</option>
+          <option value="always">Always record</option>
+        </select>
+      </Field>
+      {m.mic === 'follow' && (
+        <Field label="Accessibility" hint="Reads only the meeting app's mute button. Nothing else on screen.">
+          <span className={info.accessibility === 'granted' ? 'ok' : 'muted'}>{STATUS[info.accessibility]}</span>
+          <span style={{ flex: 1 }} />
+          {info.accessibility !== 'granted' && (
+            <button className="btn" disabled={busy} onClick={() => void act(() => deck().meetingsPermission('accessibility'))}>
+              {info.accessibility === 'denied' || info.accessibility === 'restricted' ? 'Open System Settings' : 'Allow'}
+            </button>
+          )}
+        </Field>
+      )}
       <ModelRow />
       <Field label="Language" hint="What the meetings are spoken in. Automatic detection works for most; pick one when a meeting is in one language.">
         <select className="input" aria-label="Meeting language" value={m.language} onChange={(e) => setM({ language: e.target.value })}>
