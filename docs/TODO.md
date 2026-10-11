@@ -622,12 +622,26 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
   `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
 
+## Costs time filter: open points (2026-10-10, issue #88)
+
+- **Part hours are an even spread.** Costs are kept per clock hour, so Last 1/5/12 hours and a
+  custom range with minutes take a share of the hours they cut by time. Exact would need samples
+  finer than an hour in the cost book (it travels in `AppState`, so mind the bridge's size).
+- **A session first seen today** (MasterDeck closed while it worked) puts all it spent so far today
+  in the hour it was first seen; its transcript's tokens could spread it if they were priced.
+- **Hours older than 35 days are folded into days**: a custom range with times further back is
+  spread over the day.
+- **Not checked on Windows.** The installed app was only checked to start; the view itself was
+  checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
+  converted: new records are hourly, older days stay days.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
 | MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | branch `feat/app-icon` | — |
 | The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
 | Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |

@@ -8,7 +8,7 @@ import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
-import { fakeScreen, fixtureState } from './fixture'
+import { fakeScreen, fixtureCosts, fixtureState } from './fixture'
 
 type Fn = (...a: never[]) => unknown
 
@@ -56,7 +56,7 @@ function previewDeck(noBoard: boolean): DeckApi {
     searchHistory: () => [],
     janitor: () => [],
     standupCommits: () => [],
-    tokensByDay: () => ({}),
+    tokensByDay: () => fixtureCosts().tokens,
     workspaceRepos: () => repos,
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,

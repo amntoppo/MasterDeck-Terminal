@@ -2,7 +2,10 @@
 // Fictional org `acme`; nothing here comes from a real machine.
 import { DEFAULT_CONFIG, parseConfig } from '@shared/appConfig'
 import { DEFAULT_SETTINGS } from '@shared/settings'
+import type { CostBook } from '@shared/costs'
 import type { InboxEntry } from '@shared/inbox'
+import { hourOf } from '@shared/timeline'
+import type { TokensByDay } from '@shared/tokens'
 import type { AppState, Session } from '@shared/types'
 
 const now = Date.now()
@@ -98,6 +101,38 @@ const loose = (number: number, title: string, status: string, extra: Record<stri
   card(number, title, status, { project: null, derived: true as const, state: status === 'Done' ? ('CLOSED' as const) : ('OPEN' as const), closedAt: status === 'Done' ? new Date(now - 2 * 86400_000).toISOString() : null, ...extra })
 
 /** `noBoard` (?preview=noboard): the same account with repositories but no GitHub board. */
+/**
+ * Ten days of cost history for the Costs view: each session works some daytime hours (none three
+ * days ago, so a custom range there is empty), its cost kept per hour as recordCosts keeps it.
+ */
+export function fixtureCosts(): { book: CostBook; tokens: Record<string, TokensByDay> } {
+  const book: CostBook = {}
+  const tokens: Record<string, TokensByDay> = {}
+  const day0 = new Date(now)
+  day0.setHours(0, 0, 0, 0)
+  for (const s of SESSIONS.filter((x) => x.name !== 'master-agent')) {
+    const n = Number(s.sessionId.slice(-1))
+    let cost = 0
+    const days: Record<string, number> = {}
+    const toks: TokensByDay = {}
+    for (let d = 9; d >= 0; d--) {
+      if (d === 3) continue
+      for (let h = 8; h <= 20; h++) {
+        const t = day0.getTime() - d * 86_400_000 + h * 3_600_000
+        if (t > now || (h * 7 + d * 3 + n * 5) % 4 === 0) continue
+        const spent = ((h * 13 + d * 7 + n * 11) % 9) * 0.07 + 0.05
+        cost += spent
+        days[hourOf(t)] = Math.round(cost * 100) / 100
+        const k = Math.round(spent * 400_000)
+        toks[hourOf(t)] = { input: Math.round(k * 0.01), output: Math.round(k * 0.04), cacheWrite: Math.round(k * 0.1), cacheRead: Math.round(k * 0.85) }
+      }
+    }
+    book[s.sessionId] = { name: s.name, key: s.key, issue: s.issue, days }
+    tokens[s.sessionId] = toks
+  }
+  return { book, tokens }
+}
+
 export function fixtureState(noBoard = false): AppState {
   const master = SESSIONS.find((s) => s.name === 'master-agent')!
   // The board of the account, as `master config show` would give it (project 1).
@@ -216,7 +251,7 @@ export function fixtureState(noBoard = false): AppState {
     me: 'dev',
     settings: DEFAULT_SETTINGS,
     allStats: {},
-    costBook: {},
+    costBook: fixtureCosts().book,
     lastActivity: {},
     boardHistory: {},
     ghCache: null,

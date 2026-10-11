@@ -370,6 +370,12 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-10)
 
+- **Costs time filter** (issue #88) is merged to `main` (from branch
+  `worktree-MasterDeck-Terminal-88-costs-timeline`, not pushed) and installed locally (2026-10-12): presets and a custom range in the Costs view, costs and tokens kept
+  per local hour (`shared/timeline.ts`; ARCHITECTURE "The Costs time filter"). Checked: typecheck,
+  vitest, and the web preview (`/?preview` now has fixture cost history) at 1400 px and 390 px.
+  Open points are in TODO ("Costs time filter").
+
 - **masterdeck.dev** is its own repository, [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
   (deploy and search-engine notes in its README; OPERATIONS § Website). For search: structured data,
   IndexNow on deploy, and this repository's website field, topics, README and release notes link to
