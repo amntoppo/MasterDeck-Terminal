@@ -6,11 +6,12 @@ import { OFFER_POLL_MS } from '@shared/meetingApps'
 const electron = vi.hoisted(() => ({
   askForMediaAccess: vi.fn(async () => true),
   getMediaAccessStatus: vi.fn(() => 'not-determined'),
+  isTrustedAccessibilityClient: vi.fn((_prompt: boolean) => false),
   getSources: vi.fn(async () => []),
   openExternal: vi.fn(async () => {}),
 }))
 vi.mock('electron', () => ({
-  systemPreferences: { askForMediaAccess: electron.askForMediaAccess, getMediaAccessStatus: electron.getMediaAccessStatus },
+  systemPreferences: { askForMediaAccess: electron.askForMediaAccess, getMediaAccessStatus: electron.getMediaAccessStatus, isTrustedAccessibilityClient: electron.isTrustedAccessibilityClient },
   desktopCapturer: { getSources: electron.getSources },
   shell: { openExternal: electron.openExternal },
 }))
@@ -30,7 +31,7 @@ function offer(m: MeetingsSettings = agreed, platform = 'darwin', gate?: Promise
   let appsLoads = 0
   const offers: string[] = []
   let lives = 0
-  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null, mic: null }
   const starts: unknown[] = []
   const rec: RecorderLike & { recording: boolean } = {
     recording: false,
@@ -40,6 +41,7 @@ function offer(m: MeetingsSettings = agreed, platform = 'darwin', gate?: Promise
     stop: async () => ((rec.recording = false), { ok: true, live: rec.live() }),
     pause: async () => ({ ok: true, live: rec.live() }),
     probe: async () => false,
+    setMicGate: () => {},
   }
   const ps = vi.fn(async () => ZOOM)
   const ipc = new MeetingsIpc({

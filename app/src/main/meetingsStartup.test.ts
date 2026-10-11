@@ -9,11 +9,12 @@ import { DEFAULT_MEETINGS, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, type Mee
 const electron = vi.hoisted(() => ({
   askForMediaAccess: vi.fn(async () => true),
   getMediaAccessStatus: vi.fn((_kind: string) => 'not-determined'),
+  isTrustedAccessibilityClient: vi.fn((_prompt: boolean) => false),
   getSources: vi.fn(async () => []),
   openExternal: vi.fn(async () => {}),
 }))
 vi.mock('electron', () => ({
-  systemPreferences: { askForMediaAccess: electron.askForMediaAccess, getMediaAccessStatus: electron.getMediaAccessStatus },
+  systemPreferences: { askForMediaAccess: electron.askForMediaAccess, getMediaAccessStatus: electron.getMediaAccessStatus, isTrustedAccessibilityClient: electron.isTrustedAccessibilityClient },
   desktopCapturer: { getSources: electron.getSources },
   shell: { openExternal: electron.openExternal },
 }))
@@ -26,7 +27,7 @@ vi.mock('./meetings/gate', async (orig) => {
 import { guardSessions, MeetingsIpc, type MeetingsDeps, type PermissionSession, type RecorderLike } from './meetingsIpc'
 import type { MeetingNotice } from '@shared/meetings'
 
-const MEDIA_APIS = ['askForMediaAccess', 'getUserMedia', 'getDisplayMedia', 'desktopCapturer', 'getMediaAccessStatus']
+const MEDIA_APIS = ['askForMediaAccess', 'getUserMedia', 'getDisplayMedia', 'desktopCapturer', 'getMediaAccessStatus', 'isTrustedAccessibilityClient']
 
 function mainSources(dir = __dirname, ext = /\.ts$/): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -39,9 +40,11 @@ function mainSources(dir = __dirname, ext = /\.ts$/): string[] {
 /** A recorder that records nothing: what MeetingsIpc asks of it. */
 function fakeRecorder() {
   const calls: string[] = []
-  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: null, mic: null }
   const probeResult = { ok: false }
-  const rec: Omit<RecorderLike, 'recording'> & { recording: boolean; calls: string[]; probeResult: { ok: boolean } } = {
+  const gates: boolean[] = []
+  const rec: Omit<RecorderLike, 'recording'> & { recording: boolean; calls: string[]; gates: boolean[]; probeResult: { ok: boolean } } = {
+    gates,
     calls,
     probeResult,
     recording: false,
@@ -51,6 +54,7 @@ function fakeRecorder() {
     stop: async (why?: string) => (calls.push(`stop:${why ?? 'user'}`), { ok: true, live }),
     pause: async (p: unknown) => (calls.push(`pause:${String(p)}`), { ok: true, live }),
     probe: async () => (calls.push('probe'), probeResult.ok),
+    setMicGate: (on: boolean) => void gates.push(on),
   }
   return rec
 }
@@ -88,6 +92,7 @@ const remote = { remote: true }
 beforeEach(() => {
   vi.clearAllMocks()
   electron.getMediaAccessStatus.mockImplementation(() => 'not-determined')
+  electron.isTrustedAccessibilityClient.mockImplementation(() => false)
 })
 
 // A static `import … from` / `export … from` of main/meetings/ at any relative depth, over the
@@ -162,7 +167,7 @@ describe('the startup rule', () => {
   it('index.ts guards the sessions and wires the handlers without loading the gate', () => {
     const src = readFileSync(join(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('guardSessions(app, session,')
-    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause', 'meetingsRetry', 'meetingsRematch', 'meetingsList', 'meetingsGet', 'meetingsRename', 'meetingsDelete', 'meetingsDeleteAudio', 'meetingsExport', 'meetingsJanitor', 'meetingsClean', 'meetingsNotNow'])
+    for (const ch of ['meetingsSetup', 'meetingsConsent', 'meetingsPermission', 'meetingsModel', 'meetingsRestart', 'meetingsStart', 'meetingsStop', 'meetingsPause', 'meetingsMicOff', 'meetingsRetry', 'meetingsRematch', 'meetingsList', 'meetingsGet', 'meetingsRename', 'meetingsDelete', 'meetingsDeleteAudio', 'meetingsExport', 'meetingsJanitor', 'meetingsClean', 'meetingsNotNow'])
       expect(src).toMatch(new RegExp(`reg\\.handle\\(CH\\.${ch},`))
   })
 
@@ -288,6 +293,32 @@ describe('meetings:* handlers', () => {
     gate.probeSystemAudio = null
     expect(await gate.permission('screen')).toMatchObject({ ok: true, screen: 'not-checked' })
     expect(electron.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture')
+  })
+
+  it('Accessibility: refused before consent without loading anything or asking macOS', async () => {
+    const { ipc } = setup()
+    expect(await ipc.permission(local, 'accessibility')).toEqual({ ok: false, message: 'Agree to how meetings work first.' })
+    expect(ipc.loaded).toBe(false)
+    expect(electron.isTrustedAccessibilityClient).not.toHaveBeenCalled()
+    // Settings → Meetings reads it without the prompt.
+    expect(await ipc.setup(local)).toMatchObject({ ok: true, accessibility: 'not-determined' })
+    expect(electron.isTrustedAccessibilityClient.mock.calls.every(([prompt]) => prompt === false)).toBe(true)
+  })
+
+  it("Accessibility after consent: the first Allow brings up macOS's prompt, the next opens System Settings", async () => {
+    const { ipc } = setup({ meetings: agreed })
+    expect(await ipc.permission(local, 'accessibility')).toMatchObject({ ok: true, accessibility: 'denied' })
+    expect(electron.isTrustedAccessibilityClient).toHaveBeenCalledWith(true)
+    expect(electron.openExternal).not.toHaveBeenCalled()
+    electron.isTrustedAccessibilityClient.mockClear()
+    await ipc.permission(local, 'accessibility')
+    expect(electron.isTrustedAccessibilityClient).not.toHaveBeenCalledWith(true)
+    expect(electron.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+    electron.isTrustedAccessibilityClient.mockImplementation(() => true)
+    electron.openExternal.mockClear()
+    expect(await ipc.permission(local, 'accessibility')).toMatchObject({ ok: true, accessibility: 'granted' })
+    expect(electron.openExternal).not.toHaveBeenCalled()
+    expect(await ipc.permission(remote, 'accessibility')).toMatchObject({ ok: false })
   })
 
   it("the Mac's sound on 13 to 14.1 is the Screen Recording grant", async () => {
@@ -439,7 +470,7 @@ describe('meetings:start / stop / pause', () => {
       expect(t.made()).toBe(0)
       expect(t.ipc.loaded).toBe(false)
     }
-    expect(mac.ipc.live()).toEqual({ recording: false, since: null, paused: false, elapsed: 0, offer: null })
+    expect(mac.ipc.live()).toEqual({ recording: false, since: null, paused: false, elapsed: 0, offer: null, mic: null })
     for (const f of Object.values(electron)) expect(f).not.toHaveBeenCalled()
   })
 

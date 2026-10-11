@@ -8,7 +8,7 @@ import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
 import type { Settings } from "./settings";
-import type { MeetingsAnswer, RecordAnswer } from "./meetings";
+import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
 import type { ExportKind, MeetingGetAnswer, MeetingsListAnswer } from "./meetingsPage";
 import type { CleanRequest, MeetingsCleanAnswer, MeetingsJanitorAnswer } from "./meetingJanitor";
@@ -219,6 +219,7 @@ export const CH = {
   meetingsStart: "meetings:start",
   meetingsStop: "meetings:stop",
   meetingsPause: "meetings:pause",
+  meetingsMicOff: "meetings:micOff",
   meetingsRetry: "meetings:retry",
   meetingsRematch: "meetings:rematch",
   meetingsList: "meetings:list",
@@ -436,10 +437,11 @@ export interface DeckApi {
   /** I agree (true) or Turn off meetings (false): stores or clears the consent. Asks macOS nothing. */
   meetingsConsent(agree: boolean): Promise<MeetingsAnswer>;
   /**
-   * Allow the microphone or the Mac's sound, only after consent: asks macOS (the microphone's
-   * prompt), checks the sound, or opens System Settings at its pane when the grant was refused.
+   * Allow the microphone, the Mac's sound or Accessibility, only after consent: asks macOS (the
+   * microphone's or Accessibility's prompt), checks the sound, or opens System Settings at its
+   * pane when the grant was refused.
    */
-  meetingsPermission(kind: "mic" | "screen"): Promise<MeetingsAnswer>;
+  meetingsPermission(kind: MeetingsGrant): Promise<MeetingsAnswer>;
   /**
    * The speech model (Settings → Meetings): its state, pick one (stored as settings.meetings.model),
    * download it (also picks it; progress through onMeetingsModelProgress), cancel, remove.
@@ -458,6 +460,11 @@ export interface DeckApi {
   meetingsStop(): Promise<RecordAnswer>;
   /** Pause (true) or resume (false): the paused time is left out of the audio and the transcript. */
   meetingsPause(paused: boolean): Promise<RecordAnswer>;
+  /**
+   * The Record popout's Mic off in the recording (true) or back to following the meeting app
+   * (false); only while recording, reset at the next recording. AppState.meetingLive.mic follows.
+   */
+  meetingsMicOff(on: boolean): Promise<RecordAnswer>;
   /** Try again on a meeting whose transcription failed: its chunks still on disk are queued again. */
   meetingsRetry(id: string): Promise<{ ok: boolean; message?: string }>;
   /** Match again: the meeting's notes the user never edited are removed, then it is matched to sessions again (one claude -p). */

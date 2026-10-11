@@ -1137,7 +1137,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   same way as a pause: to a started page, else in front of the start script (`CaptureControl.gated`
   holds it until the streams open, so a recording that starts muted never keeps a frame of the
   mic). The recorder keeps the last value (`micGated`) for the recording now and for one that starts
-  later; a value equal to the last sends nothing. Who calls it decides when (the mute watch).
+  later; a value equal to the last sends nothing; it is sent while stopping too (the last chunk is
+  still to come). Who calls it decides when: the mute watch (§ Meetings: the mic follows the mute).
 - It sets `setDisplayMediaRequestHandler` on `session.fromPartition('meetings-capture')`
   (`useSystemPicker: false`): it answers `{ video: request.frame, audio: 'loopback' }` only for the
   capture window's own main frame (compared by `processId` / `routingId`) while the consent holds,
@@ -1430,8 +1431,7 @@ waits, and writes nothing if accounts appeared meanwhile.
 
 So a recording can leave the microphone out while you are muted in the meeting app (macOS has no
 API for another app's mute), a small Swift helper reads the app's own Mute / Unmute control
-through Accessibility. Task 1 of Plan M: the helper, its build and the app's side of its protocol;
-nothing runs it yet (the recorder's `MuteWatch` is the next task).
+through Accessibility. `MuteWatch` (below) runs it while a recording runs.
 
 - `native/mute/main.swift`, built by `scripts/mute.sh` into `resources/mute/<arch>/md-mute`
   (OPERATIONS § Meetings: md-mute). One line of JSON rules on stdin, then every 400 ms one line
@@ -1441,10 +1441,18 @@ nothing runs it yet (the recorder's `MuteWatch` is the next task).
   consent). A **menu rule** reads the titles of one menu bar menu's items; an **element rule** walks
   the app's windows breadth first and reads the rule's label attributes (`AXTitle`,
   `AXDescription`, `AXHelp`) only on controls of the rule's role. Matching is a case-insensitive
-  prefix, muted first. Caps per search: depth 60, 6000 elements, 150 ms (past any: `unknown`), and
-  a 50 ms messaging timeout per AX call. For the rule's Chromium bundles it sets
-  `AXManualAccessibility` once per process (how screen readers get web content). It presses
-  nothing. It exits when stdin closes or its parent changes (`getppid()` each tick); bad rules: a
+  prefix; the longest matching prefix decides (muted on a tie), and a control any of whose labels
+  starts with one of the rule's `exclude` prefixes ("Mute all", "Mute everyone", "Turn off
+  microphone for everyone", …) is never the user's (`classify` / `classifyControl`, mirrored by
+  `classifyLabel` / `classifyControl` in `shared/meetingMute.ts`, whose tests are theirs; prefixes
+  stay ASCII, as Swift counts Characters and JS UTF-16 units). The control found is kept per
+  process and only its labels are read again each tick; a full search runs only when it no longer
+  reads, at most every 2 s per process (`unknown` in between). Caps per search: depth 60, 6000
+  elements, 150 ms (past any: `unknown`); a 50 ms messaging timeout set once on the system-wide
+  element (the default for every element; an app element's own would not reach its children);
+  each tick in an `autoreleasepool`. For the Chromium bundles of a rule it was sent it sets
+  `AXManualAccessibility` once per process (how screen readers get web content; it stays on until
+  that browser quits). It presses nothing. It exits when stdin closes or its parent changes (`getppid()` each tick); bad rules: a
   line on stderr, exit 2.
 - `shared/meetingMute.ts`: `MUTE_RULES` (Zoom: the **Meeting** menu, "Unmute audio" while muted,
   "Mute audio" while heard; Teams, Webex: buttons "Unmute…" / "Mute…"; Google Meet in Chrome, Arc,
@@ -1453,11 +1461,50 @@ nothing runs it yet (the recorder's `MuteWatch` is the next task).
   known?)` (strict: any wrong field, an app twice, an id not in `known`, or a muted/unmuted state
   while not trusted is `null`), `muteRuleId` (a rule from the offer's app name or an id),
   `pickApp(apps, preferred)` (the preferred app while listed, else the first read as
-  muted/unmuted), `MuteSettle` (two equal readings in a row before the settled state changes).
+  muted/unmuted), `MuteSettle` (the first `muted` reading settles at once; leaving `muted` takes two
+  equal readings in a row; between `unmuted` and `unknown`, both of which keep the mic, at once).
 - `main/meetings/muteHelper.ts`: `findMute(where)` (`MASTERDECK_MUTE`, set but not runnable is
   none; then the bundled `mute/<arch>/md-mute`, or `app/resources/mute/<arch>/` in development; no
   PATH lookup) and `spawnMute(bin, rules?)` → `{ onLine, onExit, kill }` (lines split across chunks
   are joined, junk dropped, stderr kept for `onExit`; `kill` closes stdin and sends SIGTERM).
+
+### Meetings: the mic follows the mute (Plan M)
+
+- **Settings.** `settings.meetings.mic`: `'follow'` (default; settings from before have none and
+  read as follow) or `'always'`, through `normalizeMeetings` / `keepMeetings` like the rest of
+  Settings → Meetings. The `setSettings` handler calls `meetings.settingsChanged()`, so a change
+  applies to a recording running now.
+- **Accessibility** is the gate's (`main/meetings/gate.ts`): `permission('accessibility')` after
+  consent only; the first press calls `systemPreferences.isTrustedAccessibilityClient(true)` (macOS's
+  prompt, which points to System Settings), a later press while still not trusted opens
+  `x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility`. `setup()` and the
+  watch read it with `isTrustedAccessibilityClient(false)` (never prompts) via
+  `accessibilityTrusted()`; `MeetingsSetupInfo.accessibility` is `granted`, `not-determined`, or
+  `denied` once Allow was pressed in this run (macOS reports no refusal). `meetingsStartup.test.ts`
+  bans the name outside `main/meetings/`.
+- **`MuteWatch`** (`main/meetings/mute.ts`, loaded with the recorder by `import()`): `begin(app)`
+  before every `Recorder.start` (the manual switch goes off, nothing of the last recording carries
+  over, `setMicGate` is set explicitly), then `sync({recording, paused})` after start, stop, pause,
+  Turn off, a quit, a settings change, an Accessibility grant and every recorder `onChange` (a stop
+  by itself). md-mute runs only while recording, not paused, in follow mode and with Accessibility
+  trusted (`findMute` through `deps.whisper()`'s paths); anything else kills it. It gets only the
+  offered call app's rule when one is known (`muteRuleId`; MasterDeck then reads no other app and
+  touches no browser), else every rule. Which app it follows: the offered one while listed, else
+  the one followed now while it reads, else `pickApp`'s first readable, else the first listed.
+  The gate is `manualOff || (follow && settled === 'muted')`, sent on every change; a lost app,
+  `trusted: false`, unknown, a helper that is missing or ended (not restarted until the next
+  resume or recording: `ponytail:`), 'always', stop and Turn off all come out ungated: the mic
+  records as before. A pause kills md-mute but keeps the settled mute, so a resume while muted
+  starts gated.
+- **State.** `meetingLive.mic` (null while nothing records) = `{ mode, app, state, manualOff, kept,
+  reason }`: `app` the rule's name ("Zoom"), `kept` the mic goes into the recording now (not gated,
+  not paused), `reason` why the state is unknown in follow mode (`not-trusted`: Accessibility not
+  given or lost, as after an update of an ad-hoc signed build; `no-helper`; `no-app`; `unreadable`:
+  an app found whose control did not read). `onChange` only when it changes. `webState` blanks
+  `mic.app` with `offer`: web tabs never learn the call app.
+- **The manual switch.** `meetings:micOff(on)` (`deck.meetingsMicOff`, `blocked` on the web;
+  refused from a browser and off macOS; only while recording): Mic off in the recording, in either
+  mode; the next recording starts with it off.
 
 ### Working hours (issue #64)
 

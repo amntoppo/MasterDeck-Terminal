@@ -11,8 +11,10 @@ import {
   mediaAllowed,
   meetingsAgreed,
   type MeetingLive,
+  MEETINGS_GRANTS,
   type MeetingNotice,
   type MeetingsAnswer,
+  type MeetingsGrant,
   type MeetingsSettings,
   type RecordAnswer,
 } from '@shared/meetings'
@@ -43,14 +45,18 @@ import type { MeetingStore } from './meetings/store'
 import type { Transcriber } from './meetings/transcriber'
 import type { Matcher } from './meetings/matcher'
 import type { OfferWatch } from './meetings/apps'
+import type { MuteWatch } from './meetings/mute'
+import type { MuteHelper } from './meetings/muteHelper'
+import type { MuteRule } from '@shared/meetingMute'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
 type RecorderModule = typeof import('./meetings/recorder')
 type AppsModule = typeof import('./meetings/apps')
+type MuteModule = typeof import('./meetings/mute')
 type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber') & Partial<typeof import('./meetings/matcher')>
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
-export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId'>
+export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId' | 'setMicGate'>
 /** The meetings on disk and the transcription queue, loaded together after consent. */
 export interface MeetingsService {
   store: MeetingStore
@@ -132,6 +138,10 @@ export interface MeetingsDeps {
   loadApps?: () => Promise<AppsModule>
   /** The offer's `ps -axo comm` (tests pass sample output); default apps.ts's psComm. */
   ps?: () => Promise<string>
+  /** How main/meetings/mute.ts is loaded (with the recorder); default a dynamic import. */
+  loadMute?: () => Promise<MuteModule>
+  /** How md-mute is started (tests pass a fake helper); default spawnMute. md-mute is found through whisper(). */
+  spawnMute?: (bin: string, rules: readonly MuteRule[]) => MuteHelper
 }
 
 /** How long the media scheme reuses the audio path it found for a meeting (a seek makes many Range requests). */
@@ -186,6 +196,8 @@ export class MeetingsIpc {
   /** The offer's watch, once loaded (after consent, with timers only before). */
   private offers: Promise<OfferWatch> | null = null
   private watch: OfferWatch | null = null
+  /** The mic follows the meeting app's mute (loaded with the recorder; null if that load failed). */
+  private mute: MuteWatch | null = null
   /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
   private generation = 0
   /** audioFile's answers for a while: the meeting's JSON is not read again for every Range request. */
@@ -368,6 +380,8 @@ export class MeetingsIpc {
             page: this.d.capturePage(),
             preload: this.d.capturePreload,
             onChange: () => {
+              // Also a recording that stopped by itself (the 4-hour limit, a full disk): md-mute goes.
+              this.syncMute()
               this.d.onLive()
               this.d.changed?.(null)
             },
@@ -381,16 +395,61 @@ export class MeetingsIpc {
         })
       const rec = await make({ gate, engine, service })
       gate.probeSystemAudio = () => rec.probe()
+      try {
+        const mod = await (this.d.loadMute ?? (() => import('./meetings/mute')))()
+        this.mute = new mod.MuteWatch({
+          mode: () => this.d.meetings().mic,
+          trusted: () => gate.accessibilityTrusted(),
+          where: () => this.d.whisper(),
+          gate: (on) => rec.setMicGate(on),
+          onChange: () => this.d.onLive(),
+          ...(this.d.spawnMute ? { spawn: this.d.spawnMute } : {}),
+        })
+      } catch (err) {
+        // Without the watch the mic records throughout, as before Plan M.
+        console.error(`meetings: mute watch: ${String(err)}`)
+      }
       this.rec = rec
       return rec
     })
+  }
+
+  /** md-mute runs, pauses or goes with the recording (and the mode, and the grant). */
+  private syncMute(): void {
+    const rec = this.rec
+    if (!rec || !this.mute) return
+    this.mute.sync({ recording: rec.recording, paused: rec.live().paused })
+  }
+
+  /** Settings were saved: Your microphone may have changed (main/index.ts calls it after setSettings). */
+  settingsChanged(): void {
+    this.syncMute()
+  }
+
+  /**
+   * The Record popout's Mic off in the recording: the mic stays out of the recording whatever the
+   * meeting app says (on), or follows it again (off). Only while recording; the next recording
+   * starts with it off. The window's only.
+   */
+  async micOff(e: unknown, on: unknown): Promise<RecordAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    if (typeof on !== 'boolean') return { ok: false, message: 'Not a switch.' }
+    if (!this.rec?.recording) return { ok: false, message: 'Nothing is being recorded.' }
+    if (!this.mute) return { ok: false, message: 'The microphone switch is not available.' }
+    this.mute.setManualOff(on)
+    return { ok: true, live: this.live() ?? IDLE_LIVE }
   }
 
   /** AppState.meetingLive: null off macOS; idle until the recorder was ever loaded. */
   live(): MeetingLive | null {
     if (this.d.platform !== 'darwin') return null
     const live = this.rec?.live() ?? IDLE_LIVE
-    return { ...live, offer: live.recording ? null : (this.watch?.offered ?? null) }
+    return {
+      ...live,
+      offer: live.recording ? null : (this.watch?.offered ?? null),
+      mic: live.recording ? (this.mute?.live() ?? null) : null,
+    }
   }
 
   /** Whether a meeting is being recorded now (quitting asks first). */
@@ -406,7 +465,11 @@ export class MeetingsIpc {
     const app = this.watch?.offered ?? null
     // After a Turn off and a new consent the recorder stays, the queue is loaded again.
     await this.loadService()
-    const res = await (await this.loadRecorder()).start(title)
+    const rec = await this.loadRecorder()
+    // Before Record: the recorder's gate carries over from the last recording; set it now.
+    if (!rec.recording) this.mute?.begin(app)
+    const res = await rec.start(title)
+    this.syncMute()
     if (res.ok) {
       // Recorded from the offer (or with one showing): the call's app is the meeting's, and the chip goes.
       if (app && res.id) this.svc?.store.update(res.id, (m) => ({ ...m, apps: [app] }))
@@ -464,19 +527,24 @@ export class MeetingsIpc {
     const r = this.refused(e)
     if (r) return r
     if (!this.rec) return { ok: false, message: 'Nothing is being recorded.' }
-    return this.rec.stop()
+    const res = await this.rec.stop()
+    this.syncMute()
+    return res
   }
 
   async pause(e: unknown, paused: unknown): Promise<RecordAnswer> {
     const r = this.refused(e)
     if (r) return r
     if (!this.rec) return { ok: false, message: 'Nothing is being recorded.' }
-    return this.rec.pause(paused)
+    const res = await this.rec.pause(paused)
+    this.syncMute()
+    return res.ok ? { ...res, live: this.live() ?? res.live } : res
   }
 
   /** Quitting while recording (after the user said yes): the last chunks are written first. */
   async stopForQuit(): Promise<void> {
     if (this.rec?.recording) await this.rec.stop('quit')
+    this.syncMute()
   }
 
   /**
@@ -486,6 +554,7 @@ export class MeetingsIpc {
    * loaded: a quit never loads main/meetings/.
    */
   quit(): void {
+    this.mute?.stop()
     this.stopBackground()
     this.stopOffers()
     this.svc?.transcriber.stop()
@@ -837,6 +906,7 @@ export class MeetingsIpc {
     // Turn off during a recording: it stops first (its last chunks are written while the consent
     // still holds), then the consent goes. Nothing is recorded after turning off.
     if (!agree && this.rec?.recording) await this.rec.stop('consent')
+    if (!agree) this.mute?.stop()
     // Turn off during a model download: it is cancelled, and the pick it made is not kept.
     const dl = agree ? null : this.downloadPick
     if (!agree && this.engine) {
@@ -863,12 +933,15 @@ export class MeetingsIpc {
   async permission(e: unknown, kind: unknown): Promise<MeetingsAnswer> {
     const r = this.refused(e)
     if (r) return r
-    if (kind !== 'mic' && kind !== 'screen') return { ok: false, message: 'Not a permission.' }
+    if (!MEETINGS_GRANTS.includes(kind as MeetingsGrant)) return { ok: false, message: 'Not a permission.' }
     // Checked here too, so a refusal never loads the gate.
     if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first.' }
     // The Mac's sound is checked by a 1-second capture: the recorder provides it.
     if (kind === 'screen') await this.loadRecorder()
-    return this.withModel(await (await this.loadGate()).permission(kind))
+    const res = await (await this.loadGate()).permission(kind as MeetingsGrant)
+    // Allowed during a recording: md-mute can start now.
+    if (kind === 'accessibility') this.syncMute()
+    return this.withModel(res)
   }
 
   /** The models' state: what is on disk, the one picked, a download running, the speech engine. */

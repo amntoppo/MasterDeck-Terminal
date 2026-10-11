@@ -17,12 +17,15 @@ const agreed = { ...DEFAULT_MEETINGS, consentAt: 5, consentVersion: MEETINGS_CON
 describe('normalizeMeetings', () => {
   it('defaults for nothing, junk and settings files from before meetings', () => {
     for (const raw of [undefined, null, 'x', [], {}]) expect(normalizeMeetings(raw)).toEqual(DEFAULT_MEETINGS)
-    expect(DEFAULT_MEETINGS).toEqual({ consentAt: null, consentVersion: 0, model: null, language: 'auto', offer: true, deleteAudioAfterDays: 30, systemAudio: null })
+    expect(DEFAULT_MEETINGS).toEqual({ consentAt: null, consentVersion: 0, model: null, language: 'auto', offer: true, deleteAudioAfterDays: 30, systemAudio: null, mic: 'follow' })
   })
   it('keeps good values and drops bad ones', () => {
     expect(
-      normalizeMeetings({ consentAt: 5, consentVersion: 1, model: 'ggml-base.en', language: 'de', offer: false, deleteAudioAfterDays: null, systemAudio: { at: 7, ok: true } }),
-    ).toEqual({ consentAt: 5, consentVersion: 1, model: 'ggml-base.en', language: 'de', offer: false, deleteAudioAfterDays: null, systemAudio: { at: 7, ok: true } })
+      normalizeMeetings({ consentAt: 5, consentVersion: 1, model: 'ggml-base.en', language: 'de', offer: false, deleteAudioAfterDays: null, systemAudio: { at: 7, ok: true }, mic: 'always' }),
+    ).toEqual({ consentAt: 5, consentVersion: 1, model: 'ggml-base.en', language: 'de', offer: false, deleteAudioAfterDays: null, systemAudio: { at: 7, ok: true }, mic: 'always' })
+    // Settings from before Plan M, or junk: follow the meeting app's mute.
+    expect(normalizeMeetings({ mic: 'never' }).mic).toBe('follow')
+    expect(normalizeMeetings({ offer: false }).mic).toBe('follow')
     expect(normalizeMeetings({ model: '../x', language: 'English', offer: 'yes', deleteAudioAfterDays: 0.5, systemAudio: { at: 'now', ok: true } })).toEqual(DEFAULT_MEETINGS)
     expect(normalizeMeetings({ deleteAudioAfterDays: 99_999 }).deleteAudioAfterDays).toBe(30)
   })
@@ -99,7 +102,7 @@ describe('the Mac sound', () => {
 })
 
 describe('webState', () => {
-  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: 'Zoom' }
+  const live = { recording: false, since: null, paused: false, elapsed: 0, offer: 'Zoom' as string | null, mic: null }
   it('blanks the offered call app and leaves the rest', () => {
     const s = { sessions: [1], meetingLive: live }
     const w = webState(s)
@@ -114,5 +117,19 @@ describe('webState', () => {
     expect(webState(n)).toBe(n)
     const u = {}
     expect(webState(u)).toBe(u)
+  })
+  it('blanks the app the mic follows and keeps the rest of mic', () => {
+    const mic = { mode: 'follow' as const, app: 'Zoom', state: 'muted' as const, manualOff: false, kept: false, reason: null }
+    const s = { meetingLive: { ...live, recording: true, offer: null, mic } }
+    expect(webState(s).meetingLive.mic).toEqual({ ...mic, app: null })
+    expect(s.meetingLive.mic.app).toBe('Zoom')
+    const none = { meetingLive: { ...live, recording: true, offer: null, mic: { ...mic, app: null } } }
+    expect(webState(none)).toBe(none)
+  })
+})
+
+describe('privacyPane: Accessibility', () => {
+  it('opens Privacy_Accessibility', () => {
+    expect(privacyPane('accessibility', 'tap')).toBe('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
   })
 })

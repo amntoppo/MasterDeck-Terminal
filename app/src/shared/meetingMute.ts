@@ -23,13 +23,22 @@ export interface MenuRule {
   unmuted: readonly string[]
 }
 
-/** A control in the app's windows whose label starts with one of the prefixes. */
+/**
+ * A control in the app's windows whose label starts with one of the prefixes. Keep every prefix
+ * ASCII: md-mute compares Swift Characters, this file UTF-16 units, so "the longest prefix" would
+ * differ between the two for other text (meetingMute.test.ts checks it).
+ */
 export interface ElementRule {
   role: 'AXButton'
   /** The label attributes read, in order, on controls of that role only. */
   attrs: readonly string[]
   muted: readonly string[]
   unmuted: readonly string[]
+  /**
+   * Labels that start with one of these are never the user's own control, though a muted or
+   * unmuted prefix matches them too: "Mute all" in Teams' participants panel starts with "Mute".
+   */
+  exclude?: readonly string[]
 }
 
 export interface MuteRule {
@@ -44,6 +53,33 @@ export interface MuteRule {
 }
 
 const LABELS = ['AXTitle', 'AXDescription', 'AXHelp'] as const
+
+/**
+ * Controls of Teams and Webex whose label starts with "Mute" / "Unmute" but act on others or on
+ * something else than your microphone (participants panel, host controls, chat).
+ */
+const NOT_YOURS = [
+  'Mute all',
+  'Unmute all',
+  'Mute everyone',
+  'Unmute everyone',
+  'Mute attendees',
+  'Unmute attendees',
+  'Mute participants',
+  'Unmute participants',
+  'Mute others',
+  'Mute on entry',
+  'Mute notifications',
+  'Unmute notifications',
+  'Mute chat',
+  'Unmute chat',
+  'Mute conversation',
+  'Unmute conversation',
+  'Mute meeting chat',
+  'Mute sound',
+  'Mute speaker',
+  'Unmute speaker',
+] as const
 
 const CHROMIUM = [
   'com.google.Chrome',
@@ -66,14 +102,27 @@ export const MUTE_RULES: readonly MuteRule[] = [
     // New Teams, then classic.
     bundles: ['com.microsoft.teams2', 'com.microsoft.teams'],
     // ponytail: unverified; Teams' button reads "Mute (⌘+Shift+M)" / "Unmute (⌘+Shift+M)".
-    element: { role: 'AXButton', attrs: LABELS, muted: ['Unmute'], unmuted: ['Mute'] },
+    element: {
+      role: 'AXButton',
+      attrs: LABELS,
+      // The most specific first; the longest prefix that matches decides.
+      muted: ['Unmute microphone', 'Unmute mic', 'Unmute'],
+      unmuted: ['Mute microphone', 'Mute mic', 'Mute'],
+      exclude: NOT_YOURS,
+    },
   },
   {
     id: 'webex',
     name: 'Webex',
     bundles: ['Cisco-Systems.Spark'],
     // ponytail: unverified; Webex's button reads "Mute" / "Unmute" (sometimes with "my audio").
-    element: { role: 'AXButton', attrs: LABELS, muted: ['Unmute'], unmuted: ['Mute'] },
+    element: {
+      role: 'AXButton',
+      attrs: LABELS,
+      muted: ['Unmute my audio', 'Unmute'],
+      unmuted: ['Mute my audio', 'Mute'],
+      exclude: NOT_YOURS,
+    },
   },
   {
     id: 'meet',
@@ -82,9 +131,50 @@ export const MUTE_RULES: readonly MuteRule[] = [
     chromium: CHROMIUM,
     // ponytail: unverified; Meet's button reads "Turn on microphone (⌘ + d)" while muted. Only
     // the tab on screen is in a browser's tree: a Meet in a background tab reads as unknown.
-    element: { role: 'AXButton', attrs: LABELS, muted: ['Turn on microphone'], unmuted: ['Turn off microphone'] },
+    element: {
+      role: 'AXButton',
+      attrs: LABELS,
+      muted: ['Turn on microphone'],
+      unmuted: ['Turn off microphone'],
+      // A host's controls for the others.
+      exclude: ['Turn on microphone for everyone', 'Turn off microphone for everyone', 'Turn off microphone for all'],
+    },
   },
 ]
+
+const norm = (s: string): string => s.trim().toLowerCase()
+
+/**
+ * What one label says, as md-mute's classify() reads it (native/mute/main.swift; keep the two the
+ * same): null when it starts with an `exclude` prefix or with none of the rule's prefixes; else
+ * the side whose matching prefix is the longest (the most specific: "Unmute microphone" over
+ * "Mute"), muted on a tie. Case and outer spaces are ignored.
+ */
+export function classifyLabel(label: string, rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude'>): 'muted' | 'unmuted' | null {
+  const l = norm(label)
+  if (!l) return null
+  if ((rule.exclude ?? []).some((p) => norm(p) && l.startsWith(norm(p)))) return null
+  const best = (ps: readonly string[]): number => Math.max(0, ...ps.map(norm).filter((p) => p && l.startsWith(p)).map((p) => p.length))
+  const m = best(rule.muted)
+  const u = best(rule.unmuted)
+  if (!m && !u) return null
+  return m >= u ? 'muted' : 'unmuted'
+}
+
+/**
+ * One control's labels (the rule's attributes, in order), as md-mute's classifyControl() reads
+ * them: null when any label is excluded (a "Mute all" is never yours, whatever its other labels
+ * say), else the first label that classifies.
+ */
+export function classifyControl(labels: readonly string[], rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude'>): 'muted' | 'unmuted' | null {
+  const ex = (rule.exclude ?? []).map(norm).filter(Boolean)
+  if (labels.some((l) => ex.some((p) => norm(l).startsWith(p)))) return null
+  for (const l of labels) {
+    const s = classifyLabel(l, { muted: rule.muted, unmuted: rule.unmuted })
+    if (s) return s
+  }
+  return null
+}
 
 /** The one line md-mute reads on stdin: only the fields it uses. */
 export function muteRulesLine(rules: readonly MuteRule[] = MUTE_RULES): string {
@@ -172,8 +262,10 @@ export function pickApp(
 }
 
 /**
- * Two equal readings in a row before the settled state changes: one stray reading (a menu being
- * rebuilt, a tree half built) never switches the mic. Starts unknown.
+ * The settled mute, debounced only on the way back to the mic: the first 'muted' reading settles
+ * at once (dropping the mic is the safe side), while leaving 'muted' takes two equal readings in
+ * a row, so one stray reading (a menu being rebuilt, a tree half built) never lets the mic in.
+ * Between 'unmuted' and 'unknown' (both keep the mic) a reading counts at once. Starts unknown.
  */
 export class MuteSettle {
   private settled: MuteState = 'unknown'
@@ -181,7 +273,7 @@ export class MuteSettle {
 
   /** Feeds one reading; returns the settled state after it. */
   push(s: MuteState): MuteState {
-    if (s === this.last) this.settled = s
+    if (s === 'muted' || this.settled !== 'muted' || s === this.last) this.settled = s
     this.last = s
     return this.settled
   }

@@ -1,3 +1,5 @@
+import type { MuteState } from './meetingMute'
+
 /** A meeting's id, and so the name of its folder under MASTERDECK_HOME/meetings: never anything else is used as a path. */
 export const MEETING_ID = /^m-[0-9a-f]{32}$/
 export const MEETING_TITLE_MAX = 120
@@ -31,7 +33,15 @@ export interface MeetingsSettings {
   deleteAudioAfterDays: number | null
   /** The last check of the Mac's sound (its Allow on Settings → Meetings); macOS 14.2+ only. */
   systemAudio: SystemAudioCheck | null
+  /**
+   * Your microphone while recording: 'follow' keeps it out while the meeting app has you muted
+   * (read through Accessibility by md-mute; main/meetings/mute.ts), 'always' records it throughout.
+   */
+  mic: MicMode
 }
+
+/** Settings → Meetings' Your microphone. */
+export type MicMode = 'follow' | 'always'
 
 export const DEFAULT_MEETINGS: MeetingsSettings = {
   consentAt: null,
@@ -41,6 +51,7 @@ export const DEFAULT_MEETINGS: MeetingsSettings = {
   offer: true,
   deleteAudioAfterDays: 30,
   systemAudio: null,
+  mic: 'follow',
 }
 
 const MODEL_NAME = /^[\w.-]{1,64}$/
@@ -70,6 +81,8 @@ export function normalizeMeetings(raw: unknown): MeetingsSettings {
     deleteAudioAfterDays:
       r.deleteAudioAfterDays === null ? null : (posInt(r.deleteAudioAfterDays, DELETE_AUDIO_DAYS_MAX) ?? DEFAULT_MEETINGS.deleteAudioAfterDays),
     systemAudio: sa && saAt !== null && typeof sa.ok === 'boolean' ? { at: saAt, ok: sa.ok } : null,
+    // Settings from before Plan M have none: they follow the meeting app's mute.
+    mic: r.mic === 'always' ? 'always' : 'follow',
   }
 }
 
@@ -126,6 +139,12 @@ export interface MeetingsSetupInfo {
   agreed: boolean
   mic: MediaStatus
   screen: SoundStatus
+  /**
+   * Accessibility (md-mute reads the meeting app's mute through it): granted, or not-determined
+   * until Allow was pressed in this run, denied after that while still not granted (macOS has no
+   * read of a refusal: isTrustedAccessibilityClient says only yes or no).
+   */
+  accessibility: MediaStatus
   systemAudio: SystemAudioPath
   /** The speech model (filled by the model download, a later step). */
   model: { name: string | null; ready: boolean }
@@ -135,6 +154,10 @@ export interface MeetingsSetupInfo {
 }
 export type MeetingsAnswer = MeetingsSetupInfo | { ok: false; message: string }
 
+/** What Settings → Meetings' Allow buttons ask for (meetings:permission). */
+export type MeetingsGrant = 'mic' | 'screen' | 'accessibility'
+export const MEETINGS_GRANTS: readonly MeetingsGrant[] = ['mic', 'screen', 'accessibility']
+
 /** The sound row's status: the stored check (14.2+), the Screen Recording grant (13 to 14.1), or none. */
 export function soundStatus(path: SystemAudioPath, screenGrant: MediaStatus, check: SystemAudioCheck | null): SoundStatus {
   if (path === 'none') return 'unsupported'
@@ -143,8 +166,15 @@ export function soundStatus(path: SystemAudioPath, screenGrant: MediaStatus, che
 }
 
 /** System Settings' pane for a grant. Privacy_AudioCapture is System Audio Recording Only (14.2+). */
-export function privacyPane(kind: 'mic' | 'screen', path: SystemAudioPath): string {
-  const anchor = kind === 'mic' ? 'Privacy_Microphone' : path === 'tap' ? 'Privacy_AudioCapture' : 'Privacy_ScreenCapture'
+export function privacyPane(kind: MeetingsGrant, path: SystemAudioPath): string {
+  const anchor =
+    kind === 'mic'
+      ? 'Privacy_Microphone'
+      : kind === 'accessibility'
+        ? 'Privacy_Accessibility'
+        : path === 'tap'
+          ? 'Privacy_AudioCapture'
+          : 'Privacy_ScreenCapture'
   return `x-apple.systempreferences:com.apple.preference.security?${anchor}`
 }
 
@@ -356,13 +386,42 @@ export interface MeetingLive {
   elapsed: number
   /** The meeting app in a call that MasterDeck offers to record (main/meetings/apps.ts), or null; null while recording. */
   offer: string | null
+  /** Your microphone in the recording (main/meetings/mute.ts); null while nothing records. */
+  mic: MicLive | null
 }
-export const IDLE_LIVE: MeetingLive = { recording: false, since: null, paused: false, elapsed: 0, offer: null }
+export const IDLE_LIVE: MeetingLive = { recording: false, since: null, paused: false, elapsed: 0, offer: null, mic: null }
 
-/** The state as web tabs get it: the offered call app (which app the user is in a call with) stays on the Mac. */
+/**
+ * Your microphone in the recording now (the Record popout's line and switch). `kept`: the mic goes
+ * into the recording now (not gated, not paused). `state` is the meeting app's mute as md-mute
+ * settled it, `app` the rule's name it follows ("Zoom"; null: none found), and `reason` why the
+ * state is unknown while following (null otherwise). Unknown never gates: the mic records as
+ * before Plan M.
+ */
+export interface MicLive {
+  mode: MicMode
+  app: string | null
+  state: MuteState
+  manualOff: boolean
+  kept: boolean
+  reason: MicUnknown | null
+}
+
+/**
+ * Why the mute is not known: Accessibility not allowed, or lost (an update of an ad-hoc signed
+ * build: "Allow again in Settings → Meetings"); md-mute missing or ended; no meeting app found;
+ * an app found whose control could not be read.
+ */
+export type MicUnknown = 'not-trusted' | 'no-helper' | 'no-app' | 'unreadable'
+
+/**
+ * The state as web tabs get it: the offered call app and the app the mic follows (which app the
+ * user is in a call with) stay on the Mac.
+ */
 export function webState<T extends { meetingLive?: MeetingLive | null }>(state: T): T {
-  if (!state?.meetingLive || state.meetingLive.offer === null) return state
-  return { ...state, meetingLive: { ...state.meetingLive, offer: null } }
+  const live = state?.meetingLive
+  if (!live || (live.offer === null && (live.mic?.app ?? null) === null)) return state
+  return { ...state, meetingLive: { ...live, offer: null, mic: live.mic ? { ...live.mic, app: null } : null } }
 }
 
 /** Time recorded so far: frozen while paused. */

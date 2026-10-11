@@ -2233,6 +2233,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsStart, (e, title: unknown) => meetings.start(e, title));
   reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
+  reg.handle(CH.meetingsMicOff, (e, on: unknown) => meetings.micOff(e, on));
   reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
   reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
   reg.handle(CH.meetingsList, (e, from: unknown, to: unknown) => meetings.list(e, from, to));
@@ -2589,9 +2590,12 @@ function registerIpc(): void {
   reg.handle(CH.setSettings, (e, s: unknown) => {
     const cur = sources.getSettings();
     // The meetings consent and sound check change only through meetings:*; a browser changes no meetings setting.
-    return sources.setSettings(
+    const saved = sources.setSettings(
       keepMeetings(isRemote(e) ? remoteSettings(s, cur) : s, cur.meetings, isRemote(e)),
     );
+    // Your microphone (follow / always) applies to a recording running now.
+    meetings.settingsChanged();
+    return saved;
   });
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"

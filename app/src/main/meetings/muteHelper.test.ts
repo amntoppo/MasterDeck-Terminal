@@ -78,8 +78,16 @@ printf '{"t":4,"trusted":false,"apps":[]}'`,
 
   it.skipIf(!posix)('kill ends a helper that would run for ever; a refusal brings its stderr', { timeout: 20_000 }, async () => {
     const forever = script(join(root, 'forever'), 'while true; do printf \'{"t":1,"trusted":false,"apps":[]}\\n\'; sleep 0.05; done')
-    const k = await run(forever, undefined, 1500)
-    expect(k.lines.length).toBeGreaterThan(0)
+    // Killed after its first line (a fixed wait was too short with the full suite running).
+    const k = await new Promise<{ lines: number; code: number | null }>((resolve) => {
+      const h = spawnMute(forever)
+      let lines = 0
+      h.onLine(() => {
+        if (lines++ === 0) h.kill()
+      })
+      h.onExit((code) => resolve({ lines, code }))
+    })
+    expect(k.lines).toBeGreaterThan(0)
     const refuse = script(join(root, 'refuse'), 'read -r x; echo "md-mute: rules are not valid" >&2; exit 2')
     const f = await run(refuse)
     expect(f).toMatchObject({ code: 2, error: 'md-mute: rules are not valid', lines: [] })

@@ -144,7 +144,7 @@ export class Recorder {
     if (!r) return IDLE_LIVE
     const since = r.started + r.pausedMs
     // elapsed is as of the last change, so the state does not change every second (the rail counts).
-    return { recording: true, since, paused: r.pausedAt !== null, elapsed: Math.max(0, (r.pausedAt ?? r.resumedAt) - since), offer: null }
+    return { recording: true, since, paused: r.pausedAt !== null, elapsed: Math.max(0, (r.pausedAt ?? r.resumedAt) - since), offer: null, mic: null }
   }
 
   private fromCapture(e: IpcMainEvent): boolean {
@@ -271,8 +271,9 @@ export class Recorder {
   setMicGate(on: boolean): void {
     if (on === this.gated) return
     this.gated = on
+    // Also while stopping: the page still sends its last chunk, and a mute then must not reach it.
     const r = this.rec
-    if (r && !r.stopping) this.command(r, on ? 'gate' : 'ungate')
+    if (r) this.command(r, on ? 'gate' : 'ungate')
   }
 
   async pause(paused: unknown): Promise<RecordAnswer> {

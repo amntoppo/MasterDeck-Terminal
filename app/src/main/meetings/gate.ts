@@ -6,6 +6,7 @@ import {
   systemAudioPath,
   type MediaStatus,
   type MeetingsAnswer,
+  type MeetingsGrant,
   type MeetingsSettings,
   type MeetingsSetupInfo,
   type SystemAudioCheck,
@@ -39,6 +40,8 @@ export class MeetingsGate {
    */
   probeSystemAudio: (() => Promise<boolean>) | null = null
   readonly path: SystemAudioPath
+  /** Allow for Accessibility was pressed in this run: still not trusted then reads as denied. */
+  private askedAccess = false
 
   constructor(private deps: GateDeps) {
     this.path = systemAudioPath(deps.macosVersion)
@@ -55,6 +58,7 @@ export class MeetingsGate {
       agreed: meetingsAgreed({ meetings: m }),
       mic: status(systemPreferences.getMediaAccessStatus('microphone')),
       screen: soundStatus(this.path, screenGrant, m.systemAudio),
+      accessibility: this.accessibilityTrusted() ? 'granted' : this.askedAccess ? 'denied' : 'not-determined',
       systemAudio: this.path,
       model: { name: m.model, ready: false },
       settings: m,
@@ -62,9 +66,26 @@ export class MeetingsGate {
     }
   }
 
-  /** Allow (or, once refused, Open System Settings) for the microphone or the Mac's sound. Refused without consent. */
-  async permission(kind: 'mic' | 'screen'): Promise<MeetingsAnswer> {
+  /**
+   * Whether macOS lets MasterDeck (and md-mute, which it starts) read other apps' controls. The
+   * non-prompting read: it asks nothing (the mute watch calls it before each start of md-mute).
+   */
+  accessibilityTrusted(): boolean {
+    return systemPreferences.isTrustedAccessibilityClient(false)
+  }
+
+  /** Allow (or, once refused, Open System Settings) for the microphone, the Mac's sound or Accessibility. Refused without consent. */
+  async permission(kind: MeetingsGrant): Promise<MeetingsAnswer> {
     if (!meetingsAgreed({ meetings: this.deps.meetings() })) return { ok: false, message: 'Agree to how meetings work first.' }
+    if (kind === 'accessibility') {
+      if (this.accessibilityTrusted()) return this.setup()
+      // macOS has no "refused" for Accessibility: the first press brings up its prompt (which
+      // points to System Settings); a press after that, still not trusted, opens the pane.
+      if (this.askedAccess) return this.openPane('accessibility')
+      this.askedAccess = true
+      systemPreferences.isTrustedAccessibilityClient(true)
+      return this.setup()
+    }
     if (kind === 'mic') {
       const now = status(systemPreferences.getMediaAccessStatus('microphone'))
       // macOS asks once: after a refusal only System Settings can change it.
@@ -85,7 +106,7 @@ export class MeetingsGate {
     return this.setup(ok ? undefined : 'No sound came through. Allow MasterDeck in System Settings, then restart MasterDeck and try again.')
   }
 
-  private async openPane(kind: 'mic' | 'screen'): Promise<MeetingsSetupInfo> {
+  private async openPane(kind: MeetingsGrant): Promise<MeetingsSetupInfo> {
     await shell.openExternal(privacyPane(kind, this.path))
     return this.setup('System Settings is open: allow MasterDeck there, then come back.')
   }

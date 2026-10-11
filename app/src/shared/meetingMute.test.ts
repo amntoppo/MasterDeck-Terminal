@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MUTE_RULES, MuteSettle, muteRuleId, muteRulesLine, parseMuteLine, pickApp } from './meetingMute'
+import { classifyControl, classifyLabel, MUTE_RULES, MuteSettle, muteRuleId, muteRulesLine, parseMuteLine, pickApp } from './meetingMute'
 
 const line = (o: unknown): string => JSON.stringify(o)
 
@@ -126,21 +126,59 @@ describe('pickApp', () => {
 })
 
 describe('MuteSettle', () => {
-  it('two equal readings in a row before the state changes', () => {
+  it('muted settles on the first reading; back to the mic takes two equal readings', () => {
     const s = new MuteSettle()
     expect(s.state).toBe('unknown')
-    expect(s.push('muted')).toBe('unknown')
     expect(s.push('muted')).toBe('muted')
     expect(s.push('unmuted')).toBe('muted')
     expect(s.push('muted')).toBe('muted')
+    expect(s.push('unknown')).toBe('muted')
     expect(s.push('unmuted')).toBe('muted')
     expect(s.push('unmuted')).toBe('unmuted')
-    expect(s.push('unknown')).toBe('unmuted')
+    // Between the two states that keep the mic: at once.
     expect(s.push('unknown')).toBe('unknown')
-    s.push('muted')
+    expect(s.push('unmuted')).toBe('unmuted')
+    expect(s.push('unknown')).toBe('unknown')
     s.push('muted')
     s.reset()
     expect(s.state).toBe('unknown')
-    expect(s.push('muted')).toBe('unknown')
+    expect(s.push('unmuted')).toBe('unmuted')
+  })
+})
+
+describe('classifyLabel / classifyControl (md-mute reads labels the same way)', () => {
+  const teams = MUTE_RULES.find((r) => r.id === 'teams')!.element!
+  const meet = MUTE_RULES.find((r) => r.id === 'meet')!.element!
+
+  it("reads the user's own control, case and outer spaces ignored", () => {
+    expect(classifyLabel('Mute (⌘+Shift+M)', teams)).toBe('unmuted')
+    expect(classifyLabel('  unmute (⌘+Shift+M)', teams)).toBe('muted')
+    expect(classifyLabel('Turn on microphone (⌘ + d)', meet)).toBe('muted')
+    expect(classifyLabel('Turn off microphone', meet)).toBe('unmuted')
+    expect(classifyLabel('Leave', teams)).toBeNull()
+    expect(classifyLabel('', teams)).toBeNull()
+  })
+
+  it('"Mute all" and the like are never yours', () => {
+    for (const l of ['Mute all', 'Unmute all', 'Mute everyone', 'Mute notifications', 'mute ALL participants']) expect(classifyLabel(l, teams), l).toBeNull()
+    expect(classifyLabel('Turn off microphone for everyone', meet)).toBeNull()
+    expect(classifyControl(['Mute', 'Mute all'], teams)).toBeNull()
+    expect(classifyControl(['', 'Unmute'], teams)).toBe('muted')
+    expect(classifyControl(['Leave', 'Mute'], teams)).toBe('unmuted')
+  })
+
+  it('the longest matching prefix decides, muted on a tie', () => {
+    const r = { muted: ['Unmute', 'Mute is on'], unmuted: ['Mute'] }
+    expect(classifyLabel('Mute is on', r)).toBe('muted')
+    expect(classifyLabel('Mute', r)).toBe('unmuted')
+    expect(classifyLabel('x', { muted: ['x'], unmuted: ['x'] })).toBe('muted')
+  })
+
+  it('every prefix is ASCII (Swift counts Characters, JS UTF-16 units)', () => {
+    for (const rule of MUTE_RULES) {
+      const m = rule.menu ?? rule.element!
+      const all = [...m.muted, ...m.unmuted, ...(rule.element?.exclude ?? []), ...(rule.menu ? [rule.menu.title] : [])]
+      for (const p of all) expect(/^[\x20-\x7e]+$/.test(p), `${rule.id}: ${p}`).toBe(true)
+    }
   })
 })

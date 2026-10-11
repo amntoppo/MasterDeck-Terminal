@@ -178,8 +178,8 @@ describe('the rail’s time', () => {
     expect(recordClock(3_723_000)).toBe('1:02:03')
   })
   it('recordedMs runs from since, and is frozen while paused', () => {
-    expect(recordedMs({ recording: true, since: 1000, paused: false, elapsed: 0, offer: null }, 6000)).toBe(5000)
-    expect(recordedMs({ recording: true, since: 1000, paused: true, elapsed: 4000, offer: null }, 99_000)).toBe(4000)
+    expect(recordedMs({ recording: true, since: 1000, paused: false, elapsed: 0, offer: null, mic: null }, 6000)).toBe(5000)
+    expect(recordedMs({ recording: true, since: 1000, paused: true, elapsed: 4000, offer: null, mic: null }, 99_000)).toBe(4000)
   })
 })
 

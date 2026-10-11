@@ -284,6 +284,21 @@ describe('Recorder', () => {
     expect(t.rec.micGated).toBe(false)
   })
 
+  it('the mic gate still goes to the page while it stops (its last chunk is not written yet)', async () => {
+    const t = setup()
+    const r = await t.rec.start()
+    const id = r.ok ? r.id! : ''
+    await flush()
+    const w = t.win()
+    const stopped = t.rec.stop()
+    await flush()
+    t.rec.setMicGate(true)
+    await flush()
+    expect(w.scripts).toEqual([`window.mdCapture.record("${id}") [gesture]`, 'window.mdCapture.command("stop")', 'window.mdCapture.command("gate")'])
+    t.send(CAPTURE_CH.ended, t.ev(w), 'stopped')
+    await stopped
+  })
+
   it('a gate set while the page loads (or before Record) goes in with the start: a muted start never keeps the mic', async () => {
     let loaded = () => {}
     fake.state.hold = new Promise<void>((res) => (loaded = res))

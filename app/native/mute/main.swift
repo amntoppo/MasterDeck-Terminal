@@ -29,6 +29,8 @@ struct ElementRule: Decodable {
   let attrs: [String]
   let muted: [String]
   let unmuted: [String]
+  /** Labels that start with one of these are never the user's own control ("Mute all"). */
+  let exclude: [String]?
 }
 
 struct AppRule: Decodable {
@@ -59,12 +61,17 @@ struct Line: Encodable {
 let maxDepth = 60
 let maxElements = 6000
 let searchBudgetNs: UInt64 = 150_000_000
-// One AX call to a busy app may not hang the helper.
+// One AX call to a busy app may not hang the helper. Set on the system-wide element, it is the
+// default for every element (an app element's own timeout does not reach its children).
 let messagingTimeout: Float = 0.05
 let tickSeconds = 0.4
+// A control found once is re-read each tick (its labels only); a full search again only when it
+// no longer reads, and at most this often per process.
+let researchSeconds = 2.0
 
 setvbuf(stdout, nil, _IOLBF, 0)
 signal(SIGPIPE, SIG_DFL)
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
 
 func fail(_ msg: String) -> Never {
   FileHandle.standardError.write(("md-mute: " + msg + "\n").data(using: .utf8)!)
@@ -94,14 +101,30 @@ func norm(_ s: String) -> String {
   s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 }
 
-/** "muted" / "unmuted" when the label starts with one of the rule's prefixes, else nil. */
-func classify(_ label: String, muted: [String], unmuted: [String]) -> String? {
+/**
+ * nil when the label starts with an exclude prefix or none of the rule's; else the side whose
+ * matching prefix is the longest (the most specific), muted on a tie. Keep it the same as
+ * classifyLabel in shared/meetingMute.ts (its tests are this function's).
+ */
+func classify(_ label: String, muted: [String], unmuted: [String], exclude: [String] = []) -> String? {
   let l = norm(label)
   if l.isEmpty { return nil }
-  // Muted first: "Unmute" must not be read by a looser "Mute" written the other way round.
-  for p in muted where !p.isEmpty && l.hasPrefix(norm(p)) { return "muted" }
-  for p in unmuted where !p.isEmpty && l.hasPrefix(norm(p)) { return "unmuted" }
-  return nil
+  for p in exclude {
+    let n = norm(p)
+    if !n.isEmpty && l.hasPrefix(n) { return nil }
+  }
+  func best(_ ps: [String]) -> Int {
+    var len = 0
+    for p in ps {
+      let n = norm(p)
+      if !n.isEmpty && l.hasPrefix(n) && n.count > len { len = n.count }
+    }
+    return len
+  }
+  let m = best(muted)
+  let u = best(unmuted)
+  if m == 0 && u == 0 { return nil }
+  return m >= u ? "muted" : "unmuted"
 }
 
 func attr(_ el: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -128,77 +151,123 @@ struct Budget {
   }
 }
 
-/** The menu bar menu named by the rule, its items' titles. */
-func readMenu(_ app: AXUIElement, _ rule: MenuRule) -> String {
+/** The rule's menu item in the menu bar menu it names, and what its title says. */
+func searchMenu(_ app: AXUIElement, _ rule: MenuRule) -> (String, AXUIElement)? {
   var budget = Budget()
   guard let bar = attr(app, kAXMenuBarAttribute as String), CFGetTypeID(bar) == AXUIElementGetTypeID() else {
-    return "unknown"
+    return nil
   }
   let barEl = bar as! AXUIElement  // checked by its type id above
   for top in children(barEl) {
-    guard budget.spend() else { return "unknown" }
+    guard budget.spend() else { return nil }
     guard let t = string(top, kAXTitleAttribute as String), norm(t) == norm(rule.title) else { continue }
     for menu in children(top) {
       for item in children(menu) {
-        guard budget.spend() else { return "unknown" }
+        guard budget.spend() else { return nil }
         if let title = string(item, kAXTitleAttribute as String),
            let s = classify(title, muted: rule.muted, unmuted: rule.unmuted) {
-          return s
+          return (s, item)
         }
       }
     }
-    return "unknown"
+    return nil
   }
-  return "unknown"
+  return nil
+}
+
+/**
+ * One control's labels (the rule's attributes, in order): nil when any of them is excluded (a
+ * "Mute all" is never the user's own control, whatever its other labels say), else the first
+ * label that classifies. classifyControl in shared/meetingMute.ts is the same.
+ */
+func classifyControl(_ labels: [String], _ rule: ElementRule) -> String? {
+  let ex = (rule.exclude ?? []).map(norm).filter { !$0.isEmpty }
+  for label in labels {
+    let l = norm(label)
+    if ex.contains(where: { l.hasPrefix($0) }) { return nil }
+  }
+  for label in labels {
+    if let s = classify(label, muted: rule.muted, unmuted: rule.unmuted) { return s }
+  }
+  return nil
+}
+
+/** A control of the rule's role and what its labels say, or nil. */
+func readControl(_ el: AXUIElement, _ rule: ElementRule) -> String? {
+  guard string(el, kAXRoleAttribute as String) == rule.role else { return nil }
+  return classifyControl(rule.attrs.compactMap { string(el, $0) }, rule)
 }
 
 /** A breadth-first walk of the app's windows for the first control of the rule's role and label. */
-func readElement(_ app: AXUIElement, _ rule: ElementRule) -> String {
+func searchElement(_ app: AXUIElement, _ rule: ElementRule) -> (String, AXUIElement)? {
   var budget = Budget()
   var level: [AXUIElement] = children(app, kAXWindowsAttribute as String)
   var depth = 0
   while !level.isEmpty && depth < maxDepth {
     var next: [AXUIElement] = []
     for el in level {
-      guard budget.spend() else { return "unknown" }
-      if string(el, kAXRoleAttribute as String) == rule.role {
-        for a in rule.attrs {
-          if let label = string(el, a), let s = classify(label, muted: rule.muted, unmuted: rule.unmuted) {
-            return s
-          }
-        }
-      }
+      guard budget.spend() else { return nil }
+      if let s = readControl(el, rule) { return (s, el) }
       next.append(contentsOf: children(el))
     }
     level = next
     depth += 1
   }
-  return "unknown"
+  return nil
 }
 
 /** One rule set, read every tick. A class, so the run loop's timer holds no global state. */
 final class Watcher {
   let rules: Rules
   let parent: pid_t
-  /** Chromium processes already asked for their web content's tree. */
+  /** Chromium processes already asked for their web content's tree (only for a rule sent). */
   var manualSet = Set<pid_t>()
+  /** Per "rule id:pid": the control found last, re-read each tick (its labels only). */
+  var found: [String: AXUIElement] = [:]
+  /** Per "rule id:pid": when the last full search ran. */
+  var searched: [String: Date] = [:]
 
   init(rules: Rules, parent: pid_t) {
     self.rules = rules
     self.parent = parent
   }
 
-  func read(_ proc: NSRunningApplication, _ rule: AppRule) -> String {
-    let app = AXUIElementCreateApplication(proc.processIdentifier)
-    AXUIElementSetMessagingTimeout(app, messagingTimeout)
-    if let b = proc.bundleIdentifier, rule.chromium?.contains(b) == true, !manualSet.contains(proc.processIdentifier) {
-      // Chromium builds its tree for web content only when asked; the next ticks see it.
-      _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-      manualSet.insert(proc.processIdentifier)
+  /** The cached control's state, if it still reads. */
+  func reread(_ el: AXUIElement, _ rule: AppRule) -> String? {
+    if let m = rule.menu {
+      guard let t = string(el, kAXTitleAttribute as String) else { return nil }
+      return classify(t, muted: m.muted, unmuted: m.unmuted)
     }
-    if let m = rule.menu { return readMenu(app, m) }
-    if let e = rule.element { return readElement(app, e) }
-    return "unknown"
+    if let e = rule.element { return readControl(el, e) }
+    return nil
+  }
+
+  func read(_ proc: NSRunningApplication, _ rule: AppRule) -> String {
+    let pid = proc.processIdentifier
+    let key = "\(rule.id):\(pid)"
+    if let el = found[key] {
+      if let s = reread(el, rule) { return s }
+      found[key] = nil
+    }
+    // A full search at most every researchSeconds per process: unknown in between.
+    if let last = searched[key], Date().timeIntervalSince(last) < researchSeconds { return "unknown" }
+    searched[key] = Date()
+    let app = AXUIElementCreateApplication(pid)
+    if let b = proc.bundleIdentifier, rule.chromium?.contains(b) == true, !manualSet.contains(pid) {
+      // Chromium builds its tree for web content only when asked; the next searches see it. It
+      // stays on until that browser quits (OPERATIONS § Meetings: md-mute).
+      _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+      manualSet.insert(pid)
+    }
+    var hit: (String, AXUIElement)? = nil
+    if let m = rule.menu {
+      hit = searchMenu(app, m)
+    } else if let e = rule.element {
+      hit = searchElement(app, e)
+    }
+    guard let (s, el) = hit else { return "unknown" }
+    found[key] = el
+    return s
   }
 
   func tick() {
@@ -218,8 +287,15 @@ final class Watcher {
       }
       out.append(AppState(id: rule.id, state: state))
     }
+    // What belonged to processes that are gone.
     let live = Set(running.map { $0.processIdentifier })
+    let alive = { (k: String) -> Bool in
+      guard let p = k.split(separator: ":").last, let pid = pid_t(p) else { return false }
+      return live.contains(pid)
+    }
     manualSet = manualSet.filter { live.contains($0) }
+    found = found.filter { alive($0.key) }
+    searched = searched.filter { alive($0.key) }
     let line = Line(t: Int64(Date().timeIntervalSince1970 * 1000), trusted: trusted, apps: out)
     if let data = try? JSONEncoder().encode(line), let s = String(data: data, encoding: .utf8) {
       print(s)
@@ -228,8 +304,8 @@ final class Watcher {
 }
 
 let watcher = Watcher(rules: rules, parent: parent)
-watcher.tick()
+autoreleasepool { watcher.tick() }
 // The timer fires on the main run loop, the only thread that touches the watcher.
-let timer = Timer(timeInterval: tickSeconds, repeats: true) { _ in watcher.tick() }
+let timer = Timer(timeInterval: tickSeconds, repeats: true) { _ in autoreleasepool { watcher.tick() } }
 RunLoop.main.add(timer, forMode: .common)
 RunLoop.main.run()

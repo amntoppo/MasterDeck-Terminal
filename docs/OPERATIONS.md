@@ -433,7 +433,16 @@ terminal's, System Settings → Privacy & Security → Accessibility); `false` m
 trusted means no control matched (not in a call, a label the rule does not know, a browser's Meet
 in a background tab, or a search past its caps). To find the real label, open the app in a call and
 look at the mute button with Accessibility Inspector (Xcode → Open Developer Tool), then put its
-title, description or help text (the start of it) in the rule. Bad rules exit 2 with a message.
+title, description or help text (the start of it) in the rule (ASCII only), and anything else
+whose label starts the same way but is not your own mute ("Mute all") in its `exclude`. Bad rules
+exit 2 with a message.
+
+- A control found is re-read each tick; a full search runs again only when it stops reading, at
+  most every 2 s per process, so for up to 2 s after a window is rebuilt the state is `unknown`.
+- For Google Meet the helper sets `AXManualAccessibility` on each running Chromium browser (Chrome,
+  Arc, Edge, Brave) when the Meet rule is in the rules it was sent (no call app offered: all rules).
+  It stays on until that browser quits; the browser may be a little slower while it builds its
+  accessibility tree. With Zoom or Webex offered only their rule is sent and no browser is touched.
 
 ## Meetings: the fixture
 
