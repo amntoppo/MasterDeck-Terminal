@@ -54,6 +54,8 @@ type EngineModule = typeof import('./meetings/models') & typeof import('./meetin
 type RecorderModule = typeof import('./meetings/recorder')
 type AppsModule = typeof import('./meetings/apps')
 type MuteModule = typeof import('./meetings/mute')
+/** How often a recording that follows the mute but cannot read it yet looks again. */
+const MUTE_RETRY_MS = 5000
 type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber') & Partial<typeof import('./meetings/matcher')>
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
 export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId' | 'setMicGate'>
@@ -198,6 +200,10 @@ export class MeetingsIpc {
   private watch: OfferWatch | null = null
   /** The mic follows the meeting app's mute (loaded with the recorder; null if that load failed). */
   private mute: MuteWatch | null = null
+  /** While the watch is `waiting` (no Accessibility or md-mute yet): a sync every MUTE_RETRY_MS. */
+  private muteRetry: ReturnType<typeof setInterval> | null = null
+  /** Recorder.start is running: its own onChange syncs must not kill the md-mute begin() started. */
+  private muteStarting = false
   /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
   private generation = 0
   /** audioFile's answers for a while: the meeting's JSON is not read again for every Range request. */
@@ -402,7 +408,10 @@ export class MeetingsIpc {
           trusted: () => gate.accessibilityTrusted(),
           where: () => this.d.whisper(),
           gate: (on) => rec.setMicGate(on),
-          onChange: () => this.d.onLive(),
+          onChange: () => {
+            this.armMuteRetry()
+            this.d.onLive()
+          },
           ...(this.d.spawnMute ? { spawn: this.d.spawnMute } : {}),
         })
       } catch (err) {
@@ -417,8 +426,28 @@ export class MeetingsIpc {
   /** md-mute runs, pauses or goes with the recording (and the mode, and the grant). */
   private syncMute(): void {
     const rec = this.rec
-    if (!rec || !this.mute) return
+    if (!rec || !this.mute || this.muteStarting) return
     this.mute.sync({ recording: rec.recording, paused: rec.live().paused })
+    this.armMuteRetry()
+  }
+
+  /**
+   * Following but nothing can read yet (Accessibility allowed in System Settings during the call,
+   * md-mute that ended): sync again every 5 s; MuteWatch caps the restarts. After every sync and
+   * every change the watch reports (a helper that ended reports one).
+   */
+  private armMuteRetry(): void {
+    if (this.mute?.waiting) {
+      if (!this.muteRetry) {
+        this.muteRetry = setInterval(() => this.syncMute(), MUTE_RETRY_MS)
+        this.muteRetry.unref?.()
+      }
+    } else this.stopMuteRetry()
+  }
+
+  private stopMuteRetry(): void {
+    if (this.muteRetry) clearInterval(this.muteRetry)
+    this.muteRetry = null
   }
 
   /** Settings were saved: Your microphone may have changed (main/index.ts calls it after setSettings). */
@@ -467,8 +496,17 @@ export class MeetingsIpc {
     await this.loadService()
     const rec = await this.loadRecorder()
     // Before Record: the recorder's gate carries over from the last recording; set it now.
-    if (!rec.recording) this.mute?.begin(app)
-    const res = await rec.start(title)
+    // begin() also starts md-mute, so a first 'muted' reading can gate before the mic opens.
+    let res: RecordAnswer
+    if (!rec.recording) {
+      this.mute?.begin(app)
+      this.muteStarting = true
+    }
+    try {
+      res = await rec.start(title)
+    } finally {
+      this.muteStarting = false
+    }
     this.syncMute()
     if (res.ok) {
       // Recorded from the offer (or with one showing): the call's app is the meeting's, and the chip goes.
@@ -555,6 +593,7 @@ export class MeetingsIpc {
    */
   quit(): void {
     this.mute?.stop()
+    this.stopMuteRetry()
     this.stopBackground()
     this.stopOffers()
     this.svc?.transcriber.stop()
@@ -906,7 +945,10 @@ export class MeetingsIpc {
     // Turn off during a recording: it stops first (its last chunks are written while the consent
     // still holds), then the consent goes. Nothing is recorded after turning off.
     if (!agree && this.rec?.recording) await this.rec.stop('consent')
-    if (!agree) this.mute?.stop()
+    if (!agree) {
+      this.mute?.stop()
+      this.stopMuteRetry()
+    }
     // Turn off during a model download: it is cancelled, and the pick it made is not kept.
     const dl = agree ? null : this.downloadPick
     if (!agree && this.engine) {

@@ -39,6 +39,12 @@ export interface ElementRule {
    * unmuted prefix matches them too: "Mute all" in Teams' participants panel starts with "Mute".
    */
   exclude?: readonly string[]
+  /**
+   * Prefixes among `muted` / `unmuted` that match only the whole label or the label followed by
+   * " (" (a shortcut: "Mute (⌘+Shift+M)"): a bare "Mute" must not read "Mute Alice" in a
+   * participants list. The specific ones ("Mute microphone") stay prefixes.
+   */
+  whole?: readonly string[]
 }
 
 export interface MuteRule {
@@ -81,6 +87,9 @@ const NOT_YOURS = [
   'Unmute speaker',
 ] as const
 
+/** The bare words: the whole label only (or with a shortcut after it), never "Mute Alice". */
+const BARE = ['Mute', 'Unmute'] as const
+
 const CHROMIUM = [
   'com.google.Chrome',
   'company.thebrowser.Browser', // Arc
@@ -109,6 +118,7 @@ export const MUTE_RULES: readonly MuteRule[] = [
       muted: ['Unmute microphone', 'Unmute mic', 'Unmute'],
       unmuted: ['Mute microphone', 'Mute mic', 'Mute'],
       exclude: NOT_YOURS,
+      whole: BARE,
     },
   },
   {
@@ -122,6 +132,7 @@ export const MUTE_RULES: readonly MuteRule[] = [
       muted: ['Unmute my audio', 'Unmute'],
       unmuted: ['Mute my audio', 'Mute'],
       exclude: NOT_YOURS,
+      whole: BARE,
     },
   },
   {
@@ -148,13 +159,19 @@ const norm = (s: string): string => s.trim().toLowerCase()
  * What one label says, as md-mute's classify() reads it (native/mute/main.swift; keep the two the
  * same): null when it starts with an `exclude` prefix or with none of the rule's prefixes; else
  * the side whose matching prefix is the longest (the most specific: "Unmute microphone" over
- * "Mute"), muted on a tie. Case and outer spaces are ignored.
+ * "Mute"), muted on a tie. A prefix listed in `whole` matches only the whole label or the label
+ * followed by " (". Case and outer spaces are ignored.
  */
-export function classifyLabel(label: string, rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude'>): 'muted' | 'unmuted' | null {
+export function classifyLabel(
+  label: string,
+  rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude' | 'whole'>,
+): 'muted' | 'unmuted' | null {
   const l = norm(label)
   if (!l) return null
   if ((rule.exclude ?? []).some((p) => norm(p) && l.startsWith(norm(p)))) return null
-  const best = (ps: readonly string[]): number => Math.max(0, ...ps.map(norm).filter((p) => p && l.startsWith(p)).map((p) => p.length))
+  const whole = new Set((rule.whole ?? []).map(norm))
+  const matches = (p: string): boolean => (whole.has(p) ? l === p || l.startsWith(p + ' (') : l.startsWith(p))
+  const best = (ps: readonly string[]): number => Math.max(0, ...ps.map(norm).filter((p) => p && matches(p)).map((p) => p.length))
   const m = best(rule.muted)
   const u = best(rule.unmuted)
   if (!m && !u) return null
@@ -166,11 +183,14 @@ export function classifyLabel(label: string, rule: Pick<ElementRule, 'muted' | '
  * them: null when any label is excluded (a "Mute all" is never yours, whatever its other labels
  * say), else the first label that classifies.
  */
-export function classifyControl(labels: readonly string[], rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude'>): 'muted' | 'unmuted' | null {
+export function classifyControl(
+  labels: readonly string[],
+  rule: Pick<ElementRule, 'muted' | 'unmuted' | 'exclude' | 'whole'>,
+): 'muted' | 'unmuted' | null {
   const ex = (rule.exclude ?? []).map(norm).filter(Boolean)
   if (labels.some((l) => ex.some((p) => norm(l).startsWith(p)))) return null
   for (const l of labels) {
-    const s = classifyLabel(l, { muted: rule.muted, unmuted: rule.unmuted })
+    const s = classifyLabel(l, { muted: rule.muted, unmuted: rule.unmuted, whole: rule.whole })
     if (s) return s
   }
   return null
@@ -262,19 +282,31 @@ export function pickApp(
 }
 
 /**
+ * Readings of 'unknown' in a row that leave 'muted' (7 × 400 ms, about 3 s): a control being
+ * rebuilt, a window redrawn or md-mute's next full search must not let the mic in while you are
+ * still muted. Unknown for longer (the call ended, the app hid its controls) does.
+ */
+export const MUTE_UNKNOWN_HOLD = 7
+
+/**
  * The settled mute, debounced only on the way back to the mic: the first 'muted' reading settles
- * at once (dropping the mic is the safe side), while leaving 'muted' takes two equal readings in
- * a row, so one stray reading (a menu being rebuilt, a tree half built) never lets the mic in.
- * Between 'unmuted' and 'unknown' (both keep the mic) a reading counts at once. Starts unknown.
+ * at once (dropping the mic is the safe side), while leaving 'muted' takes two 'unmuted' readings
+ * in a row, or MUTE_UNKNOWN_HOLD 'unknown' ones, so a stray reading or a short gap in what
+ * md-mute can see never lets the mic in. Between 'unmuted' and 'unknown' (both keep the mic) a
+ * reading counts at once. Starts unknown.
  */
 export class MuteSettle {
   private settled: MuteState = 'unknown'
   private last: MuteState | null = null
+  /** How many readings in a row were `last`. */
+  private run = 0
 
   /** Feeds one reading; returns the settled state after it. */
   push(s: MuteState): MuteState {
-    if (s === 'muted' || this.settled !== 'muted' || s === this.last) this.settled = s
+    this.run = s === this.last ? this.run + 1 : 1
     this.last = s
+    if (s === 'muted' || this.settled !== 'muted') this.settled = s
+    else if (this.run >= (s === 'unmuted' ? 2 : MUTE_UNKNOWN_HOLD)) this.settled = s
     return this.settled
   }
 
@@ -282,9 +314,20 @@ export class MuteSettle {
     return this.settled
   }
 
-  /** Another app, or the helper started again: nothing carries over. */
+  /** The helper started again, or a new recording: nothing carries over. */
   reset(): void {
     this.settled = 'unknown'
     this.last = null
+    this.run = 0
+  }
+
+  /**
+   * The mic follows another app now: a settled 'muted' is kept until the new app's readings leave
+   * it as above (one reading of another app never lets the mic in); anything else starts over.
+   */
+  switched(): void {
+    if (this.settled !== 'muted') this.settled = 'unknown'
+    this.last = null
+    this.run = 0
   }
 }

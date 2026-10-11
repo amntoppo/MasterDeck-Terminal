@@ -1441,13 +1441,16 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   consent). A **menu rule** reads the titles of one menu bar menu's items; an **element rule** walks
   the app's windows breadth first and reads the rule's label attributes (`AXTitle`,
   `AXDescription`, `AXHelp`) only on controls of the rule's role. Matching is a case-insensitive
-  prefix; the longest matching prefix decides (muted on a tie), and a control any of whose labels
+  prefix; the longest matching prefix decides (muted on a tie); a prefix in the rule's `whole`
+  (Teams' and Webex's bare "Mute" / "Unmute") matches only the whole label or the label followed
+  by " (" (a shortcut), so "Mute Alice" is nothing; and a control any of whose labels
   starts with one of the rule's `exclude` prefixes ("Mute all", "Mute everyone", "Turn off
   microphone for everyone", …) is never the user's (`classify` / `classifyControl`, mirrored by
   `classifyLabel` / `classifyControl` in `shared/meetingMute.ts`, whose tests are theirs; prefixes
   stay ASCII, as Swift counts Characters and JS UTF-16 units). The control found is kept per
-  process and only its labels are read again each tick; a full search runs only when it no longer
-  reads, at most every 2 s per process (`unknown` in between). Caps per search: depth 60, 6000
+  process and only its labels are read again each tick; when it no longer reads, a full search
+  runs in the same tick, and only failed searches in a row are held to one every 2 s per process
+  (`unknown` in between). Caps per search: depth 60, 6000
   elements, 150 ms (past any: `unknown`); a 50 ms messaging timeout set once on the system-wide
   element (the default for every element; an app element's own would not reach its children);
   each tick in an `autoreleasepool`. For the Chromium bundles of a rule it was sent it sets
@@ -1462,7 +1465,10 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   while not trusted is `null`), `muteRuleId` (a rule from the offer's app name or an id),
   `pickApp(apps, preferred)` (the preferred app while listed, else the first read as
   muted/unmuted), `MuteSettle` (the first `muted` reading settles at once; leaving `muted` takes two
-  equal readings in a row; between `unmuted` and `unknown`, both of which keep the mic, at once).
+  `unmuted` readings in a row, or `MUTE_UNKNOWN_HOLD` (7, about 3 s) `unknown` ones, so a brief gap
+  in the reading never lets the mic in; between `unmuted` and `unknown`, both of which keep the
+  mic, at once; `switched()` when the followed app changes keeps a settled `muted` until the new
+  app's readings leave it).
 - `main/meetings/muteHelper.ts`: `findMute(where)` (`MASTERDECK_MUTE`, set but not runnable is
   none; then the bundled `mute/<arch>/md-mute`, or `app/resources/mute/<arch>/` in development; no
   PATH lookup) and `spawnMute(bin, rules?)` → `{ onLine, onExit, kill }` (lines split across chunks
@@ -1484,17 +1490,23 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   bans the name outside `main/meetings/`.
 - **`MuteWatch`** (`main/meetings/mute.ts`, loaded with the recorder by `import()`): `begin(app)`
   before every `Recorder.start` (the manual switch goes off, nothing of the last recording carries
-  over, `setMicGate` is set explicitly), then `sync({recording, paused})` after start, stop, pause,
-  Turn off, a quit, a settings change, an Accessibility grant and every recorder `onChange` (a stop
-  by itself). md-mute runs only while recording, not paused, in follow mode and with Accessibility
+  over, `setMicGate` is set explicitly, and md-mute is started then, so a first `muted` reading
+  can gate before the capture page opens the mic; one not yet in leaves the mic ungated as
+  before), then `sync({recording, paused})` after start, stop, pause, Turn off, a quit, a settings
+  change, an Accessibility grant and every recorder `onChange` (a stop by itself; skipped while
+  `Recorder.start` runs, so its own changes do not kill that md-mute). While the watch is
+  `waiting` (following, recording, not paused, but no Accessibility or no md-mute), MeetingsIpc
+  syncs again every 5 s: a grant made in System Settings during the call, or a helper that
+  ended, takes effect without a pause (a helper is started again at most `MUTE_RESTARTS`, 3,
+  times per recording: `ponytail:`, no backoff). md-mute runs only while recording, not paused, in follow mode and with Accessibility
   trusted (`findMute` through `deps.whisper()`'s paths); anything else kills it. It gets only the
   offered call app's rule when one is known (`muteRuleId`; MasterDeck then reads no other app and
   touches no browser), else every rule. Which app it follows: the offered one while listed, else
-  the one followed now while it reads, else `pickApp`'s first readable, else the first listed.
-  The gate is `manualOff || (follow && settled === 'muted')`, sent on every change; a lost app,
-  `trusted: false`, unknown, a helper that is missing or ended (not restarted until the next
-  resume or recording: `ponytail:`), 'always', stop and Turn off all come out ungated: the mic
-  records as before. A pause kills md-mute but keeps the settled mute, so a resume while muted
+  the one followed now while it reads (or, settled muted, while it is listed at all), else
+  `pickApp`'s first readable, else the first listed.
+  The gate is `manualOff || (follow && settled === 'muted')`, sent on every change; a lost app
+  or unknown (after about 3 s), `trusted: false`, a helper that is missing or ended, 'always',
+  stop and Turn off all come out ungated: the mic records as before. A pause kills md-mute but keeps the settled mute, so a resume while muted
   starts gated.
 - **State.** `meetingLive.mic` (null while nothing records) = `{ mode, app, state, manualOff, kept,
   reason }`: `app` the rule's name ("Zoom"), `kept` the mic goes into the recording now (not gated,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyControl, classifyLabel, MUTE_RULES, MuteSettle, muteRuleId, muteRulesLine, parseMuteLine, pickApp } from './meetingMute'
+import { classifyControl, classifyLabel, MUTE_RULES, MUTE_UNKNOWN_HOLD, MuteSettle, muteRuleId, muteRulesLine, parseMuteLine, pickApp } from './meetingMute'
 
 const line = (o: unknown): string => JSON.stringify(o)
 
@@ -144,6 +144,38 @@ describe('MuteSettle', () => {
     expect(s.state).toBe('unknown')
     expect(s.push('unmuted')).toBe('unmuted')
   })
+
+  it('leaving muted for unknown takes MUTE_UNKNOWN_HOLD readings in a row (about 3 s)', () => {
+    expect(MUTE_UNKNOWN_HOLD).toBe(7)
+    const s = new MuteSettle()
+    s.push('muted')
+    for (let i = 0; i < MUTE_UNKNOWN_HOLD - 1; i++) expect(s.push('unknown')).toBe('muted')
+    // Seen again: the count starts over.
+    expect(s.push('muted')).toBe('muted')
+    for (let i = 0; i < MUTE_UNKNOWN_HOLD - 1; i++) s.push('unknown')
+    expect(s.state).toBe('muted')
+    expect(s.push('unknown')).toBe('unknown')
+    // Unknown, then unmuted: two unmuted readings still leave it.
+    s.push('muted')
+    s.push('unknown')
+    s.push('unknown')
+    expect(s.push('unmuted')).toBe('muted')
+    expect(s.push('unmuted')).toBe('unmuted')
+  })
+
+  it('switched() keeps a settled muted until the new readings leave it; anything else starts over', () => {
+    const s = new MuteSettle()
+    s.push('muted')
+    s.push('unmuted')
+    s.switched()
+    expect(s.state).toBe('muted')
+    // The unmuted before the switch does not count towards the two.
+    expect(s.push('unmuted')).toBe('muted')
+    expect(s.push('unmuted')).toBe('unmuted')
+    s.switched()
+    expect(s.state).toBe('unknown')
+    expect(s.push('unmuted')).toBe('unmuted')
+  })
 })
 
 describe('classifyLabel / classifyControl (md-mute reads labels the same way)', () => {
@@ -165,6 +197,31 @@ describe('classifyLabel / classifyControl (md-mute reads labels the same way)', 
     expect(classifyControl(['Mute', 'Mute all'], teams)).toBeNull()
     expect(classifyControl(['', 'Unmute'], teams)).toBe('muted')
     expect(classifyControl(['Leave', 'Mute'], teams)).toBe('unmuted')
+  })
+
+  it('a bare "Mute" / "Unmute" is the whole label (or one with a shortcut), never "Mute Alice"', () => {
+    const webex = MUTE_RULES.find((r) => r.id === 'webex')!.element!
+    for (const rule of [teams, webex]) {
+      expect(classifyLabel('Mute', rule)).toBe('unmuted')
+      expect(classifyLabel(' UNMUTE ', rule)).toBe('muted')
+      expect(classifyLabel('Unmute (⌘+Shift+M)', rule)).toBe('muted')
+      for (const l of ['Mute Alice', 'Unmute Bob', 'Muted', 'Mute(x)', 'Unmute alice (guest)']) expect(classifyLabel(l, rule), l).toBeNull()
+    }
+    // The specific ones stay prefixes.
+    expect(classifyLabel('Mute microphone (⌘+Shift+M)', teams)).toBe('unmuted')
+    expect(classifyLabel('Unmute mic now', teams)).toBe('muted')
+    expect(classifyLabel('Unmute my audio, button', webex)).toBe('muted')
+    expect(classifyControl(['Mute Alice', 'Mute'], teams)).toBe('unmuted')
+    expect(classifyControl(['Mute Alice'], teams)).toBeNull()
+    // Without `whole`, a prefix is a prefix.
+    expect(classifyLabel('Mute Alice', { muted: ['Unmute'], unmuted: ['Mute'] })).toBe('unmuted')
+  })
+
+  it('every whole entry is one of its rule\'s prefixes', () => {
+    for (const r of MUTE_RULES) {
+      const e = r.element
+      for (const w of e?.whole ?? []) expect([...e!.muted, ...e!.unmuted], `${r.id}: ${w}`).toContain(w)
+    }
   })
 
   it('the longest matching prefix decides, muted on a tie', () => {

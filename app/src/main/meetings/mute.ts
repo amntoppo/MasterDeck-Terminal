@@ -24,14 +24,19 @@ export interface RecordingNow {
   paused: boolean
 }
 
+/** md-mute processes started again after one ended, per recording. */
+export const MUTE_RESTARTS = 3
+
 /**
- * The mic follows the meeting app's mute (Plan M). md-mute runs only while a recording runs (not
- * paused), in 'follow' mode and with Accessibility allowed; anything else kills it. The gate is
- * `manualOff || (follow && settled === 'muted')`, sent to the recorder on every change: an
- * unknown mute (no app found, no Accessibility, no helper, a helper that died) never gates, so
- * the mic records as it did before. The first 'muted' reading gates at once; back to the mic takes
- * two equal readings (MuteSettle). The recorder keeps its gate from one recording to the next:
- * begin() sets it at every start, and every way out of following sets it off.
+ * The mic follows the meeting app's mute (Plan M). md-mute runs from begin() (just before the
+ * recording starts) while a recording runs (not paused), in 'follow' mode and with Accessibility
+ * allowed; anything else kills it. The gate is `manualOff || (follow && settled === 'muted')`,
+ * sent to the recorder on every change: an unknown mute (no app found, no Accessibility, no
+ * helper, a helper that died) never gates, so the mic records as it did before. The first
+ * 'muted' reading gates at once; back to the mic takes two 'unmuted' readings or about 3 s of
+ * 'unknown' (MuteSettle), also when the followed app changes. The recorder keeps its gate from
+ * one recording to the next: begin() sets it at every start, and every way out of following sets
+ * it off.
  */
 export class MuteWatch {
   private helper: MuteHelper | null = null
@@ -46,6 +51,8 @@ export class MuteWatch {
   /** Why nothing can be read at all (null: md-mute runs and reads). */
   private cause: 'not-trusted' | 'no-helper' | null = null
   private gated = false
+  /** md-mute processes that ended (or failed to start) in this recording: past MUTE_RESTARTS, no more. */
+  private deaths = 0
   private lastKey = ''
   private readonly rules: readonly MuteRule[]
 
@@ -66,9 +73,14 @@ export class MuteWatch {
     this.preferred = preferred ? muteRuleId(preferred, this.rules) : null
     this.manualOff = false
     this.reset()
+    this.deaths = 0
     this.active = false
     this.paused = false
     this.apply(true)
+    // md-mute starts now, before Recorder.start: its first reading (a tick at once) can gate
+    // before the capture page opens the mic. One that has not come yet leaves the mic ungated,
+    // as without md-mute. A start that fails is cleaned up by the sync after it.
+    if (this.follow) this.startHelper()
   }
 
   /** The recording now: md-mute is started or killed to match (start, pause, stop, a mode change, a new grant). */
@@ -79,6 +91,7 @@ export class MuteWatch {
       this.active = false
       this.paused = false
       this.manualOff = false
+      this.deaths = 0
       this.reset()
       this.apply(true)
       return
@@ -116,6 +129,22 @@ export class MuteWatch {
     return this.helper !== null
   }
 
+  /**
+   * Following, recording and not paused, but md-mute cannot run yet (no Accessibility, no helper,
+   * one that ended with restarts left): MeetingsIpc syncs again every 5 s, so a grant
+   * made in System Settings during the call, or a restart, takes effect without a pause.
+   */
+  get waiting(): boolean {
+    return (
+      this.active &&
+      !this.paused &&
+      this.follow &&
+      !this.helper &&
+      (this.cause === 'not-trusted' || this.cause === 'no-helper') &&
+      this.deaths <= MUTE_RESTARTS
+    )
+  }
+
   live(): MicLive | null {
     if (!this.active) return null
     const follow = this.follow
@@ -146,6 +175,12 @@ export class MuteWatch {
   }
 
   private startHelper(): void {
+    if (this.deaths > MUTE_RESTARTS) {
+      // It kept ending: not again in this recording (the mic records, unknown).
+      this.reset()
+      this.cause = 'no-helper'
+      return
+    }
     let trusted = false
     try {
       trusted = this.d.trusted()
@@ -171,6 +206,7 @@ export class MuteWatch {
       h = (this.d.spawn ?? spawnMute)(bin, rule ? [rule] : this.rules)
     } catch (e) {
       console.error(`meetings: md-mute: ${String(e)}`)
+      this.deaths++
       this.reset()
       this.cause = 'no-helper'
       return
@@ -180,9 +216,11 @@ export class MuteWatch {
     h.onLine((r) => this.reading(h, r))
     h.onExit((code, error) => {
       if (this.helper !== h) return
-      // ponytail: a helper that dies is not started again until the next resume or recording;
-      // the mic records meanwhile (unknown). Upgrade: a restart with a backoff.
+      // ponytail: a helper that dies is started again by the next sync (MeetingsIpc's 5 s retry,
+      // or any other), at most MUTE_RESTARTS times per recording, with no backoff; the mic records
+      // meanwhile (unknown). Upgrade: a backoff, and a notice when it gives up.
       console.error(`meetings: md-mute ended (${code ?? 'signal'})${error ? `: ${error}` : ''}`)
+      this.deaths++
       this.helper = null
       this.reset()
       this.cause = 'no-helper'
@@ -199,13 +237,18 @@ export class MuteWatch {
       return this.apply()
     }
     this.cause = null
-    // The offered call app while md-mute lists it; else the app followed now while it reads; else
-    // the first app it can read; else the first it lists (unknown: "can't see your mute in …").
+    // The offered call app while md-mute lists it; else the app followed now while it reads (or,
+    // settled muted, while it is listed at all: a gap in its reading is not a reason to follow
+    // another app); else the first app it can read; else the first it lists (unknown: "can't see
+    // your mute in …").
+    const listed = (id: string | null) => !!id && r.apps.some((a) => a.id === id)
     const reads = (id: string | null) => !!id && r.apps.some((a) => a.id === id && a.state !== 'unknown')
-    const sticky = this.preferred ?? (reads(this.app) ? this.app : null)
+    const keep = reads(this.app) || (this.settle.state === 'muted' && listed(this.app))
+    const sticky = this.preferred ?? (keep ? this.app : null)
     const id = pickApp(r.apps, sticky, this.rules) ?? r.apps[0]?.id ?? null
     if (id !== this.app) {
-      this.settle.reset()
+      // Muted stays muted until the new app's own readings leave it (MuteSettle.switched).
+      this.settle.switched()
       this.app = id
     }
     this.settle.push(id ? (r.apps.find((a) => a.id === id)?.state ?? 'unknown') : 'unknown')

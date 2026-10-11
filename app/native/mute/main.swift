@@ -31,6 +31,11 @@ struct ElementRule: Decodable {
   let unmuted: [String]
   /** Labels that start with one of these are never the user's own control ("Mute all"). */
   let exclude: [String]?
+  /**
+   * Prefixes among muted / unmuted that match only the whole label or the label followed by " ("
+   * (a shortcut: "Mute (⌘+Shift+M)"), so a bare "Mute" never reads "Mute Alice".
+   */
+  let whole: [String]?
 }
 
 struct AppRule: Decodable {
@@ -65,8 +70,8 @@ let searchBudgetNs: UInt64 = 150_000_000
 // default for every element (an app element's own timeout does not reach its children).
 let messagingTimeout: Float = 0.05
 let tickSeconds = 0.4
-// A control found once is re-read each tick (its labels only); a full search again only when it
-// no longer reads, and at most this often per process.
+// A control found once is re-read each tick (its labels only); a full search again at once when
+// it no longer reads, then, while searches keep failing, at most this often per process.
 let researchSeconds = 2.0
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -103,21 +108,27 @@ func norm(_ s: String) -> String {
 
 /**
  * nil when the label starts with an exclude prefix or none of the rule's; else the side whose
- * matching prefix is the longest (the most specific), muted on a tie. Keep it the same as
- * classifyLabel in shared/meetingMute.ts (its tests are this function's).
+ * matching prefix is the longest (the most specific), muted on a tie. A prefix listed in `whole`
+ * matches only the whole label or the label followed by " (". Keep it the same as classifyLabel
+ * in shared/meetingMute.ts (its tests are this function's).
  */
-func classify(_ label: String, muted: [String], unmuted: [String], exclude: [String] = []) -> String? {
+func classify(_ label: String, muted: [String], unmuted: [String], exclude: [String] = [], whole: [String] = []) -> String? {
   let l = norm(label)
   if l.isEmpty { return nil }
   for p in exclude {
     let n = norm(p)
     if !n.isEmpty && l.hasPrefix(n) { return nil }
   }
+  let wholeSet = Set(whole.map(norm))
+  func matches(_ n: String) -> Bool {
+    if wholeSet.contains(n) { return l == n || l.hasPrefix(n + " (") }
+    return l.hasPrefix(n)
+  }
   func best(_ ps: [String]) -> Int {
     var len = 0
     for p in ps {
       let n = norm(p)
-      if !n.isEmpty && l.hasPrefix(n) && n.count > len { len = n.count }
+      if !n.isEmpty && matches(n) && n.count > len { len = n.count }
     }
     return len
   }
@@ -187,7 +198,7 @@ func classifyControl(_ labels: [String], _ rule: ElementRule) -> String? {
     if ex.contains(where: { l.hasPrefix($0) }) { return nil }
   }
   for label in labels {
-    if let s = classify(label, muted: rule.muted, unmuted: rule.unmuted) { return s }
+    if let s = classify(label, muted: rule.muted, unmuted: rule.unmuted, whole: rule.whole ?? []) { return s }
   }
   return nil
 }
@@ -245,12 +256,16 @@ final class Watcher {
   func read(_ proc: NSRunningApplication, _ rule: AppRule) -> String {
     let pid = proc.processIdentifier
     let key = "\(rule.id):\(pid)"
+    var lost = false
     if let el = found[key] {
       if let s = reread(el, rule) { return s }
       found[key] = nil
+      lost = true
     }
-    // A full search at most every researchSeconds per process: unknown in between.
-    if let last = searched[key], Date().timeIntervalSince(last) < researchSeconds { return "unknown" }
+    // The control that read last tick no longer does (rebuilt, moved): search again now, so a
+    // mute shown a moment ago is not reported unknown for 2 s. Only failed searches in a row are
+    // throttled, to one every researchSeconds per process (unknown in between).
+    if !lost, let last = searched[key], Date().timeIntervalSince(last) < researchSeconds { return "unknown" }
     searched[key] = Date()
     let app = AXUIElementCreateApplication(pid)
     if let b = proc.bundleIdentifier, rule.chromium?.contains(b) == true, !manualSet.contains(pid) {

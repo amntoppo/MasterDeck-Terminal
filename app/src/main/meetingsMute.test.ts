@@ -45,9 +45,10 @@ interface Fake extends MuteHelper {
   rules: readonly MuteRule[]
   killed: boolean
   send(apps: MuteApp[]): void
+  exit(): void
 }
 
-function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; env?: NodeJS.ProcessEnv } = {}) {
+function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; env?: NodeJS.ProcessEnv; beforeStart?: () => void } = {}) {
   let settings = o.m ?? agreed
   const events: string[] = []
   const helpers: Fake[] = []
@@ -59,7 +60,7 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
     },
     meetingId: null,
     live,
-    start: async () => (events.push('start'), (state.recording = true), { ok: true, live: live() }),
+    start: async () => (o.beforeStart?.(), events.push('start'), (state.recording = true), { ok: true, live: live() }),
     stop: async () => (events.push('stop'), (state.recording = false), { ok: true, live: live() }),
     pause: async (p: unknown) => ((state.paused = p === true), { ok: true, live: live() }),
     probe: async () => false,
@@ -111,12 +112,14 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
       : {
           spawnMute: (_bin: string, rules: readonly MuteRule[]) => {
             const lines: ((r: MuteReading) => void)[] = []
+            const exits: ((c: number | null, e: string) => void)[] = []
             let t = 0
             const h: Fake = {
               rules,
               killed: false,
               onLine: (cb) => void lines.push(cb),
-              onExit: () => {},
+              onExit: (cb) => void exits.push(cb),
+              exit: () => exits.forEach((cb) => cb(1, 'gone')),
               kill: () => {
                 h.killed = true
                 events.push('kill')
@@ -133,10 +136,10 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
 }
 
 describe('the mic in MeetingsIpc', () => {
-  it('every start sets the gate before Record; md-mute starts with the recording; muted gates at once', async () => {
+  it('every start sets the gate before Record; md-mute starts just before it; muted gates at once', async () => {
     const t = setup()
     await t.ipc.start(local)
-    expect(t.events).toEqual(['ungate', 'start', 'spawn'])
+    expect(t.events).toEqual(['ungate', 'spawn', 'start'])
     t.last().send([{ id: 'zoom', state: 'muted' }])
     expect(t.events.at(-1)).toBe('gate')
     expect(t.ipc.live()?.mic).toEqual({ mode: 'follow', app: 'Zoom', state: 'muted', manualOff: false, kept: false, reason: null })
@@ -147,7 +150,89 @@ describe('the mic in MeetingsIpc', () => {
     expect(t.ipc.live()?.mic).toBeNull()
     // The next recording starts ungated again, whatever the last one ended with.
     await t.ipc.start(local)
-    expect(t.events.slice(-3)).toEqual(['ungate', 'start', 'spawn'])
+    expect(t.events.slice(-3)).toEqual(['ungate', 'spawn', 'start'])
+  })
+
+  it('a muted reading that comes before Record gates before the recording opens the mic', async () => {
+    let send: (() => void) | null = null
+    const t = setup({ beforeStart: () => send?.() })
+    send = () => t.last().send([{ id: 'zoom', state: 'muted' }])
+    await t.ipc.start(local)
+    expect(t.events).toEqual(['ungate', 'spawn', 'gate', 'start'])
+    expect(t.helpers).toHaveLength(1)
+    expect(t.ipc.live()?.mic).toMatchObject({ state: 'muted', kept: false })
+  })
+
+  it('a recorder change during Record does not kill the md-mute started for it', async () => {
+    // The recorder's onChange (syncMute) may fire while start runs, not recording yet: here as a settings sync.
+    let during: (() => void) | null = null
+    const t = setup({ beforeStart: () => during?.() })
+    during = () => t.ipc.settingsChanged()
+    await t.ipc.start(local)
+    expect(t.events).toEqual(['ungate', 'spawn', 'start'])
+    expect(t.last().killed).toBe(false)
+  })
+
+  describe('looking again every 5 s while it cannot read', () => {
+    beforeEach(() => void vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }))
+    afterEach(() => void vi.useRealTimers())
+
+    it('Accessibility allowed during the call: md-mute starts within 5 s, and the looks stop', async () => {
+      electron.isTrustedAccessibilityClient.mockImplementation(() => false)
+      const t = setup()
+      await t.ipc.start(local)
+      expect(t.helpers).toHaveLength(0)
+      vi.advanceTimersByTime(5000)
+      expect(t.helpers).toHaveLength(0)
+      electron.isTrustedAccessibilityClient.mockImplementation(() => true)
+      vi.advanceTimersByTime(5000)
+      expect(t.helpers).toHaveLength(1)
+      expect(vi.getTimerCount()).toBe(0)
+      t.last().send([{ id: 'zoom', state: 'muted' }])
+      expect(t.events.at(-1)).toBe('gate')
+    })
+
+    it('a helper that ended is started again, at most 3 times per recording', async () => {
+      const t = setup()
+      await t.ipc.start(local)
+      for (let i = 0; i < 3; i++) {
+        t.last().exit()
+        expect(t.ipc.live()?.mic).toMatchObject({ reason: 'no-helper', kept: true })
+        vi.advanceTimersByTime(5000)
+        expect(t.helpers).toHaveLength(i + 2)
+      }
+      t.last().exit()
+      vi.advanceTimersByTime(20_000)
+      expect(t.helpers).toHaveLength(4)
+      expect(vi.getTimerCount()).toBe(0)
+      // The next recording may start it again.
+      await t.ipc.stop(local)
+      await t.ipc.start(local)
+      expect(t.helpers).toHaveLength(5)
+    })
+
+    it('no looks while paused, in always mode, after stop or a quit', async () => {
+      electron.isTrustedAccessibilityClient.mockImplementation(() => false)
+      const t = setup()
+      await t.ipc.start(local)
+      expect(vi.getTimerCount()).toBe(1)
+      await t.ipc.pause(local, true)
+      expect(vi.getTimerCount()).toBe(0)
+      await t.ipc.pause(local, false)
+      expect(vi.getTimerCount()).toBe(1)
+      t.set({ ...agreed, mic: 'always' })
+      t.ipc.settingsChanged()
+      expect(vi.getTimerCount()).toBe(0)
+      t.set(agreed)
+      t.ipc.settingsChanged()
+      expect(vi.getTimerCount()).toBe(1)
+      await t.ipc.stop(local)
+      expect(vi.getTimerCount()).toBe(0)
+      await t.ipc.start(local)
+      expect(vi.getTimerCount()).toBe(1)
+      t.ipc.quit()
+      expect(vi.getTimerCount()).toBe(0)
+    })
   })
 
   it('unknown keeps the mic: no gate, the reason says why', async () => {

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { MuteApp, MuteReading, MuteRule } from '@shared/meetingMute'
 import type { MicMode } from '@shared/meetings'
-import { MuteWatch } from './mute'
+import { MUTE_UNKNOWN_HOLD } from '@shared/meetingMute'
+import { MUTE_RESTARTS, MuteWatch } from './mute'
 import type { MuteHelper } from './muteHelper'
 
 // Never the real md-mute and never a real app: a fake helper, and a stand-in path for findMute.
@@ -68,17 +69,35 @@ const run = { recording: true, paused: false }
 const zoom = (state: MuteApp['state']): MuteApp[] => [{ id: 'zoom', state }]
 
 describe('MuteWatch', () => {
-  it('begin() sets the gate before Record (off: nothing known yet); md-mute runs once recording', () => {
+  it('begin() sets the gate (off: nothing known yet) and starts md-mute before Record', () => {
     const t = watch()
     t.w.begin('Zoom')
     expect(t.gates).toEqual([false])
-    expect(t.helpers).toHaveLength(0)
-    expect(t.w.live()).toBeNull()
-    t.w.sync(run)
     expect(t.helpers).toHaveLength(1)
     // The offered call app's rule alone.
     expect(t.last().rules.map((r) => r.id)).toEqual(['zoom'])
+    expect(t.w.live()).toBeNull()
+    t.w.sync(run)
+    expect(t.helpers).toHaveLength(1)
     expect(t.w.live()).toEqual({ mode: 'follow', app: null, state: 'unknown', manualOff: false, kept: true, reason: 'no-app' })
+  })
+
+  it('a muted reading before the recording runs gates before the mic opens', () => {
+    const t = watch()
+    t.w.begin('Zoom')
+    t.last().send(zoom('muted'))
+    expect(t.gates).toEqual([false, true])
+    t.w.sync(run)
+    expect(t.helpers).toHaveLength(1)
+    expect(t.w.live()).toMatchObject({ app: 'Zoom', state: 'muted', kept: false })
+  })
+
+  it('a start that fails kills the md-mute begin() started', () => {
+    const t = watch()
+    t.w.begin('Zoom')
+    t.w.sync({ recording: false, paused: false })
+    expect(t.last().killed).toBe(true)
+    expect(t.w.live()).toBeNull()
   })
 
   it('no call app known: every rule; the first app it can read is followed', () => {
@@ -113,11 +132,13 @@ describe('MuteWatch', () => {
     expect(t.w.live()).toMatchObject({ app: 'Zoom', state: 'unknown', kept: true, reason: 'unreadable' })
   })
 
-  it('the app gone (or trusted:false) lets the mic in at once', () => {
+  it('the app gone lets the mic in after about 3 s of readings; trusted:false at once', () => {
     const t = watch()
     t.w.begin('Zoom')
     t.w.sync(run)
     t.last().send(zoom('muted'))
+    for (let i = 0; i < MUTE_UNKNOWN_HOLD - 1; i++) t.last().send([])
+    expect(t.gates).toEqual([false, true])
     t.last().send([])
     expect(t.gates).toEqual([false, true, false])
     expect(t.w.live()).toMatchObject({ app: null, reason: 'no-app', kept: true })
@@ -125,6 +146,49 @@ describe('MuteWatch', () => {
     t.last().send(zoom('unknown'), false)
     expect(t.gates).toEqual([false, true, false, true, false])
     expect(t.w.live()).toMatchObject({ state: 'unknown', reason: 'not-trusted', kept: true })
+  })
+
+  it('a short gap in the reading (md-mute searching again) keeps the mute', () => {
+    const t = watch()
+    t.w.begin('Zoom')
+    t.w.sync(run)
+    t.last().send(zoom('muted'))
+    for (let i = 0; i < MUTE_UNKNOWN_HOLD - 1; i++) t.last().send(zoom('unknown'))
+    t.last().send(zoom('muted'))
+    for (let i = 0; i < MUTE_UNKNOWN_HOLD - 1; i++) t.last().send(zoom('unknown'))
+    expect(t.gates).toEqual([false, true])
+    expect(t.w.live()).toMatchObject({ state: 'muted', kept: false })
+    t.last().send(zoom('unknown'))
+    expect(t.gates).toEqual([false, true, false])
+    expect(t.w.live()).toMatchObject({ state: 'unknown', reason: 'unreadable', kept: true })
+  })
+
+  it('another app followed while muted: still gated until it gives two equal readings', () => {
+    const t = watch()
+    t.w.begin(null)
+    t.w.sync(run)
+    t.last().send(zoom('muted'))
+    expect(t.gates).toEqual([false, true])
+    // Zoom gone, Teams read as unmuted: one reading never lets the mic in.
+    t.last().send([{ id: 'teams', state: 'unmuted' }])
+    expect(t.gates).toEqual([false, true])
+    expect(t.w.live()).toMatchObject({ app: 'Teams', state: 'muted' })
+    t.last().send([{ id: 'teams', state: 'unmuted' }])
+    expect(t.gates).toEqual([false, true, false])
+  })
+
+  it('a muted app that reads unknown for a moment is still followed over another readable one', () => {
+    const t = watch()
+    t.w.begin(null)
+    t.w.sync(run)
+    t.last().send(zoom('muted'))
+    const both: MuteApp[] = [
+      { id: 'zoom', state: 'unknown' },
+      { id: 'teams', state: 'unmuted' },
+    ]
+    for (let i = 0; i < 3; i++) t.last().send(both)
+    expect(t.gates).toEqual([false, true])
+    expect(t.w.live()).toMatchObject({ app: 'Zoom', state: 'muted' })
   })
 
   it('Accessibility not allowed: no md-mute, the mic records, the reason says so', () => {
@@ -153,6 +217,35 @@ describe('MuteWatch', () => {
     expect(t.gates).toEqual([false, true, false])
     expect(t.w.running).toBe(false)
     expect(t.w.live()).toMatchObject({ reason: 'no-helper', kept: true })
+  })
+
+  it('waiting while following but unable to read; a helper that ended is started again at most MUTE_RESTARTS times', () => {
+    const nt = watch({ trusted: false })
+    nt.w.begin('Zoom')
+    nt.w.sync(run)
+    expect(nt.w.waiting).toBe(true)
+    nt.w.sync({ recording: true, paused: true })
+    expect(nt.w.waiting).toBe(false)
+    const t = watch()
+    t.w.begin('Zoom')
+    t.w.sync(run)
+    expect(t.w.waiting).toBe(false)
+    for (let i = 0; i < MUTE_RESTARTS; i++) {
+      t.last().exit()
+      expect(t.w.waiting).toBe(true)
+      t.w.sync(run)
+      expect(t.w.running).toBe(true)
+    }
+    expect(t.helpers).toHaveLength(MUTE_RESTARTS + 1)
+    t.last().exit()
+    expect(t.w.waiting).toBe(false)
+    t.w.sync(run)
+    expect(t.helpers).toHaveLength(MUTE_RESTARTS + 1)
+    expect(t.w.live()).toMatchObject({ reason: 'no-helper', kept: true })
+    // The next recording may start it again.
+    t.w.sync({ recording: false, paused: false })
+    t.w.begin('Zoom')
+    expect(t.helpers).toHaveLength(MUTE_RESTARTS + 2)
   })
 
   it("'always' runs no md-mute; switching to it mid-recording kills md-mute and lets the mic in", () => {
