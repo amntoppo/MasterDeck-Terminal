@@ -46,6 +46,10 @@ open /Applications/MasterDeck.app
   A Mac may keep showing the old icon of a replaced app until the Dock restarts (`killall Dock`).
 - Smoke: `MASTERDECK_NO_SKILLS=1 MASTERDECK_SMOKE=1 MASTERDECK_USER_DATA=$(mktemp -d)
   dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` → `SMOKE OK sessions=… issues=…`.
+  The smoke test never opens the Keychain (`NO_KEYCHAIN` in `main/macKey.ts`: no browser key, no
+  remote token): every build is signed ad hoc, so the Keychain asks again for each new build, and
+  its dialog blocks the main thread until answered (the run then hangs with no output, its own 30 s
+  timer frozen too). An isolated app that is not a smoke run still asks; that dialog is the user's to answer.
 
 ## Release
 

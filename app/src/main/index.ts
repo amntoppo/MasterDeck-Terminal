@@ -108,7 +108,7 @@ import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
-import { loadMacKey } from "./macKey";
+import { loadMacKey, NO_KEYCHAIN, type SafeStore } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
 import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
@@ -207,6 +207,9 @@ import {
 } from "./statusline";
 
 const SMOKE = process.env.MASTERDECK_SMOKE === "1";
+// The smoke test never opens the Keychain: a new ad-hoc-signed build makes it ask, and its dialog
+// blocks the main thread until answered (the smoke test then hangs with no output).
+const keychain: SafeStore = SMOKE ? NO_KEYCHAIN : safeStorage;
 // Dev aid: a separate profile so a test run never shares storage with the installed app.
 if (process.env.MASTERDECK_USER_DATA)
   app.setPath("userData", process.env.MASTERDECK_USER_DATA);
@@ -1002,7 +1005,7 @@ function publishBrowsers(): void {
 }
 /** DELETE /v1/browsers/:id with this Mac's device token: the hub then closes that browser with 4003. */
 async function revokeBrowserRow(id: string): Promise<boolean> {
-  const token = readToken(remoteTokenFile());
+  const token = readToken(remoteTokenFile(), keychain);
   if (!token) return false;
   try {
     const r = await fetch(`${REMOTE}/v1/browsers/${encodeURIComponent(id)}`, {
@@ -1023,7 +1026,7 @@ const account = new Account({
   fetch: (input, init) => fetch(input, init),
   openBrowser: (url) => void shell.openExternal(url),
   deviceName: hostname().replace(/\.local$/, "").slice(0, 80) || "Mac",
-  saveToken: (t) => writeToken(remoteTokenFile(), t),
+  saveToken: (t) => writeToken(remoteTokenFile(), t, keychain),
   readIdentity: () => {
     try {
       return parseIdentity(readFileSync(identityFile(), "utf8"));
@@ -1131,7 +1134,7 @@ function deviceId(): string {
 /** Start, restart or stop the line to the backend to match Settings → Remote and the token. */
 function syncRemote(): void {
   const s = latest?.settings ?? sources.getSettings();
-  const token = readToken(remoteTokenFile());
+  const token = readToken(remoteTokenFile(), keychain);
   const url = REMOTE;
   const key = s.remoteEnabled && token ? `${url}\n${token}` : "";
   if (key && key === cloudKey) return;
@@ -3153,7 +3156,7 @@ function registerIpc(): void {
       return { ok: false, message: "invalid input" };
     return account.signInEmail(x.email, x.password, x.create, x.name as string | undefined);
   });
-  reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
+  reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile(), keychain)));
   reg.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
   reg.handle(CH.browserDecide, (_e, id: unknown, allow: unknown) =>
     typeof id === "string" ? bridge!.decide(id, allow === true) : undefined,
@@ -3680,7 +3683,7 @@ app.whenReady().then(async () => {
     console.error(`ticket links import: ${String(e)}`);
   }
   try {
-    macKey = await loadMacKey(join(paths.home, "browser-key"), safeStorage);
+    macKey = await loadMacKey(join(paths.home, "browser-key"), keychain);
   } catch (e) {
     console.error(`browser key unreadable; browsers cannot connect: ${String(e)}`);
   }

@@ -107,6 +107,7 @@ release steps and the full DMG build: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 Smoke test of a packaged app: `MASTERDECK_NO_SKILLS=1 MASTERDECK_SMOKE=1 MASTERDECK_USER_DATA=<tmp>
 dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` prints `SMOKE OK sessions=… issues=…` and quits.
+It never opens the Keychain (a new ad-hoc build would put a dialog up that blocks it: OPERATIONS).
 
 ## Operating rules (from the user; follow exactly)
 
