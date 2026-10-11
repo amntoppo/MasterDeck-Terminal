@@ -1,4 +1,4 @@
-import { MUTE_RULES, MuteSettle, muteRuleId, pickApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
+import { MUTE_RULES, MUTE_TICK_MS, MuteSettle, muteRuleId, pickApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
 import type { MicLive, MicMode, MicUnknown } from '@shared/meetings'
 import { findMute, spawnMute, type MuteHelper, type MuteWhere } from './muteHelper'
 
@@ -24,6 +24,9 @@ export interface RecordingNow {
   paused: boolean
 }
 
+/** Why md-mute cannot read: not allowed, missing, or ended (restarting, or given up). */
+type Cause = Extract<MicUnknown, 'not-trusted' | 'no-helper' | 'helper-ended'>
+
 /** md-mute processes started again after one ended, per recording. */
 export const MUTE_RESTARTS = 3
 
@@ -34,7 +37,9 @@ export const MUTE_RESTARTS = 3
  * sent to the recorder on every change: an unknown mute (no app found, no Accessibility, no
  * helper, a helper that died) never gates, so the mic records as it did before. The first
  * 'muted' reading gates at once; back to the mic takes two 'unmuted' readings or about 3 s of
- * 'unknown' (MuteSettle), also when the followed app changes. The recorder keeps its gate from
+ * 'unknown' (MuteSettle), also when the followed app changes, md-mute ends or Accessibility is
+ * lost: while md-mute is down the hold keeps its clock (an 'unknown' every MUTE_TICK_MS), so a
+ * crash while muted keeps the mic out for about 3 s and a restart within that keeps it out. The recorder keeps its gate from
  * one recording to the next: begin() sets it at every start, and every way out of following sets
  * it off.
  */
@@ -49,7 +54,9 @@ export class MuteWatch {
   private active = false
   private paused = false
   /** Why nothing can be read at all (null: md-mute runs and reads). */
-  private cause: 'not-trusted' | 'no-helper' | null = null
+  private cause: Cause | null = null
+  /** While md-mute is down and the settled state is 'muted': feeds 'unknown' on the reading clock. */
+  private hold: ReturnType<typeof setInterval> | null = null
   private gated = false
   /** md-mute processes that ended (or failed to start) in this recording: past MUTE_RESTARTS, no more. */
   private deaths = 0
@@ -140,7 +147,7 @@ export class MuteWatch {
       !this.paused &&
       this.follow &&
       !this.helper &&
-      (this.cause === 'not-trusted' || this.cause === 'no-helper') &&
+      this.cause !== null &&
       this.deaths <= MUTE_RESTARTS
     )
   }
@@ -158,27 +165,56 @@ export class MuteWatch {
       state,
       manualOff: this.manualOff,
       kept: !this.gated && !this.paused,
+      paused: this.paused,
       reason,
     }
   }
 
   private reset(): void {
+    this.stopHold()
     this.settle.reset()
     this.app = null
     this.cause = null
   }
 
   private kill(): void {
+    this.stopHold()
     const h = this.helper
     this.helper = null
     h?.kill()
   }
 
+  /**
+   * md-mute cannot read now (missing, not allowed, ended). Nothing settled muted: unknown at once.
+   * Settled muted: kept, and the hold runs out on the reading clock as if md-mute read 'unknown'
+   * (a restart in time takes over with its own readings).
+   */
+  private lose(cause: Cause): void {
+    if (this.settle.state !== 'muted') {
+      this.reset()
+      this.cause = cause
+      return
+    }
+    this.cause = cause
+    if (this.helper || this.hold) return
+    this.hold = setInterval(() => {
+      if (this.settle.push('unknown') !== 'muted') {
+        this.reset()
+        this.cause = cause
+      }
+      this.apply()
+    }, MUTE_TICK_MS)
+  }
+
+  private stopHold(): void {
+    if (this.hold) clearInterval(this.hold)
+    this.hold = null
+  }
+
   private startHelper(): void {
     if (this.deaths > MUTE_RESTARTS) {
       // It kept ending: not again in this recording (the mic records, unknown).
-      this.reset()
-      this.cause = 'no-helper'
+      this.lose('helper-ended')
       return
     }
     let trusted = false
@@ -188,14 +224,12 @@ export class MuteWatch {
       console.error(`meetings: accessibility: ${String(e)}`)
     }
     if (!trusted) {
-      this.reset()
-      this.cause = 'not-trusted'
+      this.lose('not-trusted')
       return
     }
     const bin = findMute(this.d.where())
     if (!bin) {
-      this.reset()
-      this.cause = 'no-helper'
+      this.lose('no-helper')
       return
     }
     // The call app's rule alone when it is known: md-mute then looks into no other app (and sets
@@ -207,10 +241,11 @@ export class MuteWatch {
     } catch (e) {
       console.error(`meetings: md-mute: ${String(e)}`)
       this.deaths++
-      this.reset()
-      this.cause = 'no-helper'
+      this.lose('helper-ended')
       return
     }
+    // Its readings take over a hold that runs (the settled state is kept).
+    this.stopHold()
     this.helper = h
     this.cause = null
     h.onLine((r) => this.reading(h, r))
@@ -218,12 +253,12 @@ export class MuteWatch {
       if (this.helper !== h) return
       // ponytail: a helper that dies is started again by the next sync (MeetingsIpc's 5 s retry,
       // or any other), at most MUTE_RESTARTS times per recording, with no backoff; the mic records
-      // meanwhile (unknown). Upgrade: a backoff, and a notice when it gives up.
+      // meanwhile (unknown, after the hold if it was muted). Upgrade: a backoff, and a notice when
+      // it gives up.
       console.error(`meetings: md-mute ended (${code ?? 'signal'})${error ? `: ${error}` : ''}`)
       this.deaths++
       this.helper = null
-      this.reset()
-      this.cause = 'no-helper'
+      this.lose('helper-ended')
       this.apply()
     })
   }
@@ -231,9 +266,13 @@ export class MuteWatch {
   private reading(h: MuteHelper, r: MuteReading): void {
     if (this.helper !== h) return
     if (!r.trusted) {
-      // Accessibility was taken back during the call (or does not reach the helper).
-      this.reset()
-      this.cause = 'not-trusted'
+      // Accessibility was taken back during the call (or does not reach the helper): its readings
+      // count as 'unknown', so a settled mute holds about 3 s as for any gap.
+      if (this.settle.state === 'muted' && this.settle.push('unknown') === 'muted') this.cause = 'not-trusted'
+      else {
+        this.reset()
+        this.cause = 'not-trusted'
+      }
       return this.apply()
     }
     this.cause = null

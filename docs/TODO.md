@@ -708,8 +708,9 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   helper the app spawns) is unverified; if not, the popout says "Allow Accessibility" for ever.
 - **Allow again after each update**: the ad-hoc signature changes with every build, so macOS drops
   the Accessibility grant (as the other permissions); a Developer ID signature fixes it.
-- **A dead md-mute is not restarted** until the next resume or recording: the mic is recorded
-  ("The mute reader is missing") until then.
+- **A dead md-mute is restarted every 5 s, at most 3 times per recording**, with no backoff and
+  no notice when it gives up: the mic is recorded meanwhile ("The mute reader stopped; trying
+  again.", after about 3 s if it was muted), and the line keeps saying so after the last try.
 - **Partly gated chunks can still give whisper filler**: a chunk that is all zeros skips whisper,
   but one muted for most of its 30 seconds is transcribed and may get a made-up line.
 - **The popout's mic line and switch were not seen on screen** (they show only while recording,

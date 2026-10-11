@@ -424,7 +424,9 @@ buttons; it does not go through macOS window drag regions.
   through Accessibility while recording, a gate keeps your mic out while muted (unknown keeps it),
   Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility** row, the
   Record popout's mic line (`micLine` in `shared/meetings.ts`) and **Mic off in the recording**, a
-  struck mic on the rail's red time. Checked: typecheck, vitest (186 files passed, 2 skipped; 2247
+  struck mic on the rail's red time. A crash of md-mute (or `trusted: false`) while muted keeps the
+  mic out for the ~3 s hold, and the line tells a missing reader from a stopped one and says
+  "Mic: paused." while paused. Checked: typecheck, vitest (186 files passed, 2 skipped; 2266
   tests passed, 4 skipped), `npm run build`, and Settings
   → Meetings' new rows in the isolated app after consent (no Allow pressed). Not checked: anything
   while recording (the popout's line and switch, the rail mark: typecheck and `micLine`'s tests

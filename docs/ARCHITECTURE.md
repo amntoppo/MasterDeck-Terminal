@@ -1505,13 +1505,15 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   the one followed now while it reads (or, settled muted, while it is listed at all), else
   `pickApp`'s first readable, else the first listed.
   The gate is `manualOff || (follow && settled === 'muted')`, sent on every change; a lost app
-  or unknown (after about 3 s), `trusted: false`, a helper that is missing or ended, 'always',
-  stop and Turn off all come out ungated: the mic records as before. A pause kills md-mute but keeps the settled mute, so a resume while muted
+  or unknown, `trusted: false` and a helper that ended (all three after about 3 s when muted: while
+  md-mute is down a timer feeds `unknown` every `MUTE_TICK_MS`, and a restart within it keeps the
+  mute), a missing helper, 'always', stop and Turn off all come out ungated: the mic records as before. A pause kills md-mute but keeps the settled mute, so a resume while muted
   starts gated.
 - **State.** `meetingLive.mic` (null while nothing records) = `{ mode, app, state, manualOff, kept,
-  reason }`: `app` the rule's name ("Zoom"), `kept` the mic goes into the recording now (not gated,
+  paused, reason }`: `app` the rule's name ("Zoom"), `paused` the recording is paused (the line says only "Mic: paused."), `kept` the mic goes into the recording now (not gated,
   not paused), `reason` why the state is unknown in follow mode (`not-trusted`: Accessibility not
-  given or lost, as after an update of an ad-hoc signed build; `no-helper`; `no-app`; `unreadable`:
+  given or lost, as after an update of an ad-hoc signed build; `no-helper`: missing;
+  `helper-ended`: ended, started again by the next sync; `no-app`; `unreadable`:
   an app found whose control did not read). `onChange` only when it changes. `webState` blanks
   `mic.app` with `offer`: web tabs never learn the call app.
 - **The manual switch.** `meetings:micOff(on)` (`deck.meetingsMicOff`, `blocked` on the web;

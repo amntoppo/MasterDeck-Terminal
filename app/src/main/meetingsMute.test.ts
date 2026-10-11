@@ -142,7 +142,7 @@ describe('the mic in MeetingsIpc', () => {
     expect(t.events).toEqual(['ungate', 'spawn', 'start'])
     t.last().send([{ id: 'zoom', state: 'muted' }])
     expect(t.events.at(-1)).toBe('gate')
-    expect(t.ipc.live()?.mic).toEqual({ mode: 'follow', app: 'Zoom', state: 'muted', manualOff: false, kept: false, reason: null })
+    expect(t.ipc.live()?.mic).toEqual({ mode: 'follow', app: 'Zoom', state: 'muted', manualOff: false, kept: false, paused: false, reason: null })
     // Web tabs never learn the call app.
     expect(webState({ meetingLive: t.ipc.live() }).meetingLive?.mic?.app).toBeNull()
     await t.ipc.stop(local)
@@ -197,7 +197,7 @@ describe('the mic in MeetingsIpc', () => {
       await t.ipc.start(local)
       for (let i = 0; i < 3; i++) {
         t.last().exit()
-        expect(t.ipc.live()?.mic).toMatchObject({ reason: 'no-helper', kept: true })
+        expect(t.ipc.live()?.mic).toMatchObject({ reason: 'helper-ended', kept: true })
         vi.advanceTimersByTime(5000)
         expect(t.helpers).toHaveLength(i + 2)
       }

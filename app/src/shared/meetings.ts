@@ -404,15 +404,18 @@ export interface MicLive {
   state: MuteState
   manualOff: boolean
   kept: boolean
+  /** The recording is paused (nothing of the mic is recorded). */
+  paused: boolean
   reason: MicUnknown | null
 }
 
 /**
  * Why the mute is not known: Accessibility not allowed, or lost (an update of an ad-hoc signed
- * build: "Allow again in Settings → Meetings"); md-mute missing or ended; no meeting app found;
- * an app found whose control could not be read.
+ * build: "Allow again in Settings → Meetings"); md-mute missing (`no-helper`) or ended
+ * (`helper-ended`: started again by the next sync); no meeting app found; an app found whose
+ * control could not be read.
  */
-export type MicUnknown = 'not-trusted' | 'no-helper' | 'no-app' | 'unreadable'
+export type MicUnknown = 'not-trusted' | 'no-helper' | 'helper-ended' | 'no-app' | 'unreadable'
 
 /**
  * The state as web tabs get it: the offered call app and the app the mic follows (which app the
@@ -431,6 +434,7 @@ export function webState<T extends { meetingLive?: MeetingLive | null }>(state: 
 export function micLine(mic: MicLive | null | undefined): { text: string; settings: boolean } | null {
   if (!mic) return null
   const say = (text: string, settings = false) => ({ text, settings })
+  if (mic.paused) return say('Mic: paused.')
   if (mic.manualOff) return say('Mic: off in the recording.')
   if (mic.mode === 'always') return say('Mic: always recorded.')
   const app = mic.app ?? 'the meeting app'
@@ -443,6 +447,8 @@ export function micLine(mic: MicLive | null | undefined): { text: string; settin
       return say(`Mic: recorded. Can't see your mute in ${app}.`)
     case 'no-helper':
       return say('Mic: recorded. The mute reader is missing; reinstall MasterDeck.')
+    case 'helper-ended':
+      return say('Mic: recorded. The mute reader stopped; trying again.')
   }
   if (mic.state === 'muted') return say(`Mic: muted in ${app} — not recorded`)
   if (mic.state === 'unmuted') return say(`Mic: on in ${app}`)

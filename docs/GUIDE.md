@@ -992,7 +992,10 @@ macOS remembers permissions per build of an ad-hoc signed app, so after an updat
   recorded" and "Mic: on in Zoom" while it follows your mute; "Mic: always recorded." with Always
   record. When the mute can't be followed the line says your mic is recorded and why: Accessibility
   not allowed (with **Open Settings**, to Settings → Meetings), no meeting app found, the mute not
-  visible in the app, or the mute reader missing (reinstall MasterDeck).
+  visible in the app, the mute reader missing (reinstall MasterDeck), or the mute reader stopped
+  (MasterDeck tries again; if you were muted, your mic stays out for about 3 s first). While
+  paused the line says "Mic: paused."
+
 - **Mic off in the recording** (a switch in the popout) keeps your mic out until you switch it back
   or the recording ends, whatever the meeting app says; each new recording starts with the switch off.
   While your mic is out of a running recording, the red time in the rail shows a struck mic.

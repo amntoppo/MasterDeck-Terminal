@@ -121,7 +121,7 @@ describe('webState', () => {
     expect(webState(u)).toBe(u)
   })
   it('blanks the app the mic follows and keeps the rest of mic', () => {
-    const mic = { mode: 'follow' as const, app: 'Zoom', state: 'muted' as const, manualOff: false, kept: false, reason: null }
+    const mic = { mode: 'follow' as const, app: 'Zoom', state: 'muted' as const, manualOff: false, kept: false, paused: false, reason: null }
     const s = { meetingLive: { ...live, recording: true, offer: null, mic } }
     expect(webState(s).meetingLive.mic).toEqual({ ...mic, app: null })
     expect(s.meetingLive.mic.app).toBe('Zoom')
@@ -137,7 +137,7 @@ describe('privacyPane: Accessibility', () => {
 })
 
 describe('micLine', () => {
-  const mic = (p: Partial<MicLive>): MicLive => ({ mode: 'follow', app: 'Zoom', state: 'unknown', manualOff: false, kept: true, reason: null, ...p })
+  const mic = (p: Partial<MicLive>): MicLive => ({ mode: 'follow', app: 'Zoom', state: 'unknown', manualOff: false, kept: true, paused: false, reason: null, ...p })
   const text = (p: Partial<MicLive>) => micLine(mic(p))?.text
 
   it('nothing while nothing records', () => {
@@ -155,6 +155,12 @@ describe('micLine', () => {
     expect(micLine(mic({ reason: 'no-app', app: null }))).toEqual({ text: 'Mic: recorded. No meeting app found.', settings: false })
     expect(text({ reason: 'unreadable' })).toBe("Mic: recorded. Can't see your mute in Zoom.")
     expect(text({ reason: 'no-helper' })).toBe('Mic: recorded. The mute reader is missing; reinstall MasterDeck.')
+    expect(text({ reason: 'helper-ended' })).toBe('Mic: recorded. The mute reader stopped; trying again.')
+  })
+  it('paused: no app state', () => {
+    expect(text({ paused: true, kept: false, state: 'muted' })).toBe('Mic: paused.')
+    expect(text({ paused: true, kept: false, reason: 'not-trusted' })).toBe('Mic: paused.')
+    expect(micLine(mic({ paused: true, kept: false, manualOff: true }))).toEqual({ text: 'Mic: paused.', settings: false })
   })
   it('always mode and the switch come first', () => {
     expect(text({ mode: 'always', state: 'unknown' })).toBe('Mic: always recorded.')

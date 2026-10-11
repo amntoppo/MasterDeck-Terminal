@@ -288,6 +288,9 @@ export function pickApp(
  */
 export const MUTE_UNKNOWN_HOLD = 7
 
+/** md-mute's reading clock (one line every 400 ms); MuteWatch keeps it while md-mute is down. */
+export const MUTE_TICK_MS = 400
+
 /**
  * The settled mute, debounced only on the way back to the mic: the first 'muted' reading settles
  * at once (dropping the mic is the safe side), while leaving 'muted' takes two 'unmuted' readings
