@@ -605,7 +605,9 @@ lists its open points (real screenshots, Always Use HTTPS for the zone, analytic
 Console). Here only what touches this repository:
 
 - **Agent loops (#82)** are "coming soon" on the site: update it when they ship.
-- **The README rewrite** (its own ticket) should reuse the site's pitch and screens.
+- **The README's images** (issue #90) are copies of the site's drawn screens in `docs/images/`, plus
+  `accounts-setup.svg` drawn the same way for the README only: replace all five with real
+  screenshots (the hero, `sessions-list.svg`, could be a GIF), here and on the site together.
 - **Redeploy the site after each release** so Download and the changelog show it (OPERATIONS).
 
 ## MasterDeck mod: open points (2026-10-10, issue #86)
@@ -666,6 +668,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | branch `worktree-MasterDeck-Terminal-90-readme` | — |
 | MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |

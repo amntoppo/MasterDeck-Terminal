@@ -378,7 +378,13 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-10)
+## Current state and next steps (2026-10-12)
+
+- **The README is rewritten for developers (#90)** (branch `worktree-MasterDeck-Terminal-90-readme`,
+  a draft for the user's review; not pushed): pitch, badges, hero, Features with placeholder images in
+  `docs/images/` (four copied from the website, `accounts-setup.svg` drawn in the same style), a
+  Quick start, links to masterdeck.dev and the docs. Checked: every local link and guide anchor,
+  masterdeck.dev's pages answer. Not checked: the render on GitHub (needs a push).
 
 - **MasterDeck installs, updates and reloads its mods (#93)** (branch
   `worktree-MasterDeck-Terminal-93-mods-install`, draft PR, not merged, **not installed**: the
