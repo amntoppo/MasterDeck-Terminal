@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { wav } from '@shared/meetingAudio'
 import { MATCH_FAILED } from '@shared/meetingMatch'
 import { CHUNK_MS, type Meeting, type Speaker } from '@shared/meetings'
 import { MeetingStore } from './store'
@@ -111,6 +112,32 @@ describe('Transcriber', () => {
       { start: 100, end: 900, speaker: 'others', text: 'others-0 said en' },
       { start: CHUNK_MS + 100, end: CHUNK_MS + 900, speaker: 'you', text: 'you-1 said en' },
     ])
+  })
+
+  it('a silent "you" chunk (the mic gate\'s zeros, or below SILENT_RMS) skips whisper: no lines, WAV removed, counted; "others" only when all zeros', async () => {
+    const m = make()
+    let live: string | null = m.id
+    const { t, w } = queue({ live: () => live })
+    const put = (track: Speaker, seq: number, samples: Int16Array) => {
+      const r = store.writeChunk(m.id, track, seq, wav(samples))
+      if (!r.ok) throw new Error(r.message)
+      t.add({ id: m.id, track, seq })
+    }
+    const n = 16_000
+    put('you', 0, new Int16Array(n)) // gated: all zeros
+    put('you', 1, new Int16Array(n).fill(2)) // 6e-5 of full scale: under the line
+    put('you', 2, new Int16Array(n).fill(400)) // quiet speech: heard
+    put('others', 0, new Int16Array(n)) // nothing playing: skipped
+    put('others', 1, new Int16Array(n).fill(1)) // the Mac's sound, faint but not zero: heard
+    await vi.waitFor(() => expect(store.get(m.id)?.progress).toEqual({ done: 5, total: 5, wait: null }))
+    expect(w.calls).toEqual(['you-2', 'others-1'])
+    expect([onDisk(m.id, 'you', 0), onDisk(m.id, 'you', 1), onDisk(m.id, 'others', 0)]).toEqual([false, false, false])
+    live = null
+    endRecording(m.id)
+    t.ended(m.id)
+    const done = store.get(m.id)!
+    expect(done.state).toBe('done')
+    expect(done.segments.map((s) => s.text)).toEqual(['others-1 said en', 'you-2 said en'])
   })
 
   it('without a matcher the meeting is done', async () => {

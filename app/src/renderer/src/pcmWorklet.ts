@@ -5,8 +5,11 @@
 //
 // Messages from the page: 'pause' posts what is buffered (recorded before the pause) and drops
 // the input from then on; 'resume' takes it again; 'flush' posts what is buffered, then 'flushed'
-// (Stop waits for it). processorOptions.paused: the track starts paused (a pause that came while
-// the page waited for its streams).
+// (Stop waits for it); 'gate' writes zeros in place of the input from the next block on (the mic
+// is not kept, while the track's timeline stays aligned with the other one), 'ungate' takes the
+// input again (nothing from the gated time is kept or pre-rolled). A pause holds over a gate: a
+// paused track drops its frames, gated or not. processorOptions.paused / .gated: the track starts
+// so (a command that came while the page waited for its streams).
 
 declare class AudioWorkletProcessor {
   readonly port: MessagePort
@@ -20,13 +23,17 @@ class PcmTap extends AudioWorkletProcessor {
   private buf = new Float32Array(BLOCK)
   private n = 0
   private paused: boolean
+  private gated: boolean
 
   constructor(options?: { processorOptions?: unknown }) {
     super(options)
-    const o = options?.processorOptions as { paused?: unknown } | undefined
+    const o = options?.processorOptions as { paused?: unknown; gated?: unknown } | undefined
     this.paused = o?.paused === true
+    this.gated = o?.gated === true
     this.port.onmessage = (e) => {
-      if (e.data === 'pause') {
+      if (e.data === 'gate') this.gated = true
+      else if (e.data === 'ungate') this.gated = false
+      else if (e.data === 'pause') {
         this.post()
         this.paused = true
       } else if (e.data === 'resume') this.paused = false
@@ -46,10 +53,11 @@ class PcmTap extends AudioWorkletProcessor {
     const chans = inputs[0]
     if (this.paused || !chans || !chans.length) return true
     const len = chans[0].length
+    const gated = this.gated
     for (let i = 0; i < len; i++) {
       let s = 0
-      for (const c of chans) s += c[i]
-      this.buf[this.n++] = s / chans.length
+      if (!gated) for (const c of chans) s += c[i]
+      this.buf[this.n++] = gated ? 0 : s / chans.length
       if (this.n === BLOCK) {
         this.port.postMessage(this.buf, [this.buf.buffer])
         this.buf = new Float32Array(BLOCK)

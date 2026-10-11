@@ -438,11 +438,15 @@ export const CAPTURE_CH = {
   level: 'meetings:level',
   /** capture → main: the capture window is done (one of CAPTURE_ENDS). */
   ended: 'meetings:ended',
-  /** main → capture: pause, resume, stop. */
+  /** main → capture: pause, resume, stop, mic gate on / off. */
   command: 'meetings:captureCommand',
 } as const
 
-export type CaptureCommand = 'pause' | 'resume' | 'stop'
+/**
+ * What main tells the capture page (fixed words: the recorder puts them in a script). 'gate': the
+ * microphone is not kept (zeros in the "you" track, nothing into the playback mix); 'ungate': it is.
+ */
+export type CaptureCommand = 'pause' | 'resume' | 'stop' | 'gate' | 'ungate'
 /** Why the capture window ended: Stop pressed, the probe's second is over, or what went wrong. */
 export const CAPTURE_ENDS = ['stopped', 'probe', 'no-track', 'mic-refused', 'mic-ended', 'error'] as const
 export type CaptureEnd = (typeof CAPTURE_ENDS)[number]

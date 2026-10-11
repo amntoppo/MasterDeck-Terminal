@@ -69,6 +69,34 @@ export function toInt16(f: Float32Array): Int16Array {
   return out
 }
 
+/**
+ * Below this RMS (of full scale) a "you" chunk is not given to whisper: 1e-4 is -80 dBFS, about
+ * 3 in Int16 steps, under the noise floor of any real microphone (a quiet room through a laptop
+ * mic is -60 dBFS or louder), so it only catches the mic gate's zeros and digital silence, which
+ * whisper turns into made-up lines ("Thank you.").
+ */
+export const SILENT_RMS = 1e-4
+
+/**
+ * Whether a chunk (a WAV exactly as wav() writes it) has nothing for whisper: a "you" chunk whose
+ * RMS is below SILENT_RMS, an "others" chunk only when every sample is zero (the Mac's sound can
+ * be quiet and real; nothing playing at all is exact zeros). Anything that is not such a WAV:
+ * false (whisper decides).
+ */
+export function silentChunk(bytes: Uint8Array, track: Speaker): boolean {
+  if (!checkWav(bytes)) return false
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const n = (bytes.length - WAV_HEADER) / 2
+  let sum = 0
+  for (let i = 0; i < n; i++) {
+    const s = v.getInt16(WAV_HEADER + i * 2, true)
+    if (track === 'others' && s !== 0) return false
+    sum += s * s
+  }
+  if (track === 'others') return true
+  return !n || Math.sqrt(sum / n) / 0x8000 < SILENT_RMS
+}
+
 /** Root mean square of a block (0 for an empty one). */
 export function rms(f: Float32Array): number {
   if (!f.length) return 0
@@ -149,23 +177,26 @@ export class Chunker {
 }
 
 /**
- * The capture page's pause and stop as main sent them. A command can arrive while the page still
- * waits for the microphone and the Mac's sound (macOS may be asking); it is kept here and applied
- * when the streams open, so a pause or a stop is never lost and the page never records while main
- * shows "Paused".
+ * The capture page's pause, stop and mic gate as main sent them. A command can arrive while the
+ * page still waits for the microphone and the Mac's sound (macOS may be asking); it is kept here
+ * and applied when the streams open, so a pause, a stop or a gate is never lost: the page never
+ * records while main shows "Paused", and a recording that starts muted never keeps the mic.
  */
 export class CaptureControl {
   paused = false
   stopped = false
+  /** The mic is not kept (the meeting app has it muted, or the user switched it off). */
+  gated = false
   private on: ((c: CaptureCommand) => void) | null = null
 
   take(c: CaptureCommand): void {
     if (c === 'stop') this.stopped = true
+    else if (c === 'gate' || c === 'ungate') this.gated = c === 'gate'
     else this.paused = c === 'pause'
     this.on?.(c)
   }
 
-  /** The streams are open: they read paused / stopped now, and each later command goes to fn. */
+  /** The streams are open: they read paused / stopped / gated now, and each later command goes to fn. */
   attach(fn: (c: CaptureCommand) => void): void {
     this.on = fn
   }

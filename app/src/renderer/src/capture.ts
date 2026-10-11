@@ -4,8 +4,11 @@ import { CaptureControl, Chunker, Resampler, rms, toInt16, wav, type CaptureBrid
 import { AUDIO_BITS, AUDIO_SLICE_MS, SAMPLE_RATE, type CaptureCommand, type CaptureEnd, type Speaker } from '@shared/meetings'
 
 // The meetings capture window (hidden; main/meetings/recorder.ts opens it at Record and closes it
-// at Stop). Main starts it with window.mdCapture.record(id) or .probe(), and sends pause, resume
-// and stop through window.mdCapture.command (kept until the streams are open: CaptureControl).
+// at Stop). Main starts it with window.mdCapture.record(id) or .probe(), and sends pause, resume,
+// stop and the mic gate (gate / ungate) through window.mdCapture.command (kept until the streams
+// are open: CaptureControl). While the mic is gated it is not kept at all: the "you" worklet
+// writes zeros (the timeline stays aligned with the others' track) and its gain into the playback
+// mix is 0.
 // Everything it records goes to main through
 // window.capture (preload/capture.ts); it keeps nothing.
 
@@ -33,13 +36,14 @@ class Tap {
     ctx: AudioContext,
     src: MediaStreamAudioSourceNode,
     paused: boolean,
+    gated = false,
   ) {
     this.resampler = ctx.sampleRate === SAMPLE_RATE ? null : new Resampler(ctx.sampleRate)
     this.node = new AudioWorkletNode(ctx, 'md-pcm', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],
-      processorOptions: { paused },
+      processorOptions: { paused, gated },
     })
     src.connect(this.node)
     // The worklet writes silence: connected only so the graph pulls it.
@@ -53,6 +57,11 @@ class Tap {
   /** The worklet holds the pause: it posts what it buffered before it, then drops the input. */
   pause(paused: boolean): void {
     this.node.port.postMessage(paused ? 'pause' : 'resume')
+  }
+
+  /** The worklet holds the gate: zeros in place of the input from its next block on. */
+  gate(gated: boolean): void {
+    this.node.port.postMessage(gated ? 'gate' : 'ungate')
   }
 
   private take(block: Float32Array): void {
@@ -141,12 +150,17 @@ async function record(id: string): Promise<void> {
     await ctx.resume()
     const micSrc = ctx.createMediaStreamSource(mic)
     const sysSrc = sys ? ctx.createMediaStreamSource(sys) : null
-    // A pause that came while the streams were opening holds from the first frame.
+    // A pause or a gate that came while the streams were opening holds from the first frame.
     const paused = control.paused
-    const taps = [new Tap('you', id, ctx, micSrc, paused), ...(sysSrc ? [new Tap('others', id, ctx, sysSrc, paused)] : [])]
-    // The playback copy: both tracks mixed, Opus, appended by main every 10 s.
+    const you = new Tap('you', id, ctx, micSrc, paused, control.gated)
+    const taps = [you, ...(sysSrc ? [new Tap('others', id, ctx, sysSrc, paused)] : [])]
+    // The playback copy: both tracks mixed, Opus, appended by main every 10 s. The mic goes
+    // through a gain that is 0 while gated, so nothing muted reaches audio.webm.
     const mix = ctx.createMediaStreamDestination()
-    micSrc.connect(mix)
+    const micGain = ctx.createGain()
+    micGain.gain.value = control.gated ? 0 : 1
+    micSrc.connect(micGain)
+    micGain.connect(mix)
     sysSrc?.connect(mix)
     const recorder = new MediaRecorder(mix.stream, { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: AUDIO_BITS })
     let slices = Promise.resolve()
@@ -163,6 +177,12 @@ async function record(id: string): Promise<void> {
 
     control.attach((c) => {
       if (c === 'stop') return void stopFn?.('stopped')
+      if (c === 'gate' || c === 'ungate') {
+        const gated = c === 'gate'
+        you.gate(gated)
+        micGain.gain.setValueAtTime(gated ? 0 : 1, ctx.currentTime)
+        return
+      }
       const pause = c === 'pause'
       for (const t of taps) t.pause(pause)
       if (pause && recorder.state === 'recording') recorder.pause()

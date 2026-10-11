@@ -270,6 +270,45 @@ describe('Recorder', () => {
     expect(t.store.get(id)).toMatchObject({ state: 'failed', error: 'Nothing was recorded.' })
   })
 
+  it('the mic gate goes to a started page like a pause; a repeat sends nothing; the last value is kept', async () => {
+    const t = setup()
+    const r = await t.rec.start()
+    const id = r.ok ? r.id! : ''
+    await flush()
+    t.rec.setMicGate(true)
+    t.rec.setMicGate(true)
+    expect(t.rec.micGated).toBe(true)
+    t.rec.setMicGate(false)
+    await flush()
+    expect(t.win().scripts).toEqual([`window.mdCapture.record("${id}") [gesture]`, 'window.mdCapture.command("gate")', 'window.mdCapture.command("ungate")'])
+    expect(t.rec.micGated).toBe(false)
+  })
+
+  it('a gate set while the page loads (or before Record) goes in with the start: a muted start never keeps the mic', async () => {
+    let loaded = () => {}
+    fake.state.hold = new Promise<void>((res) => (loaded = res))
+    const t = setup()
+    const r = await t.rec.start()
+    const id = r.ok ? r.id! : ''
+    t.rec.setMicGate(true)
+    await t.rec.pause(true)
+    await flush()
+    expect(t.win().scripts).toEqual([])
+    loaded()
+    await flush()
+    expect(t.win().scripts).toEqual([`window.mdCapture.command("gate");window.mdCapture.command("pause");window.mdCapture.record("${id}") [gesture]`])
+    const w = t.win()
+    const stopped = t.rec.stop()
+    await flush()
+    t.send(CAPTURE_CH.ended, t.ev(w), 'stopped')
+    await stopped
+    // Set before the next Record: its start script carries it.
+    fake.state.hold = null
+    const r2 = await t.rec.start()
+    await flush()
+    expect(t.win().scripts).toEqual([`window.mdCapture.command("gate");window.mdCapture.record("${r2.ok ? r2.id : ''}") [gesture]`])
+  })
+
   it('a window that never answers Stop is closed anyway', async () => {
     const t = setup()
     const r = await t.rec.start()

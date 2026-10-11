@@ -1133,6 +1133,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   written stays. `probe()`: a capture window in probe mode, true when its `ended` is `probe` and the
   loudest `level` was above `PROBE_SILENCE` (60 s wait for macOS's prompt); during a recording,
   whether the others' track has come through. `live()` is `AppState.meetingLive`.
+  `setMicGate(on)` (the mic follows the meeting app's mute, Plan M) sends `gate` / `ungate` the
+  same way as a pause: to a started page, else in front of the start script (`CaptureControl.gated`
+  holds it until the streams open, so a recording that starts muted never keeps a frame of the
+  mic). The recorder keeps the last value (`micGated`) for the recording now and for one that starts
+  later; a value equal to the last sends nothing. Who calls it decides when (the mute watch).
 - It sets `setDisplayMediaRequestHandler` on `session.fromPartition('meetings-capture')`
   (`useSystemPicker: false`): it answers `{ video: request.frame, audio: 'loopback' }` only for the
   capture window's own main frame (compared by `processId` / `routingId`) while the consent holds,
@@ -1154,6 +1159,11 @@ waits, and writes nothing if accounts appeared meanwhile.
   (`audio/webm;codecs=opus`, 32 kbit/s, 10-second slices) sends the playback copy. Levels go out
   every 500 ms (-1: no track). Pause pauses the worklets and the `MediaRecorder`, so the chunks and
   the audio leave the paused time out alike (Stop while paused sends nothing recorded since).
+  The mic gate: the "you" worklet takes `gate` / `ungate` (and `processorOptions.gated` for the start
+  state) and while gated writes zeros for its frames, so the "you" track keeps its timeline next to
+  the others' one; the mic reaches the playback mix through a `GainNode` that is 0 while gated. It
+  applies from the next audio block; nothing from the gated time is kept or pre-rolled. A pause
+  holds over a gate (a paused worklet drops its frames either way).
 - Messages from the capture window (`CAPTURE_CH` in `shared/meetings.ts`, `ipcMain.on`, never on
   `DeckApi`): each is dropped unless its sender is the capture window's own main frame. `meetings:chunk`
   `({ id, track, seq }, bytes)`: the recording's id, `you` or `others`, a sequence number above the
@@ -1197,6 +1207,12 @@ waits, and writes nothing if accounts appeared meanwhile.
   longer the one recording and none of its chunks wait (a chunk on disk the queue never heard of is
   queued first), its lines are merged by time (`mergeSegments`) and it becomes `matching` and goes
   to `onTranscribed(id)` (the matcher, below), or `done` when none is set.
+- A chunk with nothing to hear is not given to whisper (which makes up lines such as "Thank you."
+  from silence): `silentChunk` (`shared/meetingAudio.ts`) on its WAV, read before the run. A "you"
+  chunk is silent below `SILENT_RMS` (1e-4 of full scale, -80 dBFS: under any real microphone's
+  noise floor, so it catches the mic gate's zeros and digital silence); an "others" chunk only when
+  every sample is zero (the Mac's sound can be faint and real). It gets no lines, its WAV is
+  removed and it counts as done. A partly gated chunk is transcribed as it is (zeros are silence).
 - `Meeting.progress` (`MeetingProgress`: `done`, `total`, `wait`; null before the first chunk and in
   older files) is what the Meetings page shows: chunks done, chunks known (grows while recording),
   and why it waits. With no model on disk the head of the queue waits, the meeting stays

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import {
   CHUNK_MS,
@@ -11,6 +11,7 @@ import {
   type Segment,
   type Speaker,
 } from '@shared/meetings'
+import { silentChunk } from '@shared/meetingAudio'
 import { MATCH_FAILED } from '@shared/meetingMatch'
 import type { Leftover, MeetingStore } from './store'
 import type { Segment as HeardSegment, TranscribeOptions } from './whisper'
@@ -77,6 +78,8 @@ function reason(e: unknown): string {
  * other meetings go past it. A chunk that fails stays on disk and the meeting's other chunks go on;
  * once nothing of it waits, the meeting is failed with the first reason, and retry() reruns the
  * chunks still on disk. A missing whisper-cli fails the meeting at once (every chunk would).
+ * A chunk with nothing to hear (silentChunk: a "you" chunk the mic gate zeroed, below SILENT_RMS;
+ * an "others" chunk of exact zeros) is never given to whisper: no lines, its WAV removed, counted done.
  */
 export class Transcriber {
   private queue: Chunk[] = []
@@ -285,6 +288,12 @@ export class Transcriber {
       if (!next) return
       const { c, m, wav, model } = next
       if (m.progress?.wait) this.setProgress(c.id, { wait: null })
+      // Nothing to hear (the mic gate's zeros, digital silence): no whisper, which would make lines up.
+      if (this.silent(c, wav)) {
+        this.shift(c)
+        this.written(c, [])
+        continue
+      }
       const bin = this.d.engine()
       if (!bin) {
         this.fail(c.id, ENGINE_MISSING)
@@ -311,32 +320,45 @@ export class Transcriber {
         this.running = null
       }
       this.shift(c)
-      const lines = chunkSegments(heard, c.track, c.seq)
-      const u = this.d.store.update(c.id, (x) => {
-        // Lines this chunk wrote before (a run whose WAV was not removed) are replaced, not doubled.
-        const kept = x.segments.filter((s) => !(s.speaker === c.track && s.start >= c.seq * CHUNK_MS && s.start < (c.seq + 1) * CHUNK_MS))
-        // ponytail: past MEETING_SEGMENTS_MAX lines (far beyond 4 hours of talk) the rest is dropped; upgrade: a second file.
-        const segments = mergeSegments(
-          [...kept, ...lines].filter((s) => s.speaker === 'you'),
-          [...kept, ...lines].filter((s) => s.speaker === 'others'),
-        ).slice(0, MEETING_SEGMENTS_MAX)
-        const done = (x.progress?.done ?? 0) + 1
-        return { ...x, segments, progress: { done, total: done + this.pending(c.id), wait: null } }
-      })
-      if (!u.ok) {
-        // Deleted while whisper ran: nothing to write to.
-        if (this.d.store.get(c.id)) this.fail(c.id, `Transcription failed: ${u.message}`)
-        continue
-      }
-      this.done.add(keyOf(c))
-      try {
-        this.d.store.removeChunk(c.id, c.track, c.seq)
-      } catch {
-        // Left on disk: done holds it, so it is not transcribed again in this run.
-      }
-      this.d.onChange?.(c.id)
-      this.finishIfDone(c.id)
+      this.written(c, chunkSegments(heard, c.track, c.seq))
     }
+  }
+
+  /** A chunk that silentChunk says has nothing for whisper (an unreadable file: whisper decides). */
+  private silent(c: Chunk, wav: string): boolean {
+    try {
+      return silentChunk(readFileSync(wav), c.track)
+    } catch {
+      return false
+    }
+  }
+
+  /** A chunk is text: its lines replace what it wrote before, progress counts it, its WAV goes. */
+  private written(c: Chunk, lines: Segment[]): void {
+    const u = this.d.store.update(c.id, (x) => {
+      // Lines this chunk wrote before (a run whose WAV was not removed) are replaced, not doubled.
+      const kept = x.segments.filter((s) => !(s.speaker === c.track && s.start >= c.seq * CHUNK_MS && s.start < (c.seq + 1) * CHUNK_MS))
+      // ponytail: past MEETING_SEGMENTS_MAX lines (far beyond 4 hours of talk) the rest is dropped; upgrade: a second file.
+      const segments = mergeSegments(
+        [...kept, ...lines].filter((s) => s.speaker === 'you'),
+        [...kept, ...lines].filter((s) => s.speaker === 'others'),
+      ).slice(0, MEETING_SEGMENTS_MAX)
+      const done = (x.progress?.done ?? 0) + 1
+      return { ...x, segments, progress: { done, total: done + this.pending(c.id), wait: null } }
+    })
+    if (!u.ok) {
+      // Deleted while whisper ran: nothing to write to.
+      if (this.d.store.get(c.id)) this.fail(c.id, `Transcription failed: ${u.message}`)
+      return
+    }
+    this.done.add(keyOf(c))
+    try {
+      this.d.store.removeChunk(c.id, c.track, c.seq)
+    } catch {
+      // Left on disk: done holds it, so it is not transcribed again in this run.
+    }
+    this.d.onChange?.(c.id)
+    this.finishIfDone(c.id)
   }
 
   private shift(c: Chunk): void {

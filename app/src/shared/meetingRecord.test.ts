@@ -15,7 +15,7 @@ import {
   type Meeting,
   type Segment,
 } from './meetings'
-import { CaptureControl, checkWav, Chunker, Resampler, rms, toInt16, wav, WAV_HEADER } from './meetingAudio'
+import { CaptureControl, checkWav, Chunker, Resampler, rms, SILENT_RMS, silentChunk, toInt16, wav, WAV_HEADER } from './meetingAudio'
 
 const ID = 'm-' + 'a'.repeat(32)
 const meeting = (over: Partial<Meeting> = {}): Meeting => ({
@@ -196,6 +196,38 @@ describe('CaptureControl (the capture page keeps pause and stop until its stream
     c.take('stop')
     expect(seen).toEqual(['resume', 'stop'])
     expect(c).toMatchObject({ paused: false, stopped: true })
+  })
+})
+
+describe('CaptureControl and the mic gate', () => {
+  it('keeps the last gate state before the streams open, apart from pause; hands later ones on', () => {
+    const c = new CaptureControl()
+    c.take('gate')
+    c.take('pause')
+    expect(c).toMatchObject({ gated: true, paused: true })
+    c.take('resume')
+    expect(c).toMatchObject({ gated: true, paused: false })
+    const seen: string[] = []
+    c.attach((x) => seen.push(x))
+    c.take('ungate')
+    expect(seen).toEqual(['ungate'])
+    expect(c.gated).toBe(false)
+  })
+})
+
+describe('silentChunk', () => {
+  it('"you": all zeros or under SILENT_RMS is silent; "others": only all zeros; not a WAV: never', () => {
+    expect(SILENT_RMS).toBe(1e-4)
+    expect(silentChunk(wav(new Int16Array(100)), 'you')).toBe(true)
+    expect(silentChunk(wav(new Int16Array(0)), 'you')).toBe(true)
+    expect(silentChunk(wav(new Int16Array(100).fill(3)), 'you')).toBe(true) // 9.2e-5
+    expect(silentChunk(wav(new Int16Array(100).fill(4)), 'you')).toBe(false) // 1.2e-4
+    const one = new Int16Array(100)
+    one[50] = 1000
+    expect(silentChunk(wav(one), 'you')).toBe(false)
+    expect(silentChunk(wav(new Int16Array(100)), 'others')).toBe(true)
+    expect(silentChunk(wav(new Int16Array(100).fill(1)), 'others')).toBe(false)
+    expect(silentChunk(new Uint8Array(100), 'you')).toBe(false)
   })
 })
 

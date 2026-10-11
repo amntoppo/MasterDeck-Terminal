@@ -68,4 +68,38 @@ describe('pcmWorklet', () => {
     t.port.send('flush')
     expect((t.port.posted[0] as Float32Array)[0]).toBeCloseTo(0.5)
   })
+
+  it('gate writes zeros in place of the input (same number of frames), ungate takes it again', () => {
+    const t = new Ctor()
+    t.process(quantum(0.4))
+    t.port.send('gate')
+    for (let i = 0; i < 3; i++) t.process(quantum(0.9))
+    t.port.send('ungate')
+    t.process(quantum(0.2))
+    t.port.send('flush')
+    const out = t.port.posted.filter((x): x is Float32Array => x instanceof Float32Array)
+    const all = Float32Array.from(out.flatMap((b) => [...b]))
+    // The timeline is kept: five quanta in, five out.
+    expect(all.length).toBe(5 * 128)
+    expect(all.slice(0, 128).every((v) => Math.abs(v - 0.4) < 1e-6)).toBe(true)
+    expect(all.slice(128, 4 * 128).every((v) => v === 0)).toBe(true)
+    expect(all.slice(4 * 128).every((v) => Math.abs(v - 0.2) < 1e-6)).toBe(true)
+  })
+
+  it('starts gated when the page says so (a recording that starts muted never keeps the mic)', () => {
+    const t = new Ctor({ processorOptions: { gated: true } })
+    for (let i = 0; i < 20; i++) t.process([[new Float32Array(128).fill(0.7), new Float32Array(128).fill(0.3)]])
+    t.port.send('flush')
+    expect(frames(t.port.posted)).toBe(20 * 128)
+    for (const b of t.port.posted) if (b instanceof Float32Array) expect(b.every((v) => v === 0)).toBe(true)
+  })
+
+  it('a pause holds over a gate: nothing is posted while paused, gated or not', () => {
+    const t = new Ctor({ processorOptions: { paused: true, gated: true } })
+    t.process(quantum(0.5))
+    t.port.send('ungate')
+    t.process(quantum(0.5))
+    t.port.send('flush')
+    expect(t.port.posted).toEqual(['flushed'])
+  })
 })

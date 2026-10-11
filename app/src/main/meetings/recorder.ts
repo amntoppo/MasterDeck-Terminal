@@ -83,7 +83,7 @@ const ENDED_TEXT: Partial<Record<CaptureEnd, string>> = {
 const sameFrame = (a: { processId: number; routingId: number } | null | undefined, b: { processId: number; routingId: number } | null | undefined): boolean =>
   !!a && !!b && a.processId === b.processId && a.routingId === b.routingId
 
-/** The page's command call, as a statement (CaptureCommand is one of three fixed words). */
+/** The page's command call, as a statement (CaptureCommand is one of five fixed words). */
 const cmd = (c: CaptureCommand): string => `window.mdCapture.command(${JSON.stringify(c)});`
 
 const bytesOf = (v: unknown): Uint8Array | null =>
@@ -101,6 +101,11 @@ export class Recorder {
   private rec: Recording | null = null
   private probing: { promise: Promise<boolean>; max: number; ended: (r: CaptureEnd) => void } | null = null
   private now: () => number
+  /**
+   * The mic gate as last set (setMicGate): the recording now has it, and a recording that starts
+   * later starts with it. Whoever sets it (the mute watch) sets it again for each recording.
+   */
+  private gated = false
 
   constructor(private d: RecorderDeps) {
     this.now = d.now ?? Date.now
@@ -234,8 +239,10 @@ export class Recorder {
     // pressed while the page loaded goes first (the page keeps it until its streams open).
     this.run(w, () => {
       rec.pageStarted = true
+      // The gate as it is now (set while the page loaded, or before Record): never a frame of a muted mic.
+      const gate = this.gated ? cmd('gate') : ''
       const first = rec.stopping ? cmd('stop') : rec.pausedAt !== null ? cmd('pause') : ''
-      return `${first}window.mdCapture.record(${JSON.stringify(id)})`
+      return `${gate}${first}window.mdCapture.record(${JSON.stringify(id)})`
     }).catch(() => rec.ended('error'))
     return {
       ok: true,
@@ -249,6 +256,23 @@ export class Recorder {
   private command(r: Recording, c: CaptureCommand): void {
     const w = this.win
     if (r.pageStarted && w && !w.isDestroyed()) void w.webContents.executeJavaScript(cmd(c).slice(0, -1)).catch(() => {})
+  }
+
+  /** Whether the mic is kept out of the recording (the last setMicGate). */
+  get micGated(): boolean {
+    return this.gated
+  }
+
+  /**
+   * The mic gate: on, the capture page keeps zeros for the "you" track and nothing of the mic in
+   * the playback mix; off, the mic again. Sent like a pause (the start script carries it while the
+   * page loads); a value equal to the last one sends nothing.
+   */
+  setMicGate(on: boolean): void {
+    if (on === this.gated) return
+    this.gated = on
+    const r = this.rec
+    if (r && !r.stopping) this.command(r, on ? 'gate' : 'ungate')
   }
 
   async pause(paused: unknown): Promise<RecordAnswer> {
