@@ -419,8 +419,8 @@ buttons; it does not go through macOS window drag regions.
   audio, search), Janitor's Meetings section. Not checked: any real capture or permission prompt, a
   real transcription with a downloaded model, a real `claude -p` match, Zoom's and Webex's real
   process names in a call; Windows is not supported. Open points: TODO ("Meetings (#102): open points").
-  **The mic follows the meeting app's mute** (Plan M, 2026-10-12; fc97904, a321ec6, 0466563 and
-  the UI commit after them, same branch, not installed yet): `md-mute` reads the meeting app's mute
+  **The mic follows the meeting app's mute** (Plan M, 2026-10-12; fc97904, a321ec6, 0466563,
+  65937de and 081b82e, same branch, not installed yet): `md-mute` reads the meeting app's mute
   through Accessibility while recording, a gate keeps your mic out while muted (unknown keeps it),
   Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility** row, the
   Record popout's mic line (`micLine` in `shared/meetings.ts`) and **Mic off in the recording**, a
