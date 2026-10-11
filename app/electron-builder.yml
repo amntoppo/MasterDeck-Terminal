@@ -46,6 +46,12 @@ mac:
       to: whisper/${arch}
       filter:
         - whisper-cli
+    # The helper that reads the meeting app's mute, built by scripts/mute.sh (CI runs it too).
+    # Missing: the recording keeps the microphone, as with "Always record".
+    - from: resources/mute/${arch}
+      to: mute/${arch}
+      filter:
+        - md-mute
 win:
   target:
     - target: nsis

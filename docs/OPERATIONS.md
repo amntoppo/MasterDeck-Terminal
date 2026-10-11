@@ -389,6 +389,52 @@ thrown away. It needs the model's size plus 200 MB free. One downloads at a time
 by hand, put the file there under the same name (it is ready when its size matches). To remove
 one: **Remove** on the screen, or delete the file while MasterDeck is closed.
 
+## Meetings: md-mute
+
+`md-mute` reads the meeting app's own Mute / Unmute control through Accessibility, so a recording
+can leave the microphone out while you are muted (Plan M; ARCHITECTURE § Meetings: the mute
+reader).
+
+**Building it.** `app/scripts/mute.sh [arm64|x64]` (default: this Mac's) compiles
+`app/native/mute/main.swift` with `xcrun swiftc -O -swift-version 5 -target <arch>-apple-macos12.0`
+into `app/resources/mute/<arch>/md-mute` (about 140 KB arm64, 115 KB x64; git-ignored). It needs
+Xcode's command line tools only. Like whisper.sh it fails if `otool -L` names anything outside
+`/usr/lib` and `/System/Library` (the Swift runtime is in `/usr/lib/swift` on macOS 12+), strips the
+binary and signs it ad hoc (identifier `io.github.amntoppo.masterdeck.md-mute`).
+
+```bash
+cd app && ./scripts/mute.sh arm64 && ./scripts/mute.sh x64
+otool -L resources/mute/arm64/md-mute   # libSystem, libc++, libobjc, /usr/lib/swift/*, AppKit, ApplicationServices, CoreFoundation, Foundation
+```
+
+- CI's macOS job runs it for arm64 and x64 after whisper.sh, before `dist:mac`.
+- `electron-builder.yml` `mac.extraResources` ships `resources/mute/${arch}` as
+  `Contents/Resources/mute/<arch>/md-mute`. Missing (a local build without the script): the
+  recording keeps the microphone.
+- Where the app looks (`findMute`, `main/meetings/muteHelper.ts`): `MASTERDECK_MUTE` (set but not
+  runnable: nothing else), then the app's own (packaged `Resources/mute/<arch>/`; `npm run dev`
+  `app/resources/mute/<arch>/`). There is no PATH lookup.
+- An x64 build cannot be run on an Apple Silicon Mac without Rosetta ("Bad CPU type").
+
+**Checking a rule by hand.** Rules are data in `shared/meetingMute.ts`, so a wrong label is a TS
+change. To see what the helper reads for a rule, run it from a terminal with one line of rules
+(Ctrl-C or closing stdin ends it):
+
+```bash
+cd app
+{ echo '{"apps":[{"id":"zoom","bundles":["us.zoom.xos"],"menu":{"title":"Meeting","muted":["Unmute audio"],"unmuted":["Mute audio"]}}]}'; sleep 10; } \
+  | resources/mute/arm64/md-mute
+# {"t":…,"trusted":true,"apps":[{"id":"zoom","state":"muted"}]}   every 400 ms
+```
+
+`trusted` is the Accessibility grant of the process that started it (from a terminal: the
+terminal's, System Settings → Privacy & Security → Accessibility); `false` means every app reads
+`unknown`. The helper never asks for the grant. An app is listed only while it runs; `unknown` while
+trusted means no control matched (not in a call, a label the rule does not know, a browser's Meet
+in a background tab, or a search past its caps). To find the real label, open the app in a call and
+look at the mute button with Accessibility Inspector (Xcode → Open Developer Tool), then put its
+title, description or help text (the start of it) in the rule. Bad rules exit 2 with a message.
+
 ## Meetings: the fixture
 
 The Meetings page can be checked in the isolated app without recording anything:

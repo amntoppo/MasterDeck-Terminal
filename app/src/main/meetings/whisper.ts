@@ -25,7 +25,7 @@ export interface WhisperWhere {
 
 const BIN = 'whisper-cli'
 
-function executable(p: string): boolean {
+export function executable(p: string): boolean {
   try {
     if (!statSync(p).isFile()) return false
     accessSync(p, constants.X_OK)

@@ -50,6 +50,12 @@ jobs:
           command -v cmake >/dev/null || brew install cmake
           ./scripts/whisper.sh arm64
           ./scripts/whisper.sh x64
+      - name: Build md-mute (meetings' mute reader, macOS only)
+        if: runner.os == 'macOS'
+        working-directory: app
+        run: |
+          ./scripts/mute.sh arm64
+          ./scripts/mute.sh x64
       - name: Build installers
         working-directory: app
         run: npm run ${{ matrix.dist }} -- --publish never

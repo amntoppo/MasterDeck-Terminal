@@ -1426,6 +1426,39 @@ waits, and writes nothing if accounts appeared meanwhile.
   closed: the words, **Record** (`meetingsStart()`), **Not now** (`meetingsNotNow()`), "Tell the
   others you are recording."
 
+### Meetings: the mute reader `md-mute` (issue #102, Plan M)
+
+So a recording can leave the microphone out while you are muted in the meeting app (macOS has no
+API for another app's mute), a small Swift helper reads the app's own Mute / Unmute control
+through Accessibility. Task 1 of Plan M: the helper, its build and the app's side of its protocol;
+nothing runs it yet (the recorder's `MuteWatch` is the next task).
+
+- `native/mute/main.swift`, built by `scripts/mute.sh` into `resources/mute/<arch>/md-mute`
+  (OPERATIONS § Meetings: md-mute). One line of JSON rules on stdin, then every 400 ms one line
+  `{"t":<ms>,"trusted":bool,"apps":[{"id","state"}]}` (`muted` / `unmuted` / `unknown`, only apps
+  with a running process, found by bundle id with `NSWorkspace`). Not trusted: every app is
+  `unknown`. It calls `AXIsProcessTrusted()` only (never the prompting variant: the app asks, after
+  consent). A **menu rule** reads the titles of one menu bar menu's items; an **element rule** walks
+  the app's windows breadth first and reads the rule's label attributes (`AXTitle`,
+  `AXDescription`, `AXHelp`) only on controls of the rule's role. Matching is a case-insensitive
+  prefix, muted first. Caps per search: depth 60, 6000 elements, 150 ms (past any: `unknown`), and
+  a 50 ms messaging timeout per AX call. For the rule's Chromium bundles it sets
+  `AXManualAccessibility` once per process (how screen readers get web content). It presses
+  nothing. It exits when stdin closes or its parent changes (`getppid()` each tick); bad rules: a
+  line on stderr, exit 2.
+- `shared/meetingMute.ts`: `MUTE_RULES` (Zoom: the **Meeting** menu, "Unmute audio" while muted,
+  "Mute audio" while heard; Teams, Webex: buttons "Unmute…" / "Mute…"; Google Meet in Chrome, Arc,
+  Edge, Brave, Safari: "Turn on microphone…" / "Turn off microphone…"; all `ponytail:` guesses
+  until checked on real calls, data so a fix is no rebuild), `muteRulesLine`, `parseMuteLine(line,
+  known?)` (strict: any wrong field, an app twice, an id not in `known`, or a muted/unmuted state
+  while not trusted is `null`), `muteRuleId` (a rule from the offer's app name or an id),
+  `pickApp(apps, preferred)` (the preferred app while listed, else the first read as
+  muted/unmuted), `MuteSettle` (two equal readings in a row before the settled state changes).
+- `main/meetings/muteHelper.ts`: `findMute(where)` (`MASTERDECK_MUTE`, set but not runnable is
+  none; then the bundled `mute/<arch>/md-mute`, or `app/resources/mute/<arch>/` in development; no
+  PATH lookup) and `spawnMute(bin, rules?)` → `{ onLine, onExit, kill }` (lines split across chunks
+  are joined, junk dropped, stderr kept for `onExit`; `kill` closes stdin and sends SIGTERM).
+
 ### Working hours (issue #64)
 
 The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per GitHub account, day
