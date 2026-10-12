@@ -1,9 +1,10 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
-import { parseChanges, parseDiff, type ChangedFile, type FileDiff } from '../shared/diff'
-import { insideRoot } from '../shared/filePath'
-import { BINARY_SNIFF, FILE_MAX_BYTES, FILE_MAX_LINES, limitOf, type FileRefusal } from '../shared/fileView'
-import type { DiffBase } from '../shared/sessionTabs'
+import { parseChanges, parseDiff } from '@shared/diff'
+import { insideRoot } from '@shared/filePath'
+import { BINARY_SNIFF, FILE_MAX_BYTES, FILE_MAX_LINES, limitOf, type FileRefusal } from '@shared/fileView'
+import type { Answer, ChangeList, DiffRead, FileList, FileRead } from '@shared/sessionFiles'
+import type { DiffBase } from '@shared/sessionTabs'
 import { defaultBranch } from './defaultBranch'
 import type { Runner } from './run'
 
@@ -20,13 +21,6 @@ const WALK_DEPTH = 6
 const COUNT_UNTRACKED_MAX = 500
 const GIT_MS = 10_000
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
-
-export type Answer<T> = ({ ok: true } & T) | { ok: false; message: string }
-
-export type FileList = Answer<{ paths: string[]; truncated: boolean }>
-export type FileRead = Answer<{ path: string; text: string | null; refused: FileRefusal | null; bytes: number; mtimeMs: number }>
-export type ChangeList = Answer<{ files: ChangedFile[] }>
-export type DiffRead = Answer<{ path: string; diff: FileDiff }>
 
 const z = (s: string) => s.split('\0').filter(Boolean)
 

@@ -74,6 +74,11 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   notesSave: invoke(CH.notesSave),
   notesDelete: invoke(CH.notesDelete),
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
+  // A session's files and diffs, read only, inside its own folder (sessionFileCall), cut to fit the bridge (webFit).
+  filesList: invoke(CH.filesList),
+  filesRead: invoke(CH.filesRead),
+  diffList: invoke(CH.diffList),
+  diffFile: invoke(CH.diffFile),
   // Side questions run on the Mac (a forked claude -p); a browser asks and reads them as the window does.
   btwList: invoke(CH.btwList),
   btwAsk: invoke(CH.btwAsk),
