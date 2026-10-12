@@ -677,10 +677,22 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 ## Product ideas (from the user, 2026-10-03)
 
+## Session details → GitHub (#103): open points
+
+- **P3 · Events across restarts.** A monitor's and a PR watch's events are kept in memory only
+  (the last 50); after a restart the list starts empty while the count goes on. Save the rings
+  beside `watches.json` / `pr-watch.json` if that turns out to matter.
+- **P3 · Not checked against GitHub.** `pr:detail` was checked with a fixture answer and the web
+  preview only: the first real read (GraphQL cost, a PR with 100+ checks, StatusContext links) is
+  the user's.
+- **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
+  refresh while the row stays open.
+
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Session details in three tabs (issue #103): **Session** (no GitHub UI), **GitHub** (Ticket with steps, note and sub-issues; each PR with checks, reviews, open threads, comments and its PR watch's finds; each monitor with its lines, newest first; counts, status badges and ↗ links; live refresh) and **Mods**; the tab is remembered. New reads `watch:events` and `pr:detail` (`shared/prDetail.ts`) | branch `worktree-MasterDeck-Terminal-103-details-tabs` | — |
 | The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
 | Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
 | MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |

@@ -166,7 +166,10 @@ export function fixtureState(noBoard = false): AppState {
     stats: { [SESSIONS[0].sessionId]: stats(3.42, 61), [SESSIONS[1].sessionId]: stats(1.08, 24) },
     tails: {},
     git: {},
-    prLive: {},
+    // Session details → GitHub: the first session's PR, live, with changes asked for.
+    prLive: {
+      'https://github.com/acme/web/pull/131': { number: 131, title: 'Fix login redirect loop', url: 'https://github.com/acme/web/pull/131', state: 'OPEN', reviewDecision: 'CHANGES_REQUESTED', ci: 'failure', reviewCheck: 'success', buildCi: 'failure', isDraft: false, headRef: 'fix/112', createdAt: now - 3 * 3600_000, mergedAt: null, lastCommentAt: now - 20 * min },
+    },
     hookInfo: {},
     sessionWorktrees: {},
     peers: { [SESSIONS[0].key]: [SESSIONS[1].key], [SESSIONS[1].key]: [SESSIONS[0].key] },
@@ -197,7 +200,11 @@ export function fixtureState(noBoard = false): AppState {
       { name: 'token-weather', provenance: 'token-weather@claude-code-playground-mods', version: '0.1.0', tier: 'user' },
     ],
     sessionPrs: { [SESSIONS[0].sessionId]: ['https://github.com/acme/web/pull/131'] },
-    watches: [],
+    // A monitor of the first session's own, and MasterDeck's PR watch on its PR (listed under the PR).
+    watches: [
+      { id: 'w-deploy', sessionId: SESSIONS[0].sessionId, description: 'Staging deploy status', command: 'while sleep 30; do curl -s https://staging.acme.example/health; done', startedAt: now - 95 * min, events: 7, lastEventAt: now - 3 * min, queued: 1 },
+      { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
+    ],
     schedules: {},
     loops: {},
     sources: { agents: 'ok', github: 'ok' },
