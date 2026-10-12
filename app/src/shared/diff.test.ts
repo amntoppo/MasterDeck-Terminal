@@ -76,6 +76,11 @@ describe('parseDiff', () => {
     expect(d.truncated).toBe(true)
     expect(d.hunks[0].lines).toHaveLength(DIFF_MAX_LINES)
   })
+  it('reads only the first file of an answer that holds two', () => {
+    const d = parseDiff(`${DIFF}diff --git a/other.ts b/other.ts\n--- a/other.ts\n+++ b/other.ts\n@@ -1 +1 @@\n-x\n+y\n`)
+    expect(d.hunks).toHaveLength(2)
+    expect(d.hunks.flatMap((h) => h.lines).some((l) => l.text === 'y')).toBe(false)
+  })
   it('gives nothing for an empty diff', () => {
     expect(parseDiff('')).toEqual({ binary: false, hunks: [], truncated: false })
   })

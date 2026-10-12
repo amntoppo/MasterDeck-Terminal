@@ -751,6 +751,9 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   too (on mtime) if files edited mid-turn need to show at once.
 - **P3 · No highlighting in diffs.** Diff lines are plain text with red/green rows; highlighting
   each line by language would need context across lines (a multi-line comment).
+- **P3 · ⌘-click on Windows and through a linked folder.** `findPaths` / `relativeTo` know `/`
+  paths only, so nothing is linked on Windows; a session whose `cwd` is a link (`/tmp` vs
+  `/private/tmp`) does not match an absolute path Claude printed with the real folder.
 - **P3 · Not checked:** a real Claude session's paths in the installed app, the web app over the
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).

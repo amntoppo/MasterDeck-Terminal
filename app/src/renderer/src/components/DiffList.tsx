@@ -7,6 +7,8 @@ import { sessionTabs } from '../sessionTabsStore'
 import { usePull } from '../usePull'
 
 const BASE_KEY = 'diff-base'
+/** Rows drawn; a folder with more changes says how many are left out. */
+const SHOW_MAX = 500
 const LETTER: Record<ChangedFile['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' }
 
 /**
@@ -17,6 +19,7 @@ const LETTER: Record<ChangedFile['status'], string> = { added: 'A', modified: 'M
 export function DiffList({ session, onCount }: { session: Session; onCount: (n: number | null) => void }) {
   const [base, setBaseState] = useState<DiffBase>(() => (load<string>(BASE_KEY, 'uncommitted') === 'branch' ? 'branch' : 'uncommitted'))
   const [files, setFiles] = useState<ChangedFile[] | null>(null)
+  const [more, setMore] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   // The base now, for an answer that comes back after the switch was flipped.
@@ -30,12 +33,14 @@ export function DiffList({ session, onCount }: { session: Session; onCount: (n: 
   }
   usePull(true, `${session.key}:${session.state}:${base}`, async () => {
     // The panel stays mounted when hidden: ask nothing then.
-    if (!ref.current || ref.current.offsetParent === null) return
+    if (!ref.current || ref.current.offsetParent === null) return false
     const asked = base
     const r = await deck().diffList(session.key, asked)
     if (asked !== baseNow.current) return
     if (r.ok) {
-      setFiles(r.files)
+      // The same answer as last time draws nothing again.
+      setFiles((cur) => (cur && JSON.stringify(cur) === JSON.stringify(r.files) ? cur : r.files))
+      setMore(r.more ?? 0)
       setError(null)
       onCount(r.files.length)
     } else {
@@ -69,7 +74,7 @@ export function DiffList({ session, onCount }: { session: Session; onCount: (n: 
       {files && files.length === 0 && <div className="empty">{base === 'uncommitted' ? 'No changes since the last commit.' : 'No changes on this branch.'}</div>}
       {files && files.length > 0 && (
         <ul className="diff-files">
-          {files.map((f) => (
+          {files.slice(0, SHOW_MAX).map((f) => (
             <li key={f.path}>
               <button
                 className={`diff-file ${f.status}`}
@@ -94,6 +99,11 @@ export function DiffList({ session, onCount }: { session: Session; onCount: (n: 
             </li>
           ))}
         </ul>
+      )}
+      {files && (files.length > SHOW_MAX || more > 0) && (
+        <div className="empty">
+          {(Math.max(0, files.length - SHOW_MAX) + more).toLocaleString('en-US')} more changed files are not listed (a build folder git does not ignore?).
+        </div>
       )}
     </div>
   )

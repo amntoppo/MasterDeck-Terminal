@@ -43,6 +43,10 @@ describe('findPaths', () => {
       { path: 'docs/GUIDE.md', start: 14, end: 27 },
     ])
   })
+  it('skips words that only look like files', () => {
+    expect(findPaths('e.g. this, i.e. that, see example.com')).toEqual([])
+    expect(findPaths('see package.json and Makefile.am').map((p) => p.path)).toEqual(['package.json'])
+  })
   it('skips URLs, bare words and version numbers', () => {
     expect(findPaths('https://github.com/a/b.ts and www.x.com')).toEqual([])
     expect(findPaths('hello world')).toEqual([])

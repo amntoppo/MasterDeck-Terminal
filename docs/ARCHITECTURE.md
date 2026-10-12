@@ -740,17 +740,23 @@ goes through the store: Details → Diff (`DiffList.tsx`) and Files (`FileTree.t
 Main reads, never writes: `main/sessionFiles.ts` `SessionFiles` behind four `remote` channels
 (`files:list`, `files:read`, `diff:list`, `diff:file`). The folder is always the listed session's
 `cwd`, looked up by key (`sessionFileCall` in `main/remoteGuards.ts`); a path passes `insideRoot`
-(relative, no `..`, no NUL) and then the real-path check (no link out of the folder). Git runs with
-`GIT_OPTIONAL_LOCKS=0` and a 10 s timeout; lists come from `-z` output (`shared/diff.ts`
+(relative, no `..`, no NUL) and then the real-path check (no link out of the folder); a path
+through `.git`, `.ssh`, `.gnupg` or `.aws` is never read, and a session whose folder is the home
+folder (no repository) gets no file list (no crawl of `~/Library`). Git runs with
+`GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1` (`[id].tsx` is a name, not a glob),
+`--no-textconv` and a 10 s timeout; a tracked file over 10 MB is not diffed; lists come from `-z` output (`shared/diff.ts`
 `parseChanges`, `parseDiff`, `splitRows`). **Uncommitted** diffs against `HEAD` (the empty tree
 before a first commit), **Branch** against `merge-base HEAD origin/<default>` (else the local
-branch); untracked files are listed as added and counted by main. Limits (`shared/fileView.ts`): a
+branch); untracked files are listed as added (the first 300; `more` counts the rest) and their
+lines counted by main, 8 files at a time. Limits (`shared/fileView.ts`): a
 file over 1 MB or 20,000 lines, or binary (a NUL in the first 8 KB), is refused with a reason; a
 diff is cut at 5,000 lines. A web answer passes `webFit` (`shared/sessionFiles.ts`): under ~900 KB
-of JSON so it fits one bridge frame (a list is cut, a file becomes too-large, a diff is refused).
+of JSON so it fits one bridge frame (a list is cut to what fits, a file becomes too-large, a diff is refused).
 
 Nothing of this is in `AppState`. Details → Diff and an open diff tab pull (`renderer/src/usePull.ts`):
-every 3 s while on screen and the window is visible, at once when the session's state changes.
+every 3 s while on screen and the window is visible, at once when the session's state changes;
+the schedule is checked from refs, so nothing re-renders between pulls, and an unchanged answer
+draws nothing.
 Highlighting is `highlight.js` (`lib/common` plus dockerfile) in `renderer/src/highlight.ts`,
 which splits its HTML per line; over 300 KB a file is shown as plain text. Markdown goes through
 `MarkdownView html={false}`. Token colours are theme tokens (`.hljs-*` in `styles.css`).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WEB_ANSWER_MAX, webFit, type DiffRead, type FileList, type FileRead } from './sessionFiles'
+import { WEB_ANSWER_MAX, webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from './sessionFiles'
 
 const size = (v: unknown) => Buffer.byteLength(JSON.stringify(v))
 
@@ -21,6 +21,13 @@ describe('webFit', () => {
     expect(r.ok && r.truncated).toBe(true)
     expect(size(r)).toBeLessThanOrEqual(WEB_ANSWER_MAX)
     expect(r.ok && r.paths[0]).toBe(paths[0])
+  })
+  it('cuts a long change list until it fits', () => {
+    const files = Array.from({ length: 5000 }, (_, i) => ({ path: `${'deep/'.repeat(40)}file-${i}.ts`, status: 'added' as const, add: 1, del: 0, binary: false }))
+    const r = webFit({ ok: true, files } as ChangeList)
+    expect(size(r)).toBeLessThanOrEqual(WEB_ANSWER_MAX)
+    expect(r.ok && r.files.length).toBeGreaterThan(0)
+    expect(r.ok && r.more).toBe(5000 - (r.ok ? r.files.length : 0))
   })
   it('refuses a diff too big for the bridge', () => {
     const line = { kind: 'add' as const, text: 'x'.repeat(1000), new: 1 }

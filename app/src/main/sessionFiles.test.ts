@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FILE_MAX_BYTES } from '../shared/fileView'
 import { makeRunner } from './run'
-import { SessionFiles } from './sessionFiles'
+import { SessionFiles, UNTRACKED_MAX } from './sessionFiles'
 
 const run = makeRunner(() => ({ ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }))
 const files = new SessionFiles(run)
@@ -41,7 +41,18 @@ beforeAll(() => {
   writeFileSync(join(repo, 'ignored.log'), 'x')
   writeFileSync(join(repo, 'logo.bin'), Buffer.from([0, 9, 9, 9]))
   writeFileSync(join(repo, 'big.txt'), 'x'.repeat(FILE_MAX_BYTES + 10))
+  // A Next.js-style name: git reads pathspecs as globs unless told not to.
+  mkdirSync(join(repo, 'app/[id]'), { recursive: true })
+  mkdirSync(join(repo, 'app/i'), { recursive: true })
+  writeFileSync(join(repo, 'app/[id]/page.tsx'), 'id\n')
+  writeFileSync(join(repo, 'app/i/page.tsx'), 'i\n')
+  git(repo, 'add', 'app')
+  git(repo, 'commit', '-q', '-m', 'pages', '--', 'app')
+  writeFileSync(join(repo, 'app/[id]/page.tsx'), 'id changed\n')
+  writeFileSync(join(repo, 'app/i/page.tsx'), 'i changed\n')
+  writeFileSync(join(repo, 'empty.txt'), '')
   writeFileSync(join(top, 'secret.txt'), 'outside')
+  symlinkSync(join(top, 'secret.txt'), join(repo, 'out-link.txt'))
   symlinkSync(join(top, 'secret.txt'), join(repo, 'link.txt'))
 
   mkdirSync(join(plain, 'docs'), { recursive: true })
@@ -86,6 +97,13 @@ describe('read', () => {
     expect(await files.read(repo, 'gone.txt')).toMatchObject({ ok: true, text: null, refused: 'missing' })
     expect(await files.read(repo, 'src')).toMatchObject({ ok: true, text: null, refused: 'not-file' })
   })
+  it('never reads git internals or ssh keys by name', async () => {
+    expect(await files.read(repo, '.git/config')).toMatchObject({ ok: true, text: null, refused: 'outside' })
+    expect(await files.read(repo, 'a/.ssh/id_rsa')).toMatchObject({ ok: true, text: null, refused: 'outside' })
+  })
+  it('never walks a home folder', async () => {
+    expect(await new SessionFiles(run, plain).list(plain)).toEqual({ ok: false, message: 'This session works in your home folder: open a session in a project to see its files.' })
+  })
   it('never follows a path or a link out of the folder', async () => {
     expect(await files.read(repo, 'link.txt')).toMatchObject({ ok: true, text: null, refused: 'outside' })
     expect(await files.read(repo, '../secret.txt')).toMatchObject({ ok: false })
@@ -105,6 +123,16 @@ describe('changes', () => {
     expect(by['logo.bin']).toMatchObject({ status: 'modified', binary: true })
     expect(by['committed.ts']).toBeUndefined()
     expect(by['ignored.log']).toBeUndefined()
+  })
+  it('counts at most UNTRACKED_MAX untracked files, and says how many more there are', async () => {
+    const many = join(top, 'many')
+    mkdirSync(many)
+    git(many, 'init', '-q', '-b', 'main')
+    for (let i = 0; i < UNTRACKED_MAX + 5; i++) writeFileSync(join(many, `f${String(i).padStart(4, '0')}.txt`), 'x\n')
+    const r = await files.changes(many, 'uncommitted')
+    expect(r.ok && r.files.length).toBe(UNTRACKED_MAX)
+    expect(r.ok && r.more).toBe(5)
+    expect(r.ok && r.files.every((f) => f.add === 1)).toBe(true)
   })
   it('includes commits since the default branch for the branch base', async () => {
     const r = await files.changes(repo, 'branch')
@@ -143,6 +171,15 @@ describe('fileDiff', () => {
     expect(r.ok && r.diff.hunks).toEqual([])
     const b = await files.fileDiff(repo, 'logo.bin', 'uncommitted')
     expect(b.ok && b.diff.binary).toBe(true)
+  })
+  it('takes a path literally, never as a glob', async () => {
+    const r = await files.fileDiff(repo, 'app/[id]/page.tsx', 'uncommitted')
+    expect(r.ok && r.diff.hunks.flatMap((h) => h.lines.map((l) => l.text))).toEqual(['id', 'id changed'])
+  })
+  it('says an untracked link out of the folder is outside, and an empty new file has no lines', async () => {
+    expect(await files.fileDiff(repo, 'out-link.txt', 'uncommitted')).toEqual({ ok: false, message: "This path is outside the session's folder." })
+    const e = await files.fileDiff(repo, 'empty.txt', 'uncommitted')
+    expect(e.ok && e.diff.hunks).toEqual([])
   })
   it('diffs against the merge base for the branch base', async () => {
     const r = await files.fileDiff(repo, 'committed.ts', 'branch')

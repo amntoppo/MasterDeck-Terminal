@@ -85,6 +85,7 @@ export function parseDiff(text: string): FileDiff {
   let truncated = false
   let oldN = 0
   let newN = 0
+  let seenFile = false
   for (const line of text.split('\n')) {
     if (line.startsWith('@@')) {
       const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
@@ -100,6 +101,9 @@ export function parseDiff(text: string): FileDiff {
       continue
     }
     if (line.startsWith('diff --git ')) {
+      // One file per answer: a second section (a pathspec that matched more) is not this file's.
+      if (seenFile) break
+      seenFile = true
       hunk = null
       continue
     }

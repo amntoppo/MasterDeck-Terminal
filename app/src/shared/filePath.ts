@@ -3,7 +3,11 @@
  * web goes through before main reads it (main then checks the real path too: symlinks).
  */
 
+import { viewKind } from './fileView'
+
 const MAX_PATH = 4096
+// Plain-text extensions a bare name (no folder) may have and still be taken for a file.
+const TEXT_EXT = /\.(txt|log|csv|tsv|lock|env|cfg|conf)$/i
 
 /** A safe relative path, normalised ("a/./b/../c" → "a/c"), or null when it is not one. */
 export function insideRoot(p: unknown): string | null {
@@ -56,6 +60,8 @@ export function findPaths(text: string): FoundPath[] {
     if (!path || path.startsWith('www.')) continue
     const last = path.slice(path.lastIndexOf('/') + 1)
     if (!/\.[A-Za-z][\w-]*$/.test(last) && !path.startsWith('./')) continue
+    // A bare name ("e.g", "example.com") is a file only with an extension MasterDeck knows.
+    if (!path.includes('/') && viewKind(path).kind === 'text' && !TEXT_EXT.test(path)) continue
     const start = m.index ?? 0
     const line = m[2] ?? m[4]
     found.push({ path, ...(line ? { line: Number(line) } : {}), start, end: hasSuffix ? start + m[0].length : start + path.length })

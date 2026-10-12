@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 /**
  * Details → Diff stays live by asking main again: every PULL_MS while it is on screen and the
@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react'
  * changed files is in AppState (the bridge's state budget), and nothing runs while nobody looks.
  */
 export const PULL_MS = 3000
+/** How often the schedule is looked at; looking re-renders nothing. */
+const CHECK_MS = 500
 
 export function pullDue(p: { now: number; last: number | null; visible: boolean; changed: boolean }): boolean {
   if (!p.visible) return false
@@ -16,40 +18,52 @@ const pageVisible = () => typeof document === 'undefined' || document.visibility
 
 /**
  * Run `pull` on that schedule while `on`; `trigger` (the session's state) changing pulls at once.
- * A pull never overlaps the last one.
+ * A pull never overlaps the last one. `pull` answers false when it did not ask (its view is
+ * hidden): that does not count as a pull, so the view asks as soon as it shows again.
  */
-export function usePull(on: boolean, trigger: unknown, pull: () => Promise<void>): void {
+export function usePull(on: boolean, trigger: unknown, pull: () => Promise<boolean | void>): void {
   const last = useRef<number | null>(null)
   const seen = useRef(trigger)
   const busy = useRef(false)
   const pullRef = useRef(pull)
   pullRef.current = pull
-  const [tick, setTick] = useState(0)
+  const triggerRef = useRef(trigger)
+  triggerRef.current = trigger
+  const check = useRef(() => {})
+  check.current = () => {
+    if (busy.current) return
+    const changed = seen.current !== triggerRef.current
+    if (!pullDue({ now: Date.now(), last: last.current, visible: pageVisible(), changed })) return
+    seen.current = triggerRef.current
+    busy.current = true
+    void pullRef
+      .current()
+      .then((asked) => {
+        if (asked !== false) last.current = Date.now()
+      })
+      .catch(() => {
+        last.current = Date.now()
+      })
+      .finally(() => {
+        busy.current = false
+      })
+  }
   useEffect(() => {
     if (!on) {
       last.current = null
       return
     }
-    const t = setInterval(() => setTick((n) => n + 1), 500)
-    const onVis = () => setTick((n) => n + 1)
+    check.current()
+    const t = setInterval(() => check.current(), CHECK_MS)
+    const onVis = () => check.current()
     document.addEventListener('visibilitychange', onVis)
     return () => {
       clearInterval(t)
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [on])
+  // A new trigger pulls now, not at the next look.
   useEffect(() => {
-    if (!on || busy.current) return
-    const changed = seen.current !== trigger
-    if (!pullDue({ now: Date.now(), last: last.current, visible: pageVisible(), changed })) return
-    seen.current = trigger
-    busy.current = true
-    void pullRef
-      .current()
-      .catch(() => {})
-      .finally(() => {
-        busy.current = false
-        last.current = Date.now()
-      })
-  }, [on, trigger, tick])
+    if (on) check.current()
+  }, [on, trigger])
 }

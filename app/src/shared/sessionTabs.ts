@@ -16,7 +16,7 @@ export interface SessionTabsState {
 
 export const TERMINAL: SessionTab = { kind: 'terminal' }
 export const TERMINAL_ID = 'terminal'
-/** File and diff tabs a session keeps; the oldest beyond it are dropped when saved. */
+/** File and diff tabs a session keeps: a saved row read back keeps its last MAX_TABS. */
 export const MAX_TABS = 40
 
 export const isDiffBase = (v: unknown): v is DiffBase => v === 'uncommitted' || v === 'branch'
