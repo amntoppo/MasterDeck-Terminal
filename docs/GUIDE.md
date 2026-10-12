@@ -1350,7 +1350,6 @@ cards is in them.
 
 | Keys | What |
 |---|---|
-| `⇧←` / `⇧→` | Previous / next view: Terminals, Board View, PRs, Tasks |
 | `⇧↑` / `⇧↓` | Previous / next terminal tab (switches to Terminals) |
 | `⌘1`–`⌘9` | Terminal tab 1–9 |
 | `⌘T` | New terminal in the workspace (+ menu) |
@@ -1366,7 +1365,7 @@ cards is in them.
 | `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks, mods & skills, Remote, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
-Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where
+Shift+Up/Down work from a terminal too (they don't reach the shell), but not in a text box, where
 they select text, or while a dialog is open. `⌘C` copies a terminal selection.
 
 ## Windows notes

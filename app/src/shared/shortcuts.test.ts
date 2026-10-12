@@ -6,14 +6,15 @@ const mac = { platform: 'darwin', inTextField: false, dialogOpen: false }
 const win = { platform: 'win32', inTextField: false, dialogOpen: false }
 
 describe('matchShortcut', () => {
-  it('maps Shift+arrows to views and tabs', () => {
-    expect(matchShortcut(key('ArrowLeft', { shift: true }), mac)).toEqual({ id: 'view-prev' })
-    expect(matchShortcut(key('ArrowRight', { shift: true }), mac)).toEqual({ id: 'view-next' })
+  it('maps Shift+Up/Down to tabs and leaves Shift+Left/Right alone', () => {
+    expect(matchShortcut(key('ArrowLeft', { shift: true }), mac)).toBeNull()
+    expect(matchShortcut(key('ArrowRight', { shift: true }), win)).toBeNull()
+    expect(SHORTCUTS.some((s) => s.id.startsWith('view-'))).toBe(false)
     expect(matchShortcut(key('ArrowUp', { shift: true }), mac)).toEqual({ id: 'tab-prev' })
     expect(matchShortcut(key('ArrowDown', { shift: true }), win)).toEqual({ id: 'tab-next' })
   })
   it('leaves Shift+arrows to text fields and dialogs', () => {
-    expect(matchShortcut(key('ArrowLeft', { shift: true }), { ...mac, inTextField: true })).toBeNull()
+    expect(matchShortcut(key('ArrowDown', { shift: true }), { ...mac, inTextField: true })).toBeNull()
     expect(matchShortcut(key('ArrowUp', { shift: true }), { ...mac, dialogOpen: true })).toBeNull()
     expect(matchShortcut(key('ArrowUp'), mac)).toBeNull()
   })

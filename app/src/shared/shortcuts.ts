@@ -5,8 +5,6 @@
  */
 
 export type ShortcutId =
-  | 'view-prev'
-  | 'view-next'
   | 'tab-prev'
   | 'tab-next'
   | 'tab-n'
@@ -32,8 +30,6 @@ export interface Shortcut {
 }
 
 export const SHORTCUTS: Shortcut[] = [
-  { id: 'view-prev', keys: '⇧←', what: 'Previous view (Terminals · Board View · PRs · Tasks)', group: 'Move around' },
-  { id: 'view-next', keys: '⇧→', what: 'Next view', group: 'Move around' },
   { id: 'needs-you', keys: 'Mod J', what: 'Open the first Needs-you item', group: 'Move around' },
   { id: 'find', keys: 'Mod F', what: 'Find in the terminal, Board or PRs', group: 'Move around' },
   { id: 'history', keys: 'Mod ⇧F', what: 'History: search every session, jump to the match', group: 'Move around' },
@@ -75,7 +71,7 @@ export function matchShortcut(e: KeyLike, c: KeyContext): { id: ShortcutId; n?: 
   if (e.altKey) return null
   if (!mod) {
     if (!e.shiftKey || e.metaKey || e.ctrlKey || c.inTextField || c.dialogOpen) return null
-    const arrows: Record<string, ShortcutId> = { ArrowLeft: 'view-prev', ArrowRight: 'view-next', ArrowUp: 'tab-prev', ArrowDown: 'tab-next' }
+    const arrows: Record<string, ShortcutId> = { ArrowUp: 'tab-prev', ArrowDown: 'tab-next' }
     return arrows[e.key] ? { id: arrows[e.key] } : null
   }
   const k = e.key.toLowerCase()

@@ -97,8 +97,6 @@ type Tab =
 
 const MIN_MASTER = 300;
 const MIN_PANEL = 340;
-/** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
-const MAIN_VIEWS: View[] = ["terminals", "board", "prs", "tasks"];
 const SIDE_W = 272;
 const MIN_SIDE = 200;
 const MAX_SIDE = 560;
@@ -724,7 +722,7 @@ export function App() {
   };
 
   // Keyboard shortcuts (shared/shortcuts.ts; listed in Settings). Caught before a terminal sees
-  // them, so Shift+arrows move around instead of reaching the shell.
+  // them, so Shift+Up/Down move between tabs instead of reaching the shell.
   const onShortcut = useRef<(e: KeyboardEvent) => void>(() => {});
   onShortcut.current = (e: KeyboardEvent) => {
     const el = e.target as HTMLElement | null;
@@ -752,17 +750,6 @@ export function App() {
       activate(id);
     };
     switch (hit.id) {
-      case "view-prev":
-      case "view-next":
-        setView(
-          (v) =>
-            cycle(
-              MAIN_VIEWS,
-              MAIN_VIEWS.includes(v) ? v : null,
-              hit.id === "view-next" ? 1 : -1,
-            ) ?? v,
-        );
-        return done();
       case "tab-prev":
       case "tab-next":
         goTab(
