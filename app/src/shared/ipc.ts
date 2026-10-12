@@ -18,6 +18,8 @@ import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
+import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
+import type { DiffBase } from "./sessionTabs";
 import type { HookEntry } from "./workflow";
 import type {
   CustomTrigger,
@@ -220,6 +222,10 @@ export const CH = {
   notesSave: "notes:save",
   notesDelete: "notes:delete",
   notesChanged: "notes:changed",
+  filesList: "files:list",
+  filesRead: "files:read",
+  diffList: "diff:list",
+  diffFile: "diff:file",
   btwList: "btw:list",
   btwAsk: "btw:ask",
   btwStop: "btw:stop",
@@ -427,6 +433,14 @@ export interface DeckApi {
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
+  /** The files in a session's folder (its own `cwd`), for Details → Files and ⌘P. Read only. */
+  filesList(key: string): Promise<FileList>;
+  /** One file of a session's folder for a file tab, or why it is not shown (binary, too large …). */
+  filesRead(key: string, path: string): Promise<FileRead>;
+  /** The changed files of a session's folder against HEAD or the merge base (Details → Diff). */
+  diffList(key: string, base: DiffBase): Promise<ChangeList>;
+  /** One changed file's diff for a diff tab. */
+  diffFile(key: string, path: string, base: DiffBase): Promise<DiffRead>;
   /** A session's side questions (Tools → BTW), oldest first: asked there and `/btw` typed in its terminal. */
   btwList(key: string): Promise<BtwEntry[]>;
   /** Ask a side question about a session, as `/btw` does; the answer comes as btw events. */

@@ -7,6 +7,7 @@ import type { DeckApi } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { applyBtwEvent, type BtwEntry, type BtwEvent } from '@shared/btw'
+import { parseDiff } from '@shared/diff'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
@@ -14,6 +15,22 @@ import { BUILTIN_WORKFLOWS } from '@shared/builtinWorkflows'
 import { fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
 
 type Fn = (...a: never[]) => unknown
+
+/** The preview session's folder for its file and diff tabs. */
+const PREVIEW_FILES: Record<string, string> = {
+  'README.md': '# acme web\n\nThe **web** app of acme.\n\n- Sign in with a magic link\n- Keep the return path\n\n```ts\nredirect("/home?tab=2")\n```\n',
+  'src/auth/redirect.ts': "export function returnPath(url: URL): string {\n  // Keep the query string: the page needs it after sign-in.\n  const path = url.searchParams.get('next') ?? '/'\n  return path.startsWith('/') ? path : '/'\n}\n",
+  'src/auth/redirect.test.ts': "import { expect, it } from 'vitest'\nimport { returnPath } from './redirect'\n\nit('keeps the query string', () => {\n  expect(returnPath(new URL('https://x/?next=/a?b=1'))).toBe('/a?b=1')\n})\n",
+  'src/index.ts': "export * from './auth/redirect'\n",
+  'public/logo.png': '',
+}
+const PREVIEW_DIFFS: Record<string, string> = {
+  'README.md': '@@ -1,5 +1,7 @@\n # acme web\n \n-The web app.\n+The **web** app of acme.\n+\n+- Sign in with a magic link\n+- Keep the return path\n',
+  'src/auth/redirect.ts':
+    "@@ -1,4 +1,6 @@\n export function returnPath(url: URL): string {\n-  const path = url.pathname\n-  return path\n+  // Keep the query string: the page needs it after sign-in.\n+  const path = url.searchParams.get('next') ?? '/'\n+  return path.startsWith('/') ? path : '/'\n+  // (a very long line to show how the split view wraps text that does not fit in its half of the pane at all)\n }\n",
+  'src/auth/redirect.test.ts': `@@ -0,0 +1,6 @@\n${PREVIEW_FILES['src/auth/redirect.test.ts'].replace(/\n$/, '').split('\n').map((l) => `+${l}`).join('\n')}\n`,
+  'docs/old-auth.md': '@@ -1,2 +0,0 @@\n-# Old auth\n-Gone.\n',
+}
 
 /** A workflow with a Loop frame, as Build with Claude drafts it (no positions): the editor lays it out. */
 const loopFlow = (): Flow =>
@@ -286,6 +303,24 @@ function previewDeck(noBoard: boolean): DeckApi {
       return true
     },
     onBtwEvent: (cb: (e: BtwEvent) => void) => (btwCbs.add(cb), () => btwCbs.delete(cb)),
+    // A session's folder: a few files, two changed, one new (session tabs, Details → Diff / Files).
+    filesList: async () => ({ ok: true, paths: Object.keys(PREVIEW_FILES).sort(), truncated: false }),
+    filesRead: async (_key: string, path: string) => {
+      const text = PREVIEW_FILES[path]
+      if (text === undefined) return { ok: true, path, text: null, refused: 'missing', bytes: 0, mtimeMs: 0 }
+      if (path.endsWith('.png')) return { ok: true, path, text: null, refused: 'binary', bytes: 2048, mtimeMs: Date.now() }
+      return { ok: true, path, text, refused: null, bytes: text.length, mtimeMs: Date.now() }
+    },
+    diffList: async (_key: string, base: string) => ({
+      ok: true,
+      files: [
+        { path: 'README.md', status: 'modified', add: 3, del: 1, binary: false },
+        { path: 'src/auth/redirect.ts', status: 'modified', add: 4, del: 2, binary: false },
+        { path: 'src/auth/redirect.test.ts', status: 'added', add: 9, del: 0, binary: false, untracked: true },
+        ...(base === 'branch' ? [{ path: 'docs/old-auth.md', status: 'deleted', add: 0, del: 12, binary: false }] : []),
+      ],
+    }),
+    diffFile: async (_key: string, path: string) => ({ ok: true, path, diff: parseDiff(PREVIEW_DIFFS[path] ?? '') }),
     platform: 'web',
     home: '/Users/dev',
     openExternal: () => {},

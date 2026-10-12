@@ -756,6 +756,23 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   checked against this machine's real `ps` / `lsof` and a live session's tree), the web app over the
   bridge, a phone, Linux.
 
+## Session tabs, files and diffs (#113): open points
+
+- **P3 · Wide characters before a path.** The ⌘-click link provider uses string offsets as
+  columns, so a line with CJK or emoji before a path underlines the wrong cells (`ponytail:` in
+  `TerminalView.tsx`). A path xterm wraps onto the next row is not found at all.
+- **P3 · File tabs reload on a state change, not live.** Diff tabs and Details → Diff pull every
+  3 s; a file tab reads again when it shows, when the session's turn ends, and on Reload. Pull it
+  too (on mtime) if files edited mid-turn need to show at once.
+- **P3 · No highlighting in diffs.** Diff lines are plain text with red/green rows; highlighting
+  each line by language would need context across lines (a multi-line comment).
+- **P3 · ⌘-click on Windows and through a linked folder.** `findPaths` / `relativeTo` know `/`
+  paths only, so nothing is linked on Windows; a session whose `cwd` is a link (`/tmp` vs
+  `/private/tmp`) does not match an absolute path Claude printed with the real folder.
+- **P3 · Not checked:** a real Claude session's paths in the installed app, the web app over the
+  real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
+  (50,000-path list, `git status` time).
+
 ## Recently done
 
 - **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
@@ -766,6 +783,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Per-session tabs (issue #113): each session pane has its own tab row (Terminal first, never closed), file tabs (Markdown rendered, code highlighted with highlight.js, a sentence for binary / too large / gone) and diff tabs (unified, Split when wide, live), closed with × or a middle-click and kept per session across restarts; Details → **Diff** (Uncommitted / Branch, A/M/D/R with +/− counts, live while it shows) and **Files** (tree, filter); ⌘P and ⌘-click on a path in the terminal open files; four read-only channels open to the web app, inside the session's folder only. The leftover ⇧← / ⇧→ view cycling and the old tab strip's CSS are gone | branch `113-session-tabs` | — |
 | Mods moved from Session details to the right panel's **Tools** tab (#86 follow-up): a third sub-tab after Queue and BTW (`SessionTools.tsx`), its label with "· n off"; Details is **Session · GitHub** again and a remembered `md.detailsTab` of `mods` opens Session | branch `worktree-MasterDeck-Terminal-86-mods-tools` | — |
 | Built-in workflows (issue #104): Superpowers, Ticket to PR, Bug fix, TDD (locked tests) and CI doctor ship as templates with a mark (`builtin: {id, hash, raw}`); seeded at launch, an unedited one follows a new release (keeping a rename), an edited one is never touched; a **Built-in** chip (**· edited**), the description and when to use it under the bar, **Duplicate**, **Restore original** (also after a rename only) and **Restore built-ins (n)**; TDD's check guards every `tests:` commit of the branch, CI doctor's every run of the commit | 3d5503a, 21a5f82, a42f78b and the review fixes, branch `worktree-MasterDeck-Terminal-104-builtin-workflows` (not merged, not installed) | spec `docs/superpowers/specs/2026-10-12-builtin-workflows-design.md` on branch `docs/builtin-workflows-104` (not pushed) |
 | **BTW** in the right panel (issue #106; the Queue tab is now **Tools**, with Queue and BTW as sub-tabs): ask a side question about a session as `/btw` does (a forked, tool-less `claude -p` of its conversation, streamed in, Stop, errors with Try again, Markdown, Copy, cost), and its history newest first across restarts, with `/btw` typed in the terminal too (question from `history.jsonl`, answer read off a background session's screen) | branch `worktree-MasterDeck-Terminal-106-btw-tab` | — |
