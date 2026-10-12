@@ -18,6 +18,7 @@ const EMPTY = terminalOnly()
 export class SessionTabsStore {
   private all: Record<string, SessionTabsState> = {}
   private listeners = new Set<() => void>()
+  private openers = new Set<(key: string) => void>()
 
   constructor(private storage: KeyValue | null) {
     let raw: unknown = null
@@ -39,8 +40,15 @@ export class SessionTabsStore {
     return () => this.listeners.delete(cb)
   }
 
+  /** Called after every open (also of a tab already open): the phone closes its panel to show it. */
+  onOpen(cb: (key: string) => void): () => void {
+    this.openers.add(cb)
+    return () => this.openers.delete(cb)
+  }
+
   open(key: string, t: SessionTab): void {
     this.set(key, openTab(this.get(key), t))
+    for (const cb of this.openers) cb(key)
   }
 
   close(key: string, id: string): void {

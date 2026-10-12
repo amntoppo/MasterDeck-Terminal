@@ -691,6 +691,8 @@ export function App() {
 
   const activeTab = tabs.find((t) => t.id === active) ?? null;
   const activeKey = activeTab?.kind === "session" ? activeTab.key : null;
+  // The open session's own tab (its terminal, or a file or diff): the phone's terminal keys only fit the terminal.
+  const activeOwnTab = useSessionTabs(activeKey ?? "").active;
   const activeSessionId = activeKey
     ? (state?.sessions.find((x) => x.key === activeKey)?.sessionId ?? null)
     : null;
@@ -713,6 +715,8 @@ export function App() {
   const visibleKey = visibleIds.join(",");
   // Forget the file and diff tabs of sessions no longer listed (never on an empty list: a start-up
   // or a failing `claude agents` is not every session gone).
+  // A phone shows one sheet at a time: a file or diff opened from the panel shows at once.
+  useEffect(() => sessionTabs.onOpen(() => setPhonePanel(false)), []);
   const listedKeys = (state?.sessions ?? []).map((x) => x.key).join(",");
   useEffect(() => {
     if (listedKeys) sessionTabs.prune(new Set(listedKeys.split(",")));
@@ -1367,7 +1371,8 @@ export function App() {
             </div>
           ))}
         </div>
-        {phone && activeTab && activeTab.kind !== "pending" && (
+        {phone && activeTab && activeTab.kind !== "pending" &&
+          (activeTab.kind !== "session" || activeOwnTab === TERMINAL_ID) && (
           <QuickKeys paneId={paneIdFor(activeTab)} />
         )}
       </main>

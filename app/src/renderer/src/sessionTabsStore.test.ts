@@ -46,6 +46,17 @@ describe('SessionTabsStore', () => {
     s.open('k1', file('x.ts'))
     expect(calls).toBe(3)
   })
+  it('tells who wants to know that a tab was opened (the phone closes its panel)', () => {
+    const s = new SessionTabsStore(fakeStorage())
+    const opened: string[] = []
+    const off = s.onOpen((key) => opened.push(key))
+    s.open('k1', file('a.ts'))
+    s.open('k1', file('a.ts')) // focusing an open tab counts too
+    s.activate('k1', 'terminal')
+    off()
+    s.open('k2', file('b.ts'))
+    expect(opened).toEqual(['k1', 'k1'])
+  })
   it('reads bad stored data as nothing', () => {
     expect(new SessionTabsStore(fakeStorage({ 'session-tabs': '{oops' })).get('k1').tabs).toEqual([TERMINAL])
     expect(new SessionTabsStore(fakeStorage({ 'session-tabs': '[1,2]' })).get('k1').tabs).toEqual([TERMINAL])

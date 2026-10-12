@@ -919,7 +919,8 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dsec:last-child { border-bottom: none; }
 .d-tabs { padding: 10px 16px 0; display: flex; }
 .d-tabs .seg { flex: 1; min-width: 0; }
-.d-tabs .seg button { white-space: nowrap; padding: 5px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.d-tabs .seg button { white-space: nowrap; padding: 5px 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
+.ftab-head .seg { flex: none; }
 .d-tab-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-tab-count.bad { color: var(--red); }
 /* Details → Diff (DiffList.tsx) and Files (FileTree.tsx). */
