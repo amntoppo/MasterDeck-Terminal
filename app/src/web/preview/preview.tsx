@@ -10,6 +10,7 @@ import { applyBtwEvent, type BtwEntry, type BtwEvent } from '@shared/btw'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
+import { BUILTIN_WORKFLOWS } from '@shared/builtinWorkflows'
 import { fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
 
 type Fn = (...a: never[]) => unknown
@@ -158,7 +159,24 @@ function previewDeck(noBoard: boolean): DeckApi {
     },
     sessionWorkflowGet: () => ({ flow: loopFlow(), from: 'Fix the tests', at: Date.now() }),
     workflowDraftGet: () => null,
-    workflowGet: () => ({ hooks: [], skills: [], flow: loopFlow(), templates: [{ id: 'default', name: 'Default', flow: loopFlow() }], triggers: [], monitors: [] }),
+    // One built-in (edited, with a newer version shipped) and one deleted, so the chip, the note,
+    // Restore original and Restore built-ins (1) show.
+    workflowGet: () => {
+      const b = BUILTIN_WORKFLOWS[0]
+      return {
+        hooks: [],
+        skills: [],
+        flow: loopFlow(),
+        templates: [
+          { id: 'default', name: 'Default', flow: loopFlow() },
+          { id: b.id, name: b.name, flow: b.flow, builtin: { id: b.id, edited: true, renamed: false, updated: true, description: b.description, whenToUse: b.whenToUse } },
+        ],
+        triggers: [],
+        monitors: [],
+        builtinsRemoved: [BUILTIN_WORKFLOWS[4].id],
+      }
+    },
+    workflowBuiltinRestore: () => ({ ok: true, message: 'restored (preview: nothing written)' }),
     defaultModel: () => null,
     ticketRepoMeta: () => ({ labels: [], milestones: [], assignees: [] }),
     issueBody: () => ({ ok: true, body: '## Steps\n\n1. Sign in from a fresh browser.\n2. Open **Settings**.\n\nThe page is blank; expected the settings form.' }),

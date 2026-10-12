@@ -1,0 +1,214 @@
+{
+  "flow": {
+    "nodes": [
+      {
+        "id": "t-session-start",
+        "x": 0,
+        "y": 0,
+        "kind": "trigger",
+        "trigger": "session-start"
+      },
+      {
+        "id": "t-linked",
+        "x": 0,
+        "y": 110,
+        "kind": "trigger",
+        "trigger": "linked"
+      },
+      {
+        "id": "b-ticket",
+        "x": 290,
+        "y": 110,
+        "kind": "builtin",
+        "builtin": "ticket"
+      },
+      {
+        "id": "explore",
+        "x": 290,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Read the issue and the code it touches. Change nothing yet: no edits, no commits. Note the files involved, how they are tested, and the commands that run the project's tests, typecheck and lint."
+      },
+      {
+        "id": "plan",
+        "x": 580,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Write a short plan in the words the PR will use: the files to change, the approach, the tests that will prove it, and what is out of scope. Show it to the user and go on, unless the ticket is unclear: then ask first. If this session is on main or master, first create a branch named after the issue (e.g. 123-short-title)."
+      },
+      {
+        "id": "build",
+        "x": 870,
+        "y": 220,
+        "kind": "loop",
+        "name": "Build until green",
+        "members": [
+          "implement",
+          "verify"
+        ],
+        "w": 540,
+        "h": 148,
+        "check": {
+          "command": "",
+          "output": "",
+          "outputMode": "match",
+          "timeoutMin": 5
+        },
+        "agentDone": {
+          "on": true,
+          "goal": "The plan is done and the project's test, typecheck and lint commands pass. Name each command you ran and its result."
+        },
+        "limits": {
+          "iterations": 15,
+          "minutes": 0,
+          "stall": 0
+        }
+      },
+      {
+        "id": "implement",
+        "x": 900,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Implement the next part of the plan, with tests for it. Commit each part that works."
+      },
+      {
+        "id": "verify",
+        "x": 1190,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Run the project's tests, typecheck and lint, and read the output. Fix the root cause of each failure. Never skip, weaken or delete a test to make it pass; anything failing is the next round's first job."
+      },
+      {
+        "id": "review",
+        "x": 1510,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Launch a fresh reviewer subagent (Agent tool) on the branch diff against the base branch, with the plan and the issue. Run it in the foreground and wait for its report. Ask it for correctness bugs and requirement gaps only, not style. Fix what is real, re-run the tests, and commit."
+      },
+      {
+        "id": "open-pr",
+        "x": 1800,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Push this branch and open a PR with gh pr create: a title from the issue, the plan and the test commands with their results in the body, and \"Closes #<issue>\". Never push to main or master."
+      },
+      {
+        "id": "stuck",
+        "x": 1510,
+        "y": 440,
+        "kind": "instruction",
+        "text": "Don't open a PR. Tell the user what is done, which checks still fail and why, what you tried, and what you need from them."
+      },
+      {
+        "id": "t-before-pr",
+        "x": 0,
+        "y": 550,
+        "kind": "trigger",
+        "trigger": "before-pr"
+      },
+      {
+        "id": "b-pr-review",
+        "x": 290,
+        "y": 550,
+        "kind": "builtin",
+        "builtin": "pr-review"
+      },
+      {
+        "id": "t-pr-created",
+        "x": 0,
+        "y": 660,
+        "kind": "trigger",
+        "trigger": "pr-created"
+      },
+      {
+        "id": "b-pr-watch",
+        "x": 290,
+        "y": 660,
+        "kind": "builtin",
+        "builtin": "pr-watch"
+      },
+      {
+        "id": "t-needs-you",
+        "x": 0,
+        "y": 770,
+        "kind": "trigger",
+        "trigger": "needs-you"
+      },
+      {
+        "id": "ping",
+        "x": 290,
+        "y": 770,
+        "kind": "notify",
+        "text": "A session is waiting on you (a question about the ticket or a permission)."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-t-linked-b-ticket",
+        "from": "t-linked",
+        "to": "b-ticket",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-linked-explore",
+        "from": "t-linked",
+        "to": "explore",
+        "kind": "then"
+      },
+      {
+        "id": "e-explore-plan",
+        "from": "explore",
+        "to": "plan",
+        "kind": "then"
+      },
+      {
+        "id": "e-plan-build",
+        "from": "plan",
+        "to": "build",
+        "kind": "then"
+      },
+      {
+        "id": "e-implement-verify",
+        "from": "implement",
+        "to": "verify",
+        "kind": "then"
+      },
+      {
+        "id": "e-build-review",
+        "from": "build",
+        "to": "review",
+        "kind": "met"
+      },
+      {
+        "id": "e-build-stuck",
+        "from": "build",
+        "to": "stuck",
+        "kind": "limit"
+      },
+      {
+        "id": "e-review-open-pr",
+        "from": "review",
+        "to": "open-pr",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-before-pr-b-pr-review",
+        "from": "t-before-pr",
+        "to": "b-pr-review",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-b-pr-watch",
+        "from": "t-pr-created",
+        "to": "b-pr-watch",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-needs-you-ping",
+        "from": "t-needs-you",
+        "to": "ping",
+        "kind": "then"
+      }
+    ]
+  }
+}

@@ -465,6 +465,32 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
 
+**Built-in workflows** (#104). `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`: id, name,
+description, whenToUse, flow; `builtinById`, `flowHash`, `rawFlowHash`, `markFor`, `sameAsMark`)
+with the flows as JSON in `shared/builtin-workflows/<id>.json`. Ids start with `md-`.
+`WorkflowStore.seedBuiltins()` runs at launch right after `migrate()` (also on Windows and with
+`MASTERDECK_NO_HOOK`, not in the smoke test) and writes them as `workflows/templates/md-*.json` with
+a mark `builtin: {id, hash, raw}`: `hash` is `flowHash` of the shipped flow (over `parseFlow`, so
+formatting is no edit while a moved block is), `raw` is `rawFlowHash` (sorted-key JSON of the flow
+as written, no `parseFlow`). A file is unedited when its flow's raw hash equals `raw` **or** its
+parsed hash equals `hash` (`sameAsMark`; a mark from before `raw` has the parsed hash only), so a
+later `parseFlow` that reads the same file differently never turns an untouched built-in into an
+edited one. Seeding: a missing one is written unless its id is in `workflows/builtins.json`
+(`{removed: [...]}`, written by `deleteTemplate` for a marked file); an unedited marked file is
+rewritten when the shipped flow changed (keeping its name); an edited one and any file without the
+mark are never touched. `templates()` fills `WorkflowTemplate.builtin` (`edited`; `renamed` when the
+name differs from the shipped one; `updated` when edited and the shipped flow changed since);
+`saveTemplate` keeps the mark on a built-in it rewrites, never puts one on a new template
+(Duplicate), never gives a new template a built-in's id, and refuses (null) to write a deleted
+shipped built-in's id (a late autosave; the handler answers "restore it first"). The
+`workflow:templateSave` answer carries the store's `builtin` for the template, which the window
+shows as it is. `restoreBuiltin(id)` writes one back as shipped (Restore original, shown when edited
+or renamed, `workflow:builtinRestore`; the window asks with a native dialog, the web with
+`webConfirm`); `restoreBuiltin(null)` writes back every removed one and clears the list (Restore
+built-ins). `workflowGet` carries `builtinsRemoved`. The window's autosave binds each change to the
+template open when it was made (`useAutosave`'s target), flushes before Rename and Delete, and drops
+what is pending before Restore original.
+
 **Loops** (a Loop frame, #82). A trigger's step carries its `CompiledLoop`s; when it fires, its hook
 arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json` (written to `<sid>.json.<pid>.tmp`, then renamed)
 (`{loops: [{id, step, state: "open", iteration: 0, startedAt, history: [], reason, lastCheck}]}`)

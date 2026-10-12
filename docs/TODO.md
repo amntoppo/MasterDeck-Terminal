@@ -675,6 +675,30 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
   converted: new records are hourly, older days stay days.
 
+## Built-in workflows: open points (2026-10-12, issue #104)
+
+- **A loop is armed when its trigger fires, not when the session reaches it** (found in the live
+  runs). Steps ahead of a loop (Superpowers' brainstorm and plan, Ticket to PR's "ask first if
+  unclear") run while it is open: each stop to ask the user a question is blocked with "Not done
+  yet" and counted as a round. The built-ins work around it (no stall limit on those two, more
+  rounds), but the fix is in the mechanism (#82): arm such a loop when the session reaches it
+  (a marker it runs or prints), or do not block a stop that ends with a question to the user.
+- **The stall limit counts turns spent waiting on a background subagent** (no change in the tree).
+  The built-ins' review steps say to run the reviewer in the foreground; the loop hook could skip
+  such rounds.
+- **More built-ins.** Candidates: a second-opinion review, a refactor, a security audit, release
+  notes, issue triage. Each needs a flow, a description, a when-to-use line and the checks in
+  `builtinWorkflows.test.ts`.
+- **Use as Default.** A built-in can be picked per session (Start dialog, Details) but not made the
+  Default in one click; today the user copies its blocks into the Default by hand.
+- **A per-project test command for loop checks.** The loops ask the agent for evidence (and TDD /
+  CI doctor have their own checks); a project's own test command (from Setup or the repository)
+  would let every built-in's loop run the suite as its check.
+- **The builder does not know the built-ins.** Build with Claude gets the open workflow and the
+  format, not the built-ins as examples to start from or compare with.
+- **The Template bar sorts by file name**, so the built-ins show in `md-*` order (Bug fix, CI
+  doctor, Superpowers, TDD, Ticket to PR), not the spec's order (Superpowers first).
+
 ## BTW (Tools tab): open points (2026-10-12, issue #106)
 
 - **Cost.** A question from the tab is a forked `claude -p` that reads the session's whole context
@@ -721,6 +745,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Built-in workflows (issue #104): Superpowers, Ticket to PR, Bug fix, TDD (locked tests) and CI doctor ship as templates with a mark (`builtin: {id, hash, raw}`); seeded at launch, an unedited one follows a new release (keeping a rename), an edited one is never touched; a **Built-in** chip (**· edited**), the description and when to use it under the bar, **Duplicate**, **Restore original** (also after a rename only) and **Restore built-ins (n)**; TDD's check guards every `tests:` commit of the branch, CI doctor's every run of the commit | 3d5503a, 21a5f82, a42f78b and the review fixes, branch `worktree-MasterDeck-Terminal-104-builtin-workflows` (not merged, not installed) | spec `docs/superpowers/specs/2026-10-12-builtin-workflows-design.md` on branch `docs/builtin-workflows-104` (not pushed) |
 | **BTW** in the right panel (issue #106; the Queue tab is now **Tools**, with Queue and BTW as sub-tabs): ask a side question about a session as `/btw` does (a forked, tool-less `claude -p` of its conversation, streamed in, Stop, errors with Try again, Markdown, Copy, cost), and its history newest first across restarts, with `/btw` typed in the terminal too (question from `history.jsonl`, answer read off a background session's screen) | branch `worktree-MasterDeck-Terminal-106-btw-tab` | — |
 | Themes (issue #105): every colour comes from a token set in `shared/themes.ts` (surfaces, lines, text, accent, status hues, overlays, find, the terminal's 16 ANSI colours); a Primer-based light theme checked for WCAG AA in vitest; Settings → General → **Appearance** Light / Dark / System that switches at once (terminals too) and persists, per browser in the web app; a lint test against colour literals; `docs/THEMES.md` (exploration, palette, adding a theme) | branch `worktree-MasterDeck-Terminal-105-themes` (PR) | spec + plan on `docs/themes-105` (not pushed) |
 | Session details in three tabs (issue #103): **Session** (no GitHub UI), **GitHub** (Ticket with steps, note and sub-issues; each PR with checks, reviews, open threads, comments and its PR watch's finds; each monitor with its lines, newest first; counts, status badges and ↗ links; live refresh) and **Mods**; the tab is remembered. New reads `watch:events` and `pr:detail` (`shared/prDetail.ts`) | branch `worktree-MasterDeck-Terminal-103-details-tabs` | — |

@@ -10,6 +10,7 @@ import {
   setMonitors,
 } from "@shared/flow";
 import type { AppState } from "@shared/types";
+import { builtinById } from "@shared/builtinWorkflows";
 import { deck, load as loadPref, save as savePref } from "../deck";
 import { webConfirm } from "../webConfirm";
 import { FlowEditor, type Skill } from "./FlowEditor";
@@ -20,6 +21,8 @@ type Data = {
   hooks: HookEntry[];
   skills: Skill[];
   templates: WorkflowTemplate[];
+  /** Built-ins the user deleted (Restore built-ins). */
+  builtinsRemoved: string[];
 };
 
 const SOURCE: Record<HookEntry["source"], string> = {
@@ -42,40 +45,61 @@ function short(c: string): string {
 
 export type SaveState = "idle" | "saving" | "saved" | { error: string };
 
-/** Save a flow shortly after the last change (drags and typing make many). */
-export function useAutosave(
-  save: (f: Flow) => Promise<{ ok: boolean; message: string }>,
-): [SaveState, (f: Flow) => void] {
+/** What useAutosave hands back besides its state and change handler. */
+export interface Autosave {
+  /** Save what is pending now (before something that reads or removes the saved file). */
+  flush(): Promise<void>;
+  /** Drop what is pending (before the file is written over from elsewhere). */
+  cancel(): void;
+}
+
+/**
+ * Save a flow shortly after the last change (drags and typing make many). A change carries a
+ * `target` bound when it is made (the template it belongs to), so a save still pending when the
+ * user moves on lands where the change was made; a change for another target sends the pending one
+ * at once.
+ */
+export function useAutosave<T = undefined>(
+  save: (f: Flow, target: T) => Promise<{ ok: boolean; message: string }>,
+): [SaveState, (f: Flow, target?: T) => void, Autosave] {
   const [state, setState] = useState<SaveState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const latest = useRef(save);
   latest.current = save;
-  const pending = useRef<Flow | null>(null);
+  const pending = useRef<{ flow: Flow; target: T } | null>(null);
   const flush = useCallback(async () => {
-    const f = pending.current;
-    if (!f) return;
+    clearTimeout(timer.current);
+    const p = pending.current;
+    if (!p) return;
     pending.current = null;
     setState("saving");
-    const r = await latest.current(f);
+    const r = await latest.current(p.flow, p.target);
     setState(r.ok ? "saved" : { error: r.message });
+  }, []);
+  const cancel = useCallback(() => {
+    clearTimeout(timer.current);
+    if (pending.current) setState("idle");
+    pending.current = null;
   }, []);
   // Anything not saved yet goes out when the editor closes.
   useEffect(
     () => () => {
-      clearTimeout(timer.current);
       void flush();
     },
     [flush],
   );
-  return [
-    state,
-    (f: Flow) => {
-      pending.current = f;
+  const onChange = useCallback(
+    (f: Flow, target?: T) => {
+      if (pending.current && pending.current.target !== target) void flush();
+      pending.current = { flow: f, target: target as T };
       setState("saving");
       clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush(), 600);
     },
-  ];
+    [flush],
+  );
+  const control = useRef<Autosave>({ flush, cancel });
+  return [state, onChange, control.current];
 }
 
 export function SaveBadge({ state }: { state: SaveState }) {
@@ -148,8 +172,16 @@ export function WorkflowView(_: { state: AppState }) {
     // The custom trigger library: the editor, the compiler and block titles use it.
     setCustomTriggers(w.triggers);
     setMonitors(w.monitors);
-    setData({ hooks: w.hooks, skills: w.skills, templates: w.templates });
+    setData({
+      hooks: w.hooks,
+      skills: w.skills,
+      templates: w.templates,
+      builtinsRemoved: w.builtinsRemoved ?? [],
+    });
   }, []);
+  // Bumped when a template is rewritten from outside the canvas (Restore original): the editor
+  // takes its flow only when it mounts.
+  const [gen, setGen] = useState(0);
   useEffect(() => void load(), [load]);
 
   const templates = data?.templates ?? [];
@@ -158,36 +190,48 @@ export function WorkflowView(_: { state: AppState }) {
     if (data && !templates.some((t) => t.id === tid)) setTid(DEFAULT_TEMPLATE);
   }, [data, templates, tid]);
 
-  // The template being edited keeps its id and name while the editor saves it.
-  const target = useRef(current);
-  target.current = current;
-  const [saveState, onChange] = useAutosave(async (flow) => {
-    const t = target.current;
-    if (!t) return { ok: false, message: "nothing to save" };
-    const r =
-      t.id === DEFAULT_TEMPLATE
-        ? await deck().workflowSave(flow)
-        : await deck().workflowTemplateSave(t.id, t.name, flow);
-    if (r.ok)
-      setData((d) =>
-        d
-          ? {
-              ...d,
-              templates: d.templates.map((x) =>
-                x.id === t.id ? { ...x, flow } : x,
-              ),
-            }
-          : d,
-      );
-    return r;
-  });
+  // A change is bound to the template open when it is made (its id); the save reads that
+  // template's latest name, so a save still pending after a switch never lands in another one.
+  // The templates as last saved, kept current at once (a render comes later), so what runs right
+  // after a flush reads the flow just saved.
+  const latestTemplates = useRef(templates);
+  latestTemplates.current = templates;
+  const saved = (t: WorkflowTemplate) => {
+    const put = (list: WorkflowTemplate[]) =>
+      list.map((x) => (x.id === t.id ? t : x));
+    latestTemplates.current = put(latestTemplates.current);
+    setData((d) => (d ? { ...d, templates: put(d.templates) } : d));
+  };
+  const [saveState, saveLater, autosave] = useAutosave<string>(
+    async (flow, id) => {
+      const t = latestTemplates.current.find((x) => x.id === id);
+      if (!t) return { ok: false, message: "nothing to save" };
+      if (t.id === DEFAULT_TEMPLATE) {
+        const r = await deck().workflowSave(flow);
+        if (r.ok) saved({ ...t, flow });
+        return r;
+      }
+      const r = await deck().workflowTemplateSave(t.id, t.name, flow);
+      // A built-in's chip follows the store's answer (edited, renamed), not a guess made here.
+      if (r.ok) saved({ ...t, flow, builtin: r.builtin });
+      return r;
+    },
+  );
+  const onChange = (flow: Flow) => {
+    if (current) saveLater(flow, current.id);
+  };
 
   const name = async () => {
     if (!naming || !current || !naming.name.trim()) return;
+    // An edit still waiting goes out first, so the rename (or the copy) has it.
+    await autosave.flush();
+    const flow =
+      latestTemplates.current.find((x) => x.id === current.id)?.flow ??
+      current.flow;
     const r = await deck().workflowTemplateSave(
       naming.mode === "new" ? null : current.id,
       naming.name.trim(),
-      current.flow,
+      flow,
     );
     setMsg(r.message);
     if (r.ok) {
@@ -198,8 +242,14 @@ export function WorkflowView(_: { state: AppState }) {
   };
   const del = async () => {
     if (!current) return;
-    if (!(await webConfirm(`Delete the workflow “${current.name}”?`, { confirmLabel: "Delete", danger: true })))
+    const ask = current.builtin
+      ? `Delete the built-in workflow “${current.name}”? Restore built-ins brings it back as MasterDeck ships it.`
+      : `Delete the workflow “${current.name}”?`;
+    if (!(await webConfirm(ask, { confirmLabel: "Delete", danger: true })))
       return;
+    // An edit still waiting is saved first: it must not land after the delete (and is kept when
+    // the window's own dialog is cancelled).
+    await autosave.flush();
     const r = await deck().workflowTemplateDelete(current.id);
     setMsg(r.message);
     if (r.ok) {
@@ -207,6 +257,30 @@ export function WorkflowView(_: { state: AppState }) {
       await load();
     }
   };
+
+  // Restore original (the open built-in) or Restore built-ins (every deleted one, id null).
+  const restore = async (id: string | null) => {
+    if (!current) return;
+    // An edit still waiting is saved first: kept if the restore is called off, written over if not.
+    await autosave.flush();
+    const ask =
+      id === null
+        ? `Bring back the deleted built-in workflow${removed.length === 1 ? "" : "s"} as MasterDeck ships ${removed.length === 1 ? "it" : "them"}?`
+        : `Restore “${current.name}” as MasterDeck ships it? Your edits to it are lost.`;
+    if (
+      !(await webConfirm(ask, {
+        confirmLabel: "Restore",
+        danger: id !== null,
+      }))
+    )
+      return;
+    const r = await deck().workflowBuiltinRestore(id);
+    setMsg(r.message);
+    if (!r.ok) return;
+    await load();
+    setGen((g) => g + 1);
+  };
+  const removed = data?.builtinsRemoved ?? [];
 
   // The builder works on the workflow open here: its folder gets it (and the format) first.
   const openBuilder = async (fresh: boolean) => {
@@ -291,6 +365,18 @@ export function WorkflowView(_: { state: AppState }) {
                 onClick={() => (setTid(t.id), setNaming(null))}
               >
                 {t.name}
+                {t.builtin && (
+                  <span
+                    className={`wf-builtin${t.builtin.edited ? " edited" : ""}`}
+                    title={
+                      t.builtin.edited
+                        ? "A workflow MasterDeck ships, changed since: Restore original takes it back"
+                        : "A workflow MasterDeck ships"
+                    }
+                  >
+                    Built-in{t.builtin.edited ? " · edited" : ""}
+                  </span>
+                )}
                 <span className="wf-count">{actionCount(t.flow)}</span>
               </button>
             ))}
@@ -302,7 +388,9 @@ export function WorkflowView(_: { state: AppState }) {
                 value={naming.name}
                 placeholder={
                   naming.mode === "new"
-                    ? "Name of the new template"
+                    ? current.builtin
+                      ? "Name of the copy"
+                      : "Name of the new template"
                     : "New name"
                 }
                 onChange={(e) => setNaming({ ...naming, name: e.target.value })}
@@ -326,11 +414,29 @@ export function WorkflowView(_: { state: AppState }) {
             <>
               <button
                 className="btn"
-                onClick={() => setNaming({ mode: "new", name: "" })}
-                title={`A new template, starting as a copy of ${current.name}`}
+                onClick={() =>
+                  setNaming({
+                    mode: "new",
+                    name: current.builtin ? `${current.name} (copy)` : "",
+                  })
+                }
+                title={
+                  current.builtin
+                    ? `A template of your own, starting as a copy of ${current.name}`
+                    : `A new template, starting as a copy of ${current.name}`
+                }
               >
-                + New template
+                {current.builtin ? "Duplicate" : "+ New template"}
               </button>
+              {(current.builtin?.edited || current.builtin?.renamed) && (
+                <button
+                  className="btn"
+                  onClick={() => void restore(current.builtin!.id)}
+                  title="Put back the flow and name MasterDeck ships (your edits and name are lost)"
+                >
+                  Restore original
+                </button>
+              )}
               {current.id !== DEFAULT_TEMPLATE && (
                 <>
                   <button
@@ -346,12 +452,32 @@ export function WorkflowView(_: { state: AppState }) {
                   </button>
                 </>
               )}
+              {removed.length > 0 && (
+                <button
+                  className="btn"
+                  onClick={() => void restore(null)}
+                  title={`Bring back the built-in workflows you deleted: ${removed
+                    .map((id) => builtinById(id)?.name ?? id)
+                    .join(", ")}`}
+                >
+                  Restore built-ins ({removed.length})
+                </button>
+              )}
             </>
           )}
           <span className="wf-note muted">
-            {current.id === DEFAULT_TEMPLATE
-              ? "Every new session starts with a copy of the Default."
-              : "Pick it in the Start dialog, or apply it from a session’s Details (Workflow → Edit)."}
+            {current.builtin ? (
+              <>
+                {current.builtin.description}{" "}
+                <b>When to use:</b> {current.builtin.whenToUse}
+                {current.builtin.updated &&
+                  " A newer version ships with MasterDeck: Restore original to get it."}
+              </>
+            ) : current.id === DEFAULT_TEMPLATE ? (
+              "Every new session starts with a copy of the Default."
+            ) : (
+              "Pick it in the Start dialog, or apply it from a session’s Details (Workflow → Edit)."
+            )}
           </span>
         </div>
       )}
@@ -499,7 +625,7 @@ export function WorkflowView(_: { state: AppState }) {
             />
           ) : (
             <FlowEditor
-              key={current.id}
+              key={`${current.id}:${gen}`}
               flow={current.flow}
               skills={data.skills}
               onChange={onChange}

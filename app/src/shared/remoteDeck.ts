@@ -119,6 +119,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   workflowSave: invoke(CH.workflowSave),
   workflowTemplateSave: invoke(CH.workflowTemplateSave),
   workflowTemplateDelete: invoke(CH.workflowTemplateDelete),
+  workflowBuiltinRestore: invoke(CH.workflowBuiltinRestore),
   workflowBuilderPrepare: invoke(CH.workflowBuilderPrepare),
   workflowDraftGet: invoke(CH.workflowDraftGet),
   onWorkflowDraft: { kind: "event", ch: CH.workflowDraft },

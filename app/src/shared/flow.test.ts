@@ -500,7 +500,7 @@ describe("compiling loops", () => {
         "   2.1. B",
         "   2.2. Then: C",
         '   End each round with one line starting "PROGRESS:" that says what you tried (MasterDeck keeps these as the loop\'s progress).',
-        "   When MasterDeck says the loop is over:",
+        "   When MasterDeck says the loop is over (not before: none of these while the loop is open):",
         "     If the criterion was met:",
         "       2.met.1. D",
         // The limit branch is a notify block, which adds nothing to a hook's plan: no empty heading.
@@ -532,7 +532,7 @@ describe("compiling loops", () => {
         agentDone: { on: true, goal: "the page loads" },
       }),
     ).toContain(
-      ': you reach this goal: the page loads; when you have, end your turn with a line starting "LOOP DONE:" and why)',
+      ': you reach this goal: the page loads; when you have, end your turn with a line starting "LOOP DONE:" and why (only when the goal is reached: when you are blocked, say so without that line and the loop ends at its limit))',
     );
     expect(
       loopLine({
@@ -540,7 +540,7 @@ describe("compiling loops", () => {
         agentDone: { on: true, goal: "the page loads" },
       }),
     ).toContain(
-      ': `npm test` must pass, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: the page loads)',
+      ': `npm test` must pass, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: the page loads (only when the goal is reached: when you are blocked, say so without that line and the loop ends at its limit))',
     );
   });
 
