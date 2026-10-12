@@ -437,6 +437,25 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
   session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
+- **Session details → Session → Processes** (#115, `renderer/.../SessionProcs.tsx`): read on
+  demand, never in `AppState`. While the section is on screen (and the window visible) it calls
+  `deck.procsList(key)` (`procs:list`) every 2.5 s; `SessionProcs` (`main/sessionProcs.ts`) runs one
+  `/bin/ps ax -o pid,ppid,pgid,etime,%cpu,rss,command` and two `/usr/sbin/lsof -F` calls (folder and
+  stdout; listening TCP sockets) for the session's processes only. `shared/sessionProcs.ts` groups
+  them: each child of the session's `claude` (`Session.pid`) that is a Claude Code Bash shell
+  (`zsh -c … eval '<cmd>' < /dev/null && pwd -P >| /tmp/claude-<hex>-cwd`, `isClaudeShell`) with its
+  whole tree, and, outside the tree, processes still in the process group of a shell seen before
+  (what `cmd &` leaves, adopted by launchd). Claude Code helpers (`caffeinate`, MCP servers) are not
+  shells and are left out. A shell writes to `…/<sessionId>/tasks/<taskId>.output` whether or not it
+  runs in the background; the transcript says which ("running in background with ID: …",
+  `transcriptTasks`, read again only when its mtime changes) and gives a background command's exit
+  code from its `<task-notification>` (`… (exit code N)` or `… failed with exit code N`). An ended
+  background or detached command stays listed `exited` for `EXITED_KEEP_MS` (60 s); a foreground
+  call drops off at once (its result is in the conversation). `deck.procsOutput(key, pid)` reads
+  the last 12 KB of the stdout file of a process the last list found (never a path from the
+  caller), ANSI and `\r` redraws cleaned (`cleanOutput`). `deck.openPort(url)` (`procs:openPort`,
+  blocked on the web and refused for a remote call) opens only `http://localhost|<IP>:<port>`
+  (`isPortUrl`). Windows answers `supported: false`.
 - **Session details → GitHub** (#103, `renderer/.../GitHubDetails.tsx`; the tab is kept in
   localStorage `md.detailsTab`, open rows in a module map per `Session.key`): ticket, PRs and
   monitors as rows that open. What is not in `AppState` is read on demand, never added to it (the web

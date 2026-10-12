@@ -741,6 +741,21 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
   refresh while the row stays open.
 
+## Session processes (#115): open points (2026-10-12)
+
+- **P2 · Leftovers of a shell MasterDeck never saw.** What `cmd &` / `nohup cmd &` leaves behind
+  is found by its shell's process group, which `SessionProcs` remembers only for shells it listed
+  (Details open while the shell ran). A cheap `ps` per minute for every live session would catch
+  them all.
+- **P3 · Exit codes of foreground calls** are not shown (they drop off at once; the result is in
+  the conversation). A process that was never a background command (a detached one) has no code.
+- **P3 · Windows.** Not supported (`supported: false`): needs a process table and sockets per pid
+  (`Get-CimInstance Win32_Process`, `Get-NetTCPConnection -State Listen`).
+- **P3 · Not checked:** a real Claude Code session's background command in the installed app (the
+  isolated app ran against a stand-in session whose shells mimic Claude Code's; the parsers were
+  checked against this machine's real `ps` / `lsof` and a live session's tree), the web app over the
+  bridge, a phone, Linux.
+
 ## Session tabs, files and diffs (#113): open points
 
 - **P3 · Wide characters before a path.** The ⌘-click link provider uses string offsets as
@@ -759,6 +774,12 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   (50,000-path list, `git status` time).
 
 ## Recently done
+
+- **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
+  running commands (background shells, the call running now, what a command left behind) with
+  folder, pid, uptime, CPU / memory, listening ports that open in the browser, the processes below
+  and the last output; exited background commands show their exit code for a minute. Branch
+  `worktree-MasterDeck-Terminal-115-session-processes`.
 
 | What | MasterDeck | Backend |
 |---|---|---|

@@ -20,6 +20,7 @@ import { DiffList } from "./DiffList";
 import { FileTree } from "./FileTree";
 import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
 import { peerRows } from "./peersView";
+import { SessionProcs } from "./SessionProcs";
 
 interface Props {
   session: Session;
@@ -44,7 +45,8 @@ const asTab = (v: unknown): DetailsTab =>
  * above the terminal), in tabs: Session (what waits on you, status, workflow, linked sessions,
  * branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub (ticket,
  * PRs, monitors: GitHubDetails; #103), Diff (changed files: DiffList) and Files (FileTree; #113).
- * Mods is in the Tools tab. The picked tab is kept across sessions and restarts.
+ * Mods is in the Tools tab. Session also lists the session's running processes and their ports
+ * (SessionProcs, #115). The picked tab is kept across sessions and restarts.
  */
 export function SessionDetails({
   session: s,
@@ -299,6 +301,8 @@ export function SessionDetails({
           </div>
         </section>
       )}
+
+      <SessionProcs session={s} now={now} />
 
       <section className="dsec">
         <div className="eyebrow">Worktrees</div>

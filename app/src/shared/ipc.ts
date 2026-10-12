@@ -66,6 +66,7 @@ export interface WorkflowStatus extends FlowProgress {
   from: string | null;
 }
 import type { SessionSummary } from "./summary";
+import type { ProcsAnswer } from "./sessionProcs";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
 
@@ -121,6 +122,9 @@ export const CH = {
   setVisible: "app:setVisible",
   openExternal: "app:openExternal",
   openEditor: "app:openEditor",
+  procsList: "procs:list",
+  procsOutput: "procs:output",
+  openPort: "procs:openPort",
   copy: "app:copy",
   stopSession: "session:stop",
   stopOtherSession: "session:stopOther",
@@ -657,6 +661,12 @@ export interface DeckApi {
   setFocus(sessionId: string | null): void;
   setVisible(sessionIds: string[]): void;
   openExternal(url: string): void;
+  /** The session's running processes: its Claude Code shells, what runs below them, their ports (Details). */
+  procsList(key: string): Promise<ProcsAnswer>;
+  /** The last few KB one of them wrote, when its output goes to a file (a background command). */
+  procsOutput(key: string, pid: number): Promise<{ ok: true; text: string } | { ok: false; message: string }>;
+  /** Open a local server in the browser: `http://localhost:<port>` (or an IP literal); anything else is refused. */
+  openPort(url: string): void;
   openEditor(dir: string): Promise<CliResult>;
   copy(text: string): void;
   stopSession(bgId: string, name: string): Promise<CliResult>;
