@@ -58,6 +58,10 @@ Empty tab (no ticket, no PR, no monitor): one line, "Nothing on GitHub for this 
 
 Unchanged: `SessionMods` (#86 is merged). Its tab label keeps "· n off".
 
+Later (2026-10-12): Mods moved to the right panel's Tools tab (`SessionTools.tsx`, after Queue and
+BTW), so Details has two tabs, **Session · GitHub**; a remembered `md.detailsTab` of `mods` opens
+Session.
+
 ## New data (read on demand, not in AppState)
 
 AppState stays as it is (the web bridge drops states over ~1.05 MB), so both new things are reads

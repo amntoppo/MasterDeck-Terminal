@@ -6,7 +6,7 @@ import { noteAnswerText, noteRequestId } from './note'
 /*
  * /md-note <text>: adds the text to the note of this session's ticket in MasterDeck (it owns the
  * notes), through the same pump as the masterdeck-notes skill (`note-requests/`, `note-answers/`).
- * It runs at once, without a Claude turn. Switched off for the session in Session details → Mods,
+ * It runs at once, without a Claude turn. Switched off for the session in Tools → Mods,
  * the command answers with nothing.
  */
 

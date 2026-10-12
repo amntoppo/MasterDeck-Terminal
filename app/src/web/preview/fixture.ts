@@ -173,7 +173,7 @@ export function fixtureState(noBoard = false): AppState {
     hookInfo: {},
     sessionWorktrees: {},
     peers: { [SESSIONS[0].key]: [SESSIONS[1].key], [SESSIONS[1].key]: [SESSIONS[0].key] },
-    // Session details → Mods: the MasterDeck mod runs in the first session and reported these.
+    // Tools → Mods: the MasterDeck mod runs in the first session and reported these.
     modLive: {
       [SESSIONS[0].key]: {
         version: '0.5.0',

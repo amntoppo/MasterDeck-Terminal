@@ -222,7 +222,7 @@ function previewDeck(noBoard: boolean): DeckApi {
         comments: [{ author: 'riley', at: Date.now() - 2.5 * 3600_000, text: 'Deployed to staging for a look.', url: 'https://github.com/acme/web/pull/131#issuecomment-1' }],
       },
     }),
-    // Session details → Mods: switch in the fixture, as the Mac would after its next state.
+    // Tools → Mods: switch in the fixture, as the Mac would after its next state.
     modSet: (key: string, mod: string, on: boolean) => {
       const off = new Set(state.modOff?.[key] ?? [])
       if (on) off.delete(mod)
