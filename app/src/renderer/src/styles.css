@@ -113,7 +113,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .diff-base { font-size: 11px; color: var(--muted); }
 .code.diff { table-layout: auto; }
 .code.diff.split { table-layout: fixed; }
-.code.diff.split .ln { width: 48px; }
+.code.diff.split .ln-col { width: 52px; }
 .code.diff.split .half { white-space: pre-wrap; word-break: break-all; }
 .code.diff .sign { width: 1%; padding: 0 6px; color: var(--faint); user-select: none; }
 .code.diff tr.hunk td { padding: 4px 12px; color: var(--muted); background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

@@ -86,6 +86,15 @@ export function DiffTab({ session, path, base, visible }: { session: Session; pa
       ) : (
         <div className="ftab-scroll">
           <table className={`code diff${split && canSplit ? ' split' : ''}`}>
+            {/* A fixed layout takes its widths from here, not from the first row (a hunk header). */}
+            {split && canSplit && (
+              <colgroup>
+                <col className="ln-col" />
+                <col />
+                <col className="ln-col" />
+                <col />
+              </colgroup>
+            )}
             <tbody>{d!.hunks.map((h, i) => (split && canSplit ? <SplitHunk key={i} hunk={h} /> : <UnifiedHunk key={i} hunk={h} />))}</tbody>
           </table>
           {d!.truncated && <div className="ftab-note">The diff is longer than {DIFF_MAX_LINES.toLocaleString('en-US')} lines; the rest is not shown.</div>}
