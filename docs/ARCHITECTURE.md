@@ -1110,6 +1110,15 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 
 - `main.tsx` mounts `App`. `deck.ts`: `deck()` = `window.deck`, `useAppState()` (first
   `getState()`, then `onState`), `useNow(ms)`.
+- Themes (issue #105, [THEMES.md](THEMES.md)): every colour is a token of `shared/themes.ts`
+  (`DARK`, `LIGHT`). `theme.ts` writes the active theme's tokens on `<html>` as CSS variables
+  (`applyTheme`), `bootTheme()` runs before the first render (`main.tsx`, `web/main.tsx`) from
+  localStorage `md.theme`, and `useTheme(pref)` in `App` follows `settings.theme` (the window) or
+  the browser's own choice (`useWebThemePref`, the web app), resolving System through
+  `prefers-color-scheme`. Terminals subscribe with `onTheme`. In main, `applyNativeTheme` sets
+  `nativeTheme.themeSource` and the window's background on every settings save, and `remoteSettings`
+  never lets a browser change the Mac's theme. `themes.lint.test.ts` fails on any colour literal in
+  `renderer/src` or `src/web`.
 - `App.tsx` lays out, left to right: **`Rail`** (views, tools, the remote indicator, actions,
   Settings), **`Sidebar`** (the Sessions column on Terminals: Needs you, grouped sessions, shells,
   Parked, footer with Refresh/Cleanup/GitHub cache), the **main view**, the **`Inspector`** right

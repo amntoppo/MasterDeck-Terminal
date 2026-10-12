@@ -20,6 +20,7 @@ Start here, then read what the task needs:
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
 | [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
+| [docs/THEMES.md](docs/THEMES.md) | Themes: the token set, the light palette, adding a theme |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
 ## Two repos, one product
@@ -175,6 +176,7 @@ web tabs keep working.
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
+| Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -379,6 +381,16 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-12)
+
+- **Themes and a light theme (#105)** on branch `worktree-MasterDeck-Terminal-105-themes` (PR, not
+  merged): every colour is a token of `shared/themes.ts` (Dark = the old look, Light = Primer-based,
+  AA-checked), Settings → General → **Appearance** (Light / Dark / System, default Dark; per browser
+  in the web app), live switching including terminals (xterm `minimumContrastRatio` 4.5 in light).
+  Spec and plan in the backend repo (`docs/themes-105`, not pushed). Checked: typecheck, vitest,
+  `build:web`, every screen in both themes in the web preview (1440 px and 390 px), and the isolated
+  Electron app (Light / Dark / System switching, the window background and `nativeTheme`, kept
+  after a restart). Not checked: Windows, a real Claude session in the light terminal, a phone.
+  Open points: TODO ("Themes: open points").
 
 - **The README is rewritten for developers (#90)** (merged to `main` from branch
   `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in

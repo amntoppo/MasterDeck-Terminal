@@ -68,6 +68,6 @@ export const KIND_COLOR: Record<string, string> = {
   CI: 'var(--red)',
   STALE: 'var(--amber)',
   ORPHAN: 'var(--grey)',
-  MEETING: '#4fd1c5',
-  CHAT: '#9ca3af',
+  MEETING: 'var(--teal)',
+  CHAT: 'var(--text-3)',
 }

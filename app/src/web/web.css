@@ -2,8 +2,8 @@
 .web-card { max-width: 420px; margin: 18vh auto 0; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
 .web-card h2 { margin: 0; font-size: 18px; }
 .web-card p { margin: 0; color: var(--muted); line-height: 1.5; }
-.web-words { font-family: 'Geist Mono Variable', monospace; font-size: 22px; letter-spacing: .02em; color: var(--text, #e6e9ef); }
-.web-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 6px 12px; text-align: center; font-size: 12px; background: rgba(245, 184, 61, .15); color: var(--amber); border-bottom: 1px solid rgba(245, 184, 61, .35); }
+.web-words { font-family: 'Geist Mono Variable', monospace; font-size: 22px; letter-spacing: .02em; color: var(--text); }
+.web-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 6px 12px; text-align: center; font-size: 12px; background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); border-bottom: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); }
 .web-signout { position: fixed; left: 0; bottom: 4px; width: var(--rail-w); z-index: 42; background: none; border: 0; color: var(--muted); font-size: 10px; cursor: pointer; padding: 4px 0; }
 .web-signout:hover { color: var(--red); }
 

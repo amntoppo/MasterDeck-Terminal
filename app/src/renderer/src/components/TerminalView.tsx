@@ -8,29 +8,9 @@ import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
 import { quickKeyBytes, type QuickKey } from '../quickKeys'
 import { isPhone, isWeb, keyPlatform, usePhone } from '../web'
+import { currentTheme, onTheme } from '../theme'
+import { xtermTheme } from '@shared/themes'
 
-const THEME = {
-  background: '#0b0c0f',
-  foreground: '#e6e9ef',
-  cursor: '#6aa9ff',
-  selectionBackground: 'rgba(106,169,255,0.35)',
-  black: '#1c2130',
-  brightBlack: '#5d6579',
-  red: '#f26d6d',
-  brightRed: '#ff8a8a',
-  green: '#3ecf8e',
-  brightGreen: '#6ee7b7',
-  yellow: '#f5b83d',
-  brightYellow: '#fcd34d',
-  blue: '#6aa9ff',
-  brightBlue: '#93c5fd',
-  magenta: '#a78bfa',
-  brightMagenta: '#c4b5fd',
-  cyan: '#4fd1c5',
-  brightCyan: '#81e6d9',
-  white: '#e6e9ef',
-  brightWhite: '#ffffff',
-}
 
 /** Terminal views by pane id (one pane can show in Terminals and in Tasks at once), for ⌘F. */
 const searchers = new Map<string, { search: SearchAddon; host: HTMLElement; term: Terminal }[]>()
@@ -80,7 +60,9 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // A phone gets ~45 columns at 12px; everything else keeps 13.
       fontSize: isPhone() ? 12 : 13,
       lineHeight: 1.15,
-      theme: THEME,
+      theme: xtermTheme(currentTheme()),
+      // The light theme lifts colours a program picked for a dark terminal (Claude Code's own dark theme).
+      minimumContrastRatio: currentTheme().termMinContrast,
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 10000,
@@ -102,6 +84,11 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // hidden on mount; fitted when shown
     }
     let disposed = false
+    const offTheme = onTheme(() => {
+      const th = currentTheme()
+      t.options.theme = xtermTheme(th)
+      t.options.minimumContrastRatio = th.termMinContrast
+    })
     // Created before any output so it tracks the pen and cursor state from the start; switched on by the setting.
     pred.current = isWeb() ? createPredictor(t, { enabled: false }) : null
     const setInstant = (on: boolean) => !disposed && pred.current?.setEnabled(on)
@@ -180,6 +167,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       offData()
       offExit()
       offState()
+      offTheme()
       pred.current?.dispose()
       pred.current = null
       const rest = (searchers.get(paneId) ?? []).filter((x) => x !== entry)

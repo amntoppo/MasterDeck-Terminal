@@ -38,3 +38,11 @@ describe('watch new PRs', () => {
     expect(normalizeSettings({ watchPrs: 'no' }).watchPrs).toBe(true)
   })
 })
+
+describe('theme', () => {
+  it('defaults to dark and keeps a known choice', () => {
+    expect(normalizeSettings({}).theme).toBe('dark')
+    for (const t of ['light', 'dark', 'system'] as const) expect(normalizeSettings({ theme: t }).theme).toBe(t)
+    expect(normalizeSettings({ theme: 'solarized' }).theme).toBe('dark')
+  })
+})
