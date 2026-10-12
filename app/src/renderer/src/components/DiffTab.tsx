@@ -6,6 +6,7 @@ import type { DiffBase } from '@shared/sessionTabs'
 import type { Session } from '@shared/types'
 import { deck, load, save } from '../deck'
 import { sessionTabs } from '../sessionTabsStore'
+import { usePull } from '../usePull'
 
 /** Narrower than this, old and new side by side do not fit: the diff stays unified. */
 const SPLIT_MIN_PX = 760
@@ -36,17 +37,13 @@ export function DiffTab({ session, path, base, visible }: { session: Session; pa
   const [split, setSplitState] = useState(() => load<boolean>(SPLIT_KEY, false) === true)
   const [ref, width] = useWidth()
   const canSplit = width >= SPLIT_MIN_PX
-  useEffect(() => {
-    if (!visible) return
-    let live = true
-    void deck()
+  // Live while it shows, like Details → Diff: the session may be editing this file right now.
+  usePull(visible, `${session.state}:${nonce}`, async () => {
+    const r = await deck()
       .diffFile(session.key, path, base)
-      .then((r) => live && setDiff(r))
-      .catch((e: unknown) => live && setDiff({ ok: false, message: String(e) }))
-    return () => {
-      live = false
-    }
-  }, [session.key, path, base, visible, session.state, nonce])
+      .catch((e: unknown): DiffRead => ({ ok: false, message: String(e) }))
+    setDiff((cur) => (cur && JSON.stringify(cur) === JSON.stringify(r) ? cur : r))
+  })
   const setSplit = (v: boolean) => {
     setSplitState(v)
     save(SPLIT_KEY, v)

@@ -922,6 +922,29 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .d-tabs .seg button { white-space: nowrap; padding: 5px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .d-tab-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-tab-count.bad { color: var(--red); }
+/* Details → Diff (DiffList.tsx) and Files (FileTree.tsx). */
+.diff-list, .file-tree { gap: 6px; }
+.diff-list-head, .ft-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ft-head .filter { flex: 1; margin: 0; }
+.diff-sum { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.plus { color: var(--green); }
+.minus { color: var(--red); }
+.diff-err { color: var(--red); font-size: 12px; user-select: text; }
+.diff-files, .ft, .ft ul { list-style: none; margin: 0; padding: 0; }
+.diff-file, .ft-row { width: 100%; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: none; background: none; border-radius: 5px; cursor: pointer; text-align: left; font-size: 12px; min-width: 0; color: var(--text-2); }
+.diff-file:hover, .ft-row:hover { background: var(--bg-3); color: var(--text); }
+.diff-st { flex: none; width: 16px; text-align: center; font: 600 10px var(--mono); border-radius: 3px; }
+.diff-st.added { color: var(--green); }
+.diff-st.modified { color: var(--amber); }
+.diff-st.deleted { color: var(--red); }
+.diff-st.renamed { color: var(--accent); }
+.diff-path { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; }
+.diff-name { white-space: nowrap; }
+.diff-file.deleted .diff-name { text-decoration: line-through; color: var(--muted); }
+.diff-dir { color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.diff-n { flex: none; font: 11px var(--mono); color: var(--muted); }
+.ft-dir { color: var(--text); }
+.ft-caret { width: 10px; color: var(--faint); font-size: 10px; }
 /* Session details → GitHub (#103): rows that open to what is behind them. */
 .gh-list { gap: 2px; }
 .gh-row { border-radius: 7px; }
