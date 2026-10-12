@@ -974,7 +974,7 @@ button.gh-toggle:hover { background: var(--bg-3); }
 .d-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 /* Details → Session → Processes (#115) */
 .d-proc { display: flex; flex-direction: column; gap: 3px; padding: 7px 0; border-top: 1px solid var(--line); }
-.d-proc:first-of-type { border-top: none; padding-top: 0; }
+.dsec > .eyebrow + .d-proc { border-top: none; padding-top: 0; }
 .d-proc.ended { opacity: .65; }
 .d-proc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .d-proc-cmd { display: inline-flex; align-items: center; gap: 7px; flex: 1 1 160px; min-width: 0; border: none; background: none; padding: 0; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; }

@@ -144,6 +144,23 @@ function previewDeck(noBoard: boolean): DeckApi {
     janitor: () => [],
     standupCommits: () => [],
     tokensByDay: () => fixtureCosts().tokens,
+    // Details → Session → Processes (#115): a dev server and an API with ports, and a test run that just failed.
+    procsList: () => {
+      const t = Date.now()
+      const proc = (pid: number, command: string, cwd: string, upMin: number, ports: number[], extra: object = {}) => ({
+        pid, command, kind: 'background' as const, cwd, startedAt: t - upMin * 60_000, state: 'running' as const, exitCode: null, endedAt: null,
+        ports: ports.map((port) => ({ host: '127.0.0.1', port })), cpu: 0.4, memKb: 84_000, children: [{ pid: pid + 2, command: 'node node_modules/.bin/vite' }], hasOutput: true, ...extra,
+      })
+      return {
+        ok: true, supported: true, running: true,
+        procs: [
+          proc(4312, 'npm run dev', '/Users/dev/acme/web', 42, [5173]),
+          proc(4388, 'uv run main.py', '/Users/dev/acme/api', 18, [8000], { children: [] }),
+          proc(4501, 'npm test -- --run', '/Users/dev/acme/web', 1, [], { state: 'exited', exitCode: 1, endedAt: t - 20_000, cpu: 0, memKb: 0, children: [], hasOutput: false }),
+        ],
+      }
+    },
+    procsOutput: () => ({ ok: true, text: '  VITE v5.4.2  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n10:41:02 [vite] hmr update /src/App.tsx' }),
     workspaceRepos: () => repos,
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,
