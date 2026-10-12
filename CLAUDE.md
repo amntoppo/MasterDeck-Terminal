@@ -386,8 +386,8 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-12)
 
-- **Per-session tabs (#113)** are built on branch `113-session-tabs` (not merged, **not
-  installed**: the rebuild of the real app waits for the user's word). A tab row per session pane
+- **Per-session tabs (#113)** are built on branch `113-session-tabs` (PR #114, `origin/main`
+  merged in, not merged to `main`; **installed locally 2026-10-12**). A tab row per session pane
   (Terminal, then file and diff tabs, kept per `Session.key` across restarts), Details → **Diff**
   and **Files**, ⌘P, ⌘-click on terminal paths; ⇧← / ⇧→ removed. Design and plan:
   `docs/plans/2026-10-12-session-tabs-{design,plan}.md`. Checked: typecheck, vitest, `build:web`,
