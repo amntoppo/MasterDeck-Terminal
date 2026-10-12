@@ -7,7 +7,7 @@ import type { Span } from './tokens'
 const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTime()
 const span = (day: number, h1: number, m1: number, h2: number, m2: number): Span => [at(day, h1, m1), at(day, h2, m2)]
 const HOUR = 60 * 60_000
-const ALL = { idleGapMs: HOUR, from: '0000-00-00', to: '9999-99-99' }
+const ALL = { idleGapMs: HOUR, from: 0, to: Infinity }
 const s = (id: string, account: string | null, ticket: string | null, spans: Span[], key = id): HoursSession => ({ id, key, account, ticket, spans })
 
 describe('mergeSpans', () => {
@@ -73,9 +73,14 @@ describe('estimateHours', () => {
   })
 
   it('returns only days in the range', () => {
-    const r = estimateHours([s('a', 'alice', 'acme/web#12', [[at(1, 23, 0), at(2, 1, 0)]])], { ...ALL, from: '2026-10-02', to: '2026-10-02' })
+    const r = estimateHours([s('a', 'alice', 'acme/web#12', [[at(1, 23, 0), at(2, 1, 0)]])], { ...ALL, from: at(2, 0), to: at(3, 0) })
     expect(r.accounts).toEqual([{ day: '2026-10-02', account: 'alice', ticket: null, minutes: 60 }])
     expect(r.tickets).toEqual([{ day: '2026-10-02', account: 'alice', ticket: 'acme/web#12', minutes: 60 }])
+  })
+
+  it('cuts time to a range inside a day, gaps filled before the cut', () => {
+    const r = estimateHours([s('a', 'alice', null, [span(1, 10, 0, 10, 10), span(1, 10, 50, 11, 0)])], { ...ALL, from: at(1, 10, 30), to: at(1, 11, 30) })
+    expect(r.accounts).toEqual([{ day: '2026-10-01', account: 'alice', ticket: null, minutes: 30 }])
   })
 
   it('fills the gap across a resume (a new id, the same key)', () => {

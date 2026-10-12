@@ -115,7 +115,7 @@ function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: (
 }
 
 const VIEWS: [View, string, string][] = [
-  ['terminals', 'Terminals', '⇧← ⇧→'],
+  ['terminals', 'Terminals', ''],
   ['board', 'Board', ''],
   ['prs', 'Pull requests', ''],
   ['tasks', 'Tasks', ''],

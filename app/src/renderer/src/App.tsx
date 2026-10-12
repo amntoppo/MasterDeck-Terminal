@@ -64,7 +64,13 @@ import { HistoryDialog } from "./components/HistoryDialog";
 import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
+import { SessionTabBody, SessionTabRow } from "./components/SessionTabs";
+import { QuickOpen } from "./components/QuickOpen";
+import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
+import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
+import { relativeTo } from "@shared/filePath";
 import { deck, load, save, useAppState } from "./deck";
+import { savedPref, useTheme, useWebThemePref } from "./theme";
 
 type Tab =
   | { id: string; kind: "session"; key: string }
@@ -99,8 +105,6 @@ type Tab =
 
 const MIN_MASTER = 300;
 const MIN_PANEL = 340;
-/** The views ⇧← / ⇧→ step through, in the order of the switch at the top of the sidebar. */
-const MAIN_VIEWS: View[] = ["terminals", "board", "prs", "tasks"];
 const SIDE_W = 272;
 const MIN_SIDE = 200;
 const MAX_SIDE = 560;
@@ -120,6 +124,9 @@ function paneIdFor(tab: Tab): string {
 
 export function App() {
   const state = useAppState();
+  // The window follows the Mac's setting; a browser its own choice (theme.ts).
+  const webTheme = useWebThemePref();
+  useTheme(isWeb() ? webTheme : (state?.settings.theme ?? savedPref()));
   // Phone layout (web, narrow window): one screen at a time and a bottom tab bar. Never true in Electron.
   const phone = usePhone();
   const remote = useMemo(
@@ -215,6 +222,8 @@ export function App() {
     if (phoneScreen !== "main" || view !== "terminals") setPhonePanel(false);
   }, [phoneScreen, view]);
   const [palette, setPalette] = useState(false);
+  // ⌘P: the session whose files it picks from.
+  const [quickOpen, setQuickOpen] = useState<Session | null>(null);
   // History (⌘⇧F): a popup over any screen.
   const [historyOpen, setHistoryOpen] = useState(false);
   // ⌘F: find on the Terminals, Board or PRs screen; `at` reopens it (and refocuses) on each press.
@@ -269,7 +278,7 @@ export function App() {
     return deck().onMeetingsShowRecord(() => setRecordOpen(true));
   }, []);
   const notes = useNotes(!!state);
-  // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
+  // The Terminals screen's right panel: its tab (Details, Tools, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
   );
@@ -706,6 +715,8 @@ export function App() {
 
   const activeTab = tabs.find((t) => t.id === active) ?? null;
   const activeKey = activeTab?.kind === "session" ? activeTab.key : null;
+  // The open session's own tab (its terminal, or a file or diff): the phone's terminal keys only fit the terminal.
+  const activeOwnTab = useSessionTabs(activeKey ?? "").active;
   const activeSessionId = activeKey
     ? (state?.sessions.find((x) => x.key === activeKey)?.sessionId ?? null)
     : null;
@@ -726,6 +737,14 @@ export function App() {
     return ids;
   }, [tabs, state?.sessions, state?.master]);
   const visibleKey = visibleIds.join(",");
+  // Forget the file and diff tabs of sessions no longer listed (never on an empty list: a start-up
+  // or a failing `claude agents` is not every session gone).
+  // A phone shows one sheet at a time: a file or diff opened from the panel shows at once.
+  useEffect(() => sessionTabs.onOpen(() => setPhonePanel(false)), []);
+  const listedKeys = (state?.sessions ?? []).map((x) => x.key).join(",");
+  useEffect(() => {
+    if (listedKeys) sessionTabs.prune(new Set(listedKeys.split(",")));
+  }, [listedKeys]);
   useEffect(() => {
     deck().setVisible(visibleIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -744,7 +763,7 @@ export function App() {
   };
 
   // Keyboard shortcuts (shared/shortcuts.ts; listed in Settings). Caught before a terminal sees
-  // them, so Shift+arrows move around instead of reaching the shell.
+  // them, so Shift+Up/Down move between tabs instead of reaching the shell.
   const onShortcut = useRef<(e: KeyboardEvent) => void>(() => {});
   onShortcut.current = (e: KeyboardEvent) => {
     const el = e.target as HTMLElement | null;
@@ -772,17 +791,6 @@ export function App() {
       activate(id);
     };
     switch (hit.id) {
-      case "view-prev":
-      case "view-next":
-        setView(
-          (v) =>
-            cycle(
-              MAIN_VIEWS,
-              MAIN_VIEWS.includes(v) ? v : null,
-              hit.id === "view-next" ? 1 : -1,
-            ) ?? v,
-        );
-        return done();
       case "tab-prev":
       case "tab-next":
         goTab(
@@ -802,6 +810,16 @@ export function App() {
       case "new-shell":
         void openShell();
         return done();
+      case "quick-open": {
+        const s = activeKey
+          ? state.sessions.find((x) => x.key === activeKey)
+          : null;
+        if (s) {
+          setView("terminals");
+          setQuickOpen((cur) => (cur ? null : s));
+        } else flash("Open a session tab first");
+        return done();
+      }
       case "palette":
         setPalette((p) => !p);
         return done();
@@ -1404,7 +1422,8 @@ export function App() {
             </div>
           ))}
         </div>
-        {phone && activeTab && activeTab.kind !== "pending" && (
+        {phone && activeTab && activeTab.kind !== "pending" &&
+          (activeTab.kind !== "session" || activeOwnTab === TERMINAL_ID) && (
           <QuickKeys paneId={paneIdFor(activeTab)} />
         )}
       </main>
@@ -1464,7 +1483,7 @@ export function App() {
         <button
           className="panel-show"
           onClick={() => setInspOpen(true)}
-          title="Show the panel: Details, Queue, Summary"
+          title="Show the panel: Details, Tools, Summary"
         >
           ‹ Panel
         </button>
@@ -1504,6 +1523,9 @@ export function App() {
           onClose={() => setNotesAt(null)}
           phone={phone}
         />
+      )}
+      {quickOpen && (
+        <QuickOpen session={quickOpen} onClose={() => setQuickOpen(null)} />
       )}
       {palette && (
         <CommandPalette
@@ -1748,6 +1770,10 @@ function SessionPane(p: {
   const [gen, setGen] = useState(0);
   const phone = usePhone();
   const paneId = `s:${p.tab.key}`;
+  // The session's own tab row: the terminal stays mounted (and keeps its buffer) under a file tab.
+  const own = useSessionTabs(p.tab.key);
+  const onTerminal = own.active === TERMINAL_ID;
+  const openTab = own.tabs.find((t) => tabId(t) === own.active);
 
   if (!s) {
     return (
@@ -1780,6 +1806,13 @@ function SessionPane(p: {
           <SessionAccount login={login} ghActive={ghActive} />
         </div>
       )}
+      <SessionTabRow sessionKey={s.key} />
+      {!onTerminal && openTab && openTab.kind !== "terminal" && (
+        <div className="stab-body">
+          <SessionTabBody session={s} tab={openTab} visible={p.visible} />
+        </div>
+      )}
+      <div className={`stab-body${onTerminal ? "" : " hidden"}`}>
       {s.kind === "background" && s.bgId && !p.armed ? (
         <NotStarted
           label={
@@ -1802,10 +1835,14 @@ function SessionPane(p: {
           <TerminalView
             paneId={paneId}
             spec={{ kind: "attach", bgId: s.bgId }}
-            visible={p.visible}
+            visible={p.visible && onTerminal}
             focusOnShow={p.focus}
             generation={gen}
             onExit={() => setExited(true)}
+            onOpenPath={(path) => {
+              const rel = relativeTo(s.cwd, path);
+              if (rel) sessionTabs.open(s.key, { kind: "file", path: rel });
+            }}
           />
           {exited && (
             <div className="overlay">
@@ -1848,6 +1885,7 @@ function SessionPane(p: {
           )}
         </div>
       )}
+      </div>
     </>
   );
 }

@@ -81,7 +81,7 @@ session polling GitHub would burn the rate limit; the mod is a thin reader of wh
 | 1 | Bridge: the app writes per-session files, the mod reads them and writes a heartbeat (**built**) | foundation | M |
 | 2 | Ticket band above the prompt (**built**) | high | S |
 | 3 | `/md-note`, `/md-ticket`, `/md-board` (**built**) | medium-high | S |
-| 3b | Every mod switched per session from Session details → Mods (**built**: the mod refuses others at `plugin.register`) | medium | M |
+| 3b | Every mod switched per session from Tools → Mods (**built**: the mod refuses others at `plugin.register`) | medium | M |
 | 4 | Ticket context through `prompt.context` | medium-high | S |
 | 5 | Agent-loop driver and progress band (#82): `turn.complete` runs the check, then submits the next round (**built**: `masterdeck-loop`) | high for #82 | M-L |
 | 6 | Typing, `/queue` and AskUserQuestion through the mod | high (reliability) | L, in steps |
@@ -91,11 +91,12 @@ session polling GitHub would burn the rate limit; the mod is a thin reader of wh
 
 ## How MasterDeck should ship it
 
-- Bundle `mods/` with the app and copy it under `MASTERDECK_HOME/mods/` as a local-folder
-  marketplace; install with `claude plugin marketplace add <folder>` and
-  `claude plugin install masterdeck@masterdeck --scope user`, from Setup and a Settings switch
-  (backups, as for hooks). An app update rewrites the folder; sessions take it at `/reload-plugins`
-  or their next start.
+- **Built (#93):** the app bundles `mods/` and copies it to `MASTERDECK_HOME/mods/` (a
+  local-folder marketplace read in place); Setup's Mods step and Settings install it with
+  `claude plugin marketplace add <folder>` and `claude plugin install <name>@masterdeck --scope
+  user` for each mod, plus `prependPlugins` (backups, as for hooks), and remove it again. An app
+  update rewrites the folder; Needs you offers `/reload-plugins` for idle sessions on older mods
+  (ARCHITECTURE, "Installing the mods").
 - Trust the mod only per session, by its heartbeat: anywhere without one (older Claude Code,
   `disableAllHooks`, a policy, a failed load) the deck hook keeps working as today.
 - Coexist with the user's mods: pass every event on with `next(e)` (no denies but the guards

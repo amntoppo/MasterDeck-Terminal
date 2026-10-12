@@ -5,6 +5,9 @@ import '@fontsource-variable/geist-mono'
 import '@renderer/styles.css'
 import './web.css'
 import { Gate } from './Gate'
+import { bootTheme } from '@renderer/theme'
+
+bootTheme()
 
 const root = createRoot(document.getElementById('root')!)
 const preview = new URLSearchParams(location.search).get('preview')

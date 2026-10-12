@@ -1,9 +1,11 @@
 import { ticketKey } from './ticket'
+import { bucketShare } from './timeline'
 
 /**
  * Cost history from the status line stats. A session's `total_cost_usd` is cumulative, so for
- * each session we keep the highest value seen per day; a day's spend is that day's maximum minus
- * the maximum of the latest earlier day. A resumed session gets a new session id and starts
+ * each session we keep the highest value seen per bucket (a local clock hour, `YYYY-MM-DDTHH`; a day
+ * before #88 or once a month old, see shared/timeline.ts); a bucket's spend is its maximum minus the
+ * maximum of the latest earlier bucket. A resumed session gets a new session id and starts
  * again from its own zero, so each id is accounted separately and nothing goes negative.
  */
 
@@ -30,7 +32,7 @@ export interface SessionCost {
   key: string
   issue: number | null
   issueRepo?: string | null
-  /** YYYY-MM-DD → highest cumulative cost seen that day. */
+  /** Bucket (YYYY-MM-DDTHH, or YYYY-MM-DD) → highest cumulative cost seen in it. */
   days: Record<string, number>
 }
 
@@ -43,11 +45,14 @@ export function dayOf(t: number): string {
 }
 
 /**
- * Record the latest cumulative cost of each session under `day`. A session seen for the first time
- * that started before `dayStartMs` gets its cost as a baseline instead, so a first launch doesn't
- * report every session's lifetime spend as today's. Returns true when anything changed.
+ * Record the latest cumulative cost of each session under `bucket` (the hour, `hourOf`). A session
+ * seen for the first time that started before `dayStartMs` gets its cost as a baseline instead, so a
+ * first launch doesn't report every session's lifetime spend as today's. Returns true when anything
+ * changed.
+ * ponytail: a session first seen after it started today puts what it spent so far in this hour; a
+ * finer split would need its transcript's tokens priced per model.
  */
-export function recordCosts(book: CostBook, entries: CostEntry[], day: string, dayStartMs?: number): boolean {
+export function recordCosts(book: CostBook, entries: CostEntry[], bucket: string, dayStartMs?: number): boolean {
   let changed = false
   for (const e of entries) {
     if (!(e.cost >= 0)) continue
@@ -67,16 +72,16 @@ export function recordCosts(book: CostBook, entries: CostEntry[], day: string, d
       }
       changed = true
     }
-    if ((rec.days[day] ?? -1) < e.cost) {
-      rec.days[day] = e.cost
+    if ((rec.days[bucket] ?? -1) < e.cost) {
+      rec.days[bucket] = e.cost
       changed = true
     }
   }
   return changed
 }
 
-/** Spend per day for one session. */
-function perDay(rec: SessionCost): Record<string, number> {
+/** Spend per bucket for one session. */
+function perBucket(rec: SessionCost): Record<string, number> {
   const out: Record<string, number> = {}
   let prev = 0
   for (const d of Object.keys(rec.days).sort()) {
@@ -87,12 +92,31 @@ function perDay(rec: SessionCost): Record<string, number> {
   return out
 }
 
+/** Total spend per bucket across sessions (the baseline is not a bucket). */
+export function bucketSpend(book: CostBook): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const rec of Object.values(book))
+    for (const [b, v] of Object.entries(perBucket(rec))) if (b !== BASELINE) out[b] = (out[b] ?? 0) + v
+  return out
+}
+
 /** Total spend per day across sessions (the baseline is not a day). */
 export function dailySpend(book: CostBook): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const rec of Object.values(book))
-    for (const [d, v] of Object.entries(perDay(rec))) if (d !== BASELINE) out[d] = (out[d] ?? 0) + v
+  for (const [b, v] of Object.entries(bucketSpend(book))) out[b.slice(0, 10)] = (out[b.slice(0, 10)] ?? 0) + v
   return out
+}
+
+/** Spend in [from, to) (epoch ms) of spend per bucket (`bucketSpend`, or one session's). */
+export function spendIn(byBucket: Record<string, number>, from: number, to: number, now: number): number {
+  let sum = 0
+  for (const [b, v] of Object.entries(byBucket)) if (v > 0) sum += v * bucketShare(b, from, to, now)
+  return sum
+}
+
+/** Spend in [from, to) (epoch ms) of one session. */
+export function sessionSpendIn(rec: SessionCost, from: number, to: number, now: number): number {
+  return spendIn(perBucket(rec), from, to, now)
 }
 
 /** All-time spend of one session (its highest cumulative cost). */
@@ -102,8 +126,8 @@ export function sessionTotal(rec: SessionCost): number {
 
 /** Spend within [from, to] (YYYY-MM-DD, inclusive) of one session. */
 export function sessionSpendBetween(rec: SessionCost, from: string, to: string): number {
-  return Object.entries(perDay(rec))
-    .filter(([d]) => d >= from && d <= to)
+  return Object.entries(perBucket(rec))
+    .filter(([b]) => b.slice(0, 10) >= from && b.slice(0, 10) <= to)
     .reduce((a, [, v]) => a + v, 0)
 }
 
@@ -119,12 +143,21 @@ export function ticketSpend(book: CostBook): Record<string, number> {
 }
 
 /**
- * Drop days older than `keepDays` before `today`. The dropped days' highest cumulative cost folds
- * into the baseline, so later days' spend and the all-time total stay right.
+ * Fold hours older than `hourDays` before `today` into their day (keeps the book small: the state
+ * carries it), and drop days older than `keepDays`. A fold keeps the highest cumulative cost, so
+ * later spend and the all-time total stay right; dropped days go into the baseline.
  */
-export function pruneBook(book: CostBook, today: string, keepDays = 120): void {
+export function pruneBook(book: CostBook, today: string, keepDays = 120, hourDays = 35): void {
   const cutoff = dayOf(Date.parse(today) - keepDays * 86_400_000)
+  const hourCutoff = dayOf(Date.parse(today) - hourDays * 86_400_000)
   for (const rec of Object.values(book)) {
+    for (const b of Object.keys(rec.days)) {
+      const day = b.slice(0, 10)
+      if (b.length > 10 && b !== BASELINE && day < hourCutoff) {
+        rec.days[day] = Math.max(rec.days[day] ?? 0, rec.days[b])
+        delete rec.days[b]
+      }
+    }
     let folded = rec.days[BASELINE] ?? 0
     let dropped = false
     for (const d of Object.keys(rec.days)) {

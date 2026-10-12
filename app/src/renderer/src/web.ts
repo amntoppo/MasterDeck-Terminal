@@ -76,10 +76,8 @@ type Need = { screen?: Screen; method?: Method }
 const ok = (n: Need | undefined) => !n || ((!n.screen || screenOk(n.screen)) && (!n.method || can(n.method)))
 
 const SHORTCUT_NEEDS: Partial<Record<ShortcutId, Need>> = {
-  // ⇧← / ⇧→ step through Terminals · Board · PRs · Tasks.
-  'view-prev': { screen: 'board' },
-  'view-next': { screen: 'board' },
   history: { screen: 'history' },
+  'quick-open': { method: 'filesList' },
   worktree: { method: 'openEditor' },
   refresh: { method: 'refresh' },
   settings: { screen: 'settings' },

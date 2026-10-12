@@ -605,23 +605,21 @@ lists its open points (real screenshots, Always Use HTTPS for the zone, analytic
 Console). Here only what touches this repository:
 
 - **Agent loops (#82)** are "coming soon" on the site: update it when they ship.
-- **The README rewrite** (its own ticket) should reuse the site's pitch and screens.
+- **The README's images** (issue #90) are copies of the site's drawn screens in `docs/images/`, plus
+  `accounts-setup.svg` drawn the same way for the README only: replace all five with real
+  screenshots (the hero, `sessions-list.svg`, could be a GIF), here and on the site together.
 - **Redeploy the site after each release** so Download and the changelog show it (OPERATIONS).
 
 ## MasterDeck mod: open points (2026-10-10, issue #86)
 
 See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The MasterDeck mod".
 
-- **Not installed by MasterDeck.** Setup step / Settings switch that copies `mods/` under
-  `MASTERDECK_HOME/mods/` and runs `claude plugin marketplace add` + `claude plugin install
-  masterdeck@masterdeck --scope user` (and uninstall), with a version check (2.1.287+). Package
-  `mods/` in the app (electron-builder `extraResources`).
 - **Installed by hand on the user's machine (2026-10-10)**: `mods/` copied (`git archive`) to
   `~/.claude/masterdeck/mods`, `claude plugin marketplace add` it, `claude plugin install
   masterdeck@masterdeck --scope user` (settings.json backed up first as
   `settings.backup.<ts>.before-mod.json`). A new `claude --bg` with no flags loads it (heartbeat,
   nothing drawn without a band). Running sessions take it at `/reload-plugins` or their next start.
-  Updating the copy is by hand until the app installs it.
+  An app with #93 replaces that hand copy at launch (no marker) and reads it as installed.
 - **A background session runs with the daemon's environment**, not the shell that ran `claude --bg`:
   `MASTERDECK_HOME` does not reach the mod there, so an isolated test app's sessions use the real
   `~/.claude/masterdeck/deck`. Give the mod the deck folder another way (a `userConfig` option the
@@ -640,7 +638,15 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   must list it (or the mods load before it and show "Not loaded in this session"). Set by hand on
   the user's machine (2026-10-10, settings backed up as `settings.backup.<ts>.before-prepend.json`):
   checked in a throwaway session, the installed mod loaded before a `--plugin-dir` mod and refused
-  it. Setup should add `prependPlugins` with the install (backup, atomic).
+  it. MasterDeck's install adds it now (#93) and says where it is ignored.
+- **Mods install (#93): open points.** Checked with the real `claude` 2.1.296 against a temp
+  `CLAUDE_CONFIG_DIR` in the isolated app (Install, Remove, the backups) and the packaged build's
+  `Resources/mods`; not checked: the Needs-you reload item with real sessions (the isolated app
+  listed none), an app update over an installed copy on the user's machine, Windows (`--json` lines
+  and paths), a managed settings file or a Team plan for real (`prependNote` is unit-tested only).
+  A session whose Claude Code is older than 2.1.287 never sends a heartbeat, so after an install it
+  stays in the reload item until dismissed. The swap of `<home>/mods` leaves a moment with no folder
+  (`ponytail:` in `syncModsFolder`). The isolated app installs mods only with `CLAUDE_CONFIG_DIR` set.
 - **The agent loop lives in the session** (`masterdeck-loop`): MasterDeck's window does not show it
   yet, and #82's workflow canvas cannot start one. Next: the loop writes `deck/loops/<sid>.json`
   (round, max, status), Session details shows it, and a workflow step starts `/md-loop` with its
@@ -650,9 +656,6 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **`/md-board` shows the app's one selected sprint** (`state.board` is read for it): another
   account's board with no cards in that sprint shows empty columns (seen 2026-10-10 on a second
   account). A board file per account and its own current sprint needs a read per account.
-- **Updating the mods needs a reload in every running session** (the copy under
-  `~/.claude/masterdeck/mods` changes at once, sessions take it at `/reload-plugins`). The Mods tab
-  offers **Reload plugins** per session; an app-run install could offer it for every idle session.
 - **Switching a refused mod back on adds a `/reload-plugins` row** to the transcript (the engine's).
 - **Two copies of the band's shape** (`shared/modBand.ts`, `mods/shared/deck.ts`);
   a change bumps `v` in both.
@@ -716,19 +719,143 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **The popout's mic line and switch were not seen on screen** (they show only while recording,
   which no test or agent may start): typecheck and `micLine`'s tests only.
 
+## Costs time filter: open points (2026-10-10, issue #88)
+
+- **Part hours are an even spread.** Costs are kept per clock hour, so Last 1/5/12 hours and a
+  custom range with minutes take a share of the hours they cut by time. Exact would need samples
+  finer than an hour in the cost book (it travels in `AppState`, so mind the bridge's size).
+- **A session first seen today** (MasterDeck closed while it worked) puts all it spent so far today
+  in the hour it was first seen; its transcript's tokens could spread it if they were priced.
+- **Hours older than 35 days are folded into days**: a custom range with times further back is
+  spread over the day.
+- **Not checked on Windows.** The installed app was only checked to start; the view itself was
+  checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
+  converted: new records are hourly, older days stay days.
+
+## Built-in workflows: open points (2026-10-12, issue #104)
+
+- **A loop is armed when its trigger fires, not when the session reaches it** (found in the live
+  runs). Steps ahead of a loop (Superpowers' brainstorm and plan, Ticket to PR's "ask first if
+  unclear") run while it is open: each stop to ask the user a question is blocked with "Not done
+  yet" and counted as a round. The built-ins work around it (no stall limit on those two, more
+  rounds), but the fix is in the mechanism (#82): arm such a loop when the session reaches it
+  (a marker it runs or prints), or do not block a stop that ends with a question to the user.
+- **The stall limit counts turns spent waiting on a background subagent** (no change in the tree).
+  The built-ins' review steps say to run the reviewer in the foreground; the loop hook could skip
+  such rounds.
+- **More built-ins.** Candidates: a second-opinion review, a refactor, a security audit, release
+  notes, issue triage. Each needs a flow, a description, a when-to-use line and the checks in
+  `builtinWorkflows.test.ts`.
+- **Use as Default.** A built-in can be picked per session (Start dialog, Details) but not made the
+  Default in one click; today the user copies its blocks into the Default by hand.
+- **A per-project test command for loop checks.** The loops ask the agent for evidence (and TDD /
+  CI doctor have their own checks); a project's own test command (from Setup or the repository)
+  would let every built-in's loop run the suite as its check.
+- **The builder does not know the built-ins.** Build with Claude gets the open workflow and the
+  format, not the built-ins as examples to start from or compare with.
+- **The Template bar sorts by file name**, so the built-ins show in `md-*` order (Bug fix, CI
+  doctor, Superpowers, TDD, Ticket to PR), not the spec's order (Superpowers first).
+
+## BTW (Tools tab): open points (2026-10-12, issue #106)
+
+- **Cost.** A question from the tab is a forked `claude -p` that reads the session's whole context
+  without the session's prompt cache (its tool list differs), so it costs more than `/btw` in a long
+  session. Measure it on a big session; a cheaper path needs a side-question API in Claude Code.
+- **Terminal answers are what fit on the screen.** Claude Code writes no `/btw` answer to disk; the
+  answer is read off `claude logs` while the box is open (a long one is marked partial), and only
+  for background sessions. An interactive session (a plain `claude` in a MasterDeck pane) could be
+  read from its PTY buffer instead.
+- **The screen parser follows Claude Code 2.1.296's box** (`/btw <q>`, answer, `c to copy · … Esc to
+  close`). A new layout makes terminal answers show as "could not read"; the question still shows.
+- **Not checked:** the real web app over the bridge, a phone, Windows (no `claude logs` capture
+  tested there), a session whose transcript is very large, a resumed session's earlier id.
+- Tools holds Queue and BTW; anything else per session that is not a detail (a scratchpad, the loop's log) can go there as a sub-tab.
+
+## Themes: open points (2026-10-12, issue #105)
+
+- More themes on the token set: dimmed, high contrast, and themes read from a user file (THEMES.md
+  "Adding a theme").
+- The light terminal relies on xterm's `minimumContrastRatio` for programs that assume a dark
+  background (Claude Code's default theme). A program that paints its own background (full-screen
+  TUIs) still shows its dark colours. Claude Code's `/theme` is the user's fix; MasterDeck could
+  offer to keep terminals dark in the light theme if that turns out to be common.
+- The web app's choice is per browser and does not follow the Mac's. Revisit if users ask for
+  one setting everywhere.
+- The color-literal lint skips digit-only hex in TSX (`#123` reads as an issue number in UI
+  text), so a colour written as `'#111'` in a component would slip through.
+- Windows: the native theme and the window background were not checked on Windows.
+
 ## Product ideas (from the user, 2026-10-03)
 
+## Session details → GitHub (#103): open points
+
+- **P3 · Events across restarts.** A monitor's and a PR watch's events are kept in memory only
+  (the last 50); after a restart the list starts empty while the count goes on. Save the rings
+  beside `watches.json` / `pr-watch.json` if that turns out to matter.
+- **P3 · Not checked against GitHub.** `pr:detail` was checked with a fixture answer and the web
+  preview only: the first real read (GraphQL cost, a PR with 100+ checks, StatusContext links) is
+  the user's.
+- **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
+  refresh while the row stays open.
+
+## Session processes (#115): open points (2026-10-12)
+
+- **P2 · Leftovers of a shell MasterDeck never saw.** What `cmd &` / `nohup cmd &` leaves behind
+  is found by its shell's process group, which `SessionProcs` remembers only for shells it listed
+  (Details open while the shell ran). A cheap `ps` per minute for every live session would catch
+  them all.
+- **P3 · Exit codes of foreground calls** are not shown (they drop off at once; the result is in
+  the conversation). A process that was never a background command (a detached one) has no code.
+- **P3 · Windows.** Not supported (`supported: false`): needs a process table and sockets per pid
+  (`Get-CimInstance Win32_Process`, `Get-NetTCPConnection -State Listen`).
+- **P3 · Not checked:** a real Claude Code session's background command in the installed app (the
+  isolated app ran against a stand-in session whose shells mimic Claude Code's; the parsers were
+  checked against this machine's real `ps` / `lsof` and a live session's tree), the web app over the
+  bridge, a phone, Linux.
+
+## Session tabs, files and diffs (#113): open points
+
+- **P3 · Wide characters before a path.** The ⌘-click link provider uses string offsets as
+  columns, so a line with CJK or emoji before a path underlines the wrong cells (`ponytail:` in
+  `TerminalView.tsx`). A path xterm wraps onto the next row is not found at all.
+- **P3 · File tabs reload on a state change, not live.** Diff tabs and Details → Diff pull every
+  3 s; a file tab reads again when it shows, when the session's turn ends, and on Reload. Pull it
+  too (on mtime) if files edited mid-turn need to show at once.
+- **P3 · No highlighting in diffs.** Diff lines are plain text with red/green rows; highlighting
+  each line by language would need context across lines (a multi-line comment).
+- **P3 · ⌘-click on Windows and through a linked folder.** `findPaths` / `relativeTo` know `/`
+  paths only, so nothing is linked on Windows; a session whose `cwd` is a link (`/tmp` vs
+  `/private/tmp`) does not match an absolute path Claude printed with the real folder.
+- **P3 · Not checked:** a real Claude session's paths in the installed app, the web app over the
+  real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
+  (50,000-path list, `git status` time).
+
 ## Recently done
+
+- **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
+  running commands (background shells, the call running now, what a command left behind) with
+  folder, pid, uptime, CPU / memory, listening ports that open in the browser, the processes below
+  and the last output; exited background commands show their exit code for a minute. Branch
+  `worktree-MasterDeck-Terminal-115-session-processes`.
 
 | What | MasterDeck | Backend |
 |---|---|---|
 | Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, 65937de and 081b82e (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
 | Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
+| Per-session tabs (issue #113): each session pane has its own tab row (Terminal first, never closed), file tabs (Markdown rendered, code highlighted with highlight.js, a sentence for binary / too large / gone) and diff tabs (unified, Split when wide, live), closed with × or a middle-click and kept per session across restarts; Details → **Diff** (Uncommitted / Branch, A/M/D/R with +/− counts, live while it shows) and **Files** (tree, filter); ⌘P and ⌘-click on a path in the terminal open files; four read-only channels open to the web app, inside the session's folder only. The leftover ⇧← / ⇧→ view cycling and the old tab strip's CSS are gone | branch `113-session-tabs` | — |
+| Mods moved from Session details to the right panel's **Tools** tab (#86 follow-up): a third sub-tab after Queue and BTW (`SessionTools.tsx`), its label with "· n off"; Details is **Session · GitHub** again and a remembered `md.detailsTab` of `mods` opens Session | branch `worktree-MasterDeck-Terminal-86-mods-tools` | — |
+| Built-in workflows (issue #104): Superpowers, Ticket to PR, Bug fix, TDD (locked tests) and CI doctor ship as templates with a mark (`builtin: {id, hash, raw}`); seeded at launch, an unedited one follows a new release (keeping a rename), an edited one is never touched; a **Built-in** chip (**· edited**), the description and when to use it under the bar, **Duplicate**, **Restore original** (also after a rename only) and **Restore built-ins (n)**; TDD's check guards every `tests:` commit of the branch, CI doctor's every run of the commit | 3d5503a, 21a5f82, a42f78b and the review fixes, branch `worktree-MasterDeck-Terminal-104-builtin-workflows` (not merged, not installed) | spec `docs/superpowers/specs/2026-10-12-builtin-workflows-design.md` on branch `docs/builtin-workflows-104` (not pushed) |
+| **BTW** in the right panel (issue #106; the Queue tab is now **Tools**, with Queue and BTW as sub-tabs): ask a side question about a session as `/btw` does (a forked, tool-less `claude -p` of its conversation, streamed in, Stop, errors with Try again, Markdown, Copy, cost), and its history newest first across restarts, with `/btw` typed in the terminal too (question from `history.jsonl`, answer read off a background session's screen) | branch `worktree-MasterDeck-Terminal-106-btw-tab` | — |
+| Themes (issue #105): every colour comes from a token set in `shared/themes.ts` (surfaces, lines, text, accent, status hues, overlays, find, the terminal's 16 ANSI colours); a Primer-based light theme checked for WCAG AA in vitest; Settings → General → **Appearance** Light / Dark / System that switches at once (terminals too) and persists, per browser in the web app; a lint test against colour literals; `docs/THEMES.md` (exploration, palette, adding a theme) | branch `worktree-MasterDeck-Terminal-105-themes` (PR) | spec + plan on `docs/themes-105` (not pushed) |
+| Session details in three tabs (issue #103): **Session** (no GitHub UI), **GitHub** (Ticket with steps, note and sub-issues; each PR with checks, reviews, open threads, comments and its PR watch's finds; each monitor with its lines, newest first; counts, status badges and ↗ links; live refresh) and **Mods**; the tab is remembered. New reads `watch:events` and `pr:detail` (`shared/prDetail.ts`) | branch `worktree-MasterDeck-Terminal-103-details-tabs` | — |
+| The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
+| Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
+| MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |
 | Workflow agent loops (issue #82; spec and plan L in the backend repo): a **Loop** frame on the Workflow canvas repeats its blocks until a check command passes (exit 0 or an output pattern), the agent says `LOOP DONE:`, or both; limits on rounds (10), time and no progress (3); **when met** / **at the limit** arrows; MasterDeck's Stop hook (`workflows/loop.sh`, `shared/loopHook.ts`) keeps the session going and hands back the check's output and the agent's `PROGRESS:` lines; one loop open at a time, the next opening when the one before closes; progress in Details (line, History, Stop loop), a `↻ 3/10` badge on the session row and live on the canvas; Needs you at a limit (Run 5 more) and when an open loop sits idle (Continue / Stop loop); `/queue` and Turn finished wait for an open loop; Build with Claude drafts loops | branch `worktree-MasterDeck-Terminal-82-agent-loops` (not merged, installed locally) | spec + plan L on `docs/agent-loops-82` (not pushed) |
 | The website on masterdeck.dev (issue #89), now its own repository [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) (Astro): Home, Features, Get started, Download/Changelog and a 404, light and dark, scroll motion that stops under reduced motion, a draggable workflow playground, placeholder screens in one place, Open Graph images, Lighthouse 100 on every page; `npm run deploy` deploys `masterdeck-site` and the `www` redirect Worker; live 2026-10-10 | built as `site/` in bbebbb4, moved out (branch `worktree-MasterDeck-Terminal-89-website`) | — |
 | MasterDeck's own icon: the masterdeck.dev mark on a dark tile as the app icon (macOS `.icns` on Apple's icon grid, Windows `.ico`, the Dock in dev) and on app.masterdeck.dev (favicon, apple-touch and Android icons, `manifest.webmanifest`), all from `app/scripts/icons.mjs` | 3d83781, merge 3ce574c | — |
 | The session name always shows in the Sessions column: the ticket (`repo#n`) and account badge wrap below the name in a narrow column instead of squeezing it to nothing (`.srow-name` in `Sidebar.tsx` / `styles.css`) | branch `worktree-session-name-wrap` | — |
-| Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Session details → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
+| Claude Code mods researched and a prototype built (issue #86, `docs/MODS.md`): a probe showed a mod runs in a `claude --bg` session and draws in `claude attach` (band, toast, status line, at any width, two clients at once, kept on resume). `mods/masterdeck`: the ticket, its column, the PR (CI, threads) and linked sessions above the prompt, toasts on changes, `/md-ticket` (a pane), `/md-note` (adds to the ticket's note), a heartbeat; the app writes `deck/band/<sid>.json` (`shared/modBand.ts`, `DeckHooks.setBand`) and shows **Mod live** in Session details (`state.modLive`); split into a core `masterdeck` and one mod per feature (`masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`; shared `mods/shared/deck.ts`); Tools → **Mods** switches each mod per session (MasterDeck's own go quiet at once; another is refused by the mod's `plugin.register` hook when it loads, and switched on again it joins at a reload the mod asks for; `mod-off.json`, `mod-catalog.json`, `offMods` in the band; then `masterdeck-loop` (`/md-loop`, rounds until a check passes, #82) and `masterdeck-board` (`/md-board`, `deck/boards/<key>.json`); mods 0.5.0) | PR #91, branch `worktree-MasterDeck-Terminal-86-mods` | — |
 | Where a session starts, checked for real (issue #59): a ticket session started from the Start dialog in the resolved temp checkout, `parked-sessions.json` keyed by the background id, the parked session's link recording no branch (and the folder's branch without the record), `claude --bg` 2.1.295's real output in `test_spawn.py` (the parser needed no change), the real trust prompt through **Open Claude there…**, the native picker and a start from the chosen folder keeping master's prompt and model, the recipe in OPERATIONS | branch `worktree-MasterDeck-Terminal-59-start-for-real` (not merged) | — |
 | A session moves to Merged when its PR merges: the PR watch's own "merged" message (typed in after the merge) counted as the user writing, so every watched session showed Rework instead (`isUserWords` now skips `[MasterDeck …]` messages); and the PR watch's merge reaches the session's lane at once (`Sources.prEnded`, read past the gh cache) instead of on the next review poll | branch `fix/session-merged-state` | — |
 | Create with Claude's settings bar (issue #68): repo, board, status, sprint, assignees, labels and milestone below the chat, collapsed to one line; prefilled from the + column, the tab's filters and sprint, or the dialog's draft; options follow the repository (labels, milestones) and the board (columns, sprints); MasterDeck's create pump enforces the bar on every ticket, so a change applies to the next one, and its answer lists any value it replaced; Claude is told to say the bar's value applies when the chat asks for another | branch `worktree-MasterDeck-Terminal-68-ticket-settings` (not merged) | — |

@@ -4,33 +4,14 @@ import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
+import { findPaths } from '@shared/filePath'
 import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
 import { quickKeyBytes, type QuickKey } from '../quickKeys'
 import { isPhone, isWeb, keyPlatform, usePhone } from '../web'
+import { currentTheme, onTheme } from '../theme'
+import { xtermTheme } from '@shared/themes'
 
-const THEME = {
-  background: '#0b0c0f',
-  foreground: '#e6e9ef',
-  cursor: '#6aa9ff',
-  selectionBackground: 'rgba(106,169,255,0.35)',
-  black: '#1c2130',
-  brightBlack: '#5d6579',
-  red: '#f26d6d',
-  brightRed: '#ff8a8a',
-  green: '#3ecf8e',
-  brightGreen: '#6ee7b7',
-  yellow: '#f5b83d',
-  brightYellow: '#fcd34d',
-  blue: '#6aa9ff',
-  brightBlue: '#93c5fd',
-  magenta: '#a78bfa',
-  brightMagenta: '#c4b5fd',
-  cyan: '#4fd1c5',
-  brightCyan: '#81e6d9',
-  white: '#e6e9ef',
-  brightWhite: '#ffffff',
-}
 
 /** Terminal views by pane id (one pane can show in Terminals and in Tasks at once), for ⌘F. */
 const searchers = new Map<string, { search: SearchAddon; host: HTMLElement; term: Terminal }[]>()
@@ -56,9 +37,13 @@ interface Props {
   /** Bumped by the parent to force a fresh PTY (Reattach). */
   generation?: number
   onExit?: (code: number) => void
+  /** ⌘-click (Ctrl-click elsewhere) on a file path in the output: a session opens it as a tab. */
+  onOpenPath?: (path: string) => void
 }
 
-export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 0, onExit }: Props) {
+export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 0, onExit, onOpenPath }: Props) {
+  const onPathRef = useRef(onOpenPath)
+  onPathRef.current = onOpenPath
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
@@ -80,7 +65,9 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // A phone gets ~45 columns at 12px; everything else keeps 13.
       fontSize: isPhone() ? 12 : 13,
       lineHeight: 1.15,
-      theme: THEME,
+      theme: xtermTheme(currentTheme()),
+      // The light theme lifts colours a program picked for a dark terminal (Claude Code's own dark theme).
+      minimumContrastRatio: currentTheme().termMinContrast,
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 10000,
@@ -102,6 +89,11 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       // hidden on mount; fitted when shown
     }
     let disposed = false
+    const offTheme = onTheme(() => {
+      const th = currentTheme()
+      t.options.theme = xtermTheme(th)
+      t.options.minimumContrastRatio = th.termMinContrast
+    })
     // Created before any output so it tracks the pen and cursor state from the start; switched on by the setting.
     pred.current = isWeb() ? createPredictor(t, { enabled: false }) : null
     const setInstant = (on: boolean) => !disposed && pred.current?.setEnabled(on)
@@ -139,6 +131,26 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       deck().ptyWrite(paneId, d)
     })
     const resize = t.onResize(({ cols, rows }) => visibleRef.current && deck().ptyResize(paneId, cols, rows))
+    // File paths in the output open as tabs on ⌘-click. ponytail: columns are string offsets, so a
+    // line with wide characters before the path is off by them; map through cells if that matters.
+    const links = t.registerLinkProvider({
+      provideLinks(y, done) {
+        if (!onPathRef.current) return done(undefined)
+        const text = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const found = findPaths(text)
+        if (!found.length) return done(undefined)
+        done(
+          found.map((f) => ({
+            range: { start: { x: f.start + 1, y }, end: { x: f.end, y } },
+            text: text.slice(f.start, f.end),
+            decorations: { pointerCursor: true, underline: true },
+            activate: (e: MouseEvent) => {
+              if (keyPlatform() === 'darwin' ? e.metaKey : e.ctrlKey) onPathRef.current?.(f.path)
+            },
+          })),
+        )
+      },
+    })
     // Cmd+C copies a selection instead of sending ^C; Cmd+V pastes.
     t.attachCustomKeyEventHandler((e) => {
       const o = keyOverride(e)
@@ -177,9 +189,11 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       ro.disconnect()
       input.dispose()
       resize.dispose()
+      links.dispose()
       offData()
       offExit()
       offState()
+      offTheme()
       pred.current?.dispose()
       pred.current = null
       const rest = (searchers.get(paneId) ?? []).filter((x) => x !== entry)

@@ -4,6 +4,7 @@ import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
+import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -21,6 +22,7 @@ import {
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
 import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
@@ -32,6 +34,7 @@ import {
   dialog,
   ipcMain,
   net,
+  nativeTheme,
   Notification,
   protocol,
   safeStorage,
@@ -101,7 +104,9 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { SessionFiles } from "./sessionFiles";
+import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
 import { isPermissionMode } from "@shared/startOptions";
 import { heldForTrust } from "@shared/trust";
@@ -156,11 +161,14 @@ import {
   syncSkills,
   writeRemoved,
 } from "./skills";
+import { ModsInstaller } from "./mods";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
 import { LoopStore } from "./loops";
 import { LoopQueue } from "./loopQueue";
 import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
+import { BtwAsker, BtwStore, BtwTerminal } from "./btw";
+import { sessionScreen } from "./screen";
 import {
   DEFAULT_TEMPLATE,
   parseFlow,
@@ -169,6 +177,7 @@ import {
   setMonitors,
   type MonitorDef,
 } from "@shared/flow";
+import { builtinById } from "@shared/builtinWorkflows";
 import { ticketContext } from "@shared/ticketBuilder";
 import { shellQuote } from "@shared/workflow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
@@ -187,6 +196,7 @@ import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { parsePrUrl } from "@shared/prSummary";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -199,6 +209,8 @@ import { DeckHooks } from "./deckHooks";
 import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
+import { SessionProcs } from "./sessionProcs";
+import { isPortUrl } from "@shared/sessionProcs";
 import {
   installStatusline,
   isInstalled,
@@ -253,7 +265,10 @@ const paths = resolvePaths(
 const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
+const sessionProcs = new SessionProcs(run);
 const cli = new MasterCli(run, paths.libDir, paths.python);
+// Read-only views of a session's folder for its file and diff tabs.
+const sessionFiles = new SessionFiles(run);
 // Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
 const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 // The account each session was started as (resume, Details, PR watch).
@@ -272,6 +287,48 @@ try {
 } catch (e) {
   console.error(`meetings fixture: ${String(e)}`);
 }
+// MasterDeck's mods in Claude Code (Setup / Settings → Mods): its folder, install and uninstall.
+const mods = new ModsInstaller({
+  run,
+  claude: () => claudeBin,
+  bundled: paths.bundledMods,
+  folder: paths.modsDir,
+  settings: paths.modsSettings,
+  refused: paths.modsSettings
+    ? null
+    : "This test app keeps Claude Code's settings apart: set CLAUDE_CONFIG_DIR to try mods in it.",
+  backupDir: paths.home,
+  installedFile: join(paths.home, "mods-installed.json"),
+});
+let modsStatus: ModsStatus = MODS_OFF;
+let modsReadAt = 0;
+/** What of the mods settings.json has, read again at most every 30 s (it changes by hand too). */
+function modsNow(fresh = false): ModsStatus {
+  if (fresh || Date.now() - modsReadAt > 30_000) {
+    modsStatus = mods.status();
+    modsReadAt = Date.now();
+  }
+  return modsStatus;
+}
+/** Running sessions on older mods (or none, started before the install). */
+const modsOffer = (sessions: Session[]) =>
+  modsReloadOffer(sessions, deckHooks.modBeats(), modsNow().state === "installed", mods.installedAt());
+/** Type /reload-plugins into each idle session the offer names, one after another. */
+async function reloadMods(): Promise<CliResult> {
+  const offer = latest ? modsOffer(latest.sessions) : null;
+  const idle = (offer?.idle ?? []).flatMap((k) => latest?.sessions.find((s) => s.key === k) ?? []);
+  if (!idle.length) return { ok: false, message: "No idle session runs older mods." };
+  const failed: string[] = [];
+  // Never relayed through master-agent: its message would not run the command.
+  for (const s of idle) {
+    const r = await sender.send(s, "/reload-plugins", false);
+    if (!r.ok) failed.push(r.message);
+  }
+  const done = idle.length - failed.length;
+  return failed.length
+    ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
+    : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
+}
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's NoteMeta: its title, 120-character preview, ticket, `link` (the
 // session's key and name, a ticket) and `meeting` (id, title, time), to the window and to web tabs
@@ -280,6 +337,20 @@ const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
 });
+// Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
+// terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
+const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
+const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
+const btwTerminal = new BtwTerminal(
+  paths.claudeHistory,
+  join(paths.home, "btw", "history-offset.json"),
+  btwStore,
+  (bgId) => sessionScreen(run, claudeBin, bgId),
+);
+function pollBtw(): void {
+  const sessions = (latest?.sessions ?? []).map((s) => ({ key: s.key, sessionId: s.sessionId, bgId: s.kind === "background" ? s.bgId : null }));
+  void btwTerminal.poll(sessions).catch((e) => console.error(`btw: ${String(e)}`));
+}
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -682,13 +753,14 @@ const sources = new Sources(
           return [s.key, { version: b.version, claude: b.claude, mods: b.mods }];
         }),
     );
-    // Every mod any session reported, kept so Session details → Mods can list them all.
+    // Every mod any session reported, kept so Tools → Mods can list them all.
     let catalog = modCatalog.entries();
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
     state.modCatalog = catalog;
     // The rail's recording indicator (never in toRemoteSnapshot).
     state.meetingLive = meetings.live();
+    state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -1333,6 +1405,8 @@ async function runInboxAction(
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "reload":
+      return d.type === "mods" ? reloadMods() : { ok: false, message: "not a mods item" };
     case "trust": {
       const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
       if (!held) return { ok: false, message: "not a start Claude Code refused" };
@@ -1863,6 +1937,16 @@ async function confirmLoopStop(name: string): Promise<boolean> {
   });
   return choice.response === 1;
 }
+
+/** The built-in workflows MasterDeck ships, into the templates (#104); a failure only logs. */
+const seedWorkflows = () => {
+  try {
+    workflows().seedBuiltins();
+  } catch (e) {
+    console.error(`built-in workflows: ${String(e)}`);
+  }
+};
+
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
@@ -2205,6 +2289,27 @@ function registerIpc(): void {
   reg.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // A session's files and diffs: the folder is the listed session's own (sessionFileCall); a web
+  // answer is cut to fit the bridge (webFit).
+  const sessionFilesAt = (key: unknown, want?: { path?: unknown; base?: unknown }) =>
+    sessionFileCall(latest?.sessions ?? [], key, want);
+  const fit = <T extends FileList | FileRead | ChangeList | DiffRead>(remote: boolean, a: T): T => (remote ? webFit(a) : a);
+  reg.handle(CH.filesList, async (e, key: unknown) => {
+    const c = sessionFilesAt(key);
+    return c.ok ? fit(isRemote(e), await sessionFiles.list(c.root)) : c;
+  });
+  reg.handle(CH.filesRead, async (e, key: unknown, path: unknown) => {
+    const c = sessionFilesAt(key, { path });
+    return c.ok ? fit(isRemote(e), await sessionFiles.read(c.root, c.path!)) : c;
+  });
+  reg.handle(CH.diffList, async (e, key: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.changes(c.root, c.base!)) : c;
+  });
+  reg.handle(CH.diffFile, async (e, key: unknown, path: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { path, base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.fileDiff(c.root, c.path!, c.base!)) : c;
+  });
   // Notes: the store checks every argument itself (ids, limits, characters).
   reg.handle(CH.notesList, () => notes.list());
   reg.handle(CH.notesGet, (_e, id: unknown) => notes.get(id));
@@ -2248,6 +2353,21 @@ function registerIpc(): void {
   reg.handle(CH.meetingsJanitor, (e) => meetings.janitor(e));
   reg.handle(CH.meetingsClean, (e, req: unknown) => meetings.clean(e, req));
   reg.handle(CH.meetingsNotNow, (e) => meetings.notNow(e));
+  // Side questions: the store and the asker check every argument (key, id, question).
+  reg.handle(CH.btwList, (_e, key: unknown) => btwStore.list(key));
+  reg.handle(CH.btwAsk, (_e, key: unknown, question: unknown) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const model = latest?.tails[s.sessionId]?.model ?? null;
+    return btwAsker.ask({ key: s.key, sessionId: s.sessionId, model }, question);
+  });
+  reg.handle(CH.btwStop, (_e, key: unknown, id: unknown) => btwAsker.stop(key, id));
+  reg.handle(CH.btwRemove, (_e, key: unknown, id: unknown) => {
+    // An answer still on its way is not removed: it would come back when it ends (Stop it first).
+    const asking = btwStore.list(key).some((x) => x.id === id && x.status === "asking");
+    if (asking) return false;
+    return btwStore.remove(key, id);
+  });
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -2607,12 +2727,24 @@ function registerIpc(): void {
         : watches.stop(id)
       : false,
   );
+  reg.handle(CH.watchEvents, (_e, id: unknown) =>
+    typeof id === "string" && id.length <= 300
+      ? id.startsWith("pr:")
+        ? prWatch.events(id)
+        : watches.events(id)
+      : [],
+  );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
     // A PR of a repository no account lists: as the account whose board holds a card of that repository.
     forCard(prRepo(String(url))).github.prSummary(url),
+  );
+  reg.handle(CH.prDetail, (_e, url: unknown) =>
+    typeof url === "string" && parsePrUrl(url)
+      ? forCard(prRepo(url)).github.prDetail(url)
+      : { ok: false, message: "not a PR URL" },
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -2828,6 +2960,7 @@ function registerIpc(): void {
     templates: workflows().templates(),
     triggers: workflows().triggers(),
     monitors: workflows().monitors(),
+    builtinsRemoved: workflows().builtinsRemoved(),
   }));
   reg.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
@@ -2841,16 +2974,75 @@ function registerIpc(): void {
         typeof name === "string" ? name : "",
         parseFlow(raw),
       );
-      if (!tid) return { ok: false, message: "give the template a name" };
+      if (!tid)
+        return {
+          ok: false,
+          message:
+            typeof id === "string" && builtinById(id) && !workflows().template(id)
+              ? "that built-in was deleted: restore it first (Restore built-ins)"
+              : "give the template a name",
+        };
       const r = syncWorkflowHooks();
-      return r.ok ? { ok: true, message: "template saved", id: tid } : r;
+      // The store's word on a built-in (edited, renamed), so the window need not work it out.
+      return r.ok
+        ? {
+            ok: true,
+            message: "template saved",
+            id: tid,
+            builtin: workflows().template(tid)?.builtin,
+          }
+        : r;
     },
   );
-  reg.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
-    if (typeof id !== "string" || !workflows().deleteTemplate(id))
+  reg.handle(CH.workflowTemplateDelete, async (e, id: unknown) => {
+    const t = typeof id === "string" ? workflows().template(id) : null;
+    if (!t || t.id === DEFAULT_TEMPLATE)
+      return { ok: false, message: "no such template" };
+    // The window asks here (webConfirm answers yes at once on the desktop); the web asked already.
+    if (!isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Delete"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete the workflow "${t.name}"?`,
+        detail: t.builtin
+          ? "It is a built-in workflow: Restore built-ins brings it back as MasterDeck ships it."
+          : "Sessions that already copied it keep their copy.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().deleteTemplate(t.id))
       return { ok: false, message: "no such template" };
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
+  });
+  // Restore original (an id) or Restore built-ins (null); the window and the web asked first.
+  reg.handle(CH.workflowBuiltinRestore, async (e, id: unknown) => {
+    if (id !== null && (typeof id !== "string" || !/^md-[a-z0-9-]{1,40}$/.test(id)))
+      return { ok: false, message: "no such built-in workflow" };
+    // Restore original loses the edits: the window asks here, the web asked with webConfirm.
+    // Restore built-ins only adds files, so it does not ask.
+    if (id !== null && !isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Restore"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Restore "${workflows().template(id)?.name ?? id}" as MasterDeck ships it?`,
+        detail: "Your edits to it, and its name, are lost.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().restoreBuiltin(id))
+      return {
+        ok: false,
+        message: id === null ? "no built-in to restore" : "no such built-in workflow",
+      };
+    const r = syncWorkflowHooks();
+    return r.ok
+      ? { ok: true, message: id === null ? "built-ins restored" : "original restored" }
+      : r;
   });
   // The builder: its folder gets the format, the skills and the open workflow before it starts.
   reg.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
@@ -3100,7 +3292,7 @@ function registerIpc(): void {
     peerSync.refreshAll([a, b]);
     return r;
   });
-  // Session details → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
+  // Tools → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
   reg.handle(CH.modSet, (_e, key: unknown, mod: unknown, on: unknown) => {
     if (typeof key !== "string" || typeof mod !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
       return { ok: false, message: "bad session" };
@@ -3108,6 +3300,15 @@ function registerIpc(): void {
     sources.changed();
     return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
   });
+  // Setup / Settings → Mods. Fixed claude commands only (the web asked with webConfirm first).
+  const modsChanged = (r: CliResult): CliResult => {
+    modsNow(true);
+    sources.changed();
+    return r;
+  };
+  reg.handle(CH.modsInstall, async () => modsChanged(await mods.install()));
+  reg.handle(CH.modsUninstall, async () => modsChanged(await mods.uninstall()));
+  reg.handle(CH.modsReload, () => reloadMods());
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200
       ? peerSync.syncNow(key)
@@ -3137,6 +3338,23 @@ function registerIpc(): void {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
+  reg.handle(CH.procsList, (_e, key: unknown) => {
+    const s = typeof key === "string" ? latest?.sessions.find((x) => x.key === key) : undefined;
+    if (!s) return { ok: false, message: "session not found" };
+    return sessionProcs.list({
+      key: s.key,
+      pid: s.state === "done" ? null : s.pid,
+      transcript: sources.sessionFacts(s.sessionId, s.key).transcript,
+    });
+  });
+  reg.handle(CH.procsOutput, (_e, key: unknown, pid: unknown) =>
+    typeof key === "string" && Number.isInteger(pid)
+      ? sessionProcs.output(key, pid as number)
+      : { ok: false, message: "bad request" },
+  );
+  reg.on(CH.openPort, (e, url: unknown) => {
+    if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
+  });
   reg.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
   reg.handle(CH.accountSignIn, (_e, p: unknown) => {
     if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
@@ -3306,6 +3524,18 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Settings → Appearance: native menus, dialogs and scrollbars follow it (and so does the renderer's
+ * prefers-color-scheme, which resolves System), and the window's own background, seen before the page paints.
+ */
+function applyNativeTheme(pref: ThemePref): void {
+  nativeTheme.themeSource = pref;
+  win?.setBackgroundColor(themeBg());
+}
+const themeBg = (): string =>
+  resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
+    .tokens.bg;
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -3314,7 +3544,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: "MasterDeck",
-    backgroundColor: "#0f1117",
+    backgroundColor: themeBg(),
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -3713,6 +3943,17 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
+  // MasterDeck's mods: its folder is the marketplace Claude Code reads in place, so this version's
+  // mods reach every session at its next reload (Needs you offers one for idle sessions).
+  if (!SMOKE) {
+    const r = mods.syncFolder();
+    if (r.error) console.error(r.error);
+  }
+  sources.setModsReload(modsOffer);
+  void mods.refresh().then(() => {
+    modsNow(true);
+    sources.changed();
+  });
   // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
   // that work itself now; the skills stay for use by hand.
   if (
@@ -3748,11 +3989,15 @@ app.whenReady().then(async () => {
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
+  sources.onSettings = (st) => applyNativeTheme(st.theme);
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
-      sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
+      sources.onSettings = (st) => {
+        deckHooks.setMonitorsBy(st.monitorsBy);
+        applyNativeTheme(st.theme);
+      };
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -3782,14 +4027,19 @@ app.whenReady().then(async () => {
     process.platform !== "win32" &&
     !SMOKE &&
     process.env.MASTERDECK_NO_HOOK !== "1"
-  )
+  ) {
     try {
       workflows().migrate();
+      seedWorkflows();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  } else if (!SMOKE) {
+    // Without the hooks (Windows, MASTERDECK_NO_HOOK) the templates are still there to pick and edit.
+    seedWorkflows();
+  }
   // PR watch (all platforms): rows join the monitors in Details; review offers for its PRs step aside.
   sources.setWatchInfo(() => [
     ...watches.info(),
@@ -3810,6 +4060,8 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
+  if (!SMOKE) setInterval(pollBtw, 2_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
     try {
@@ -3835,6 +4087,8 @@ app.whenReady().then(async () => {
   createWindow();
   // Meetings' Delete audio after timer: timers only now; the first look is minutes later.
   meetings.background();
+  // The OS switching light/dark while the setting is System.
+  nativeTheme.on("updated", () => win?.setBackgroundColor(themeBg()));
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
   );
@@ -3853,6 +4107,8 @@ app.whenReady().then(async () => {
   setInterval(() => void refreshAccounts(), 3_600_000);
   setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
+  // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
+  applyNativeTheme(sources.getSettings().theme);
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {
@@ -3919,6 +4175,7 @@ app.on("will-quit", () => {
   cloud?.stop();
   peerStore.flush();
   sender.killAll();
+  btwAsker.stopAll();
   watches.killAll();
   ptys.closeAll();
   sources.stop();

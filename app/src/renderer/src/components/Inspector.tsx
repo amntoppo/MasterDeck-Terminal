@@ -1,11 +1,11 @@
-import { QueuePanel } from "./QueuePanel";
 import { SessionDetails } from "./SessionDetails";
+import { SessionTools } from "./SessionTools";
 import { SummaryPanel } from "./SummaryPanel";
 import type { AppState, Session } from "@shared/types";
 import type { NoteMeta } from "@shared/notes";
 import type { NoteTarget } from "@shared/noteEditor";
 
-export type InspectorTab = "details" | "queue" | "summary";
+export type InspectorTab = "details" | "tools" | "summary";
 
 interface Props {
   state: AppState;
@@ -24,8 +24,8 @@ interface Props {
 }
 
 /**
- * The Terminals screen's right panel: Details (everything the status bar used to show), Queue and
- * Summary. Master has its own column (App), on every screen.
+ * The Terminals screen's right panel: Details (everything the status bar used to show), Tools
+ * (Queue, BTW: SessionTools) and Summary. Master has its own column (App), on every screen.
  */
 export function Inspector({
   state,
@@ -42,10 +42,12 @@ export function Inspector({
 }: Props) {
   const tabs: [InspectorTab, string][] = [
     ["details", "Details"],
-    ["queue", "Queue"],
+    ["tools", "Tools"],
     ["summary", "Summary"],
   ];
-  const shown = tabs.some(([k]) => k === tab) ? tab : "details";
+  // "queue" is the Tools tab's name from before it held more than the queue (a remembered choice).
+  const asked = (tab as string) === "queue" ? "tools" : tab;
+  const shown = tabs.some(([k]) => k === asked) ? asked : "details";
   return (
     <aside className="inspector" aria-label="Session panel">
       <div className="insp-head">
@@ -89,11 +91,11 @@ export function Inspector({
               Open a session to see its details. Shells have none.
             </div>
           ))}
-        {shown === "queue" && (
-          <QueuePanel
+        {shown === "tools" && (
+          <SessionTools
             state={state}
+            session={session}
             activeKey={activeKey}
-            onClose={() => onTab("details")}
           />
         )}
         {shown === "summary" && (

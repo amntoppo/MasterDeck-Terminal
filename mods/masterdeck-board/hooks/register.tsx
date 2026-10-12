@@ -6,7 +6,7 @@ import { deckFolder, deckRead, isOff, type DeckRead } from './deck'
 /*
  * /md-board: the board of this session's account in a pane, read only, this session's ticket
  * marked. MasterDeck writes it (`deck/boards/<key>.json`, the band's `boardKey` says which); this mod
- * never calls GitHub. Switched off for the session in Session details → Mods, the command answers
+ * never calls GitHub. Switched off for the session in Tools → Mods, the command answers
  * with nothing and an open pane closes.
  */
 

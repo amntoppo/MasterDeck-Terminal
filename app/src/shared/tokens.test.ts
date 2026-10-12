@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTokens, lineTime, newFileTally, SPAN_GRAIN, tallyLines, tokenSum, tokensBetween, totalOf } from './tokens'
+import { formatTokens, lineTime, newFileTally, SPAN_GRAIN, tallyLines, tokenSum, tokensBetween, tokensIn, totalOf } from './tokens'
 
 const line = (id: string, ts: string, u: Record<string, number>) => JSON.stringify({ timestamp: ts, message: { id, role: 'assistant', usage: u } })
 const U = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000 }
@@ -13,13 +13,24 @@ describe('tokens', () => {
     tallyLines(t, [line('m2', '2026-09-25T11:00:00Z', U)])
     expect(tokenSum(totalOf(t.byDay))).toBe(2230)
   })
-  it('buckets by the day of each message', () => {
+  it('buckets by the time of each message, read back per day', () => {
     const t = newFileTally()
     tallyLines(t, [line('a', '2026-09-20T12:00:00Z', U), line('b', '2026-09-25T12:00:00Z', U)])
-    const days = Object.keys(t.byDay).sort()
+    const days = Object.keys(t.byDay).sort().map((b) => b.slice(0, 10))
     expect(days).toHaveLength(2)
     expect(tokenSum(tokensBetween(t.byDay, days[1], days[1]))).toBe(1115)
     expect(tokenSum(tokensBetween(t.byDay, '0000-00-00', '9999-99-99'))).toBe(2230)
+  })
+  it('buckets by the local hour, and sums a range in ms', () => {
+    const t = newFileTally()
+    const at = (h: number, m: number) => new Date(2026, 9, 9, h, m)
+    tallyLines(t, [line('a', at(10, 5).toISOString(), U), line('b', at(10, 50).toISOString(), U), line('c', at(12, 0).toISOString(), U)])
+    expect(Object.keys(t.byDay).sort()).toEqual(['2026-10-09T10', '2026-10-09T12'])
+    const now = at(12, 30).getTime()
+    expect(tokenSum(tokensIn(t.byDay, at(12, 0).getTime(), now, now))).toBe(1115)
+    // Half of 10:00's hour.
+    expect(tokenSum(tokensIn(t.byDay, at(10, 30).getTime(), at(11, 0).getTime(), now))).toBe(1115)
+    expect(tokenSum(tokensBetween(t.byDay, '2026-10-09', '2026-10-09'))).toBe(3345)
   })
   it('formats large counts compactly', () => {
     expect(formatTokens(null)).toBe('—')

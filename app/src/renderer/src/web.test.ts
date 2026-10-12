@@ -8,7 +8,7 @@ describe('web allowlist (WEB_VIEWS)', () => {
   it('the web shows every screen; only controls needing a blocked method hide', () => {
     vi.stubGlobal('window', { deck: { platform: 'web' } })
     expect(SCREENS.filter((v) => !screenOk(v as never))).toEqual([])
-    expect(shortcutOk('palette') && shortcutOk('new-shell') && shortcutOk('settings') && shortcutOk('view-next')).toBe(true)
+    expect(shortcutOk('palette') && shortcutOk('new-shell') && shortcutOk('settings')).toBe(true)
     expect(shortcutOk('worktree')).toBe(false) // openEditor opens a Mac window
     expect(['view:tasks', 'view:board', 'view:history', 'settings', 'broadcast', 'skills', 'notes', 'start-master'].every((a) => actionOk(a as never))).toBe(true)
   })

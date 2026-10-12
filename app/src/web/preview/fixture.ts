@@ -2,7 +2,10 @@
 // Fictional org `acme`; nothing here comes from a real machine.
 import { DEFAULT_CONFIG, parseConfig } from '@shared/appConfig'
 import { DEFAULT_SETTINGS } from '@shared/settings'
+import type { CostBook } from '@shared/costs'
 import type { InboxEntry } from '@shared/inbox'
+import { hourOf } from '@shared/timeline'
+import type { TokensByDay } from '@shared/tokens'
 import type { AppState, Session } from '@shared/types'
 
 const now = Date.now()
@@ -98,6 +101,38 @@ const loose = (number: number, title: string, status: string, extra: Record<stri
   card(number, title, status, { project: null, derived: true as const, state: status === 'Done' ? ('CLOSED' as const) : ('OPEN' as const), closedAt: status === 'Done' ? new Date(now - 2 * 86400_000).toISOString() : null, ...extra })
 
 /** `noBoard` (?preview=noboard): the same account with repositories but no GitHub board. */
+/**
+ * Ten days of cost history for the Costs view: each session works some daytime hours (none three
+ * days ago, so a custom range there is empty), its cost kept per hour as recordCosts keeps it.
+ */
+export function fixtureCosts(): { book: CostBook; tokens: Record<string, TokensByDay> } {
+  const book: CostBook = {}
+  const tokens: Record<string, TokensByDay> = {}
+  const day0 = new Date(now)
+  day0.setHours(0, 0, 0, 0)
+  for (const s of SESSIONS.filter((x) => x.name !== 'master-agent')) {
+    const n = Number(s.sessionId.slice(-1))
+    let cost = 0
+    const days: Record<string, number> = {}
+    const toks: TokensByDay = {}
+    for (let d = 9; d >= 0; d--) {
+      if (d === 3) continue
+      for (let h = 8; h <= 20; h++) {
+        const t = day0.getTime() - d * 86_400_000 + h * 3_600_000
+        if (t > now || (h * 7 + d * 3 + n * 5) % 4 === 0) continue
+        const spent = ((h * 13 + d * 7 + n * 11) % 9) * 0.07 + 0.05
+        cost += spent
+        days[hourOf(t)] = Math.round(cost * 100) / 100
+        const k = Math.round(spent * 400_000)
+        toks[hourOf(t)] = { input: Math.round(k * 0.01), output: Math.round(k * 0.04), cacheWrite: Math.round(k * 0.1), cacheRead: Math.round(k * 0.85) }
+      }
+    }
+    book[s.sessionId] = { name: s.name, key: s.key, issue: s.issue, days }
+    tokens[s.sessionId] = toks
+  }
+  return { book, tokens }
+}
+
 export function fixtureState(noBoard = false): AppState {
   const master = SESSIONS.find((s) => s.name === 'master-agent')!
   // The board of the account, as `master config show` would give it (project 1).
@@ -131,11 +166,14 @@ export function fixtureState(noBoard = false): AppState {
     stats: { [SESSIONS[0].sessionId]: stats(3.42, 61), [SESSIONS[1].sessionId]: stats(1.08, 24) },
     tails: {},
     git: {},
-    prLive: {},
+    // Session details → GitHub: the first session's PR, live, with changes asked for.
+    prLive: {
+      'https://github.com/acme/web/pull/131': { number: 131, title: 'Fix login redirect loop', url: 'https://github.com/acme/web/pull/131', state: 'OPEN', reviewDecision: 'CHANGES_REQUESTED', ci: 'failure', reviewCheck: 'success', buildCi: 'failure', isDraft: false, headRef: 'fix/112', createdAt: now - 3 * 3600_000, mergedAt: null, lastCommentAt: now - 20 * min },
+    },
     hookInfo: {},
     sessionWorktrees: {},
     peers: { [SESSIONS[0].key]: [SESSIONS[1].key], [SESSIONS[1].key]: [SESSIONS[0].key] },
-    // Session details → Mods: the MasterDeck mod runs in the first session and reported these.
+    // Tools → Mods: the MasterDeck mod runs in the first session and reported these.
     modLive: {
       [SESSIONS[0].key]: {
         version: '0.5.0',
@@ -162,7 +200,11 @@ export function fixtureState(noBoard = false): AppState {
       { name: 'token-weather', provenance: 'token-weather@claude-code-playground-mods', version: '0.1.0', tier: 'user' },
     ],
     sessionPrs: { [SESSIONS[0].sessionId]: ['https://github.com/acme/web/pull/131'] },
-    watches: [],
+    // A monitor of the first session's own, and MasterDeck's PR watch on its PR (listed under the PR).
+    watches: [
+      { id: 'w-deploy', sessionId: SESSIONS[0].sessionId, description: 'Staging deploy status', command: 'while sleep 30; do curl -s https://staging.acme.example/health; done', startedAt: now - 95 * min, events: 7, lastEventAt: now - 3 * min, queued: 1 },
+      { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
+    ],
     schedules: {},
     loops: {},
     sources: { agents: 'ok', github: 'ok' },
@@ -217,7 +259,7 @@ export function fixtureState(noBoard = false): AppState {
     me: 'dev',
     settings: DEFAULT_SETTINGS,
     allStats: {},
-    costBook: {},
+    costBook: fixtureCosts().book,
     lastActivity: {},
     boardHistory: {},
     ghCache: null,

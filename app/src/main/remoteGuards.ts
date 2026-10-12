@@ -1,13 +1,43 @@
 import { realpathSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
+import { insideRoot } from '@shared/filePath'
+import { isDiffBase, type DiffBase } from '@shared/sessionTabs'
+
+/**
+ * A call on a session's files (its tabs, Details → Diff / Files), from the window or the web app:
+ * the folder is the listed session's own `cwd`, looked up by key, never a folder the caller names;
+ * a path must stay inside it (`insideRoot`; main's reader then checks the real path) and a base is
+ * one of the two the Diff tab offers.
+ */
+export function sessionFileCall(
+  sessions: { key: string; cwd: string }[],
+  key: unknown,
+  want: { path?: unknown; base?: unknown } = {},
+): { ok: true; root: string; path?: string; base?: DiffBase } | { ok: false; message: string } {
+  const s = typeof key === 'string' ? sessions.find((x) => x.key === key) : undefined
+  if (!s) return { ok: false, message: 'That session is not listed.' }
+  if (!s.cwd) return { ok: false, message: 'That session has no folder.' }
+  const out: { ok: true; root: string; path?: string; base?: DiffBase } = { ok: true, root: s.cwd }
+  if ('path' in want) {
+    const p = insideRoot(want.path)
+    if (!p) return { ok: false, message: "Not a path in the session's folder." }
+    out.path = p
+  }
+  if ('base' in want) {
+    if (!isDiffBase(want.base)) return { ok: false, message: 'Not a diff base.' }
+    out.base = want.base
+  }
+  return out
+}
 
 /**
  * A remote save merges over the full current settings (a malformed payload changes nothing) and never changes
- * remoteEnabled (settings saves replace the whole object).
+ * remoteEnabled (settings saves replace the whole object), nor the Mac's theme (a browser keeps its own).
  */
 export function remoteSettings(patch: unknown, current: object): Record<string, unknown> {
   const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? (patch as Record<string, unknown>) : {}
-  return { ...current, ...p, remoteEnabled: (current as { remoteEnabled?: unknown }).remoteEnabled }
+  const c = current as { remoteEnabled?: unknown; theme?: unknown }
+  return { ...current, ...p, remoteEnabled: c.remoteEnabled, theme: c.theme }
 }
 
 /** Only dirs the deck already knows (workspace repos, session cwds); path.resolve normalises trailing slashes and `..`. */

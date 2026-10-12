@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { canDeliver, enqueue, eventMessage, sameWatch, type WatchInfo, type WatchRequest } from '@shared/watches'
+import { canDeliver, enqueue, eventMessage, pushEvents, sameWatch, type WatchEvent, type WatchInfo, type WatchRequest } from '@shared/watches'
 import type { CliResult, Session } from '@shared/types'
 
 interface Watch {
@@ -19,6 +19,8 @@ interface Watch {
   rest: string
   /** Its script exited: the last message says so, then it is gone. */
   ended: boolean
+  /** The last lines it printed, for Session details (memory only). */
+  log: WatchEvent[]
 }
 
 /** What is kept across launches: the monitors to start again. */
@@ -55,7 +57,7 @@ export class Watches {
     for (const w of Array.isArray(saved) ? saved : []) {
       if (typeof w?.id !== 'string' || typeof w.command !== 'string' || typeof w.sessionId !== 'string') continue
       if (typeof w.pid === 'number' && w.pid > 1 && isOurScript(w.pid, w.command)) killGroup(w.pid)
-      this.start({ ...w, queue: [], dropped: 0, proc: null, rest: '', ended: false })
+      this.start({ ...w, queue: [], dropped: 0, proc: null, rest: '', ended: false, log: [] })
     }
   }
 
@@ -76,6 +78,7 @@ export class Watches {
       proc: null,
       rest: '',
       ended: false,
+      log: [],
     })
     this.save()
     this.onChange()
@@ -106,11 +109,15 @@ export class Watches {
       w.events += got.length
       w.lastEventAt = Date.now()
       w.dropped += enqueue(w.queue, got)
+      pushEvents(w.log, got.map((text) => ({ at: w.lastEventAt!, text })))
       this.onChange()
     })
     w.proc.on('error', (e) => this.finish(w, `failed: ${String(e)}`))
     w.proc.on('exit', (code, signal) => {
-      if (w.rest.trim()) enqueue(w.queue, [w.rest])
+      if (w.rest.trim()) {
+        enqueue(w.queue, [w.rest])
+        pushEvents(w.log, [{ at: Date.now(), text: w.rest }])
+      }
       w.rest = ''
       if (!w.ended) this.finish(w, signal ? `stopped (${signal})` : `its script exited (code ${code ?? '?'})`)
     })
@@ -121,6 +128,7 @@ export class Watches {
     w.ended = true
     w.proc = null
     enqueue(w.queue, [`(monitor ended: ${why})`])
+    pushEvents(w.log, [{ at: Date.now(), text: `(monitor ended: ${why})` }])
     this.save()
     this.onChange()
   }
@@ -133,6 +141,7 @@ export class Watches {
     if (w.proc?.pid) killGroup(w.proc.pid)
     w.proc = null
     w.queue.push('(monitor stopped from MasterDeck)')
+    pushEvents(w.log, [{ at: Date.now(), text: '(monitor stopped from MasterDeck)' }])
     this.save()
     this.onChange()
     return true
@@ -190,6 +199,11 @@ export class Watches {
         })
         .finally(() => this.sending.delete(sid))
     }
+  }
+
+  /** A monitor's last lines, newest first (Session details → GitHub → Monitors). */
+  events(id: string): WatchEvent[] {
+    return [...(this.list.find((w) => w.id === id)?.log ?? [])].reverse()
   }
 
   info(): WatchInfo[] {

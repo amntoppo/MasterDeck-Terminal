@@ -147,7 +147,7 @@ const COLUMN_COLOR: Record<string, string> = {
   "Ready For Dev": "var(--accent)",
   "In Dev": "var(--amber)",
   "PR Raised": "var(--amber)",
-  "Dev Done": "#f28b50",
+  "Dev Done": "var(--orange)",
   "In QA": "var(--purple)",
   "QA Done": "var(--green)",
   "Re-Open": "var(--red)",
@@ -193,7 +193,7 @@ function columnColor(col: string, derived = false): string {
   if (derived) return DERIVED_COLOR[col] ?? "var(--grey)";
   const s = getConfig().statuses;
   if (col === s.ready) return "var(--accent)";
-  if (col === s.devDone) return "#f28b50";
+  if (col === s.devDone) return "var(--orange)";
   return COLUMN_COLOR[col] ?? GROUP_COLOR[statusGroup(col)];
 }
 

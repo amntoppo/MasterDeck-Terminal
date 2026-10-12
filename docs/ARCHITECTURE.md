@@ -333,8 +333,9 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   again; one switched on after a refusal joins at a `/reload-plugins` the core asks for from its timer
   (`toReload`; a `$.command.run` cannot run from a `command.run` hook). Managed (`prepend`/`append`)
   and built-in mods are never refused.
-- **Session details → Mods** (`SessionMods.tsx`, a `Session | Mods` switcher at the top of the
-  Details tab; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
+- **Tools → Mods** (`SessionMods.tsx`, the third of the Tools tab's `Queue | BTW | Mods`
+  sub-tabs, `SessionTools.tsx`, with "· n off" on its label; `modRows` in shared): a MasterDeck group
+  (the core, locked; the feature mods by
   `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
   or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
   and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`. A running session takes
@@ -370,9 +371,43 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 - **The core** writes its heartbeat every 15 s where `deck/alive` exists (`ended: true` at
   `session.end`); what it saw is in `$.state` (`seen`), since a reload does not judge an unchanged
   module again.
-- **Not wired yet:** MasterDeck does not install the mods (by hand: `claude plugin marketplace add
-  <folder>/mods`, `claude plugin install <name>@masterdeck` for each, `prependPlugins` in settings),
-  nothing of the deck hook moved into them, and no Windows path. See TODO ("MasterDeck mod").
+- **Installing the mods** (`main/mods.ts`, `shared/mods.ts`, issue #93). The app ships `mods/`
+  (electron-builder `extraResources`, without tests, `shared/` and `sync-shared.sh`) and at every
+  launch copies it to `<home>/mods` when its content hash differs from the folder's marker
+  (`syncModsFolder`: `.masterdeck-mods.json`, copied to `mods.new` and swapped in; a hand copy there
+  is replaced). Claude Code reads a directory marketplace in place (`claude plugin list` shows
+  `readFromFolder`), so that copy is the update: nothing is installed again. `ModsInstaller.install`
+  checks `claude --version` (`MODS_MIN_CLAUDE`, 2.1.287), backs up settings.json
+  (`settings.backup.<ms>.before-mods.json` in `<home>`; `backupSettings` in `hooks.ts` never
+  overwrites one), runs `claude plugin marketplace add <home>/mods --scope user` (adding it again
+  re-points a `masterdeck` marketplace that came from elsewhere) and `claude plugin install
+  <name>@masterdeck --scope user` for each mod in `marketplace.json`, all with `--json` (the last
+  line's `outcome` / `failureCode`), then puts the core first in `prependPlugins` with the hooks'
+  own atomic write (another backup) and records `<home>/mods-installed.json` (`{at, version}`).
+  `uninstall` runs `claude plugin uninstall` for each (`not_installed` is fine), `claude plugin
+  marketplace remove masterdeck` (`not_configured` is fine) and takes the core out of
+  `prependPlugins` (the key goes when empty); the folder stays. One change at a time.
+  `modsInSettings` reads what is installed from the settings file: the marketplace on this folder,
+  each `enabledPlugins` entry and `prependPlugins` (`installed`, `partial` with what is `missing`,
+  `off`). `prependNote` says when `prependPlugins` is not honoured: a managed settings file
+  (`managedSettingsFiles`: `managed-settings.json` and `managed-settings.d/*.json` per platform) that
+  does not list the core itself, or `claude auth status --json` reporting a `team` / `enterprise`
+  `subscriptionType`. `state.mods` (`ModsStatus`) is read in the state callback at most every 30 s
+  (`modsNow`) and again after each change. `paths.modsSettings` is the file `claude plugin` writes:
+  Claude Code's own, or `$CLAUDE_CONFIG_DIR/settings.json`; null (install refused, with a note) when
+  MasterDeck's settings are kept apart (`MASTERDECK_ISOLATED`, `MASTERDECK_CLAUDE_SETTINGS`) without
+  `CLAUDE_CONFIG_DIR`, since the CLI would write the real one. `CH.modsInstall` / `CH.modsUninstall`
+  are open to the web (fixed commands, `webConfirm` first), as the status line's are.
+- **Reloading after an update.** `modsReloadOffer` (the state's sessions, `DeckHooks.modBeats()`,
+  installed, `installedAt`) lists running sessions (not done or suspended) whose core is older
+  (`modsStale`), or that have no heartbeat and started before MasterDeck installed the mods; the
+  idle ones (state `idle`, no `busyWith`) can be reloaded now. `Sources.setModsReload` puts it into
+  `collectItems` (`modsReload`) as one Needs-you item `mods:<MOD_VERSION>` (kind `mods`, action
+  `reload` while one is idle; a dismissed one stays dismissed until the next version).
+  `reloadMods()` (the `reload` inbox action and `CH.modsReload`, Settings → Mods) types
+  `/reload-plugins` into each idle one through `Sender`, never relayed through master-agent.
+- **Not wired yet:** nothing of the deck hook moved into the mods, and no Windows path. See TODO
+  ("MasterDeck mod").
 
 ### Monitors (watches) and schedules
 
@@ -409,6 +444,40 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
   session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
+- **Session details → Session → Processes** (#115, `renderer/.../SessionProcs.tsx`): read on
+  demand, never in `AppState`. While the section is on screen (and the window visible) it calls
+  `deck.procsList(key)` (`procs:list`) every 2.5 s; `SessionProcs` (`main/sessionProcs.ts`) runs one
+  `/bin/ps ax -o pid,ppid,pgid,etime,%cpu,rss,command` and two `/usr/sbin/lsof -F` calls (folder and
+  stdout; listening TCP sockets) for the session's processes only. `shared/sessionProcs.ts` groups
+  them: each child of the session's `claude` (`Session.pid`) that is a Claude Code Bash shell
+  (`zsh -c … eval '<cmd>' < /dev/null && pwd -P >| /tmp/claude-<hex>-cwd`, `isClaudeShell`) with its
+  whole tree, and, outside the tree, processes still in the process group of a shell seen before
+  (what `cmd &` leaves, adopted by launchd). Claude Code helpers (`caffeinate`, MCP servers) are not
+  shells and are left out. A shell writes to `…/<sessionId>/tasks/<taskId>.output` whether or not it
+  runs in the background; the transcript says which ("running in background with ID: …",
+  `transcriptTasks`, read again only when its mtime changes) and gives a background command's exit
+  code from its `<task-notification>` (`… (exit code N)` or `… failed with exit code N`). An ended
+  background or detached command stays listed `exited` for `EXITED_KEEP_MS` (60 s); a foreground
+  call drops off at once (its result is in the conversation). `deck.procsOutput(key, pid)` reads
+  the last 12 KB of the stdout file of a process the last list found (never a path from the
+  caller), ANSI and `\r` redraws cleaned (`cleanOutput`). `deck.openPort(url)` (`procs:openPort`,
+  blocked on the web and refused for a remote call) opens only `http://localhost|<IP>:<port>`
+  (`isPortUrl`). Windows answers `supported: false`.
+- **Session details → GitHub** (#103, `renderer/.../GitHubDetails.tsx`; the tab is kept in
+  localStorage `md.detailsTab`, open rows in a module map per `Session.key`): ticket, PRs and
+  monitors as rows that open. What is not in `AppState` is read on demand, never added to it (the web
+  bridge drops states over ~1.05 MB): `deck.watchEvents(id)` (`watch:events`) returns the last 50
+  events of a monitor (`Watches.events`, lines with their time) or a PR watch (`PrWatch.events` for
+  `pr:<url>`: items with kind and author, and its own notes), newest first; the rings
+  (`pushEvents`, `EVENTS_MAX`, text cut to 500) are memory only, stripped from `watches.json` /
+  `pr-watch.json`. A row reads again when its `WatchInfo` (`events`, `lastEventAt`, `queued`)
+  changes. `deck.prDetail(url)` (`pr:detail`) is one GraphQL read through ghc (ttl 60 s) as
+  `forCard(prRepo(url))`: `shared/prDetail.ts` builds it (`prDetailQuery`, never the word for a
+  write) and reads checks (CheckRun and StatusContext, failing first), the latest review per
+  reviewer, unresolved current threads and comments (`parsePrDetail`); `worstPrStatus` sums the PRs'
+  lines for the closed row. A PR row reads again when `state.prLive[url]` changes and each 60 s,
+  keeping its last answer on screen. Both channels are `remote` in `DECK_ACCESS` (reads); main checks
+  the id's length and that the URL is a PR's.
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".
 
@@ -422,6 +491,32 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 `shared/flowBuilder.ts` (builder drafts in `<home>/workflow-builder/`), `shared/flowTrack.ts`
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
+
+**Built-in workflows** (#104). `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`: id, name,
+description, whenToUse, flow; `builtinById`, `flowHash`, `rawFlowHash`, `markFor`, `sameAsMark`)
+with the flows as JSON in `shared/builtin-workflows/<id>.json`. Ids start with `md-`.
+`WorkflowStore.seedBuiltins()` runs at launch right after `migrate()` (also on Windows and with
+`MASTERDECK_NO_HOOK`, not in the smoke test) and writes them as `workflows/templates/md-*.json` with
+a mark `builtin: {id, hash, raw}`: `hash` is `flowHash` of the shipped flow (over `parseFlow`, so
+formatting is no edit while a moved block is), `raw` is `rawFlowHash` (sorted-key JSON of the flow
+as written, no `parseFlow`). A file is unedited when its flow's raw hash equals `raw` **or** its
+parsed hash equals `hash` (`sameAsMark`; a mark from before `raw` has the parsed hash only), so a
+later `parseFlow` that reads the same file differently never turns an untouched built-in into an
+edited one. Seeding: a missing one is written unless its id is in `workflows/builtins.json`
+(`{removed: [...]}`, written by `deleteTemplate` for a marked file); an unedited marked file is
+rewritten when the shipped flow changed (keeping its name); an edited one and any file without the
+mark are never touched. `templates()` fills `WorkflowTemplate.builtin` (`edited`; `renamed` when the
+name differs from the shipped one; `updated` when edited and the shipped flow changed since);
+`saveTemplate` keeps the mark on a built-in it rewrites, never puts one on a new template
+(Duplicate), never gives a new template a built-in's id, and refuses (null) to write a deleted
+shipped built-in's id (a late autosave; the handler answers "restore it first"). The
+`workflow:templateSave` answer carries the store's `builtin` for the template, which the window
+shows as it is. `restoreBuiltin(id)` writes one back as shipped (Restore original, shown when edited
+or renamed, `workflow:builtinRestore`; the window asks with a native dialog, the web with
+`webConfirm`); `restoreBuiltin(null)` writes back every removed one and clears the list (Restore
+built-ins). `workflowGet` carries `builtinsRemoved`. The window's autosave binds each change to the
+template open when it was made (`useAutosave`'s target), flushes before Rename and Delete, and drops
+what is pending before Restore original.
 
 **Loops** (a Loop frame, #82). A trigger's step carries its `CompiledLoop`s; when it fires, its hook
 arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json` (written to `<sid>.json.<pid>.tmp`, then renamed)
@@ -613,6 +708,40 @@ draw above it; dialogs are 50. On a phone the panel is a sheet at 46 (the inspec
 tab bar is 47: the More menu lives in the bar's stacking context and would open behind a sheet
 otherwise.
 
+### Side questions (BTW, issue #106)
+
+The right panel's **Tools → BTW** (`renderer/.../SessionBtw.tsx`, in `SessionTools.tsx`) asks what Claude Code's `/btw` asks: a
+question answered from the session's conversation, with no tools, never added to it. Claude Code has
+no API for it, so `main/btw.ts` `BtwAsker` runs `claude -p --resume <sessionId> --fork-session
+--no-session-persistence --tools "" --strict-mcp-config --settings '{"disableAllHooks":true}'
+--output-format stream-json --verbose --include-partial-messages [--model <the transcript's model>]`
+from an empty temp folder (its empty `~/.claude/projects` folder is removed, `tidyScratchProject` in
+`summary.ts`). The prompt (`btwPrompt` in `shared/btw.ts`) frames the question as a side question and
+carries the session's last 20 answered ones. Text deltas (`parseStreamLine`) go out as the entry at
+most every 120 ms; the result's `total_cost_usd` is kept. One question at a time per session; **Stop**
+kills the run; 5 minutes at most. The session's transcript is never written (checked with a live
+session) and a `claude -p` prompt is not added to `history.jsonl`.
+
+`/btw` typed in a terminal: Claude Code writes the question to its prompt history
+(`~/.claude/history.jsonl`, or `$CLAUDE_CONFIG_DIR/history.jsonl`: `paths.claudeHistory`) with the
+session id, and keeps the answer nowhere (it lives in the overlay only). `BtwTerminal` stats the file
+every 2 s (`pollBtw` in `index.ts`), reads what it gained (its offset in `btw/history-offset.json`; the
+first read looks 2 MB back), files each `/btw <question>` (`parseHistoryLine`) under the listed
+session with that id (or whose background id starts it), as `t-<timestamp>`; one whose session is
+not listed yet waits up to 2 minutes for it (a session just started), then is dropped. A fresh one (under 2
+minutes) of a background session gets its answer from the screen: `claude logs` every 2 s for up to
+90 s, `parseBtwScreen` finds the box (`/btw <question>`, the answer, the footer `… c to copy … Esc to
+close`), keeps the longest answer seen while the question matches (`sameQuestion`), and marks it
+`partial` when the footer shows `↑/↓` (the answer goes on below the box). Anything else is kept with
+`captured: false`.
+
+`BtwStore` keeps each session's entries in `btw/<session key>.json` (oldest first, 200 at most, an
+answer 64 KB at most; temp file + rename) and sends every change as `btw:event` (`BtwEvent`: the
+whole entry, or `removed`). An answer still streaming is sent but written only when it ends; one left
+`asking` by a quit is read back as `stopped`. Not in `AppState` or a snapshot: channels `btw:list`,
+`btw:ask`, `btw:stop`, `btw:remove` and the event, open to the web app (`DECK_ACCESS`), so a browser's
+question runs on the Mac the same way. The web preview (`/?preview`) has an in-memory stand-in.
+
 ### Linked sessions (peers)
 
 A user can link sessions to each other (running sessions only, any repository or account). `shared/peers.ts` is the
@@ -648,6 +777,43 @@ IPC: `CH.peersSet` (add or remove one link) and `CH.peersSync`, both open to rem
 Renderer: `PeersDialog.tsx` and `PeerPicker.tsx` (`peersView.ts`), the "Linked sessions" section of
 `SessionDetails.tsx`, and a "Link to sessions" field in `AssignDialog` and `NewSessionDialog`.
 Unlinking stops further sharing but retracts nothing already in a transcript.
+
+### Session tabs, files and diffs (issue #113)
+
+Each session pane has its own tab row (`renderer/.../SessionTabs.tsx`): the terminal, then file
+and diff tabs. The model is pure (`shared/sessionTabs.ts`: `openTab` focuses an open tab, else
+adds it after the active one; `closeTab` never closes the terminal and hands the active tab to its
+right, else left neighbour; `cleanTabs` checks a saved state). `renderer/src/sessionTabsStore.ts`
+keeps every session's row by `Session.key` in localStorage (`session-tabs`), so it survives a
+resume and a restart; the App prunes keys no longer listed (never on an empty list). Every opener
+goes through the store: Details → Diff (`DiffList.tsx`) and Files (`FileTree.tsx`), ⌘P
+(`QuickOpen.tsx`), ⌘-click in a terminal (an xterm link provider in `TerminalView.tsx`,
+`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**. The store's
+`onOpen` lets the phone close its panel sheet. The terminal stays mounted (hidden) under another tab.
+
+Main reads, never writes: `main/sessionFiles.ts` `SessionFiles` behind four `remote` channels
+(`files:list`, `files:read`, `diff:list`, `diff:file`). The folder is always the listed session's
+`cwd`, looked up by key (`sessionFileCall` in `main/remoteGuards.ts`); a path passes `insideRoot`
+(relative, no `..`, no NUL) and then the real-path check (no link out of the folder); a path
+through `.git`, `.ssh`, `.gnupg` or `.aws` is never read, and a session whose folder is the home
+folder (no repository) gets no file list (no crawl of `~/Library`). Git runs with
+`GIT_OPTIONAL_LOCKS=0`, `GIT_LITERAL_PATHSPECS=1` (`[id].tsx` is a name, not a glob),
+`--no-textconv` and a 10 s timeout; a tracked file over 10 MB is not diffed; lists come from `-z` output (`shared/diff.ts`
+`parseChanges`, `parseDiff`, `splitRows`). **Uncommitted** diffs against `HEAD` (the empty tree
+before a first commit), **Branch** against `merge-base HEAD origin/<default>` (else the local
+branch); untracked files are listed as added (the first 300; `more` counts the rest) and their
+lines counted by main, 8 files at a time. Limits (`shared/fileView.ts`): a
+file over 1 MB or 20,000 lines, or binary (a NUL in the first 8 KB), is refused with a reason; a
+diff is cut at 5,000 lines. A web answer passes `webFit` (`shared/sessionFiles.ts`): under ~900 KB
+of JSON so it fits one bridge frame (a list is cut to what fits, a file becomes too-large, a diff is refused).
+
+Nothing of this is in `AppState`. Details → Diff and an open diff tab pull (`renderer/src/usePull.ts`):
+every 3 s while on screen and the window is visible, at once when the session's state changes;
+the schedule is checked from refs, so nothing re-renders between pulls, and an unchanged answer
+draws nothing.
+Highlighting is `highlight.js` (`lib/common` plus dockerfile) in `renderer/src/highlight.ts`,
+which splits its HTML per line; over 300 KB a file is shown as plain text. Markdown goes through
+`MarkdownView html={false}`. Token colours are theme tokens (`.hljs-*` in `styles.css`).
 
 ### Queue
 
@@ -1526,8 +1692,8 @@ The Costs view's **Hours** (`HoursView.tsx`, desktop only) estimates time per Gi
 and ticket. `TokenIndex` (`main/tokens.ts`) keeps, next to each transcript file's tokens, its
 activity `spans`: every line with a top-level `timestamp` (the line is parsed; a nested one never
 counts) widens the last span when within `SPAN_GRAIN` (5 min) of it, else opens one (`addMoment`,
-`shared/tokens.ts`). The cache is `tokens.json` version 2; a version 1 file is dropped and every
-transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
+`shared/tokens.ts`). The cache is `tokens.json` version 3 (hours, #88); an older file is dropped
+and every transcript read again once. `CH.hoursActivity(ids, since)` (the book's session ids; the view
 re-asks every minute) answers `{spans, account}` for each session active since `since`:
 `Sources.hoursActivity` gives the spans, key, folder and ticket, main's handler the account
 (`hoursAccount`: recorded in `session-accounts.json` and still connected, else the account of the
@@ -1542,6 +1708,26 @@ so an account counts a minute once and each ticket gets its full time. `hoursCsv
 `date,account,ticket,minutes`; `CH.hoursExport` saves it through a save dialog. Both channels are
 `blocked` in `DECK_ACCESS` and refuse a remote call: nothing reaches `AppState`, the snapshot or
 the web.
+
+### The Costs time filter (issue #88)
+
+`shared/timeline.ts` holds the presets (`PRESETS`, `RangeChoice`, `parseRange` for the saved value),
+`resolveRange(choice, now)` to `[from, to)` epoch ms in local time (Last 7/30 days start at the
+midnight 6/29 days back, as before), `rangeLabel`, the custom range's input values (`customRange`:
+the To minute is included, an end before the start is an error) and `chartBars` (hours up to 48 h,
+days up to 62 days, weeks from Monday, then months). The choice is in the renderer's localStorage
+(`costsRange`), like `costsUnit`. Costs and tokens are kept per **local clock hour**, bucket key
+`YYYY-MM-DDTHH` (`hourOf`): `Sources.scanAllStats` records the cost book under the hour
+(`recordCosts`), `tallyLines` counts tokens under the message's hour, and `TokenIndex`'s cache is
+version 3 (every transcript is read again once). Day keys (`YYYY-MM-DD`) stay valid: books from
+before #88, and hours older than 35 days, which `pruneBook` folds into their day (max of the
+cumulative cost) so the book in `AppState` stays small. `bucketShare(key, from, to, now)` is the one
+rule for a range: the part of a bucket inside it by time, the running hour only up to `now`
+(`spendIn`, `sessionSpendIn`, `tokensIn`); the day-string helpers (`dailySpend`,
+`sessionSpendBetween`, `tokensBetween`) read hour keys by their day. `CostsView` computes every
+figure from `[from, to)`; the ticket table's All time column stays all-time (the budget check).
+`HoursView` takes the same `from`/`to`: `estimateHours` cuts the joined spans to it before the
+per-day split.
 
 ## Shared modules (`shared/`)
 
@@ -1563,10 +1749,19 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 
 - `main.tsx` mounts `App`. `deck.ts`: `deck()` = `window.deck`, `useAppState()` (first
   `getState()`, then `onState`), `useNow(ms)`.
+- Themes (issue #105, [THEMES.md](THEMES.md)): every colour is a token of `shared/themes.ts`
+  (`DARK`, `LIGHT`). `theme.ts` writes the active theme's tokens on `<html>` as CSS variables
+  (`applyTheme`), `bootTheme()` runs before the first render (`main.tsx`, `web/main.tsx`) from
+  localStorage `md.theme`, and `useTheme(pref)` in `App` follows `settings.theme` (the window) or
+  the browser's own choice (`useWebThemePref`, the web app), resolving System through
+  `prefers-color-scheme`. Terminals subscribe with `onTheme`. In main, `applyNativeTheme` sets
+  `nativeTheme.themeSource` and the window's background on every settings save, and `remoteSettings`
+  never lets a browser change the Mac's theme. `themes.lint.test.ts` fails on any colour literal in
+  `renderer/src` or `src/web`.
 - `App.tsx` lays out, left to right: **`Rail`** (views, tools, the remote indicator, actions,
   Settings), **`Sidebar`** (the Sessions column on Terminals: Needs you, grouped sessions, shells,
   Parked, footer with Refresh/Cleanup/GitHub cache), the **main view**, the **`Inspector`** right
-  panel on Terminals (Details = `SessionDetails`, Queue = `QueuePanel`, Summary = `SummaryPanel`),
+  panel on Terminals (Details = `SessionDetails`, Tools = `SessionTools` with sub-tabs Queue = `QueuePanel` and BTW = `SessionBtw`, kept in `md.toolsTab`; a saved `inspTab` of `"queue"` opens Tools; Summary = `SummaryPanel`),
   and **`MasterPane`** (master-agent's terminal; ★ Master / ⌘⇧M). Dialogs and popups mount at the
   end (`BrowserApproval` only where `can('browserDecide')`, i.e. desktop).
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
@@ -1580,7 +1775,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   `components/NotesPanel.tsx` draws the list, search and editor; the editor's rules live in
   `shared/noteEditor.ts` (`NoteEditor`, one per window, outside the panel: 500 ms debounce, `base`,
   `incoming`, see "Notes" above). The panel is mounted after the headers (like the ★ Master button) so
-  it gets its clicks. The entry points are `SessionDetails.tsx` (**Add note** / **Edit note**) and the
+  it gets its clicks. The entry points are `GitHubDetails.tsx` (Details → GitHub: **Add note** / **Edit note**), `SessionNotes.tsx` (Details → Notes) and the
   mark in the top row of a `BoardView` `Card` (`bcard-note`; always visible on a phone). A ticket's
   title in the panel comes from `ticketTitle` over the issues, the board and the repository view.
   On a phone the panel is a full-screen sheet (`web.css`, `.app.phone > .notes-panel`) and `App.tsx`
@@ -1637,6 +1832,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
 | `meetingLive` | the state callback, from `MeetingsIpc.live()` (`Recorder.live()`): `{ recording, since, paused, elapsed, offer }` (`elapsed` as of the last change, so it does not tick; the rail counts from `since`), idle until a recorder was loaded, null off macOS; never in `toRemoteSnapshot` |
+| `mods` | the state callback, `modsNow()` over `ModsInstaller.status()`: whether MasterDeck's mods are installed in Claude Code, Claude Code's version, the mods' version, `prependNote`, `unavailable` |
 | `Session.account` (inside `sessions`; two or more accounts) | `sessionAccount` over `SessionAccounts` (`session-accounts.json`), the session's spawn proposal, its folder's `origin`, else the primary |
 | `ghAccounts` | `AccountEnv.status()` (login, primary, health, warning; never a token) |
 
@@ -1648,14 +1844,16 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 |---|---|
 | `settings.json` | `Settings` |
 | `cache.json` | last GitHub snapshot, boards, sprints, users, team PRs, the repository view's issues (`repoIssues`) |
-| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 2: per transcript file, tokens per day and activity `spans`), status line output per session |
+| `costs.json`, `tokens.json`, `stats/` | cost book, token index (version 3: per transcript file, tokens per local hour and activity `spans`); the cost book keeps each session's highest cumulative cost per hour (per day once 35 days old), status line output per session |
 | `statusline_tee.py` | installed status line tee (settings.json points here) |
 | `inbox.json`, `inbox-events.jsonl` | Needs you state and event log |
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
+| `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
+| `btw/` | Side questions (Tools → BTW): `<session key>.json` per session (`{version, entries}`), `history-offset.json` (how far `history.jsonl` was read). `main/btw.ts` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `meetings/` | `<id>.json` per meeting (`m-<32 hex>`; temp file + rename), `<id>/audio.webm` (the playback copy, appended every 10 s), `<id>/chunks/<you|others>-<seq>.wav` (30-second 16 kHz WAVs until transcribed), `models/` (speech models). Private like notes (`main/meetings/store.ts`) |
 | `meeting-notices.json` | Meetings' Needs-you items, one per meeting (meeting id, title, kind, counts or reason, time); temp file + rename by `main/meetingNotices.ts`; 30 days |

@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { canDeliver, enqueue, eventMessage, handedOver, parseWatchRequest, QUEUE_MAX } from '@shared/watches'
+import { canDeliver, enqueue, eventMessage, EVENT_TEXT_MAX, EVENTS_MAX, handedOver, parseWatchRequest, pushEvents, QUEUE_MAX, type WatchEvent } from '@shared/watches'
 import type { Session } from '@shared/types'
 import { DeckHooks } from './deckHooks'
 import { installDeckHooks } from './hooks'
@@ -35,6 +35,14 @@ describe('watch helpers', () => {
     const q: string[] = []
     expect(enqueue(q, Array.from({ length: QUEUE_MAX + 5 }, (_, i) => `${i}`))).toBe(5)
     expect(q[0]).toBe('5')
+  })
+  it('keeps the newest events, each cut', () => {
+    const ring: WatchEvent[] = []
+    pushEvents(ring, Array.from({ length: EVENTS_MAX + 3 }, (_, i) => ({ at: i, text: `${i}` })))
+    expect(ring).toHaveLength(EVENTS_MAX)
+    expect(ring[0].text).toBe('3')
+    pushEvents(ring, [{ at: 0, text: 'x'.repeat(EVENT_TEXT_MAX + 9) }])
+    expect(ring.at(-1)!.text).toHaveLength(EVENT_TEXT_MAX)
   })
   it('delivers only once the turn is over', () => {
     expect(canDeliver({ state: 'idle' })).toBe(true)
@@ -91,6 +99,7 @@ describe.skipIf(process.platform === 'win32')('monitors run by MasterDeck', () =
     expect(w.add(req)).toEqual({ already: false })
     expect(w.add({ ...req, id: 'a2' })).toEqual({ already: true })
     await until(() => w.info()[0]?.events === 2)
+    expect(w.events('a1').map((e) => e.text)).toEqual(['two', 'one'])
     w.deliver([session])
     expect(sent).toEqual([])
     expect(w.info()[0]).toMatchObject({ description: 'test monitor', events: 2, queued: 2 })

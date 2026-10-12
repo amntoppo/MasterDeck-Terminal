@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { terminalSearch } from './TerminalView'
+import { currentTheme } from '../theme'
 
 /** What a find bar searches: a terminal's scrollback, or the text of a screen (Board, PRs). */
 export type FindTarget = { kind: 'terminal'; paneId: string } | { kind: 'dom'; root: () => HTMLElement | null }
@@ -57,13 +58,14 @@ export function FindBar({ target, onClose }: { target: FindTarget; onClose: () =
       setRes({ index: -1, count: 0 })
       return
     }
+    const tk = currentTheme().tokens
     const opts = {
       incremental,
       decorations: {
-        matchBackground: '#5a4a1a',
-        matchOverviewRuler: '#d9a441',
-        activeMatchBackground: '#d9a441',
-        activeMatchColorOverviewRuler: '#ffcf6b',
+        matchBackground: tk['term-match'],
+        matchOverviewRuler: tk['term-match-active'],
+        activeMatchBackground: tk['term-match-active'],
+        activeMatchColorOverviewRuler: tk['term-match-ruler'],
       },
     }
     const found = dir > 0 ? s.findNext(q, opts) : s.findPrevious(q, opts)

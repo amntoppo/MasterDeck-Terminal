@@ -20,6 +20,7 @@ Start here, then read what the task needs:
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
 | [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
+| [docs/THEMES.md](docs/THEMES.md) | Themes: the token set, the light palette, adding a theme |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
 ## Two repos, one product
@@ -163,6 +164,7 @@ web tabs keep working.
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
+| Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`, `rawFlowHash`, `sameAsMark`: the one "edited" rule), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
 | The Start dialog's options (worktree made before the start, permission mode, remembered choices) and its Markdown preview | `shared/startOptions.ts`, `main/startWorktree.ts` (`worktreeInfo`, `createWorktree`), `worktreeFolder` in `main/remoteGuards.ts`, `AssignRequest.permissionMode` → `master add --permission-mode` → `spawn.command`, `shared/markdown.ts` + `renderer/.../MarkdownView.tsx` (reuse for any Markdown view), `renderer/.../AssignDialog.tsx` |
@@ -174,10 +176,16 @@ web tabs keep working.
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
-| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`, `sessionNotes`; a note's `link` (the session and/or ticket an `n-` note is about) and `meeting` (set by `NotesStore.addMeetingNote` alone)), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `shared/noteFilter.ts` (the panel's All · Mine · Tickets · Sessions · Meetings, the Notes tab's meeting dot), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (the one editor: Write / Preview / Side by side, `MarkdownView` with `html={false}`); Session details → **Notes n**: `renderer/.../SessionNotes.tsx` (read only; Edit and New note open the panel); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
+| A session's tabs (Terminal, files, diffs), Details → Diff / Files, ⌘P, ⌘-click paths | `shared/sessionTabs.ts` (model), `renderer/src/sessionTabsStore.ts` (per `Session.key`, localStorage, `onOpen`), `renderer/.../SessionTabs.tsx`, `FileTab.tsx`, `DiffTab.tsx`, `DiffList.tsx`, `FileTree.tsx`, `QuickOpen.tsx`, `renderer/src/usePull.ts` (3 s while shown), `renderer/src/highlight.ts`; reads: `main/sessionFiles.ts` behind `files:*` / `diff:*`, guarded by `sessionFileCall` (`main/remoteGuards.ts`) and `insideRoot` / `relativeTo` / `findPaths` (`shared/filePath.ts`), parsers `shared/diff.ts`, limits `shared/fileView.ts`, web size cap `webFit` (`shared/sessionFiles.ts`). Nothing in `AppState` |
+| Notes | `shared/notes.ts` (types, limits, checks, `notePreview`, `sessionNotes`; a note's `link` (the session and/or ticket an `n-` note is about) and `meeting` (set by `NotesStore.addMeetingNote` alone)), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `shared/noteFilter.ts` (the panel's All · Mine · Tickets · Sessions · Meetings, the Notes tab's meeting dot), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (the one editor: Write / Preview / Side by side, `MarkdownView` with `html={false}`); Session details → **Notes n**: `renderer/.../SessionNotes.tsx` (read only; Edit and New note open the panel); entry points in `Rail.tsx`, `GitHubDetails.tsx` (Details → GitHub), `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Meetings (macOS; record, transcribe on the Mac, match to sessions; issue #102) | IPC and lazy loading: `main/meetingsIpc.ts` (`MeetingsIpc`; the only importer of `main/meetings/`, by dynamic `import()`); `main/meetings/gate.ts` (consent, permissions), `recorder.ts` (capture window, chunks, `audio.webm`), `store.ts` (`MASTERDECK_HOME/meetings`), `transcriber.ts` (queue, crash recovery), `matcher.ts` (the one `claude -p`, meeting notes), `models.ts` + `whisper.ts` (speech models, `whisper-cli`), `apps.ts` (the offer's process check), `muteHelper.ts` (`findMute`, `spawnMute`: the `md-mute` helper, `native/mute/main.swift`, `scripts/mute.sh`; its rules and protocol in `shared/meetingMute.ts`), `mute.ts` (`MuteWatch`: the mic follows the meeting app's mute, `meetingLive.mic`, `meetings:micOff`); `main/meetingMedia.ts` (`masterdeck-media://` audio), `main/meetingNotices.ts` (Needs you), `main/meetingsFixture.ts`, `main/claudeOnce.ts` (`claude -p` from an empty temp folder); `shared/meetings.ts` (types, settings, consent, `systemAudioPath`), `meetingAudio.ts`, `meetingModels.ts`, `meetingMatch.ts` (candidates, answer check, `MATCH_FAILED`), `meetingsPage.ts`, `meetingJanitor.ts`, `meetingApps.ts` (Zoom, Webex); capture window: `renderer/capture.html`, `renderer/src/capture.ts`, `renderer/src/pcmWorklet.ts`, `preload/capture.ts`; UI: `renderer/.../MeetingsSetup.tsx` (Settings → Meetings), `RecordMeeting.tsx`, `MeetingsView.tsx` (the page), Janitor's section in `HygieneViews.tsx`; `scripts/whisper.sh`, `scripts/meeting-fixture.cjs`; ARCHITECTURE "Meetings: …", OPERATIONS "Meetings: …" |
+| Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
-| MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
+| MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Tools → Mods, a sub-tab of `SessionTools.tsx`); the mod refuses switched-off mods in its `plugin.register` hook |
+| Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
+| Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
+| Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
+| A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -399,7 +407,107 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-10)
+## Current state and next steps (2026-10-12)
+
+- **Session processes in Details (#115)** are built on branch
+  `worktree-MasterDeck-Terminal-115-session-processes` (draft PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). Details → Session → **Processes**: the
+  session's Claude Code shells and what runs below them, what a command left running, their ports
+  (open in the browser), folder, pid, uptime, CPU / memory and last output; exited background
+  commands keep their exit code for a minute (ARCHITECTURE "Session details → Session → Processes").
+  Checked: typecheck, vitest (169 files passed, 2 skipped; 2067 tests passed, 4 skipped), the parsers against this Mac's real `ps` / `lsof` and a live session's
+  tree, and the isolated app with a stand-in `claude` whose session ran `npm run dev` and two Python
+  servers (list, ports, expanded output following along, the list emptying when they were killed).
+  Not checked: the installed app with a real session, a port click opening the browser, the web
+  app, Linux, Windows. Open points: TODO ("Session processes (#115)").
+
+- **Per-session tabs (#113)** are built on branch `113-session-tabs` (PR #114, `origin/main`
+  merged in, not merged to `main`; **installed locally 2026-10-12**). A tab row per session pane
+  (Terminal, then file and diff tabs, kept per `Session.key` across restarts), Details → **Diff**
+  and **Files**, ⌘P, ⌘-click on terminal paths; ⇧← / ⇧→ removed. Design and plan:
+  `docs/plans/2026-10-12-session-tabs-{design,plan}.md`. Checked: typecheck, vitest, `build:web`,
+  the web preview at 1400 and 390 px, and the isolated app with a stand-in `claude` listing one
+  session in a temp repo (the four channels against real git, the Diff list updating by itself
+  after a file was added, a diff tab kept after a restart, middle-click close). Open points:
+  TODO ("Session tabs, files and diffs (#113)").
+
+- **Built-in workflows (#104)** are built on branch
+  `worktree-MasterDeck-Terminal-104-builtin-workflows` (3d5503a, 21a5f82, a42f78b and the review
+  fixes; not merged, **not installed yet**). Five templates MasterDeck ships (Superpowers, Ticket to
+  PR, Bug fix, TDD (locked tests), CI doctor) are seeded at launch with a mark
+  (`builtin: {id, hash, raw}`), kept up to date while unedited, left alone once edited; the Workflow
+  window shows a **Built-in** chip, the description and when to use it, **Duplicate**, **Restore
+  original** (edited or renamed) and **Restore built-ins (n)**. TDD's check guards every `tests:`
+  commit of the branch; CI doctor's waits for every run of the commit. Spec in the backend repo
+  (`docs/superpowers/specs/2026-10-12-builtin-workflows-design.md`, branch
+  `docs/builtin-workflows-104`, not pushed). Checked: typecheck, vitest (162 files passed, 2
+  skipped; 2006 tests passed, 4 skipped), and, before the review fixes, the isolated app and the web
+  preview as in a42f78b. Live runs (one `claude -p --model haiku` each, on a sample repo with a
+  local bare `origin` and stand-in `gh`/`tt.sh`, isolated home; before the review fixes): Bug fix,
+  Ticket to PR, TDD, CI doctor passed (plan from the trigger, loop met, PR step reached the gate);
+  Superpowers ended at the stall limit while it waited on a background reviewer (fixed in the
+  texts: reviewers run in the foreground; its loop has no stall limit now). The runs also changed
+  every loop's wording (`LOOP DONE` only for a reached goal; nothing after the loop while it is
+  open). Open: a loop is armed when its trigger fires, before the steps ahead of it, so question
+  turns (Superpowers' brainstorm) are blocked as rounds. Open points: TODO ("Built-in workflows:
+  open points").
+
+- **BTW in the right panel's Tools tab (#106)** (Tools was the Queue tab; it now holds Queue and BTW as sub-tabs) (branch `worktree-MasterDeck-Terminal-106-btw-tab`, PR,
+  not merged, **not installed**: the rebuild of the real app waits for the user's word). Asks a side
+  question as `/btw` does through a forked `claude -p` of the session (no tools, hooks or MCP, nothing
+  saved), streams it in, keeps the history per session in `<home>/btw/`, and picks up `/btw` typed in
+  the terminal (`history.jsonl`, the answer read off `claude logs`). Spec and plan on the issue
+  (the backend repo was out of reach of this session). Checked: typecheck, vitest, the web preview at
+  1440 and 390 px, and the isolated app with a throwaway haiku background session: a panel question
+  answered from its conversation, a terminal `/btw` captured off its screen, an old one listed
+  without its answer, all three after a restart, the session's transcript unchanged. Not checked:
+  the real web app, a phone, Windows. Open points: TODO ("BTW (Tools tab)").
+
+- **Themes and a light theme (#105)** on branch `worktree-MasterDeck-Terminal-105-themes` (PR #108,
+  not merged; installed locally 2026-10-12, default Dark so the look is unchanged until picked): every colour is a token of `shared/themes.ts` (Dark = the old look, Light = Primer-based,
+  AA-checked), Settings → General → **Appearance** (Light / Dark / System, default Dark; per browser
+  in the web app), live switching including terminals (xterm `minimumContrastRatio` 4.5 in light).
+  Spec and plan in the backend repo (`docs/themes-105`, not pushed). Checked: typecheck, vitest,
+  `build:web`, every screen in both themes in the web preview (1440 px and 390 px), and the isolated
+  Electron app (Light / Dark / System switching, the window background and `nativeTheme`, kept
+  after a restart). Not checked: Windows, a real Claude session in the light terminal, a phone.
+  Open points: TODO ("Themes: open points").
+
+- **Session details in three tabs (#103)** (branch `worktree-MasterDeck-Terminal-103-details-tabs`,
+  draft PR, not merged): Session (no GitHub UI), GitHub (ticket / PRs / monitors as rows that
+  open: sub-issues, checks, reviews, threads, comments, a PR watch's and a monitor's events newest
+  first, ↗ links, live refresh) and Mods; the tab is remembered. Two new reads, `watch:events` and
+  `pr:detail`; events kept in memory only. Spec and plan in this repo's
+  `docs/superpowers/{specs,plans}/2026-10-12-details-tabs*`. Checked: typecheck, vitest, the web
+  preview over CDP (each tab, rows opening, the tab kept after a reload, no GitHub text on the
+  Session tab, a 280 px panel without sideways scroll, the phone's Panel). Not checked: a real
+  `pr:detail` read against GitHub, the real web app over the bridge, Windows. Open points: TODO
+  ("Session details → GitHub (#103)").
+
+- **The README is rewritten for developers (#90)** (merged to `main` from branch
+  `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in
+  `docs/images/` (four copied from the website, `accounts-setup.svg` drawn in the same style), a
+  Quick start, links to masterdeck.dev and the docs. Checked: every local link and guide anchor,
+  masterdeck.dev's pages answer. Not checked: the render on GitHub (needs a push).
+
+- **Costs time filter** (issue #88) is merged to `main` (from branch
+  `worktree-MasterDeck-Terminal-88-costs-timeline`, not pushed) and installed locally (2026-10-12): presets and a custom range in the Costs view, costs and tokens kept
+  per local hour (`shared/timeline.ts`; ARCHITECTURE "The Costs time filter"). Checked: typecheck,
+  vitest, and the web preview (`/?preview` now has fixture cost history) at 1400 px and 390 px.
+  Open points are in TODO ("Costs time filter").
+
+- **MasterDeck installs, updates and reloads its mods (#93)** (branch
+  `worktree-MasterDeck-Terminal-93-mods-install`, draft PR, not merged, **not installed**: the
+  rebuild of the real app copies over `~/.claude/masterdeck/mods`, so it waits for the user's
+  word). `mods/` ships in the app and is copied to `<home>/mods` at launch when it changed; Setup's
+  **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check, the
+  marketplace, each mod, `prependPlugins`) and remove them, backing up settings.json before every
+  change; a Needs-you **MODS** item offers **Reload idle sessions**; `prependNote` says where
+  `prependPlugins` is ignored. Checked: typecheck, vitest (153 files passed, 2 skipped; 1771 tests
+  passed, 4 skipped), the isolated app with the real `claude` 2.1.296 and a temp `CLAUDE_CONFIG_DIR`
+  (Install, Remove, backups, the real settings.json's hash unchanged), a packaged dir build's
+  `Resources/mods`. Not checked: the reload item with real sessions, an update over the user's
+  copy, Windows. Open points: TODO ("Mods install (#93)").
 
 - **Meetings (#102)** are built on branch `worktree-MasterDeck-Terminal-102-meetings` (from 537cd0f,
   the capture notes, to the docs commit that carries this line): not merged, not pushed, installed
@@ -433,6 +541,11 @@ buttons; it does not go through macOS window drag regions.
   while recording (the popout's line and switch, the rail mark: typecheck and `micLine`'s tests
   only), the Accessibility prompt, whether its grant reaches the helper, any real meeting app's
   labels. Open points: TODO ("The mic follows the meeting app's mute").
+  **`origin/main` merged in** (2026-10-13, up to PR #116): the session's Notes are a tab of
+  Details beside Session, GitHub, Diff and Files (Mods moved to Tools on main), `btw.ts` uses
+  `claudeOnce`'s `tidyProjects`, and the Meetings CSS reads theme tokens only (the theme lint).
+  Checked: typecheck, vitest (208 files passed, 2 skipped; 2543 tests passed, 4 skipped),
+  `npm run build`. Not checked on screen.
 
 - **Workflow agent loops (#82)** are built on branch `worktree-MasterDeck-Terminal-82-agent-loops`
   (local `main` merged in at 9e00e29, so it also carries the mods of #86; pushed as PR #101, not
@@ -474,7 +587,7 @@ buttons; it does not go through macOS window drag regions.
   `claude attach`. Prototype mods: a core `mods/masterdeck` (per-session switches, heartbeat) and
   `masterdeck-ticket`, `masterdeck-alerts`, `masterdeck-note`, `masterdeck-loop` (`/md-loop`, #82),
   `masterdeck-board` (`/md-board`), and the app's side
-  (`deck/band/<sid>.json`, Session details → **Mods** with a switch per mod per session). Checked:
+  (`deck/band/<sid>.json`, Tools → **Mods** with a switch per mod per session). Checked:
   typecheck, vitest (151 files passed, 2 skipped; 1738 tests passed, 4 skipped), `claude plugin
   validate` / `test` / tsc for each mod, the Mods tab in the web preview at 1400 and 390 px, and
   throwaway sessions: the line at 80/110/160 columns, toasts, `/md-note` against a stand-in pump,

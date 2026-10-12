@@ -7,6 +7,8 @@ import type {
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
+import type { WatchEvent } from "./watches";
+import type { PrDetail } from "./prDetail";
 import type { Settings } from "./settings";
 import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
@@ -19,6 +21,9 @@ import type { TokensByDay } from "./tokens";
 import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
+import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
+import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
+import type { DiffBase } from "./sessionTabs";
 import type { HookEntry } from "./workflow";
 import type {
   CustomTrigger,
@@ -65,6 +70,7 @@ export interface WorkflowStatus extends FlowProgress {
   from: string | null;
 }
 import type { SessionSummary } from "./summary";
+import type { ProcsAnswer } from "./sessionProcs";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
 
@@ -100,6 +106,7 @@ export const CH = {
   showInboxItem: "app:showInboxItem",
   getState: "state:get",
   watchStop: "watch:stop",
+  watchEvents: "watch:events",
   accountSignIn: "account:signIn",
   accountCancel: "account:cancel",
   accountReopen: "account:reopen",
@@ -119,6 +126,9 @@ export const CH = {
   setVisible: "app:setVisible",
   openExternal: "app:openExternal",
   openEditor: "app:openEditor",
+  procsList: "procs:list",
+  procsOutput: "procs:output",
+  openPort: "procs:openPort",
   copy: "app:copy",
   stopSession: "session:stop",
   stopOtherSession: "session:stopOther",
@@ -156,6 +166,7 @@ export const CH = {
   workflowSave: "workflow:save",
   workflowTemplateSave: "workflow:templateSave",
   workflowTemplateDelete: "workflow:templateDelete",
+  workflowBuiltinRestore: "workflow:builtinRestore",
   sessionWorkflowGet: "workflow:sessionGet",
   workflowStatus: "workflow:status",
   workflowLoopHistory: "workflow:loopHistory",
@@ -172,8 +183,12 @@ export const CH = {
   peersSet: "peers:set",
   peersSync: "peers:sync",
   modSet: "mod:set",
+  modsInstall: "mods:install",
+  modsUninstall: "mods:uninstall",
+  modsReload: "mods:reload",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
+  prDetail: "pr:detail",
   issueBody: "issue:body",
   issueSubIssues: "issue:subIssues",
   shellPrepare: "shell:prepare",
@@ -234,6 +249,15 @@ export const CH = {
   meetingsNotNow: "meetings:notNow",
   meetingsShowRecord: "meetings:showRecord",
   notesChanged: "notes:changed",
+  filesList: "files:list",
+  filesRead: "files:read",
+  diffList: "diff:list",
+  diffFile: "diff:file",
+  btwList: "btw:list",
+  btwAsk: "btw:ask",
+  btwStop: "btw:stop",
+  btwRemove: "btw:remove",
+  btwEvent: "btw:event",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
   ticketCreate: "ticket:create",
@@ -305,6 +329,8 @@ export interface DeckApi {
   getState(): Promise<AppState | null>;
   /** Stop a monitor MasterDeck runs (its session is told). */
   watchStop(id: string): Promise<boolean>;
+  /** A monitor's or PR watch's last events, newest first (Session details → GitHub). A read. */
+  watchEvents(id: string): Promise<WatchEvent[]>;
   /** Start the browser sign-in with this provider (progress arrives as AppState.account). */
   accountSignIn(provider: "google" | "github" | "apple"): Promise<void>;
   accountCancel(): Promise<void>;
@@ -350,6 +376,10 @@ export interface DeckApi {
   issueSubIssues(
     ticket: Ticket,
   ): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }>;
+  /** A PR's checks, reviews, unresolved threads and comments (Session details → GitHub). A read. */
+  prDetail(
+    url: string,
+  ): Promise<{ ok: true; detail: PrDetail } | { ok: false; message: string }>;
   prSummary(
     url: string,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;
@@ -497,6 +527,21 @@ export interface DeckApi {
   /** The offer's notification was clicked: show the rail's Record popout. The window only. */
   onMeetingsShowRecord(cb: () => void): () => void;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
+  /** The files in a session's folder (its own `cwd`), for Details → Files and ⌘P. Read only. */
+  filesList(key: string): Promise<FileList>;
+  /** One file of a session's folder for a file tab, or why it is not shown (binary, too large …). */
+  filesRead(key: string, path: string): Promise<FileRead>;
+  /** The changed files of a session's folder against HEAD or the merge base (Details → Diff). */
+  diffList(key: string, base: DiffBase): Promise<ChangeList>;
+  /** One changed file's diff for a diff tab. */
+  diffFile(key: string, path: string, base: DiffBase): Promise<DiffRead>;
+  /** A session's side questions (Tools → BTW), oldest first: asked there and `/btw` typed in its terminal. */
+  btwList(key: string): Promise<BtwEntry[]>;
+  /** Ask a side question about a session, as `/btw` does; the answer comes as btw events. */
+  btwAsk(key: string, question: string): Promise<BtwAskResult>;
+  btwStop(key: string, id: string): Promise<boolean>;
+  btwRemove(key: string, id: string): Promise<boolean>;
+  onBtwEvent(cb: (e: BtwEvent) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */
   ticketCreate(
@@ -613,6 +658,8 @@ export interface DeckApi {
     triggers: CustomTrigger[];
     /** The monitor library. */
     monitors: MonitorDef[];
+    /** Built-ins the user deleted that can be written back (Restore built-ins). */
+    builtinsRemoved: string[];
   }>;
   /** Save the default workflow (what new sessions copy). */
   workflowSave(flow: Flow): Promise<CliResult>;
@@ -621,8 +668,16 @@ export interface DeckApi {
     id: string | null,
     name: string,
     flow: Flow,
-  ): Promise<CliResult & { id?: string }>;
+  ): Promise<
+    CliResult & {
+      id?: string;
+      /** On a saved built-in: the store's state of it (edited, renamed …) after the save. */
+      builtin?: WorkflowTemplate["builtin"];
+    }
+  >;
   workflowTemplateDelete(id: string): Promise<CliResult>;
+  /** Write a built-in back as shipped (Restore original), or with null every deleted one. */
+  workflowBuiltinRestore(id: string | null): Promise<CliResult>;
   /** Set up the workflow builder's folder for the workflow open on the canvas. */
   workflowBuilderPrepare(
     templateId: string,
@@ -679,8 +734,14 @@ export interface DeckApi {
   peersSet(a: string, b: string, on: boolean): Promise<CliResult>;
   /** Linked sessions → Sync now: summarize this session and refresh what its peers see. */
   peersSync(sessionKey: string): Promise<CliResult>;
-  /** Session details → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
+  /** Tools → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
+  /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
+  modsInstall(): Promise<CliResult>;
+  /** Take them out again (every mod, the marketplace, prependPlugins). */
+  modsUninstall(): Promise<CliResult>;
+  /** Type /reload-plugins into every idle session that runs older mods (or none). */
+  modsReload(): Promise<CliResult>;
   setBoardOpen(open: boolean): void;
   /** Repository view: the repositories the Board tab on screen shows. MasterDeck reads the issues of the ones it does not hold yet (or holds for over an hour); it writes nothing. */
   boardRepos(repos: string[]): void;
@@ -694,6 +755,12 @@ export interface DeckApi {
   setFocus(sessionId: string | null): void;
   setVisible(sessionIds: string[]): void;
   openExternal(url: string): void;
+  /** The session's running processes: its Claude Code shells, what runs below them, their ports (Details). */
+  procsList(key: string): Promise<ProcsAnswer>;
+  /** The last few KB one of them wrote, when its output goes to a file (a background command). */
+  procsOutput(key: string, pid: number): Promise<{ ok: true; text: string } | { ok: false; message: string }>;
+  /** Open a local server in the browser: `http://localhost:<port>` (or an IP literal); anything else is refused. */
+  openPort(url: string): void;
   openEditor(dir: string): Promise<CliResult>;
   copy(text: string): void;
   stopSession(bgId: string, name: string): Promise<CliResult>;
