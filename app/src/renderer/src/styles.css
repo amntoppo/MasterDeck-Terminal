@@ -972,6 +972,25 @@ button.gh-toggle:hover { background: var(--bg-3); }
 .d-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; font-size: 12px; color: var(--muted); }
 .d-grid b { color: var(--text); font-weight: 600; }
 .d-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+/* Details → Session → Processes (#115) */
+.d-proc { display: flex; flex-direction: column; gap: 3px; padding: 7px 0; border-top: 1px solid var(--line); }
+.d-proc:first-of-type { border-top: none; padding-top: 0; }
+.d-proc.ended { opacity: .65; }
+.d-proc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.d-proc-cmd { display: inline-flex; align-items: center; gap: 7px; flex: 1 1 160px; min-width: 0; border: none; background: none; padding: 0; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; }
+.d-proc-cmd > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-proc-cmd:disabled { cursor: default; }
+.d-proc-cmd:hover:not(:disabled) > span:nth-child(2) { color: var(--accent); }
+.d-port { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: var(--accent-soft); color: var(--text); border-radius: 10px; padding: 1px 8px; font-size: 11px; font-family: var(--mono); white-space: nowrap; cursor: pointer; }
+span.d-port { cursor: default; }
+button.d-port:hover { border-color: var(--accent); }
+.d-proc-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; padding-left: 15px; font-variant-numeric: tabular-nums; }
+.d-proc-meta .bad { color: var(--red); }
+.d-proc-cwd { font-size: 11px; padding-left: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-proc-detail { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0 15px; }
+.d-proc-kids { list-style: none; margin: 0; padding: 0; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+.d-proc-kids li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-proc-out { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
 .d-peer { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .d-peer-name { font-weight: 500; }
 .d-x { margin-left: auto; border: none; background: none; padding: 0 4px; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }

@@ -180,6 +180,7 @@ web tabs keep working.
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
 | Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
+| A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -384,6 +385,18 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-12)
+
+- **Session processes in Details (#115)** are built on branch
+  `worktree-MasterDeck-Terminal-115-session-processes` (draft PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). Details → Session → **Processes**: the
+  session's Claude Code shells and what runs below them, what a command left running, their ports
+  (open in the browser), folder, pid, uptime, CPU / memory and last output; exited background
+  commands keep their exit code for a minute (ARCHITECTURE "Session details → Session → Processes").
+  Checked: typecheck, vitest (169 files passed, 2 skipped; 2067 tests passed, 4 skipped), the parsers against this Mac's real `ps` / `lsof` and a live session's
+  tree, and the isolated app with a stand-in `claude` whose session ran `npm run dev` and two Python
+  servers (list, ports, expanded output following along, the list emptying when they were killed).
+  Not checked: the installed app with a real session, a port click opening the browser, the web
+  app, Linux, Windows. Open points: TODO ("Session processes (#115)").
 
 - **Built-in workflows (#104)** are built on branch
   `worktree-MasterDeck-Terminal-104-builtin-workflows` (3d5503a, 21a5f82, a42f78b and the review

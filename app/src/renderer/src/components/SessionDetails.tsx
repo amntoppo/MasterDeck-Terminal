@@ -18,6 +18,7 @@ import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
 import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
 import { peerRows } from "./peersView";
+import { SessionProcs } from "./SessionProcs";
 
 interface Props {
   session: Session;
@@ -40,7 +41,8 @@ const asTab = (v: unknown): DetailsTab => (v === "github" ? v : "session");
  * Everything about the open session, in the right panel's Details tab (it replaced the status bar
  * above the terminal), in three tabs (#103): Session (what waits on you, status, workflow, linked
  * sessions, branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub
- * (ticket, PRs, monitors: GitHubDetails) and Mods. The picked tab is kept across sessions and restarts.
+ * (ticket, PRs, monitors: GitHubDetails) and Mods. Session also lists the session's running
+ * processes and their ports (SessionProcs, #115). The picked tab is kept across sessions and restarts.
  */
 export function SessionDetails({
   session: s,
@@ -270,6 +272,8 @@ export function SessionDetails({
           </div>
         </section>
       )}
+
+      <SessionProcs session={s} now={now} />
 
       <section className="dsec">
         <div className="eyebrow">Worktrees</div>

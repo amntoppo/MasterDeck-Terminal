@@ -151,6 +151,10 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setFocus: local,
   setVisible: local,
   openExternal: local,
+  procsList: invoke(CH.procsList),
+  procsOutput: invoke(CH.procsOutput),
+  // A port is on the Mac: a browser elsewhere cannot open its localhost.
+  openPort: blocked,
   openEditor: blocked,
   copy: local,
   stopSession: invoke(CH.stopSession),

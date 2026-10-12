@@ -408,7 +408,17 @@ checkout whose branch was once linked to a ticket does not link it.
 - **Session details (right panel → Details)** has two tabs, and the one you pick stays picked
   (per window; the web app keeps its own):
   - **Session:** what waits on you, the status, the workflow, schedules, linked sessions, the
-    worktrees or folder and branch, context, tokens, model, diff, and the session's actions.
+    session's **Processes**, the worktrees or folder and branch, context, tokens, model, diff, and
+    the session's actions.
+  - **Processes** lists what the session started that is still running: its background commands
+    (a dev server, `npm run dev`, `uv run …`), the tool call running now, and what a command left
+    running when it ended (`cmd &`), with everything they started below them. Each row shows the
+    command, how long it has been up, its pid, CPU and memory, its folder, and the **ports** it
+    listens on: click `localhost:8000 ↗` to open it in your browser (on the web app the port is
+    shown, not opened: it is on the Mac). Click the command to see the processes below it and its
+    last output, which follows along. The list refreshes every few seconds while it is on screen;
+    a background command that ends shows **exited** with its exit code for a minute, then drops
+    off. macOS and Linux only for now.
   - **GitHub:** a row each for the **Ticket**, the **Pull requests** and the **Monitors**, with
     counts and status badges while closed and **↗** to open the item on GitHub. Click a row to open
     it, and open what is inside it in turn: the ticket's steps, its note and its **Sub-issues**

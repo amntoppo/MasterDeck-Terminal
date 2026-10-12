@@ -196,6 +196,8 @@ import { DeckHooks } from "./deckHooks";
 import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
+import { SessionProcs } from "./sessionProcs";
+import { isPortUrl } from "@shared/sessionProcs";
 import {
   installStatusline,
   isInstalled,
@@ -246,6 +248,7 @@ const paths = resolvePaths(
 const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
+const sessionProcs = new SessionProcs(run);
 const cli = new MasterCli(run, paths.libDir, paths.python);
 // Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
 const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
@@ -3234,6 +3237,23 @@ function registerIpc(): void {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
+  reg.handle(CH.procsList, (_e, key: unknown) => {
+    const s = typeof key === "string" ? latest?.sessions.find((x) => x.key === key) : undefined;
+    if (!s) return { ok: false, message: "session not found" };
+    return sessionProcs.list({
+      key: s.key,
+      pid: s.state === "done" ? null : s.pid,
+      transcript: sources.sessionFacts(s.sessionId, s.key).transcript,
+    });
+  });
+  reg.handle(CH.procsOutput, (_e, key: unknown, pid: unknown) =>
+    typeof key === "string" && Number.isInteger(pid)
+      ? sessionProcs.output(key, pid as number)
+      : { ok: false, message: "bad request" },
+  );
+  reg.on(CH.openPort, (e, url: unknown) => {
+    if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
+  });
   reg.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
   reg.handle(CH.accountSignIn, (_e, p: unknown) => {
     if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
