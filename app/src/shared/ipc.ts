@@ -121,6 +121,7 @@ export const CH = {
   setFocus: "app:setFocus",
   setVisible: "app:setVisible",
   openExternal: "app:openExternal",
+  openLink: "app:openLink",
   openEditor: "app:openEditor",
   procsList: "procs:list",
   procsOutput: "procs:output",
@@ -666,6 +667,8 @@ export interface DeckApi {
   setFocus(sessionId: string | null): void;
   setVisible(sessionIds: string[]): void;
   openExternal(url: string): void;
+  /** A link clicked in a terminal: http or https only (`isWebLink`), anything else is ignored. */
+  openLink(url: string): void;
   /** The session's running processes: its Claude Code shells, what runs below them, their ports (Details). */
   procsList(key: string): Promise<ProcsAnswer>;
   /** The last few KB one of them wrote, when its output goes to a file (a background command). */

@@ -14,6 +14,11 @@ One window for all your Claude Code sessions, laid out as a command center:
     side by side; **+** opens the new-terminal / new-session menu. A row always shows the session's
     name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
+    **⌘-click** (Ctrl-click on Windows and in a browser off a Mac) an `http://` or `https://` link in
+    it to open it in your browser: a dev server's `http://127.0.0.1:20060`, a link that wraps onto
+    the next line, or a link with its own text (OSC 8). Hold the key over a link to see it underlined.
+    A plain click still selects text. In the web app the browser opens it, so a `localhost` link
+    is that computer's, not the Mac's.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
     ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Tools**
     (**Queue**, **BTW** and **Mods**) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
@@ -263,7 +268,7 @@ Open files from:
   filter box. Click a file to open it.
 - **⌘P**: type part of a file's name in the open session's folder, ↵ opens it.
 - **⌘-click a path in the terminal** (Ctrl-click on Windows) that Claude printed, relative or
-  absolute, inside the session's folder.
+  absolute, inside the session's folder (underlined while you hold the key).
 
 MasterDeck only reads here: nothing in these tabs changes a file. The web app shows the same tabs,
 reading the files on your Mac over the encrypted line, only inside the session's folder; a file or

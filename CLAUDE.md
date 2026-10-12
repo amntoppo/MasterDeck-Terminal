@@ -174,6 +174,7 @@ web tabs keep working.
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | A session's tabs (Terminal, files, diffs), Details → Diff / Files, ⌘P, ⌘-click paths | `shared/sessionTabs.ts` (model), `renderer/src/sessionTabsStore.ts` (per `Session.key`, localStorage, `onOpen`), `renderer/.../SessionTabs.tsx`, `FileTab.tsx`, `DiffTab.tsx`, `DiffList.tsx`, `FileTree.tsx`, `QuickOpen.tsx`, `renderer/src/usePull.ts` (3 s while shown), `renderer/src/highlight.ts`; reads: `main/sessionFiles.ts` behind `files:*` / `diff:*`, guarded by `sessionFileCall` (`main/remoteGuards.ts`) and `insideRoot` / `relativeTo` / `findPaths` (`shared/filePath.ts`), parsers `shared/diff.ts`, limits `shared/fileView.ts`, web size cap `webFit` (`shared/sessionFiles.ts`). Nothing in `AppState` |
+| Links in a terminal (⌘-click opens http/https in the browser, #119) | `shared/termLinks.ts` (`findUrls`, `isWebLink`), `renderer/src/termText.ts` (`logicalLine`, `cellRange`: a wrapped line read through its cells), the link provider and `linkHandler` (OSC 8) in `renderer/.../TerminalView.tsx`, `deck.openLink` (`app:openLink`, `local`: main's `shell.openExternal`, the web's `window.open`, both after `isWebLink`); `openExternal` stays https only |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
@@ -386,6 +387,18 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-13)
+
+- **Links in a terminal (#119)** are built on branch
+  `worktree-MasterDeck-Terminal-119-terminal-links` (not merged, not pushed, **not installed**: the
+  rebuild of the real app waits for the user's word). ⌘-click (Ctrl-click off a Mac) opens an
+  http/https address in the browser: localhost / IP with ports, paths and queries, one link across
+  wrapped rows, trailing punctuation left out, OSC 8 links; underline and pointer only while the
+  key is held (paths too, which now also wrap and survive wide characters). Checked: typecheck,
+  vitest (one timing flake in `browserBridge.test.ts` under the full run, passing alone), and the
+  isolated app over CDP with `shell.openExternal` stubbed in main: hover with and without ⌘, ⌘ down
+  and up while hovering, a plain click opening nothing, a ⌘-click on a plain, a wrapped and an OSC 8
+  link opening the right address, a `file:` OSC 8 link ignored. Not checked: the web app over the
+  bridge, Windows, a real Claude session's output. Open points: TODO ("Terminal links (#119)").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves

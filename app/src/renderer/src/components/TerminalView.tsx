@@ -1,10 +1,12 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ILink } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
 import { findPaths } from '@shared/filePath'
+import { findUrls, isWebLink } from '@shared/termLinks'
+import { cellRange, logicalLine } from '../termText'
 import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
 import { quickKeyBytes, type QuickKey } from '../quickKeys'
@@ -28,6 +30,9 @@ export function terminalKey(paneId: string, k: QuickKey): void {
   t?.input(quickKeyBytes(k, t.modes.applicationCursorKeysMode), true)
 }
 
+/** The key that makes a click open a link: ⌘ on a Mac, Ctrl elsewhere. */
+const linkMod = (e: { metaKey: boolean; ctrlKey: boolean }) => (keyPlatform() === 'darwin' ? e.metaKey : e.ctrlKey)
+
 interface Props {
   paneId: string
   spec: PaneSpec
@@ -37,7 +42,7 @@ interface Props {
   /** Bumped by the parent to force a fresh PTY (Reattach). */
   generation?: number
   onExit?: (code: number) => void
-  /** ⌘-click (Ctrl-click elsewhere) on a file path in the output: a session opens it as a tab. */
+  /** ⌘-click (Ctrl-click elsewhere) on a file path in the output: a session opens it as a tab. Web links open in the browser. */
   onOpenPath?: (path: string) => void
 }
 
@@ -72,6 +77,13 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       allowProposedApi: true,
       scrollback: 10000,
       macOptionIsMeta: true,
+      // OSC 8 links (separate display text): only http/https (xterm drops the rest), and only with the modifier.
+      // ponytail: xterm underlines these on hover without the modifier too; its decorations are not ours to set.
+      linkHandler: {
+        activate: (e, uri) => {
+          if (linkMod(e) && isWebLink(uri)) deck().openLink(uri)
+        },
+      },
     })
     const f = new FitAddon()
     t.loadAddon(f)
@@ -131,24 +143,56 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       deck().ptyWrite(paneId, d)
     })
     const resize = t.onResize(({ cols, rows }) => visibleRef.current && deck().ptyResize(paneId, cols, rows))
-    // File paths in the output open as tabs on ⌘-click. ponytail: columns are string offsets, so a
-    // line with wide characters before the path is off by them; map through cells if that matters.
+    // Web links and file paths in the output open on ⌘-click (Ctrl-click elsewhere): underlined, with a
+    // pointer, only while the modifier is held. A wrapped line is read as one, through its cells.
+    let modHeld = false
+    let hovered: ILink | null = null
+    const showMod = (on: boolean) => {
+      modHeld = on
+      if (hovered?.decorations) {
+        hovered.decorations.underline = on
+        hovered.decorations.pointerCursor = on
+      }
+    }
+    const onMod = (e: KeyboardEvent | MouseEvent) => showMod(linkMod(e))
+    const offMod = () => showMod(false)
+    const hostEl = host.current
+    hostEl.addEventListener('mousemove', onMod)
+    window.addEventListener('keydown', onMod, true)
+    window.addEventListener('keyup', onMod, true)
+    window.addEventListener('blur', offMod)
     const links = t.registerLinkProvider({
       provideLinks(y, done) {
-        if (!onPathRef.current) return done(undefined)
-        const text = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
-        const found = findPaths(text)
-        if (!found.length) return done(undefined)
-        done(
-          found.map((f) => ({
-            range: { start: { x: f.start + 1, y }, end: { x: f.end, y } },
-            text: text.slice(f.start, f.end),
-            decorations: { pointerCursor: true, underline: true },
-            activate: (e: MouseEvent) => {
-              if (keyPlatform() === 'darwin' ? e.metaKey : e.ctrlKey) onPathRef.current?.(f.path)
-            },
-          })),
-        )
+        const line = logicalLine(t.buffer.active, y)
+        const urls = findUrls(line.text)
+        const paths = onPathRef.current ? findPaths(line.text).filter((p) => !urls.some((u) => p.start < u.end && p.end > u.start)) : []
+        const found = [
+          ...urls.map((u) => ({ start: u.start, end: u.end, open: () => deck().openLink(u.url) })),
+          ...paths.map((p) => ({ start: p.start, end: p.end, open: () => onPathRef.current?.(p.path) })),
+        ]
+        const out = found
+          .map((f) => ({ ...f, range: cellRange(line, f.start, f.end) }))
+          .filter((f) => f.range.start.y <= y && f.range.end.y >= y)
+          .map((f) => {
+            const link: ILink = {
+              range: f.range,
+              text: line.text.slice(f.start, f.end),
+              decorations: { pointerCursor: modHeld, underline: modHeld },
+              activate: (e) => {
+                if (linkMod(e)) f.open()
+              },
+              // xterm swaps in its own decorations right after hover: set them once it has.
+              hover: () => {
+                hovered = link
+                queueMicrotask(() => hovered === link && showMod(modHeld))
+              },
+              leave: () => {
+                if (hovered === link) hovered = null
+              },
+            }
+            return link
+          })
+        done(out.length ? out : undefined)
       },
     })
     // Cmd+C copies a selection instead of sending ^C; Cmd+V pastes.
@@ -190,6 +234,10 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       input.dispose()
       resize.dispose()
       links.dispose()
+      hostEl.removeEventListener('mousemove', onMod)
+      window.removeEventListener('keydown', onMod, true)
+      window.removeEventListener('keyup', onMod, true)
+      window.removeEventListener('blur', offMod)
       offData()
       offExit()
       offState()

@@ -324,6 +324,7 @@ function previewDeck(noBoard: boolean): DeckApi {
     platform: 'web',
     home: '/Users/dev',
     openExternal: () => {},
+    openLink: () => {},
     copy: () => {},
     setFocus: () => {},
     setVisible: () => {},
