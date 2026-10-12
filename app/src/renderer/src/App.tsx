@@ -65,6 +65,7 @@ import { SessionTabBody, SessionTabRow } from "./components/SessionTabs";
 import { QuickOpen } from "./components/QuickOpen";
 import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
 import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
+import { relativeTo } from "@shared/filePath";
 import { deck, load, save, useAppState } from "./deck";
 import { savedPref, useTheme, useWebThemePref } from "./theme";
 
@@ -1782,6 +1783,10 @@ function SessionPane(p: {
             focusOnShow={p.focus}
             generation={gen}
             onExit={() => setExited(true)}
+            onOpenPath={(path) => {
+              const rel = relativeTo(s.cwd, path);
+              if (rel) sessionTabs.open(s.key, { kind: "file", path: rel });
+            }}
           />
           {exited && (
             <div className="overlay">

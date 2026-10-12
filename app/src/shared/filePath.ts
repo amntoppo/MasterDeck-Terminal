@@ -20,6 +20,17 @@ export function insideRoot(p: unknown): string | null {
   return out.length ? out.join('/') : null
 }
 
+/**
+ * A path as a session printed it (relative to its folder, or absolute inside it) as a path inside
+ * the folder `root`, or null when it points anywhere else.
+ */
+export function relativeTo(root: string, p: string): string | null {
+  const r = root.replace(/\/+$/, '')
+  if (!r) return null
+  if (p.startsWith('/')) return p.startsWith(`${r}/`) ? insideRoot(p.slice(r.length + 1)) : null
+  return insideRoot(p)
+}
+
 export interface FoundPath {
   path: string
   line?: number
@@ -30,7 +41,7 @@ export interface FoundPath {
 
 // A path token not preceded by path or URL characters (so nothing inside a URL), then an optional
 // ":line[:col]" or "(line)".
-const PATH_RE = /(?<![\w./:~-])((?:\.{1,2}\/)?[\w@+-][\w.@+-]*(?:\/[\w.@+-]+)*)(?::(\d+)(?::(\d+))?|\((\d+)\))?/g
+const PATH_RE = /(?<![\w./:~-])((?:\.{1,2}\/|\/)?[\w@+-][\w.@+-]*(?:\/[\w.@+-]+)*)(?::(\d+)(?::(\d+))?|\((\d+)\))?/g
 
 /**
  * File paths in a line of terminal text, for ⌘-click. A path needs an extension with a letter

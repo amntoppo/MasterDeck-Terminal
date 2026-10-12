@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findPaths, insideRoot } from './filePath'
+import { findPaths, insideRoot, relativeTo } from './filePath'
 
 describe('insideRoot', () => {
   it('accepts relative paths and normalises them', () => {
@@ -14,6 +14,20 @@ describe('insideRoot', () => {
     expect(insideRoot(3)).toBeNull()
     expect(insideRoot(null)).toBeNull()
     expect(insideRoot('x'.repeat(5000))).toBeNull()
+  })
+})
+
+describe('relativeTo', () => {
+  it('turns a path printed in the terminal into one inside the session folder', () => {
+    expect(relativeTo('/w/repo', 'src/a.ts')).toBe('src/a.ts')
+    expect(relativeTo('/w/repo/', './a.md')).toBe('a.md')
+    expect(relativeTo('/w/repo', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  })
+  it('refuses paths outside it', () => {
+    expect(relativeTo('/w/repo', '/w/repo-other/a.ts')).toBeNull()
+    expect(relativeTo('/w/repo', '/etc/hosts')).toBeNull()
+    expect(relativeTo('/w/repo', '../x.ts')).toBeNull()
+    expect(relativeTo('', 'a.ts')).toBeNull()
   })
 })
 
@@ -33,6 +47,13 @@ describe('findPaths', () => {
     expect(findPaths('https://github.com/a/b.ts and www.x.com')).toEqual([])
     expect(findPaths('hello world')).toEqual([])
     expect(findPaths('v1.2.3 and 0.9.0')).toEqual([])
+  })
+  it('finds absolute paths', () => {
+    expect(findPaths('Wrote /w/repo/src/a.ts:3')).toEqual([{ path: '/w/repo/src/a.ts', line: 3, start: 6, end: 24 }])
+  })
+  it('ignores a path cut by a line wrap (no extension left)', () => {
+    // ponytail: a path xterm wraps onto the next row is two halves; neither half is found.
+    expect(findPaths('see src/components/Sess')).toEqual([])
   })
   it('finds paths in quotes and brackets', () => {
     expect(findPaths('"src/a.ts"').map((p) => p.path)).toEqual(['src/a.ts'])

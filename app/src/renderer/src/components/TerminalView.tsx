@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { PaneSpec } from '@shared/types'
 import { keyOverride } from '@shared/keys'
+import { findPaths } from '@shared/filePath'
 import { deck } from '../deck'
 import { createPredictor, type Predictor } from '../predictiveEcho'
 import { quickKeyBytes, type QuickKey } from '../quickKeys'
@@ -36,9 +37,13 @@ interface Props {
   /** Bumped by the parent to force a fresh PTY (Reattach). */
   generation?: number
   onExit?: (code: number) => void
+  /** ⌘-click (Ctrl-click elsewhere) on a file path in the output: a session opens it as a tab. */
+  onOpenPath?: (path: string) => void
 }
 
-export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 0, onExit }: Props) {
+export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 0, onExit, onOpenPath }: Props) {
+  const onPathRef = useRef(onOpenPath)
+  onPathRef.current = onOpenPath
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
@@ -126,6 +131,26 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       deck().ptyWrite(paneId, d)
     })
     const resize = t.onResize(({ cols, rows }) => visibleRef.current && deck().ptyResize(paneId, cols, rows))
+    // File paths in the output open as tabs on ⌘-click. ponytail: columns are string offsets, so a
+    // line with wide characters before the path is off by them; map through cells if that matters.
+    const links = t.registerLinkProvider({
+      provideLinks(y, done) {
+        if (!onPathRef.current) return done(undefined)
+        const text = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const found = findPaths(text)
+        if (!found.length) return done(undefined)
+        done(
+          found.map((f) => ({
+            range: { start: { x: f.start + 1, y }, end: { x: f.end, y } },
+            text: text.slice(f.start, f.end),
+            decorations: { pointerCursor: true, underline: true },
+            activate: (e: MouseEvent) => {
+              if (keyPlatform() === 'darwin' ? e.metaKey : e.ctrlKey) onPathRef.current?.(f.path)
+            },
+          })),
+        )
+      },
+    })
     // Cmd+C copies a selection instead of sending ^C; Cmd+V pastes.
     t.attachCustomKeyEventHandler((e) => {
       const o = keyOverride(e)
@@ -164,6 +189,7 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       ro.disconnect()
       input.dispose()
       resize.dispose()
+      links.dispose()
       offData()
       offExit()
       offState()
