@@ -128,7 +128,7 @@ function previewDeck(noBoard: boolean): DeckApi {
         flow: loopFlow(),
         templates: [
           { id: 'default', name: 'Default', flow: loopFlow() },
-          { id: b.id, name: b.name, flow: b.flow, builtin: { id: b.id, edited: true, updated: true, description: b.description, whenToUse: b.whenToUse } },
+          { id: b.id, name: b.name, flow: b.flow, builtin: { id: b.id, edited: true, renamed: false, updated: true, description: b.description, whenToUse: b.whenToUse } },
         ],
         triggers: [],
         monitors: [],

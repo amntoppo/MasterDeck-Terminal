@@ -160,6 +160,7 @@ import {
   setMonitors,
   type MonitorDef,
 } from "@shared/flow";
+import { builtinById } from "@shared/builtinWorkflows";
 import { ticketContext } from "@shared/ticketBuilder";
 import { shellQuote } from "@shared/workflow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
@@ -1860,7 +1861,7 @@ async function confirmLoopStop(name: string): Promise<boolean> {
   });
   return choice.response === 1;
 }
-/** Put the trigger hooks in (or take them out when no workflow has a step). */
+
 /** The built-in workflows MasterDeck ships, into the templates (#104); a failure only logs. */
 const seedWorkflows = () => {
   try {
@@ -1870,6 +1871,7 @@ const seedWorkflows = () => {
   }
 };
 
+/** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
  * The custom trigger library is registered first, so compiling and the editor know it.
@@ -2822,9 +2824,24 @@ function registerIpc(): void {
         typeof name === "string" ? name : "",
         parseFlow(raw),
       );
-      if (!tid) return { ok: false, message: "give the template a name" };
+      if (!tid)
+        return {
+          ok: false,
+          message:
+            typeof id === "string" && builtinById(id) && !workflows().template(id)
+              ? "that built-in was deleted: restore it first (Restore built-ins)"
+              : "give the template a name",
+        };
       const r = syncWorkflowHooks();
-      return r.ok ? { ok: true, message: "template saved", id: tid } : r;
+      // The store's word on a built-in (edited, renamed), so the window need not work it out.
+      return r.ok
+        ? {
+            ok: true,
+            message: "template saved",
+            id: tid,
+            builtin: workflows().template(tid)?.builtin,
+          }
+        : r;
     },
   );
   reg.handle(CH.workflowTemplateDelete, async (e, id: unknown) => {

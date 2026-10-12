@@ -533,7 +533,13 @@ export interface DeckApi {
     id: string | null,
     name: string,
     flow: Flow,
-  ): Promise<CliResult & { id?: string }>;
+  ): Promise<
+    CliResult & {
+      id?: string;
+      /** On a saved built-in: the store's state of it (edited, renamed …) after the save. */
+      builtin?: WorkflowTemplate["builtin"];
+    }
+  >;
   workflowTemplateDelete(id: string): Promise<CliResult>;
   /** Write a built-in back as shipped (Restore original), or with null every deleted one. */
   workflowBuiltinRestore(id: string | null): Promise<CliResult>;

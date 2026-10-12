@@ -675,12 +675,28 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
   converted: new records are hourly, older days stay days.
 
+## Built-in workflows: open points (2026-10-12, issue #104)
+
+- **More built-ins.** Candidates: a second-opinion review, a refactor, a security audit, release
+  notes, issue triage. Each needs a flow, a description, a when-to-use line and the checks in
+  `builtinWorkflows.test.ts`.
+- **Use as Default.** A built-in can be picked per session (Start dialog, Details) but not made the
+  Default in one click; today the user copies its blocks into the Default by hand.
+- **A per-project test command for loop checks.** The loops ask the agent for evidence (and TDD /
+  CI doctor have their own checks); a project's own test command (from Setup or the repository)
+  would let every built-in's loop run the suite as its check.
+- **The builder does not know the built-ins.** Build with Claude gets the open workflow and the
+  format, not the built-ins as examples to start from or compare with.
+- **The Template bar sorts by file name**, so the built-ins show in `md-*` order (Bug fix, CI
+  doctor, Superpowers, TDD, Ticket to PR), not the spec's order (Superpowers first).
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Built-in workflows (issue #104): Superpowers, Ticket to PR, Bug fix, TDD (locked tests) and CI doctor ship as templates with a mark (`builtin: {id, hash, raw}`); seeded at launch, an unedited one follows a new release (keeping a rename), an edited one is never touched; a **Built-in** chip (**· edited**), the description and when to use it under the bar, **Duplicate**, **Restore original** (also after a rename only) and **Restore built-ins (n)**; TDD's check guards every `tests:` commit of the branch, CI doctor's every run of the commit | 3d5503a, 21a5f82, a42f78b and the review fixes, branch `worktree-MasterDeck-Terminal-104-builtin-workflows` (not merged, not installed) | spec `docs/superpowers/specs/2026-10-12-builtin-workflows-design.md` on branch `docs/builtin-workflows-104` (not pushed) |
 | The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
 | Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
 | MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |

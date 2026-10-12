@@ -44,19 +44,20 @@
         "name": "Implement until the tests pass",
         "members": [
           "implement",
-          "verify"
+          "verify",
+          "overfit"
         ],
-        "w": 540,
+        "w": 830,
         "h": 148,
         "check": {
-          "command": "base=$(git log --grep='^tests:' -1 --format=%H) && test -n \"$base\" && git diff --quiet \"$base\" -- $(git show --name-only --format= \"$base\")",
+          "command": "d=$(git rev-parse -q --verify origin/HEAD); export N=\"${d:+^$d}\" GIT_LITERAL_PATHSPECS=1; o=$(git -c core.quotepath=off log -z --format= --name-only --grep='^tests:' HEAD $N -- | xargs -0 sh -c 'for f do [ -n \"$f\" ] || continue; c=$(git log -1 --full-history --format=%H --grep=\"^tests:\" HEAD $N -- \"$f\") && [ -n \"$c\" ] || exit 1; git cat-file -e \"$c:$f\" 2>/dev/null || continue; git diff --quiet \"$c\" -- \"$f\" || { echo \"changed: $f\" >&2; exit 1; }; echo ok; done' sh) && [ -n \"$o\" ]",
           "output": "",
           "outputMode": "match",
           "timeoutMin": 1
         },
         "agentDone": {
           "on": true,
-          "goal": "Every test passes. Name the command you ran and its result."
+          "goal": "Every test passes, and the overfitting reviewer found no gap or each gap it found now has a passing test. Name the command you ran and its result."
         },
         "limits": {
           "iterations": 15,
@@ -69,7 +70,7 @@
         "x": 900,
         "y": 268,
         "kind": "instruction",
-        "text": "Write the smallest code that makes the next failing test pass. Never edit, skip or delete the tests of the \"tests:\" commit: MasterDeck checks that they are unchanged."
+        "text": "Write the smallest code that makes the next failing test pass. Never edit, skip or delete the tests of a \"tests:\" commit: MasterDeck checks that they are unchanged."
       },
       {
         "id": "verify",
@@ -80,10 +81,10 @@
       },
       {
         "id": "overfit",
-        "x": 1510,
-        "y": 220,
+        "x": 1480,
+        "y": 268,
         "kind": "instruction",
-        "text": "Launch a fresh reviewer subagent (Agent tool) to look for overfitting: hard-coded answers, branches on the tests' inputs, cases only the tests get right. For each real gap, add a test in a new commit starting \"tests:\", see it fail, then make it pass without touching the tests. Run all the tests again."
+        "text": "Once every test passes, launch a fresh reviewer subagent (Agent tool) to look for overfitting: hard-coded answers, branches on the tests' inputs, cases only the tests get right. For each real gap, add a test in a new commit starting \"tests:\" (MasterDeck guards it like the first), see it fail, then make it pass without touching the tests. Run all the tests again."
       },
       {
         "id": "open-pr",
@@ -174,9 +175,15 @@
         "kind": "then"
       },
       {
-        "id": "e-build-overfit",
-        "from": "build",
+        "id": "e-verify-overfit",
+        "from": "verify",
         "to": "overfit",
+        "kind": "then"
+      },
+      {
+        "id": "e-build-open-pr",
+        "from": "build",
+        "to": "open-pr",
         "kind": "met"
       },
       {
@@ -184,12 +191,6 @@
         "from": "build",
         "to": "stuck",
         "kind": "limit"
-      },
-      {
-        "id": "e-overfit-open-pr",
-        "from": "overfit",
-        "to": "open-pr",
-        "kind": "then"
       },
       {
         "id": "e-t-before-pr-b-pr-review",

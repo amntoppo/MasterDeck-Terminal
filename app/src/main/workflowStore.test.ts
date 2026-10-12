@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultFlow, edgeId, type Flow } from "@shared/flow";
-import { BUILTIN_WORKFLOWS, type BuiltinWorkflow } from "@shared/builtinWorkflows";
+import { BUILTIN_WORKFLOWS, flowHash, type BuiltinWorkflow } from "@shared/builtinWorkflows";
 import { WorkflowStore } from "./workflow";
 
 const SID = "aaaaaaaa-1111-2222-3333-444444444444";
@@ -163,6 +163,7 @@ describe("WorkflowStore", () => {
       expect(one(w).builtin).toEqual({
         id: "md-acme-one",
         edited: false,
+        renamed: false,
         updated: false,
         description: "About md-acme-one.",
         whenToUse: "When md-acme-one fits.",
@@ -195,6 +196,60 @@ describe("WorkflowStore", () => {
       expect(one(w, next).builtin!.edited).toBe(false);
       expect(w.restoreBuiltin("md-acme-one", next)).toBe(true);
       expect(one(w, next).name).toBe("Acme one, v2");
+    });
+
+    it("the mark keeps the flow's hash as written, so a later parseFlow cannot make it look edited", () => {
+      const { home, w, file } = setup();
+      w.seedBuiltins(LIST);
+      expect(read(file("md-acme-one")).builtin.raw).toMatch(/^[a-z0-9]+$/);
+      // A later release whose parse reads the same file differently: the parsed hash no longer
+      // matches the mark, the raw one does.
+      const later = new WorkflowStore(home, (f) => `v2-${flowHash(f)}`);
+      expect(later.templates(LIST).find((x) => x.id === "md-acme-one")!.builtin).toMatchObject({
+        edited: false,
+        updated: false,
+      });
+      expect(later.seedBuiltins(LIST)).toBe(0);
+      const next = [ship("md-acme-one", "Do one better."), LIST[1]];
+      expect(later.seedBuiltins(next)).toBe(1);
+      expect(one(later, next).flow).toEqual(next[0].flow);
+      expect(read(file("md-acme-one")).builtin.hash).toBe(`v2-${flowHash(next[0].flow)}`);
+      // An edit is still an edit under either hash.
+      later.saveTemplate("md-acme-one", "Acme one", flowWith("Mine."));
+      expect(one(later, next).builtin!.edited).toBe(true);
+    });
+
+    it("an old mark without raw is read by the parsed hash alone", () => {
+      const { w, file } = setup();
+      w.seedBuiltins(LIST);
+      const f = file("md-acme-one");
+      const doc = read(f);
+      delete doc.builtin.raw;
+      writeFileSync(f, JSON.stringify(doc));
+      expect(one(w).builtin!.edited).toBe(false);
+      const next = [ship("md-acme-one", "Do one better."), LIST[1]];
+      expect(w.seedBuiltins(next)).toBe(1);
+      expect(read(f).builtin.raw).toBeTruthy();
+    });
+
+    it("a rename alone shows as renamed, not edited", () => {
+      const { w } = setup();
+      w.seedBuiltins(LIST);
+      w.saveTemplate("md-acme-one", "Our one", LIST[0].flow);
+      expect(one(w).builtin).toMatchObject({ edited: false, renamed: true });
+      expect(w.restoreBuiltin("md-acme-one", LIST)).toBe(true);
+      expect(one(w).builtin).toMatchObject({ edited: false, renamed: false });
+    });
+
+    it("a save never brings back a deleted shipped built-in", () => {
+      const { w, file } = setup();
+      const b = BUILTIN_WORKFLOWS[0];
+      w.seedBuiltins();
+      expect(w.deleteTemplate(b.id)).toBe(true);
+      expect(w.saveTemplate(b.id, b.name, b.flow)).toBeNull();
+      expect(existsSync(file(b.id))).toBe(false);
+      // A plain template's id that is missing is still written (a save after a rename elsewhere).
+      expect(w.saveTemplate("acme-chores", "Acme chores", flowWith("x."))).toBe("acme-chores");
     });
 
     it("an edited built-in is kept, and says when the shipped flow changed since", () => {

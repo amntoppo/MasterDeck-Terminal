@@ -40,6 +40,9 @@ import {
 import {
   BUILTIN_WORKFLOWS,
   flowHash,
+  markFor,
+  sameAsMark,
+  type BuiltinMark,
   type BuiltinWorkflow,
 } from "@shared/builtinWorkflows";
 
@@ -274,23 +277,21 @@ export function writeFlow(
   writeAtomic(file, docJson({ flow, from: null, at: null }, name, extra));
 }
 
-/** A built-in's mark in its template file: which one it is, and the shipped flow's hash when written. */
-interface BuiltinMark {
-  id: string;
-  hash: string;
-}
-
 /** The mark of a template file `id`; a mark naming another id is no mark (a hand-made copy). */
 function markOf(raw: unknown, id: string): BuiltinMark | null {
   const b = (raw as { builtin?: unknown } | null)?.builtin as
-    | { id?: unknown; hash?: unknown }
+    | { id?: unknown; hash?: unknown; raw?: unknown }
     | undefined;
   return b &&
     typeof b === "object" &&
     b.id === id &&
     typeof b.hash === "string" &&
     b.hash
-    ? { id, hash: b.hash }
+    ? {
+        id,
+        hash: b.hash,
+        ...(typeof b.raw === "string" && b.raw ? { raw: b.raw } : {}),
+      }
     : null;
 }
 
@@ -324,7 +325,14 @@ export interface WorkflowRun {
 export class WorkflowStore {
   /** Sessions already given their copy (or found with one) in this run. */
   private seen = new Set<string>();
-  constructor(private home: string) {}
+  /**
+   * `hash` is the parsed-flow fingerprint of built-in marks; tests pass another to stand in for a
+   * later parseFlow that reads the same files differently.
+   */
+  constructor(
+    private home: string,
+    private hash: (f: Flow) => string = flowHash,
+  ) {}
 
   get defaultFile(): string {
     return join(this.home, "workflow.json");
@@ -429,9 +437,17 @@ export class WorkflowStore {
   private writeBuiltin(b: BuiltinWorkflow, name = b.name): void {
     const file = this.templateFile(b.id);
     if (file)
-      writeFlow(file, b.flow, name, {
-        builtin: { id: b.id, hash: flowHash(b.flow) },
-      });
+      writeFlow(file, b.flow, name, { builtin: markFor(b, this.hash) });
+  }
+
+  /** Whether a template file still holds the flow its mark was written with. */
+  private unedited(raw: unknown, mark: BuiltinMark): boolean {
+    return sameAsMark(mark, (raw as { flow?: unknown } | null)?.flow, this.hash);
+  }
+
+  /** Whether a mark was written from the flow `b` ships now. */
+  private current(mark: BuiltinMark, b: BuiltinWorkflow): boolean {
+    return sameAsMark(mark, b.flow, this.hash);
   }
 
   /**
@@ -454,8 +470,8 @@ export class WorkflowStore {
       }
       const raw = readRaw(file);
       const mark = markOf(raw, b.id);
-      if (!mark || mark.hash === flowHash(b.flow)) continue;
-      if (flowHash(parseDoc(raw).flow) !== mark.hash) continue; // edited: the user's now
+      if (!mark || this.current(mark, b)) continue;
+      if (!this.unedited(raw, mark)) continue; // edited: the user's now
       // The update brings the flow; a name is the user's choice, kept (Restore original resets it).
       const name = (raw as { name?: unknown } | null)?.name;
       this.writeBuiltin(
@@ -521,20 +537,22 @@ export class WorkflowStore {
       const mark = markOf(raw, id);
       // A mark naming no shipped built-in (one dropped from a later release) is a plain template.
       const b = mark ? list.find((x) => x.id === mark.id) : undefined;
-      const edited = !!mark && flowHash(flow) !== mark.hash;
+      const edited = !!mark && !this.unedited(raw, mark);
+      const name =
+        typeof raw?.name === "string" && raw.name.trim()
+          ? raw.name.slice(0, 60)
+          : id;
       out.push({
         id,
-        name:
-          typeof raw?.name === "string" && raw.name.trim()
-            ? raw.name.slice(0, 60)
-            : id,
+        name,
         flow,
         ...(mark && b
           ? {
               builtin: {
                 id: b.id,
                 edited,
-                updated: edited && mark.hash !== flowHash(b.flow),
+                renamed: name !== b.name,
+                updated: edited && !this.current(mark, b),
                 description: b.description,
                 whenToUse: b.whenToUse,
               },
@@ -568,6 +586,10 @@ export class WorkflowStore {
         tid = `${tid.slice(0, 40)}-${Math.random().toString(36).slice(2, 5)}`;
     const file = this.templateFile(tid);
     if (!file) return null;
+    // A deleted built-in is not written back by a save (a late autosave, a stale tab): it would
+    // come back without its mark. Restore built-ins brings it back.
+    if (id && !existsSync(file) && BUILTIN_WORKFLOWS.some((b) => b.id === id))
+      return null;
     // Saving a built-in (an edit, a rename) keeps its mark as written, so seeding sees the edit;
     // a new template (a Duplicate) never carries one.
     const mark = id ? markOf(readRaw(file), tid) : null;

@@ -1482,13 +1482,14 @@ export interface WorkflowTemplate {
   name: string;
   flow: Flow;
   /**
-   * Set on a built-in MasterDeck ships (its file carries the mark `builtin: {id, hash}`):
-   * `edited` when its flow is no longer the one written, `updated` when it is edited and the
-   * shipped flow changed since.
+   * Set on a built-in MasterDeck ships (its file carries the mark `builtin: {id, hash, raw}`):
+   * `edited` when its flow is no longer the one written, `renamed` when its name is not the
+   * shipped one, `updated` when it is edited and the shipped flow changed since.
    */
   builtin?: {
     id: string;
     edited: boolean;
+    renamed: boolean;
     updated: boolean;
     description: string;
     whenToUse: string;

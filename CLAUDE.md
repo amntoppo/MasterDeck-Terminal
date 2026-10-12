@@ -160,7 +160,7 @@ web tabs keep working.
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
-| Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
+| Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`, `rawFlowHash`, `sameAsMark`: the one "edited" rule), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
 | The Start dialog's options (worktree made before the start, permission mode, remembered choices) and its Markdown preview | `shared/startOptions.ts`, `main/startWorktree.ts` (`worktreeInfo`, `createWorktree`), `worktreeFolder` in `main/remoteGuards.ts`, `AssignRequest.permissionMode` → `master add --permission-mode` → `spawn.command`, `shared/markdown.ts` + `renderer/.../MarkdownView.tsx` (reuse for any Markdown view), `renderer/.../AssignDialog.tsx` |
@@ -380,6 +380,20 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-12)
+
+- **Built-in workflows (#104)** are built on branch
+  `worktree-MasterDeck-Terminal-104-builtin-workflows` (3d5503a, 21a5f82, a42f78b and the review
+  fixes; not merged, **not installed yet**). Five templates MasterDeck ships (Superpowers, Ticket to
+  PR, Bug fix, TDD (locked tests), CI doctor) are seeded at launch with a mark
+  (`builtin: {id, hash, raw}`), kept up to date while unedited, left alone once edited; the Workflow
+  window shows a **Built-in** chip, the description and when to use it, **Duplicate**, **Restore
+  original** (edited or renamed) and **Restore built-ins (n)**. TDD's check guards every `tests:`
+  commit of the branch; CI doctor's waits for every run of the commit. Spec in the backend repo
+  (`docs/superpowers/specs/2026-10-12-builtin-workflows-design.md`, branch
+  `docs/builtin-workflows-104`, not pushed). Checked: typecheck, vitest (162 files passed, 2
+  skipped; 2006 tests passed, 4 skipped), and, before the review fixes, the isolated app and the web
+  preview as in a42f78b. Live runs of the built-ins: see the PR. Open points: TODO ("Built-in
+  workflows: open points").
 
 - **The README is rewritten for developers (#90)** (merged to `main` from branch
   `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in

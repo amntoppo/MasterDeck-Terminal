@@ -342,17 +342,21 @@ checkout whose branch was once linked to a ticket does not link it.
   - **Ticket to PR**: a well-described ticket of ordinary size that needs no design session.
   - **Bug fix**: a bug report; it reproduces the bug and pins it with a failing test first.
   - **TDD (locked tests)**: behaviour you can state as inputs and outputs; the tests are committed
-    first, and MasterDeck checks they stay unchanged while the code is written.
+    first (a commit whose message starts with `tests:`), and MasterDeck checks that every test of
+    every `tests:` commit on the branch stays unchanged while the code is written. Inside the loop,
+    a reviewer looks for code that only fits the tests; a gap it finds gets a new `tests:` commit.
   - **CI doctor**: a branch whose CI should be green before review; after each push the session
-    waits for CI, reads the failure and fixes it.
+    waits for every CI run of the commit, reads a failure and fixes it, until all of them pass. A
+    commit no CI runs for passes too, and the session says so.
 
   Pick one in the Start dialog or apply it from a session's Details like any template. A built-in
-  can be edited and renamed; its chip then reads **Built-in · edited** and **Restore original** puts
-  back the flow and name MasterDeck ships (your edits are lost; it asks first). **Duplicate** (in
-  place of + New template) makes a copy of your own. Delete asks first and removes it for good until
-  you press **Restore built-ins (n)**, which brings back every deleted one. A new MasterDeck version
-  updates the built-ins you have not edited; an edited one is left as it is, and its line says when
-  a newer version ships.
+  can be edited and renamed. Once its blocks change, the chip reads **Built-in · edited**. Once its
+  blocks or its name differ from what MasterDeck ships, **Restore original** shows: it puts back the
+  flow and name MasterDeck ships (your edits are lost; it asks first). **Duplicate** (in place of
+  + New template) makes a copy of your own. Delete asks first and removes it for good until you
+  press **Restore built-ins (n)**, which brings back every deleted one. A new MasterDeck version
+  updates the built-ins whose blocks you have not changed (a renamed one keeps your name); an
+  edited one is left as it is, and its line says when a newer version ships.
 - **A session's own workflow:** each session gets its own copy the first time MasterDeck sees it: the
   Default, or the template picked under **Workflow** in the Start dialog. Its **Details** tab shows a
   **Workflow** line: the workflow point the session reached last (linked to its issue, pushed, PR

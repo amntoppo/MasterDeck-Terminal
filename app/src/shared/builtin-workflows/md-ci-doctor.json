@@ -13,7 +13,7 @@
         "x": 290,
         "y": 0,
         "kind": "instruction",
-        "text": "If this session's branch already has a failing CI run (gh run list --branch <branch> --limit 1), start with it: read its log (gh run view <id> --log-failed), fix the root cause, commit and push this branch. Never push to main or master."
+        "text": "Only for a branch this session created or was asked to work on (the ticket's branch): if it already has a failing CI run (gh run list --branch <branch> --limit 1), start with it: read its log (gh run view <id> --log-failed), fix the root cause, commit and push that branch. On any other branch skip this step, and never push another branch. Never push to main or master."
       },
       {
         "id": "t-linked",
@@ -49,19 +49,19 @@
         "w": 540,
         "h": 148,
         "check": {
-          "command": "gh run list --commit \"$(git rev-parse HEAD)\" --limit 1 --json status,conclusion --jq '.[0] | \"\\(.status) \\(.conclusion)\"'",
-          "output": "^completed success$",
+          "command": "gh run list --commit \"$(git rev-parse HEAD)\" --json status,conclusion --jq 'if length == 0 then \"none\" elif all(.[]; .status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"skipped\" or .conclusion == \"neutral\")) then \"completed success\" else map(\"\\(.status) \\(.conclusion)\") | join(\", \") end'",
+          "output": "^(completed success|none)$",
           "outputMode": "match",
           "timeoutMin": 2
         },
         "agentDone": {
           "on": true,
-          "goal": "CI is green for the latest push: name the run and its result. (A flaky test or the environment cannot be fixed here: say so and change nothing; the loop then ends at its limit and you report it.)"
+          "goal": "CI is green for the latest push: name each run of this commit and its result, or say that no CI ran for it. (A flaky test or the environment cannot be fixed here: say so and change nothing; the loop then ends at its limit and you report it.)"
         },
         "limits": {
           "iterations": 5,
           "minutes": 0,
-          "stall": 2
+          "stall": 0
         }
       },
       {
@@ -69,7 +69,7 @@
         "x": 320,
         "y": 268,
         "kind": "instruction",
-        "text": "Wait for this commit's CI run and read its result: find it with gh run list --commit $(git rev-parse HEAD), wait with gh run watch <id>. On a failure read gh run view <id> --log-failed and say whether it is a real failure, a flaky test or the environment."
+        "text": "Wait for this commit's CI runs: list them with gh run list --commit $(git rev-parse HEAD). If none shows up after a minute, say there is no CI for this commit. Otherwise wait for each with gh run watch <id> --exit-status, run with a long Bash timeout (up to 10 minutes), and don't end your turn while a run is in progress. On a failure read gh run view <id> --log-failed and say whether it is a real failure, a flaky test or the environment."
       },
       {
         "id": "fix",
@@ -83,7 +83,7 @@
         "x": 930,
         "y": 220,
         "kind": "instruction",
-        "text": "Tell the user what still fails in CI and why, and what you tried."
+        "text": "Tell the user what still fails in CI and why, and what you tried. If no CI run ever showed up for this commit, say that instead: nothing was checked."
       },
       {
         "id": "t-before-pr",

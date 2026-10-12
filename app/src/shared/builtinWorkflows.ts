@@ -77,11 +77,65 @@ export const builtinById = (id: string): BuiltinWorkflow | undefined =>
 
 /**
  * A flow's fingerprint: over the parsed flow, so formatting and dropped junk never count as an
- * edit, while moving a block does. cyrb53 (53 bits): no crypto module, so it runs in the
- * renderer too.
+ * edit, while moving a block does.
  */
 export function flowHash(flow: Flow): string {
-  const s = JSON.stringify(parseFlow(flow));
+  return cyrb53(JSON.stringify(parseFlow(flow)));
+}
+
+/** JSON with every object's keys sorted: the same value always gives the same text. */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+/**
+ * A flow's fingerprint exactly as written, without parseFlow (key order and formatting aside). A
+ * built-in's mark keeps it as `raw`, so a later parseFlow that reads the same file differently
+ * never makes an unedited built-in look edited.
+ */
+export function rawFlowHash(flow: unknown): string {
+  return cyrb53(stableJson(flow));
+}
+
+/** A built-in's mark in its template file: which one it is, and the written flow's hashes. */
+export interface BuiltinMark {
+  id: string;
+  /** flowHash of the flow written. */
+  hash: string;
+  /** rawFlowHash of the flow written; marks written before it have none. */
+  raw?: string;
+}
+
+/** The mark of a built-in written as shipped. */
+export const markFor = (
+  b: BuiltinWorkflow,
+  hash: (f: Flow) => string = flowHash,
+): BuiltinMark => ({ id: b.id, hash: hash(b.flow), raw: rawFlowHash(b.flow) });
+
+/**
+ * Whether a flow, as read from its file (not parsed), is still the one its mark was written with:
+ * the raw hash matches, or the parsed one does (all an older mark has). The one rule for "edited".
+ */
+export function sameAsMark(
+  mark: BuiltinMark,
+  rawFlow: unknown,
+  hash: (f: Flow) => string = flowHash,
+): boolean {
+  if (mark.raw && rawFlowHash(rawFlow) === mark.raw) return true;
+  return hash(parseFlow(rawFlow)) === mark.hash;
+}
+
+/** cyrb53 (53 bits): no crypto module, so it runs in the renderer too. */
+function cyrb53(s: string): string {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
   for (let i = 0; i < s.length; i++) {
