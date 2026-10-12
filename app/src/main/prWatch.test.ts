@@ -98,10 +98,13 @@ describe('PrWatch', () => {
   })
   it('watches a new PR of a session, tells it about a new thread once its turn is over, and not again', async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? withThread('rename x') : lightPr))
-    const { w, sent } = make(gh)
+    const { w, sent, file } = make(gh)
     w.sync(one(NOW - 60_000), () => true, NOW)
     expect(w.info([sess()])).toMatchObject([{ id: `pr:${url(1)}`, sessionId: SID, description: 'PR watch · web#1' }])
     await w.poll(NOW)
+    // What it found is listed for Details, and kept in memory only.
+    expect(w.events(`pr:${url(1)}`)).toEqual([{ at: NOW, kind: 'thread', by: 'bob', text: 'rename x' }])
+    expect((await import('node:fs')).readFileSync(file, 'utf8')).not.toContain('"log"')
     w.deliver([sess('working')], NOW)
     expect(sent).toEqual([])
     w.deliver([sess()], NOW)
@@ -283,6 +286,7 @@ describe('PrWatch', () => {
     w.sync(one(NOW), () => true, NOW)
     expect(w.stop(`pr:${url(1)}`)).toBe(true)
     expect(w.stop(`pr:${url(1)}`)).toBe(false)
+    expect(w.events(`pr:${url(1)}`).map((e) => e.kind)).toEqual(['note'])
     expect(w.info([sess()])).toEqual([])
     w.deliver([sess()], NOW)
     await tick()
