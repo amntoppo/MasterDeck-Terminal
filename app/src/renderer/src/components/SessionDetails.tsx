@@ -16,6 +16,8 @@ import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
+import { DiffList } from "./DiffList";
+import { FileTree } from "./FileTree";
 import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
 import { peerRows } from "./peersView";
 
@@ -31,16 +33,18 @@ interface Props {
   onNote?: (t: Ticket) => void;
 }
 
-type DetailsTab = "session" | "github";
+type DetailsTab = "session" | "github" | "diff" | "files";
 const TAB_KEY = "md.detailsTab";
 // "mods" (remembered from before Mods moved to the Tools tab) opens Session.
-const asTab = (v: unknown): DetailsTab => (v === "github" ? v : "session");
+const asTab = (v: unknown): DetailsTab =>
+  v === "github" || v === "diff" || v === "files" ? v : "session";
 
 /**
  * Everything about the open session, in the right panel's Details tab (it replaced the status bar
- * above the terminal), in three tabs (#103): Session (what waits on you, status, workflow, linked
- * sessions, branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub
- * (ticket, PRs, monitors: GitHubDetails) and Mods. The picked tab is kept across sessions and restarts.
+ * above the terminal), in tabs: Session (what waits on you, status, workflow, linked sessions,
+ * branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub (ticket,
+ * PRs, monitors: GitHubDetails; #103), Diff (changed files: DiffList) and Files (FileTree; #113).
+ * Mods is in the Tools tab. The picked tab is kept across sessions and restarts.
  */
 export function SessionDetails({
   session: s,
@@ -61,6 +65,9 @@ export function SessionDetails({
     setTabState(t);
     save(TAB_KEY, t);
   };
+  // Changed files, as Details → Diff last read them (for the count on its tab).
+  const [diffCount, setDiffCount] = useState<{ key: string; n: number | null }>({ key: s.key, n: null });
+  const diffN = diffCount.key === s.key ? diffCount.n : null;
   const since = useStateSince(s);
   const starred = useStars().includes(s.key);
   const status = sessionStatus(
@@ -129,6 +136,14 @@ export function SessionDetails({
             )}
           </>,
         )}
+        {tabButton(
+          "diff",
+          <>
+            Diff
+            {diffN ? <span className="d-tab-count"> {diffN}</span> : null}
+          </>,
+        )}
+        {tabButton("files", "Files")}
       </div>
     </div>
   );
@@ -137,6 +152,20 @@ export function SessionDetails({
       <div className="details">
         {tabs}
         <GitHubDetails session={s} state={state} notes={notes} onNote={onNote} />
+      </div>
+    );
+  if (tab === "diff")
+    return (
+      <div className="details">
+        {tabs}
+        <DiffList key={s.key} session={s} onCount={(n) => setDiffCount({ key: s.key, n })} />
+      </div>
+    );
+  if (tab === "files")
+    return (
+      <div className="details">
+        {tabs}
+        <FileTree key={s.key} session={s} />
       </div>
     );
 

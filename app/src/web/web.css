@@ -69,7 +69,7 @@
 
 /* Touch: hover-only controls show, tooltips go, targets grow, inputs stop iOS zooming. */
 .app.phone .srow .srow-x { visibility: visible; }
-.app.phone .tab .x { opacity: .6; }
+.app.phone .stab-x { opacity: .7; min-width: 28px; min-height: 28px; }
 .app.phone .rb:hover::after { display: none; }
 html.phone .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
 .app.phone .col-btn, .app.phone .icon-btn, .app.phone .card-x { min-width: 36px; min-height: 36px; }

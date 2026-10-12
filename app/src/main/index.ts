@@ -93,7 +93,9 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { SessionFiles } from "./sessionFiles";
+import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
 import { isPermissionMode } from "@shared/startOptions";
 import { heldForTrust } from "@shared/trust";
@@ -247,6 +249,8 @@ const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
 const cli = new MasterCli(run, paths.libDir, paths.python);
+// Read-only views of a session's folder for its file and diff tabs.
+const sessionFiles = new SessionFiles(run);
 // Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
 const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 // The account each session was started as (resume, Details, PR watch).
@@ -2232,6 +2236,27 @@ function registerIpc(): void {
   reg.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // A session's files and diffs: the folder is the listed session's own (sessionFileCall); a web
+  // answer is cut to fit the bridge (webFit).
+  const sessionFilesAt = (key: unknown, want?: { path?: unknown; base?: unknown }) =>
+    sessionFileCall(latest?.sessions ?? [], key, want);
+  const fit = <T extends FileList | FileRead | ChangeList | DiffRead>(remote: boolean, a: T): T => (remote ? webFit(a) : a);
+  reg.handle(CH.filesList, async (e, key: unknown) => {
+    const c = sessionFilesAt(key);
+    return c.ok ? fit(isRemote(e), await sessionFiles.list(c.root)) : c;
+  });
+  reg.handle(CH.filesRead, async (e, key: unknown, path: unknown) => {
+    const c = sessionFilesAt(key, { path });
+    return c.ok ? fit(isRemote(e), await sessionFiles.read(c.root, c.path!)) : c;
+  });
+  reg.handle(CH.diffList, async (e, key: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.changes(c.root, c.base!)) : c;
+  });
+  reg.handle(CH.diffFile, async (e, key: unknown, path: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { path, base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.fileDiff(c.root, c.path!, c.base!)) : c;
+  });
   // Notes: the store checks every argument itself (ids, limits, characters).
   reg.handle(CH.notesList, () => notes.list());
   reg.handle(CH.notesGet, (_e, id: unknown) => notes.get(id));

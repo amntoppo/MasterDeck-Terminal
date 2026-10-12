@@ -6,14 +6,15 @@ const mac = { platform: 'darwin', inTextField: false, dialogOpen: false }
 const win = { platform: 'win32', inTextField: false, dialogOpen: false }
 
 describe('matchShortcut', () => {
-  it('maps Shift+arrows to views and tabs', () => {
-    expect(matchShortcut(key('ArrowLeft', { shift: true }), mac)).toEqual({ id: 'view-prev' })
-    expect(matchShortcut(key('ArrowRight', { shift: true }), mac)).toEqual({ id: 'view-next' })
+  it('maps Shift+Up/Down to tabs and leaves Shift+Left/Right alone', () => {
+    expect(matchShortcut(key('ArrowLeft', { shift: true }), mac)).toBeNull()
+    expect(matchShortcut(key('ArrowRight', { shift: true }), win)).toBeNull()
+    expect(SHORTCUTS.some((s) => s.id.startsWith('view-'))).toBe(false)
     expect(matchShortcut(key('ArrowUp', { shift: true }), mac)).toEqual({ id: 'tab-prev' })
     expect(matchShortcut(key('ArrowDown', { shift: true }), win)).toEqual({ id: 'tab-next' })
   })
   it('leaves Shift+arrows to text fields and dialogs', () => {
-    expect(matchShortcut(key('ArrowLeft', { shift: true }), { ...mac, inTextField: true })).toBeNull()
+    expect(matchShortcut(key('ArrowDown', { shift: true }), { ...mac, inTextField: true })).toBeNull()
     expect(matchShortcut(key('ArrowUp', { shift: true }), { ...mac, dialogOpen: true })).toBeNull()
     expect(matchShortcut(key('ArrowUp'), mac)).toBeNull()
   })
@@ -25,6 +26,12 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key('M', { meta: true, shift: true }), mac)).toEqual({ id: 'master' })
     expect(matchShortcut(key('F', { meta: true, shift: true }), mac)).toEqual({ id: 'history' })
     expect(matchShortcut(key('f', { meta: true }), mac)).toEqual({ id: 'find' })
+  })
+  it('opens quick-open with Mod P', () => {
+    expect(matchShortcut(key('p', { meta: true }), mac)).toEqual({ id: 'quick-open' })
+    expect(matchShortcut(key('p', { ctrl: true }), win)).toEqual({ id: 'quick-open' })
+    expect(matchShortcut(key('p', { ctrl: true }), mac)).toBeNull()
+    expect(SHORTCUTS.find((s) => s.id === 'quick-open')?.keys).toBe('Mod P')
   })
   it('does not take the default menu combos', () => {
     for (const k of ['r', 'w', 'm', 'h', 'q', '0', 'c', 'v']) expect(matchShortcut(key(k, { meta: true }), mac)).toBeNull()

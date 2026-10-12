@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, worktreeFolder } from './remoteGuards'
+import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, sessionFileCall, worktreeFolder } from './remoteGuards'
 it('remote save keeps current remoteEnabled and theme and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, font: 14 }, { remoteEnabled: true, theme: 'dark' })).toEqual({ remoteEnabled: true, font: 14, theme: 'dark' })
   expect(remoteSettings({ font: 14 }, { remoteEnabled: true, font: 12, theme: 'light' })).toEqual({ remoteEnabled: true, font: 14, theme: 'light' })
@@ -103,4 +103,26 @@ it("a worktree is made only from the Mac's own window, in a folder that is there
   expect(worktreeFolder(true, tmpdir())).toMatchObject({ ok: false })
   expect(worktreeFolder(false, join(tmpdir(), 'no-such-folder-here'))).toMatchObject({ ok: false })
   expect(worktreeFolder(false, undefined)).toMatchObject({ ok: false })
+})
+
+describe('sessionFileCall', () => {
+  const sessions = [
+    { key: 'k1', cwd: '/w/repo' },
+    { key: 'k2', cwd: '' },
+  ]
+  it('takes the folder from the session, never from the caller', () => {
+    expect(sessionFileCall(sessions, 'k1')).toEqual({ ok: true, root: '/w/repo' })
+    expect(sessionFileCall(sessions, 'k1', { path: './src/a.ts' })).toEqual({ ok: true, root: '/w/repo', path: 'src/a.ts' })
+    expect(sessionFileCall(sessions, 'k1', { path: 'a', base: 'branch' })).toEqual({ ok: true, root: '/w/repo', path: 'a', base: 'branch' })
+    expect(sessionFileCall(sessions, 'k1', { base: 'uncommitted' })).toEqual({ ok: true, root: '/w/repo', base: 'uncommitted' })
+  })
+  it('refuses unknown sessions, sessions with no folder, bad paths and bad bases', () => {
+    expect(sessionFileCall(sessions, 'nope').ok).toBe(false)
+    expect(sessionFileCall(sessions, 3).ok).toBe(false)
+    expect(sessionFileCall(sessions, 'k2').ok).toBe(false)
+    expect(sessionFileCall(sessions, 'k1', { path: '../etc/passwd' }).ok).toBe(false)
+    expect(sessionFileCall(sessions, 'k1', { path: '/etc/passwd' }).ok).toBe(false)
+    expect(sessionFileCall(sessions, 'k1', { path: 7 }).ok).toBe(false)
+    expect(sessionFileCall(sessions, 'k1', { base: 'HEAD~3' }).ok).toBe(false)
+  })
 })

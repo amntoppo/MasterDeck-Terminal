@@ -235,6 +235,40 @@ A session you start yourself (`claude` in a shell) is not linked to any ticket u
 updates the skill's own file, which MasterDeck no longer reads.) Being in a
 checkout whose branch was once linked to a ticket does not link it.
 
+## A session's tabs: files and diffs
+
+Each session's terminal has its own row of tabs above it. **Terminal** is always first; it cannot
+be closed or moved. Other tabs show files and changes from the session's folder:
+
+- **A file tab** shows the file: Markdown (`.md`) rendered (**Preview** / **Source**), anything
+  else with syntax colours for its language and line numbers. A binary file, one over 1 MB or
+  20,000 lines, or one that is gone says so instead. **Reload** reads it again (it also reloads
+  when the session's turn ends); **Open in editor** opens it in your editor (desktop only).
+- **A diff tab** shows what changed in one file: removed lines in red, added in green, with old
+  and new line numbers. **Split** shows old and new side by side when the pane is wide enough
+  (remembered). **Open file** opens the whole file next to it. It stays live while it shows.
+
+Close a file or diff tab with **×** or a middle-click; closing the tab you are on moves to the one
+on its right (else its left). Each session keeps its tabs when you switch sessions, after a
+resume and after a restart.
+
+Open files from:
+- **Details → Diff**: the files changed in the session's folder, each with **A** (added),
+  **M** (modified), **D** (deleted) or **R** (renamed) and its `+`/`−` line counts.
+  **Uncommitted** compares with the last commit (new, untracked files count as added); **Branch**
+  shows everything since the branch left the default branch, commits included: what a PR would
+  hold. The list updates by itself every few seconds while it shows. Click a file to open its diff
+  (or go to it when it is open already).
+- **Details → Files**: the session's folder as a tree (git's files, ignored ones left out), with a
+  filter box. Click a file to open it.
+- **⌘P**: type part of a file's name in the open session's folder, ↵ opens it.
+- **⌘-click a path in the terminal** (Ctrl-click on Windows) that Claude printed, relative or
+  absolute, inside the session's folder.
+
+MasterDeck only reads here: nothing in these tabs changes a file. The web app shows the same tabs,
+reading the files on your Mac over the encrypted line, only inside the session's folder; a file or
+diff too big to send says so.
+
 ## Keeping many sessions moving
 
 - **Closing a Needs-you card (×):** hides it until the situation changes. A session card comes back
@@ -1351,13 +1385,14 @@ cards is in them.
 
 | Keys | What |
 |---|---|
-| `⇧←` / `⇧→` | Previous / next view: Terminals, Board View, PRs, Tasks |
 | `⇧↑` / `⇧↓` | Previous / next terminal tab (switches to Terminals) |
 | `⌘1`–`⌘9` | Terminal tab 1–9 |
 | `⌘T` | New terminal in the workspace (+ menu) |
 | `⌘⇧W` | Close the tab (the session keeps running) |
 | `⌘\` | Split two tabs side by side, or close the split |
 | `⌘K` | Command palette |
+| `⌘P` | Open a file of the open session in a tab |
+| `⌘`-click | A file path in a session's terminal opens it in a tab |
 | `⌘F` | Find in the open terminal, or on the Board or PRs screen |
 | `⌘⇧F` | History: search every session, jump to the match |
 | `⌘J` | Open the first Needs-you item |
@@ -1367,7 +1402,7 @@ cards is in them.
 | `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks, mods & skills, Remote, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
-Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where
+Shift+Up/Down work from a terminal too (they don't reach the shell), but not in a text box, where
 they select text, or while a dialog is open. `⌘C` copies a terminal selection.
 
 ## Windows notes
