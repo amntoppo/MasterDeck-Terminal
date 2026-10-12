@@ -37,6 +37,11 @@ import {
   type WorkflowDoc,
   type WorkflowTemplate,
 } from "@shared/flow";
+import {
+  BUILTIN_WORKFLOWS,
+  flowHash,
+  type BuiltinWorkflow,
+} from "@shared/builtinWorkflows";
 
 /**
  * What the Workflow view shows: every hook Claude Code runs (user settings, the workspace's
@@ -260,8 +265,33 @@ export function readSteps(file: string): CustomStep[] {
   }
 }
 
-export function writeFlow(file: string, flow: Flow, name?: string): void {
-  writeAtomic(file, docJson({ flow, from: null, at: null }, name));
+export function writeFlow(
+  file: string,
+  flow: Flow,
+  name?: string,
+  extra?: Record<string, unknown>,
+): void {
+  writeAtomic(file, docJson({ flow, from: null, at: null }, name, extra));
+}
+
+/** A built-in's mark in its template file: which one it is, and the shipped flow's hash when written. */
+interface BuiltinMark {
+  id: string;
+  hash: string;
+}
+
+/** The mark of a template file `id`; a mark naming another id is no mark (a hand-made copy). */
+function markOf(raw: unknown, id: string): BuiltinMark | null {
+  const b = (raw as { builtin?: unknown } | null)?.builtin as
+    | { id?: unknown; hash?: unknown }
+    | undefined;
+  return b &&
+    typeof b === "object" &&
+    b.id === id &&
+    typeof b.hash === "string" &&
+    b.hash
+    ? { id, hash: b.hash }
+    : null;
 }
 
 function writeAtomic(file: string, text: string): void {
@@ -307,6 +337,10 @@ export class WorkflowStore {
   }
   private get pendingFile(): string {
     return join(this.home, "workflows", "pending.json");
+  }
+  /** The built-ins the user deleted (`{removed: [...]}`), so a launch does not bring them back. */
+  get builtinsFile(): string {
+    return join(this.home, "workflows", "builtins.json");
   }
   private templateFile(id: string): string | null {
     if (id === DEFAULT_TEMPLATE) return this.defaultFile;
@@ -369,7 +403,106 @@ export class WorkflowStore {
     chmodSync(file, 0o755);
   }
 
-  templates(): WorkflowTemplate[] {
+  private removed(): string[] {
+    const r = (readRaw(this.builtinsFile) as { removed?: unknown } | null)
+      ?.removed;
+    return Array.isArray(r)
+      ? [
+          ...new Set(
+            r.filter(
+              (x): x is string =>
+                typeof x === "string" && /^[a-z0-9-]{1,48}$/.test(x),
+            ),
+          ),
+        ]
+      : [];
+  }
+
+  private setRemoved(ids: string[]): void {
+    writeAtomic(
+      this.builtinsFile,
+      JSON.stringify({ removed: [...new Set(ids)] }, null, 2) + "\n",
+    );
+  }
+
+  /** Write a built-in as shipped: its flow, name and mark. */
+  private writeBuiltin(b: BuiltinWorkflow, name = b.name): void {
+    const file = this.templateFile(b.id);
+    if (file)
+      writeFlow(file, b.flow, name, {
+        builtin: { id: b.id, hash: flowHash(b.flow) },
+      });
+  }
+
+  /**
+   * Bring the shipped built-ins into the templates (at launch, after `migrate()`). A missing one is
+   * written unless the user deleted it; an unedited one whose shipped flow changed is rewritten;
+   * an edited one, and any file without the mark (the user's), is left as it is. Returns how many
+   * files were written.
+   */
+  seedBuiltins(list: BuiltinWorkflow[] = BUILTIN_WORKFLOWS): number {
+    const removed = new Set(this.removed());
+    let wrote = 0;
+    for (const b of list) {
+      const file = this.templateFile(b.id);
+      if (!file || b.id === DEFAULT_TEMPLATE) continue;
+      if (!existsSync(file)) {
+        if (removed.has(b.id)) continue;
+        this.writeBuiltin(b);
+        wrote++;
+        continue;
+      }
+      const raw = readRaw(file);
+      const mark = markOf(raw, b.id);
+      if (!mark || mark.hash === flowHash(b.flow)) continue;
+      if (flowHash(parseDoc(raw).flow) !== mark.hash) continue; // edited: the user's now
+      // The update brings the flow; a name is the user's choice, kept (Restore original resets it).
+      const name = (raw as { name?: unknown } | null)?.name;
+      this.writeBuiltin(
+        b,
+        typeof name === "string" && name.trim() ? name.slice(0, 60) : b.name,
+      );
+      wrote++;
+    }
+    return wrote;
+  }
+
+  /**
+   * Write a built-in back as shipped (Restore original), or, with null, every deleted one
+   * (Restore built-ins) and clear the list. A file at its id without the mark is the user's and
+   * is never written over. False when nothing could be restored.
+   */
+  restoreBuiltin(
+    id: string | null,
+    list: BuiltinWorkflow[] = BUILTIN_WORKFLOWS,
+  ): boolean {
+    const removed = this.removed();
+    const ids = id === null ? removed : [id];
+    let wrote = 0;
+    for (const bid of ids) {
+      const b = list.find((x) => x.id === bid);
+      const file = b ? this.templateFile(b.id) : null;
+      if (!b || !file || b.id === DEFAULT_TEMPLATE) continue;
+      if (existsSync(file) && !markOf(readRaw(file), b.id)) continue;
+      this.writeBuiltin(b);
+      wrote++;
+    }
+    if (id === null) {
+      if (removed.length) this.setRemoved([]);
+    } else if (wrote && removed.includes(id))
+      this.setRemoved(removed.filter((r) => r !== id));
+    return wrote > 0;
+  }
+
+  /** The deleted built-ins that can be written back (Restore built-ins (n)). */
+  builtinsRemoved(list: BuiltinWorkflow[] = BUILTIN_WORKFLOWS): string[] {
+    return this.removed().filter((id) => {
+      const file = list.some((b) => b.id === id) ? this.templateFile(id) : null;
+      return !!file && !existsSync(file);
+    });
+  }
+
+  templates(list: BuiltinWorkflow[] = BUILTIN_WORKFLOWS): WorkflowTemplate[] {
     const out: WorkflowTemplate[] = [
       { id: DEFAULT_TEMPLATE, name: "Default", flow: this.defaultDoc().flow },
     ];
@@ -384,13 +517,29 @@ export class WorkflowStore {
         name?: unknown;
       } | null;
       const id = f.slice(0, -5);
+      const flow = parseDoc(raw).flow;
+      const mark = markOf(raw, id);
+      // A mark naming no shipped built-in (one dropped from a later release) is a plain template.
+      const b = mark ? list.find((x) => x.id === mark.id) : undefined;
+      const edited = !!mark && flowHash(flow) !== mark.hash;
       out.push({
         id,
         name:
           typeof raw?.name === "string" && raw.name.trim()
             ? raw.name.slice(0, 60)
             : id,
-        flow: parseDoc(raw).flow,
+        flow,
+        ...(mark && b
+          ? {
+              builtin: {
+                id: b.id,
+                edited,
+                updated: edited && mark.hash !== flowHash(b.flow),
+                description: b.description,
+                whenToUse: b.whenToUse,
+              },
+            }
+          : {}),
       });
     }
     return out;
@@ -408,21 +557,30 @@ export class WorkflowStore {
       return id;
     }
     if (!clean) return null;
-    const taken = new Set(this.templates().map((t) => t.id));
+    // A new template never takes a built-in's id, even a deleted one's: it stays restorable.
+    const taken = new Set([
+      ...this.templates().map((t) => t.id),
+      ...BUILTIN_WORKFLOWS.map((b) => b.id),
+    ]);
     let tid = id ?? templateId(clean);
     if (!id)
       while (taken.has(tid))
         tid = `${tid.slice(0, 40)}-${Math.random().toString(36).slice(2, 5)}`;
     const file = this.templateFile(tid);
     if (!file) return null;
-    writeFlow(file, flow, clean);
+    // Saving a built-in (an edit, a rename) keeps its mark as written, so seeding sees the edit;
+    // a new template (a Duplicate) never carries one.
+    const mark = id ? markOf(readRaw(file), tid) : null;
+    writeFlow(file, flow, clean, mark ? { builtin: mark } : undefined);
     return tid;
   }
 
   deleteTemplate(id: string): boolean {
     const file = id === DEFAULT_TEMPLATE ? null : this.templateFile(id);
     if (!file || !existsSync(file)) return false;
+    const mark = markOf(readRaw(file), id);
     unlinkSync(file);
+    if (mark) this.setRemoved([...this.removed(), id]);
     return true;
   }
 

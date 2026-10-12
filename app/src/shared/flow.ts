@@ -1481,6 +1481,18 @@ export interface WorkflowTemplate {
   id: string;
   name: string;
   flow: Flow;
+  /**
+   * Set on a built-in MasterDeck ships (its file carries the mark `builtin: {id, hash}`):
+   * `edited` when its flow is no longer the one written, `updated` when it is edited and the
+   * shipped flow changed since.
+   */
+  builtin?: {
+    id: string;
+    edited: boolean;
+    updated: boolean;
+    description: string;
+    whenToUse: string;
+  };
 }
 
 export const DEFAULT_TEMPLATE = "default";
@@ -1497,12 +1509,17 @@ export function parseDoc(raw: unknown): WorkflowDoc {
 }
 
 /** A workflow file as MasterDeck and the hooks read it: the flow, and what it compiles to. */
-export function docJson(doc: WorkflowDoc, name?: string): string {
+export function docJson(
+  doc: WorkflowDoc,
+  name?: string,
+  extra?: Record<string, unknown>,
+): string {
   const { steps, builtins } = compileFlow(doc.flow);
   return (
     JSON.stringify(
       {
         ...(name ? { name } : {}),
+        ...extra,
         from: doc.from,
         at: doc.at,
         flow: doc.flow,
