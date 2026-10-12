@@ -382,8 +382,8 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-12)
 
-- **Themes and a light theme (#105)** on branch `worktree-MasterDeck-Terminal-105-themes` (PR, not
-  merged): every colour is a token of `shared/themes.ts` (Dark = the old look, Light = Primer-based,
+- **Themes and a light theme (#105)** on branch `worktree-MasterDeck-Terminal-105-themes` (PR #108,
+  not merged; installed locally 2026-10-12, default Dark so the look is unchanged until picked): every colour is a token of `shared/themes.ts` (Dark = the old look, Light = Primer-based,
   AA-checked), Settings → General → **Appearance** (Light / Dark / System, default Dark; per browser
   in the web app), live switching including terminals (xterm `minimumContrastRatio` 4.5 in light).
   Spec and plan in the backend repo (`docs/themes-105`, not pushed). Checked: typecheck, vitest,
