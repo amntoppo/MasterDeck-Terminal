@@ -249,7 +249,7 @@ export function App() {
   // The Notes panel: null closed, {} the list, or the note to open.
   const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
   const notes = useNotes(!!state);
-  // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
+  // The Terminals screen's right panel: its tab (Details, Tools, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
   );
@@ -1417,7 +1417,7 @@ export function App() {
         <button
           className="panel-show"
           onClick={() => setInspOpen(true)}
-          title="Show the panel: Details, Queue, Summary"
+          title="Show the panel: Details, Tools, Summary"
         >
           ‹ Panel
         </button>

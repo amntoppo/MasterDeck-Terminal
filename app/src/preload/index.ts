@@ -81,6 +81,11 @@ const api: DeckApi = {
   notesSave: (input) => ipcRenderer.invoke(CH.notesSave, input),
   notesDelete: (id) => ipcRenderer.invoke(CH.notesDelete, id),
   onNotesChanged: (cb) => listen(CH.notesChanged, cb),
+  btwList: (key) => ipcRenderer.invoke(CH.btwList, key),
+  btwAsk: (key, question) => ipcRenderer.invoke(CH.btwAsk, key, question),
+  btwStop: (key, id) => ipcRenderer.invoke(CH.btwStop, key, id),
+  btwRemove: (key, id) => ipcRenderer.invoke(CH.btwRemove, key, id),
+  onBtwEvent: (cb) => listen(CH.btwEvent, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),
   onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),

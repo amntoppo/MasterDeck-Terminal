@@ -74,6 +74,12 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   notesSave: invoke(CH.notesSave),
   notesDelete: invoke(CH.notesDelete),
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
+  // Side questions run on the Mac (a forked claude -p); a browser asks and reads them as the window does.
+  btwList: invoke(CH.btwList),
+  btwAsk: invoke(CH.btwAsk),
+  btwStop: invoke(CH.btwStop),
+  btwRemove: invoke(CH.btwRemove),
+  onBtwEvent: { kind: "event", ch: CH.btwEvent },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
@@ -172,6 +178,7 @@ export const REMOTE_EVENTS: Record<string, string> = {
   onWorkflowDraft: CH.workflowDraft,
   onTicketsCreated: CH.ticketsCreated,
   onNotesChanged: CH.notesChanged,
+  onBtwEvent: CH.btwEvent,
 };
 
 /** Argument reshaping the preload does for remote methods, so RemoteDeck and the preload agree. */

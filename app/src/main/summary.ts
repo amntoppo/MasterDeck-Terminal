@@ -7,6 +7,23 @@ import type { Runner } from './run'
 /** A cheap, quick model is plenty for a summary. */
 const MODEL = 'haiku'
 
+/** The empty project folder a `claude -p` run from `scratch` left in ~/.claude/projects (never one with transcripts). */
+export function tidyScratchProject(projectsDir: string | null, scratch: string): void {
+  if (!projectsDir) return
+  const tag = basename(scratch)
+  try {
+    for (const d of readdirSync(projectsDir)) {
+      if (!d.endsWith(tag)) continue
+      const p = join(projectsDir, d)
+      const hasTranscript = (dir: string): boolean =>
+        readdirSync(dir, { withFileTypes: true }).some((e) => (e.isDirectory() ? hasTranscript(join(dir, e.name)) : e.name.endsWith('.jsonl')))
+      if (!hasTranscript(p)) rmSync(p, { recursive: true, force: true })
+    }
+  } catch {
+    // nothing to tidy
+  }
+}
+
 export class Summaries {
   private busy = new Set<string>()
 
@@ -17,23 +34,6 @@ export class Summaries {
     /** ~/.claude/projects: Claude Code makes a folder there even for a session it doesn't save. */
     private projectsDir: string | null = null,
   ) {}
-
-  /** The empty project folder `claude -p` left for the scratch directory (never one with transcripts). */
-  private tidy(scratch: string): void {
-    if (!this.projectsDir) return
-    const tag = basename(scratch)
-    try {
-      for (const d of readdirSync(this.projectsDir)) {
-        if (!d.endsWith(tag)) continue
-        const p = join(this.projectsDir, d)
-        const hasTranscript = (dir: string): boolean =>
-          readdirSync(dir, { withFileTypes: true }).some((e) => (e.isDirectory() ? hasTranscript(join(dir, e.name)) : e.name.endsWith('.jsonl')))
-        if (!hasTranscript(p)) rmSync(p, { recursive: true, force: true })
-      }
-    } catch {
-      // nothing to tidy
-    }
-  }
 
   private file(sessionId: string): string | null {
     return /^[0-9a-f-]{36}$/i.test(sessionId) ? join(this.dir, `${sessionId}.json`) : null
@@ -88,7 +88,7 @@ export class Summaries {
     } finally {
       this.busy.delete(o.sessionId)
       rmSync(scratch, { recursive: true, force: true })
-      this.tidy(scratch)
+      tidyScratchProject(this.projectsDir, scratch)
     }
   }
 }

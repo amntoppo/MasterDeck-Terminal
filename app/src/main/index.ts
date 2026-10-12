@@ -154,6 +154,8 @@ import { LoopStore } from "./loops";
 import { LoopQueue } from "./loopQueue";
 import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
+import { BtwAsker, BtwStore, BtwTerminal } from "./btw";
+import { sessionScreen } from "./screen";
 import {
   DEFAULT_TEMPLATE,
   parseFlow,
@@ -303,6 +305,20 @@ const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
 });
+// Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
+// terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
+const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
+const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
+const btwTerminal = new BtwTerminal(
+  paths.claudeHistory,
+  join(paths.home, "btw", "history-offset.json"),
+  btwStore,
+  (bgId) => sessionScreen(run, claudeBin, bgId),
+);
+function pollBtw(): void {
+  const sessions = (latest?.sessions ?? []).map((s) => ({ key: s.key, sessionId: s.sessionId, bgId: s.kind === "background" ? s.bgId : null }));
+  void btwTerminal.poll(sessions).catch((e) => console.error(`btw: ${String(e)}`));
+}
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -2227,6 +2243,21 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
   });
+  // Side questions: the store and the asker check every argument (key, id, question).
+  reg.handle(CH.btwList, (_e, key: unknown) => btwStore.list(key));
+  reg.handle(CH.btwAsk, (_e, key: unknown, question: unknown) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const model = latest?.tails[s.sessionId]?.model ?? null;
+    return btwAsker.ask({ key: s.key, sessionId: s.sessionId, model }, question);
+  });
+  reg.handle(CH.btwStop, (_e, key: unknown, id: unknown) => btwAsker.stop(key, id));
+  reg.handle(CH.btwRemove, (_e, key: unknown, id: unknown) => {
+    // An answer still on its way is not removed: it would come back when it ends (Stop it first).
+    const asking = btwStore.list(key).some((x) => x.id === id && x.status === "asking");
+    if (asking) return false;
+    return btwStore.remove(key, id);
+  });
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -3675,6 +3706,8 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
+  if (!SMOKE) setInterval(pollBtw, 2_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
     try {
@@ -3773,6 +3806,7 @@ app.on("will-quit", () => {
   cloud?.stop();
   peerStore.flush();
   sender.killAll();
+  btwAsker.stopAll();
   watches.killAll();
   ptys.closeAll();
   sources.stop();
