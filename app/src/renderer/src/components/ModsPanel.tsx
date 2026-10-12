@@ -6,7 +6,7 @@ import { webConfirm } from '../webConfirm'
 
 /** What the mods are, in one line (Setup's Mods step, Settings → Hooks, mods & skills). */
 export const MODS_ABOUT =
-  "MasterDeck's mods show inside each Claude Code session what MasterDeck knows: the ticket line above the prompt, alerts, /md-note, /md-loop and /md-board. Each one switches per session in Session details → Mods."
+  "MasterDeck's mods show inside each Claude Code session what MasterDeck knows: the ticket line above the prompt, alerts, /md-note, /md-loop and /md-board. Each one switches per session in Tools → Mods."
 
 /**
  * Install or remove MasterDeck's mods in Claude Code (the marketplace, every mod, and the core first

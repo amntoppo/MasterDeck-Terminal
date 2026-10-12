@@ -636,7 +636,7 @@ export interface DeckApi {
   peersSet(a: string, b: string, on: boolean): Promise<CliResult>;
   /** Linked sessions → Sync now: summarize this session and refresh what its peers see. */
   peersSync(sessionKey: string): Promise<CliResult>;
-  /** Session details → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
+  /** Tools → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
   /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
   modsInstall(): Promise<CliResult>;

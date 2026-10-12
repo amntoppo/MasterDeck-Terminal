@@ -7,7 +7,7 @@ import { deckFolder, deckRead, isOff, type Band, type DeckRead } from './deck'
  * Toasts in the session for what MasterDeck sees change about it: the card moves, a review thread
  * opens, CI fails or passes, the PR merges or is linked. It compares two reads of
  * `deck/band/<sessionId>.json` (the app writes it; this mod never calls GitHub). Switched off for
- * the session in Session details → Mods, it toasts nothing, and nothing when switched on again.
+ * the session in Tools → Mods, it toasts nothing, and nothing when switched on again.
  */
 
 const NAME = 'masterdeck-alerts'

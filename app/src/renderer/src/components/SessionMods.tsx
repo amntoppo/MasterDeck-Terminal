@@ -65,7 +65,7 @@ function Row({ r, busy, onFlip }: { r: ModRow; busy: boolean; onFlip: () => void
 }
 
 /**
- * Session details → Mods: MasterDeck's mods (its core, which does the switching, and one mod per
+ * Tools → Mods: MasterDeck's mods (its core, which does the switching, and one mod per
  * feature), then every other mod MasterDeck has seen, with a switch per mod for this session. The
  * core does the switching inside the session, so nothing can be switched where it does not run.
  */

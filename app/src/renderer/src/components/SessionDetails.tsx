@@ -16,7 +16,6 @@ import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
-import { SessionMods } from "./SessionMods";
 import { DiffList } from "./DiffList";
 import { FileTree } from "./FileTree";
 import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
@@ -34,16 +33,18 @@ interface Props {
   onNote?: (t: Ticket) => void;
 }
 
-type DetailsTab = "session" | "github" | "diff" | "files" | "mods";
+type DetailsTab = "session" | "github" | "diff" | "files";
 const TAB_KEY = "md.detailsTab";
+// "mods" (remembered from before Mods moved to the Tools tab) opens Session.
 const asTab = (v: unknown): DetailsTab =>
-  v === "github" || v === "diff" || v === "files" || v === "mods" ? v : "session";
+  v === "github" || v === "diff" || v === "files" ? v : "session";
 
 /**
  * Everything about the open session, in the right panel's Details tab (it replaced the status bar
- * above the terminal), in three tabs (#103): Session (what waits on you, status, workflow, linked
- * sessions, branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub
- * (ticket, PRs, monitors: GitHubDetails) and Mods. The picked tab is kept across sessions and restarts.
+ * above the terminal), in tabs: Session (what waits on you, status, workflow, linked sessions,
+ * branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub (ticket,
+ * PRs, monitors: GitHubDetails; #103), Diff (changed files: DiffList) and Files (FileTree; #113).
+ * Mods is in the Tools tab. The picked tab is kept across sessions and restarts.
  */
 export function SessionDetails({
   session: s,
@@ -143,13 +144,6 @@ export function SessionDetails({
           </>,
         )}
         {tabButton("files", "Files")}
-        {tabButton(
-          "mods",
-          <>
-            Mods
-            {state.modOff?.[s.key]?.length ? <span className="d-tab-count"> {state.modOff[s.key].length} off</span> : null}
-          </>,
-        )}
       </div>
     </div>
   );
@@ -172,18 +166,6 @@ export function SessionDetails({
       <div className="details">
         {tabs}
         <FileTree key={s.key} session={s} />
-      </div>
-    );
-  if (tab === "mods")
-    return (
-      <div className="details">
-        {tabs}
-        {note && (
-          <section className="dsec">
-            <span className="d-note">{note}</span>
-          </section>
-        )}
-        <SessionMods session={s} state={state} onMessage={flash} />
       </div>
     );
 

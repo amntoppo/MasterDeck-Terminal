@@ -7,7 +7,7 @@ import { deckFolder, deckRead, type DeckRead } from './deck'
 /*
  * MasterDeck's core mod: nothing on screen. It
  * - judges every mod module that loads after it (`prependPlugins: ["masterdeck@masterdeck"]` puts
- *   it first) and refuses the ones switched off for this session in Session details → Mods
+ *   it first) and refuses the ones switched off for this session in Tools → Mods
  *   (`offMods` in `deck/band/<sessionId>.json`); MasterDeck's own mods switch themselves;
  * - asks for a /reload-plugins when a refused mod is switched on again (a running mod switched off
  *   stays until the session starts again: a reload does not judge an unchanged module again);

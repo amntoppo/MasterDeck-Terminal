@@ -723,7 +723,7 @@ const sources = new Sources(
           return [s.key, { version: b.version, claude: b.claude, mods: b.mods }];
         }),
     );
-    // Every mod any session reported, kept so Session details → Mods can list them all.
+    // Every mod any session reported, kept so Tools → Mods can list them all.
     let catalog = modCatalog.entries();
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
@@ -3213,7 +3213,7 @@ function registerIpc(): void {
     peerSync.refreshAll([a, b]);
     return r;
   });
-  // Session details → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
+  // Tools → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
   reg.handle(CH.modSet, (_e, key: unknown, mod: unknown, on: unknown) => {
     if (typeof key !== "string" || typeof mod !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
       return { ok: false, message: "bad session" };

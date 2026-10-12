@@ -326,8 +326,9 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   again; one switched on after a refusal joins at a `/reload-plugins` the core asks for from its timer
   (`toReload`; a `$.command.run` cannot run from a `command.run` hook). Managed (`prepend`/`append`)
   and built-in mods are never refused.
-- **Session details → Mods** (`SessionMods.tsx`, the third of the Details tab's `Session | GitHub |
-  Mods` tabs; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
+- **Tools → Mods** (`SessionMods.tsx`, the third of the Tools tab's `Queue | BTW | Mods`
+  sub-tabs, `SessionTools.tsx`, with "· n off" on its label; `modRows` in shared): a MasterDeck group
+  (the core, locked; the feature mods by
   `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
   or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
   and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`. A running session takes

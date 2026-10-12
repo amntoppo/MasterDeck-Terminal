@@ -18,8 +18,8 @@ function writeJson(file: string, value: unknown): boolean {
 }
 
 /**
- * `mod-off.json`: `{ <Session.key>: [mod names] }`, the mods switched off for a session in Session
- * details → Mods. Claude Code turns a plugin on or off per settings scope only, so the MasterDeck
+ * `mod-off.json`: `{ <Session.key>: [mod names] }`, the mods switched off for a session in Tools →
+ * Mods. Claude Code turns a plugin on or off per settings scope only, so the MasterDeck
  * mod does it per session: it stays quiet itself, and refuses the others when they load.
  * Older files: an array of keys (the one MasterDeck mod off there), and `masterdeck` in a list
  * (the same, before it became a core and feature mods): both read as every feature mod off.

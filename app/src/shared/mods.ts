@@ -165,7 +165,7 @@ export function modsReloadText(o: ModsReloadOffer): string {
   const n = o.keys.length;
   const idle = o.idle.length;
   const head = `${n} running session${n === 1 ? "" : "s"} still use${n === 1 ? "s" : ""} MasterDeck's mods from before ${MOD_VERSION} (or none).`;
-  const later = "when reloaded from Session details → Mods, or at the next start.";
+  const later = "when reloaded from Tools → Mods, or at the next start.";
   if (idle === n) return `${head} ${n === 1 ? "It is" : "All are"} idle: reload ${n === 1 ? "it" : "them"} now.`;
   if (idle === 0) return `${head} None is idle now: ${n === 1 ? "it takes" : "they take"} the new mods ${later}`;
   return `${head} ${idle} ${idle === 1 ? "is" : "are"} idle and can reload now; the others take the new mods ${later}`;

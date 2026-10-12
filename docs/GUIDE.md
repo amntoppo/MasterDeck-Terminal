@@ -16,7 +16,7 @@ One window for all your Claude Code sessions, laid out as a command center:
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
     ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Tools**
-    (**Queue** and **BTW**, more to come) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
+    (**Queue**, **BTW** and **Mods**) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
 - **Master:** master-agent's terminal in its own column at the far right, on every screen. The
   **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
 - **The other views** use the full width (next to Master when it shows).
@@ -439,7 +439,7 @@ diff too big to send says so.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice, also when MasterDeck is started a second time.
-- **Session details (right panel → Details)** has three tabs, and the one you pick stays picked
+- **Session details (right panel → Details)** has two tabs, and the one you pick stays picked
   (per window; the web app keeps its own):
   - **Session:** what waits on you, the status, the workflow, schedules, linked sessions, the
     worktrees or folder and branch, context, tokens, model, diff, and the session's actions.
@@ -454,7 +454,6 @@ diff too big to send says so.
     monitor are kept while MasterDeck runs; after a restart its list starts again. The tab's label
     counts the PRs and monitors, in red when a PR's CI fails or changes were asked for. The account
     the session works as is at the top.
-  - **Mods:** this session's mods and their switches (see Mods below).
 - **Worktrees (Details tab, or ⌘E for a popup):** list every git worktree the session created
   or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
   transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS
@@ -466,6 +465,8 @@ diff too big to send says so.
   branch's changes, and asks a small model (`claude -p --model haiku`, about 20 s) for the summary; it
   runs only when you press it, and it is kept per session in `~/.claude/masterdeck/summaries/`. The panel
   says when the session has moved on since. **Post to issue** comments it on the session's issue.
+- **Mods (right panel → Tools → Mods):** this session's Claude Code mods, each with a switch for
+  this session; the label says how many are off (see MasterDeck's mods below).
 - **Queue (right panel → Tools → Queue):** holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
@@ -672,7 +673,7 @@ until they reload their plugins: Needs you then shows a **MODS** item with how m
 older mods (or none, after an install) and **Reload idle sessions**, which types `/reload-plugins`
 into each one that waits at an empty prompt (never into one asking a question or a permission).
 Settings → Mods has the same button. The others take the new mods when you reload them from
-Session details → Mods, or at their next start.
+Tools → Mods, or at their next start.
 
 **Where the order is not yours to set.** With your organization's managed settings in place, or
 signed in to Claude Code with a Team or Enterprise plan, Claude Code ignores `prependPlugins` in
@@ -704,7 +705,7 @@ a PR or with linked sessions:
 - **MasterDeck core** (`masterdeck`): nothing on screen; it does the switching below and tells
   MasterDeck which mods run in each session.
 
-**Session details → Mods** has a switch per mod, for that session only:
+**Tools → Mods** has a switch per mod, for that session only:
 
 - **MasterDeck** lists the core (always on: it does the switching) and the five feature mods. One
   switched off stops at once (nothing drawn or toasted, its command does nothing), and comes back at
