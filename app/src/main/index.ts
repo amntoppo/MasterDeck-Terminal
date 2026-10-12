@@ -2240,22 +2240,22 @@ function registerIpc(): void {
   // answer is cut to fit the bridge (webFit).
   const sessionFilesAt = (key: unknown, want?: { path?: unknown; base?: unknown }) =>
     sessionFileCall(latest?.sessions ?? [], key, want);
-  const fit = <T extends FileList | FileRead | ChangeList | DiffRead>(e: unknown, a: T): T => (isRemote(e) ? webFit(a) : a);
+  const fit = <T extends FileList | FileRead | ChangeList | DiffRead>(remote: boolean, a: T): T => (remote ? webFit(a) : a);
   reg.handle(CH.filesList, async (e, key: unknown) => {
     const c = sessionFilesAt(key);
-    return c.ok ? fit(e, await sessionFiles.list(c.root)) : c;
+    return c.ok ? fit(isRemote(e), await sessionFiles.list(c.root)) : c;
   });
   reg.handle(CH.filesRead, async (e, key: unknown, path: unknown) => {
     const c = sessionFilesAt(key, { path });
-    return c.ok ? fit(e, await sessionFiles.read(c.root, c.path!)) : c;
+    return c.ok ? fit(isRemote(e), await sessionFiles.read(c.root, c.path!)) : c;
   });
   reg.handle(CH.diffList, async (e, key: unknown, base: unknown) => {
     const c = sessionFilesAt(key, { base });
-    return c.ok ? fit(e, await sessionFiles.changes(c.root, c.base!)) : c;
+    return c.ok ? fit(isRemote(e), await sessionFiles.changes(c.root, c.base!)) : c;
   });
   reg.handle(CH.diffFile, async (e, key: unknown, path: unknown, base: unknown) => {
     const c = sessionFilesAt(key, { path, base });
-    return c.ok ? fit(e, await sessionFiles.fileDiff(c.root, c.path!, c.base!)) : c;
+    return c.ok ? fit(isRemote(e), await sessionFiles.fileDiff(c.root, c.path!, c.base!)) : c;
   });
   // Notes: the store checks every argument itself (ids, limits, characters).
   reg.handle(CH.notesList, () => notes.list());
