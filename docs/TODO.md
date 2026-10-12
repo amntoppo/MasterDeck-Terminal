@@ -675,6 +675,20 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
   converted: new records are hourly, older days stay days.
 
+## Themes: open points (2026-10-12, issue #105)
+
+- More themes on the token set: dimmed, high contrast, and themes read from a user file (THEMES.md
+  "Adding a theme").
+- The light terminal relies on xterm's `minimumContrastRatio` for programs that assume a dark
+  background (Claude Code's default theme). A program that paints its own background (full-screen
+  TUIs) still shows its dark colours. Claude Code's `/theme` is the user's fix; MasterDeck could
+  offer to keep terminals dark in the light theme if that turns out to be common.
+- The web app's choice is per browser and does not follow the Mac's. Revisit if users ask for
+  one setting everywhere.
+- The color-literal lint skips digit-only hex in TSX (`#123` reads as an issue number in UI
+  text), so a colour written as `'#111'` in a component would slip through.
+- Windows: the native theme and the window background were not checked on Windows.
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Session details → GitHub (#103): open points
@@ -692,6 +706,7 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Themes (issue #105): every colour comes from a token set in `shared/themes.ts` (surfaces, lines, text, accent, status hues, overlays, find, the terminal's 16 ANSI colours); a Primer-based light theme checked for WCAG AA in vitest; Settings → General → **Appearance** Light / Dark / System that switches at once (terminals too) and persists, per browser in the web app; a lint test against colour literals; `docs/THEMES.md` (exploration, palette, adding a theme) | branch `worktree-MasterDeck-Terminal-105-themes` (PR) | spec + plan on `docs/themes-105` (not pushed) |
 | Session details in three tabs (issue #103): **Session** (no GitHub UI), **GitHub** (Ticket with steps, note and sub-issues; each PR with checks, reviews, open threads, comments and its PR watch's finds; each monitor with its lines, newest first; counts, status badges and ↗ links; live refresh) and **Mods**; the tab is remembered. New reads `watch:events` and `pr:detail` (`shared/prDetail.ts`) | branch `worktree-MasterDeck-Terminal-103-details-tabs` | — |
 | The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
 | Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |

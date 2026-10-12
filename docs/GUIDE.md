@@ -880,6 +880,13 @@ A place for what you would otherwise keep in another app: your own notes, and on
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
+- **Appearance** (General): **Light**, **Dark** or **System**. System follows macOS (or Windows)
+  light or dark mode and switches with it. The change shows at once, terminals included, and is
+  kept. The default is Dark. In the web app, the choice applies to that browser only, so a phone
+  can be light while the Mac stays dark. In the light theme, terminal text is darkened
+  automatically where a program picked colours for a dark background. If Claude Code's own colours
+  still look wrong, run `/theme` in the session and pick a light theme there.
+
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
 - **Hooks, mods & skills:** status lines, not switches (but **Mods**, see MasterDeck's mods). **Queue** says who runs `/queue`: MasterDeck's

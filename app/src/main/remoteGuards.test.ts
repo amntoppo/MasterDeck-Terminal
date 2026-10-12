@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, worktreeFolder } from './remoteGuards'
-it('remote save keeps current remoteEnabled and passes other keys', () => {
-  expect(remoteSettings({ remoteEnabled: false, theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
-  expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true })).toEqual({ remoteEnabled: true, theme: 'dark' })
-  expect(remoteSettings({ theme: 'dark' }, { remoteEnabled: true, font: 12, theme: 'light' })).toEqual({ remoteEnabled: true, font: 12, theme: 'dark' })
+it('remote save keeps current remoteEnabled and theme and passes other keys', () => {
+  expect(remoteSettings({ remoteEnabled: false, font: 14 }, { remoteEnabled: true, theme: 'dark' })).toEqual({ remoteEnabled: true, font: 14, theme: 'dark' })
+  expect(remoteSettings({ font: 14 }, { remoteEnabled: true, font: 12, theme: 'light' })).toEqual({ remoteEnabled: true, font: 14, theme: 'light' })
+  // A browser picks its own theme; saving settings from it never changes the Mac's.
+  expect(remoteSettings({ theme: 'light' }, { remoteEnabled: true, theme: 'system' })).toEqual({ remoteEnabled: true, theme: 'system' })
 })
 it('non-object payload keeps every current setting', () => {
   for (const bad of [null, 'x', 3, [1]]) expect(remoteSettings(bad, { remoteEnabled: true, font: 12 })).toEqual({ remoteEnabled: true, font: 12 })

@@ -62,6 +62,7 @@ import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
 import { deck, load, save, useAppState } from "./deck";
+import { savedPref, useTheme, useWebThemePref } from "./theme";
 
 type Tab =
   | { id: string; kind: "session"; key: string }
@@ -117,6 +118,9 @@ function paneIdFor(tab: Tab): string {
 
 export function App() {
   const state = useAppState();
+  // The window follows the Mac's setting; a browser its own choice (theme.ts).
+  const webTheme = useWebThemePref();
+  useTheme(isWeb() ? webTheme : (state?.settings.theme ?? savedPref()));
   // Phone layout (web, narrow window): one screen at a time and a bottom tab bar. Never true in Electron.
   const phone = usePhone();
   const remote = useMemo(

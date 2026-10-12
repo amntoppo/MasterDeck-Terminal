@@ -8,6 +8,8 @@ import { webConfirm } from '../webConfirm'
 import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
 import { MODS_ABOUT, ModsPanel } from './ModsPanel'
+import { setWebThemePref, useWebThemePref } from '../theme'
+import { THEME_PREFS, THEMES, type ThemePref } from '@shared/themes'
 
 export type SettingsSection = Section
 type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
@@ -57,6 +59,11 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
 
+  // The window saves the Mac's setting; a browser keeps its own choice (theme.ts).
+  const webTheme = useWebThemePref()
+  const theme = isWeb() ? webTheme : s.theme
+  const setTheme = (t: ThemePref) => (isWeb() ? setWebThemePref(t) : set('theme', t))
+
   const now = useNow(5_000)
   const r = state.remote
   const dot = !r || r.conn === 'off' ? 'off' : r.conn === 'connected' ? 'ok' : r.conn === 'error' ? 'bad' : 'wait'
@@ -68,6 +75,15 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     account: <AccountPanel account={state.account} />,
     general: (
       <>
+        <Field label="Appearance" hint={isWeb() ? 'For this browser. System follows its light or dark mode.' : `System follows ${deck().platform === 'win32' ? 'Windows' : 'macOS'} light or dark mode.`}>
+          <div className="seg" role="radiogroup" aria-label="Appearance">
+            {THEME_PREFS.map((t) => (
+              <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => setTheme(t)}>
+                {t === 'system' ? 'System' : THEMES[t].label}
+              </button>
+            ))}
+          </div>
+        </Field>
         <Field label="GitHub and boards" hint="Your account, repositories and boards (Setup).">
           <div className="f-row">
             {c.configured ? (
