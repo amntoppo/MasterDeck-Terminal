@@ -1861,6 +1861,15 @@ async function confirmLoopStop(name: string): Promise<boolean> {
   return choice.response === 1;
 }
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
+/** The built-in workflows MasterDeck ships, into the templates (#104); a failure only logs. */
+const seedWorkflows = () => {
+  try {
+    workflows().seedBuiltins();
+  } catch (e) {
+    console.error(`built-in workflows: ${String(e)}`);
+  }
+};
+
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
  * The custom trigger library is registered first, so compiling and the editor know it.
@@ -2799,6 +2808,7 @@ function registerIpc(): void {
     templates: workflows().templates(),
     triggers: workflows().triggers(),
     monitors: workflows().monitors(),
+    builtinsRemoved: workflows().builtinsRemoved(),
   }));
   reg.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
@@ -2817,11 +2827,55 @@ function registerIpc(): void {
       return r.ok ? { ok: true, message: "template saved", id: tid } : r;
     },
   );
-  reg.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
-    if (typeof id !== "string" || !workflows().deleteTemplate(id))
+  reg.handle(CH.workflowTemplateDelete, async (e, id: unknown) => {
+    const t = typeof id === "string" ? workflows().template(id) : null;
+    if (!t || t.id === DEFAULT_TEMPLATE)
+      return { ok: false, message: "no such template" };
+    // The window asks here (webConfirm answers yes at once on the desktop); the web asked already.
+    if (!isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Delete"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete the workflow "${t.name}"?`,
+        detail: t.builtin
+          ? "It is a built-in workflow: Restore built-ins brings it back as MasterDeck ships it."
+          : "Sessions that already copied it keep their copy.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().deleteTemplate(t.id))
       return { ok: false, message: "no such template" };
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
+  });
+  // Restore original (an id) or Restore built-ins (null); the window and the web asked first.
+  reg.handle(CH.workflowBuiltinRestore, async (e, id: unknown) => {
+    if (id !== null && (typeof id !== "string" || !/^md-[a-z0-9-]{1,40}$/.test(id)))
+      return { ok: false, message: "no such built-in workflow" };
+    // Restore original loses the edits: the window asks here, the web asked with webConfirm.
+    // Restore built-ins only adds files, so it does not ask.
+    if (id !== null && !isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Restore"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Restore "${workflows().template(id)?.name ?? id}" as MasterDeck ships it?`,
+        detail: "Your edits to it, and its name, are lost.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().restoreBuiltin(id))
+      return {
+        ok: false,
+        message: id === null ? "no built-in to restore" : "no such built-in workflow",
+      };
+    const r = syncWorkflowHooks();
+    return r.ok
+      ? { ok: true, message: id === null ? "built-ins restored" : "original restored" }
+      : r;
   });
   // The builder: its folder gets the format, the skills and the open workflow before it starts.
   reg.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
@@ -3616,14 +3670,19 @@ app.whenReady().then(async () => {
     process.platform !== "win32" &&
     !SMOKE &&
     process.env.MASTERDECK_NO_HOOK !== "1"
-  )
+  ) {
     try {
       workflows().migrate();
+      seedWorkflows();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  } else if (!SMOKE) {
+    // Without the hooks (Windows, MASTERDECK_NO_HOOK) the templates are still there to pick and edit.
+    seedWorkflows();
+  }
   // PR watch (all platforms): rows join the monitors in Details; review offers for its PRs step aside.
   sources.setWatchInfo(() => [
     ...watches.info(),

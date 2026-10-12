@@ -10,6 +10,7 @@ import {
   setMonitors,
 } from "@shared/flow";
 import type { AppState } from "@shared/types";
+import { builtinById, flowHash } from "@shared/builtinWorkflows";
 import { deck, load as loadPref, save as savePref } from "../deck";
 import { webConfirm } from "../webConfirm";
 import { FlowEditor, type Skill } from "./FlowEditor";
@@ -20,6 +21,8 @@ type Data = {
   hooks: HookEntry[];
   skills: Skill[];
   templates: WorkflowTemplate[];
+  /** Built-ins the user deleted (Restore built-ins). */
+  builtinsRemoved: string[];
 };
 
 const SOURCE: Record<HookEntry["source"], string> = {
@@ -38,6 +41,22 @@ function whereLabel(h: HookEntry): string {
 function short(c: string): string {
   const one = c.replace(/\s+/g, " ").trim();
   return one.length > 110 ? `${one.slice(0, 110)}…` : one;
+}
+
+/**
+ * A built-in's mark after the canvas saved it: edited while it differs from the original. Exact
+ * while the shipped flow is the one written (seeding keeps unedited ones up to date); an updated
+ * one stays edited, as the next read says too.
+ */
+function stillBuiltin(
+  t: WorkflowTemplate,
+  flow: Flow,
+): WorkflowTemplate["builtin"] {
+  if (!t.builtin) return undefined;
+  const b = builtinById(t.builtin.id);
+  const edited =
+    t.builtin.updated || !b || flowHash(flow) !== flowHash(b.flow);
+  return { ...t.builtin, edited };
 }
 
 export type SaveState = "idle" | "saving" | "saved" | { error: string };
@@ -148,8 +167,16 @@ export function WorkflowView(_: { state: AppState }) {
     // The custom trigger library: the editor, the compiler and block titles use it.
     setCustomTriggers(w.triggers);
     setMonitors(w.monitors);
-    setData({ hooks: w.hooks, skills: w.skills, templates: w.templates });
+    setData({
+      hooks: w.hooks,
+      skills: w.skills,
+      templates: w.templates,
+      builtinsRemoved: w.builtinsRemoved ?? [],
+    });
   }, []);
+  // Bumped when a template is rewritten from outside the canvas (Restore original): the editor
+  // takes its flow only when it mounts.
+  const [gen, setGen] = useState(0);
   useEffect(() => void load(), [load]);
 
   const templates = data?.templates ?? [];
@@ -174,7 +201,7 @@ export function WorkflowView(_: { state: AppState }) {
           ? {
               ...d,
               templates: d.templates.map((x) =>
-                x.id === t.id ? { ...x, flow } : x,
+                x.id === t.id ? { ...x, flow, builtin: stillBuiltin(x, flow) } : x,
               ),
             }
           : d,
@@ -198,7 +225,10 @@ export function WorkflowView(_: { state: AppState }) {
   };
   const del = async () => {
     if (!current) return;
-    if (!(await webConfirm(`Delete the workflow “${current.name}”?`, { confirmLabel: "Delete", danger: true })))
+    const ask = current.builtin
+      ? `Delete the built-in workflow “${current.name}”? Restore built-ins brings it back as MasterDeck ships it.`
+      : `Delete the workflow “${current.name}”?`;
+    if (!(await webConfirm(ask, { confirmLabel: "Delete", danger: true })))
       return;
     const r = await deck().workflowTemplateDelete(current.id);
     setMsg(r.message);
@@ -207,6 +237,28 @@ export function WorkflowView(_: { state: AppState }) {
       await load();
     }
   };
+
+  // Restore original (the open built-in) or Restore built-ins (every deleted one, id null).
+  const restore = async (id: string | null) => {
+    if (!current) return;
+    const ask =
+      id === null
+        ? `Bring back the deleted built-in workflow${removed.length === 1 ? "" : "s"} as MasterDeck ships ${removed.length === 1 ? "it" : "them"}?`
+        : `Restore “${current.name}” as MasterDeck ships it? Your edits to it are lost.`;
+    if (
+      !(await webConfirm(ask, {
+        confirmLabel: "Restore",
+        danger: id !== null,
+      }))
+    )
+      return;
+    const r = await deck().workflowBuiltinRestore(id);
+    setMsg(r.message);
+    if (!r.ok) return;
+    await load();
+    setGen((g) => g + 1);
+  };
+  const removed = data?.builtinsRemoved ?? [];
 
   // The builder works on the workflow open here: its folder gets it (and the format) first.
   const openBuilder = async (fresh: boolean) => {
@@ -291,6 +343,18 @@ export function WorkflowView(_: { state: AppState }) {
                 onClick={() => (setTid(t.id), setNaming(null))}
               >
                 {t.name}
+                {t.builtin && (
+                  <span
+                    className={`wf-builtin${t.builtin.edited ? " edited" : ""}`}
+                    title={
+                      t.builtin.edited
+                        ? "A workflow MasterDeck ships, changed since: Restore original takes it back"
+                        : "A workflow MasterDeck ships"
+                    }
+                  >
+                    Built-in{t.builtin.edited ? " · edited" : ""}
+                  </span>
+                )}
                 <span className="wf-count">{actionCount(t.flow)}</span>
               </button>
             ))}
@@ -302,7 +366,9 @@ export function WorkflowView(_: { state: AppState }) {
                 value={naming.name}
                 placeholder={
                   naming.mode === "new"
-                    ? "Name of the new template"
+                    ? current.builtin
+                      ? "Name of the copy"
+                      : "Name of the new template"
                     : "New name"
                 }
                 onChange={(e) => setNaming({ ...naming, name: e.target.value })}
@@ -326,11 +392,29 @@ export function WorkflowView(_: { state: AppState }) {
             <>
               <button
                 className="btn"
-                onClick={() => setNaming({ mode: "new", name: "" })}
-                title={`A new template, starting as a copy of ${current.name}`}
+                onClick={() =>
+                  setNaming({
+                    mode: "new",
+                    name: current.builtin ? `${current.name} (copy)` : "",
+                  })
+                }
+                title={
+                  current.builtin
+                    ? `A template of your own, starting as a copy of ${current.name}`
+                    : `A new template, starting as a copy of ${current.name}`
+                }
               >
-                + New template
+                {current.builtin ? "Duplicate" : "+ New template"}
               </button>
+              {current.builtin?.edited && (
+                <button
+                  className="btn"
+                  onClick={() => void restore(current.builtin!.id)}
+                  title="Put back the flow and name MasterDeck ships (your edits are lost)"
+                >
+                  Restore original
+                </button>
+              )}
               {current.id !== DEFAULT_TEMPLATE && (
                 <>
                   <button
@@ -346,12 +430,32 @@ export function WorkflowView(_: { state: AppState }) {
                   </button>
                 </>
               )}
+              {removed.length > 0 && (
+                <button
+                  className="btn"
+                  onClick={() => void restore(null)}
+                  title={`Bring back the built-in workflows you deleted: ${removed
+                    .map((id) => builtinById(id)?.name ?? id)
+                    .join(", ")}`}
+                >
+                  Restore built-ins ({removed.length})
+                </button>
+              )}
             </>
           )}
           <span className="wf-note muted">
-            {current.id === DEFAULT_TEMPLATE
-              ? "Every new session starts with a copy of the Default."
-              : "Pick it in the Start dialog, or apply it from a session’s Details (Workflow → Edit)."}
+            {current.builtin ? (
+              <>
+                {current.builtin.description}{" "}
+                <b>When to use:</b> {current.builtin.whenToUse}
+                {current.builtin.updated &&
+                  " A newer version ships with MasterDeck: Restore original to get it."}
+              </>
+            ) : current.id === DEFAULT_TEMPLATE ? (
+              "Every new session starts with a copy of the Default."
+            ) : (
+              "Pick it in the Start dialog, or apply it from a session’s Details (Workflow → Edit)."
+            )}
           </span>
         </div>
       )}
@@ -499,7 +603,7 @@ export function WorkflowView(_: { state: AppState }) {
             />
           ) : (
             <FlowEditor
-              key={current.id}
+              key={`${current.id}:${gen}`}
               flow={current.flow}
               skills={data.skills}
               onChange={onChange}

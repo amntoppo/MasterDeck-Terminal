@@ -450,6 +450,23 @@ triggers), `workflows/monitors/` (`<id>.json` + `<id>.sh`), `workflows/runs.json
 (progress from transcripts), `shared/flowWatch.ts` (needs-you/idle triggers MasterDeck acts on).
 One MasterDeck hook per trigger in settings.json reads the session's copy.
 
+**Built-in workflows** (#104). `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`: id, name,
+description, whenToUse, flow; `builtinById`, `flowHash`) with the flows as JSON in
+`shared/builtin-workflows/<id>.json`. Ids start with `md-`. `WorkflowStore.seedBuiltins()` runs at
+launch right after `migrate()` (also on Windows and with `MASTERDECK_NO_HOOK`, not in the smoke
+test) and writes them as `workflows/templates/md-*.json` with a mark `builtin: {id, hash}` (`hash`:
+`flowHash` of the shipped flow, over `parseFlow`, so formatting is no edit while a moved block is):
+a missing one is written unless its id is in `workflows/builtins.json` (`{removed: [...]}`, written
+by `deleteTemplate` for a marked file); a marked file whose flow still hashes to its mark is
+rewritten when the shipped hash changed (keeping its name); an edited one (flow hash differs from the
+mark) and any file without the mark are never touched. `templates()` fills
+`WorkflowTemplate.builtin` (`edited`; `updated` when edited and the shipped flow changed since);
+`saveTemplate` keeps the mark on a built-in it rewrites, never puts one on a new template (Duplicate),
+and never gives a new template a built-in's id. `restoreBuiltin(id)` writes one back as shipped
+(Restore original, `workflow:builtinRestore`; the window asks with a native dialog, the web with
+`webConfirm`); `restoreBuiltin(null)` writes back every removed one and clears the list (Restore
+built-ins). `workflowGet` carries `builtinsRemoved`.
+
 **Loops** (a Loop frame, #82). A trigger's step carries its `CompiledLoop`s; when it fires, its hook
 arms the loops with nothing before them (`after: null`) in `workflows/loops/<sid>.json` (written to `<sid>.json.<pid>.tmp`, then renamed)
 (`{loops: [{id, step, state: "open", iteration: 0, startedAt, history: [], reason, lastCheck}]}`)

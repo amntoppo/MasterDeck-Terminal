@@ -152,6 +152,7 @@ export const CH = {
   workflowSave: "workflow:save",
   workflowTemplateSave: "workflow:templateSave",
   workflowTemplateDelete: "workflow:templateDelete",
+  workflowBuiltinRestore: "workflow:builtinRestore",
   sessionWorkflowGet: "workflow:sessionGet",
   workflowStatus: "workflow:status",
   workflowLoopHistory: "workflow:loopHistory",
@@ -522,6 +523,8 @@ export interface DeckApi {
     triggers: CustomTrigger[];
     /** The monitor library. */
     monitors: MonitorDef[];
+    /** Built-ins the user deleted that can be written back (Restore built-ins). */
+    builtinsRemoved: string[];
   }>;
   /** Save the default workflow (what new sessions copy). */
   workflowSave(flow: Flow): Promise<CliResult>;
@@ -532,6 +535,8 @@ export interface DeckApi {
     flow: Flow,
   ): Promise<CliResult & { id?: string }>;
   workflowTemplateDelete(id: string): Promise<CliResult>;
+  /** Write a built-in back as shipped (Restore original), or with null every deleted one. */
+  workflowBuiltinRestore(id: string | null): Promise<CliResult>;
   /** Set up the workflow builder's folder for the workflow open on the canvas. */
   workflowBuilderPrepare(
     templateId: string,

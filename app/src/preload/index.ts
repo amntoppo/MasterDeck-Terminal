@@ -120,6 +120,8 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.workflowTemplateSave, id, name, steps),
   workflowTemplateDelete: (id) =>
     ipcRenderer.invoke(CH.workflowTemplateDelete, id),
+  workflowBuiltinRestore: (id) =>
+    ipcRenderer.invoke(CH.workflowBuiltinRestore, id),
   workflowBuilderPrepare: (templateId) =>
     ipcRenderer.invoke(CH.workflowBuilderPrepare, templateId),
   workflowDraftGet: () => ipcRenderer.invoke(CH.workflowDraftGet),
