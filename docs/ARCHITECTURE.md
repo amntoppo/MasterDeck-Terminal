@@ -326,8 +326,8 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   again; one switched on after a refusal joins at a `/reload-plugins` the core asks for from its timer
   (`toReload`; a `$.command.run` cannot run from a `command.run` hook). Managed (`prepend`/`append`)
   and built-in mods are never refused.
-- **Session details → Mods** (`SessionMods.tsx`, a `Session | Mods` switcher at the top of the
-  Details tab; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
+- **Session details → Mods** (`SessionMods.tsx`, the third of the Details tab's `Session | GitHub |
+  Mods` tabs; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
   `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
   or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
   and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`. A running session takes
@@ -436,6 +436,21 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
   session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
+- **Session details → GitHub** (#103, `renderer/.../GitHubDetails.tsx`; the tab is kept in
+  localStorage `md.detailsTab`, open rows in a module map per `Session.key`): ticket, PRs and
+  monitors as rows that open. What is not in `AppState` is read on demand, never added to it (the web
+  bridge drops states over ~1.05 MB): `deck.watchEvents(id)` (`watch:events`) returns the last 50
+  events of a monitor (`Watches.events`, lines with their time) or a PR watch (`PrWatch.events` for
+  `pr:<url>`: items with kind and author, and its own notes), newest first; the rings
+  (`pushEvents`, `EVENTS_MAX`, text cut to 500) are memory only, stripped from `watches.json` /
+  `pr-watch.json`. A row reads again when its `WatchInfo` (`events`, `lastEventAt`, `queued`)
+  changes. `deck.prDetail(url)` (`pr:detail`) is one GraphQL read through ghc (ttl 60 s) as
+  `forCard(prRepo(url))`: `shared/prDetail.ts` builds it (`prDetailQuery`, never the word for a
+  write) and reads checks (CheckRun and StatusContext, failing first), the latest review per
+  reviewer, unresolved current threads and comments (`parsePrDetail`); `worstPrStatus` sums the PRs'
+  lines for the closed row. A PR row reads again when `state.prLive[url]` changes and each 60 s,
+  keeping its last answer on screen. Both channels are `remote` in `DECK_ACCESS` (reads); main checks
+  the id's length and that the URL is a PR's.
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".
 

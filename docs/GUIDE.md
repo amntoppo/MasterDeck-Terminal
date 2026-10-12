@@ -382,6 +382,22 @@ checkout whose branch was once linked to a ticket does not link it.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice, also when MasterDeck is started a second time.
+- **Session details (right panel → Details)** has three tabs, and the one you pick stays picked
+  (per window; the web app keeps its own):
+  - **Session:** what waits on you, the status, the workflow, schedules, linked sessions, the
+    worktrees or folder and branch, context, tokens, model, diff, and the session's actions.
+  - **GitHub:** a row each for the **Ticket**, the **Pull requests** and the **Monitors**, with
+    counts and status badges while closed and **↗** to open the item on GitHub. Click a row to open
+    it, and open what is inside it in turn: the ticket's steps, its note and its **Sub-issues**
+    (done of total); each PR's **Checks** (failing first), **Reviews** (the latest per reviewer),
+    **Open threads** (file and the last comment), **Comments** (newest first) and, when MasterDeck
+    watches it, **PR watch** with what it found and **Stop**; each monitor with the lines it printed,
+    newest first, and **Stop**. Open rows refresh by themselves when the session's state changes (a
+    PR also each minute) and stay open when you switch tabs or sessions. The last 50 events of a
+    monitor are kept while MasterDeck runs; after a restart its list starts again. The tab's label
+    counts the PRs and monitors, in red when a PR's CI fails or changes were asked for. The account
+    the session works as is at the top.
+  - **Mods:** this session's mods and their switches (see Mods below).
 - **Worktrees (Details tab, or ⌘E for a popup):** list every git worktree the session created
   or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
   transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS

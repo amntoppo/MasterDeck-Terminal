@@ -180,6 +180,7 @@ import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { parsePrUrl } from "@shared/prSummary";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -2580,12 +2581,24 @@ function registerIpc(): void {
         : watches.stop(id)
       : false,
   );
+  reg.handle(CH.watchEvents, (_e, id: unknown) =>
+    typeof id === "string" && id.length <= 300
+      ? id.startsWith("pr:")
+        ? prWatch.events(id)
+        : watches.events(id)
+      : [],
+  );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
     // A PR of a repository no account lists: as the account whose board holds a card of that repository.
     forCard(prRepo(String(url))).github.prSummary(url),
+  );
+  reg.handle(CH.prDetail, (_e, url: unknown) =>
+    typeof url === "string" && parsePrUrl(url)
+      ? forCard(prRepo(url)).github.prDetail(url)
+      : { ok: false, message: "not a PR URL" },
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>

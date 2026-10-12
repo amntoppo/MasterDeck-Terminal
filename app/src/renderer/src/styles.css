@@ -878,8 +878,46 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .dsec { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .dsec:last-child { border-bottom: none; }
 .d-tabs { padding: 10px 16px 0; display: flex; }
-.d-tabs .seg { flex: none; }
-.d-tabs .seg button { white-space: nowrap; padding: 5px 14px; }
+.d-tabs .seg { flex: 1; min-width: 0; }
+.d-tabs .seg button { white-space: nowrap; padding: 5px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.d-tab-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-tab-count.bad { color: var(--red); }
+/* Session details → GitHub (#103): rows that open to what is behind them. */
+.gh-list { gap: 2px; }
+.gh-row { border-radius: 7px; }
+.gh-row.open { background: color-mix(in srgb, var(--bg-3) 55%, transparent); }
+.gh-head { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.gh-toggle { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 6px; padding: 6px 6px; border: none; background: none; border-radius: 7px; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.gh-toggle.static { cursor: default; }
+button.gh-toggle:hover { background: var(--bg-3); }
+.gh-toggle:focus-visible, .gh-out:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gh-caret { flex: none; width: 12px; line-height: 20px; color: var(--muted); font-size: 11px; text-align: center; transition: transform .12s ease; }
+.gh-sum { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; line-height: 20px; }
+.gh-row.open > .gh-head .gh-caret { transform: rotate(90deg); }
+.gh-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-ref { color: var(--accent); font-size: 11.5px; }
+.gh-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+:where(.gh-badge, .gh-item) { --tone: var(--t-off); }
+.gh-badge { display: inline-flex; align-items: center; max-width: 100%; padding: 0 7px; border-radius: 10px; font-size: 11px; font-weight: 600; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tone); border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 10%, transparent); font-variant-numeric: tabular-nums; }
+.gh-out, .gh-stop { flex: none; margin-top: 4px; }
+.gh-out { width: 24px; height: 22px; border: none; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.gh-out:hover { background: var(--bg-3); color: var(--accent); }
+.gh-stop { padding: 3px 4px; }
+.gh-kids { display: flex; flex-direction: column; gap: 2px; padding: 0 4px 6px 16px; margin-left: 5px; border-left: 1px solid var(--line); }
+.gh-kids > .d-steps, .gh-kids > .d-stepname, .gh-kids > .d-note { margin: 4px 6px; }
+.gh-item { display: flex; align-items: flex-start; gap: 6px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
+.gh-item:hover { background: var(--bg-3); }
+.gh-item .gh-badge { margin-top: 1px; flex: none; max-width: 40%; }
+.gh-item-main { flex: 1; min-width: 0; }
+.gh-item-lead { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-item-text { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.gh-item.done .gh-sub-title { color: var(--muted); text-decoration: line-through; }
+.gh-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--tone); vertical-align: 1px; }
+.gh-path { font-size: 11.5px; }
+.gh-meta { font-size: 11.5px; padding: 2px 6px 4px; }
+.gh-empty { font-size: 12px; padding: 5px 6px; }
+.gh-events .gh-item-text { color: var(--text); font-family: var(--mono); font-size: 11.5px; }
+.gh-mon-dot { display: inline-block; margin: 0 7px 0 0; vertical-align: 0; }
 .d-mods { display: flex; flex-direction: column; gap: 10px; }
 .d-mod { display: flex; align-items: center; gap: 12px; }
 .d-mod-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
