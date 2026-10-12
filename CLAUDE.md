@@ -173,6 +173,7 @@ web tabs keep working.
 | Web bridge | `main/browserBridge.ts`, `main/browserStore.ts`, `main/macKey.ts`, `main/ipcRegistry.ts`, `main/remoteGuards.ts`, `shared/{e2e,bridgeWire,remoteDeck}.ts` |
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
+| A session's tabs (Terminal, files, diffs), Details → Diff / Files, ⌘P, ⌘-click paths | `shared/sessionTabs.ts` (model), `renderer/src/sessionTabsStore.ts` (per `Session.key`, localStorage, `onOpen`), `renderer/.../SessionTabs.tsx`, `FileTab.tsx`, `DiffTab.tsx`, `DiffList.tsx`, `FileTree.tsx`, `QuickOpen.tsx`, `renderer/src/usePull.ts` (3 s while shown), `renderer/src/highlight.ts`; reads: `main/sessionFiles.ts` behind `files:*` / `diff:*`, guarded by `sessionFileCall` (`main/remoteGuards.ts`) and `insideRoot` / `relativeTo` / `findPaths` (`shared/filePath.ts`), parsers `shared/diff.ts`, limits `shared/fileView.ts`, web size cap `webFit` (`shared/sessionFiles.ts`). Nothing in `AppState` |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
@@ -384,6 +385,16 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-12)
+
+- **Per-session tabs (#113)** are built on branch `113-session-tabs` (not merged, **not
+  installed**: the rebuild of the real app waits for the user's word). A tab row per session pane
+  (Terminal, then file and diff tabs, kept per `Session.key` across restarts), Details → **Diff**
+  and **Files**, ⌘P, ⌘-click on terminal paths; ⇧← / ⇧→ removed. Design and plan:
+  `docs/plans/2026-10-12-session-tabs-{design,plan}.md`. Checked: typecheck, vitest, `build:web`,
+  the web preview at 1400 and 390 px, and the isolated app with a stand-in `claude` listing one
+  session in a temp repo (the four channels against real git, the Diff list updating by itself
+  after a file was added, a diff tab kept after a restart, middle-click close). Open points:
+  TODO ("Session tabs, files and diffs (#113)").
 
 - **Built-in workflows (#104)** are built on branch
   `worktree-MasterDeck-Terminal-104-builtin-workflows` (3d5503a, 21a5f82, a42f78b and the review
