@@ -33,7 +33,7 @@ export function PrPopup({ card, state, onClose, onStartReview, onStart }: Props)
     setError(null)
     if (!url) return
     void deck()
-      .prSummary(url)
+      .prSummary(url, card.project ?? null)
       .then((r) => {
         if (!alive) return
         if (r.ok) setPr(r.pr)

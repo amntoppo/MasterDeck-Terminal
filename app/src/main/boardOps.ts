@@ -80,8 +80,9 @@ export class BoardOps {
     if (!s(i.title)) return null
     const items = arr(o(i.projectItems).nodes).map(o)
     const keyOf = (n: J) => `${s(o(o(n.project).owner).login)}/${o(n.project).number}`
-    // Config order: the first selected board that holds the issue.
-    for (const p of this.config().projects) {
+    // The board the ticket names (its card's) first, then config order: the first selected board that holds the issue.
+    const named = this.board(t.project ?? null)
+    for (const p of named ? [named, ...this.config().projects.filter((x) => x !== named)] : this.config().projects) {
       const it = items.find((n) => keyOf(n) === projectKey(p))
       if (!it) continue
       const status = arr(o(it.fieldValues).nodes).map(o).find((v) => s(o(v.field).id) === p.statusFieldId)
@@ -240,7 +241,7 @@ export async function linkTicket(d: LinkDeps, t: Ticket, sessionId: string, cwd:
   let moved = ''
   if (info.item && d.moves(sessionId)) {
     const target = statusesFor(info.project).inProgress
-    const m = await d.ops.move(t, target)
+    const m = await d.ops.move({ ...t, project: info.project }, target)
     moved = `; ${m.message}`
     if (m.ok && !/left at|already/.test(m.message)) d.noteStatus(t, target)
   }

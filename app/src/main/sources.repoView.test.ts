@@ -85,6 +85,17 @@ describe('Sources and the repository view', () => {
     priv.boards = { '@current': { ...priv.boards['@current'], takenAt: '2026-09-25T11:00:00Z' } }
     expect(src.boardStamp()).not.toBe(before) // a board read landed
   })
+  it("with no number (or no card that is the issue), the board is Setup's first that holds the repository, whichever loaded first", () => {
+    const { src, priv } = make()
+    priv.config = parseConfig({ ...boarded, projects: [BOARD, { ...BOARD, number: 2 }] })
+    const card = (project: string, number: number) => ({ number, repo: 'partner/portal', project, title: 't', url: '', status: 'To Do', prs: [], assignees: [], labels: [], milestone: null, type: null })
+    priv.boards = { '@current': { takenAt: 1, sprint: null, columns: [], cards: [card('acme/2', 4), card('acme/1', 5)] } }
+    expect(src.boardOf('partner/portal')).toBe('acme/1')
+    expect(src.boardOf('partner/portal', 9)).toBe('acme/1')
+    expect(src.boardOf('partner/portal', 4)).toBe('acme/2') // the card that is the issue wins
+    priv.boards = { '@current': { ...priv.boards['@current'], cards: [card('acme/1', 5), card('acme/2', 4)] } }
+    expect(src.boardOf('partner/portal')).toBe('acme/1')
+  })
   it('a rate-limited repository note starts the pause', () => {
     for (const t of ['acme/api not read: RATE_LIMITED', 'gh: API rate limit exceeded', 'secondary rate limit', 'abuse detection mechanism']) expect(RATE_LIMITED.test(t)).toBe(true)
     expect(RATE_LIMITED.test('Not found: acme/old')).toBe(false)
