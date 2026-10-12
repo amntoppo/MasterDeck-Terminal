@@ -29,7 +29,7 @@ function useWidth() {
 
 /**
  * A changed file's diff: unified (− and + lines with old and new numbers) or, on a wide pane, old
- * and new side by side. Read again when the tab shows, when the session's turn ends, and on Reload.
+ * and new side by side. Live while it shows (usePull), and read again on Reload.
  */
 export function DiffTab({ session, path, base, visible }: { session: Session; path: string; base: DiffBase; visible: boolean }) {
   const [diff, setDiff] = useState<DiffRead | null>(null)
