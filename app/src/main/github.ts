@@ -2,6 +2,7 @@ import { getConfig } from '@shared/appConfig'
 import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import { buildPrSummary, parsePrUrl, type PrSummary } from '@shared/prSummary'
 import { parsePrDetail, prDetailQuery, type PrDetail } from '@shared/prDetail'
+import { safeRef } from '@shared/prWatch'
 import { parseSubIssues, SUB_ISSUES_JQ, type SubIssue } from '@shared/subIssues'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
@@ -63,7 +64,8 @@ export class GitHub {
   /** A PR's checks, reviews, threads and comments in one GraphQL read; cached for a minute. */
   async prDetail(url: string): Promise<{ ok: true; detail: PrDetail } | { ok: false; message: string }> {
     const id = parsePrUrl(url)
-    if (!id) return { ok: false, message: `not a PR URL: ${url}` }
+    // parsePrUrl takes names GitHub never gives (an owner with "_"); the query builder refuses them.
+    if (!id || !safeRef(id)) return { ok: false, message: `not a PR URL: ${url}` }
     const r = await this.gh(['api', 'graphql', '-f', `query=${prDetailQuery(id)}`], { timeoutMs: 30_000, ttl: 60 })
     const detail = parsePrDetail(r.stdout)
     if (detail) return { ok: true, detail }
