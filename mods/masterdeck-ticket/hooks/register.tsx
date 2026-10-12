@@ -7,8 +7,8 @@ import { NARROW_COLS, segments } from './line'
  * The session's MasterDeck ticket above the prompt: the ticket, its board column, the PR (CI, open
  * threads) and linked sessions, from `deck/band/<sessionId>.json`, which the app writes; this mod
  * never calls GitHub. **Details** and /md-ticket open a pane with the links. Nothing is drawn where
- * MasterDeck has no band for the session, or while this mod is switched off for it in Session
- * details → Mods (it reads that from the band itself, so the switch acts at once).
+ * MasterDeck has no band for the session, or while this mod is switched off for it in Tools →
+ * Mods (it reads that from the band itself, so the switch acts at once).
  * What it draws comes from module variables: a reload starts them over and the next read (2 s,
  * and one at once at session.start) fills them again.
  */

@@ -30,7 +30,7 @@ export interface ModBand {
   /** The board this session's account sees: `deck/boards/<boardKey>.json` (`modBoard`). */
   boardKey?: string
   /**
-   * Mods switched off for this session in Session details → Mods, by plugin name. MasterDeck's own
+   * Mods switched off for this session in Tools → Mods, by plugin name. MasterDeck's own
    * feature mods read it and go quiet; the core refuses any other when it loads.
    */
   offMods?: string[]
@@ -96,7 +96,7 @@ function parseSeen(raw: unknown): ModSeen[] {
   return out
 }
 
-/** A mod MasterDeck has seen in any session (`mod-catalog.json`): what Session details → Mods lists. */
+/** A mod MasterDeck has seen in any session (`mod-catalog.json`): what Tools → Mods lists. */
 export interface ModEntry {
   name: string
   provenance: string
@@ -119,7 +119,7 @@ export function mergeCatalog(catalog: readonly ModEntry[], seen: readonly ModSee
   return changed ? out.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 200) : null
 }
 
-/** How a mod stands in one session, for Session details → Mods. */
+/** How a mod stands in one session, for Tools → Mods. */
 export type ModRowStatus =
   | 'on'
   /** Switched off and refused (or, for MasterDeck's own, quiet). */
@@ -148,7 +148,7 @@ export interface ModRow {
 }
 
 /**
- * The rows of Session details → Mods: MasterDeck's core (locked: it does the switching), its
+ * The rows of Tools → Mods: MasterDeck's core (locked: it does the switching), its
  * feature mods (always listed; they switch themselves at once), then every other mod seen anywhere.
  */
 export function modRows(

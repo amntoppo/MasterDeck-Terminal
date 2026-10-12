@@ -10,7 +10,7 @@ import { USAGE, firstPrompt, isActive, newLoop, nextPrompt, parseLoopArgs, progr
  * the goal; when that turn ends the check runs in the session's folder; while it fails, Claude gets
  * its last lines and another round, up to N. It ends when the check passes, after N rounds, when
  * the person interrupts a round's turn, presses Stop or types /md-loop stop, or when this mod is
- * switched off for the session in MasterDeck (Session details → Mods). Its progress is a line above
+ * switched off for the session in MasterDeck (Tools → Mods). Its progress is a line above
  * the prompt. The loop lives in $.state, so a reload of the module keeps it.
  * Only the turn a round started counts: it binds to the first main-loop turn that starts after the
  * round was submitted (`turnId`), so a subagent's turn or an earlier one never ends a round.

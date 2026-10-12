@@ -216,7 +216,7 @@ export interface AppState {
   peers: Record<string, string[]>;
   /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
   modLive?: Record<string, { version: string; claude: string; mods: import("./modBand").ModSeen[] }>;
-  /** The mods switched off per session (Session.key → plugin names), from Session details → Mods (`mod-off.json`). */
+  /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
   modOff?: Record<string, string[]>;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
   modCatalog?: import("./modBand").ModEntry[];
