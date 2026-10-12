@@ -75,6 +75,7 @@ const ok = (n: Need | undefined) => !n || ((!n.screen || screenOk(n.screen)) && 
 
 const SHORTCUT_NEEDS: Partial<Record<ShortcutId, Need>> = {
   history: { screen: 'history' },
+  'quick-open': { method: 'filesList' },
   worktree: { method: 'openEditor' },
   refresh: { method: 'refresh' },
   settings: { screen: 'settings' },

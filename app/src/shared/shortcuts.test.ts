@@ -27,6 +27,12 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key('F', { meta: true, shift: true }), mac)).toEqual({ id: 'history' })
     expect(matchShortcut(key('f', { meta: true }), mac)).toEqual({ id: 'find' })
   })
+  it('opens quick-open with Mod P', () => {
+    expect(matchShortcut(key('p', { meta: true }), mac)).toEqual({ id: 'quick-open' })
+    expect(matchShortcut(key('p', { ctrl: true }), win)).toEqual({ id: 'quick-open' })
+    expect(matchShortcut(key('p', { ctrl: true }), mac)).toBeNull()
+    expect(SHORTCUTS.find((s) => s.id === 'quick-open')?.keys).toBe('Mod P')
+  })
   it('does not take the default menu combos', () => {
     for (const k of ['r', 'w', 'm', 'h', 'q', '0', 'c', 'v']) expect(matchShortcut(key(k, { meta: true }), mac)).toBeNull()
     expect(matchShortcut(key('R', { meta: true, shift: true }), mac)).toBeNull()

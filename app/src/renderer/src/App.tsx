@@ -62,6 +62,7 @@ import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
 import { SessionTabBody, SessionTabRow } from "./components/SessionTabs";
+import { QuickOpen } from "./components/QuickOpen";
 import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
 import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
 import { deck, load, save, useAppState } from "./deck";
@@ -216,6 +217,8 @@ export function App() {
     if (phoneScreen !== "main" || view !== "terminals") setPhonePanel(false);
   }, [phoneScreen, view]);
   const [palette, setPalette] = useState(false);
+  // ⌘P: the session whose files it picks from.
+  const [quickOpen, setQuickOpen] = useState<Session | null>(null);
   // History (⌘⇧F): a popup over any screen.
   const [historyOpen, setHistoryOpen] = useState(false);
   // ⌘F: find on the Terminals, Board or PRs screen; `at` reopens it (and refocuses) on each press.
@@ -778,6 +781,16 @@ export function App() {
       case "new-shell":
         void openShell();
         return done();
+      case "quick-open": {
+        const s = activeKey
+          ? state.sessions.find((x) => x.key === activeKey)
+          : null;
+        if (s) {
+          setView("terminals");
+          setQuickOpen((cur) => (cur ? null : s));
+        } else flash("Open a session tab first");
+        return done();
+      }
       case "palette":
         setPalette((p) => !p);
         return done();
@@ -1453,6 +1466,9 @@ export function App() {
           onClose={() => setNotesAt(null)}
           phone={phone}
         />
+      )}
+      {quickOpen && (
+        <QuickOpen session={quickOpen} onClose={() => setQuickOpen(null)} />
       )}
       {palette && (
         <CommandPalette

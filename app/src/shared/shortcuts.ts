@@ -20,6 +20,7 @@ export type ShortcutId =
   | 'shortcuts'
   | 'history'
   | 'find'
+  | 'quick-open'
 
 export interface Shortcut {
   id: ShortcutId
@@ -40,6 +41,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'new-shell', keys: 'Mod T', what: 'New shell in the workspace (+ Shell)', group: 'Tabs' },
   { id: 'close-tab', keys: 'Mod ⇧W', what: 'Close the tab (the session keeps running)', group: 'Tabs' },
   { id: 'split', keys: 'Mod \\', what: 'Show two tabs side by side, or close the split', group: 'Tabs' },
+  { id: 'quick-open', keys: 'Mod P', what: "Open a file of the open session in a tab", group: 'Sessions' },
   { id: 'worktree', keys: 'Mod E', what: "The open session's worktrees (open one in your editor)", group: 'Sessions' },
   { id: 'master', keys: 'Mod ⇧M', what: 'Show or hide master (every screen)', group: 'Sessions' },
   { id: 'refresh', keys: 'Mod ⇧G', what: 'Refresh from GitHub', group: 'App' },
@@ -77,7 +79,7 @@ export function matchShortcut(e: KeyLike, c: KeyContext): { id: ShortcutId; n?: 
   const k = e.key.toLowerCase()
   if (!e.shiftKey) {
     if (/^[1-9]$/.test(k)) return { id: 'tab-n', n: Number(k) }
-    const plain: Record<string, ShortcutId> = { f: 'find', k: 'palette', t: 'new-shell', j: 'needs-you', e: 'worktree', '\\': 'split', ',': 'settings', '/': 'shortcuts' }
+    const plain: Record<string, ShortcutId> = { f: 'find', k: 'palette', p: 'quick-open', t: 'new-shell', j: 'needs-you', e: 'worktree', '\\': 'split', ',': 'settings', '/': 'shortcuts' }
     return plain[k] ? { id: plain[k] } : null
   }
   const shifted: Record<string, ShortcutId> = { w: 'close-tab', m: 'master', g: 'refresh', f: 'history' }
