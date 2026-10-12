@@ -110,6 +110,19 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .code td { padding: 0 10px 0 0; vertical-align: top; white-space: pre; }
 .code .ln { width: 1%; padding: 0 10px 0 12px; text-align: right; color: var(--faint); user-select: none; }
 .code .lc { color: var(--text-2); }
+.diff-base { font-size: 11px; color: var(--muted); }
+.code.diff { table-layout: auto; }
+.code.diff.split { table-layout: fixed; }
+.code.diff.split .ln { width: 48px; }
+.code.diff.split .half { white-space: pre-wrap; word-break: break-all; }
+.code.diff .sign { width: 1%; padding: 0 6px; color: var(--faint); user-select: none; }
+.code.diff tr.hunk td { padding: 4px 12px; color: var(--muted); background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.code.diff tr.add td, .code.diff td.half.add { background: color-mix(in srgb, var(--green) 14%, transparent); }
+.code.diff tr.del td, .code.diff td.half.del { background: color-mix(in srgb, var(--red) 14%, transparent); }
+.code.diff tr.add .sign { color: var(--green); }
+.code.diff tr.del .sign { color: var(--red); }
+.code.diff td.half.none { background: var(--bg-2); }
+.code.diff .nonl { color: var(--faint); font-style: italic; }
 /* highlight.js tokens from the theme's colours, so light and dark both read. */
 .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-type, .hljs-doctag { color: var(--purple); }
 .hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-template-tag { color: var(--green); }
