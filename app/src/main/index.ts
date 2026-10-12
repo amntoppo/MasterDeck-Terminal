@@ -2250,7 +2250,7 @@ function registerIpc(): void {
   });
   reg.handle(CH.btwStop, (_e, key: unknown, id: unknown) => btwAsker.stop(key, id));
   reg.handle(CH.btwRemove, (_e, key: unknown, id: unknown) => {
-    // An answer still on its way is stopped first, so it does not come back when it ends.
+    // An answer still on its way is not removed: it would come back when it ends (Stop it first).
     const asking = btwStore.list(key).some((x) => x.id === id && x.status === "asking");
     if (asking) return false;
     return btwStore.remove(key, id);

@@ -632,7 +632,8 @@ session) and a `claude -p` prompt is not added to `history.jsonl`.
 session id, and keeps the answer nowhere (it lives in the overlay only). `BtwTerminal` stats the file
 every 2 s (`pollBtw` in `index.ts`), reads what it gained (its offset in `btw/history-offset.json`; the
 first read looks 2 MB back), files each `/btw <question>` (`parseHistoryLine`) under the listed
-session with that id (or whose background id starts it), as `t-<timestamp>`. A fresh one (under 2
+session with that id (or whose background id starts it), as `t-<timestamp>`; one whose session is
+not listed yet waits up to 2 minutes for it (a session just started), then is dropped. A fresh one (under 2
 minutes) of a background session gets its answer from the screen: `claude logs` every 2 s for up to
 90 s, `parseBtwScreen` finds the box (`/btw <question>`, the answer, the footer `… c to copy … Esc to
 close`), keeps the longest answer seen while the question matches (`sameQuestion`), and marks it

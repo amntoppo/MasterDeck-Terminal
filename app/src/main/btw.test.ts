@@ -189,6 +189,28 @@ describe('BtwTerminal', () => {
     expect(store.list('092cdc65')).toHaveLength(2)
   })
 
+  it('waits for a session that is listed after its /btw, and drops one never listed', async () => {
+    const file = join(dir, 'history.jsonl')
+    writeFileSync(file, '')
+    const store = new BtwStore(join(dir, 'btw'), () => {})
+    let now = 10_000_000
+    const term = new BtwTerminal(file, join(dir, 'offset.json'), store, async () => null, () => now, async (ms) => {
+      now += ms
+    })
+    const other = { key: 'other', sessionId: 'aaaaaaaa-0000-0000-0000-000000000000', bgId: null }
+    await term.poll([other])
+    appendFileSync(file, hist('/btw new one', now) + hist('/btw never listed', now, 'ffffffff-0000-0000-0000-000000000000'))
+    await term.poll([other])
+    expect(store.list('092cdc65')).toEqual([])
+    now += 10_000
+    await term.poll([other, { ...sessions[0], bgId: null }])
+    expect(store.list('092cdc65')).toMatchObject([{ question: 'new one', status: 'done', captured: false }])
+    now += 3 * 60_000
+    await term.poll([other])
+    await term.poll([other, { key: 'late', sessionId: 'ffffffff-0000-0000-0000-000000000000', bgId: null }])
+    expect(store.list('late')).toEqual([])
+  })
+
   it('says when the answer could not be read', async () => {
     const file = join(dir, 'history.jsonl')
     writeFileSync(file, '')

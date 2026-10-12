@@ -281,6 +281,8 @@ export class BtwTerminal {
   private offset: number | null = null
   private capturing = new Map<string, string>()
   private busy = false
+  /** `/btw` lines read and not filed yet. */
+  private pending: { sessionId: string; question: string; at: number }[] = []
 
   constructor(
     private file: string,
@@ -296,13 +298,14 @@ export class BtwTerminal {
     if (this.busy || !sessions.length) return
     this.busy = true
     try {
-      this.read(sessions)
+      this.read()
+      this.place(sessions)
     } finally {
       this.busy = false
     }
   }
 
-  private read(sessions: BtwTarget[]): void {
+  private read(): void {
     let size: number
     try {
       size = statSync(this.file).size
@@ -340,9 +343,20 @@ export class BtwTerminal {
     const next = from + Buffer.byteLength(text.slice(0, lastNl + 1))
     for (const l of lines) {
       const h = parseHistoryLine(l)
-      if (!h) continue
+      if (h) this.pending.push(h)
+    }
+    this.saveOffset(next)
+  }
+
+  /** File what was read under its session. A fresh one whose session is not listed yet (just started) waits for it. */
+  private place(sessions: BtwTarget[]): void {
+    const wait: typeof this.pending = []
+    for (const h of this.pending) {
       const s = sessions.find((x) => x.sessionId === h.sessionId) ?? sessions.find((x) => x.bgId && h.sessionId.startsWith(x.bgId))
-      if (!s) continue
+      if (!s) {
+        if (this.now() - h.at < FRESH_MS) wait.push(h)
+        continue
+      }
       const id = `t-${h.at}`
       if (this.store.list(s.key).some((e) => e.id === id)) continue
       const fresh = this.now() - h.at < FRESH_MS && !!s.bgId
@@ -359,7 +373,7 @@ export class BtwTerminal {
       this.store.put(s.key, entry)
       if (fresh && s.bgId) void this.capture(s.key, s.bgId, entry)
     }
-    this.saveOffset(next)
+    this.pending = wait
   }
 
   private saveOffset(offset: number): void {
