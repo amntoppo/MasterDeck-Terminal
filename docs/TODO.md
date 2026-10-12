@@ -80,9 +80,10 @@ fixes it, and move the item here to "Recently done".
   `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
   builder sessions use gh's active account. (f) master starts without `--settings` when the primary
   needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
-  without an `origin` of any connected account is read as the primary. (h) Boards and their repos
-  belong to one account: a board holding issues from another account's repos moves cards as the
-  repo's account. (i) Select all in one account's Repos & boards may widen what another account
+  without an `origin` of any connected account is read as the primary. (h) A card's issue calls
+  (assign, a PR link) go as its repository's account even when its board is another account's
+  (status moves go as the board's, #54); the assignable-users cache is per repository, so its read
+  has no card to ask. (i) Select all in one account's Repos & boards may widen what another account
   lists. (j) An account can show healthy for a few seconds before its background check fails.
 - **P3 · Phone/API clients and `session.start.account`.** The protocol field is merged and deployed
   in the backend (PR #10); no web or phone UI sends it yet.
@@ -235,20 +236,12 @@ fixes it, and move the item here to "Recently done".
   lost with it, and other repository reads and Refresh wait behind it (one read at a time).
   Approach: print each chunk as a line when it is done and let `RepoIssues` apply them as they come,
   or have the app send one CLI call per ten.
-- **P3 · Three gaps in which account a card's calls go out as** (`accountForCard`, `forCard`).
-  (1) A status move is routed by the card's account, not by the project's owner: a repository
-  listed by account A whose card sits only on B's board is moved with A's token, which fails when A
-  cannot write B's project. (2) `Sources.boardOf` without a number (the assignable-users read, a
-  PR's summary) guesses by repository: the first loaded card of that repository decides the board.
-  (3) `BoardFlow` drops the project it already knows: a my-issues card outside the loaded sprint, in
-  a repository no account lists or owns, is not found by `boardOf` and routes to the primary.
-  Approach: carry the card's `project` in the ticket through `move`/`linkPr`/`setStatus` and route
-  project writes by `accountForProject`.
-- **P3 · A session for a card of a repository no account lists starts as the primary account.**
-  MasterDeck's own calls for such a card go out as the account whose board holds it (`forCard`);
-  a session started from it (Start, a PR review) still takes its account from the repository alone
-  (`defaultAccount`: `matchRepo`, else the primary), so it may not be able to read a private
-  repository on another account's board. Approach: pass the card's board into `defaultAccount`.
+- **P3 · The CLI picks a ticket session's account by repository alone.** `spawn.default_account`
+  (a master proposal without an account) and `config.start_account` (the workspace `draft-assign`
+  looks for the folder in) ignore the card's board: for a card of a repository no account lists, on
+  another account's board, master's ASSIGN starts as the primary, and the Start dialog looks for the
+  folder in the primary's workspace while the app starts the session as the board's account (#54).
+  Approach: the card's board from the snapshot, and the same order as `accountForCard`.
 - **P3 · The per-repository Assign list was not seen in the app or against GitHub** (suites only):
   the loading line, the error line, and `gh api repos/<o>/<r>/assignees` as a second account.
 - **P3 · The PR popup was not checked at phone width.** The phone preview has no card that opens
@@ -842,6 +835,7 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 |---|---|---|
 | Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, 65937de and 081b82e (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
 | Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
+| Which account a card's calls and sessions use (issue #54): a status move (the Board's menu, BoardFlow, `linkSession`'s In Dev) goes as the account whose board holds the card (`forBoard`, `accountForProject`), even when another account lists the repository; the card's `project` travels in the ticket (`Ticket.project`, `knownProject`), so a my-issues card outside the loaded sprint routes by its board; `Sources.boardOf` without a number answers Setup's first board, not the first loaded card; a ticket session's account (Start, PR review: `startAccount`, after the code's repository) uses the card's board as `accountForCard` does. One account: unchanged | branch `worktree-MasterDeck-Terminal-54-card-account-routing` | — |
 | Per-session tabs (issue #113): each session pane has its own tab row (Terminal first, never closed), file tabs (Markdown rendered, code highlighted with highlight.js, a sentence for binary / too large / gone) and diff tabs (unified, Split when wide, live), closed with × or a middle-click and kept per session across restarts; Details → **Diff** (Uncommitted / Branch, A/M/D/R with +/− counts, live while it shows) and **Files** (tree, filter); ⌘P and ⌘-click on a path in the terminal open files; four read-only channels open to the web app, inside the session's folder only. The leftover ⇧← / ⇧→ view cycling and the old tab strip's CSS are gone | branch `113-session-tabs` | — |
 | Mods moved from Session details to the right panel's **Tools** tab (#86 follow-up): a third sub-tab after Queue and BTW (`SessionTools.tsx`), its label with "· n off"; Details is **Session · GitHub** again and a remembered `md.detailsTab` of `mods` opens Session | branch `worktree-MasterDeck-Terminal-86-mods-tools` | — |
 | Built-in workflows (issue #104): Superpowers, Ticket to PR, Bug fix, TDD (locked tests) and CI doctor ship as templates with a mark (`builtin: {id, hash, raw}`); seeded at launch, an unedited one follows a new release (keeping a rename), an edited one is never touched; a **Built-in** chip (**· edited**), the description and when to use it under the bar, **Duplicate**, **Restore original** (also after a rename only) and **Restore built-ins (n)**; TDD's check guards every `tests:` commit of the branch, CI doctor's every run of the commit | 3d5503a, 21a5f82, a42f78b and the review fixes, branch `worktree-MasterDeck-Terminal-104-builtin-workflows` (not merged, not installed) | spec `docs/superpowers/specs/2026-10-12-builtin-workflows-design.md` on branch `docs/builtin-workflows-104` (not pushed) |

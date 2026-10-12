@@ -11,6 +11,9 @@ const alice = { login: 'alice', primary: true, owner: 'acme', issueRepo: 'web', 
 const bob = { login: 'bob-work', owner: 'globex', issueRepo: 'app', repos: ['globex/app'], projects: [{ owner: 'globex', number: 7, columns: ['Todo'] }] }
 const one = parseConfig({ accounts: [alice] })
 const two = parseConfig({ accounts: [alice, bob] })
+// alice's board acme/1 holds a card of globex/app, which bob-work lists.
+const boards = parseConfig({ accounts: [{ ...alice, projects: [{ owner: 'acme', number: 1, columns: ['Todo'] }] }, bob] })
+const oneBoard = parseConfig({ accounts: [{ ...alice, projects: [{ owner: 'acme', number: 1, columns: ['Todo'] }] }] })
 
 function setup(cfg = two, bad: string[] = []) {
   const calls: { cmd: string; args: string[]; opts?: RunOpts }[] = []
@@ -138,5 +141,34 @@ describe('accountClients', () => {
     const s = setup(one)
     expect(s.c.forCard('globex/infra', 7)).toBe(s.base)
     expect(s.c.cardAccount('globex/infra', 7)).toBeNull()
+    const b = setup(oneBoard)
+    expect(b.c.forBoard({ repo: 'globex/app', number: 2, project: 'acme/1' })).toBe(b.base)
+  })
+  it("a status move goes out as the account whose board holds the card, not the repository's; a PR link stays the repository's", async () => {
+    const s = setup(boards)
+    const t = { repo: 'globex/app', number: 2, project: 'acme/1' }
+    await s.c.boardOps.move(t, 'In Dev')
+    await s.c.boardOps.setStatus(t, 'Todo')
+    const moves = s.calls.length
+    expect(moves).toBeGreaterThan(1)
+    await s.c.boardOps.linkPr(t, 'https://github.com/globex/app/pull/2')
+    expect(s.as().slice(0, moves).every((a) => a === 'alice')).toBe(true)
+    expect(s.as().slice(moves).every((a) => a === 'bob-work')).toBe(true)
+    expect(s.c.forBoard(t)).toBe(s.c.forAccount('alice'))
+    // A board Setup does not select is ignored: the card's own account, as before.
+    expect(s.c.forBoard({ ...t, project: 'other/9' })).toBe(s.c.forAccount('bob-work'))
+    // No board named: the loaded board that holds it (bob-work's globex/7 for partner/infra).
+    expect(s.c.forBoard({ repo: 'partner/infra', number: 7 })).toBe(s.c.forAccount('bob-work'))
+    expect(s.baseCalls).toEqual([])
+  })
+  it('a card outside the loaded boards routes by the board it names', async () => {
+    const s = setup()
+    // partner/portal: listed by no account, on no loaded board; its card says globex/7.
+    expect(s.c.cardAccount('partner/portal', 3)).toBe('alice')
+    expect(s.c.cardAccount('partner/portal', 3, 'globex/7')).toBe('bob-work')
+    expect(s.c.cardAccount('partner/portal', 3, 'other/9')).toBe('alice')
+    await s.c.boardOps.move({ repo: 'partner/portal', number: 3, project: 'globex/7' }, 'In Dev')
+    await s.c.boardOps.linkPr({ repo: 'partner/portal', number: 3, project: 'globex/7' }, 'https://github.com/partner/portal/pull/4')
+    expect(new Set(s.as())).toEqual(new Set(['bob-work']))
   })
 })

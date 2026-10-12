@@ -1419,8 +1419,9 @@ is a `gh` login (`gh auth status` lists them).
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
   accounts): it defaults to the account of the repository the issue's code is in (the issue's own
-  unless Setup says another), else the issue's repository's, else the folder's `origin`, else the
-  primary; accounts needing a new login can't be picked. Details shows the session's account. A
+  unless Setup says another), else the issue's repository's (for a repository no account lists, on
+  a board: the account with that owner, else the account whose board holds the card), else the
+  folder's `origin`, else the primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog: that starts a copy of the conversation as the new account (a running session is
   refused; the old session stays, stopped and hidden). Leaving the Account field alone never

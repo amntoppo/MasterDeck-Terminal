@@ -91,8 +91,10 @@ export function AssignDialog({
   // The workflow the new session starts with (a copy of it): the default, or a template.
   const [workflow, setWorkflow] = useState(prefs?.workflow ?? "default");
   // The account of the repository the ticket's code is in (else the issue's) by default; picking
-  // another starts (or resumes) as that one, and its workspace is looked in for the folder.
-  const defAccount = startAccount(issue.repo ?? null, state.config);
+  // another starts (or resumes) as that one, and its workspace is looked in for the folder. With
+  // its card's board, so a repository no account lists defaults to that board's account (as main does).
+  const issueBoard = issue.project ?? state.board?.cards.find((c) => sameTicket(c, issue))?.project ?? null;
+  const defAccount = startAccount(issue.repo ?? null, state.config, null, issueBoard);
   const [account, setAccount] = useState<string | null>(defAccount);
   const [accountPicked, setAccountPicked] = useState(false);
   const override = accountOverride(account, defAccount, state.config);
@@ -435,6 +437,7 @@ export function AssignDialog({
     onStart({
       issue: issue.number,
       repo: issue.repo ?? null,
+      ...(issueBoard ? { project: issueBoard } : {}),
       name,
       cwd,
       prompt,

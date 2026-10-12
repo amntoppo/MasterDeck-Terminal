@@ -232,7 +232,7 @@ function prRepoOf(url: string): string | null {
 
 /** What the PR popup's Start review sends: a review session for the card's ticket, in whichever repository that ticket is. */
 export function reviewRequest(
-  card: Pick<BoardCard, 'number' | 'repo'>,
+  card: Pick<BoardCard, 'number' | 'repo' | 'project'>,
   pr: { url: string; repo: string; number: number; title: string; author: string },
   o: { sessions: Session[]; cwd: string; instructions: string },
 ): AssignRequest {
@@ -240,6 +240,8 @@ export function reviewRequest(
     kind: 'PRREVIEW',
     issue: card.number,
     repo: card.repo ?? null,
+    // Its board: the review starts as the account the card's calls use.
+    ...(card.project ? { project: card.project } : {}),
     name: reviewName(pr.repo, pr.number, o.sessions),
     // Main starts it in the PR's repository's checkout when there is one; this folder otherwise.
     cwd: o.cwd,

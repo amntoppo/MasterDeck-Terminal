@@ -1,4 +1,4 @@
-import { accountForRepo, isMulti, primaryLogin, repoOfArgs, accountForCard } from '@shared/accounts'
+import { accountForProject, accountForRepo, isMulti, knownProject, primaryLogin, repoOfArgs, accountForCard } from '@shared/accounts'
 import type { AppConfig } from '@shared/appConfig'
 import type { Ticket } from '@shared/ticket'
 import type { AccountRunEnv } from './accountEnv'
@@ -56,15 +56,32 @@ export function accountClients(d: AccountClientsDeps) {
   const forRepo = (repo: string | null | undefined): Clients => forAccount(accountForRepo(repo, d.config()))
   /**
    * A card's calls (`accountForCard`): its repository's account; for a repository no account lists,
-   * the account with that owner, else the account whose loaded board holds the card (`boardOf`),
-   * so a private repository on another account's board is not asked for with the primary's token;
-   * else the primary. `cardAccount` is that login (null with one account).
+   * the account with that owner, else the account whose board holds the card (`project` when the
+   * caller knows it, else the loaded board that holds it: `boardOf`), so a private repository on
+   * another account's board is not asked for with the primary's token; else the primary.
+   * `cardAccount` is that login (null with one account).
    */
-  const cardAccount = (repo: string | null | undefined, number?: number): string | null => {
+  const cardAccount = (repo: string | null | undefined, number?: number, project?: string | null): string | null => {
     const cfg = d.config()
-    return isMulti(cfg) ? accountForCard(repo, d.boardOf?.(repo, number) ?? null, cfg) : null
+    return isMulti(cfg) ? accountForCard(repo, knownProject(project, cfg) ?? d.boardOf?.(repo, number) ?? null, cfg) : null
   }
-  const forCard = (repo: string | null | undefined, number?: number): Clients => forAccount(cardAccount(repo, number))
+  const forCard = (repo: string | null | undefined, number?: number, project?: string | null): Clients => forAccount(cardAccount(repo, number, project))
+  /** The board a ticket's card is on: the one it names (a selected board), else the loaded board that holds it; null when not known. */
+  const boardOfTicket = (t: Ticket): string | null => knownProject(t.project, d.config()) ?? d.boardOf?.(t.repo, t.number) ?? null
+  /**
+   * A ticket's board reads and writes (a status move and the read right before it): as the account
+   * whose board holds the card (`accountForProject`), the one that can write that board, even when
+   * another account lists the repository; with no known board, as the card's account (`forCard`).
+   * Issue reads and writes (assign, a PR link) stay on `forCard`.
+   */
+  const forBoard = (t: Ticket): Clients => {
+    const cfg = d.config()
+    if (!isMulti(cfg)) return d.base
+    const p = boardOfTicket(t)
+    return p ? forAccount(accountForProject(p, cfg)) : forCard(t.repo, t.number)
+  }
+  /** The ticket with its board filled in, so BoardOps moves the card on that board. */
+  const onBoard = (t: Ticket): Ticket => ({ ...t, project: boardOfTicket(t) })
   /**
    * Picks the account from the call itself: `-R`/`--repo owner/name`, a whole PR or issue URL, or a
    * `repos/<owner>/<repo>/…` API path (`repoOfArgs`). Anything else (`api user`, search) names no
@@ -79,10 +96,11 @@ export function accountClients(d: AccountClientsDeps) {
     if ('error' in a) return Promise.resolve({ code: 1, stdout: '', stderr: a.error })
     return d.run('gh', args, { ...opts, env: { ...(opts.env ?? {}), ...a.env } })
   }
-  /** BoardFlow's automatic moves and PR links, each as its ticket's repo's account. */
-  const boardOps: Pick<BoardOps, 'move' | 'linkPr'> = {
-    move: (t: Ticket, target: string, o?: { force?: boolean }) => forCard(t.repo, t.number).ops.move(t, target, o),
-    linkPr: (t: Ticket, url: string) => forCard(t.repo, t.number).ops.linkPr(t, url),
+  /** BoardFlow's automatic moves and PR links, and the Board's status menu: moves as the card's board's account (`forBoard`), PR links (an issue write) as the card's. */
+  const boardOps: Pick<BoardOps, 'move' | 'linkPr' | 'setStatus'> = {
+    move: (t: Ticket, target: string, o?: { force?: boolean }) => forBoard(t).ops.move(onBoard(t), target, o),
+    setStatus: (t: Ticket, status: string) => forBoard(t).ops.setStatus(onBoard(t), status),
+    linkPr: (t: Ticket, url: string) => forCard(t.repo, t.number, t.project).ops.linkPr(t, url),
   }
-  return { forAccount, forRepo, forCard, cardAccount, ghRouted, ghDirect, boardOps }
+  return { forAccount, forRepo, forCard, forBoard, cardAccount, ghRouted, ghDirect, boardOps }
 }

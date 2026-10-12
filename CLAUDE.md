@@ -159,7 +159,7 @@ web tabs keep working.
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
-| Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card |
+| Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card; its board writes (status moves) as `forBoard` (the board's account); pass the card's `project` (`Ticket.project`, `knownProject` for input) where you have it |
 | A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
@@ -407,7 +407,16 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-12)
+## Current state and next steps (2026-10-13)
+
+- **Which account a card's calls and sessions use (#54)** is fixed on branch
+  `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves
+  go as the card's board's account (`forBoard`), the card's board travels in the ticket
+  (`Ticket.project`), `boardOf` falls back in Setup's order, and a ticket session's account
+  (`startAccount`, after the code's repository) uses the card's board as `accountForCard` does.
+  Checked: typecheck and vitest (fake clients per account). Not checked: real GitHub with two
+  accounts, the app on screen. The CLI's `start_account` and master's own proposals still pick by
+  repository (TODO).
 
 - **Session processes in Details (#115)** are built on branch
   `worktree-MasterDeck-Terminal-115-session-processes` (draft PR, not merged, **not installed**: the
