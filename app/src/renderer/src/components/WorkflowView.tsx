@@ -261,6 +261,8 @@ export function WorkflowView(_: { state: AppState }) {
   // Restore original (the open built-in) or Restore built-ins (every deleted one, id null).
   const restore = async (id: string | null) => {
     if (!current) return;
+    // An edit still waiting is saved first: kept if the restore is called off, written over if not.
+    await autosave.flush();
     const ask =
       id === null
         ? `Bring back the deleted built-in workflow${removed.length === 1 ? "" : "s"} as MasterDeck ships ${removed.length === 1 ? "it" : "them"}?`
@@ -272,8 +274,6 @@ export function WorkflowView(_: { state: AppState }) {
       }))
     )
       return;
-    // Restore original writes the file over: an edit still waiting must not land after it.
-    if (id !== null) autosave.cancel();
     const r = await deck().workflowBuiltinRestore(id);
     setMsg(r.message);
     if (!r.ok) return;
