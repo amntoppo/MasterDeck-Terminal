@@ -15,6 +15,7 @@ import type { TokensByDay } from "./tokens";
 import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
+import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
 import type { HookEntry } from "./workflow";
 import type {
   CustomTrigger,
@@ -210,6 +211,11 @@ export const CH = {
   notesSave: "notes:save",
   notesDelete: "notes:delete",
   notesChanged: "notes:changed",
+  btwList: "btw:list",
+  btwAsk: "btw:ask",
+  btwStop: "btw:stop",
+  btwRemove: "btw:remove",
+  btwEvent: "btw:event",
   resumeSession: "session:resume",
   workspaceRepos: "app:workspaceRepos",
   ticketCreate: "ticket:create",
@@ -406,6 +412,13 @@ export interface DeckApi {
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
+  /** A session's side questions (the BTW tab), oldest first: asked there and `/btw` typed in its terminal. */
+  btwList(key: string): Promise<BtwEntry[]>;
+  /** Ask a side question about a session, as `/btw` does; the answer comes as btw events. */
+  btwAsk(key: string, question: string): Promise<BtwAskResult>;
+  btwStop(key: string, id: string): Promise<boolean>;
+  btwRemove(key: string, id: string): Promise<boolean>;
+  onBtwEvent(cb: (e: BtwEvent) => void): () => void;
   /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */
   ticketCreate(

@@ -172,6 +172,7 @@ web tabs keep working.
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
+| Side questions (Details → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx`; never in `AppState` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
@@ -379,6 +380,17 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-12)
+
+- **A BTW tab in Session details (#106)** (branch `worktree-MasterDeck-Terminal-106-btw-tab`, PR,
+  not merged, **not installed**: the rebuild of the real app waits for the user's word). Asks a side
+  question as `/btw` does through a forked `claude -p` of the session (no tools, hooks or MCP, nothing
+  saved), streams it in, keeps the history per session in `<home>/btw/`, and picks up `/btw` typed in
+  the terminal (`history.jsonl`, the answer read off `claude logs`). Spec and plan on the issue
+  (the backend repo was out of reach of this session). Checked: typecheck, vitest, the web preview at
+  1440 and 390 px, and the isolated app with a throwaway haiku background session: a panel question
+  answered from its conversation, a terminal `/btw` captured off its screen, an old one listed
+  without its answer, all three after a restart, the session's transcript unchanged. Not checked:
+  the real web app, a phone, Windows. Open points: TODO ("BTW tab").
 
 - **The README is rewritten for developers (#90)** (merged to `main` from branch
   `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in

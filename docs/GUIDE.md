@@ -651,6 +651,29 @@ a PR or with linked sessions:
 The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
 nothing for, they show nothing. To remove them all: **Remove** in Settings → Mods.
 
+## Side questions (BTW)
+
+**Session details → BTW** asks a quick side question about the session, the way Claude Code's
+`/btw` does, without typing in the terminal:
+
+- Type the question and press **Enter** (**Shift+Enter** for a new line), or **Ask**. The answer
+  streams in under it ("Answering…" until the first words); **Stop** ends it.
+- The answer comes from the session's conversation so far, with no tools (it cannot read files or
+  run anything). It works while Claude is busy, does not interrupt it and is never added to the
+  conversation. Each question also sees your last 20 side questions and their answers, as `/btw` does.
+- Each answer shows Markdown and code, what it cost, **Copy** and **Remove**. One that failed says
+  why, in red, with **Try again**.
+- **History** lists every side question of the session, newest first, with its time (the exact time
+  on hover), and is kept across restarts (`~/.claude/masterdeck/btw/`).
+- A `/btw` you type in the session's terminal shows here too, marked **terminal**. Claude Code keeps
+  those answers nowhere, so MasterDeck reads the answer off a background session's screen while the
+  `/btw` box is open: only what fits in the box (the entry says so when the answer was longer). For
+  an interactive session, or one asked before MasterDeck was running, only the question is there;
+  **Ask here** puts it in the box to ask again from the tab.
+- Each question from the tab reads the session's whole conversation once (a separate run of
+  `claude`, with its own prompt cache), so it costs more than `/btw` in a long session; the cost is
+  shown on the answer.
+
 ## Cost and context
 
 - **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the

@@ -675,12 +675,28 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
   checked in the web preview with fixture data (desktop and 390 px). The real `costs.json` is not
   converted: new records are hourly, older days stay days.
 
+## BTW tab: open points (2026-10-12, issue #106)
+
+- **Cost.** A question from the tab is a forked `claude -p` that reads the session's whole context
+  without the session's prompt cache (its tool list differs), so it costs more than `/btw` in a long
+  session. Measure it on a big session; a cheaper path needs a side-question API in Claude Code.
+- **Terminal answers are what fit on the screen.** Claude Code writes no `/btw` answer to disk; the
+  answer is read off `claude logs` while the box is open (a long one is marked partial), and only
+  for background sessions. An interactive session (a plain `claude` in a MasterDeck pane) could be
+  read from its PTY buffer instead.
+- **The screen parser follows Claude Code 2.1.296's box** (`/btw <q>`, answer, `c to copy · … Esc to
+  close`). A new layout makes terminal answers show as "could not read"; the question still shows.
+- **Not checked:** the real web app over the bridge, a phone, Windows (no `claude logs` capture
+  tested there), a session whose transcript is very large, a resumed session's earlier id.
+- The selected Details tab is not remembered (#103 asks for that for all tabs).
+
 ## Product ideas (from the user, 2026-10-03)
 
 ## Recently done
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| A **BTW** tab in Session details (issue #106): ask a side question about a session as `/btw` does (a forked, tool-less `claude -p` of its conversation, streamed in, Stop, errors with Try again, Markdown, Copy, cost), and its history newest first across restarts, with `/btw` typed in the terminal too (question from `history.jsonl`, answer read off a background session's screen) | branch `worktree-MasterDeck-Terminal-106-btw-tab` | — |
 | The README rewritten for developers (issue #90): pitch, badges and a hero under the logo, Why MasterDeck, Features with images (workflows and loops, the board, sessions, costs, several accounts), a five-step Quick start, Docs, Contributing; the long first-run and config details folded into `<details>` | merged to `main` from branch `worktree-MasterDeck-Terminal-90-readme` (not pushed) | — |
 | Costs time filter (issue #88): Last 1/5/12 hours, Today, Yesterday, Last 7/30 days, All time and a custom From–To (end before start refused), shown in the list ("3 Oct – 9 Oct") and remembered; every figure, the chart (per hour, day, week or month) and the tables follow it, Hours too; "No costs in this period" when empty. Costs and tokens are kept per local hour now (`shared/timeline.ts`, `tokens.json` v3) | 907ac63, merged to `main` (not pushed), installed locally | — |
 | MasterDeck installs, updates and reloads its mods (issue #93): `mods/` ships in the app and is copied to `~/.claude/masterdeck/mods` at every launch when it changed (Claude Code reads that marketplace in place); Setup's **Mods** step and Settings → **Hooks, mods & skills** → **Mods** install (version check 2.1.287, `claude plugin marketplace add` + `install` for each, the core first in `prependPlugins`) and remove them, with a backup of settings.json before every change; a Needs-you **MODS** item offers **Reload idle sessions** for sessions on older mods; Setup and Settings say where `prependPlugins` is ignored (managed settings, Team or Enterprise) | branch `worktree-MasterDeck-Terminal-93-mods-install` | — |

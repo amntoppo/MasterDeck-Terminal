@@ -25,6 +25,7 @@ import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
 import { SessionMods } from "./SessionMods";
+import { SessionBtw } from "./SessionBtw";
 import { peerRows } from "./peersView";
 
 interface Props {
@@ -58,7 +59,7 @@ export function SessionDetails({
   const [statusOpen, setStatusOpen] = useState(false);
   const [peersOpen, setPeersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [tab, setTab] = useState<"session" | "mods">("session");
+  const [tab, setTab] = useState<"session" | "mods" | "btw">("session");
   const since = useStateSince(s);
   const starred = useStars().includes(s.key);
   const status = sessionStatus(
@@ -132,9 +133,26 @@ export function SessionDetails({
         <button role="tab" aria-selected={tab === "mods"} className={tab === "mods" ? "on" : undefined} onClick={() => setTab("mods")}>
           Mods{state.modOff?.[s.key]?.length ? ` · ${state.modOff[s.key].length} off` : ""}
         </button>
+        {can("btwList") && (
+          <button role="tab" aria-selected={tab === "btw"} className={tab === "btw" ? "on" : undefined} onClick={() => setTab("btw")} title="Side questions about this session (/btw)">
+            BTW
+          </button>
+        )}
       </div>
     </div>
   );
+  if (tab === "btw")
+    return (
+      <div className="details">
+        {tabs}
+        {note && (
+          <section className="dsec">
+            <span className="d-note">{note}</span>
+          </section>
+        )}
+        <SessionBtw session={s} onMessage={flash} />
+      </div>
+    );
   if (tab === "mods")
     return (
       <div className="details">
