@@ -41,6 +41,25 @@ mac:
   # Hardened runtime is for notarization (Developer ID); with an ad-hoc signature it would block
   # loading the app's own libraries.
   hardenedRuntime: false
+  # Meetings (Settings → Meetings, after consent): without the microphone key macOS ends the app
+  # on access; without the audio capture key the Mac's sound records as silence (macOS 14.2+).
+  extendInfo:
+    NSMicrophoneUsageDescription: MasterDeck records meetings only when you press Record.
+    NSAudioCaptureUsageDescription: MasterDeck records meetings only when you press Record.
+  # Meetings' speech engine, built by scripts/whisper.sh (CI runs it before dist:mac): each
+  # architecture's DMG carries its own whisper-cli. Missing (a local build without the script):
+  # Settings → Meetings says "Speech engine missing".
+  extraResources:
+    - from: resources/whisper/${arch}
+      to: whisper/${arch}
+      filter:
+        - whisper-cli
+    # The helper that reads the meeting app's mute, built by scripts/mute.sh (CI runs it too).
+    # Missing: the recording keeps the microphone, as with "Always record".
+    - from: resources/mute/${arch}
+      to: mute/${arch}
+      filter:
+        - md-mute
 win:
   target:
     - target: nsis

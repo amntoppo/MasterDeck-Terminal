@@ -11,11 +11,13 @@ export interface RunOpts {
   stdin?: string
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  /** Aborting kills the process; the result is code -4. */
+  signal?: AbortSignal
 }
 
 export type Runner = (cmd: string, args: string[], opts?: RunOpts) => Promise<RunResult>
 
-/** A Runner over child_process.spawn. Never throws: a missing binary is code -1, a timeout -2. */
+/** A Runner over child_process.spawn. Never throws: a missing binary is code -1, a timeout -2, an abort -4. */
 export function makeRunner(baseEnv: () => NodeJS.ProcessEnv): Runner {
   return (cmd, args, opts = {}) =>
     new Promise((resolve) => {
@@ -28,6 +30,10 @@ export function makeRunner(baseEnv: () => NodeJS.ProcessEnv): Runner {
         resolve(r)
       }
       let child
+      if (opts.signal?.aborted) {
+        finish({ code: -4, stdout: '', stderr: 'aborted' })
+        return
+      }
       try {
         // Windows runs .cmd/.bat only through cmd.exe, which does not quote arguments. Quote each
         // one, and refuse characters that stay special inside quotes.
@@ -53,6 +59,13 @@ export function makeRunner(baseEnv: () => NodeJS.ProcessEnv): Runner {
             finish({ code: -2, stdout, stderr: stderr + `\ntimed out after ${opts.timeoutMs} ms` })
           }, opts.timeoutMs)
         : null
+      const onAbort = () => {
+        if (timer) clearTimeout(timer)
+        child.kill()
+        finish({ code: -4, stdout, stderr: stderr + '\naborted' })
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true })
+      child.on('close', () => opts.signal?.removeEventListener('abort', onAbort))
       child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
       child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
       child.on('error', (e) => {

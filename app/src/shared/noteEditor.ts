@@ -1,10 +1,12 @@
-import { incoming, type Note, type NoteChange, type NoteInput, type NoteMeta, type SaveResult } from './notes'
+import { incoming, type Note, type NoteChange, type NoteInput, type NoteLinkInput, type NoteMeta, type SaveResult } from './notes'
 import { ticketKey, type Ticket } from './ticket'
 
 /** What the editor holds: one note's text, and the stored version it started from. */
 export interface NoteDraft {
   id: string | null
   ticket: Ticket | null
+  /** What the note is about (a session, a ticket): sent with every save, kept by the store for a new note only. */
+  link: NoteLinkInput | null
   title: string
   body: string
   /** The stored version this text started from; null before the first save. */
@@ -20,17 +22,24 @@ export const SAVE_AFTER_MS = 500
 export const SAVE_MAX_WAIT_MS = 2000
 export const SAVE_RETRY_MS = 5000
 
-export const draftOf = (n: Note): NoteDraft => ({ id: n.id, ticket: n.ticket, title: n.title, body: n.body, base: n.updated, dirty: false })
-export const blankDraft = (ticket: Ticket | null): NoteDraft => ({ id: null, ticket, title: '', body: '', base: null, dirty: false })
+export const draftOf = (n: Note): NoteDraft => ({ id: n.id, ticket: n.ticket, link: n.link ?? null, title: n.title, body: n.body, base: n.updated, dirty: false })
+export const blankDraft = (ticket: Ticket | null, link?: NoteLinkInput | null): NoteDraft => ({
+  id: null, ticket, link: link ?? null, title: '', body: '', base: null, dirty: false,
+})
 
-/** What the panel can be asked to show. {}: the list alone. `fresh` is a timestamp: two requests for a new note differ. */
-export type NoteTarget = { id?: string; ticket?: Ticket; fresh?: number }
+/**
+ * What the panel can be asked to show. {}: the list alone. `fresh` is a timestamp: two requests for a new note differ.
+ * `link`: a new note is about this (a session, its ticket).
+ */
+export type NoteTarget = { id?: string; ticket?: Ticket; link?: NoteLinkInput; fresh?: number }
 
 /** One string per target ('' is the list alone). */
 export function noteTargetKey(t: NoteTarget): string {
   if (t.id) return `i:${t.id}`
   if (t.ticket) return `t:${ticketKey(t.ticket.repo, t.ticket.number)}`
-  return t.fresh ? `f:${t.fresh}` : ''
+  if (!t.fresh) return ''
+  const s = t.link?.session?.key
+  return s ? `f:${t.fresh}:s:${s}` : `f:${t.fresh}`
 }
 
 /** The draft once its save was answered. `sent` is what the save carried; `now` what the editor holds (the user may have typed on). */
@@ -179,7 +188,7 @@ export class NoteEditor {
     this.onChange()
     // null: no answer (the call threw: the line is down). Anything else is the store's own word.
     const call = this.deps
-      .save({ id: sent.id ?? undefined, title: sent.title, body: sent.body, ticket: sent.ticket, base: sent.base, force })
+      .save({ id: sent.id ?? undefined, title: sent.title, body: sent.body, ticket: sent.ticket, link: sent.link, base: sent.base, force })
       .catch((): SaveResult | null => null)
     this.saving = call
     const r = await call

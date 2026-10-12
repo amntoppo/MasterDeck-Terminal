@@ -8,6 +8,7 @@ import { deck, load, save, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
 import { NOTE_VIEWS, WIDE_QUERY, noteView, ticketNote, type NoteView, type NotesList } from '../notes'
 import { MarkdownView } from './MarkdownView'
+import { NOTE_FILTERS, filterNotes, isNoteFilter, meetingDay, type NoteFilter } from '@shared/noteFilter'
 
 /** {}: the list only. `fresh` is a timestamp, so asking twice for a new note is two requests. */
 export type NotesTarget = NoteTarget
@@ -19,6 +20,7 @@ export type NotesTarget = NoteTarget
 const editor = new NoteEditor({ save: (i) => deck().notesSave(i), get: (id) => deck().notesGet(id) })
 
 const VIEW_KEY = 'masterdeck.notesView'
+const FILTER_KEY = 'masterdeck.notesFilter'
 const VIEW_LABEL: Record<NoteView, [string, string]> = {
   write: ['Write', 'The Markdown text, as it is saved'],
   preview: ['Preview', 'The note rendered'],
@@ -54,6 +56,15 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
   const now = useNow()
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const [query, setQuery] = useState('')
+  // Per viewer, like the view: the window and each browser remember their own (load/save never throw).
+  const [filter, setFilter] = useState<NoteFilter>(() => {
+    const f = load<unknown>(FILTER_KEY, 'all')
+    return isNoteFilter(f) ? f : 'all'
+  })
+  const pickFilter = (f: NoteFilter) => {
+    setFilter(f)
+    save(FILTER_KEY, f)
+  }
   const [found, setFound] = useState<Set<string> | null>(null)
   // An answer that comes after the panel closed must not open it again.
   const open = useRef(true)
@@ -115,7 +126,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
       const n = meta ? await deck().notesGet(meta.id) : null
       if (n) return draftOf(n)
       if (target.ticket) return blankDraft(target.ticket)
-      return target.fresh ? blankDraft(null) : null
+      return target.fresh ? blankDraft(null, target.link) : null
     }
     void editor.show(target, load).then((shown) => {
       // The open text could not be saved: the panel stays on it rather than lose it (the editor says why).
@@ -171,7 +182,7 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
     if (gone && open.current) onTarget({})
   }
 
-  const shown = useMemo(() => (found ? metas.filter((m) => found.has(m.id)) : metas), [metas, found])
+  const shown = useMemo(() => filterNotes(found ? metas.filter((m) => found.has(m.id)) : metas, filter), [metas, found, filter])
   const globals = shown.filter((m) => !m.ticket)
   const tickets = shown.filter((m) => m.ticket)
   // A ticket known only as a board card (or in the repository view) has no entry in state.issues.
@@ -189,6 +200,25 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
         )}
       </span>
       <span className="note-row-a">{formatAgo(now - m.updated)}</span>
+      {(m.link || m.meeting) && (
+        <span className="note-chips">
+          {m.link?.session && (
+            <span className="note-chip session" title={`About the session ${m.link.session.name}`}>
+              {m.link.session.name}
+            </span>
+          )}
+          {m.link?.ticket && !m.link.session && (
+            <span className="note-chip mono" title={issueTitle(m.link.ticket)}>
+              {ticketLabel(m.link.ticket.repo, m.link.ticket.number)}
+            </span>
+          )}
+          {m.meeting && (
+            <span className="note-chip meeting" title={m.meeting.title}>
+              Meeting · {meetingDay(m.meeting.at)}
+            </span>
+          )}
+        </span>
+      )}
       <span className="note-row-p">{m.preview || 'Empty'}</span>
     </button>
   )
@@ -230,12 +260,19 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
           maxLength={NOTE_QUERY_MAX}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <div className="notes-filters" role="group" aria-label="Show">
+          {NOTE_FILTERS.map(([f, label]) => (
+            <button key={f} type="button" className={`chip ${filter === f ? 'btnlike on' : ''}`} aria-pressed={filter === f} onClick={() => pickFilter(f)}>
+              {label}
+            </button>
+          ))}
+        </div>
         {!loaded ? (
           <div className="notes-empty muted">Loading notes…</div>
         ) : !metas.length ? (
           <div className="notes-empty muted">No notes yet. Write the first one with New note.</div>
         ) : !shown.length ? (
-          <div className="notes-empty muted">No notes match.</div>
+          <div className="notes-empty muted">{query.trim() || filter === 'all' ? 'No notes match.' : 'No notes of this kind.'}</div>
         ) : (
           <>
             {globals.length > 0 && <div className="eyebrow">Notes</div>}
@@ -254,15 +291,29 @@ export function NotesPanel({ notes, state, target, onTarget, onClose, phone }: P
               {issueTitle(draft.ticket)}
             </div>
           ) : (
-            <input
-              className="notes-title"
-              placeholder="Title"
-              aria-label="Title"
-              value={draft.title}
-              maxLength={NOTE_TITLE_MAX}
-              onChange={(e) => editor.edit({ title: e.target.value })}
-              onBlur={() => editor.saveNow()}
-            />
+            <>
+              {draft.link && (
+                <div className="notes-ticket notes-about">
+                  About{' '}
+                  {draft.link.session ? (
+                    <>
+                      <b>{draft.link.session.name}</b>
+                      {draft.link.ticket && ' · '}
+                    </>
+                  ) : null}
+                  {draft.link.ticket && <span className="mono">{ticketLabel(draft.link.ticket.repo, draft.link.ticket.number)}</span>}
+                </div>
+              )}
+              <input
+                className="notes-title"
+                placeholder="Title"
+                aria-label="Title"
+                value={draft.title}
+                maxLength={NOTE_TITLE_MAX}
+                onChange={(e) => editor.edit({ title: e.target.value })}
+                onBlur={() => editor.saveNow()}
+              />
+            </>
           )}
           <div className={`notes-pane ${view}`}>
             {view !== 'preview' && (

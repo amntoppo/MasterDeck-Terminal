@@ -39,6 +39,17 @@ describe('watch new PRs', () => {
   })
 })
 
+describe('meetings', () => {
+  it('a settings file from before meetings reads with the defaults', () => {
+    const old = { idleNudgeMinutes: 30, dockBadge: false, remoteEnabled: true }
+    expect(normalizeSettings(old).meetings).toEqual(DEFAULT_SETTINGS.meetings)
+    expect(normalizeSettings(old)).toMatchObject(old)
+  })
+  it('keeps a stored consent', () => {
+    expect(normalizeSettings({ meetings: { consentAt: 10, consentVersion: 1, offer: false } }).meetings).toMatchObject({ consentAt: 10, consentVersion: 1, offer: false })
+  })
+})
+
 describe('theme', () => {
   it('defaults to dark and keeps a known choice', () => {
     expect(normalizeSettings({}).theme).toBe('dark')

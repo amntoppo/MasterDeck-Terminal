@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionForIssue, sessionTicket } from "@shared/derive";
 import { mergePresence } from "@shared/remotePresence";
+import { meetingsAgreed } from "@shared/meetings";
 import type { AppState, Issue, Session, BoardCard } from "@shared/types";
 import type { AssignRequest } from "@shared/ipc";
 import { AssignDialog } from "./components/AssignDialog";
@@ -22,6 +23,8 @@ import {
 } from "./components/CommandPalette";
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
+import { MeetingsView, type MeetingTarget } from "./components/MeetingsView";
+import { meetingsHere, setMeetingOpener } from "./meetingLinks";
 import { PrsView } from "./components/PrsView";
 import { BrowserApproval } from "./components/BrowserApproval";
 import { WebConfirm } from "./components/WebConfirm";
@@ -200,6 +203,7 @@ export function App() {
         "janitor",
         "workflow",
         "settings",
+        ...(meetingsHere() ? (["meetings"] as View[]) : []),
       ] as View[]
     ).includes(v as View)
       ? (v as View)
@@ -230,6 +234,8 @@ export function App() {
     section: SettingsSection;
     at: number;
   } | null>(null);
+  /** The rail's Record popout (also ⌘K "Record meeting"). */
+  const [recordOpen, setRecordOpen] = useState(false);
   const [dialog, setDialog] = useState<
     | "broadcast"
     | "standup"
@@ -253,6 +259,24 @@ export function App() {
   const [sideDragging, setSideDragging] = useState(false);
   // The Notes panel: null closed, {} the list, or the note to open.
   const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
+  /** The Meetings page's meeting to open (a note's link, Needs you's Open). */
+  const [meetingAt, setMeetingAt] = useState<MeetingTarget | null>(null);
+  // A note's masterdeck://meetings/<id>?t= link (MarkdownView) and Needs you's Open land here; the
+  // Notes panel closes so the meeting shows.
+  const openMeeting = (id: string, t: number | null) => {
+    setMeetingAt({ id, t, at: Date.now() });
+    setView("meetings");
+    setNotesAt(null);
+  };
+  useEffect(() => {
+    setMeetingOpener(openMeeting);
+    return () => setMeetingOpener(null);
+  }, []);
+  // The offer's notification was clicked (the window only): show the Record popout.
+  useEffect(() => {
+    if (isWeb() || !can("onMeetingsShowRecord")) return;
+    return deck().onMeetingsShowRecord(() => setRecordOpen(true));
+  }, []);
   const notes = useNotes(!!state);
   // The Terminals screen's right panel: its tab (Details, Tools, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
@@ -911,8 +935,18 @@ export function App() {
     );
   }
 
+  /** Settings → Meetings (Record before consent goes there). */
+  const openMeetingsSetup = () => {
+    setRecordOpen(false);
+    setSettingsAt({ section: "meetings", at: Date.now() });
+    setView("settings");
+  };
   const runAction = (a: PaletteAction | "palette") => {
     if (a === "palette") setPalette(true);
+    else if (a === "record-meeting") {
+      if (meetingsAgreed(state.settings) || state.meetingLive?.recording) setRecordOpen(true);
+      else openMeetingsSetup();
+    }
     else if (a === "refresh") void deck().refresh();
     else if (a === "view:history") setHistoryOpen(true);
     else if (a.startsWith("view:")) setView(a.slice(5) as View);
@@ -1086,6 +1120,13 @@ export function App() {
       <Rail
         view={view}
         onView={setView}
+        meeting={{
+          live: state.meetingLive,
+          agreed: meetingsAgreed(state.settings),
+          open: recordOpen,
+          setOpen: setRecordOpen,
+          onSetup: openMeetingsSetup,
+        }}
         notesOpen={!!notesAt}
         onNotes={() => setNotesAt((n) => (n ? null : {}))}
         remote={remote}
@@ -1114,6 +1155,7 @@ export function App() {
         onView={setView}
         onTool={(a) => runAction(a)}
         onStartWith={startWithInstructions}
+        onOpenMeeting={(id) => openMeeting(id, null)}
         onSessionAction={(sess, a) => {
           if (a === "close-tab") closeTab(`tab:${sess.key}`);
           else {
@@ -1211,6 +1253,15 @@ export function App() {
       )}
       {view === "janitor" && <JanitorView state={state} />}
       {view === "workflow" && <WorkflowView state={state} />}
+      {view === "meetings" && meetingsHere() && (
+        <MeetingsView
+          agreed={meetingsAgreed(state.settings)}
+          target={meetingAt}
+          onSetup={openMeetingsSetup}
+          onNote={setNotesAt}
+          notes={notes.metas}
+        />
+      )}
       {view === "settings" && (
         <SettingsView
           settings={state.settings}
@@ -1394,7 +1445,7 @@ export function App() {
         <Inspector
           state={state}
           notes={notes.metas}
-          onNote={(t) => setNotesAt({ ticket: t })}
+          onNote={setNotesAt}
           session={
             activeKey
               ? (state.sessions.find((x) => x.key === activeKey) ?? null)

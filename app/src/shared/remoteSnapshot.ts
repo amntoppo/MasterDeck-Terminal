@@ -40,6 +40,8 @@ function inboxEntry(e: InboxEntry): RemoteInboxEntry {
   }
 }
 
+const notMeeting = (e: InboxEntry): boolean => e.item.kind !== 'meeting'
+
 export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now()): RemoteSnapshot {
   const live = s.sessions.filter((x) => x.state !== 'done')
   const sessions: RemoteSession[] = live.map((x) => {
@@ -85,9 +87,10 @@ export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now
     master: s.master.kind,
     sessions,
     inbox: {
-      open: s.inbox.open.map(inboxEntry),
-      snoozed: s.inbox.snoozed.map(inboxEntry),
-      history: s.inbox.history.slice(0, HISTORY_KEEP).map(inboxEntry),
+      // A meeting's items stay on the Mac: their text is the meeting's, and only the window acts on them.
+      open: s.inbox.open.filter(notMeeting).map(inboxEntry),
+      snoozed: s.inbox.snoozed.filter(notMeeting).map(inboxEntry),
+      history: s.inbox.history.filter(notMeeting).slice(0, HISTORY_KEEP).map(inboxEntry),
     },
     menus: Object.fromEntries(Object.entries(s.menus ?? {}).filter(([k]) => menuKeys.has(k))),
     board: s.board ? { columns: columnsWithDerived(s.board), sprint: s.board.sprint, cards } : null,

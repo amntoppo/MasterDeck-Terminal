@@ -3,9 +3,9 @@
 | Doc | For | What's in it |
 |---|---|---|
 | [../CLAUDE.md](../CLAUDE.md) | agents (start here) | Layout, commands, operating rules, protocol copy rule, where each subsystem lives, current state |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | agents | Main process (startup, Sources/state build, inbox, hooks, monitors, workflows, queue, sender/PTYs, master-agent), preload/IPC, shared modules, renderer, AppState producers, files on disk |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | agents | Main process (startup, Sources/state build, inbox, hooks, monitors, workflows, queue, sender/PTYs, master-agent), preload/IPC, shared modules, renderer, AppState producers, files on disk, Meetings (permission gate, recording, transcription, matching, the page, Janitor, the offer) |
 | [REMOTE.md](REMOTE.md) | agents | Account sign-in, CloudSync (snapshots/patches, commands, items, clients), browser bridge (approval, E2E, state patches, PTY streaming), web app, instant typing, remote indicator, message tables |
-| [OPERATIONS.md](OPERATIONS.md) | agents | Dev setup, build/package/install, release, web app, website and backend deploy, isolated E2E recipe, throwaway Claude session, measuring upload, troubleshooting |
+| [OPERATIONS.md](OPERATIONS.md) | agents | Dev setup, build/package/install, release, web app, website and backend deploy, isolated E2E recipe, throwaway Claude session, meetings ([capture](OPERATIONS.md#meetings-capture): system audio and microphone on macOS; [speech engine and models](OPERATIONS.md#meetings-speech-engine-and-models): `scripts/whisper.sh`; [md-mute](OPERATIONS.md#meetings-md-mute): building it, checking a rule by hand; [the fixture](OPERATIONS.md#meetings-the-fixture)), measuring upload, troubleshooting |
 | [THEMES.md](THEMES.md) | agents | Themes (issue #105): the exploration, the token set, the light palette, adding a theme |
 | [MODS.md](MODS.md) | agents | Claude Code mods (issue #86): how they work, what they mean for MasterDeck, the probe in a background session, integration ideas, how MasterDeck should ship its mod |
 | [TODO.md](TODO.md) | agents | Open work by priority with code pointers and approaches; recently done with commits |

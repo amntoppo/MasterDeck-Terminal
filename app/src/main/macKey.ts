@@ -4,6 +4,17 @@ import { exportPrivate, generateStatic, importPrivate, importPublic, publicRaw }
 
 export interface SafeStore { isEncryptionAvailable(): boolean; encryptString(s: string): Buffer; decryptString(b: Buffer): string }
 
+/**
+ * A store that never opens the Keychain. The smoke test uses it: each build is signed ad hoc, so
+ * the Keychain asks again on every new build, and that dialog blocks the main thread until someone
+ * answers it (the smoke test would hang with no output, its own 30 s timer frozen too).
+ */
+export const NO_KEYCHAIN: SafeStore = {
+  isEncryptionAvailable: () => false,
+  encryptString: () => { throw new Error('the Keychain is not used here') },
+  decryptString: () => { throw new Error('the Keychain is not used here') },
+}
+
 /** The Mac's long-term key for browsers, Keychain-encrypted (safeStorage). Null when encryption is unavailable. */
 export async function loadMacKey(file: string, safe: SafeStore): Promise<{ pair: CryptoKeyPair; publicKey: string } | null> {
   if (!safe.isEncryptionAvailable()) return null

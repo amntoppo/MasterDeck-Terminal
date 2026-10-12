@@ -1,3 +1,4 @@
+import { DEFAULT_MEETINGS, normalizeMeetings, type MeetingsSettings } from './meetings'
 import { isThemePref, type ThemePref } from './themes'
 
 export interface Settings {
@@ -20,6 +21,8 @@ export interface Settings {
   remoteEnabled: boolean
   /** Web terminal: show typed characters at once, corrected when the Mac's output arrives (predictive local echo). */
   instantTyping: boolean
+  /** Settings → Meetings (macOS): the consent, the speech model, offers, how long audio is kept. */
+  meetings: MeetingsSettings
   /** Light, Dark or System (follows the OS). The web app keeps its own choice per browser (renderer/src/theme.ts). */
   theme: ThemePref
 }
@@ -37,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   watchPrs: true,
   remoteEnabled: false,
   instantTyping: true,
+  meetings: DEFAULT_MEETINGS,
   // Dark: an update keeps today's look until the user picks another.
   theme: 'dark',
 }
@@ -60,6 +64,7 @@ export function normalizeSettings(raw: unknown): Settings {
     watchPrs: typeof r.watchPrs === 'boolean' ? r.watchPrs : DEFAULT_SETTINGS.watchPrs,
     remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
     instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
+    meetings: normalizeMeetings(r.meetings),
     theme: isThemePref(r.theme) ? r.theme : DEFAULT_SETTINGS.theme,
   }
 }

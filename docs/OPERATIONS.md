@@ -37,7 +37,8 @@ open /Applications/MasterDeck.app
   needed) / `npm run dist:win -- --publish never`. Then `install-app-deps` again.
 - Packaging config: `app/electron-builder.yml` (appId `io.github.amntoppo.masterdeck`, ad-hoc
   signature `identity: "-"`, no hardened runtime, node-pty unpacked from asar, `statusline_tee.py`
-  and `../skills` as extra resources without tests/caches).
+  and `../skills` as extra resources without tests/caches; on macOS also `resources/whisper/<arch>`,
+  meetings' speech engine, when `scripts/whisper.sh` built it: see "Meetings: speech engine and models").
 - Icons: `app/build/icon.icns` (macOS, also the DMG), `icon.ico` (Windows), `icon.png` / `icon.svg`
   (the source tile; `npm run dev` puts it in the Dock), and the web app's `src/web/public/favicon.svg`,
   `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` and `manifest.webmanifest`. All are made by
@@ -45,6 +46,10 @@ open /Applications/MasterDeck.app
   A Mac may keep showing the old icon of a replaced app until the Dock restarts (`killall Dock`).
 - Smoke: `MASTERDECK_NO_SKILLS=1 MASTERDECK_SMOKE=1 MASTERDECK_USER_DATA=$(mktemp -d)
   dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` → `SMOKE OK sessions=… issues=…`.
+  The smoke test never opens the Keychain (`NO_KEYCHAIN` in `main/macKey.ts`: no browser key, no
+  remote token): every build is signed ad hoc, so the Keychain asks again for each new build, and
+  its dialog blocks the main thread until answered (the run then hangs with no output, its own 30 s
+  timer frozen too). An isolated app that is not a smoke run still asks; that dialog is the user's to answer.
 
 ## Release
 
@@ -223,6 +228,255 @@ claude --bg -n probe-$(date +%s) --model haiku "Reply with OK and wait."
   the user first, or test the PTY path with a shell pane ("Terminal in a repo") instead.
 - Stop it with `claude stop <bgId>` when done, remove `$P`, and delete only the transcript folder
   that run created under `~/.claude/projects/` (name it exactly; never a glob).
+
+## Meetings: capture
+
+How MasterDeck records a meeting on macOS (issue #102; spec §1-§2 in the backend repo). This comes
+from Electron 44.4.5's `electron.d.ts` and the Electron docs. **Nothing here has been run on a real
+Mac yet**: a real capture needs the user's grants, so it is checked by the user (list below).
+
+**Two streams, both from a hidden capture window**, never at startup:
+
+- **You**: `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })`.
+  Permission: Microphone. Ask with `systemPreferences.askForMediaAccess('microphone')` (main,
+  after consent); read with `getMediaAccessStatus('microphone')` (never prompts). Needs
+  `NSMicrophoneUsageDescription` in `mac.extendInfo`, or macOS kills the app on access.
+- **Others** (the sound the Mac plays): `navigator.mediaDevices.getDisplayMedia({ video: true,
+  audio: true })`, answered in main by `setDisplayMediaRequestHandler` with `audio: 'loopback'`.
+
+**What `loopback` is on macOS in Electron 44.** The `Streams.audio` comment in `electron.d.ts` still
+says "only supported on Windows"; that comment is out of date. The desktopCapturer docs say:
+
+- **macOS 14.2+**: since Electron 39 Chromium captures loopback with Apple's **Core Audio tap**
+  (feature `MacCatapLoopbackAudioForScreenShare`, on by default). Permission: **System Audio
+  Recording Only** (Privacy & Security → Screen & System Audio Recording, the lower list), for the
+  responsible process. It needs `NSAudioCaptureUsageDescription` in Info.plist. Without the key, or
+  without the grant, the audio track is silent or `ended`, **with no error**.
+  No feature switch is needed. `app.commandLine.appendSwitch('disable-features',
+  'MacCatapLoopbackAudioForScreenShare')` falls back to the older ScreenCaptureKit path (full
+  Screen Recording permission). That works up to Electron 44 only: Chromium M155 / Electron 45
+  removed the feature, and the switch then does nothing. Do not use it.
+- **macOS 13 to 14.1**: ScreenCaptureKit carries the system audio. Permission: **Screen & System
+  Audio Recording** (the full one).
+- **macOS 12 and older**: no system audio. Meetings records only the microphone and says so.
+
+**A video source must be given.** `getDisplayMedia` refuses `video: false`, and the handler must
+answer with a video source. Use the capture window's own frame (`video: request.frame`): it is a tab
+capture of a blank page and needs no Screen Recording grant on 14.2+. That this pairs with
+`loopback` is **not yet checked**. If it does not, use `desktopCapturer.getSources({ types:
+['screen'], thumbnailSize: { width: 0, height: 0 } })`, `video: sources[0]`. That one asks for
+Screen Recording too. In the window, stop and remove the video track at once and keep the audio.
+
+```ts
+// main/meetings/capture.ts — the capture window's own partition, so the main window never gets this.
+const ses = session.fromPartition('meetings-capture')
+ses.setDisplayMediaRequestHandler(
+  (request, callback) => {
+    // Only our capture window, only while consent holds; anything else is refused.
+    if (!captureWin || request.frame !== captureWin.webContents.mainFrame || !consentOk()) {
+      return callback({}) // no streams = denied
+    }
+    callback({ video: request.frame, audio: 'loopback' })
+  },
+  { useSystemPicker: false }, // true (macOS 15+) shows Apple's picker and skips this handler
+)
+ses.setPermissionRequestHandler((wc, permission, cb, details) =>
+  cb(wc === captureWin?.webContents && consentOk() && (permission === 'media' || permission === 'display-capture')))
+```
+
+```ts
+// capture.html's script
+const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+for (const t of sys.getVideoTracks()) { t.stop(); sys.removeTrack(t) }
+const [others] = sys.getAudioTracks() // missing or readyState 'ended' = no system audio grant
+const you = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })
+```
+
+- `useSystemPicker` stays `false`. It is experimental (macOS 15+), and Apple's picker asks the
+  user to pick a screen or window: that is wrong for a meeting.
+- `loopbackWithMute` mutes the Mac's speakers while recording. Never use it.
+- **No API reads the System Audio Recording grant.** `getMediaAccessStatus('screen')` reports the
+  Screen Recording grant only, and `askForMediaAccess` takes `microphone` or `camera` only. So
+  setup's **Allow** for "Sound from the Mac" runs a 1-second capture, which brings up the prompt.
+  The status is that probe: an audio track that is live and not silent while something plays.
+  The spec's `getMediaAccessStatus('screen')` holds only for the 13-14.1 path.
+- `npm run dev` / `npx electron .` run under the terminal. macOS asks for, and records the grant
+  against, the terminal app (the responsible process), and reads the plist keys from the
+  terminal's Info.plist. Test permissions only with the packaged app.
+
+**Ad-hoc signing.** Grants are keyed to the code signature, and an ad-hoc signature changes with
+every build. A rebuild or an update may ask again, or show "granted" and capture silence. To start
+over (the user does this, never a test or an agent):
+
+```bash
+tccutil reset Microphone io.github.amntoppo.masterdeck
+tccutil reset AudioCapture io.github.amntoppo.masterdeck    # System Audio Recording Only (14.2+)
+tccutil reset ScreenCapture io.github.amntoppo.masterdeck   # Screen & System Audio Recording
+```
+
+A Developer ID signature removes this (TODO: signing).
+
+**Fallback, if loopback fails on a real Mac.** A small Swift helper with its own Core Audio
+process tap (`CATapDescription` + `AudioHardwareCreateProcessTap`, an aggregate device, macOS
+14.2+). It writes 16 kHz mono PCM to a pipe, and the rest of the design stays the same.
+Permission: System Audio Recording Only. It needs `NSAudioCaptureUsageDescription` in the app's
+Info.plist, and the helper must be signed inside the bundle, so macOS counts MasterDeck as the
+responsible process.
+
+**As built** (`main/meetings/recorder.ts`, `renderer/src/capture.ts`): the shape above, with
+these choices. The page is started by `executeJavaScript(..., true)` so `getDisplayMedia` has a
+user gesture; frames are compared by `processId` / `routingId` (WebFrameMain wrappers may differ
+as objects); the window has `autoplayPolicy: 'no-user-gesture-required'`; the AudioContext asks
+for 16 kHz (Chromium resamples the streams; `Resampler` covers another rate); the AudioWorklet is
+bundled with `?worker&url` (`worker.format: 'es'`, so a module in the build as in dev, where vite
+serves it as `?worker_file&type=module` with `import env.mjs`, never `importScripts`) into
+`out/renderer/assets/pcmWorklet-*.js` next to `capture-*.js` and loaded from `file://` (not yet run
+in a packaged app or in `npm run dev`). `npm run build` builds both renderer pages (`index.html`,
+`capture.html`) and both preloads (`index.js`, `capture.js`).
+
+**Checked by the user** (on the packaged app, after Task 5):
+
+- The microphone prompt appears on **Allow microphone**, and the status turns granted.
+- On macOS 14.2+, **Allow** for the Mac's sound shows the System Audio Recording prompt (not the
+  Screen Recording one), and the next capture has a live, non-silent system track while audio plays.
+- `video: request.frame` + `loopback` gives an audio track (else switch to the `getSources` shape).
+- After a rebuild and reinstall: whether the grants survive, and what the silent-track message says.
+- The speakers keep playing during a recording.
+- A real recording: the hidden window opens no window, the worklet loads from `file://`, chunks
+  appear in `meetings/<id>/chunks/` every 30 s per track, `audio.webm` grows every 10 s and plays,
+  Pause leaves a gap out of both, Stop closes the window within a second or two.
+
+## Meetings: speech engine and models
+
+Meetings are transcribed on the Mac by `whisper-cli` from [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+(issue #102, spec §3). No Python, no network once the model is on disk.
+
+**Building whisper-cli.** `app/scripts/whisper.sh [arm64|x64]` (default: this Mac's) clones the
+pinned tag (`WHISPER_TAG`, now `v1.9.4`) into `app/resources/whisper/.src`, stops if the tag is not
+the pinned commit (`WHISPER_COMMIT`), builds the `whisper-cli` target with CMake and copies it to
+`app/resources/whisper/<arch>/whisper-cli` (about 4 MB arm64, 3 MB x64). The whole folder is
+git-ignored. The build is static (`BUILD_SHARED_LIBS=OFF`), portable (`GGML_NATIVE=OFF`), macOS
+12+, Accelerate for BLAS, Metal on arm64 with the shaders embedded (`GGML_METAL_EMBED_LIBRARY`),
+and CPU only on x64 (cross-built with `CMAKE_OSX_ARCHITECTURES=x86_64`, AVX2/FMA/F16C, so a Mac
+from 2013 or later). The script fails if `otool -L` names anything outside `/usr/lib` and
+`/System/Library`; it strips the binary and signs it ad hoc again (Apple Silicon runs nothing
+unsigned). It needs git, `cmake` (`brew install cmake`) and Xcode's command line tools. To move to
+another release, change both pins together.
+
+```bash
+cd app && ./scripts/whisper.sh arm64 && ./scripts/whisper.sh x64
+otool -L resources/whisper/arm64/whisper-cli   # libSystem, libc++, libobjc, Accelerate, Foundation, Metal, MetalKit, CoreFoundation
+```
+
+- CI's macOS job runs it for arm64 and x64 before `dist:mac` (it installs `cmake` with Homebrew
+  when the runner has none); the Windows job skips it.
+- `electron-builder.yml` `mac.extraResources` ships `resources/whisper/${arch}` as
+  `Contents/Resources/whisper/<arch>/whisper-cli`, so each DMG carries only its own. A local
+  `--mac dir` build without the script has none: Settings → Meetings says "Speech engine missing".
+- Where the app looks (`findWhisper`, `main/meetings/whisper.ts`): `MASTERDECK_WHISPER` (when set
+  but not runnable, nothing else is tried), then the app's own (packaged: `Resources/whisper/<arch>/`;
+  `npm run dev`: `app/resources/whisper/<arch>/`), then `whisper-cli` on the login shell's PATH
+  (Homebrew's `whisper-cpp`).
+- It runs as `nice -n 10 whisper-cli -m <model> -f <chunk.wav> -oj -of <tmp>/out -l <lang|auto>
+  -t <cores-2> -np` in its own process group (a timeout stops all of it); the JSON's
+  `transcription[].offsets` (ms) and `text` are read back, `[BLANK_AUDIO]` dropped.
+
+**Models.** Downloaded on Settings → Meetings from
+`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/<file>` into
+`MASTERDECK_HOME/meetings/models/` (default `~/.claude/masterdeck/meetings/models/`):
+
+| Pick | File | Bytes | Default on |
+|---|---|---|---|
+| Best | `ggml-large-v3-turbo-q5_0.bin` | 574,041,195 | Apple Silicon |
+| Fast | `ggml-base.bin` | 147,951,465 | Intel |
+
+Their sizes and SHA-256 are in `shared/meetingModels.ts`, copied from the repository's LFS listing
+(`curl -s https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main`: `lfs.oid`, `lfs.size`;
+the same as the `x-linked-etag` / `x-linked-size` headers of a `curl -I` of the file). A download
+streams to `<file>.part`, hashed while written, and is renamed only when both match; anything else is
+thrown away. It needs the model's size plus 200 MB free. One downloads at a time. To get a model
+by hand, put the file there under the same name (it is ready when its size matches). To remove
+one: **Remove** on the screen, or delete the file while MasterDeck is closed.
+
+## Meetings: md-mute
+
+`md-mute` reads the meeting app's own Mute / Unmute control through Accessibility, so a recording
+can leave the microphone out while you are muted (Plan M; ARCHITECTURE § Meetings: the mute
+reader).
+
+**Building it.** `app/scripts/mute.sh [arm64|x64]` (default: this Mac's) compiles
+`app/native/mute/main.swift` with `xcrun swiftc -O -swift-version 5 -target <arch>-apple-macos12.0`
+into `app/resources/mute/<arch>/md-mute` (about 140 KB arm64, 115 KB x64; git-ignored). It needs
+Xcode's command line tools only. Like whisper.sh it fails if `otool -L` names anything outside
+`/usr/lib` and `/System/Library` (the Swift runtime is in `/usr/lib/swift` on macOS 12+), strips the
+binary and signs it ad hoc (identifier `io.github.amntoppo.masterdeck.md-mute`).
+
+```bash
+cd app && ./scripts/mute.sh arm64 && ./scripts/mute.sh x64
+otool -L resources/mute/arm64/md-mute   # libSystem, libc++, libobjc, /usr/lib/swift/*, AppKit, ApplicationServices, CoreFoundation, Foundation
+```
+
+- CI's macOS job runs it for arm64 and x64 after whisper.sh, before `dist:mac`.
+- `electron-builder.yml` `mac.extraResources` ships `resources/mute/${arch}` as
+  `Contents/Resources/mute/<arch>/md-mute`. Missing (a local build without the script): the
+  recording keeps the microphone.
+- Where the app looks (`findMute`, `main/meetings/muteHelper.ts`): `MASTERDECK_MUTE` (set but not
+  runnable: nothing else), then the app's own (packaged `Resources/mute/<arch>/`; `npm run dev`
+  `app/resources/mute/<arch>/`). There is no PATH lookup.
+- An x64 build cannot be run on an Apple Silicon Mac without Rosetta ("Bad CPU type").
+
+**Checking a rule by hand.** Rules are data in `shared/meetingMute.ts`, so a wrong label is a TS
+change. To see what the helper reads for a rule, run it from a terminal with one line of rules
+(Ctrl-C or closing stdin ends it):
+
+```bash
+cd app
+{ echo '{"apps":[{"id":"zoom","bundles":["us.zoom.xos"],"menu":{"title":"Meeting","muted":["Unmute audio"],"unmuted":["Mute audio"]}}]}'; sleep 10; } \
+  | resources/mute/arm64/md-mute
+# {"t":…,"trusted":true,"apps":[{"id":"zoom","state":"muted"}]}   every 400 ms
+```
+
+`trusted` is the Accessibility grant of the process that started it (from a terminal: the
+terminal's, System Settings → Privacy & Security → Accessibility); `false` means every app reads
+`unknown`. The helper never asks for the grant. An app is listed only while it runs; `unknown` while
+trusted means no control matched (not in a call, a label the rule does not know, a browser's Meet
+in a background tab, or a search past its caps). To find the real label, open the app in a call and
+look at the mute button with Accessibility Inspector (Xcode → Open Developer Tool), then put its
+title, description or help text (the start of it) in the rule (ASCII only), and anything else
+whose label starts the same way but is not your own mute ("Mute all") in its `exclude`. Bad rules
+exit 2 with a message.
+
+- A control found is re-read each tick; a full search runs again only when it stops reading, at
+  most every 2 s per process, so for up to 2 s after a window is rebuilt the state is `unknown`.
+- For Google Meet the helper sets `AXManualAccessibility` on each running Chromium browser (Chrome,
+  Arc, Edge, Brave) when the Meet rule is in the rules it was sent (no call app offered: all rules).
+  It stays on until that browser quits; the browser may be a little slower while it builds its
+  accessibility tree. With Zoom or Webex offered only their rule is sent and no browser is touched.
+
+## Meetings: the fixture
+
+The Meetings page can be checked in the isolated app without recording anything:
+`MASTERDECK_MEETINGS_FIXTURE=$PWD/test/fixtures/meetings` (from `app/`, with `MASTERDECK_ISOLATED=1` and `MASTERDECK_HOME` set)
+copies `test/fixtures/meetings/meeting.json` (a fictional "Acme web standup", 9 October 2026, six
+lines, one match), `audio.webm` (7.5 s of tones, one per line, about 28 KB) and the note it added
+(`notes/`) into `MASTERDECK_HOME` at start; a file already there is left as it is (so a renamed or
+deleted one stays that way until the next fresh `MASTERDECK_HOME`).
+
+- `audio.webm` is made by `npx electron scripts/meeting-fixture.cjs` (from `app/`): with ffmpeg on
+  the PATH by ffmpeg, else by Electron's own MediaRecorder from an oscillator (no microphone), which
+  writes WebM as the real recorder does: no duration and no cues at first. Seeking still works.
+- `deck.meetingsConsent(true)` in the isolated app stores the consent and asks macOS nothing (the
+  isolated settings file). Never press Record or any Allow there.
+- Native questions (Delete audio, Delete meeting) and save dialogs (Export): launch with
+  `--inspect=127.0.0.1:9334` and replace `require('electron').dialog.showMessageBox` /
+  `showSaveDialog` in main for the run.
+- The Range answers: CDP `Network.enable` on the page shows the player's `masterdeck-media://`
+  requests (`Range: bytes=0-` → 206 with `Content-Range`); another path or an unknown id is 404.
+- Checked this way (2026-10-10): the list, the calendar's mark, Today / This week / Last 30 days / a
+  day / Custom, play, seek, the playing line, click a line, 1.5x, ±15 s, search with ↑/↓, rename,
+  Export transcript and audio, Delete audio, Delete meeting (the note stayed), a note's **Open in
+  Meetings** link (Meetings at 0:02, the Notes panel closed), Needs you's Open, ⌘K Go to Meetings,
+  the empty page with **Set up meetings** after Turn off.
 
 ## Measuring upload
 

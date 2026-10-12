@@ -78,7 +78,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('afterSave', () => {
-  const sent: NoteDraft = { id: null, ticket: null, title: 'a', body: 'one', base: null, dirty: true }
+  const sent: NoteDraft = { id: null, ticket: null, link: null, title: 'a', body: 'one', base: null, dirty: true }
   const meta = noteMeta({ id: ID(1), title: 'a', body: 'one', ticket: null, created: 1, updated: 7 })
   it('takes the id and the version, and is clean when nothing was typed since', () => {
     expect(afterSave(sent, sent, { ok: true, meta })).toEqual({ ...sent, id: ID(1), base: 7, dirty: false })
@@ -103,6 +103,30 @@ describe('noteTargetKey', () => {
     expect(noteTargetKey({ id: ID(1) })).toBe(`i:${ID(1)}`)
     expect(noteTargetKey({ ticket: { repo: 'Acme/Web', number: 5 } })).toBe('t:acme/web#5')
     expect(noteTargetKey({ fresh: 1 })).not.toBe(noteTargetKey({ fresh: 2 }))
+    const link = { session: { key: 'bg:aa', name: 's' } }
+    expect(noteTargetKey({ fresh: 1, link })).toBe('f:1:s:bg:aa')
+    expect(noteTargetKey({ fresh: 1, link })).not.toBe(noteTargetKey({ fresh: 1, link: { session: { key: 'bg:bb', name: 's' } } }))
+  })
+})
+
+describe('a draft about a session', () => {
+  const link = { session: { key: 'bg:aa', name: 'Fix login' }, ticket: { repo: 'acme/web', number: 7 } }
+  it('a blank draft carries its link, and every save sends it', async () => {
+    await ed.show({ fresh: 1, link }, async () => blankDraft(null, link))
+    expect(ed.draft?.link).toEqual(link)
+    ed.edit({ body: 'one' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    ed.edit({ body: 'one two' })
+    vi.advanceTimersByTime(SAVE_AFTER_MS)
+    await store.answer()
+    expect(store.saves.map((s) => s.link)).toEqual([link, link])
+  })
+  it('a stored note opens with its link; one without has none', () => {
+    const n: Note = { id: ID(9), title: 't', body: 'b', ticket: null, link, created: 1, updated: 2 }
+    expect(draftOf(n).link).toEqual(link)
+    expect(draftOf({ ...n, link: undefined }).link).toBeNull()
+    expect(blankDraft(null).link).toBeNull()
   })
 })
 
@@ -117,7 +141,7 @@ describe('typing and saving', () => {
     vi.advanceTimersByTime(1)
     expect(ed.status).toBe('Saving…')
     await store.answer()
-    expect(store.saves).toEqual([{ id: undefined, title: 'Tomorrow', body: '', ticket: null, base: null, force: false }])
+    expect(store.saves).toEqual([{ id: undefined, title: 'Tomorrow', body: '', ticket: null, link: null, base: null, force: false }])
     expect(ed.draft).toMatchObject({ id: ID(1), dirty: false, base: store.notes.get(ID(1))!.updated })
     expect(ed.status).toBe('Saved')
   })
@@ -621,7 +645,7 @@ describe("a ticket's note", () => {
     ed.edit({ body: 'waiting for the API' })
     vi.advanceTimersByTime(SAVE_AFTER_MS)
     await store.answer()
-    expect(store.saves[0]).toEqual({ id: undefined, title: '', body: 'waiting for the API', ticket: T, base: null, force: false })
+    expect(store.saves[0]).toEqual({ id: undefined, title: '', body: 'waiting for the API', ticket: T, link: null, base: null, force: false })
     expect(ed.draft).toMatchObject({ id: TID, base: store.notes.get(TID)!.updated, dirty: false })
   })
 

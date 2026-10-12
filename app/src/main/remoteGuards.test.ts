@@ -76,6 +76,16 @@ it('an inbox action from the web app takes the path it always did; only opening 
   // Open Claude there… opens a tab on the Mac: never for a browser, whatever the item says.
   expect(inboxActCall(true, 'i1', 'trust', {})).toEqual({ ok: false, message: 'Do this on your Mac: open Claude in that folder once and accept its prompt.' })
   expect(inboxActCall(false, 'i1', 'trust', {})).toEqual({ ok: true, id: 'i1', type: 'trust', payload: {} })
+  // A meeting's Match again and Try again: the Mac's window only.
+  for (const type of ['rematch', 'retry']) {
+    expect(inboxActCall(true, 'i1', type, {})).toEqual({ ok: false, message: 'Do this in MasterDeck on the Mac.' })
+    expect(inboxActCall(false, 'i1', type, {})).toEqual({ ok: true, id: 'i1', type, payload: {} })
+  }
+  // A meeting item's Open (the Meetings page) too; Open on any other item stays the web's.
+  const mid = 'meeting:added:m-1:5'
+  expect(inboxActCall(true, mid, 'open', {})).toEqual({ ok: false, message: 'Do this in MasterDeck on the Mac.' })
+  expect(inboxActCall(false, mid, 'open', {})).toEqual({ ok: true, id: mid, type: 'open', payload: {} })
+  expect(inboxActCall(true, 'pr:1', 'open', {})).toEqual({ ok: true, id: 'pr:1', type: 'open', payload: {} })
   for (const [id, type] of [[1, 'approve'], ['i1', null], [undefined, undefined]])
     expect(inboxActCall(false, id, type, {})).toEqual({ ok: false, message: 'bad inbox action' })
 })

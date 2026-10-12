@@ -33,7 +33,7 @@ import type { InboxEntry, InboxKind } from "@shared/inbox";
 import type { ExternalItem } from "@shared/remote";
 import type { AppState, Issue, Proposal, Session } from "@shared/types";
 import { deck, KIND_COLOR, load, save, useNow } from "../deck";
-import { can } from "../web";
+import { can, isWeb } from "../web";
 import { webConfirm } from "../webConfirm";
 import type { PaletteAction } from "./CommandPalette";
 import { OfferRow } from "./PrsView";
@@ -54,7 +54,8 @@ export type View =
   | "costs"
   | "janitor"
   | "history"
-  | "workflow";
+  | "workflow"
+  | "meetings";
 
 interface Props {
   state: AppState;
@@ -72,6 +73,8 @@ interface Props {
   /** Footer tools and the palette's actions. */
   onTool: (a: PaletteAction) => void;
   onStartWith: (issue: Issue, instructions: string) => void;
+  /** Open a meeting (its Needs-you item's Open). */
+  onOpenMeeting?: (id: string) => void;
   /** Session actions that live in the app: its Summary panel, closing its tab (after a stop). */
   onSessionAction: (s: Session, a: SessionAction) => void;
   /** Open terminals that are not sessions (shells, sessions starting), listed under the sessions. */
@@ -119,6 +122,7 @@ export function Sidebar({
   needsYouRef,
   showItem,
   onStartWith,
+  onOpenMeeting,
   onSessionAction,
   others,
   split,
@@ -332,6 +336,7 @@ export function Sidebar({
         onOpenSession={onOpenSession}
         onIssue={onIssue}
         onStartWith={onStartWith}
+        onOpenMeeting={onOpenMeeting}
         onDetails={full ? undefined : () => setDetail(id)}
         full={full}
       />
@@ -779,6 +784,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   mods: "MODS",
   loop: "LOOP",
   "loop-paused": "LOOP",
+  meeting: "MEETING",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -838,6 +844,7 @@ function InboxCard({
   onOpenSession,
   onIssue,
   onStartWith,
+  onOpenMeeting,
   onDetails,
   full,
 }: {
@@ -846,11 +853,22 @@ function InboxCard({
   onOpenSession: (s: Session) => void;
   onIssue: (i: Issue) => void;
   onStartWith: (issue: Issue, instructions: string) => void;
+  onOpenMeeting?: (id: string) => void;
   onDetails?: () => void;
   full: boolean;
 }) {
   const i = entry.item;
   const d = i.detail;
+  if (d.type === "meeting")
+    return (
+      <MeetingCard
+        entry={entry}
+        meetingId={d.meetingId}
+        onOpenMeeting={onOpenMeeting}
+        onDetails={onDetails}
+        full={full}
+      />
+    );
   if (d.type === "proposal")
     return (
       <ProposalCard
@@ -1355,6 +1373,66 @@ function ExternalCard({
           </span>
         )}
         <span className="muted small">asked by {item.by}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A meeting's item: notes added (Open), matching failed (Match again), transcription failed (Try
+ * again). Every action goes through the inbox; a browser only reads it (meetings are the Mac's).
+ */
+function MeetingCard({
+  entry,
+  meetingId,
+  onOpenMeeting,
+  onDetails,
+  full,
+}: {
+  entry: InboxEntry;
+  meetingId: string;
+  onOpenMeeting?: (id: string) => void;
+  onDetails?: () => void;
+  full: boolean;
+}) {
+  const i = entry.item;
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const primary = i.actions.find((a) => a.primary);
+  const act = async (type: string) => {
+    setBusy(true);
+    const r = await deck().inboxAct(i.id, type);
+    setBusy(false);
+    if (!r.ok) return setMsg(r.message);
+    setMsg(null);
+    if (type === "open") onOpenMeeting?.(meetingId);
+  };
+  return (
+    <div
+      className={`card ${onDetails ? "clickable" : ""}`}
+      style={{ ["--kind" as string]: i.detail.type === "meeting" && i.detail.notice === "added" ? "var(--accent)" : "var(--red)" }}
+      onClick={detailsClick(onDetails)}
+    >
+      {!full && <ItemControls itemId={i.id} />}
+      <div className="top">
+        <span className="kind">MEETING</span>
+        <span className="title">{i.title}</span>
+      </div>
+      <div className="body">{i.body}</div>
+      <div className="actions">
+        {msg && <span className="error">{msg}</span>}
+        <button className="btn" disabled={busy} onClick={() => void deck().inboxAct(i.id, "dismiss")}>
+          Dismiss
+        </button>
+        {isWeb() ? (
+          <span className="muted">Open MasterDeck on the Mac for this.</span>
+        ) : (
+          primary && (
+            <button className="btn primary" disabled={busy} onClick={() => void act(primary.type)}>
+              {primary.label}
+            </button>
+          )
+        )}
       </div>
     </div>
   );

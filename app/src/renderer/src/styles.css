@@ -1536,6 +1536,26 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .ri-name { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
 .ri-sub { font-size: 11px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ri-dot { animation: none; opacity: 1; } }
+/* Record a meeting (RecordMeeting.tsx): the rail item, red with the time while recording, and its popout. */
+.rec { position: relative; flex: none; }
+.rb.rec-on { flex-direction: column; gap: 3px; height: 40px; color: var(--red); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: mon-blink 1.4s ease-in-out infinite; }
+.rec-dot.paused { animation: none; opacity: .45; }
+.rec-time { font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
+.rec-pop { position: absolute; left: 44px; top: 0; z-index: 60; width: 260px; background: var(--bg-4); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 20px var(--shadow); -webkit-app-region: no-drag; }
+.rec-pop .input { width: 100%; margin: 6px 0 8px; }
+.rec-head { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.rec-tell { font-size: 11px; color: var(--amber); margin: 8px 0 0; }
+.janitor-meetings-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.janitor-meetings-msg { font-size: 12px; margin: 0 0 8px; }
+.rec-offer { border-color: var(--amber); }
+.rec-msg { font-size: 11px; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
+.rec-marks { display: flex; align-items: center; gap: 3px; }
+.rec-micoff { color: var(--red); flex: none; }
+.rec-mic { font-size: 11px; color: var(--muted); margin: 8px 0 0; overflow-wrap: anywhere; }
+.rec-mic.off { color: var(--text); }
+.rec-switch { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 /* Two or more GitHub accounts: the account a session works as, at its top. */
 .pane-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; min-width: 0; }
 .pane-head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1583,6 +1603,23 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .notes-foot .seg button { padding: 3px 8px; white-space: nowrap; }
 .notes-clash { display: flex; align-items: center; gap: 6px; padding: 7px 10px 7px 14px; border-top: 1px solid var(--amber); color: var(--amber); font-size: 12.5px; }
 .notes-foot { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 10px 8px 14px; border-top: 1px solid var(--line); font-size: 12px; }
+/* All · Mine · Tickets · Sessions · Meetings; and on a row, what the note is about and the meeting it came from. */
+.notes-filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 4px; }
+.notes-filters .chip { font: inherit; font-size: 11.5px; padding: 2px 9px; cursor: pointer; color: var(--muted); }
+.notes-filters .chip:hover { color: var(--text); border-color: var(--muted); }
+.notes-filters .chip.on { color: var(--on-accent); }
+.note-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; margin: 2px 0 1px; }
+.note-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 7px; border-radius: 9px; border: 1px solid var(--line-2); font-size: 10.5px; line-height: 16px; color: var(--muted); font-weight: 500; }
+.note-chip.meeting { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 45%, transparent); }
+.notes-about { padding-bottom: 0; }
+.notes-about b { color: var(--text); font-weight: 600; }
+
+/* Session details → Notes: the session's notes, the picked one read only below. */
+.d-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--purple); vertical-align: 2px; }
+.s-notes-list { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.s-note { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.s-note-t { font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-note-body { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* A ticket's note: in Details, and a mark on its Board card's top row (faint until hovered when there is no note yet). */
 .d-note { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
@@ -1687,3 +1724,71 @@ details.sd-more > summary:hover { color: var(--text); }
 .repo-picker .mpick-row b { flex: none; }
 .repo-picker .mpick-row .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-picker .mpick-row.on { background: var(--accent-soft); }
+
+/* The Meetings page (spec §6): dates and meetings on the left, the meeting with its audio and transcript on the right. */
+.mt-body { flex: 1; display: flex; min-height: 0; }
+.mt-side { width: 300px; flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-right: 1px solid var(--line); min-height: 0; }
+.mt-cal-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 6px; }
+.mt-cal-head .btn { padding: 1px 8px; }
+.mt-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.mt-wd { text-align: center; font-size: 10px; color: var(--faint); padding: 2px 0; }
+.mt-day { position: relative; border: 1px solid transparent; background: none; border-radius: 6px; padding: 5px 0 7px; font-size: 12px; cursor: pointer; color: var(--text); }
+.mt-day:hover { border-color: var(--line-2); }
+.mt-day.out { color: var(--faint); }
+.mt-day.in { background: var(--accent-soft); }
+.mt-day.today { border-color: var(--accent); }
+.mt-day.has { font-weight: 700; }
+.mt-day i { position: absolute; left: 50%; bottom: 2px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+.mt-presets { flex: none; display: flex; }
+.mt-presets button { flex: 1; padding: 4px 2px; white-space: nowrap; }
+.mt-fromto { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }
+.mt-fromto label { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.mt-fromto input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12px; color-scheme: dark; }
+.mt-list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.mt-none { padding: 10px 4px; }
+.mt-row { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; background: var(--bg-2); display: flex; flex-direction: column; gap: 3px; }
+.mt-row:hover { border-color: var(--line-2); }
+.mt-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.mt-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-row-sub { display: flex; gap: 8px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.mt-state-wrap { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mt-state { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--bg-4); color: var(--muted); }
+.mt-state.live { color: var(--red); }
+.mt-state.busy { color: var(--amber); }
+.mt-state.done { color: var(--green); }
+.mt-state.failed { color: var(--on-accent); background: var(--red); }
+.mt-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.mt-pick { align-items: center; justify-content: center; }
+.mt-top { padding: 12px 18px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); max-height: 45%; overflow: auto; flex: none; }
+.mt-title { font: inherit; font-size: 17px; font-weight: 700; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--text); padding: 2px 6px; margin-left: -7px; outline: none; }
+.mt-title:hover { border-color: var(--line); }
+.mt-title:focus { border-color: var(--accent); background: var(--bg); }
+.mt-meta { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+.mt-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mt-err { font-size: 12px; }
+.mt-summary { font-size: 13px; user-select: text; }
+.mt-notes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.mt-player { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex: none; }
+.mt-play { min-width: 64px; }
+.mt-seek { flex: 1; min-width: 80px; accent-color: var(--accent); }
+.mt-clock { font-size: 11.5px; color: var(--muted); min-width: 38px; text-align: center; }
+.mt-rate { flex: none; display: flex; }
+.mt-rate button { padding: 3px 8px; }
+.mt-search { display: flex; align-items: center; gap: 6px; padding: 6px 18px; border-bottom: 1px solid var(--line); flex: none; }
+.mt-search .filter { margin: 0; max-width: 340px; }
+.mt-lines { flex: 1; overflow: auto; padding: 6px 10px 24px; min-height: 0; user-select: text; }
+.mt-line { display: grid; grid-template-columns: 56px 44px 1fr; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer; border-left: 2px solid transparent; }
+.mt-line:hover { background: var(--bg-3); }
+.mt-line.playing { background: var(--accent-soft); border-left-color: var(--accent); }
+.mt-line.hit { box-shadow: inset 0 0 0 1px var(--amber); }
+.mt-spk { font-size: 11px; font-weight: 700; color: var(--muted); padding-top: 1px; }
+.mt-spk.you { color: var(--accent); }
+.mt-spk.others { color: var(--purple); }
+.mt-at { font-size: 11px; color: var(--faint); padding-top: 1px; }
+.mt-text { line-height: 1.5; }
+.mt-text mark { background: var(--mark-soft); color: var(--text); border-radius: 2px; }
+.mt-chip { margin-left: 6px; vertical-align: 1px; }
+.mt-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); text-align: center; padding: 24px; }
+.mt-empty p { max-width: 460px; margin: 0; }
+.mdv-meeting { color: var(--muted); }
+.mt-body .error { color: var(--red); font-size: 12px; }
