@@ -115,8 +115,8 @@ describe("the built-in workflows", () => {
 
   it("loop limits follow the spec", () => {
     const lim = (id: string) => loopOf(id).limits;
-    expect(lim("md-superpowers")).toEqual({ iterations: 15, minutes: 0, stall: 3 });
-    expect(lim("md-ticket-to-pr")).toEqual({ iterations: 10, minutes: 0, stall: 3 });
+    expect(lim("md-superpowers")).toEqual({ iterations: 30, minutes: 0, stall: 0 });
+    expect(lim("md-ticket-to-pr")).toEqual({ iterations: 15, minutes: 0, stall: 0 });
     expect(lim("md-bug-fix")).toEqual({ iterations: 8, minutes: 0, stall: 3 });
     expect(lim("md-tdd")).toEqual({ iterations: 15, minutes: 0, stall: 3 });
     expect(lim("md-ci-doctor")).toEqual({ iterations: 5, minutes: 0, stall: 0 });

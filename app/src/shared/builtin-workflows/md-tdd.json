@@ -84,7 +84,7 @@
         "x": 1480,
         "y": 268,
         "kind": "instruction",
-        "text": "Once every test passes, launch a fresh reviewer subagent (Agent tool) to look for overfitting: hard-coded answers, branches on the tests' inputs, cases only the tests get right. For each real gap, add a test in a new commit starting \"tests:\" (MasterDeck guards it like the first), see it fail, then make it pass without touching the tests. Run all the tests again."
+        "text": "Once every test passes, launch a fresh reviewer subagent (Agent tool) to look for overfitting: hard-coded answers, branches on the tests' inputs, cases only the tests get right. Run it in the foreground and wait for its report. For each real gap, add a test in a new commit starting \"tests:\" (MasterDeck guards it like the first), see it fail, then make it pass without touching the tests. Run all the tests again."
       },
       {
         "id": "open-pr",

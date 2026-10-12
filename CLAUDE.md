@@ -392,8 +392,15 @@ buttons; it does not go through macOS window drag regions.
   (`docs/superpowers/specs/2026-10-12-builtin-workflows-design.md`, branch
   `docs/builtin-workflows-104`, not pushed). Checked: typecheck, vitest (162 files passed, 2
   skipped; 2006 tests passed, 4 skipped), and, before the review fixes, the isolated app and the web
-  preview as in a42f78b. Live runs of the built-ins: see the PR. Open points: TODO ("Built-in
-  workflows: open points").
+  preview as in a42f78b. Live runs (one `claude -p --model haiku` each, on a sample repo with a
+  local bare `origin` and stand-in `gh`/`tt.sh`, isolated home; before the review fixes): Bug fix,
+  Ticket to PR, TDD, CI doctor passed (plan from the trigger, loop met, PR step reached the gate);
+  Superpowers ended at the stall limit while it waited on a background reviewer (fixed in the
+  texts: reviewers run in the foreground; its loop has no stall limit now). The runs also changed
+  every loop's wording (`LOOP DONE` only for a reached goal; nothing after the loop while it is
+  open). Open: a loop is armed when its trigger fires, before the steps ahead of it, so question
+  turns (Superpowers' brainstorm) are blocked as rounds. Open points: TODO ("Built-in workflows:
+  open points").
 
 - **The README is rewritten for developers (#90)** (merged to `main` from branch
   `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in

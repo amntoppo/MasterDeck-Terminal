@@ -816,6 +816,11 @@ function blockText(n: FlowNode, mons: MonitorDef[] = []): string | null {
 
 type LoopNode = Extract<FlowNode, { kind: "loop" }>;
 
+// A session that is blocked once wrote "LOOP DONE: stopped, edits were denied" and was taken at
+// its word (live run, #104): the line is for a reached goal only.
+const DONE_ONLY =
+  " (only when the goal is reached: when you are blocked, say so without that line and the loop ends at its limit)";
+
 /** What ends a loop, in the words the session reads ("" when nothing does: the check reports it). */
 function loopCriterion(n: LoopNode): string {
   const cmd = n.check.command.trim();
@@ -827,8 +832,8 @@ function loopCriterion(n: LoopNode): string {
   const goal = n.agentDone.goal.trim();
   if (!n.agentDone.on) return check;
   if (!check)
-    return `you reach this goal: ${goal}; when you have, end your turn with a line starting "LOOP DONE:" and why`;
-  return `${check}, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: ${goal}`;
+    return `you reach this goal: ${goal}; when you have, end your turn with a line starting "LOOP DONE:" and why${DONE_ONLY}`;
+  return `${check}, and you end your turn with a line starting "LOOP DONE:" and why once you reach this goal: ${goal}${DONE_ONLY}`;
 }
 
 /** Where a loop's round starts: its members no other member leads to, in the frame's order. */
@@ -916,7 +921,7 @@ function planFrom(
         );
         // Headings only over a branch that says something (a notify block adds nothing here).
         const over = lines.length;
-        lines.push(`${indent}   When MasterDeck says the loop is over:`);
+        lines.push(`${indent}   When MasterDeck says the loop is over (not before: none of these while the loop is open):`);
         for (const [kind, head] of [
           ["met", "If the criterion was met:"],
           ["limit", "If a limit was hit:"],

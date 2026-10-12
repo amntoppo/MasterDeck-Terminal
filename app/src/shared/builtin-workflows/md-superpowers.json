@@ -68,9 +68,9 @@
           "goal": "Every task in the plan is implemented and committed, and a fresh run of the project's full test suite, lint and type checks passes. Name the commands you ran and their results."
         },
         "limits": {
-          "iterations": 15,
+          "iterations": 30,
           "minutes": 0,
-          "stall": 3
+          "stall": 0
         }
       },
       {
@@ -92,7 +92,7 @@
         "x": 1800,
         "y": 220,
         "kind": "instruction",
-        "text": "Ask for a code review with superpowers:requesting-code-review (if it isn't installed, launch a fresh reviewer subagent with the Agent tool yourself): a reviewer on the branch diff against the base branch. Fix every important finding, re-run the tests, and commit."
+        "text": "Ask for a code review with superpowers:requesting-code-review (if it isn't installed, launch a fresh reviewer subagent with the Agent tool yourself): a reviewer on the branch diff against the base branch; wait for its report (in the foreground). Fix every important finding, re-run the tests, and commit."
       },
       {
         "id": "open-pr",

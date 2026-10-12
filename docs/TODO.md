@@ -677,6 +677,15 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 ## Built-in workflows: open points (2026-10-12, issue #104)
 
+- **A loop is armed when its trigger fires, not when the session reaches it** (found in the live
+  runs). Steps ahead of a loop (Superpowers' brainstorm and plan, Ticket to PR's "ask first if
+  unclear") run while it is open: each stop to ask the user a question is blocked with "Not done
+  yet" and counted as a round. The built-ins work around it (no stall limit on those two, more
+  rounds), but the fix is in the mechanism (#82): arm such a loop when the session reaches it
+  (a marker it runs or prints), or do not block a stop that ends with a question to the user.
+- **The stall limit counts turns spent waiting on a background subagent** (no change in the tree).
+  The built-ins' review steps say to run the reviewer in the foreground; the loop hook could skip
+  such rounds.
 - **More built-ins.** Candidates: a second-opinion review, a refactor, a security audit, release
   notes, issue triage. Each needs a flow, a description, a when-to-use line and the checks in
   `builtinWorkflows.test.ts`.

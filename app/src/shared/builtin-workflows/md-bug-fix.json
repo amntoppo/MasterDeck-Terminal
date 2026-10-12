@@ -90,7 +90,7 @@
         "x": 1800,
         "y": 220,
         "kind": "instruction",
-        "text": "Launch a fresh reviewer subagent (Agent tool) on the diff, with the root cause: does the fix address that cause, and could it break any caller? Ask for correctness problems only. Fix what is real, re-run the tests, and commit."
+        "text": "Launch a fresh reviewer subagent (Agent tool) on the diff, with the root cause: does the fix address that cause, and could it break any caller? Run it in the foreground and wait for its report. Ask for correctness problems only. Fix what is real, re-run the tests, and commit."
       },
       {
         "id": "open-pr",

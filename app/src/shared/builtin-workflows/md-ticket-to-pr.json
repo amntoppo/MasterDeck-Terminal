@@ -59,9 +59,9 @@
           "goal": "The plan is done and the project's test, typecheck and lint commands pass. Name each command you ran and its result."
         },
         "limits": {
-          "iterations": 10,
+          "iterations": 15,
           "minutes": 0,
-          "stall": 3
+          "stall": 0
         }
       },
       {
@@ -83,7 +83,7 @@
         "x": 1510,
         "y": 220,
         "kind": "instruction",
-        "text": "Launch a fresh reviewer subagent (Agent tool) on the branch diff against the base branch, with the plan and the issue. Ask it for correctness bugs and requirement gaps only, not style. Fix what is real, re-run the tests, and commit."
+        "text": "Launch a fresh reviewer subagent (Agent tool) on the branch diff against the base branch, with the plan and the issue. Run it in the foreground and wait for its report. Ask it for correctness bugs and requirement gaps only, not style. Fix what is real, re-run the tests, and commit."
       },
       {
         "id": "open-pr",
