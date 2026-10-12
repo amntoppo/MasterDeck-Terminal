@@ -61,6 +61,9 @@ import { HistoryDialog } from "./components/HistoryDialog";
 import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
+import { SessionTabBody, SessionTabRow } from "./components/SessionTabs";
+import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
+import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
 import { deck, load, save, useAppState } from "./deck";
 import { savedPref, useTheme, useWebThemePref } from "./theme";
 
@@ -704,6 +707,12 @@ export function App() {
     return ids;
   }, [tabs, state?.sessions, state?.master]);
   const visibleKey = visibleIds.join(",");
+  // Forget the file and diff tabs of sessions no longer listed (never on an empty list: a start-up
+  // or a failing `claude agents` is not every session gone).
+  const listedKeys = (state?.sessions ?? []).map((x) => x.key).join(",");
+  useEffect(() => {
+    if (listedKeys) sessionTabs.prune(new Set(listedKeys.split(",")));
+  }, [listedKeys]);
   useEffect(() => {
     deck().setVisible(visibleIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1688,6 +1697,10 @@ function SessionPane(p: {
   const [gen, setGen] = useState(0);
   const phone = usePhone();
   const paneId = `s:${p.tab.key}`;
+  // The session's own tab row: the terminal stays mounted (and keeps its buffer) under a file tab.
+  const own = useSessionTabs(p.tab.key);
+  const onTerminal = own.active === TERMINAL_ID;
+  const openTab = own.tabs.find((t) => tabId(t) === own.active);
 
   if (!s) {
     return (
@@ -1720,6 +1733,13 @@ function SessionPane(p: {
           <SessionAccount login={login} ghActive={ghActive} />
         </div>
       )}
+      <SessionTabRow sessionKey={s.key} />
+      {!onTerminal && openTab && openTab.kind !== "terminal" && (
+        <div className="stab-body">
+          <SessionTabBody session={s} tab={openTab} visible={p.visible} />
+        </div>
+      )}
+      <div className={`stab-body${onTerminal ? "" : " hidden"}`}>
       {s.kind === "background" && s.bgId && !p.armed ? (
         <NotStarted
           label={
@@ -1742,7 +1762,7 @@ function SessionPane(p: {
           <TerminalView
             paneId={paneId}
             spec={{ kind: "attach", bgId: s.bgId }}
-            visible={p.visible}
+            visible={p.visible && onTerminal}
             focusOnShow={p.focus}
             generation={gen}
             onExit={() => setExited(true)}
@@ -1788,6 +1808,7 @@ function SessionPane(p: {
           )}
         </div>
       )}
+      </div>
     </>
   );
 }
