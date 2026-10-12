@@ -62,6 +62,7 @@ import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
 import { deck, load, save, useAppState } from "./deck";
+import { savedPref, useTheme, useWebThemePref } from "./theme";
 
 type Tab =
   | { id: string; kind: "session"; key: string }
@@ -117,6 +118,9 @@ function paneIdFor(tab: Tab): string {
 
 export function App() {
   const state = useAppState();
+  // The window follows the Mac's setting; a browser its own choice (theme.ts).
+  const webTheme = useWebThemePref();
+  useTheme(isWeb() ? webTheme : (state?.settings.theme ?? savedPref()));
   // Phone layout (web, narrow window): one screen at a time and a bottom tab bar. Never true in Electron.
   const phone = usePhone();
   const remote = useMemo(
@@ -245,7 +249,7 @@ export function App() {
   // The Notes panel: null closed, {} the list, or the note to open.
   const [notesAt, setNotesAt] = useState<NotesTarget | null>(null);
   const notes = useNotes(!!state);
-  // The Terminals screen's right panel: its tab (Details, Queue, Summary) and whether it shows.
+  // The Terminals screen's right panel: its tab (Details, Tools, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
   );
@@ -1413,7 +1417,7 @@ export function App() {
         <button
           className="panel-show"
           onClick={() => setInspOpen(true)}
-          title="Show the panel: Details, Queue, Summary"
+          title="Show the panel: Details, Tools, Summary"
         >
           ‹ Panel
         </button>

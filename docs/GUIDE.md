@@ -15,8 +15,8 @@ One window for all your Claude Code sessions, laid out as a command center:
     name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
-    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**
-    and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
+    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Tools**
+    (**Queue** and **BTW**, more to come) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
 - **Master:** master-agent's terminal in its own column at the far right, on every screen. The
   **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
 - **The other views** use the full width (next to Master when it shows).
@@ -405,6 +405,22 @@ checkout whose branch was once linked to a ticket does not link it.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice, also when MasterDeck is started a second time.
+- **Session details (right panel → Details)** has three tabs, and the one you pick stays picked
+  (per window; the web app keeps its own):
+  - **Session:** what waits on you, the status, the workflow, schedules, linked sessions, the
+    worktrees or folder and branch, context, tokens, model, diff, and the session's actions.
+  - **GitHub:** a row each for the **Ticket**, the **Pull requests** and the **Monitors**, with
+    counts and status badges while closed and **↗** to open the item on GitHub. Click a row to open
+    it, and open what is inside it in turn: the ticket's steps, its note and its **Sub-issues**
+    (done of total); each PR's **Checks** (failing first), **Reviews** (the latest per reviewer),
+    **Open threads** (file and the last comment), **Comments** (newest first) and, when MasterDeck
+    watches it, **PR watch** with what it found and **Stop**; each monitor with the lines it printed,
+    newest first, and **Stop**. Open rows refresh by themselves when the session's state changes (a
+    PR also each minute) and stay open when you switch tabs or sessions. The last 50 events of a
+    monitor are kept while MasterDeck runs; after a restart its list starts again. The tab's label
+    counts the PRs and monitors, in red when a PR's CI fails or changes were asked for. The account
+    the session works as is at the top.
+  - **Mods:** this session's mods and their switches (see Mods below).
 - **Worktrees (Details tab, or ⌘E for a popup):** list every git worktree the session created
   or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
   transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS
@@ -416,7 +432,7 @@ checkout whose branch was once linked to a ticket does not link it.
   branch's changes, and asks a small model (`claude -p --model haiku`, about 20 s) for the summary; it
   runs only when you press it, and it is kept per session in `~/.claude/masterdeck/summaries/`. The panel
   says when the session has moved on since. **Post to issue** comments it on the session's issue.
-- **Queue (right panel → Queue):** holds the focused session's `/queue`, the prompts it runs one by
+- **Queue (right panel → Tools → Queue):** holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
@@ -674,6 +690,29 @@ a PR or with linked sessions:
 The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
 nothing for, they show nothing. To remove them all: **Remove** in Settings → Mods.
 
+## Side questions (BTW)
+
+**Tools → BTW** (the right panel) asks a quick side question about the session, the way Claude Code's
+`/btw` does, without typing in the terminal:
+
+- Type the question and press **Enter** (**Shift+Enter** for a new line), or **Ask**. The answer
+  streams in under it ("Answering…" until the first words); **Stop** ends it.
+- The answer comes from the session's conversation so far, with no tools (it cannot read files or
+  run anything). It works while Claude is busy, does not interrupt it and is never added to the
+  conversation. Each question also sees your last 20 side questions and their answers, as `/btw` does.
+- Each answer shows Markdown and code, what it cost, **Copy** and **Remove**. One that failed says
+  why, in red, with **Try again**.
+- **History** lists every side question of the session, newest first, with its time (the exact time
+  on hover), and is kept across restarts (`~/.claude/masterdeck/btw/`).
+- A `/btw` you type in the session's terminal shows here too, marked **terminal**. Claude Code keeps
+  those answers nowhere, so MasterDeck reads the answer off a background session's screen while the
+  `/btw` box is open: only what fits in the box (the entry says so when the answer was longer). For
+  an interactive session, or one asked before MasterDeck was running, only the question is there;
+  **Ask here** puts it in the box to ask again from the tab.
+- Each question from the tab reads the session's whole conversation once (a separate run of
+  `claude`, with its own prompt cache), so it costs more than `/btw` in a long session; the cost is
+  shown on the answer.
+
 ## Cost and context
 
 - **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the
@@ -887,6 +926,13 @@ A place for what you would otherwise keep in another app: your own notes, and on
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
+- **Appearance** (General): **Light**, **Dark** or **System**. System follows macOS (or Windows)
+  light or dark mode and switches with it. The change shows at once, terminals included, and is
+  kept. The default is Dark. In the web app, the choice applies to that browser only, so a phone
+  can be light while the Mac stays dark. In the light theme, terminal text is darkened
+  automatically where a program picked colours for a dark background. If Claude Code's own colours
+  still look wrong, run `/theme` in the session and pick a light theme there.
+
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
 - **Hooks, mods & skills:** status lines, not switches (but **Mods**, see MasterDeck's mods). **Queue** says who runs `/queue`: MasterDeck's
@@ -1041,7 +1087,7 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
   you), **Tasks**, **Board**, **PRs** (badge = PRs waiting on you), **Master** (when master-agent is
   on) and **More** (Costs, Janitor, Notes, Workflow, Settings, Broadcast, Standup, Skills, Commands).
 - **A session:** tap it in Sessions. The terminal fills the screen: **‹ Sessions** goes back,
-  **Panel** opens Details / Queue / Summary as a sheet (› closes it). One terminal at a time (no
+  **Panel** opens Details / Tools / Summary as a sheet (› closes it). One terminal at a time (no
   split).
 - **Quick keys** under the terminal (and under master): Esc, Tab, ⇧Tab, ^C, ↑ ↓ ← →, Enter, y, n
   and /. A tap types the key into the terminal without closing the keyboard;

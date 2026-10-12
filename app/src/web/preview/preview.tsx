@@ -6,6 +6,7 @@ import { DECK_ACCESS } from '@shared/remoteDeck'
 import type { DeckApi } from '@shared/ipc'
 import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
+import { applyBtwEvent, type BtwEntry, type BtwEvent } from '@shared/btw'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
@@ -88,6 +89,46 @@ function previewDeck(noBoard: boolean): DeckApi {
     for (const cb of noteCbs) cb({ id, meta })
     return { ok: true as const, meta }
   }
+  // Side questions in memory: a few earlier ones per session, and an answer that streams in.
+  const btw = new Map<string, BtwEntry[]>()
+  const btwCbs = new Set<(e: BtwEvent) => void>()
+  const btwPut = (key: string, entry: BtwEntry) => {
+    btw.set(key, applyBtwEvent(btwList(key), { key, entry }))
+    for (const cb of btwCbs) cb({ key, entry })
+  }
+  const btwList = (key: string): BtwEntry[] => {
+    if (!btw.has(key)) {
+      const t = Date.now()
+      btw.set(key, [
+        { id: 'p1', question: 'Which files did you change for the sign-in fix so far?', answer: 'Three so far:\n\n- `src/auth/session.ts`: the cookie now keeps `SameSite=Lax`\n- `src/auth/session.test.ts`: two new tests for the restart case\n- `docs/auth.md`: the note on cookies\n\nNothing is committed yet.', at: t - 3 * 3600_000, doneAt: t - 3 * 3600_000 + 4000, source: 'panel', status: 'done', costUsd: 0.0412, model: 'claude-opus-5-5' },
+        { id: 't-1', question: 'is the migration safe to run twice?', answer: 'Yes: `ALTER TABLE … ADD COLUMN IF NOT EXISTS` makes the second run a no-op.', at: t - 47 * 60_000, doneAt: t - 47 * 60_000 + 3000, source: 'terminal', status: 'done', captured: true, partial: true },
+        { id: 't-2', question: 'what did the last test run say?', answer: '', at: t - 12 * 60_000, doneAt: t - 12 * 60_000, source: 'terminal', status: 'done', captured: false },
+        { id: 'p2', question: 'Why did you pick a cookie over local storage?', answer: '', at: t - 5 * 60_000, doneAt: t - 5 * 60_000 + 9000, source: 'panel', status: 'error', error: 'No conversation found with session ID: 3f2a…' },
+      ])
+    }
+    return btw.get(key) ?? []
+  }
+  const btwTimers = new Map<string, ReturnType<typeof setInterval>>()
+  const btwAsk = (key: string, question: string) => {
+    if (btwList(key).some((e) => e.status === 'asking')) return { ok: false, message: 'A side question is still being answered. Stop it or wait.' }
+    const id = `p-${Date.now()}`
+    const words = `Short answer: **yes**. The session is still on step 2 of 4 (the tests).\n\n\`\`\`ts\nexpect(cookie.sameSite).toBe('lax')\n\`\`\`\n\nYou asked: "${question.slice(0, 80)}".`.split(/(?<= )/)
+    let e: BtwEntry = { id, question, answer: '', at: Date.now(), doneAt: null, source: 'panel', status: 'asking', model: 'claude-opus-5-5' }
+    btwPut(key, e)
+    let i = 0
+    const timer = setInterval(() => {
+      if (i < words.length) {
+        e = { ...e, answer: e.answer + words[i++] }
+        btwPut(key, e)
+        return
+      }
+      clearInterval(timer)
+      btwTimers.delete(id)
+      btwPut(key, { ...e, status: 'done', doneAt: Date.now(), costUsd: 0.0187 })
+    }, 1200 / words.length + 60)
+    btwTimers.set(id, timer)
+    return { ok: true, id }
+  }
   const ok = { ok: true, message: 'preview: nothing was sent' }
   // The folders the Mac found: the workspace and its repositories (a long path to see the phone width).
   const repos = ['/Users/dev/acme', '/Users/dev/acme/web', '/Users/dev/acme/api', '/Users/dev/acme/clients/mobile-app-with-a-long-folder-name'].map((path) => ({ name: path.split('/').pop() ?? path, path }))
@@ -150,6 +191,37 @@ function previewDeck(noBoard: boolean): DeckApi {
       ],
     }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
+    // Session details → GitHub: a monitor's lines and the PR watch's finds, newest first.
+    watchEvents: (id: string) =>
+      id.startsWith('pr:')
+        ? [
+            { at: Date.now() - 20 * 60_000, kind: 'review', by: 'sam', text: 'The redirect should keep the hash too; see the comment on redirect.ts.' },
+            { at: Date.now() - 45 * 60_000, kind: 'thread', by: 'sam', text: 'Why not use URL() here instead of splitting by hand?' },
+            { at: Date.now() - 46 * 60_000, kind: 'thread', by: 'riley', text: 'This test needs a case for an empty next param.' },
+            { at: Date.now() - 170 * 60_000, kind: 'note', text: '[MasterDeck PR watch] web#131: already has 0 unresolved review threads and 1 PR comment from before the watch started.' },
+          ]
+        : Array.from({ length: 7 }, (_, i) => ({ at: Date.now() - (3 + i * 12) * 60_000, text: i === 0 ? '{"status":"degraded","failing":["auth-callback"],"version":"2026.10.12-3"}' : '{"status":"ok","version":"2026.10.12-2"}' })),
+    prDetail: () => ({
+      ok: true,
+      detail: {
+        checks: [
+          { name: 'e2e (login)', state: 'failure', url: 'https://github.com/acme/web/actions/runs/1' },
+          { name: 'lint', state: 'pending', url: null },
+          { name: 'build', state: 'success', url: 'https://github.com/acme/web/actions/runs/2' },
+          { name: 'unit', state: 'success', url: 'https://github.com/acme/web/actions/runs/3' },
+          { name: 'claude-review', state: 'success', url: 'https://github.com/acme/web/actions/runs/4' },
+        ],
+        reviews: [
+          { author: 'sam', state: 'CHANGES_REQUESTED', at: Date.now() - 20 * 60_000, url: 'https://github.com/acme/web/pull/131#pullrequestreview-1' },
+          { author: 'claude', state: 'COMMENTED', at: Date.now() - 2 * 3600_000, url: 'https://github.com/acme/web/pull/131#pullrequestreview-2' },
+        ],
+        threads: [
+          { path: 'src/auth/redirect.ts', author: 'sam', text: 'Why not use URL() here instead of splitting by hand?', url: 'https://github.com/acme/web/pull/131#discussion_r1' },
+          { path: 'src/auth/redirect.test.ts', author: 'riley', text: 'This test needs a case for an empty next param.', url: 'https://github.com/acme/web/pull/131#discussion_r2' },
+        ],
+        comments: [{ author: 'riley', at: Date.now() - 2.5 * 3600_000, text: 'Deployed to staging for a look.', url: 'https://github.com/acme/web/pull/131#issuecomment-1' }],
+      },
+    }),
     // Session details → Mods: switch in the fixture, as the Mac would after its next state.
     modSet: (key: string, mod: string, on: boolean) => {
       const off = new Set(state.modOff?.[key] ?? [])
@@ -180,6 +252,23 @@ function previewDeck(noBoard: boolean): DeckApi {
       return { ok: true }
     },
     onNotesChanged: (cb: (c: NoteChange) => void) => (noteCbs.add(cb), () => noteCbs.delete(cb)),
+    btwList: async (key: string) => btwList(key),
+    btwAsk: async (key: string, q: string) => btwAsk(key, q),
+    btwStop: async (key: string, id: string) => {
+      const t = btwTimers.get(id)
+      const e = btwList(key).find((x) => x.id === id)
+      if (!t || !e) return false
+      clearInterval(t)
+      btwTimers.delete(id)
+      btwPut(key, { ...btwList(key).find((x) => x.id === id)!, status: 'stopped', doneAt: Date.now() })
+      return true
+    },
+    btwRemove: async (key: string, id: string) => {
+      btw.set(key, btwList(key).filter((e) => e.id !== id))
+      for (const cb of btwCbs) cb({ key, removed: id })
+      return true
+    },
+    onBtwEvent: (cb: (e: BtwEvent) => void) => (btwCbs.add(cb), () => btwCbs.delete(cb)),
     platform: 'web',
     home: '/Users/dev',
     openExternal: () => {},

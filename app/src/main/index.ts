@@ -4,6 +4,7 @@ import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
+import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -32,6 +33,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  nativeTheme,
   Notification,
   safeStorage,
   shell,
@@ -152,6 +154,8 @@ import { LoopStore } from "./loops";
 import { LoopQueue } from "./loopQueue";
 import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
+import { BtwAsker, BtwStore, BtwTerminal } from "./btw";
+import { sessionScreen } from "./screen";
 import {
   DEFAULT_TEMPLATE,
   parseFlow,
@@ -179,6 +183,7 @@ import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { parsePrUrl } from "@shared/prSummary";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -301,6 +306,20 @@ const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
 });
+// Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
+// terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
+const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
+const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
+const btwTerminal = new BtwTerminal(
+  paths.claudeHistory,
+  join(paths.home, "btw", "history-offset.json"),
+  btwStore,
+  (bgId) => sessionScreen(run, claudeBin, bgId),
+);
+function pollBtw(): void {
+  const sessions = (latest?.sessions ?? []).map((s) => ({ key: s.key, sessionId: s.sessionId, bgId: s.kind === "background" ? s.bgId : null }));
+  void btwTerminal.poll(sessions).catch((e) => console.error(`btw: ${String(e)}`));
+}
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -2235,6 +2254,21 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
   });
+  // Side questions: the store and the asker check every argument (key, id, question).
+  reg.handle(CH.btwList, (_e, key: unknown) => btwStore.list(key));
+  reg.handle(CH.btwAsk, (_e, key: unknown, question: unknown) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const model = latest?.tails[s.sessionId]?.model ?? null;
+    return btwAsker.ask({ key: s.key, sessionId: s.sessionId, model }, question);
+  });
+  reg.handle(CH.btwStop, (_e, key: unknown, id: unknown) => btwAsker.stop(key, id));
+  reg.handle(CH.btwRemove, (_e, key: unknown, id: unknown) => {
+    // An answer still on its way is not removed: it would come back when it ends (Stop it first).
+    const asking = btwStore.list(key).some((x) => x.id === id && x.status === "asking");
+    if (asking) return false;
+    return btwStore.remove(key, id);
+  });
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
   reg.handle(CH.ticketCreate, async (_e, raw: unknown) => {
@@ -2589,12 +2623,24 @@ function registerIpc(): void {
         : watches.stop(id)
       : false,
   );
+  reg.handle(CH.watchEvents, (_e, id: unknown) =>
+    typeof id === "string" && id.length <= 300
+      ? id.startsWith("pr:")
+        ? prWatch.events(id)
+        : watches.events(id)
+      : [],
+  );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
     // A PR of a repository no account lists: as the account whose board holds a card of that repository.
     forCard(prRepo(String(url))).github.prSummary(url),
+  );
+  reg.handle(CH.prDetail, (_e, url: unknown) =>
+    typeof url === "string" && parsePrUrl(url)
+      ? forCard(prRepo(url)).github.prDetail(url)
+      : { ok: false, message: "not a PR URL" },
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -3357,6 +3403,18 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Settings → Appearance: native menus, dialogs and scrollbars follow it (and so does the renderer's
+ * prefers-color-scheme, which resolves System), and the window's own background, seen before the page paints.
+ */
+function applyNativeTheme(pref: ThemePref): void {
+  nativeTheme.themeSource = pref;
+  win?.setBackgroundColor(themeBg());
+}
+const themeBg = (): string =>
+  resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
+    .tokens.bg;
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -3365,7 +3423,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: "MasterDeck",
-    backgroundColor: "#0f1117",
+    backgroundColor: themeBg(),
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -3653,11 +3711,15 @@ app.whenReady().then(async () => {
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
+  sources.onSettings = (st) => applyNativeTheme(st.theme);
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
-      sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
+      sources.onSettings = (st) => {
+        deckHooks.setMonitorsBy(st.monitorsBy);
+        applyNativeTheme(st.theme);
+      };
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -3720,6 +3782,8 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
+  if (!SMOKE) setInterval(pollBtw, 2_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
     try {
@@ -3740,6 +3804,8 @@ app.whenReady().then(async () => {
     }
   }, 1000);
   createWindow();
+  // The OS switching light/dark while the setting is System.
+  nativeTheme.on("updated", () => win?.setBackgroundColor(themeBg()));
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
   );
@@ -3758,6 +3824,8 @@ app.whenReady().then(async () => {
   setInterval(() => void refreshAccounts(), 3_600_000);
   setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
+  // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
+  applyNativeTheme(sources.getSettings().theme);
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {
@@ -3814,6 +3882,7 @@ app.on("will-quit", () => {
   cloud?.stop();
   peerStore.flush();
   sender.killAll();
+  btwAsker.stopAll();
   watches.killAll();
   ptys.closeAll();
   sources.stop();

@@ -13,6 +13,8 @@ export interface Paths {
   statsDir: string
   claudeSettings: string
   projectsDir: string
+  /** Claude Code's prompt history: where a `/btw` typed in a terminal shows (Tools → BTW). */
+  claudeHistory: string
   ledger: string
   masterWorkspace: string
   python: string
@@ -60,6 +62,7 @@ export function resolvePaths(appRoot: string, resourcesPath: string, packaged: b
     statsDir: join(home, 'stats'),
     claudeSettings,
     projectsDir: join(h, '.claude', 'projects'),
+    claudeHistory: join(process.env.CLAUDE_CONFIG_DIR || join(h, '.claude'), 'history.jsonl'),
     ledger: join(masterHome, 'ledger.json'),
     // Replaced by the config's workspace once it loads (see Sources.applyConfig).
     masterWorkspace: process.env.MASTER_WORKSPACE || join(h, 'Documents'),

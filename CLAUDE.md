@@ -20,6 +20,7 @@ Start here, then read what the task needs:
 | [docs/TODO.md](docs/TODO.md) | Open work, prioritized, and recently done (with commits) |
 | [Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website) | The site at masterdeck.dev (its own repository) |
 | [docs/GUIDE.md](docs/GUIDE.md) | The user guide: every feature as a user sees it |
+| [docs/THEMES.md](docs/THEMES.md) | Themes: the token set, the light palette, adding a theme |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
 ## Two repos, one product
@@ -173,9 +174,12 @@ web tabs keep working.
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (Write / Preview / Side by side, `MarkdownView` with `html={false}`); entry points in `Rail.tsx`, `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
+| Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Session details → Mods); the mod refuses switched-off mods in its `plugin.register` hook |
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
+| Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
+| Session details tabs (Session · GitHub · Mods, #103) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -401,6 +405,38 @@ buttons; it does not go through macOS window drag regions.
   open). Open: a loop is armed when its trigger fires, before the steps ahead of it, so question
   turns (Superpowers' brainstorm) are blocked as rounds. Open points: TODO ("Built-in workflows:
   open points").
+
+- **BTW in the right panel's Tools tab (#106)** (Tools was the Queue tab; it now holds Queue and BTW as sub-tabs) (branch `worktree-MasterDeck-Terminal-106-btw-tab`, PR,
+  not merged, **not installed**: the rebuild of the real app waits for the user's word). Asks a side
+  question as `/btw` does through a forked `claude -p` of the session (no tools, hooks or MCP, nothing
+  saved), streams it in, keeps the history per session in `<home>/btw/`, and picks up `/btw` typed in
+  the terminal (`history.jsonl`, the answer read off `claude logs`). Spec and plan on the issue
+  (the backend repo was out of reach of this session). Checked: typecheck, vitest, the web preview at
+  1440 and 390 px, and the isolated app with a throwaway haiku background session: a panel question
+  answered from its conversation, a terminal `/btw` captured off its screen, an old one listed
+  without its answer, all three after a restart, the session's transcript unchanged. Not checked:
+  the real web app, a phone, Windows. Open points: TODO ("BTW (Tools tab)").
+
+- **Themes and a light theme (#105)** on branch `worktree-MasterDeck-Terminal-105-themes` (PR #108,
+  not merged; installed locally 2026-10-12, default Dark so the look is unchanged until picked): every colour is a token of `shared/themes.ts` (Dark = the old look, Light = Primer-based,
+  AA-checked), Settings → General → **Appearance** (Light / Dark / System, default Dark; per browser
+  in the web app), live switching including terminals (xterm `minimumContrastRatio` 4.5 in light).
+  Spec and plan in the backend repo (`docs/themes-105`, not pushed). Checked: typecheck, vitest,
+  `build:web`, every screen in both themes in the web preview (1440 px and 390 px), and the isolated
+  Electron app (Light / Dark / System switching, the window background and `nativeTheme`, kept
+  after a restart). Not checked: Windows, a real Claude session in the light terminal, a phone.
+  Open points: TODO ("Themes: open points").
+
+- **Session details in three tabs (#103)** (branch `worktree-MasterDeck-Terminal-103-details-tabs`,
+  draft PR, not merged): Session (no GitHub UI), GitHub (ticket / PRs / monitors as rows that
+  open: sub-issues, checks, reviews, threads, comments, a PR watch's and a monitor's events newest
+  first, ↗ links, live refresh) and Mods; the tab is remembered. Two new reads, `watch:events` and
+  `pr:detail`; events kept in memory only. Spec and plan in this repo's
+  `docs/superpowers/{specs,plans}/2026-10-12-details-tabs*`. Checked: typecheck, vitest, the web
+  preview over CDP (each tab, rows opening, the tab kept after a reload, no GitHub text on the
+  Session tab, a 280 px panel without sideways scroll, the phone's Panel). Not checked: a real
+  `pr:detail` read against GitHub, the real web app over the bridge, Windows. Open points: TODO
+  ("Session details → GitHub (#103)").
 
 - **The README is rewritten for developers (#90)** (merged to `main` from branch
   `worktree-MasterDeck-Terminal-90-readme`, not pushed): pitch, badges, hero, Features with placeholder images in

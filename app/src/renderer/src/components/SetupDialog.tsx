@@ -26,7 +26,7 @@ function ClaudeMark() {
   return (
     <svg className="claude-mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
       {[0, 30, 60, 90, 120, 150].map((a) => (
-        <rect key={a} x="11" y="1.5" width="2" height="21" rx="1" fill="#d97757" transform={`rotate(${a} 12 12)`} />
+        <rect key={a} x="11" y="1.5" width="2" height="21" rx="1" fill="var(--claude)" transform={`rotate(${a} 12 12)`} />
       ))}
     </svg>
   )
