@@ -2,6 +2,7 @@ import type { MouseEvent } from 'react'
 import { tabId, type SessionTab } from '@shared/sessionTabs'
 import type { Session } from '@shared/types'
 import { sessionTabs, useSessionTabs } from '../sessionTabsStore'
+import { FileTab } from './FileTab'
 
 const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 
@@ -66,6 +67,7 @@ export function SessionTabRow({ sessionKey }: { sessionKey: string }) {
 }
 
 /** What a file or diff tab shows. */
-export function SessionTabBody({ tab }: { session: Session; tab: Exclude<SessionTab, { kind: 'terminal' }>; visible: boolean }) {
+export function SessionTabBody({ session, tab, visible }: { session: Session; tab: Exclude<SessionTab, { kind: 'terminal' }>; visible: boolean }) {
+  if (tab.kind === 'file') return <FileTab key={tab.path} session={session} path={tab.path} visible={visible} />
   return <div className="welcome">{tab.path}</div>
 }
