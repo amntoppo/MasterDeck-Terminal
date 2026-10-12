@@ -173,6 +173,37 @@ function previewDeck(noBoard: boolean): DeckApi {
       ],
     }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),
+    // Session details → GitHub: a monitor's lines and the PR watch's finds, newest first.
+    watchEvents: (id: string) =>
+      id.startsWith('pr:')
+        ? [
+            { at: Date.now() - 20 * 60_000, kind: 'review', by: 'sam', text: 'The redirect should keep the hash too; see the comment on redirect.ts.' },
+            { at: Date.now() - 45 * 60_000, kind: 'thread', by: 'sam', text: 'Why not use URL() here instead of splitting by hand?' },
+            { at: Date.now() - 46 * 60_000, kind: 'thread', by: 'riley', text: 'This test needs a case for an empty next param.' },
+            { at: Date.now() - 170 * 60_000, kind: 'note', text: '[MasterDeck PR watch] web#131: already has 0 unresolved review threads and 1 PR comment from before the watch started.' },
+          ]
+        : Array.from({ length: 7 }, (_, i) => ({ at: Date.now() - (3 + i * 12) * 60_000, text: i === 0 ? '{"status":"degraded","failing":["auth-callback"],"version":"2026.10.12-3"}' : '{"status":"ok","version":"2026.10.12-2"}' })),
+    prDetail: () => ({
+      ok: true,
+      detail: {
+        checks: [
+          { name: 'e2e (login)', state: 'failure', url: 'https://github.com/acme/web/actions/runs/1' },
+          { name: 'lint', state: 'pending', url: null },
+          { name: 'build', state: 'success', url: 'https://github.com/acme/web/actions/runs/2' },
+          { name: 'unit', state: 'success', url: 'https://github.com/acme/web/actions/runs/3' },
+          { name: 'claude-review', state: 'success', url: 'https://github.com/acme/web/actions/runs/4' },
+        ],
+        reviews: [
+          { author: 'sam', state: 'CHANGES_REQUESTED', at: Date.now() - 20 * 60_000, url: 'https://github.com/acme/web/pull/131#pullrequestreview-1' },
+          { author: 'claude', state: 'COMMENTED', at: Date.now() - 2 * 3600_000, url: 'https://github.com/acme/web/pull/131#pullrequestreview-2' },
+        ],
+        threads: [
+          { path: 'src/auth/redirect.ts', author: 'sam', text: 'Why not use URL() here instead of splitting by hand?', url: 'https://github.com/acme/web/pull/131#discussion_r1' },
+          { path: 'src/auth/redirect.test.ts', author: 'riley', text: 'This test needs a case for an empty next param.', url: 'https://github.com/acme/web/pull/131#discussion_r2' },
+        ],
+        comments: [{ author: 'riley', at: Date.now() - 2.5 * 3600_000, text: 'Deployed to staging for a look.', url: 'https://github.com/acme/web/pull/131#issuecomment-1' }],
+      },
+    }),
     // Session details → Mods: switch in the fixture, as the Mac would after its next state.
     modSet: (key: string, mod: string, on: boolean) => {
       const off = new Set(state.modOff?.[key] ?? [])

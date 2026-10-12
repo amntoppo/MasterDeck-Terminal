@@ -7,6 +7,8 @@ import type {
 import type { MenuAnswer } from "./ask";
 import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
+import type { WatchEvent } from "./watches";
+import type { PrDetail } from "./prDetail";
 import type { Settings } from "./settings";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
@@ -97,6 +99,7 @@ export const CH = {
   showInboxItem: "app:showInboxItem",
   getState: "state:get",
   watchStop: "watch:stop",
+  watchEvents: "watch:events",
   accountSignIn: "account:signIn",
   accountCancel: "account:cancel",
   accountReopen: "account:reopen",
@@ -174,6 +177,7 @@ export const CH = {
   modsReload: "mods:reload",
   setSprint: "board:sprint",
   prSummary: "pr:summary",
+  prDetail: "pr:detail",
   issueBody: "issue:body",
   issueSubIssues: "issue:subIssues",
   shellPrepare: "shell:prepare",
@@ -287,6 +291,8 @@ export interface DeckApi {
   getState(): Promise<AppState | null>;
   /** Stop a monitor MasterDeck runs (its session is told). */
   watchStop(id: string): Promise<boolean>;
+  /** A monitor's or PR watch's last events, newest first (Session details → GitHub). A read. */
+  watchEvents(id: string): Promise<WatchEvent[]>;
   /** Start the browser sign-in with this provider (progress arrives as AppState.account). */
   accountSignIn(provider: "google" | "github" | "apple"): Promise<void>;
   accountCancel(): Promise<void>;
@@ -332,6 +338,10 @@ export interface DeckApi {
   issueSubIssues(
     ticket: Ticket,
   ): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }>;
+  /** A PR's checks, reviews, unresolved threads and comments (Session details → GitHub). A read. */
+  prDetail(
+    url: string,
+  ): Promise<{ ok: true; detail: PrDetail } | { ok: false; message: string }>;
   prSummary(
     url: string,
   ): Promise<{ ok: true; pr: PrSummary } | { ok: false; message: string }>;
@@ -412,7 +422,7 @@ export interface DeckApi {
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
-  /** A session's side questions (the BTW tab), oldest first: asked there and `/btw` typed in its terminal. */
+  /** A session's side questions (Tools → BTW), oldest first: asked there and `/btw` typed in its terminal. */
   btwList(key: string): Promise<BtwEntry[]>;
   /** Ask a side question about a session, as `/btw` does; the answer comes as btw events. */
   btwAsk(key: string, question: string): Promise<BtwAskResult>;

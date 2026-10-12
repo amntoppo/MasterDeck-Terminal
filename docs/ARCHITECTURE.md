@@ -326,8 +326,8 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   again; one switched on after a refusal joins at a `/reload-plugins` the core asks for from its timer
   (`toReload`; a `$.command.run` cannot run from a `command.run` hook). Managed (`prepend`/`append`)
   and built-in mods are never refused.
-- **Session details → Mods** (`SessionMods.tsx`, a `Session | Mods` switcher at the top of the
-  Details tab; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
+- **Session details → Mods** (`SessionMods.tsx`, the third of the Details tab's `Session | GitHub |
+  Mods` tabs; `modRows` in shared): a MasterDeck group (the core, locked; the three feature mods by
   `MASTERDECK_MODS` title and what they do, always listed) and Other mods (every mod in the catalog
   or this session's heartbeat; managed and built-in ones locked), each with a switch for this session
   and its status: `on`, `off`, `off-next-start`, `turning-on`, `not-seen`. A running session takes
@@ -436,6 +436,21 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
   session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
+- **Session details → GitHub** (#103, `renderer/.../GitHubDetails.tsx`; the tab is kept in
+  localStorage `md.detailsTab`, open rows in a module map per `Session.key`): ticket, PRs and
+  monitors as rows that open. What is not in `AppState` is read on demand, never added to it (the web
+  bridge drops states over ~1.05 MB): `deck.watchEvents(id)` (`watch:events`) returns the last 50
+  events of a monitor (`Watches.events`, lines with their time) or a PR watch (`PrWatch.events` for
+  `pr:<url>`: items with kind and author, and its own notes), newest first; the rings
+  (`pushEvents`, `EVENTS_MAX`, text cut to 500) are memory only, stripped from `watches.json` /
+  `pr-watch.json`. A row reads again when its `WatchInfo` (`events`, `lastEventAt`, `queued`)
+  changes. `deck.prDetail(url)` (`pr:detail`) is one GraphQL read through ghc (ttl 60 s) as
+  `forCard(prRepo(url))`: `shared/prDetail.ts` builds it (`prDetailQuery`, never the word for a
+  write) and reads checks (CheckRun and StatusContext, failing first), the latest review per
+  reviewer, unresolved current threads and comments (`parsePrDetail`); `worstPrStatus` sums the PRs'
+  lines for the closed row. A PR row reads again when `state.prLive[url]` changes and each 60 s,
+  keeping its last answer on screen. Both channels are `remote` in `DECK_ACCESS` (reads); main checks
+  the id's length and that the URL is a PR's.
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".
 
@@ -615,7 +630,7 @@ otherwise.
 
 ### Side questions (BTW, issue #106)
 
-Session details → **BTW** (`renderer/.../SessionBtw.tsx`) asks what Claude Code's `/btw` asks: a
+The right panel's **Tools → BTW** (`renderer/.../SessionBtw.tsx`, in `SessionTools.tsx`) asks what Claude Code's `/btw` asks: a
 question answered from the session's conversation, with no tools, never added to it. Claude Code has
 no API for it, so `main/btw.ts` `BtwAsker` runs `claude -p --resume <sessionId> --fork-session
 --no-session-persistence --tools "" --strict-mcp-config --settings '{"disableAllHooks":true}'
@@ -1144,10 +1159,19 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 
 - `main.tsx` mounts `App`. `deck.ts`: `deck()` = `window.deck`, `useAppState()` (first
   `getState()`, then `onState`), `useNow(ms)`.
+- Themes (issue #105, [THEMES.md](THEMES.md)): every colour is a token of `shared/themes.ts`
+  (`DARK`, `LIGHT`). `theme.ts` writes the active theme's tokens on `<html>` as CSS variables
+  (`applyTheme`), `bootTheme()` runs before the first render (`main.tsx`, `web/main.tsx`) from
+  localStorage `md.theme`, and `useTheme(pref)` in `App` follows `settings.theme` (the window) or
+  the browser's own choice (`useWebThemePref`, the web app), resolving System through
+  `prefers-color-scheme`. Terminals subscribe with `onTheme`. In main, `applyNativeTheme` sets
+  `nativeTheme.themeSource` and the window's background on every settings save, and `remoteSettings`
+  never lets a browser change the Mac's theme. `themes.lint.test.ts` fails on any colour literal in
+  `renderer/src` or `src/web`.
 - `App.tsx` lays out, left to right: **`Rail`** (views, tools, the remote indicator, actions,
   Settings), **`Sidebar`** (the Sessions column on Terminals: Needs you, grouped sessions, shells,
   Parked, footer with Refresh/Cleanup/GitHub cache), the **main view**, the **`Inspector`** right
-  panel on Terminals (Details = `SessionDetails`, Queue = `QueuePanel`, Summary = `SummaryPanel`),
+  panel on Terminals (Details = `SessionDetails`, Tools = `SessionTools` with sub-tabs Queue = `QueuePanel` and BTW = `SessionBtw`, kept in `md.toolsTab`; a saved `inspTab` of `"queue"` opens Tools; Summary = `SummaryPanel`),
   and **`MasterPane`** (master-agent's terminal; ★ Master / ⌘⇧M). Dialogs and popups mount at the
   end (`BrowserApproval` only where `can('browserDecide')`, i.e. desktop).
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
@@ -1238,7 +1262,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
-| `btw/` | Side questions (the BTW tab): `<session key>.json` per session (`{version, entries}`), `history-offset.json` (how far `history.jsonl` was read). `main/btw.ts` |
+| `btw/` | Side questions (Tools → BTW): `<session key>.json` per session (`{version, entries}`), `history-offset.json` (how far `history.jsonl` was read). `main/btw.ts` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |

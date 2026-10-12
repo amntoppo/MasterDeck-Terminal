@@ -50,7 +50,7 @@ function exact(at: number): string {
 }
 
 /**
- * Session details → BTW: side questions about the session, as Claude Code's `/btw` asks them
+ * The right panel's Tools → BTW: side questions about the session, as Claude Code's `/btw` asks them
  * (answered from the conversation, no tools, nothing added to it, the running work untouched), and
  * every earlier one, newest first, also those typed as `/btw` in the session's terminal.
  */

@@ -13,7 +13,7 @@ export interface Paths {
   statsDir: string
   claudeSettings: string
   projectsDir: string
-  /** Claude Code's prompt history: where a `/btw` typed in a terminal shows (the BTW tab). */
+  /** Claude Code's prompt history: where a `/btw` typed in a terminal shows (Tools → BTW). */
   claudeHistory: string
   ledger: string
   masterWorkspace: string

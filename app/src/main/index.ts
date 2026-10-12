@@ -4,6 +4,7 @@ import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
+import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -32,6 +33,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  nativeTheme,
   Notification,
   safeStorage,
   shell,
@@ -180,6 +182,7 @@ import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { parsePrUrl } from "@shared/prSummary";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -302,7 +305,7 @@ const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
 });
-// Side questions (the BTW tab): asked through a forked `claude -p`, and `/btw` typed in a
+// Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
 // terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
 const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
 const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
@@ -2609,12 +2612,24 @@ function registerIpc(): void {
         : watches.stop(id)
       : false,
   );
+  reg.handle(CH.watchEvents, (_e, id: unknown) =>
+    typeof id === "string" && id.length <= 300
+      ? id.startsWith("pr:")
+        ? prWatch.events(id)
+        : watches.events(id)
+      : [],
+  );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
   reg.handle(CH.prSummary, (_e, url: string) =>
     // A PR of a repository no account lists: as the account whose board holds a card of that repository.
     forCard(prRepo(String(url))).github.prSummary(url),
+  );
+  reg.handle(CH.prDetail, (_e, url: unknown) =>
+    typeof url === "string" && parsePrUrl(url)
+      ? forCard(prRepo(url)).github.prDetail(url)
+      : { ok: false, message: "not a PR URL" },
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -3317,6 +3332,18 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Settings → Appearance: native menus, dialogs and scrollbars follow it (and so does the renderer's
+ * prefers-color-scheme, which resolves System), and the window's own background, seen before the page paints.
+ */
+function applyNativeTheme(pref: ThemePref): void {
+  nativeTheme.themeSource = pref;
+  win?.setBackgroundColor(themeBg());
+}
+const themeBg = (): string =>
+  resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
+    .tokens.bg;
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -3325,7 +3352,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: "MasterDeck",
-    backgroundColor: "#0f1117",
+    backgroundColor: themeBg(),
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -3613,11 +3640,15 @@ app.whenReady().then(async () => {
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
+  sources.onSettings = (st) => applyNativeTheme(st.theme);
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
-      sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
+      sources.onSettings = (st) => {
+        deckHooks.setMonitorsBy(st.monitorsBy);
+        applyNativeTheme(st.theme);
+      };
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -3697,6 +3728,8 @@ app.whenReady().then(async () => {
     }
   }, 1000);
   createWindow();
+  // The OS switching light/dark while the setting is System.
+  nativeTheme.on("updated", () => win?.setBackgroundColor(themeBg()));
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
   );
@@ -3715,6 +3748,8 @@ app.whenReady().then(async () => {
   setInterval(() => void refreshAccounts(), 3_600_000);
   setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
+  // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
+  applyNativeTheme(sources.getSettings().theme);
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {

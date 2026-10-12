@@ -1,6 +1,6 @@
 /**
  * Side questions about a session, as Claude Code's `/btw` asks them: answered from the
- * conversation so far, with no tools, never added to the conversation. The Details panel's BTW tab
+ * conversation so far, with no tools, never added to the conversation. The right panel's Tools → BTW
  * asks them through a forked `claude -p` (main/btw.ts); a `/btw` typed in the terminal is picked
  * up from Claude Code's prompt history (`history.jsonl`), and its answer, which Claude Code keeps
  * nowhere, from the session's screen.

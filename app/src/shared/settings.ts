@@ -1,3 +1,5 @@
+import { isThemePref, type ThemePref } from './themes'
+
 export interface Settings {
   idleNudgeMinutes: number
   budgetPerTicketUsd: number
@@ -18,6 +20,8 @@ export interface Settings {
   remoteEnabled: boolean
   /** Web terminal: show typed characters at once, corrected when the Mac's output arrives (predictive local echo). */
   instantTyping: boolean
+  /** Light, Dark or System (follows the OS). The web app keeps its own choice per browser (renderer/src/theme.ts). */
+  theme: ThemePref
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +37,8 @@ export const DEFAULT_SETTINGS: Settings = {
   watchPrs: true,
   remoteEnabled: false,
   instantTyping: true,
+  // Dark: an update keeps today's look until the user picks another.
+  theme: 'dark',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -54,5 +60,6 @@ export function normalizeSettings(raw: unknown): Settings {
     watchPrs: typeof r.watchPrs === 'boolean' ? r.watchPrs : DEFAULT_SETTINGS.watchPrs,
     remoteEnabled: typeof r.remoteEnabled === 'boolean' ? r.remoteEnabled : DEFAULT_SETTINGS.remoteEnabled,
     instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
+    theme: isThemePref(r.theme) ? r.theme : DEFAULT_SETTINGS.theme,
   }
 }

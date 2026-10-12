@@ -1,31 +1,23 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AskPanel } from "./AskPanel";
 import { StatusDialog } from "./StatusDialog";
-import {
-  sameTicket,
-  ticketLabel,
-  ticketUrl,
-  type Ticket,
-} from "@shared/ticket";
+import type { Ticket } from "@shared/ticket";
 import { sessionTicket } from "@shared/derive";
 import { formatAgo, formatDiff, formatPct } from "@shared/format";
 import { contextLevel } from "@shared/stats";
 import { formatTokens, tokenSum, tokenTitle } from "@shared/tokens";
 import { attentionFor, sessionStatus } from "@shared/review";
-import { STEPS, taskStep } from "@shared/tasks";
 import type { AppState, Session } from "@shared/types";
-import { deck, useNow } from "../deck";
-import { ticketNote } from "../notes";
+import { deck, load, save, useNow } from "../deck";
 import type { NoteMeta } from "@shared/notes";
 import { can } from "../web";
 import { toggleStar, useStars } from "../stars";
 import { webConfirm } from "../webConfirm";
 import { WorkflowWidget } from "./SessionWorkflow";
-import { MonitorWidget } from "./MonitorWidget";
 import { ScheduleWidget } from "./ScheduleWidget";
 import { PeersDialog } from "./PeersDialog";
 import { SessionMods } from "./SessionMods";
-import { SessionBtw } from "./SessionBtw";
+import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
 import { peerRows } from "./peersView";
 
 interface Props {
@@ -40,10 +32,15 @@ interface Props {
   onNote?: (t: Ticket) => void;
 }
 
+type DetailsTab = "session" | "github" | "mods";
+const TAB_KEY = "md.detailsTab";
+const asTab = (v: unknown): DetailsTab => (v === "github" || v === "mods" ? v : "session");
+
 /**
  * Everything about the open session, in the right panel's Details tab (it replaced the status bar
- * above the terminal): what waits on you, status, ticket and progress, PRs, branch and worktrees,
- * tokens, context, model, diff, and the session's actions.
+ * above the terminal), in three tabs (#103): Session (what waits on you, status, workflow, linked
+ * sessions, branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub
+ * (ticket, PRs, monitors: GitHubDetails) and Mods. The picked tab is kept across sessions and restarts.
  */
 export function SessionDetails({
   session: s,
@@ -59,7 +56,11 @@ export function SessionDetails({
   const [statusOpen, setStatusOpen] = useState(false);
   const [peersOpen, setPeersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [tab, setTab] = useState<"session" | "mods" | "btw">("session");
+  const [tab, setTabState] = useState<DetailsTab>(() => asTab(load(TAB_KEY, "session")));
+  const setTab = (t: DetailsTab) => {
+    setTabState(t);
+    save(TAB_KEY, t);
+  };
   const since = useStateSince(s);
   const starred = useStars().includes(s.key);
   const status = sessionStatus(
@@ -68,7 +69,6 @@ export function SessionDetails({
     attentionFor(s, state.proposals),
     state.manualStatus[s.key],
   );
-  const step = taskStep(status.key, state.prStage[s.key], !!status.manual);
   const tokens = state.tokens[s.sessionId] ?? null;
   const flash = (t: string) => {
     setNote(t);
@@ -80,22 +80,9 @@ export function SessionDetails({
   };
 
   const peers = peerRows(state, s.key);
-  const t = sessionTicket(s);
-  const issue = t ? state.issues.find((i) => sameTicket(i, t)) : undefined;
-  const issueLink = issue?.url ?? (t ? ticketUrl(t.repo, t.number) : null);
-  // Every PR the session has (several, across repos), newest first; with none of its own, the PRs
-  // that reference its issue.
-  const linked = state.sessionPrs[s.sessionId] ?? [];
-  const issuePrs = t
-    ? state.prs
-        .filter(
-          (p) =>
-            p.refsIssue !== null &&
-            sameTicket({ repo: p.refsRepo, number: p.refsIssue }, t),
-        )
-        .map((p) => p.url)
-    : [];
-  const prUrls = [...new Set(linked.length ? linked : issuePrs)].reverse();
+  const prLines = sessionPrUrls(s, state, sessionTicket(s)).map((u) => prLineOf(u, state));
+  const ghAlert = prLines.some((l) => !l.done && (l.ci === "failure" || l.review === "CHANGES_REQUESTED"));
+  const monitorCount = (state.watches ?? []).filter((w) => w.sessionId === s.sessionId && !w.id.startsWith("pr:")).length;
   const git = state.git[s.sessionId];
   const stats = state.stats[s.sessionId];
   const tail = state.tails[s.sessionId];
@@ -124,33 +111,39 @@ export function SessionDetails({
     flash(r.ok ? r.message : `Editor: ${r.message}`);
   };
 
+  const tabButton = (t: DetailsTab, label: ReactNode) => (
+    <button role="tab" aria-selected={tab === t} className={tab === t ? "on" : undefined} onClick={() => setTab(t)}>
+      {label}
+    </button>
+  );
   const tabs = (
     <div className="d-tabs">
       <div className="seg" role="tablist" aria-label="Details">
-        <button role="tab" aria-selected={tab === "session"} className={tab === "session" ? "on" : undefined} onClick={() => setTab("session")}>
-          Session
-        </button>
-        <button role="tab" aria-selected={tab === "mods"} className={tab === "mods" ? "on" : undefined} onClick={() => setTab("mods")}>
-          Mods{state.modOff?.[s.key]?.length ? ` · ${state.modOff[s.key].length} off` : ""}
-        </button>
-        {can("btwList") && (
-          <button role="tab" aria-selected={tab === "btw"} className={tab === "btw" ? "on" : undefined} onClick={() => setTab("btw")} title="Side questions about this session (/btw)">
-            BTW
-          </button>
+        {tabButton("session", "Session")}
+        {tabButton(
+          "github",
+          <>
+            GitHub
+            {prLines.length + monitorCount > 0 && (
+              <span className={`d-tab-count${ghAlert ? " bad" : ""}`}> {prLines.length + monitorCount}</span>
+            )}
+          </>,
+        )}
+        {tabButton(
+          "mods",
+          <>
+            Mods
+            {state.modOff?.[s.key]?.length ? <span className="d-tab-count"> {state.modOff[s.key].length} off</span> : null}
+          </>,
         )}
       </div>
     </div>
   );
-  if (tab === "btw")
+  if (tab === "github")
     return (
       <div className="details">
         {tabs}
-        {note && (
-          <section className="dsec">
-            <span className="d-note">{note}</span>
-          </section>
-        )}
-        <SessionBtw session={s} onMessage={flash} />
+        <GitHubDetails session={s} state={state} notes={notes} onNote={onNote} />
       </div>
     );
   if (tab === "mods")
@@ -245,60 +238,7 @@ export function SessionDetails({
       </section>
 
       <WorkflowWidget session={s} state={state} />
-      <MonitorWidget session={s} state={state} />
       <ScheduleWidget session={s} state={state} />
-
-      <section className="dsec">
-        <div className="eyebrow">Ticket</div>
-        {issueLink ? (
-          <button
-            className="d-link"
-            onClick={() => deck().openExternal(issueLink)}
-            title="Open on GitHub"
-          >
-            <span className="mono">
-              {ticketLabel(s.issueRepo, s.issue ?? 0)}
-            </span>{" "}
-            {issue?.title ?? "Open the issue"} ↗
-          </button>
-        ) : (
-          <div className="d-text muted">No issue linked</div>
-        )}
-        {t && issueLink && onNote && can("notesList") && (() => {
-          const tn = ticketNote(notes ?? [], t.repo, t.number);
-          return (
-            <div className="d-note">
-              {tn && <div className="d-note-text">{tn.preview}</div>}
-              <button className="d-link" onClick={() => onNote(t)}>
-                {tn ? "Edit note" : "Add note"}
-              </button>
-            </div>
-          );
-        })()}
-        <div
-          className={`d-steps tone-${step.tone}`}
-          title={STEPS.map(
-            (n, i) => `${i < step.at ? "✓" : i === step.at ? "▶" : "·"} ${n}`,
-          ).join("\n")}
-        >
-          {STEPS.map((n, i) => (
-            <i
-              key={n}
-              className={
-                i < step.at || (i === step.at && step.tone === "done")
-                  ? "past"
-                  : i === step.at
-                    ? "here"
-                    : ""
-              }
-            />
-          ))}
-        </div>
-        <div className={`d-stepname tone-${step.tone}`}>
-          {step.at + 1}/5 {STEPS[step.at]}
-          {step.note ? <span className="muted"> · {step.note}</span> : null}
-        </div>
-      </section>
 
       {(peers.length > 0 || peersOpen) && (
         <section className="dsec">
@@ -349,14 +289,6 @@ export function SessionDetails({
           </div>
         </section>
       )}
-
-      <section className="dsec">
-        <div className="eyebrow">Pull requests</div>
-        {prUrls.length === 0 && <div className="d-text muted">No PR yet</div>}
-        {prUrls.map((u) => (
-          <PrLine key={u} url={u} state={state} />
-        ))}
-      </section>
 
       <section className="dsec">
         <div className="eyebrow">Worktrees</div>
@@ -442,16 +374,6 @@ export function SessionDetails({
           <div>
             Model <b>{stats?.model ?? tail?.model ?? "—"}</b>
           </div>
-          {s.account && (
-            <div title="The GitHub account this session works as (its commits, PRs and gh calls); to change it, stop it and resume it as another">
-              Account <b>{s.account}</b>
-            </div>
-          )}
-          {s.ghActive && !s.account && (
-            <div title="This session was started without an account, so its commits, PRs and gh calls use gh's active account (gh auth status). To give it one, stop it and resume it with an account picked.">
-              Account <b>gh&apos;s active account</b> (started without an account)
-            </div>
-          )}
           <div>
             Diff <b>{git ? formatDiff(git) : "—"}</b>
           </div>
@@ -558,49 +480,4 @@ function useStateSince(s: Session): number | null {
     ref.current = { id: s.sessionId, state: s.state, since: Date.now() };
   }
   return ref.current.since;
-}
-
-/** One of the session's PRs: repo#number, CI, review threads, review, state. */
-function PrLine({ url, state }: { url: string; state: AppState }) {
-  const live = state.prLive[url];
-  const snap = state.prs.find((p) => p.url === url);
-  const ci =
-    live?.ci ??
-    (snap?.ci === "success"
-      ? "success"
-      : snap?.ci === "failure" || snap?.ci === "error"
-        ? "failure"
-        : snap?.ci
-          ? "pending"
-          : null);
-  const threads = snap?.unresolvedThreads ?? 0;
-  const prState = live?.state ?? null;
-  const done = prState === "MERGED" || prState === "CLOSED";
-  const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url);
-  return (
-    <button
-      className={`d-pr ${done ? "done" : ""}`}
-      onClick={() => deck().openExternal(url)}
-      title={`${live?.title ?? snap?.title ?? ""}\n${url}`}
-    >
-      <span className="mono">{m ? `${m[1]}#${m[2]}` : url} ↗</span>
-      <span style={{ flex: 1 }} />
-      {!done && ci === "success" && <span className="ok">CI passed</span>}
-      {!done && ci === "failure" && <span className="bad">CI failing</span>}
-      {!done && ci === "pending" && <span className="wait">CI running</span>}
-      {!done && threads > 0 && (
-        <span className="wait">
-          {threads} thread{threads === 1 ? "" : "s"}
-        </span>
-      )}
-      {!done && live?.reviewDecision === "APPROVED" && (
-        <span className="ok">approved</span>
-      )}
-      {!done && live?.reviewDecision === "CHANGES_REQUESTED" && (
-        <span className="bad">changes</span>
-      )}
-      {prState === "MERGED" && <span className="merged">merged</span>}
-      {prState === "CLOSED" && <span className="muted">closed</span>}
-    </button>
-  );
 }
