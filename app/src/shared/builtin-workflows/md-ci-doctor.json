@@ -1,0 +1,182 @@
+{
+  "flow": {
+    "nodes": [
+      {
+        "id": "t-session-start",
+        "x": 0,
+        "y": 0,
+        "kind": "trigger",
+        "trigger": "session-start"
+      },
+      {
+        "id": "failing-run",
+        "x": 290,
+        "y": 0,
+        "kind": "instruction",
+        "text": "If this session's branch already has a failing CI run (gh run list --branch <branch> --limit 1), start with it: read its log (gh run view <id> --log-failed), fix the root cause, commit and push this branch. Never push to main or master."
+      },
+      {
+        "id": "t-linked",
+        "x": 0,
+        "y": 110,
+        "kind": "trigger",
+        "trigger": "linked"
+      },
+      {
+        "id": "b-ticket",
+        "x": 290,
+        "y": 110,
+        "kind": "builtin",
+        "builtin": "ticket"
+      },
+      {
+        "id": "t-after-push",
+        "x": 0,
+        "y": 220,
+        "kind": "trigger",
+        "trigger": "after-push"
+      },
+      {
+        "id": "ci",
+        "x": 290,
+        "y": 220,
+        "kind": "loop",
+        "name": "Until CI is green",
+        "members": [
+          "wait",
+          "fix"
+        ],
+        "w": 540,
+        "h": 148,
+        "check": {
+          "command": "gh run list --commit \"$(git rev-parse HEAD)\" --limit 1 --json status,conclusion --jq '.[0] | \"\\(.status) \\(.conclusion)\"'",
+          "output": "^completed success$",
+          "outputMode": "match",
+          "timeoutMin": 2
+        },
+        "agentDone": {
+          "on": true,
+          "goal": "CI is green for the latest push: name the run and its result. (A flaky test or the environment cannot be fixed here: say so and change nothing; the loop then ends at its limit and you report it.)"
+        },
+        "limits": {
+          "iterations": 5,
+          "minutes": 0,
+          "stall": 2
+        }
+      },
+      {
+        "id": "wait",
+        "x": 320,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Wait for this commit's CI run and read its result: find it with gh run list --commit $(git rev-parse HEAD), wait with gh run watch <id>. On a failure read gh run view <id> --log-failed and say whether it is a real failure, a flaky test or the environment."
+      },
+      {
+        "id": "fix",
+        "x": 610,
+        "y": 268,
+        "kind": "instruction",
+        "text": "For a real failure, fix its root cause. Never disable, skip or weaken a test or a check. Commit and push this branch; never push to main or master. For a flaky test or the environment, change nothing and say so."
+      },
+      {
+        "id": "stuck",
+        "x": 930,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Tell the user what still fails in CI and why, and what you tried."
+      },
+      {
+        "id": "t-before-pr",
+        "x": 0,
+        "y": 440,
+        "kind": "trigger",
+        "trigger": "before-pr"
+      },
+      {
+        "id": "b-pr-review",
+        "x": 290,
+        "y": 440,
+        "kind": "builtin",
+        "builtin": "pr-review"
+      },
+      {
+        "id": "t-pr-created",
+        "x": 0,
+        "y": 550,
+        "kind": "trigger",
+        "trigger": "pr-created"
+      },
+      {
+        "id": "b-pr-watch",
+        "x": 290,
+        "y": 550,
+        "kind": "builtin",
+        "builtin": "pr-watch"
+      },
+      {
+        "id": "t-needs-you",
+        "x": 0,
+        "y": 660,
+        "kind": "trigger",
+        "trigger": "needs-you"
+      },
+      {
+        "id": "ping",
+        "x": 290,
+        "y": 660,
+        "kind": "notify",
+        "text": "A session is waiting on you (a question or a permission)."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-t-session-start-failing-run",
+        "from": "t-session-start",
+        "to": "failing-run",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-linked-b-ticket",
+        "from": "t-linked",
+        "to": "b-ticket",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-after-push-ci",
+        "from": "t-after-push",
+        "to": "ci",
+        "kind": "then"
+      },
+      {
+        "id": "e-wait-fix",
+        "from": "wait",
+        "to": "fix",
+        "kind": "then"
+      },
+      {
+        "id": "e-ci-stuck",
+        "from": "ci",
+        "to": "stuck",
+        "kind": "limit"
+      },
+      {
+        "id": "e-t-before-pr-b-pr-review",
+        "from": "t-before-pr",
+        "to": "b-pr-review",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-b-pr-watch",
+        "from": "t-pr-created",
+        "to": "b-pr-watch",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-needs-you-ping",
+        "from": "t-needs-you",
+        "to": "ping",
+        "kind": "then"
+      }
+    ]
+  }
+}

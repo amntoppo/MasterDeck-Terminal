@@ -1,0 +1,227 @@
+{
+  "flow": {
+    "nodes": [
+      {
+        "id": "t-session-start",
+        "x": 0,
+        "y": 0,
+        "kind": "trigger",
+        "trigger": "session-start"
+      },
+      {
+        "id": "t-linked",
+        "x": 0,
+        "y": 110,
+        "kind": "trigger",
+        "trigger": "linked"
+      },
+      {
+        "id": "b-ticket",
+        "x": 290,
+        "y": 110,
+        "kind": "builtin",
+        "builtin": "ticket"
+      },
+      {
+        "id": "reproduce",
+        "x": 290,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Reproduce the bug before changing anything: run it, and note the exact command and its output. If you cannot reproduce it, stop and ask the user for what is missing."
+      },
+      {
+        "id": "failing-test",
+        "x": 580,
+        "y": 220,
+        "kind": "instruction",
+        "text": "If this session is on main or master, first create a branch named after the issue (e.g. 123-short-title). Write a test that shows the bug. Run it and confirm it fails, and fails for the reported reason: quote the failure."
+      },
+      {
+        "id": "root-cause",
+        "x": 870,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Find the root cause and write it down in two or three sentences before you change any code: what goes wrong, where, and why."
+      },
+      {
+        "id": "fix-loop",
+        "x": 1160,
+        "y": 220,
+        "kind": "loop",
+        "name": "Fix until the test and suite pass",
+        "members": [
+          "fix",
+          "verify"
+        ],
+        "w": 540,
+        "h": 148,
+        "check": {
+          "command": "",
+          "output": "",
+          "outputMode": "match",
+          "timeoutMin": 5
+        },
+        "agentDone": {
+          "on": true,
+          "goal": "The reproducing test and the full test suite pass. Name the commands you ran and their results."
+        },
+        "limits": {
+          "iterations": 8,
+          "minutes": 0,
+          "stall": 3
+        }
+      },
+      {
+        "id": "fix",
+        "x": 1190,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Make the smallest change that fixes that root cause. Never change or delete the new test, and never skip a test."
+      },
+      {
+        "id": "verify",
+        "x": 1480,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Run the new test, then the full test suite, and read the output. Anything failing is the next round's first job."
+      },
+      {
+        "id": "review",
+        "x": 1800,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Launch a fresh reviewer subagent (Agent tool) on the diff, with the root cause: does the fix address that cause, and could it break any caller? Ask for correctness problems only. Fix what is real, re-run the tests, and commit."
+      },
+      {
+        "id": "open-pr",
+        "x": 2090,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Commit the test and the fix, push this branch and open a PR with gh pr create: the root cause, the fix and the test results in the body, and \"Closes #<issue>\". Never push to main or master."
+      },
+      {
+        "id": "stuck",
+        "x": 1800,
+        "y": 440,
+        "kind": "instruction",
+        "text": "Don't open a PR. Tell the user what you found: how to reproduce it, the root cause if you know it, what you tried, and what still fails."
+      },
+      {
+        "id": "t-before-pr",
+        "x": 0,
+        "y": 550,
+        "kind": "trigger",
+        "trigger": "before-pr"
+      },
+      {
+        "id": "b-pr-review",
+        "x": 290,
+        "y": 550,
+        "kind": "builtin",
+        "builtin": "pr-review"
+      },
+      {
+        "id": "t-pr-created",
+        "x": 0,
+        "y": 660,
+        "kind": "trigger",
+        "trigger": "pr-created"
+      },
+      {
+        "id": "b-pr-watch",
+        "x": 290,
+        "y": 660,
+        "kind": "builtin",
+        "builtin": "pr-watch"
+      },
+      {
+        "id": "t-needs-you",
+        "x": 0,
+        "y": 770,
+        "kind": "trigger",
+        "trigger": "needs-you"
+      },
+      {
+        "id": "ping",
+        "x": 290,
+        "y": 770,
+        "kind": "notify",
+        "text": "A session is waiting on you (a bug it could not reproduce, a question or a permission)."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-t-linked-b-ticket",
+        "from": "t-linked",
+        "to": "b-ticket",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-linked-reproduce",
+        "from": "t-linked",
+        "to": "reproduce",
+        "kind": "then"
+      },
+      {
+        "id": "e-reproduce-failing-test",
+        "from": "reproduce",
+        "to": "failing-test",
+        "kind": "then"
+      },
+      {
+        "id": "e-failing-test-root-cause",
+        "from": "failing-test",
+        "to": "root-cause",
+        "kind": "then"
+      },
+      {
+        "id": "e-root-cause-fix-loop",
+        "from": "root-cause",
+        "to": "fix-loop",
+        "kind": "then"
+      },
+      {
+        "id": "e-fix-verify",
+        "from": "fix",
+        "to": "verify",
+        "kind": "then"
+      },
+      {
+        "id": "e-fix-loop-review",
+        "from": "fix-loop",
+        "to": "review",
+        "kind": "met"
+      },
+      {
+        "id": "e-fix-loop-stuck",
+        "from": "fix-loop",
+        "to": "stuck",
+        "kind": "limit"
+      },
+      {
+        "id": "e-review-open-pr",
+        "from": "review",
+        "to": "open-pr",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-before-pr-b-pr-review",
+        "from": "t-before-pr",
+        "to": "b-pr-review",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-b-pr-watch",
+        "from": "t-pr-created",
+        "to": "b-pr-watch",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-needs-you-ping",
+        "from": "t-needs-you",
+        "to": "ping",
+        "kind": "then"
+      }
+    ]
+  }
+}

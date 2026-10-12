@@ -1,0 +1,214 @@
+{
+  "flow": {
+    "nodes": [
+      {
+        "id": "t-session-start",
+        "x": 0,
+        "y": 0,
+        "kind": "trigger",
+        "trigger": "session-start"
+      },
+      {
+        "id": "t-linked",
+        "x": 0,
+        "y": 110,
+        "kind": "trigger",
+        "trigger": "linked"
+      },
+      {
+        "id": "b-ticket",
+        "x": 290,
+        "y": 110,
+        "kind": "builtin",
+        "builtin": "ticket"
+      },
+      {
+        "id": "behaviours",
+        "x": 290,
+        "y": 220,
+        "kind": "instruction",
+        "text": "List the behaviours to build as test cases: each an input and its expected output or effect, edge cases and errors included. Write no implementation yet."
+      },
+      {
+        "id": "tests",
+        "x": 580,
+        "y": 220,
+        "kind": "instruction",
+        "text": "If this session is on main or master, first create a branch named after the issue (e.g. 123-short-title). Write the tests for those cases. Run them and confirm every one fails for the right reason (the behaviour is missing, not a typo or an import error): quote the failures. Commit the tests alone, with a message starting \"tests:\"."
+      },
+      {
+        "id": "build",
+        "x": 870,
+        "y": 220,
+        "kind": "loop",
+        "name": "Implement until the tests pass",
+        "members": [
+          "implement",
+          "verify"
+        ],
+        "w": 540,
+        "h": 148,
+        "check": {
+          "command": "base=$(git log --grep='^tests:' -1 --format=%H) && test -n \"$base\" && git diff --quiet \"$base\" -- $(git show --name-only --format= \"$base\")",
+          "output": "",
+          "outputMode": "match",
+          "timeoutMin": 1
+        },
+        "agentDone": {
+          "on": true,
+          "goal": "Every test passes. Name the command you ran and its result."
+        },
+        "limits": {
+          "iterations": 15,
+          "minutes": 0,
+          "stall": 3
+        }
+      },
+      {
+        "id": "implement",
+        "x": 900,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Write the smallest code that makes the next failing test pass. Never edit, skip or delete the tests of the \"tests:\" commit: MasterDeck checks that they are unchanged."
+      },
+      {
+        "id": "verify",
+        "x": 1190,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Run the tests and read the output. A failing test is the next round's first job."
+      },
+      {
+        "id": "overfit",
+        "x": 1510,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Launch a fresh reviewer subagent (Agent tool) to look for overfitting: hard-coded answers, branches on the tests' inputs, cases only the tests get right. For each real gap, add a test in a new commit starting \"tests:\", see it fail, then make it pass without touching the tests. Run all the tests again."
+      },
+      {
+        "id": "open-pr",
+        "x": 1800,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Push this branch and open a PR with gh pr create: the behaviours, the tests and their result in the body, and \"Closes #<issue>\". Never push to main or master."
+      },
+      {
+        "id": "stuck",
+        "x": 1510,
+        "y": 440,
+        "kind": "instruction",
+        "text": "Don't open a PR. Tell the user which tests still fail and why, what you tried, and what you need from them."
+      },
+      {
+        "id": "t-before-pr",
+        "x": 0,
+        "y": 550,
+        "kind": "trigger",
+        "trigger": "before-pr"
+      },
+      {
+        "id": "b-pr-review",
+        "x": 290,
+        "y": 550,
+        "kind": "builtin",
+        "builtin": "pr-review"
+      },
+      {
+        "id": "t-pr-created",
+        "x": 0,
+        "y": 660,
+        "kind": "trigger",
+        "trigger": "pr-created"
+      },
+      {
+        "id": "b-pr-watch",
+        "x": 290,
+        "y": 660,
+        "kind": "builtin",
+        "builtin": "pr-watch"
+      },
+      {
+        "id": "t-needs-you",
+        "x": 0,
+        "y": 770,
+        "kind": "trigger",
+        "trigger": "needs-you"
+      },
+      {
+        "id": "ping",
+        "x": 290,
+        "y": 770,
+        "kind": "notify",
+        "text": "A session is waiting on you (a question or a permission)."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-t-linked-b-ticket",
+        "from": "t-linked",
+        "to": "b-ticket",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-linked-behaviours",
+        "from": "t-linked",
+        "to": "behaviours",
+        "kind": "then"
+      },
+      {
+        "id": "e-behaviours-tests",
+        "from": "behaviours",
+        "to": "tests",
+        "kind": "then"
+      },
+      {
+        "id": "e-tests-build",
+        "from": "tests",
+        "to": "build",
+        "kind": "then"
+      },
+      {
+        "id": "e-implement-verify",
+        "from": "implement",
+        "to": "verify",
+        "kind": "then"
+      },
+      {
+        "id": "e-build-overfit",
+        "from": "build",
+        "to": "overfit",
+        "kind": "met"
+      },
+      {
+        "id": "e-build-stuck",
+        "from": "build",
+        "to": "stuck",
+        "kind": "limit"
+      },
+      {
+        "id": "e-overfit-open-pr",
+        "from": "overfit",
+        "to": "open-pr",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-before-pr-b-pr-review",
+        "from": "t-before-pr",
+        "to": "b-pr-review",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-b-pr-watch",
+        "from": "t-pr-created",
+        "to": "b-pr-watch",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-needs-you-ping",
+        "from": "t-needs-you",
+        "to": "ping",
+        "kind": "then"
+      }
+    ]
+  }
+}

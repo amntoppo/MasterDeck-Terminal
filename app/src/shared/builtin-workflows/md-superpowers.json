@@ -1,0 +1,242 @@
+{
+  "flow": {
+    "nodes": [
+      {
+        "id": "t-session-start",
+        "x": 0,
+        "y": 0,
+        "kind": "trigger",
+        "trigger": "session-start"
+      },
+      {
+        "id": "t-linked",
+        "x": 0,
+        "y": 110,
+        "kind": "trigger",
+        "trigger": "linked"
+      },
+      {
+        "id": "b-ticket",
+        "x": 290,
+        "y": 110,
+        "kind": "builtin",
+        "builtin": "ticket"
+      },
+      {
+        "id": "worktree",
+        "x": 290,
+        "y": 220,
+        "kind": "skill",
+        "skill": "babysit-worktree",
+        "mode": "session",
+        "instructions": "Name the branch after the issue (e.g. 123-short-title)."
+      },
+      {
+        "id": "brainstorm",
+        "x": 580,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Brainstorm with the superpowers:brainstorming skill (if it isn't installed, do it by hand): read the issue, explore the code it touches, ask the user one question at a time until the goal is clear, propose 2-3 approaches with trade-offs, and get the user's OK on a design. Save it to docs/plans/<date>-<topic>-design.md and commit it."
+      },
+      {
+        "id": "plan",
+        "x": 870,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Write the implementation plan with the superpowers:writing-plans skill (if it isn't installed, do it by hand): small numbered tasks, each with the exact files, the failing test to write first, the code, and the command that verifies it. Save it to docs/plans/<date>-<topic>-plan.md, commit it, and show the user the task list."
+      },
+      {
+        "id": "build",
+        "x": 1160,
+        "y": 220,
+        "kind": "loop",
+        "name": "Implement and test the plan",
+        "members": [
+          "implement",
+          "verify"
+        ],
+        "w": 540,
+        "h": 148,
+        "check": {
+          "command": "",
+          "output": "",
+          "outputMode": "match",
+          "timeoutMin": 5
+        },
+        "agentDone": {
+          "on": true,
+          "goal": "Every task in the plan is implemented and committed, and a fresh run of the project's full test suite, lint and type checks passes. Name the commands you ran and their results."
+        },
+        "limits": {
+          "iterations": 15,
+          "minutes": 0,
+          "stall": 3
+        }
+      },
+      {
+        "id": "implement",
+        "x": 1190,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Take the next unfinished tasks of the plan. Implement them with superpowers:test-driven-development (failing test first, watch it fail, minimal code, watch it pass) through superpowers:subagent-driven-development or superpowers:executing-plans. On any failure use superpowers:systematic-debugging: find the root cause before changing code. Never skip or delete a test. Commit each task. If one of these skills isn't installed, do the same by hand."
+      },
+      {
+        "id": "verify",
+        "x": 1480,
+        "y": 268,
+        "kind": "instruction",
+        "text": "Use superpowers:verification-before-completion (if it isn't installed, do it by hand): run the full test suite, lint and type checks fresh and read the output. Never claim a task done without that evidence; anything failing is the next round's first job."
+      },
+      {
+        "id": "review",
+        "x": 1800,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Ask for a code review with superpowers:requesting-code-review (if it isn't installed, launch a fresh reviewer subagent with the Agent tool yourself): a reviewer on the branch diff against the base branch. Fix every important finding, re-run the tests, and commit."
+      },
+      {
+        "id": "open-pr",
+        "x": 2090,
+        "y": 220,
+        "kind": "instruction",
+        "text": "Finish the branch with superpowers:finishing-a-development-branch (if it isn't installed, do it by hand), choosing to push this branch and create a PR: a title from the issue, a description with the summary, the design and plan links, how it was tested, and \"Closes #<issue>\". Never push to main or master."
+      },
+      {
+        "id": "stuck",
+        "x": 1800,
+        "y": 440,
+        "kind": "instruction",
+        "text": "Don't create a PR. Tell the user which plan tasks are unfinished or which checks still fail, what you tried, and what you need from them."
+      },
+      {
+        "id": "t-before-pr",
+        "x": 0,
+        "y": 550,
+        "kind": "trigger",
+        "trigger": "before-pr"
+      },
+      {
+        "id": "b-pr-review",
+        "x": 290,
+        "y": 550,
+        "kind": "builtin",
+        "builtin": "pr-review"
+      },
+      {
+        "id": "t-pr-created",
+        "x": 0,
+        "y": 660,
+        "kind": "trigger",
+        "trigger": "pr-created"
+      },
+      {
+        "id": "b-pr-watch",
+        "x": 290,
+        "y": 660,
+        "kind": "builtin",
+        "builtin": "pr-watch"
+      },
+      {
+        "id": "tell-user",
+        "x": 290,
+        "y": 770,
+        "kind": "instruction",
+        "text": "Tell the user the PR is ready: send a push notification (PushNotification tool, if you have it) with the PR title and URL, and end with a short summary: PR link, issue, what changed, tests run."
+      },
+      {
+        "id": "t-needs-you",
+        "x": 0,
+        "y": 880,
+        "kind": "trigger",
+        "trigger": "needs-you"
+      },
+      {
+        "id": "ping",
+        "x": 290,
+        "y": 880,
+        "kind": "notify",
+        "text": "A session is waiting on you (a brainstorming question, plan approval or a permission)."
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-t-linked-b-ticket",
+        "from": "t-linked",
+        "to": "b-ticket",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-linked-worktree",
+        "from": "t-linked",
+        "to": "worktree",
+        "kind": "then"
+      },
+      {
+        "id": "e-worktree-brainstorm",
+        "from": "worktree",
+        "to": "brainstorm",
+        "kind": "then"
+      },
+      {
+        "id": "e-brainstorm-plan",
+        "from": "brainstorm",
+        "to": "plan",
+        "kind": "then"
+      },
+      {
+        "id": "e-plan-build",
+        "from": "plan",
+        "to": "build",
+        "kind": "then"
+      },
+      {
+        "id": "e-implement-verify",
+        "from": "implement",
+        "to": "verify",
+        "kind": "then"
+      },
+      {
+        "id": "e-build-review",
+        "from": "build",
+        "to": "review",
+        "kind": "met"
+      },
+      {
+        "id": "e-build-stuck",
+        "from": "build",
+        "to": "stuck",
+        "kind": "limit"
+      },
+      {
+        "id": "e-review-open-pr",
+        "from": "review",
+        "to": "open-pr",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-before-pr-b-pr-review",
+        "from": "t-before-pr",
+        "to": "b-pr-review",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-b-pr-watch",
+        "from": "t-pr-created",
+        "to": "b-pr-watch",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-pr-created-tell-user",
+        "from": "t-pr-created",
+        "to": "tell-user",
+        "kind": "then"
+      },
+      {
+        "id": "e-t-needs-you-ping",
+        "from": "t-needs-you",
+        "to": "ping",
+        "kind": "then"
+      }
+    ]
+  }
+}
