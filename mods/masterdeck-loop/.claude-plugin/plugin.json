@@ -1,0 +1,10 @@
+{
+  "name": "masterdeck-loop",
+  "displayName": "MasterDeck agent loop",
+  "version": "0.5.0",
+  "description": "/md-loop <check> -- <goal>: Claude works in rounds until a check command passes, with its progress above the prompt",
+  "author": { "name": "MasterDeck" },
+  "repository": "https://github.com/amntoppo/MasterDeck-Terminal",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

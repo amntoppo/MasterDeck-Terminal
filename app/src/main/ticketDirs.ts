@@ -1,6 +1,7 @@
 import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { TICKET_BUILDER_NAME, TICKET_TAB } from '@shared/ticketBuilder'
+import { enforceSettings, overrideNote, readSettings } from '@shared/ticketSettings'
 import { bodyFileAllowed, parseCreateArgs, sweepTicketDirs } from './boardOps'
 
 /**
@@ -99,7 +100,8 @@ type CreateFn = (p: Exclude<ReturnType<typeof parseCreateArgs>, { error: string 
 
 /**
  * One folder's Create-with-Claude requests: claim each, create it with the account this folder's
- * context.json names (`create` picks via ticketAccount), answer, and log it to created.jsonl.
+ * context.json names (`create` picks via ticketAccount) and the values of its settings bar (they
+ * replace the session's flags; the answer names each one replaced), answer, and log it to created.jsonl.
  */
 export async function pumpTicketDir(dir: string, create: CreateFn): Promise<void> {
   sweepTicketDirs(dir) // stale requests are dropped, not created for nobody
@@ -128,14 +130,26 @@ export async function pumpTicketDir(dir: string, create: CreateFn): Promise<void
         if (file === null) answer = { ok: false, error: 'create: body file outside the ticket folder' }
         else {
           const body = file ? readFileSync(file, 'utf8').slice(0, 60_000) : ''
-          // This folder's context.json says which account the dialog / tab picked.
-          let picked: string | null = null
+          // This folder's context.json says which account the dialog / tab picked, and what the
+          // settings bar holds (read now, so a change in the bar applies to the next ticket).
+          let ctx: { account?: unknown; settings?: unknown } = {}
           try {
-            picked = JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).account ?? null
+            ctx = JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')) ?? {}
           } catch {
             /* none */
           }
-          answer = await create({ ...p, body }, picked)
+          const picked = typeof ctx.account === 'string' ? ctx.account : null
+          const bar = readSettings(ctx.settings)
+          const { req, overridden } = bar ? enforceSettings({ ...p, body }, bar) : { req: { ...p, body }, overridden: [] }
+          // A bar that is there but unreadable is refused, never silently dropped: the user expects it to apply.
+          const made = ctx.settings !== undefined && !bar
+            ? { ok: false, error: 'create: the settings bar could not be read; change a value in it and try again' }
+            : await create(req, picked)
+          answer = {
+            ...made,
+            ...(bar ? { applied: { repo: req.repo, project: req.project ?? '', status: req.status ?? '', assignees: req.assignees, labels: req.labels, milestone: req.milestone ?? '', sprint: req.sprint ?? '' } } : {}),
+            ...(overridden.length ? { overridden, note: `Set by the settings bar, not your flags: ${overrideNote(overridden)}. Tell the user.` } : {}),
+          }
         }
       }
     } catch (e) {

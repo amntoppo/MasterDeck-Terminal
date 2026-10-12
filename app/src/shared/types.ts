@@ -214,10 +214,20 @@ export interface AppState {
   sessionPrs: Record<string, string[]>;
   /** Sessions linked to each other ("Linked sessions"), by Session.key; symmetric, sorted. */
   peers: Record<string, string[]>;
+  /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
+  modLive?: Record<string, { version: string; claude: string; mods: import("./modBand").ModSeen[] }>;
+  /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
+  modOff?: Record<string, string[]>;
+  /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
+  modCatalog?: import("./modBand").ModEntry[];
+  /** Whether MasterDeck's mods are installed in Claude Code (Settings, Setup → Mods); set in the state callback. */
+  mods?: import("./mods").ModsStatus;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
   /** Scheduled jobs (CronCreate) by session id. */
   schedules: Record<string, ScheduleInfo[]>;
+  /** Workflow loops by session id (shared/loops: at most 3 each, closed ones for a day). */
+  loops: Record<string, import("./loops").LoopView[]>;
   sources: Record<string, SourceHealth>;
   errors: string[];
   lastSnapshotAt: string | null;
@@ -463,8 +473,12 @@ export interface DraftAssign {
   workspace?: string;
   /** `cwd` is a checkout of `checkoutOf`; false: none was found and `cwd` is the workspace (or a folder the user chose that is not one). */
   found?: boolean;
-  /** owner/name of the ticket's repository. */
+  /** owner/name of the repository looked for: the ticket's, or the one its code lives in (`filedIn` set). */
   checkoutOf?: string;
+  /** The ticket's own repository, when Setup says its code lives in `checkoutOf`. */
+  filedIn?: string;
+  /** The account the session runs as, whose workspace was looked in (two or more accounts; null with one). */
+  account?: string | null;
   /** The prompt as it is without a checkout: a system prompt equal to it (or to `prompt`) is MasterDeck's own text. */
   genericPrompt?: string;
   /** Not found, and the search stopped at a limit after `searched` folders. */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { claudeInstall } from '@shared/install'
-import { projectKey, type AppConfig, type ProjectConfig, type StatusMap } from '@shared/appConfig'
+import { projectKey, type AppConfig, type CodeRepo, type ProjectConfig, type StatusMap } from '@shared/appConfig'
 import { parseDetectAll, type DetectAll } from '@shared/detect'
 import { hasProjectScope, type GhAccount } from '@shared/ghAuth'
 import type { SetupTool } from '@shared/ipc'
@@ -11,11 +11,12 @@ import { webConfirm } from '../webConfirm'
 import { RepoPicker } from './RepoPicker'
 import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
+import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, boardTakenBy, markMade, selFromConfig, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
 
 
-const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Preferences'] as const
+const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Mods', 'Preferences'] as const
 
 const INSTALLER_PANE = 'setup:installer'
 const GH_LOGIN_PANE = 'setup:gh-login'
@@ -25,7 +26,7 @@ function ClaudeMark() {
   return (
     <svg className="claude-mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
       {[0, 30, 60, 90, 120, 150].map((a) => (
-        <rect key={a} x="11" y="1.5" width="2" height="21" rx="1" fill="#d97757" transform={`rotate(${a} 12 12)`} />
+        <rect key={a} x="11" y="1.5" width="2" height="21" rx="1" fill="var(--claude)" transform={`rotate(${a} 12 12)`} />
       ))}
     </svg>
   )
@@ -40,8 +41,8 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
 ]
 
 /**
- * First-run setup (a five-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the GitHub accounts, the
- * owner / issue repository / board with its statuses, then workspace and master-agent. Skills and
+ * First-run setup (a six-step wizard: the optional account, then; from Settings → Set up MasterDeck, the same sections as one page): tools, the GitHub accounts, the
+ * owner / issue repository / board with its statuses, MasterDeck's mods (installed at once, not at Save), then workspace and master-agent. Skills and
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master and MasterDeck share.
  */
@@ -262,6 +263,11 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     else next[k] = p
     setBoards(next)
   }
+  // Issues filed in one repository and built in another: their sessions start in the other's checkout.
+  const [codeRepos, setCodeRepos] = useState<CodeRepo[]>(() => cfg.codeRepos ?? [])
+  // Every account's chosen repositories (an issue repository picks from these).
+  const issueRepos = [...new Set([...selectedRepos, ...Object.entries(sel).filter(([l]) => l !== editing).flatMap(([, s]) => s.repos)])]
+  const setCodeRow = (i: number, row: Partial<CodeRepo>) => setCodeRepos((cur) => cur.map((r, j) => (j === i ? { ...r, ...row } : r)))
   const setStatuses = (k: string, st: StatusMap) => setBoards((b) => (b[k] ? { ...b, [k]: { ...b[k], statuses: st } } : b))
 
   const save = async () => {
@@ -276,6 +282,8 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     if (!list.length) return setMsg('Go back and connect a GitHub account.')
     if (!list[0].issueRepo) return setMsg(`Go back and pick at least one repository for ${list[0].login}.`)
     if (list.some((a) => !a.email.includes('@'))) return setMsg('Each connected account needs an email for its commits.')
+    const code = codeReposToSave(codeRepos)
+    if (!code.ok) return setMsg(code.message)
     if (!(await webConfirm('Save this setup to your Mac?', { confirmLabel: 'Save' }))) return
     setBusy(true)
     setMsg(null)
@@ -286,6 +294,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
       ...(list[0].projects.length ? {} : { project: 0 }),
       ...(workspace ? { workspace } : {}),
       masterEnabled: useMaster,
+      codeRepos: code.list,
     }
     const r = await deck().configSave(patch)
     setBusy(false)
@@ -300,6 +309,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     !toolsDone ? 'checking…' : bad ? `${bad} missing` : 'all installed',
     !ghHere ? 'on your Mac' : connected.length ? connected.map((c) => c.login).join(', ') : accounts === null ? '—' : 'none connected',
     primaryRepo ? `${allRepos ? 'all repos' : `${selectedRepos.length} repo${selectedRepos.length === 1 ? '' : 's'}`} · ${allBoards ? 'all boards' : `${Object.keys(selectedBoards).length} board${Object.keys(selectedBoards).length === 1 ? '' : 's'}`}` : 'none chosen',
+    state.mods?.state === 'installed' ? 'installed' : state.mods?.state === 'partial' ? 'partly installed' : 'not installed',
     `${useMaster ? 'master on' : 'master off'} · ${notify ? 'notifications on' : 'notifications off'}`,
   ]
   // Next from Repos & boards needs a repository under the primary account (on screen or not).
@@ -658,12 +668,67 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
                     <StatusEditor columns={p.columns} statuses={p.statuses} onChange={(st) => setStatuses(projectKey(p), st)} />
                   </details>
                 ))}
+                <details className="status-more code-repos" open={codeRepos.length > 0}>
+                  <summary>Issues whose code is in another repository</summary>
+                  <div className="meta">
+                    A ticket&apos;s session starts in the code&apos;s checkout, as the account of that repository (an issue tracker and the
+                    repository it is built in). That account must be able to read the issues: a private tracker under another account
+                    is not readable from the session.
+                  </div>
+                  {codeRepos.map((r, i) => (
+                    <div key={i} className="row-inputs code-repo-row">
+                      <select className="fsel" aria-label="Issues filed in" value={r.issues} onChange={(e) => setCodeRow(i, { issues: e.target.value })}>
+                        {[...new Set([r.issues, ...issueRepos])].map((x) => (
+                          <option key={x}>{x}</option>
+                        ))}
+                      </select>
+                      <span className="muted">code in</span>
+                      <input
+                        aria-label="Code in"
+                        placeholder="owner/name"
+                        list="setup-code-repos"
+                        value={r.code}
+                        spellCheck={false}
+                        onChange={(e) => setCodeRow(i, { code: e.target.value })}
+                      />
+                      <button className="link-btn" onClick={() => setCodeRepos((cur) => cur.filter((_, j) => j !== i))}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <datalist id="setup-code-repos">
+                    {found.owners.flatMap((o) => o.repos).map((x) => (
+                      <option key={x.repo} value={x.repo} />
+                    ))}
+                  </datalist>
+                  {issueRepos.length > 0 && (
+                    <button
+                      className="link-btn"
+                      onClick={() =>
+                        setCodeRepos((cur) => [...cur, { issues: issueRepos.find((x) => !cur.some((r) => r.issues === x)) ?? issueRepos[0], code: '' }])
+                      }
+                    >
+                      Add
+                    </button>
+                  )}
+                </details>
               </>
             ) : null}
           </>
         )}
 
         {step === 4 && (
+          <>
+            <div className="meta">{MODS_ABOUT}</div>
+            <div className="meta">
+              Optional. Installing adds MasterDeck's folder of mods to Claude Code and turns them on for your user; Remove (here or in
+              Settings) takes them out again. New sessions load them; running ones at a reload.
+            </div>
+            <ModsPanel state={state} />
+          </>
+        )}
+
+        {step === 5 && (
           <>
             <label>Workspace (master and new shells start here; your repos live in or next to it)</label>
             <div className="row-inputs">

@@ -29,4 +29,23 @@ describe('TokenIndex', () => {
     expect(tokenSum(totalOf((await again.refresh([SID]))[SID]))).toBe(139 + 2)
     expect(await again.refresh(['00000000-0000-4000-8000-000000000000'])).toEqual({})
   })
+
+  it('returns the activity of a session and its subagents, and reads a version 1 cache again', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tok-'))
+    const proj = join(root, 'projects', '-w')
+    mkdirSync(join(proj, SID, 'subagents'), { recursive: true })
+    const main = join(proj, `${SID}.jsonl`)
+    writeFileSync(main, line('a', 1))
+    writeFileSync(join(proj, SID, 'subagents', 'agent-x.jsonl'), JSON.stringify({ timestamp: '2026-09-25T12:00:00Z' }) + '\n')
+    const cache = join(root, 'tokens.json')
+    // Version 1 had no spans: its offsets would skip every line.
+    writeFileSync(cache, JSON.stringify({ version: 1, files: { [main]: { offset: 1e6, rest: '', byDay: {}, recent: [] } } }))
+    const idx = new TokenIndex(new TranscriptIndex(join(root, 'projects')), cache)
+    const t = (iso: string) => Date.parse(iso)
+    expect((await idx.activity([SID]))[SID]).toEqual([
+      [t('2026-09-25T10:00:00Z'), t('2026-09-25T10:00:00Z')],
+      [t('2026-09-25T12:00:00Z'), t('2026-09-25T12:00:00Z')],
+    ])
+    expect(tokenSum(totalOf((await idx.refresh([SID]))[SID]))).toBe(2)
+  })
 })

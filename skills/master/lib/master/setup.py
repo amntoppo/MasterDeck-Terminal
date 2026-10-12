@@ -211,6 +211,10 @@ def _validate(cfg: dict) -> "str | None":
     accs = cfg.get("accounts", [])
     if not isinstance(accs, list) or not all(isinstance(a, dict) and _LOGIN.fullmatch(str(a.get("login") or "")) for a in accs):
         return "accounts must be a list of {login, ...}"
+    pairs = cfg.get("codeRepos", [])
+    if not isinstance(pairs, list) or not all(isinstance(e, dict) and all(isinstance(e.get(k), str) and re.fullmatch(config.REPO_RE, e[k])
+                                                                          for k in ("issues", "code")) for e in pairs):
+        return "codeRepos must be a list of {issues: owner/name, code: owner/name}"
     for a in accs:
         if not isinstance(a.get("repos", []), list) or not all(isinstance(r, str) and re.fullmatch(config.REPO_RE, r) for r in a.get("repos", [])):
             return f"accounts: {a['login']}'s repos must be a list of owner/name"

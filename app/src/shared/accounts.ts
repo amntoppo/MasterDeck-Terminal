@@ -1,4 +1,4 @@
-import { primaryRepo, projectByKey, projectKey, type AccountConfig, type AppConfig } from './appConfig'
+import { codeRepoOf, primaryRepo, projectByKey, projectKey, type AccountConfig, type AppConfig } from './appConfig'
 import { parsePrUrl } from './prSummary'
 
 /**
@@ -94,13 +94,22 @@ export function knownProject(key: unknown, c: AppConfig): string | null {
 }
 
 /**
- * A new session's account: the issue's repo, then the folder's `origin` remote, then the primary.
- * An issue whose board is known (`project`) starts as the account its card's calls use
+ * A ticket session's account, and so the workspace its folder is looked for in: the account of the
+ * repository its code is in (it pushes there), else the issue's, else the primary. The code is a
+ * PR review's repository (`prRepo`), else Setup's "code lives in" for the issue's repository, else
+ * that repository. The CLI's `config.start_account`; the Start dialog shows it and main starts as it.
+ * With the issue's board known (`project`), the issue's account is the one its card's calls use
  * (`accountForCard`): a repository no account lists, on another account's board, is that board's.
  */
-export function defaultAccount(o: { issue?: { repo?: string | null; project?: string | null } | null; origin?: string | null }, c: AppConfig): string | null {
-  const issue = o.issue ? (o.issue.project ? accountForCard(o.issue.repo, o.issue.project, c) : matchRepo(o.issue.repo, c)) : null
-  return issue ?? (o.origin ? matchRepo(o.origin, c) : null) ?? primaryLogin(c)
+export function startAccount(repo: string | null | undefined, c: AppConfig, prRepo?: string | null, project?: string | null): string | null {
+  const code = prRepo || codeRepoOf(repo, c)
+  const issue = project ? accountForCard(repo, project, c) : matchRepo(repo, c)
+  return (code ? matchRepo(code, c) : null) ?? issue ?? primaryLogin(c)
+}
+
+/** A new session's account: the issue's repo, then the folder's `origin` remote, then the primary. */
+export function defaultAccount(o: { issue?: { repo?: string | null } | null; origin?: string | null }, c: AppConfig): string | null {
+  return (o.issue ? matchRepo(o.issue.repo, c) : null) ?? (o.origin ? matchRepo(o.origin, c) : null) ?? primaryLogin(c)
 }
 
 /** A running session's account: as recorded at its start, else its spawn proposal's, else its folder's repo, else the primary. A login no longer connected is skipped. */

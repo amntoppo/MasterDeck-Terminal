@@ -1,6 +1,7 @@
 import type { WatchInfo } from "@shared/watches";
 import { hideSuperseded } from "@shared/superseded";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
+import type { ModsReloadOffer } from "@shared/mods";
 import {
   liveSchedules,
   newScheduleScan,
@@ -90,6 +91,7 @@ import {
   type CostBook,
   type CostEntry,
 } from "@shared/costs";
+import { hourOf } from "@shared/timeline";
 import { addBurnPoint, summarize, type BurnPoint } from "@shared/sprintSummary";
 import {
   DEFAULT_SETTINGS,
@@ -131,6 +133,7 @@ import {
   type RestoreFile,
 } from "@shared/restore";
 import { totalOf, type Tokens, type TokensByDay } from "@shared/tokens";
+import type { HoursSource } from "@shared/hours";
 import {
   pastByIssue,
   type PastSession,
@@ -196,6 +199,7 @@ import type { MasterCli } from "./masterCli";
 import type { Paths } from "./paths";
 import { LinkStore } from "./ticketLinks";
 import type { PeerStore } from "./peers";
+import type { LoopStore } from "./loops";
 import { adjacency } from "@shared/peers";
 import { linkInfoMap, ticketPrMap } from "@shared/ticketLinks";
 import {
@@ -298,6 +302,8 @@ export class Sources {
   private worktreeScans: Record<string, WorktreeScan> = {};
   /** MasterDeck's own hook (permission requests, notifications, errors, compactions). */
   private deck: DeckHooks | null = null;
+  /** Workflow loops' files (written by the hooks, outside the app). */
+  private loopStore: LoopStore | null = null;
   private hookRequests: HookRequest[] = [];
   /** Requests whose session was seen waiting on a prompt since they came. */
   private seenBlocked = new Set<string>();
@@ -508,6 +514,41 @@ export class Sources {
     );
   }
 
+  /**
+   * When these sessions were active since `since` (the Costs view's Hours), with what finds each
+   * one's account: its key, folder and ticket. A session with nothing since then is left out.
+   */
+  async hoursActivity(
+    sessionIds: string[],
+    since: number,
+  ): Promise<Record<string, HoursSource>> {
+    const ids = sessionIds.filter(
+      (x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
+    );
+    const spans = await this.tokenIndex.activity(ids);
+    const out: Record<string, HoursSource> = {};
+    for (const [id, all] of Object.entries(spans)) {
+      const s = all.filter(([, end]) => end >= since);
+      if (!s.length) continue;
+      const rec = this.costBook[id];
+      out[id] = {
+        spans: s,
+        ticket:
+          rec && rec.issue !== null ? { repo: rec.issueRepo ?? null } : null,
+        key:
+          rec?.key ??
+          this.rawSessions.find((x) => x.sessionId === id)?.key ??
+          id.slice(0, 8),
+        cwd:
+          this.stats[id]?.currentDir ??
+          this.tails[id]?.cwd ??
+          this.transcriptInfo(id)?.cwd ??
+          null,
+      };
+    }
+    return out;
+  }
+
   /** The sessions of the last `claude agents` scan; null until one succeeded. */
   sessionsNow(): Session[] | null {
     return this.isHealthy("agents") ? this.rawSessions : null;
@@ -639,6 +680,12 @@ export class Sources {
   }
   private parkedOf: ((s: ParkedKey) => Parked | null) | null =
     null;
+
+  /** Running sessions on older MasterDeck mods, for Needs you (index.ts: heartbeats, install state). */
+  setModsReload(fn: (sessions: Session[]) => ModsReloadOffer | null): void {
+    this.modsReloadOf = fn;
+  }
+  private modsReloadOf: ((sessions: Session[]) => ModsReloadOffer | null) | null = null;
 
   /** master's workspace and every account's own: shared by all sessions. */
   workspaces(): string[] {
@@ -793,6 +840,21 @@ export class Sources {
     this.emit();
   }
 
+  /**
+   * The PR watch saw this PR merged or closed: read it again now, past the gh cache, so its
+   * session's lane moves at once instead of on the next review poll (up to minutes later).
+   */
+  async prEnded(url: string): Promise<void> {
+    if (this.prLive[url] && this.prLive[url].state !== "OPEN") return;
+    const r = await this.gh(["pr", "view", url, ...PR_VIEW_ARGS], { timeoutMs: 20_000, force: true });
+    this.noteBinary("gh", r.code);
+    if (this.githubPaused(ghErrorText(r))) return;
+    const pr = r.code === 0 ? parsePrView(r.stdout) : null;
+    if (!pr) return;
+    this.prLive[url] = pr;
+    this.emit();
+  }
+
   /** Read `claude agents` now (after stopping a session, so it leaves the list at once). */
   refreshAgents(): Promise<void> {
     return this.pollAgents();
@@ -870,6 +932,16 @@ export class Sources {
   /** Rewrite every live session's context file now (a peer's summary or link changed). */
   rewriteSessionContext(): void {
     this.writeTicketContext(this.lastSessions);
+  }
+
+  setLoopStore(store: LoopStore): void {
+    this.loopStore = store;
+    this.emit();
+  }
+
+  /** A loop file changed (a turn end, an arming, Stop loop, Run 5 more): show it now. */
+  pollLoops(): void {
+    if (this.loopStore?.changed()) this.emit();
   }
 
   setPeerStore(store: PeerStore): void {
@@ -996,7 +1068,7 @@ export class Sources {
     this.allStats = next;
     const midnight = new Date(now);
     midnight.setHours(0, 0, 0, 0);
-    if (recordCosts(this.costBook, entries, dayOf(now), midnight.getTime()))
+    if (recordCosts(this.costBook, entries, hourOf(now), midnight.getTime()))
       this.costDirty = true;
     if (this.costDirty) {
       pruneBook(this.costBook, dayOf(now));
@@ -1135,7 +1207,12 @@ export class Sources {
     this.timers.push(setInterval(() => void this.pollAgents(), AGENTS_MS));
     this.timers.push(setInterval(() => void this.pollDetails(), DETAIL_MS));
     this.timers.push(setInterval(() => void this.pollMenus(), MENUS_MS));
-    this.timers.push(setInterval(() => this.pollDeck(), 1_000));
+    this.timers.push(
+      setInterval(() => {
+        this.pollDeck();
+        this.pollLoops();
+      }, 1_000),
+    );
     this.timers.push(
       setInterval(() => this.writeTicketContext(this.lastSessions), 60_000),
     );
@@ -2332,6 +2409,12 @@ export class Sources {
     );
     const m = deriveMaster(sessions);
     const masterAs = "session" in m ? this.masterAccountOf(m.session) : undefined;
+    const loops = this.loopStore
+      ? this.loopStore.views(
+          sessions.map((s) => s.sessionId),
+          now,
+        )
+      : {};
     const items = collectItems({
       sessions,
       proposals: this.proposals.filter((p) => !answered.has(p.id)),
@@ -2350,6 +2433,8 @@ export class Sources {
         ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))
         : undefined,
       accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
+      modsReload: this.modsReloadOf?.(sessions) ?? null,
+      loops,
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -2390,6 +2475,7 @@ export class Sources {
           .map((s) => [s.sessionId, this.schedulesOf(s.sessionId, now)] as const)
           .filter((e) => e[1].length > 0),
       ),
+      loops,
       hookInfo,
       sessionWorktrees: Object.fromEntries(
         sessions
@@ -2479,6 +2565,11 @@ export class Sources {
 
   isHealthy(name: string): boolean {
     return this.health[name] === "ok";
+  }
+
+  /** A source's health and, when it failed, why. */
+  sourceHealth(name: string): { health: SourceHealth | undefined; error: string | undefined } {
+    return { health: this.health[name], error: this.errors[name] };
   }
 }
 

@@ -4,6 +4,7 @@ import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
 import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
+import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
 import { spawnSync } from "node:child_process";
 import {
@@ -20,7 +21,10 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { readFile } from "node:fs/promises";
+import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
+import { readFile, writeFile } from "node:fs/promises";
+import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
@@ -29,6 +33,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  nativeTheme,
   Notification,
   safeStorage,
   shell,
@@ -72,6 +77,7 @@ import {
   prRepo,
   repoFromRemote,
   sessionAccount,
+  startAccount,
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
@@ -80,13 +86,17 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
+import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
+import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { SessionFiles } from "./sessionFiles";
+import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
 import { isPermissionMode } from "@shared/startOptions";
 import { heldForTrust } from "@shared/trust";
@@ -95,7 +105,7 @@ import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
 import { loadMacKey } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
-import { remoteStatusWhenOff, toRemoteSnapshot } from "@shared/remoteSnapshot";
+import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
   externalAnswerAllowed,
   optionMessage,
@@ -141,8 +151,14 @@ import {
   syncSkills,
   writeRemoved,
 } from "./skills";
+import { ModsInstaller } from "./mods";
 import { collectHooks, listSkills, WorkflowStore } from "./workflow";
+import { LoopStore } from "./loops";
+import { LoopQueue } from "./loopQueue";
+import { loopNudge, validLoopId } from "@shared/loops";
 import { Summaries } from "./summary";
+import { BtwAsker, BtwStore, BtwTerminal } from "./btw";
+import { sessionScreen } from "./screen";
 import {
   DEFAULT_TEMPLATE,
   parseFlow,
@@ -151,6 +167,7 @@ import {
   setMonitors,
   type MonitorDef,
 } from "@shared/flow";
+import { builtinById } from "@shared/builtinWorkflows";
 import { ticketContext } from "@shared/ticketBuilder";
 import { shellQuote } from "@shared/workflow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
@@ -169,6 +186,7 @@ import type { FlowTrigger } from "@shared/flow";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { answerKeys, permissionKey, type MenuAnswer } from "@shared/ask";
 import { asTicket, fullRepo, ticketRef } from "@shared/ticket";
+import { parsePrUrl } from "@shared/prSummary";
 import {
   deckHooksInstalled,
   hookStatus,
@@ -181,6 +199,8 @@ import { DeckHooks } from "./deckHooks";
 import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
+import { SessionProcs } from "./sessionProcs";
+import { isPortUrl } from "@shared/sessionProcs";
 import {
   installStatusline,
   isInstalled,
@@ -231,7 +251,10 @@ const paths = resolvePaths(
 const linkStore = new LinkStore(paths.ticketLinks, paths.babysitState);
 const env = () => cleanEnv(process.env, pathEnv);
 const run = makeRunner(env);
+const sessionProcs = new SessionProcs(run);
 const cli = new MasterCli(run, paths.libDir, paths.python);
+// Read-only views of a session's folder for its file and diff tabs.
+const sessionFiles = new SessionFiles(run);
 // Each connected GitHub account's token and settings file (two or more accounts; see accountEnv.ts).
 const accountEnv = new AccountEnv(join(paths.home, "accounts"), run);
 // The account each session was started as (resume, Details, PR watch).
@@ -240,13 +263,71 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
+const modOff = new ModOff(join(paths.home, "mod-off.json"));
+const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
+// MasterDeck's mods in Claude Code (Setup / Settings → Mods): its folder, install and uninstall.
+const mods = new ModsInstaller({
+  run,
+  claude: () => claudeBin,
+  bundled: paths.bundledMods,
+  folder: paths.modsDir,
+  settings: paths.modsSettings,
+  refused: paths.modsSettings
+    ? null
+    : "This test app keeps Claude Code's settings apart: set CLAUDE_CONFIG_DIR to try mods in it.",
+  backupDir: paths.home,
+  installedFile: join(paths.home, "mods-installed.json"),
+});
+let modsStatus: ModsStatus = MODS_OFF;
+let modsReadAt = 0;
+/** What of the mods settings.json has, read again at most every 30 s (it changes by hand too). */
+function modsNow(fresh = false): ModsStatus {
+  if (fresh || Date.now() - modsReadAt > 30_000) {
+    modsStatus = mods.status();
+    modsReadAt = Date.now();
+  }
+  return modsStatus;
+}
+/** Running sessions on older mods (or none, started before the install). */
+const modsOffer = (sessions: Session[]) =>
+  modsReloadOffer(sessions, deckHooks.modBeats(), modsNow().state === "installed", mods.installedAt());
+/** Type /reload-plugins into each idle session the offer names, one after another. */
+async function reloadMods(): Promise<CliResult> {
+  const offer = latest ? modsOffer(latest.sessions) : null;
+  const idle = (offer?.idle ?? []).flatMap((k) => latest?.sessions.find((s) => s.key === k) ?? []);
+  if (!idle.length) return { ok: false, message: "No idle session runs older mods." };
+  const failed: string[] = [];
+  // Never relayed through master-agent: its message would not run the command.
+  for (const s of idle) {
+    const r = await sender.send(s, "/reload-plugins", false);
+    if (!r.ok) failed.push(r.message);
+  }
+  const done = idle.length - failed.length;
+  return failed.length
+    ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
+    : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
+}
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's title and 120-character preview, to the window and to web
-// tabs that subscribed).
+// tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
 });
+// Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
+// terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
+const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
+const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
+const btwTerminal = new BtwTerminal(
+  paths.claudeHistory,
+  join(paths.home, "btw", "history-offset.json"),
+  btwStore,
+  (bgId) => sessionScreen(run, claudeBin, bgId),
+);
+function pollBtw(): void {
+  const sessions = (latest?.sessions ?? []).map((s) => ({ key: s.key, sessionId: s.sessionId, bgId: s.kind === "background" ? s.bgId : null }));
+  void btwTerminal.poll(sessions).catch((e) => console.error(`btw: ${String(e)}`));
+}
 /** owner/name of a folder's `origin` remote, by folder (cached for the run; one lookup per folder). */
 const ORIGINS_MAX = 200;
 const origins = new Map<string, string | null>();
@@ -277,6 +358,40 @@ function originOf(cwd: string): string | null {
   if (!originLookups.has(cwd)) void originNow(cwd).then(() => sources.changed());
   return origins.get(cwd) ?? null;
 }
+/**
+ * The origin repository of each folder, for the Costs view's Hours: answered from the state's
+ * lookups when they have it, else from git, four at a time, kept in a cache of its own so past
+ * sessions' folders never push live ones out of `origins`. A folder that is gone is not asked.
+ */
+const hoursRepos = new Map<string, string | null>();
+async function hoursOrigins(
+  dirs: string[],
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const ask: string[] = [];
+  for (const d of new Set(dirs)) {
+    if (origins.has(d)) out.set(d, origins.get(d) ?? null);
+    else if (hoursRepos.has(d)) out.set(d, hoursRepos.get(d) ?? null);
+    else if (existsSync(d)) ask.push(d);
+  }
+  const POOL = 4;
+  for (let i = 0; i < ask.length; i += POOL)
+    await Promise.all(
+      ask.slice(i, i + POOL).map(async (d) => {
+        const r = await run("git", ["remote", "get-url", "origin"], {
+          cwd: d,
+          timeoutMs: 5_000,
+        });
+        const repo = r.code === 0 ? repoFromRemote(r.stdout) : null;
+        // ponytail: past HOURS_REPOS_MAX folders the cache starts again; an LRU if it ever matters.
+        if (hoursRepos.size >= HOURS_REPOS_MAX) hoursRepos.clear();
+        hoursRepos.set(d, repo);
+        out.set(d, repo);
+      }),
+    );
+  return out;
+}
+const HOURS_REPOS_MAX = 2000;
 /** A session's account: recorded at start, its spawn proposal's, its folder's repo, the primary. */
 function accountOfSession(
   s: { sessionId: string; key: string; name: string },
@@ -310,23 +425,18 @@ function settingsFor(
 async function assignNow(
   given: AssignRequest,
 ): Promise<CliResult & { proposalId?: number }> {
+  const cfg = getConfig();
+  // The account it runs as: the one picked, else the code's repository's (a PR review: its PR's),
+  // else the issue's. Its workspace is where the folder is looked for.
+  const picked = given.account && cfg.accounts.some((a) => a.login === given.account) ? given.account : null;
+  // With the card's board (the one the dialog names, else the loaded board that holds it), so a
+  // repository no account lists starts as the account its card's calls use (`accountForCard`).
+  const project = knownProject(given.project, cfg) ?? sources.boardOf(given.repo ?? null, given.issue);
+  const as = picked ?? startAccount(given.repo ?? null, cfg, given.cwdRepo, project);
   // A PR review names its repository, not a folder: the CLI's resolver picks it.
-  const req = await inRepoFolder(cli, given);
+  const req = await inRepoFolder(cli, given, isMulti(cfg) ? as : null);
   return assignAs(cli, req, {
-    settings: (account) =>
-      settingsFor(account, async () =>
-        // The card's board too (the one the dialog names, else the loaded board that holds it):
-        // the session starts as the account its card's calls use (`accountForCard`).
-        defaultAccount(
-          {
-            issue: {
-              repo: req.repo ?? null,
-              project: knownProject(req.project, getConfig()) ?? sources.boardOf(req.repo ?? null, req.issue),
-            },
-          },
-          getConfig(),
-        ),
-      ),
+    settings: (account) => settingsFor(account, async () => as),
     proposalAccount: (id) =>
       latest?.proposals.find((p) => p.id === id)?.target.spawn?.account ??
       null,
@@ -472,6 +582,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
         latest?.master.kind === "elsewhere",
     ),
   onChange: () => sources.changed(),
+  ended: (url) => void sources.prEnded(url).catch(() => {}),
 });
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
@@ -506,6 +617,8 @@ let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
   deckHooks.pumpQueue();
+  // Sessions adding to the notes (the masterdeck-notes skill's note.sh). They get the note's id back, never its text.
+  pumpNoteRequests(deckHooks.dir, notes);
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
   const m = mtimeMs(paths.claudeSettings);
   if (m !== settingsSeen) {
@@ -592,6 +705,37 @@ const sources = new Sources(
             .map((s) => s.sessionId),
         ),
       );
+    // MasterDeck's mods (mods/) read band/<id>.json and boards/<key>.json; the core writes mods/<id>.json.
+    if (sources.isHealthy("agents")) {
+      const live = state.sessions.filter((s) => s.state !== "done");
+      const boardKeys = new Set<string>();
+      for (const s of live) {
+        const key = boardKeyOf(s, state.config);
+        boardKeys.add(key);
+        deckHooks.setBand(s.sessionId, bandFor(modBand(state, s, key), modOff.of(s.key)));
+      }
+      deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      // One board file per account a live session works as (masterdeck-board's /md-board).
+      for (const key of boardKeys) deckHooks.setBoard(key, modBoard(state.board, key, state.config));
+      deckHooks.pruneBoards(boardKeys);
+      if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
+    }
+    state.modOff = modOff.all();
+    const beats = deckHooks.modBeats();
+    state.modLive = Object.fromEntries(
+      state.sessions
+        .filter((s) => beats[s.sessionId])
+        .map((s) => {
+          const b = beats[s.sessionId];
+          return [s.key, { version: b.version, claude: b.claude, mods: b.mods }];
+        }),
+    );
+    // Every mod any session reported, kept so Tools → Mods can list them all.
+    let catalog = modCatalog.entries();
+    for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
+    if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
+    state.modCatalog = catalog;
+    state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
     try {
@@ -605,19 +749,25 @@ const sources = new Sources(
       console.error(`PR watch: ${String(e)}`);
     }
     void linkedSteps.deliver(state.sessions);
+    try {
+      pumpLoopQueue(state);
+    } catch (e) {
+      console.error(`queue after a loop: ${String(e)}`);
+    }
     emit(CH.state, state);
+    // The session list is in: commands that waited while MasterDeck was closed can run now.
+    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
-      cloud?.push(toRemoteSnapshot(state, app.getVersion()));
+      // Not before the session list: an empty one would wipe what the phone and web still show.
+      if (sessionsLoaded) cloud?.push(toRemoteSnapshot(state, app.getVersion()));
     } catch (e) {
       console.error(`remote snapshot: ${String(e)}`);
     }
     try {
-      if (!remoteReady && sources.isHealthy("agents")) {
-        // The session list is in: commands that waited while MasterDeck was closed can run now.
-        remoteReady = true;
-        syncRemote();
-      } else if (
+      if (
+        // While waiting: dial once the list is in or the wait is over, and keep the reason current.
+        (!remoteReady && remoteWaitSince !== null) ||
         state.settings.remoteEnabled !== prev?.settings.remoteEnabled
       )
         syncRemote();
@@ -969,7 +1119,13 @@ bridge = new BrowserBridge({
 });
 const remoteCommands = new RemoteCommands(
   {
-    state: () => latest,
+    // No state before the first session list: a command is answered "still loading" (retried) while it
+    // loads, and fails at once with the reason while `claude agents` fails.
+    state: () => (sessionsLoaded ? latest : null),
+    notLoaded: () => {
+      const a = sources.sourceHealth("agents");
+      return !sessionsLoaded && a.health === "error" ? `MasterDeck has no session list: ${agentsFailure(a.error)}` : null;
+    },
     // remote = true: a client token is less trusted than the window (see runInboxAction).
     inboxAct: (id, type, payload) => inboxAct(id, type, payload, true),
     draftAssign: (t) => cli.draftAssign(t),
@@ -990,8 +1146,14 @@ const remoteCommands = new RemoteCommands(
 );
 let cloud: CloudSync | null = null;
 let cloudKey = "";
-/** True once the first state with the session list exists; until then the backend is not dialled. */
+/** True once `claude agents` has answered; until then remote commands are answered "still loading". */
+let sessionsLoaded = false;
+/** True once the line may be dialled: the session list is in, or `REMOTE_WAIT_MS` went by without it. */
 let remoteReady = false;
+/** While the line waits for the session list: when the wait began, the text shown, the timer that ends it. */
+let remoteWaitSince: number | null = null;
+let remoteWaitMessage: string | null = null;
+let remoteWaitTimer: NodeJS.Timeout | null = null;
 
 function deviceId(): string {
   const f = join(paths.home, "remote-device-id");
@@ -1020,12 +1182,34 @@ function syncRemote(): void {
   if (key && key === cloudKey) return;
   if (key && !remoteReady) {
     // Pending commands arrive on connect; running them before the sessions load would fail them.
-    cloud?.stop();
-    cloud = null;
-    cloudKey = "";
-    sources.setRemote({ conn: "connecting", message: "waiting for sessions to load", lastSyncAt: null, hasToken: true });
-    return;
+    if (remoteWaitSince === null) {
+      remoteWaitSince = Date.now();
+      remoteWaitTimer = setTimeout(() => {
+        remoteWaitTimer = null;
+        syncRemote();
+      }, REMOTE_WAIT_MS);
+    }
+    const agents = sources.sourceHealth("agents");
+    const wait = remoteWait(agents.health, agents.error, Date.now() - remoteWaitSince);
+    if (!wait.connect) {
+      cloud?.stop();
+      cloud = null;
+      cloudKey = "";
+      // Only on a change: setRemote emits a state, whose callback calls this again.
+      if (wait.message !== remoteWaitMessage) {
+        remoteWaitMessage = wait.message;
+        sources.setRemote({ conn: "connecting", message: wait.message, lastSyncAt: null, hasToken: true });
+      }
+      return;
+    }
+    remoteReady = true;
+    if (agents.health !== "ok")
+      console.log(`remote: no session list after ${REMOTE_WAIT_MS / 1000} s (claude agents: ${agents.error ?? agents.health}); connecting anyway`);
   }
+  if (remoteWaitTimer) clearTimeout(remoteWaitTimer);
+  remoteWaitTimer = null;
+  remoteWaitSince = null;
+  remoteWaitMessage = null;
   cloud?.stop();
   cloud = null;
   cloudKey = key;
@@ -1056,7 +1240,7 @@ function syncRemote(): void {
     onClients: (c) => sources.setRemoteClients(c),
   });
   cloud.start();
-  if (latest) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
+  if (latest && sessionsLoaded) cloud.push(toRemoteSnapshot(latest, app.getVersion()));
 }
 
 /** Stop a background session (no confirmation: callers ask first). */
@@ -1191,6 +1375,8 @@ async function runInboxAction(
       return type === "approve"
         ? cli.approve([d.proposal.id])
         : cli.reject([d.proposal.id]);
+    case "reload":
+      return d.type === "mods" ? reloadMods() : { ok: false, message: "not a mods item" };
     case "trust": {
       const held = d.type === "proposal" ? heldForTrust(d.proposal) : null;
       if (!held) return { ok: false, message: "not a start Claude Code refused" };
@@ -1208,6 +1394,36 @@ async function runInboxAction(
         return { ok: false, message: "no session owns this PR; start one" };
       const r = await sender.send(s, d.offer.message, masterUp);
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
+    }
+    case "loop-more": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const r = loopStore.more(s.sessionId, d.loopId);
+      if (!r.ok) return r;
+      sources.pollLoops();
+      return nudgeLoop(s.sessionId, r.name ?? "loop", remote);
+    }
+    case "loop-continue": {
+      // A paused loop: the same fixed text as Run 5 more's nudge, typed only into an idle session.
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      if (v?.state !== "open") return { ok: false, message: "the loop is not running" };
+      return nudgeLoop(s.sessionId, v.name, remote, "the session is working; the loop goes on at its next turn end");
+    }
+    case "loop-stop": {
+      if (d.type !== "loop") return { ok: false, message: "not a loop" };
+      const s = owner();
+      if (!s) return { ok: false, message: "no live session" };
+      const v = latest?.loops?.[s.sessionId]?.find((x) => x.id === d.loopId);
+      // From a browser the web UI asked first; the window asks here.
+      if (v && !remote && !(await confirmLoopStop(v.name)))
+        return { ok: false, message: "cancelled" };
+      const r = loopStore.stop(s.sessionId, d.loopId);
+      if (r.ok) sources.pollLoops();
+      return r;
     }
     case "login": {
       if (d.type !== "account")
@@ -1609,6 +1825,83 @@ function clearDraft(): void {
 /** The workflows: the default, templates, and each session's copy (hooks in ~/.claude/settings.json). */
 let workflowStore: WorkflowStore | null = null;
 const workflows = () => (workflowStore ??= new WorkflowStore(paths.home));
+/** Workflow loops (`workflows/loops/`): names and limits from each session's compiled workflow. */
+const loopStore = new LoopStore(paths.home, (sid) =>
+  workflows()
+    .compiledFor(sid)
+    .flatMap((s) => s.loops ?? []),
+);
+sources.setLoopStore(loopStore);
+
+/**
+ * Run 5 more's nudge (the Details action and the Needs-you one): MasterDeck's own fixed text, so
+ * the loop's next round happens. Only an idle session gets it; a busy one meets the reopened loop
+ * at its next turn end anyway.
+ */
+async function nudgeLoop(
+  sessionId: string,
+  name: string,
+  remote: boolean,
+  busy = "5 more iterations; the loop goes on at the next turn end",
+): Promise<CliResult> {
+  const s = latest?.sessions.find((x) => x.sessionId === sessionId);
+  if (!s || s.state !== "idle") return { ok: true, message: busy };
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+}
+/**
+ * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
+ * after a loop closed on an idle session).
+ */
+async function sendNextQueued(s: Session): Promise<CliResult> {
+  const next = shiftQueue(s.sessionId);
+  if (next === null) return { ok: false, message: "the queue is empty" };
+  const masterUp =
+    latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
+  const r = await sender.send(s, next, !!masterUp);
+  // Not sent: back to the front, so the Stop hook still runs it later.
+  if (!r.ok) unshiftQueue(s.sessionId, next);
+  return r;
+}
+/**
+ * The queue after a loop (#82): the deck hook's Stop skipped the turn that closed the loop (it saw
+ * the loop open), so a session left idle with prompts queued gets the next one here, once.
+ */
+const loopQueue = new LoopQueue();
+function pumpLoopQueue(state: AppState): void {
+  if (process.platform === "win32") return;
+  for (const s of loopQueue.tick(
+    state.loops,
+    state.sessions,
+    (sid) => (deckHooks.ownsQueue(sid) ? readQueue(sid).length : 0),
+    (sid) => deckHooks.queueServedAt(sid),
+    Date.now(),
+  ))
+    void sendNextQueued(s).then((r) => {
+      if (!r.ok) console.error(`queue after a loop: ${r.message}`);
+    });
+}
+/** The window's ask before Stop loop (Details, Needs you): a stopped loop cannot be given more. */
+async function confirmLoopStop(name: string): Promise<boolean> {
+  const choice = await dialog.showMessageBox(win!, {
+    type: "warning",
+    buttons: ["Cancel", "Stop loop"],
+    defaultId: 0,
+    cancelId: 0,
+    message: `Stop the loop “${name}”?`,
+    detail: "The session finishes its turn and the loop does not go on.",
+  });
+  return choice.response === 1;
+}
+
+/** The built-in workflows MasterDeck ships, into the templates (#104); a failure only logs. */
+const seedWorkflows = () => {
+  try {
+    workflows().seedBuiltins();
+  } catch (e) {
+    console.error(`built-in workflows: ${String(e)}`);
+  }
+};
+
 /** Put the trigger hooks in (or take them out when no workflow has a step). */
 /**
  * Put the workflow hooks in: one per built-in trigger, and one per event the custom triggers use.
@@ -1618,6 +1911,12 @@ const syncWorkflowHooks = () => {
   const customs = workflows().triggers();
   setCustomTriggers(customs);
   setMonitors(workflows().monitors());
+  // The loop hook's script first, so its Stop hook entry never points at a missing file.
+  try {
+    workflows().setupLoopHook();
+  } catch (e) {
+    return { ok: false, message: `could not write the loop hook: ${String(e)}` };
+  }
   return installWorkflowHooks(
     paths.claudeSettings,
     paths.home,
@@ -1815,18 +2114,32 @@ function liveDirs(): string[] {
   return dirs;
 }
 
+/**
+ * The workspace and the repositories MasterDeck found in it (`Ops.repos()`): the + menu's and the
+ * web app's folder pick, and the only folders a browser may choose for a ticket's session.
+ */
+function workspaceFolders(): string[] {
+  const seen = new Set<string>();
+  return [paths.masterWorkspace, ...ops.repos()]
+    .filter((p) => typeof p === "string" && p && existsSync(p))
+    .map((p) => resolve(p))
+    .filter((p) => !seen.has(p) && seen.add(p));
+}
+
 function registerIpc(): void {
   reg.handle(CH.getState, () => latest);
   reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
     CH.draftAssign,
-    (e, issue: unknown, title?: string, url?: string, cwd?: unknown) => {
+    (e, issue: unknown, title?: string, url?: string, cwd?: unknown, account?: unknown) => {
       const t = asTicket(issue);
       if (!t) return { ok: false, message: "bad issue" };
-      // Choosing a folder is the desktop's: a browser's is dropped, the window's must be a real folder.
-      const dir = chosenFolder(isRemote(e), cwd);
-      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd) : dir;
+      // The window's must be a real folder; a browser's one of the folders MasterDeck found (its pick).
+      const dir = chosenFolder(isRemote(e), cwd, isRemote(e) ? workspaceFolders() : []);
+      // Another connected account (two or more): its workspace is looked in. Anything else is dropped.
+      const as = isMulti(getConfig()) && getConfig().accounts.some((a) => a.login === account) ? (account as string) : undefined;
+      return dir.ok ? cli.draftAssign(t, title, url, dir.cwd, as) : dir;
     },
   );
   reg.on(CH.setSprint, (_e, sprint: string) => sources.setSprint(sprint));
@@ -1861,14 +2174,7 @@ function registerIpc(): void {
   reg.handle(CH.queueSendNext, async (_e, key: string) => {
     const s = latest?.sessions.find((x) => x.key === key);
     if (!s) return { ok: false, message: "session not found" };
-    const next = shiftQueue(s.sessionId);
-    if (next === null) return { ok: false, message: "the queue is empty" };
-    const masterUp =
-      latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    const r = await sender.send(s, next, !!masterUp);
-    // Not sent: back to the front, so the Stop hook still runs it later.
-    if (!r.ok) unshiftQueue(s.sessionId, next);
-    return r;
+    return sendNextQueued(s);
   });
   reg.handle(CH.getSettings, () => sources.getSettings());
   reg.handle(CH.setStatus, async (_e, issue: unknown, status: string) => {
@@ -1944,6 +2250,27 @@ function registerIpc(): void {
   reg.handle(CH.deleteTemplate, (_e, name: string) =>
     ops.deleteTemplate(name),
   );
+  // A session's files and diffs: the folder is the listed session's own (sessionFileCall); a web
+  // answer is cut to fit the bridge (webFit).
+  const sessionFilesAt = (key: unknown, want?: { path?: unknown; base?: unknown }) =>
+    sessionFileCall(latest?.sessions ?? [], key, want);
+  const fit = <T extends FileList | FileRead | ChangeList | DiffRead>(remote: boolean, a: T): T => (remote ? webFit(a) : a);
+  reg.handle(CH.filesList, async (e, key: unknown) => {
+    const c = sessionFilesAt(key);
+    return c.ok ? fit(isRemote(e), await sessionFiles.list(c.root)) : c;
+  });
+  reg.handle(CH.filesRead, async (e, key: unknown, path: unknown) => {
+    const c = sessionFilesAt(key, { path });
+    return c.ok ? fit(isRemote(e), await sessionFiles.read(c.root, c.path!)) : c;
+  });
+  reg.handle(CH.diffList, async (e, key: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.changes(c.root, c.base!)) : c;
+  });
+  reg.handle(CH.diffFile, async (e, key: unknown, path: unknown, base: unknown) => {
+    const c = sessionFilesAt(key, { path, base });
+    return c.ok ? fit(isRemote(e), await sessionFiles.fileDiff(c.root, c.path!, c.base!)) : c;
+  });
   // Notes: the store checks every argument itself (ids, limits, characters).
   reg.handle(CH.notesList, () => notes.list());
   reg.handle(CH.notesGet, (_e, id: unknown) => notes.get(id));
@@ -1965,6 +2292,21 @@ function registerIpc(): void {
     });
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
+  });
+  // Side questions: the store and the asker check every argument (key, id, question).
+  reg.handle(CH.btwList, (_e, key: unknown) => btwStore.list(key));
+  reg.handle(CH.btwAsk, (_e, key: unknown, question: unknown) => {
+    const s = latest?.sessions.find((x) => x.key === key);
+    if (!s) return { ok: false, message: "session not found" };
+    const model = latest?.tails[s.sessionId]?.model ?? null;
+    return btwAsker.ask({ key: s.key, sessionId: s.sessionId, model }, question);
+  });
+  reg.handle(CH.btwStop, (_e, key: unknown, id: unknown) => btwAsker.stop(key, id));
+  reg.handle(CH.btwRemove, (_e, key: unknown, id: unknown) => {
+    // An answer still on its way is not removed: it would come back when it ends (Stop it first).
+    const asking = btwStore.list(key).some((x) => x.id === id && x.status === "asking");
+    if (asking) return false;
+    return btwStore.remove(key, id);
   });
   // New ticket (Board): an issue created, put on the board with its status and sprint, by
   // BoardOps.create (the Board's Claude session asks for it through create-ticket.sh).
@@ -2148,14 +2490,9 @@ function registerIpc(): void {
     return meta;
   });
   // The + menu: the workspace and its repos, to open a terminal or a session in.
-  reg.handle(CH.workspaceRepos, () => {
-    const seen = new Set<string>();
-    return [paths.masterWorkspace, ...ops.repos()]
-      .filter((p) => typeof p === "string" && p && existsSync(p))
-      .map((p) => resolve(p))
-      .filter((p) => !seen.has(p) && seen.add(p))
-      .map((p) => ({ name: basename(p), path: p }));
-  });
+  reg.handle(CH.workspaceRepos, () =>
+    workspaceFolders().map((p) => ({ name: basename(p), path: p })),
+  );
   // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
   reg.handle(CH.startClaude, async (_e, raw: unknown) => {
     const o = (raw ?? {}) as {
@@ -2263,6 +2600,55 @@ function registerIpc(): void {
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
     sources.tokensByDay(Array.isArray(ids) ? ids : []),
   );
+  // Working hours (issue #64) stay on this Mac: DECK_ACCESS blocks both, and main refuses a remote call too.
+  reg.handle(CH.hoursActivity, async (e, ids: unknown, since: unknown) => {
+    if (isRemote(e)) return {};
+    const raw = await sources.hoursActivity(
+      Array.isArray(ids) ? ids : [],
+      typeof since === "number" && Number.isFinite(since) ? since : 0,
+    );
+    // Only sessions with no recorded account need their folder's origin.
+    const recorded = new Map(
+      Object.entries(raw).map(([id, a]) => [
+        id,
+        sessionAccounts.get({ sessionId: id, key: a.key }),
+      ]),
+    );
+    const repos = await hoursOrigins(
+      Object.entries(raw)
+        .filter(([id, a]) => !recorded.get(id) && a.cwd)
+        .map(([, a]) => a.cwd!),
+    );
+    const out: Record<string, SessionActivity> = {};
+    for (const [id, a] of Object.entries(raw))
+      out[id] = {
+        spans: a.spans,
+        account: hoursAccount(
+          {
+            recorded: recorded.get(id) ?? null,
+            origin: a.cwd ? (repos.get(a.cwd) ?? null) : null,
+            ticket: a.ticket,
+          },
+          getConfig(),
+        ),
+      };
+    return out;
+  });
+  reg.handle(CH.hoursExport, async (e, csv: unknown, name: unknown) => {
+    if (isRemote(e) || typeof csv !== "string" || csv.length > 5_000_000)
+      return null;
+    const file =
+      typeof name === "string" && /^[\w.-]{1,80}\.csv$/.test(name)
+        ? name
+        : "hours.csv";
+    const r = await dialog.showSaveDialog(win!, {
+      defaultPath: join(app.getPath("downloads"), file),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, csv);
+    return r.filePath;
+  });
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
   reg.handle(CH.setSettings, (e, s: unknown) =>
     sources.setSettings(
@@ -2276,6 +2662,13 @@ function registerIpc(): void {
         : watches.stop(id)
       : false,
   );
+  reg.handle(CH.watchEvents, (_e, id: unknown) =>
+    typeof id === "string" && id.length <= 300
+      ? id.startsWith("pr:")
+        ? prWatch.events(id)
+        : watches.events(id)
+      : [],
+  );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
     startHere(o),
   );
@@ -2283,6 +2676,11 @@ function registerIpc(): void {
     // A PR of a repository no account lists: as the account whose board holds the card it was opened
     // from (`project`), else a board that holds a card of that repository.
     forCard(prRepo(String(url)), undefined, knownProject(project, getConfig())).github.prSummary(url),
+  );
+  reg.handle(CH.prDetail, (_e, url: unknown) =>
+    typeof url === "string" && parsePrUrl(url)
+      ? forCard(prRepo(url)).github.prDetail(url)
+      : { ok: false, message: "not a PR URL" },
   );
   // Only the workspace from Setup: + Shell opens there, and nothing else should be switched.
   reg.handle(CH.shellPrepare, (_e, dir: unknown) =>
@@ -2298,6 +2696,12 @@ function registerIpc(): void {
     const t = asTicket(ticket);
     return t
       ? forCard(t.repo, t.number).github.issueBody(t)
+      : { ok: false, message: "bad ticket" };
+  });
+  reg.handle(CH.issueSubIssues, (_e, ticket: unknown) => {
+    const t = asTicket(ticket);
+    return t
+      ? forCard(t.repo, t.number).github.subIssues(t)
       : { ok: false, message: "bad ticket" };
   });
   // The Assign popup's people: the card's repository's, read as that repository's account (also
@@ -2492,6 +2896,7 @@ function registerIpc(): void {
     templates: workflows().templates(),
     triggers: workflows().triggers(),
     monitors: workflows().monitors(),
+    builtinsRemoved: workflows().builtinsRemoved(),
   }));
   reg.handle(CH.workflowSave, (_e, raw: unknown) => {
     workflows().saveTemplate(DEFAULT_TEMPLATE, "Default", parseFlow(raw));
@@ -2505,16 +2910,75 @@ function registerIpc(): void {
         typeof name === "string" ? name : "",
         parseFlow(raw),
       );
-      if (!tid) return { ok: false, message: "give the template a name" };
+      if (!tid)
+        return {
+          ok: false,
+          message:
+            typeof id === "string" && builtinById(id) && !workflows().template(id)
+              ? "that built-in was deleted: restore it first (Restore built-ins)"
+              : "give the template a name",
+        };
       const r = syncWorkflowHooks();
-      return r.ok ? { ok: true, message: "template saved", id: tid } : r;
+      // The store's word on a built-in (edited, renamed), so the window need not work it out.
+      return r.ok
+        ? {
+            ok: true,
+            message: "template saved",
+            id: tid,
+            builtin: workflows().template(tid)?.builtin,
+          }
+        : r;
     },
   );
-  reg.handle(CH.workflowTemplateDelete, (_e, id: unknown) => {
-    if (typeof id !== "string" || !workflows().deleteTemplate(id))
+  reg.handle(CH.workflowTemplateDelete, async (e, id: unknown) => {
+    const t = typeof id === "string" ? workflows().template(id) : null;
+    if (!t || t.id === DEFAULT_TEMPLATE)
+      return { ok: false, message: "no such template" };
+    // The window asks here (webConfirm answers yes at once on the desktop); the web asked already.
+    if (!isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Delete"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete the workflow "${t.name}"?`,
+        detail: t.builtin
+          ? "It is a built-in workflow: Restore built-ins brings it back as MasterDeck ships it."
+          : "Sessions that already copied it keep their copy.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().deleteTemplate(t.id))
       return { ok: false, message: "no such template" };
     syncWorkflowHooks();
     return { ok: true, message: "template deleted" };
+  });
+  // Restore original (an id) or Restore built-ins (null); the window and the web asked first.
+  reg.handle(CH.workflowBuiltinRestore, async (e, id: unknown) => {
+    if (id !== null && (typeof id !== "string" || !/^md-[a-z0-9-]{1,40}$/.test(id)))
+      return { ok: false, message: "no such built-in workflow" };
+    // Restore original loses the edits: the window asks here, the web asked with webConfirm.
+    // Restore built-ins only adds files, so it does not ask.
+    if (id !== null && !isRemote(e)) {
+      const choice = await dialog.showMessageBox(win!, {
+        type: "warning",
+        buttons: ["Cancel", "Restore"],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Restore "${workflows().template(id)?.name ?? id}" as MasterDeck ships it?`,
+        detail: "Your edits to it, and its name, are lost.",
+      });
+      if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    }
+    if (!workflows().restoreBuiltin(id))
+      return {
+        ok: false,
+        message: id === null ? "no built-in to restore" : "no such built-in workflow",
+      };
+    const r = syncWorkflowHooks();
+    return r.ok
+      ? { ok: true, message: id === null ? "built-ins restored" : "original restored" }
+      : r;
   });
   // The builder: its folder gets the format, the skills and the open workflow before it starts.
   reg.handle(CH.workflowBuilderPrepare, (_e, templateId: unknown) => {
@@ -2664,6 +3128,29 @@ function registerIpc(): void {
     syncWorkflowHooks();
     return { ok: true, message: "trigger deleted" };
   });
+  // Workflow loops: ids are checked by the store (session id, loop id shapes); the state shows
+  // the change at once.
+  reg.handle(CH.workflowLoopHistory, (_e, sid: unknown, id: unknown) =>
+    loopStore.history(sid, id),
+  );
+  reg.handle(CH.workflowLoopStop, async (e, sid: unknown, id: unknown) => {
+    // A stopped loop cannot be given more: ask, as Stop session does. From a browser the web UI
+    // asked first; no native dialog on the Mac.
+    const v = validSessionId(sid) && validLoopId(id)
+      ? latest?.loops?.[sid]?.find((x) => x.id === id && x.state === "open")
+      : undefined;
+    if (v && !isRemote(e) && !(await confirmLoopStop(v.name)))
+      return { ok: false, message: "cancelled" };
+    const r = loopStore.stop(sid, id);
+    if (r.ok) sources.pollLoops();
+    return r;
+  });
+  reg.handle(CH.workflowLoopMore, async (e, sid: unknown, id: unknown) => {
+    const r = loopStore.more(sid, id);
+    if (!r.ok) return r;
+    sources.pollLoops();
+    return nudgeLoop(sid as string, r.name ?? "loop", isRemote(e));
+  });
   reg.handle(CH.workflowStatus, (_e, sid: unknown) => {
     if (!validSessionId(sid)) return null;
     const s = latest?.sessions.find((x) => x.sessionId === sid);
@@ -2741,6 +3228,23 @@ function registerIpc(): void {
     peerSync.refreshAll([a, b]);
     return r;
   });
+  // Tools → Mods: a mod on or off in one session; the MasterDeck mod reads it from the session's band file (next state).
+  reg.handle(CH.modSet, (_e, key: unknown, mod: unknown, on: unknown) => {
+    if (typeof key !== "string" || typeof mod !== "string" || typeof on !== "boolean" || !(latest?.sessions ?? []).some((s) => s.key === key))
+      return { ok: false, message: "bad session" };
+    if (!modOff.set(key, mod, on)) return { ok: false, message: "Could not save the choice." };
+    sources.changed();
+    return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
+  });
+  // Setup / Settings → Mods. Fixed claude commands only (the web asked with webConfirm first).
+  const modsChanged = (r: CliResult): CliResult => {
+    modsNow(true);
+    sources.changed();
+    return r;
+  };
+  reg.handle(CH.modsInstall, async () => modsChanged(await mods.install()));
+  reg.handle(CH.modsUninstall, async () => modsChanged(await mods.uninstall()));
+  reg.handle(CH.modsReload, () => reloadMods());
   reg.handle(CH.peersSync, (_e, key: unknown) =>
     typeof key === "string" && key.length <= 200
       ? peerSync.syncNow(key)
@@ -2770,6 +3274,23 @@ function registerIpc(): void {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
+  reg.handle(CH.procsList, (_e, key: unknown) => {
+    const s = typeof key === "string" ? latest?.sessions.find((x) => x.key === key) : undefined;
+    if (!s) return { ok: false, message: "session not found" };
+    return sessionProcs.list({
+      key: s.key,
+      pid: s.state === "done" ? null : s.pid,
+      transcript: sources.sessionFacts(s.sessionId, s.key).transcript,
+    });
+  });
+  reg.handle(CH.procsOutput, (_e, key: unknown, pid: unknown) =>
+    typeof key === "string" && Number.isInteger(pid)
+      ? sessionProcs.output(key, pid as number)
+      : { ok: false, message: "bad request" },
+  );
+  reg.on(CH.openPort, (e, url: unknown) => {
+    if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
+  });
   reg.on(CH.copy, (_e, text: string) => clipboard.writeText(text));
   reg.handle(CH.accountSignIn, (_e, p: unknown) => {
     if (p === "google" || p === "github" || p === "apple") void account.signInWith(p);
@@ -2939,6 +3460,18 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Settings → Appearance: native menus, dialogs and scrollbars follow it (and so does the renderer's
+ * prefers-color-scheme, which resolves System), and the window's own background, seen before the page paints.
+ */
+function applyNativeTheme(pref: ThemePref): void {
+  nativeTheme.themeSource = pref;
+  win?.setBackgroundColor(themeBg());
+}
+const themeBg = (): string =>
+  resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
+    .tokens.bg;
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -2947,7 +3480,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: "MasterDeck",
-    backgroundColor: "#0f1117",
+    backgroundColor: themeBg(),
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -2962,6 +3495,13 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  // The window never leaves the app: a link dropped on it (or any other navigation) opens in the
+  // browser instead. A reload of the same page still goes through.
+  win.webContents.on("will-navigate", (e, url) => {
+    if (url === win?.webContents.getURL()) return;
+    e.preventDefault();
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
   if (process.env.ELECTRON_RENDERER_URL)
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -3127,6 +3667,12 @@ if (process.platform === "win32")
 
 app.whenReady().then(async () => {
   app.setName("MasterDeck");
+  // A packaged app takes its icon from the bundle (build/icon.icns); `npm run dev` would show
+  // Electron's, so the Dock gets the same icon from the source tree.
+  if (!app.isPackaged && process.platform === "darwin") {
+    const devIcon = join(__dirname, "../../build/icon.png");
+    if (existsSync(devIcon)) app.dock?.setIcon(devIcon);
+  }
   // Token and identity must agree. Judged by the token FILE (not by decrypting it), so a transient
   // Keychain error never signs the user out: a legacy pasted token (no identity) is removed, and an
   // identity whose token file is gone is cleared.
@@ -3176,6 +3722,17 @@ app.whenReady().then(async () => {
     for (const e of r.errors) console.error(e);
     sources.setSkills(r.skills);
   }
+  // MasterDeck's mods: its folder is the marketplace Claude Code reads in place, so this version's
+  // mods reach every session at its next reload (Needs you offers one for idle sessions).
+  if (!SMOKE) {
+    const r = mods.syncFolder();
+    if (r.error) console.error(r.error);
+  }
+  sources.setModsReload(modsOffer);
+  void mods.refresh().then(() => {
+    modsNow(true);
+    sources.changed();
+  });
   // Once: older versions installed hooks for babysit-ticket, babysit-pr and queue. MasterDeck does
   // that work itself now; the skills stay for use by hand.
   if (
@@ -3211,11 +3768,15 @@ app.whenReady().then(async () => {
   refreshHooks();
   // MasterDeck's own hook: permissions answered from Needs you, exact statuses, API errors,
   // compactions, and the ticket's context after a compaction. New sessions pick it up.
+  sources.onSettings = (st) => applyNativeTheme(st.theme);
   if (process.platform !== "win32") {
     try {
       deckHooks.setup();
       deckHooks.setMonitorsBy(sources.getSettings().monitorsBy);
-      sources.onSettings = (st) => deckHooks.setMonitorsBy(st.monitorsBy);
+      sources.onSettings = (st) => {
+        deckHooks.setMonitorsBy(st.monitorsBy);
+        applyNativeTheme(st.theme);
+      };
       watches.load();
       setInterval(pumpWatches, 1000);
       sources.setDeckHooks(deckHooks, (sid) => {
@@ -3245,14 +3806,19 @@ app.whenReady().then(async () => {
     process.platform !== "win32" &&
     !SMOKE &&
     process.env.MASTERDECK_NO_HOOK !== "1"
-  )
+  ) {
     try {
       workflows().migrate();
+      seedWorkflows();
       const r = syncWorkflowHooks();
       if (!r.ok) console.error(r.message);
     } catch (e) {
       console.error(`workflow hooks: ${String(e)}`);
     }
+  } else if (!SMOKE) {
+    // Without the hooks (Windows, MASTERDECK_NO_HOOK) the templates are still there to pick and edit.
+    seedWorkflows();
+  }
   // PR watch (all platforms): rows join the monitors in Details; review offers for its PRs step aside.
   sources.setWatchInfo(() => [
     ...watches.info(),
@@ -3273,6 +3839,8 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
+  if (!SMOKE) setInterval(pollBtw, 2_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.
   setInterval(() => {
     try {
@@ -3293,6 +3861,8 @@ app.whenReady().then(async () => {
     }
   }, 1000);
   createWindow();
+  // The OS switching light/dark while the setting is System.
+  nativeTheme.on("updated", () => win?.setBackgroundColor(themeBg()));
   sources.setResumer((e) =>
     resumeBg(e.sessionId, e.name, e.cwd, null, e.bgId),
   );
@@ -3311,6 +3881,8 @@ app.whenReady().then(async () => {
   setInterval(() => void refreshAccounts(), 3_600_000);
   setInterval(() => void refreshGhActive().catch(() => {}), 60_000);
   sources.start();
+  // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
+  applyNativeTheme(sources.getSettings().theme);
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {
@@ -3367,6 +3939,7 @@ app.on("will-quit", () => {
   cloud?.stop();
   peerStore.flush();
   sender.killAll();
+  btwAsker.stopAll();
   watches.killAll();
   ptys.closeAll();
   sources.stop();

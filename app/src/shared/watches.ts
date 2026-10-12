@@ -97,3 +97,23 @@ export function canDeliver(s: { state: string; waitingOn?: string | null; busyWi
   // "Working" only because of background work it started: the turn is over, a message is taken.
   return s.state === 'working' && !!(s.waitingOn || s.busyWith)
 }
+
+/** A line a monitor printed, or an item a PR watch found, as Session details → GitHub lists them. */
+export interface WatchEvent {
+  at: number
+  text: string
+  /** PR watch only: thread, comment, review, conflict, stall, merged, closed, or note (its own lines). */
+  kind?: string
+  by?: string
+}
+
+/** Events kept per monitor in memory (not saved: after a restart the list starts again). */
+export const EVENTS_MAX = 50
+export const EVENT_TEXT_MAX = 500
+
+/** Add to a ring, keeping the newest `EVENTS_MAX`, each text cut to `EVENT_TEXT_MAX`. */
+export function pushEvents(ring: WatchEvent[], events: WatchEvent[]): void {
+  ring.push(...events.map((e) => ({ ...e, text: e.text.slice(0, EVENT_TEXT_MAX) })))
+  const over = ring.length - EVENTS_MAX
+  if (over > 0) ring.splice(0, over)
+}

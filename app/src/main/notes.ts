@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { appendText } from '@shared/noteRequest'
+import type { Ticket } from '@shared/ticket'
 import {
-  NOTES_MAX, NOTE_ID, NOTE_QUERY_MAX, cleanNote, matches, noteMeta, sortNotes, storedNote, ticketNoteId,
+  NOTES_MAX, NOTE_BODY_MAX, NOTE_ID, NOTE_QUERY_MAX, cleanNote, matches, noteMeta, sortNotes, storedNote, ticketNoteId,
   type Note, type NoteChange, type NoteMeta, type NoteTicket, type SaveResult,
 } from '@shared/notes'
 
@@ -159,6 +161,26 @@ export class NotesStore {
     const meta = noteMeta(note)
     this.notify({ id, meta })
     return { ok: true, meta }
+  }
+
+  /**
+   * A session's text added at the end of a note: a global note by id, or a ticket's note (made when there is none).
+   * Never answers with the note's text. Runs in one go on this thread, so no save can come between the read and the write.
+   */
+  append(to: { id: string } | { ticket: Ticket }, text: string): SaveResult {
+    let id: string
+    if ('ticket' in to) {
+      const tid = ticketNoteId(this.repoOf(to.ticket.repo), to.ticket.number)
+      if (!tid) return { ok: false, message: 'This ticket has no repository yet. Finish Setup first.' }
+      id = tid
+    } else {
+      id = to.id
+      if (!this.notes.has(id)) return { ok: false, message: 'No note has that id (it may have been deleted).' }
+    }
+    const old = this.notes.get(id) ?? null
+    const body = appendText(old?.body ?? '', text)
+    if (body.length > NOTE_BODY_MAX) return { ok: false, message: `The note would pass ${NOTE_BODY_MAX.toLocaleString('en-US')} characters; nothing was added.` }
+    return this.save({ ...('ticket' in to ? { ticket: to.ticket } : { id }), title: old?.title ?? '', body, base: old?.updated ?? null })
   }
 
   delete(id: unknown): { ok: boolean; message?: string; retry?: true } {

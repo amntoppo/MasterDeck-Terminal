@@ -49,3 +49,14 @@ export function ticketNote(metas: NoteMeta[], repo: string | null | undefined, n
   const full = fullRepo(repo).toLowerCase()
   return metas.find((m) => m.ticket && m.ticket.number === number && m.ticket.repo.toLowerCase() === full) ?? null
 }
+
+/** How the editor shows a note: the text, the rendered note, or both next to each other. */
+export type NoteView = 'write' | 'preview' | 'both'
+export const NOTE_VIEWS: NoteView[] = ['write', 'preview', 'both']
+/** Side by side needs room for two columns beside the rail. */
+export const WIDE_QUERY = '(min-width: 1000px)'
+
+/** The view to show: side by side falls back to the text alone in a narrow window (the choice is kept for when it widens). */
+export function noteView(picked: NoteView, wide: boolean): NoteView {
+  return picked === 'both' && !wide ? 'write' : picked
+}

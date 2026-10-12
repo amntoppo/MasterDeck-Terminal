@@ -1,0 +1,9 @@
+{
+  "name": "masterdeck-board",
+  "displayName": "MasterDeck board",
+  "version": "0.5.0",
+  "description": "/md-board shows the board of this session's account in a pane, read only, with this session's ticket marked",
+  "author": { "name": "MasterDeck" },
+  "repository": "https://github.com/amntoppo/MasterDeck-Terminal",
+  "license": "MIT"
+}

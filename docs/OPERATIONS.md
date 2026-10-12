@@ -38,12 +38,18 @@ open /Applications/MasterDeck.app
 - Packaging config: `app/electron-builder.yml` (appId `io.github.amntoppo.masterdeck`, ad-hoc
   signature `identity: "-"`, no hardened runtime, node-pty unpacked from asar, `statusline_tee.py`
   and `../skills` as extra resources without tests/caches).
+- Icons: `app/build/icon.icns` (macOS, also the DMG), `icon.ico` (Windows), `icon.png` / `icon.svg`
+  (the source tile; `npm run dev` puts it in the Dock), and the web app's `src/web/public/favicon.svg`,
+  `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` and `manifest.webmanifest`. All are made by
+  `node scripts/icons.mjs` (macOS: it calls `iconutil`) from the mark masterdeck.dev uses, and committed.
+  A Mac may keep showing the old icon of a replaced app until the Dock restarts (`killall Dock`).
 - Smoke: `MASTERDECK_NO_SKILLS=1 MASTERDECK_SMOKE=1 MASTERDECK_USER_DATA=$(mktemp -d)
   dist/mac-arm64/MasterDeck.app/Contents/MacOS/MasterDeck` → `SMOKE OK sessions=… issues=…`.
 
 ## Release
 
-Only when the user asks. Last release: v0.8.2 (2026-10-06; v0.8.0 and v0.8.1 had no Windows build).
+Only when the user asks. Last release: v0.9.0 (2026-10-10). Before it: v0.8.2 (2026-10-06; v0.8.0
+and v0.8.1 had no Windows build).
 
 ```bash
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock
@@ -67,6 +73,16 @@ Publishes the static Worker `masterdeck-web` on `app.masterdeck.dev` (assets `ou
 fallback). Needs a logged-in wrangler on this machine. Only when asked. Local dev against a local
 backend: `MD_API=http://localhost:8787 npm run dev:web -- --port 5175 --strictPort` (the backend
 then needs `APP_ORIGIN=http://localhost:5175`).
+
+## Website (masterdeck.dev)
+
+The site is its own repository, [amntoppo/Masterdeck-Website](https://github.com/amntoppo/Masterdeck-Website)
+(checkout `~/Documents/personal/Masterdeck-Website`, private). `npm run deploy` there refreshes the
+changelog from this repository's releases, builds, deploys the Workers `masterdeck-site`
+(masterdeck.dev) and `masterdeck-www` (301 to the bare domain), and pings IndexNow. After a release,
+deploy the site again so its Download page shows it. Its README covers search engines: structured
+data, the sitemap, and the one-time Google Search Console setup. This repository links to the site
+from the README, the release notes (`.github/release-notes.md`) and the repository's website field.
 
 ## Backend deploy (other repo, for reference)
 
@@ -107,6 +123,11 @@ npx electron . --remote-debugging-port=9333
 - Native dialogs: with `--inspect=127.0.0.1:9334` you can stub `dialog.*` / `shell.openExternal`
   in main for the run.
 - The isolated app still lists the user's real sessions: never Reply, Stop or answer their items.
+- **Mods (Setup / Settings → Mods)**: `claude plugin` writes Claude Code's own settings, so an
+  isolated app refuses to install mods unless `CLAUDE_CONFIG_DIR=$E2E/claudecfg` is set (then the
+  real `claude` writes `$E2E/claudecfg/settings.json` and `plugins/` only; checked 2026-10-10 with
+  Install and Remove). With it set, `claude agents` lists no sessions, so never press **Reload idle
+  sessions** in a run that does list real ones: it types `/reload-plugins` into them.
 - **Never give the app itself a temp `HOME` on macOS**: without the login keychain there, startup
   stops on a system keychain dialog (on the user's screen) and the window never opens. To keep it
   off the real `~/.claude.json`, set `CLAUDE_CONFIG_DIR=$E2E/claudecfg` instead: `master trust`,
@@ -122,6 +143,25 @@ npx electron . --remote-debugging-port=9333
   the tab running the stand-in in that folder, the dialog coming back once the temp file says
   trusted, the refused start's tab, the HELD card, **Try again** / **Start now** spawning the one
   proposal (held → sent), and no line for a trusted folder.
+- **A real start from the Start dialog** (done once, 2026-10-09, issue #59): the same launch with
+  the real `claude` on the PATH (no stand-in) and `MASTERDECK_BOARD_FIXTURE`, a throwaway checkout
+  `$E2E/ws/tracker` (`git init`, `origin` = `https://github.com/acme/tracker.git`, one commit, left
+  on a branch that is not the ticket's), the config's `workspace` = `$E2E/ws`. Board → **Show
+  everyone's issues** → a card with no PR → **Start a session**. The dialog names the checkout and
+  says Claude Code has not been allowed there: **Open Claude there…** opens the real prompt in a
+  tab (Down, Enter accepts it, which adds the folder to the real `~/.claude.json`: ask the user
+  first; `/exit` the interactive Claude it leaves), the dialog comes back, pick Haiku and a one-line
+  first instruction, Start. Then: `claude agents --json` shows the session's `cwd` is the checkout,
+  `$E2E/home/parked-sessions.json` has one record keyed by the background id (the ledger's note
+  holds the `claude --bg` output), and a link records no branch for it: add a real repository to
+  `repos` in `$E2E/master/config.json` and `window.deck.linkSession({repo, number}, sessionId,
+  cwd)` for a real issue no board of that config holds (a read; no move) → `ticket-links.json`
+  has `"branch": ""`; with `parked-sessions.json` moved aside the same link records the folder's
+  branch. A master proposal for the dialog: the CLI refuses writes from a Claude session, so write
+  the fixture with the ledger library (`with ledger.locked() as led: ledger.add(led, …)`; `locked`
+  saves the object it yields) under `$MASTER_HOME`. Afterwards `claude stop <id>` each session,
+  delete only the transcript folders those folders made under `~/.claude/projects/` (exact names),
+  and leave the trust entry (MasterDeck never writes `~/.claude.json`).
 - A unit test that opens a pane through `PtyManager` runs whatever `paneCommand` names, a real
   shell included: replace `node-pty` for the whole file with `vi.mock` before anything loads it
   (`ptys.test.ts`), so it cannot start a process even while it is red. An argument the code under
@@ -206,7 +246,7 @@ a tab open is still to be measured (TODO).
 | `npm test` / `npm run dev` crash in node-pty (wrong architecture, x86_64) | `cd app && npx electron-builder install-app-deps` (needed after every packaging build) |
 | `electron-builder` fails or DMG build dies | disk space: `rm -rf app/dist`; a DMG build needs ~1.5 GB free |
 | `remote.drift.test.ts` fails | the backend checkout is on a branch whose `src/protocol.ts` differs (or `remote.ts` was hand-edited). Check out backend `master` (or the matching branch) or run `app/scripts/sync-protocol.sh`; set `MASTERDECK_BACKEND` if the backend lives elsewhere. Missing checkout = skipped |
-| Remote stuck on "waiting for sessions to load" | `claude agents --json` is failing (see TODO); run it by hand |
+| Remote stuck on "waiting for sessions to load" | `claude agents --json` is failing (the status says why when it errors); run it by hand. After 60 s the line connects anyway; commands then fail at once with "MasterDeck has no session list: …" and no snapshot is sent until the session list is in |
 | "Another Mac is connected to this account" | close 4005: only one Mac per account; sign the other out |
 | Notifications never show | the bundle needs a whole-bundle (ad-hoc) signature; reinstall from a fresh build |
 | `install-mac.sh` says MasterDeck is running | quit it and wait for `pgrep` to be empty |

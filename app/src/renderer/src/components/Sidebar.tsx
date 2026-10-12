@@ -14,7 +14,19 @@ import { NewMenu, type NewAction } from "./NewMenu";
 import { StatusDialog } from "./StatusDialog";
 import { SessionMenu } from "./SessionMenu";
 import { attentionFor, sessionStatus } from "@shared/review";
-import { LANES, laneOf } from "@shared/tasks";
+import { LANES, laneOf, type Lane } from "@shared/tasks";
+import {
+  accountChoicesFor,
+  cleanFilter,
+  filterSessions,
+  folderChoices,
+  isFiltered,
+  NO_FILTER,
+  parkedForced,
+  shellsShown,
+  type SessionFilter,
+} from "@shared/sessionFilter";
+import { SessionFilterBar } from "./SessionFilterBar";
 import { canStop, cleanupDefaults } from "@shared/cleanup";
 import { formatAgo, formatGhCache, formatRefreshed } from "@shared/format";
 import type { InboxEntry, InboxKind } from "@shared/inbox";
@@ -29,6 +41,7 @@ import { AskPanel } from "./AskPanel";
 import { Markdown } from "./SummaryPanel";
 import { AccountBadge } from "./AccountBits";
 import { isMulti } from "@shared/accounts";
+import { rowLoop } from "@shared/loops";
 import { heldForTrust, isNotTrusted } from "@shared/trust";
 import { TrustNote, useTrust } from "./TrustFix";
 
@@ -83,6 +96,8 @@ export interface ColumnTab {
 export type SessionAction = "summary" | "close-tab";
 
 const ORDER_KEY = "sessionOrder";
+const FILTER_KEY = "sessionFilter";
+const FILTER_OPEN_KEY = "sessionFilterOpen";
 /** When each starred session was first missing from the list (see pruneStars). */
 const starsMissingSince = new Map<string, number>();
 
@@ -183,21 +198,60 @@ export function Sidebar({
       attentionFor(s, state.proposals),
       state.manualStatus[s.key],
     );
-  const live = sessions.filter((s) => s.state !== "suspended");
   // Starred: pinned above the status groups, whatever their status; an ended one loses its star.
   const stars = useStars();
   useEffect(
     () => setStars(pruneStars(stars, state.sessions, starsMissingSince)),
     [stars, state.sessions],
   );
+  // Filters (kept across restarts): everything below lists only the sessions that match.
+  const [filter, setFilterState] = useState<SessionFilter>(() =>
+    cleanFilter(load<unknown>(FILTER_KEY, NO_FILTER)),
+  );
+  const [filterOpen, setFilterOpenState] = useState(() =>
+    load<boolean>(FILTER_OPEN_KEY, false) === true,
+  );
+  const setFilter = (f: SessionFilter) => {
+    setFilterState(f);
+    save(FILTER_KEY, f);
+  };
+  const setFilterOpen = (o: boolean) => {
+    setFilterOpenState(o);
+    save(FILTER_OPEN_KEY, o);
+  };
+  const multi = isMulti(state.config);
+  const filtered = isFiltered(filter, multi);
+  // The lane a row is listed under: Parked for a suspended session, whatever its status says.
+  const laneFor = (s: Session): Lane =>
+    s.state === "suspended" ? "parked" : laneOf(statusOf(s).key);
+  // The rows keep the sessions themselves; only the keys come back from the filter.
+  const kept = filtered
+    ? new Set(
+        filterSessions(
+          sessions.map((s) => ({
+            ...s,
+            ticket: s.issue !== null ? ticketLabel(s.issueRepo, s.issue) : null,
+            lane: laneFor(s),
+          })),
+          filter,
+          { stars, multi },
+        ).map((s) => s.key),
+      )
+    : null;
+  const visible = kept ? sessions.filter((s) => kept.has(s.key)) : sessions;
+  const shells = shellsShown(others ?? [], filter, multi);
+  const allLive = sessions.filter((s) => s.state !== "suspended");
+  const live = visible.filter((s) => s.state !== "suspended");
   const { starred, rest: unstarred } = splitStarred(live, stars);
-  const suspended = sessions.filter((s) => s.state === "suspended");
+  const suspended = visible.filter((s) => s.state === "suspended");
+  const parkedHeld = parkedForced(filter);
+  const parkedOpen = showSuspended || parkedHeld;
 
   // Cleanup: rows become selectable (merged ones picked); Stop ends the picked sessions.
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [stopping, setStopping] = useState(false);
   const startCleanup = () =>
-    setPicked(cleanupDefaults(sessions, state.prStage));
+    setPicked(cleanupDefaults(visible, state.prStage));
   const togglePick = (key: string) =>
     setPicked((p) => {
       if (!p) return p;
@@ -206,8 +260,9 @@ export function Sidebar({
       else n.add(key);
       return n;
     });
+  // Only what is listed: a filter never hides a session that is about to be stopped.
   const toStop = picked
-    ? sessions.filter((s) => picked.has(s.key) && canStop(s))
+    ? visible.filter((s) => picked.has(s.key) && canStop(s))
     : [];
   const stopPicked = async () => {
     const n = toStop.length;
@@ -242,6 +297,7 @@ export function Sidebar({
         status={status}
         starred={stars.includes(s.key)}
         onStar={() => toggleStar(s.key)}
+        loop={rowLoop(state.loops?.[s.sessionId], now)}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
       />
@@ -398,9 +454,32 @@ export function Sidebar({
             ))}
         </div>
 
-        {live.length === 0 && !others?.length && (
+        {sessions.length > 0 && (
+          <SessionFilterBar
+            filter={filter}
+            onFilter={setFilter}
+            open={filterOpen}
+            onOpen={setFilterOpen}
+            multi={multi}
+            accounts={accountChoicesFor(
+              state.config.accounts.map((a) => a.login),
+              sessions,
+              filter.accounts,
+            )}
+            folders={folderChoices(sessions, filter.folders)}
+          />
+        )}
+        {allLive.length === 0 && !others?.length && (
           <div className="empty" style={{ padding: "10px 14px" }}>
             No live sessions. Start one from the board, or open a shell.
+          </div>
+        )}
+        {filtered && sessions.length > 0 && visible.length === 0 && (
+          <div className="empty sfilter-empty">
+            No sessions match the filters.{" "}
+            <button className="link-btn" onClick={() => setFilter(NO_FILTER)}>
+              Clear filters
+            </button>
           </div>
         )}
         {starred.length > 0 && (
@@ -443,13 +522,13 @@ export function Sidebar({
             }}
           />
         )}
-        {others && others.length > 0 && (
+        {shells.length > 0 && (
           <div className="section">
             <div className="section-head">
               Shells &amp; starting{" "}
-              <span className="count">{others.length}</span>
+              <span className="count">{shells.length}</span>
             </div>
-            {others.map((t) => (
+            {shells.map((t) => (
               <div
                 key={t.id}
                 className={`srow ${t.active ? "active" : ""}`}
@@ -483,13 +562,14 @@ export function Sidebar({
         {suspended.length > 0 && (
           <div className="section">
             <div
-              className="row"
-              onClick={() => setShowSuspended(!showSuspended)}
+              className={`row ${parkedHeld ? "held" : ""}`}
+              onClick={() => !parkedHeld && setShowSuspended(!showSuspended)}
+              title={parkedHeld ? "Open while the Parked filter is on" : undefined}
             >
-              <span className="mark">{showSuspended ? "▾" : "▸"}</span>
+              <span className="mark">{parkedOpen ? "▾" : "▸"}</span>
               <span className="label sub">Parked · {suspended.length}</span>
             </div>
-            {showSuspended && suspended.map((s) => rowFor(s))}
+            {parkedOpen && suspended.map((s) => rowFor(s))}
           </div>
         )}
         {menu && (
@@ -554,7 +634,7 @@ export function Sidebar({
                   setPicked(
                     toStop.length
                       ? new Set()
-                      : new Set(sessions.filter(canStop).map((s) => s.key)),
+                      : new Set(visible.filter(canStop).map((s) => s.key)),
                   )
                 }
               >
@@ -696,6 +776,9 @@ const KIND_TAG: Record<InboxKind, string> = {
   waiting: "WAITING",
   error: "API ERROR",
   external: "ASKED",
+  mods: "MODS",
+  loop: "LOOP",
+  "loop-paused": "LOOP",
 };
 
 /** Minutes from now until 9:00 tomorrow. */
@@ -833,7 +916,7 @@ function InboxCard({
 }
 
 /** `status`: the session's status (see `sessionStatus`); a parked session keeps its plain state. */
-function SessionRow({
+export function SessionRow({
   s,
   active,
   now,
@@ -842,6 +925,7 @@ function SessionRow({
   pick,
   starred,
   onStar,
+  loop,
   dragging,
   dropBefore,
   ...drag
@@ -856,6 +940,8 @@ function SessionRow({
   /** Starred or not, and its toggle; absent (Cleanup) shows no star. */
   starred?: boolean;
   onStar?: () => void;
+  /** Its workflow loop's badge and line (`rowLoop`); none without a loop to show. */
+  loop?: { badge: string; line: string } | null;
   dragging?: boolean;
   dropBefore?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -888,11 +974,22 @@ function SessionRow({
           />
         )}
         <span className={`dot st-${status?.key ?? s.state}`} />
-        <span className="label">{s.name}</span>
-        {s.issue !== null && (
-          <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
+        {/* The name keeps the first line; the ticket and account wrap below it when the rail is narrow. */}
+        <span className="srow-name">
+          <span className="label">{s.name}</span>
+          {s.issue !== null && (
+            <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
+          )}
+          <AccountBadge login={s.account} ghActive={s.ghActive} />
+        </span>
+        {loop && (
+          <span
+            className={`srow-loop ${loop.badge.endsWith("!") ? "limit" : loop.badge.endsWith("✓") ? "met" : ""}`}
+            title={loop.line}
+          >
+            {loop.badge}
+          </span>
         )}
-        <AccountBadge login={s.account} ghActive={s.ghActive} />
         {onStar && (
           <button
             className={`srow-star ${starred ? "on" : ""}`}
@@ -1291,6 +1388,12 @@ function ExtraCard({
   const kind =
     i.kind === "account"
       ? "GITHUB"
+      : i.kind === "mods"
+      ? "MODS"
+      : i.kind === "loop"
+      ? "LOOP AT ITS LIMIT"
+      : i.kind === "loop-paused"
+      ? "LOOP PAUSED"
       : i.kind === "error"
       ? "API ERROR"
       : i.detail.type === "nudge"
@@ -1302,14 +1405,31 @@ function ExtraCard({
     s ?? (i.ticket ? sessionForIssue(state.sessions, i.ticket) : null);
   const primary = i.actions.find(
     (a) =>
-      a.type === "continue" || a.type === "compact" || a.type === "login",
+      a.type === "continue" ||
+      a.type === "compact" ||
+      a.type === "login" ||
+      a.type === "loop-more" ||
+      a.type === "loop-continue" ||
+      a.type === "reload",
   );
+  const leave = i.actions.find((a) => a.type === "dismiss");
+  const stopLoop = i.actions.find((a) => a.type === "loop-stop");
+  const askStop = async () => {
+    // A stopped loop cannot be given more: the web asks here, the window natively in main.
+    const ask = "Stop the loop? The session does not go on with it, and it can't be given more.";
+    if (!(await webConfirm(ask, { confirmLabel: "Stop loop", danger: true }))) return;
+    await act("loop-stop");
+  };
   return (
     <div
       className={`card ${onDetails ? "clickable" : ""}`}
       style={{
         ["--kind" as string]:
-          i.kind === "idle" || i.kind === "waiting"
+          i.kind === "idle" ||
+          i.kind === "waiting" ||
+          i.kind === "loop" ||
+          i.kind === "loop-paused" ||
+          i.kind === "mods"
             ? "var(--amber)"
             : "var(--red)",
       }}
@@ -1333,6 +1453,24 @@ function ExtraCard({
         {owner && (
           <button className="btn" onClick={() => onOpenSession(owner)}>
             {i.detail.type === "budget" ? `Open ${owner.name}` : "Open"}
+          </button>
+        )}
+        {leave && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => void deck().inboxAct(i.id, "dismiss")}
+          >
+            {leave.label}
+          </button>
+        )}
+        {stopLoop && (
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={() => void askStop()}
+          >
+            {stopLoop.label}
           </button>
         )}
         {primary && (

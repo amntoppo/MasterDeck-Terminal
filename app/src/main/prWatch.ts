@@ -7,7 +7,7 @@ import { parsePrUrl } from '@shared/prSummary'
 import {
   BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
 } from '@shared/prWatch'
-import { canDeliver, type WatchInfo } from '@shared/watches'
+import { canDeliver, pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
 import { ghErrorText, ghHasData, type GhRunner } from './ghc'
 
@@ -38,6 +38,8 @@ export interface PrWatchEntry {
   quiet?: boolean
   /** The watched session's GitHub account (two or more connected); its runner reads this PR. */
   account?: string
+  /** What it found, for Session details (memory only: never saved). */
+  log?: WatchEvent[]
 }
 
 export interface PrWatchDeps {
@@ -47,6 +49,8 @@ export interface PrWatchDeps {
   paused: (output?: string) => boolean
   send: (s: Session, text: string) => Promise<CliResult>
   onChange: () => void
+  /** A watched PR was seen merged or closed (the session's lane follows it). */
+  ended?: (url: string) => void
 }
 
 const DONE_MAX = 500
@@ -124,7 +128,8 @@ export class PrWatch {
     if (!this.loaded) return
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(`${this.file}.tmp`, JSON.stringify({ watches: this.list, done: this.done.slice(-DONE_MAX) }, null, 1))
+      const watches = this.list.map(({ log: _log, ...w }) => w)
+      writeFileSync(`${this.file}.tmp`, JSON.stringify({ watches, done: this.done.slice(-DONE_MAX) }, null, 1))
       renameSync(`${this.file}.tmp`, this.file)
     } catch {
       // next change
@@ -133,7 +138,10 @@ export class PrWatch {
 
   private end(w: PrWatchEntry, line?: string): void {
     w.ended = true
-    if (line) w.notes.push(line)
+    if (line) {
+      w.notes.push(line)
+      pushEvents((w.log ??= []), [{ at: Date.now(), kind: 'note', text: line }])
+    }
     if (!this.done.includes(w.url)) this.done.push(w.url)
   }
 
@@ -238,13 +246,20 @@ export class PrWatch {
             w.heavyAt = now
             w.stallAt = stallAt
             if (summary) w.notes.push(summary)
+            pushEvents((w.log ??= []), [
+              ...(summary ? [{ at: now, kind: 'note', text: summary }] : []),
+              ...news.map((x) => ({ at: now, kind: x.kind, ...(x.by ? { by: x.by } : {}), text: x.text || (x.kind === 'conflict' ? `merge conflict with ${x.base}` : '') })),
+            ])
             const keys = new Set(news.map((x) => x.key))
             w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
             if (news.length || summary || ending) {
               w.events += news.length + (summary || ending ? 1 : 0)
               w.lastEventAt = now
             }
-            if (ending) this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+            if (ending) {
+              this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+              this.deps.ended?.(w.url)
+            }
           })
         }
       }
@@ -330,6 +345,11 @@ export class PrWatch {
         lastEventAt: w.lastEventAt,
         queued: w.pending.length + w.notes.length,
       }))
+  }
+
+  /** A watch's last finds, newest first (`pr:<url>`, as in info()). */
+  events(id: string): WatchEvent[] {
+    return [...(this.list.find((x) => `pr:${x.url}` === id)?.log ?? [])].reverse()
   }
 
   stop(id: string): boolean {

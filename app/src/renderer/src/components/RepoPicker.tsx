@@ -5,9 +5,10 @@ import { expandHome, filterRepos, type Repo } from '../repoPicker'
 
 /**
  * The web app's folder picker (the native one cannot open from a browser): the workspace repos, a filter, and a
- * typed path. The Mac validates whatever path comes back. `onDone(null)` on cancel.
+ * typed path. The Mac validates whatever path comes back. `onDone(null)` on cancel. `listOnly`: no typed path,
+ * for a choice the Mac accepts only from that list (a ticket's session in the Start dialog).
  */
-export function RepoPicker({ start, onDone }: { start?: string; onDone: (path: string | null) => void }) {
+export function RepoPicker({ start, listOnly, onDone }: { start?: string; listOnly?: boolean; onDone: (path: string | null) => void }) {
   const [repos, setRepos] = useState<Repo[] | null>(null)
   const [q, setQ] = useState('')
   const [path, setPath] = useState(start ?? '')
@@ -30,25 +31,37 @@ export function RepoPicker({ start, onDone }: { start?: string; onDone: (path: s
   const typed = () => path.trim() && onDone(expandHome(path.trim(), deck().home))
   return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone(null)}>
-      <div className="dialog status-dialog" role="dialog" aria-modal="true" aria-labelledby="rp-title">
-        <h3 id="rp-title">Choose a folder on your Mac</h3>
+      <div className="dialog status-dialog repo-picker" role="dialog" aria-modal="true" aria-labelledby="rp-title">
+        <h3 id="rp-title">{listOnly ? 'Choose a repository on your Mac' : 'Choose a folder on your Mac'}</h3>
         <input value={q} placeholder="Filter repos…" aria-label="Filter repos" onChange={(e) => setQ(e.target.value)} autoFocus />
         <div className="wt-list" style={{ maxHeight: 280, overflow: 'auto' }}>
           {repos === null && <div className="meta">Loading repos…</div>}
           {repos && !shown.length && <div className="meta">No repos match.</div>}
           {shown.map((r) => (
-            <button key={r.path} className="mpick-row" style={{ width: '100%', textAlign: 'left' }} onClick={() => onDone(r.path)} title={r.path}>
+            <button
+              key={r.path}
+              className={`mpick-row${listOnly && r.path === start ? ' on' : ''}`}
+              style={{ width: '100%', textAlign: 'left' }}
+              onClick={() => onDone(r.path)}
+              title={r.path}
+            >
               <b>{r.name}</b> <span className="muted mono">{r.path}</span>
             </button>
           ))}
         </div>
-        <label>Or type a path</label>
-        <div className="row-inputs">
-          <input value={path} placeholder={`${deck().home}/code/my-repo`} aria-label="Folder path" onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && typed()} />
-          <button className="btn primary" disabled={!path.trim()} onClick={typed}>
-            Use this path
-          </button>
-        </div>
+        {listOnly ? (
+          <div className="meta">From the web app a session starts only in a repository MasterDeck found in your workspace.</div>
+        ) : (
+          <>
+            <label>Or type a path</label>
+            <div className="row-inputs">
+              <input value={path} placeholder={`${deck().home}/code/my-repo`} aria-label="Folder path" onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && typed()} />
+              <button className="btn primary" disabled={!path.trim()} onClick={typed}>
+                Use this path
+              </button>
+            </div>
+          </>
+        )}
         <div className="foot">
           <span className="grow" />
           <button className="btn" onClick={() => onDone(null)}>

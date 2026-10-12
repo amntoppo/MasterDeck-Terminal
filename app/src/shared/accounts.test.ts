@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from './appConfig'
 import {
-  accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
+  accountChoices, accountLabel, accountEnvBlock, accountNotices, accountOverride, resumeAccount, accountForProject, accountForRepo, defaultAccount, startAccount, githubSshAliases, groupByAccount, isMulti, keepLastGood,
   accountForCard, knownProject, matchRepo, migrationAccount, noreplyEmail, parseGhUser, primaryLogin, prRepo, repoFromRemote, repoOfArgs, sessionAccount, ticketAccount,
 } from './accounts'
 
@@ -266,16 +266,14 @@ describe('the account a card\'s calls go out as', () => {
     expect(accountForCard('partner/portal', 'other/9', cfg)).toBe('alice') // a board no account selects
     expect(accountForCard(null, 'globex/7', cfg)).toBe('alice') // no repository: the primary issue repo
   })
-  it('a new session for a card on a known board starts as the account its calls use', () => {
-    expect(defaultAccount({ issue: { repo: 'partner/portal', project: 'globex/7' } }, cfg)).toBe('bob-work') // listed nowhere, on bob-work's board
-    expect(defaultAccount({ issue: { repo: 'partner/portal', project: 'globex/7' }, origin: 'acme/tracker' }, cfg)).toBe('bob-work') // the board, before the folder
-    expect(defaultAccount({ issue: { repo: 'globex/app', project: 'acme/1' } }, cfg)).toBe('bob-work') // listed: the board does not matter
-    expect(defaultAccount({ issue: { repo: 'acme/infra', project: 'globex/7' } }, cfg)).toBe('alice') // the owner's account, as accountForCard
-    // No board known: as before (the repository, then the folder, then the primary).
-    expect(defaultAccount({ issue: { repo: 'partner/portal', project: null }, origin: 'globex/app' }, cfg)).toBe('bob-work')
-    expect(defaultAccount({ issue: { repo: 'partner/portal' } }, cfg)).toBe('alice')
+  it('a ticket session for a card on a known board starts as the account its calls use', () => {
+    expect(startAccount('partner/portal', cfg, null, 'globex/7')).toBe('bob-work') // listed nowhere, on bob-work's board
+    expect(startAccount('globex/app', cfg, null, 'acme/1')).toBe('bob-work') // listed: the board does not matter
+    expect(startAccount('acme/infra', cfg, null, 'globex/7')).toBe('alice') // the owner's account, as accountForCard
+    expect(startAccount('partner/portal', cfg, 'acme/tracker', 'globex/7')).toBe('alice') // the code's repository first
+    expect(startAccount('partner/portal', cfg)).toBe('alice') // no board known: as before
     for (const [repo, project] of [['partner/portal', 'globex/7'], ['globex/app', 'acme/1'], ['acme/infra', 'globex/7']])
-      expect(defaultAccount({ issue: { repo, project } }, cfg)).toBe(accountForCard(repo, project, cfg))
+      expect(startAccount(repo, cfg, null, project)).toBe(accountForCard(repo, project, cfg))
   })
   it('a board key from outside is kept only when Setup selects it', () => {
     expect(knownProject('globex/7', cfg)).toBe('globex/7')
@@ -300,5 +298,27 @@ describe('the account a card\'s calls go out as', () => {
   it('one account, or none: as before', () => {
     expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [acct('alice', 'acme', ['acme/tracker'], [], true)] }))).toBe('alice')
     expect(accountForCard('globex/infra', 'globex/7', parseConfig({ owner: 'acme', issueRepo: 'tracker' }))).toBeNull()
+  })
+})
+
+describe('startAccount (issue #61)', () => {
+  const code = (pairs: { issues: string; code: string }[]) => parseConfig({ owner: 'acme', issueRepo: 'tracker', accounts: [A, B], codeRepos: pairs })
+  it("is the issue's account when its code is where it is filed", () => {
+    expect(startAccount('globex/app', two)).toBe('bob-work')
+    expect(startAccount(null, two)).toBe('alice')
+    expect(startAccount('initech/x', two)).toBe('alice')
+  })
+  it("follows the code: a tracker's issues built in another account's repository run as that account", () => {
+    expect(startAccount('globex/app', code([{ issues: 'globex/app', code: 'acme/api' }]))).toBe('alice')
+    expect(startAccount(null, code([{ issues: 'acme/tracker', code: 'globex/engine' }]))).toBe('bob-work')
+  })
+  it("keeps the issue's account when no account has the code repository", () => {
+    expect(startAccount('globex/app', code([{ issues: 'globex/app', code: 'initech/engine' }]))).toBe('bob-work')
+  })
+  it("a PR review: the PR's repository wins over the card's issue repository", () => {
+    expect(startAccount('acme/tracker', two, 'globex/app')).toBe('bob-work')
+    expect(startAccount('globex/app', two, 'acme/api')).toBe('alice')
+    // A PR in a repository no account has: the issue's.
+    expect(startAccount('globex/app', two, 'initech/x')).toBe('bob-work')
   })
 })

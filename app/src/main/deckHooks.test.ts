@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -124,6 +124,31 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     expect(run('Stop', { session_id: SID })).toBe('')
     expect(d.queueRequests()).toEqual([])
   }, 20_000)
+  const loopFile = (home: string, state: string) => {
+    mkdirSync(join(home, 'workflows', 'loops'), { recursive: true })
+    writeFileSync(join(home, 'workflows', 'loops', `${SID}.json`), JSON.stringify({ loops: [{ id: 'lp', state }] }))
+  }
+  it('the queue waits while a workflow loop is open', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'open')
+    // MasterDeck running: no request either (the loop hook owns this stop).
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(d.queueRequests()).toEqual([])
+    stale()
+    expect(run('Stop', { session_id: SID })).toBe('')
+    expect(readQueue(SID, queues)).toEqual(['a'])
+    // /queue still adds while the loop runs.
+    expect(JSON.parse(run('UserPromptSubmit', { session_id: SID, prompt: '/queue b' })).reason).toBe('Queued #2: b')
+  }, 20_000)
+  it('the queue goes on when the loop is over', () => {
+    const { d, queues, run, stale } = setup()
+    editQueue(SID, { op: 'add', text: 'a' }, queues)
+    loopFile(join(d.dir, '..'), 'met')
+    stale()
+    expect(JSON.parse(run('Stop', { session_id: SID }))).toEqual(queueAnswer('a', 0))
+    expect(readQueue(SID, queues)).toEqual([])
+  }, 20_000)
   it('MasterDeck alive but silent: the hook takes its request back and drains, once', () => {
     const { d, queues, run } = setup()
     editQueue(SID, { op: 'add', text: 'a' }, queues)
@@ -212,6 +237,25 @@ describe('pumpQueue (MasterDeck answers a Stop)', () => {
     d.pumpQueue()
     expect(JSON.parse(readFileSync(answer(id), 'utf8'))).toEqual(queueAnswer('a', 1))
     expect(readQueue(SID, queues)).toEqual(['b'])
+  })
+  it('remembers when it served a session a prompt (the loop queue asks)', () => {
+    const { d, request } = setup()
+    expect(d.queueServedAt(SID)).toBeUndefined()
+    request(process.pid)
+    const t = Date.now()
+    d.pumpQueue(t)
+    expect(d.queueServedAt(SID)).toBe(t)
+  })
+  it('ownsQueue: not with queue-off or for a legacy session', () => {
+    const { d } = setup()
+    expect(d.ownsQueue(SID)).toBe(true)
+    d.setQueueOff(true)
+    expect(d.ownsQueue(SID)).toBe(false)
+    d.setQueueOff(false)
+    d.markLegacy()
+    expect(d.ownsQueue(SID)).toBe(false)
+    d.pruneLegacy(new Set(['5d1bc2b2-2edb-4304-91fd-6633dc9bd935']))
+    expect(d.ownsQueue(SID)).toBe(true)
   })
   it('a hook that is gone (dead pid, or older than its wait) loses nothing', () => {
     const { d, queues, request, answer } = setup()
@@ -468,5 +512,44 @@ describe.skipIf(process.platform === 'win32')('the peer delta (UserPromptSubmit)
     utimesSync(stale, old, old)
     d.pruneDeltas(new Set([SID]))
     expect(readdirSync(dir)).toEqual([`${SID}.delta.json.tmp`])
+  })
+})
+
+describe('the MasterDeck mod files', () => {
+  const band = { v: 1 as const, name: 's', ticket: null, status: null, pr: null, peers: [{ name: 'p', state: 'idle' as const }] }
+
+  it('writes a band only when it changed, and removes it for a session that has none or ended', () => {
+    const home = mkdtempSync(join(tmpdir(), 'deck-'))
+    const d = new DeckHooks(home)
+    const p = join(home, 'deck', 'band', `${SID}.json`)
+    d.setBand(SID, band)
+    expect(JSON.parse(readFileSync(p, 'utf8'))).toEqual(band)
+    const old = new Date(1_000_000)
+    utimesSync(p, old, old)
+    d.setBand(SID, band)
+    expect(Math.round(statSync(p).mtimeMs)).toBe(old.getTime())
+    d.setBand(SID, null)
+    expect(existsSync(p)).toBe(false)
+    d.setBand(SID, band)
+    d.setBand('../x', band)
+    expect(readdirSync(join(home, 'deck', 'band'))).toEqual([`${SID}.json`])
+    d.pruneBands(new Set())
+    expect(readdirSync(join(home, 'deck', 'band'))).toEqual([])
+  })
+
+  it('reads fresh heartbeats and drops day-old files', () => {
+    const home = mkdtempSync(join(tmpdir(), 'deck-'))
+    const d = new DeckHooks(home)
+    const dir = join(home, 'deck', 'mods')
+    mkdirSync(dir, { recursive: true })
+    const now = 2_000_000_000_000
+    const other = '5d1bc2b2-2edb-4304-91fd-6633dc9bd935'
+    writeFileSync(join(dir, `${SID}.json`), JSON.stringify({ v: 1, version: '0.1.0', claude: '2.1.296', at: now - 1000 }))
+    writeFileSync(join(dir, `${other}.json`), JSON.stringify({ v: 1, version: '0.1.0', at: now, ended: true }))
+    utimesSync(join(dir, `${other}.json`), new Date(now - 2 * 86_400_000), new Date(now - 2 * 86_400_000))
+    writeFileSync(join(dir, 'notes.txt'), 'x')
+    expect(d.modBeats(now)).toEqual({ [SID]: { version: '0.1.0', claude: '2.1.296', at: now - 1000, mods: [] } })
+    expect(readdirSync(dir).sort()).toEqual([`${SID}.json`, 'notes.txt'])
+    expect(new DeckHooks(mkdtempSync(join(tmpdir(), 'deck-'))).modBeats(now)).toEqual({})
   })
 })

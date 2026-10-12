@@ -54,8 +54,11 @@ export function isUserWords(text: string): boolean {
     )
   )
     return false;
+  // `[MasterDeck PR watch] …` and `[MasterDeck monitor: …]` are typed in by MasterDeck: the PR
+  // watch's "merged" message comes after the merge and would turn Merged into Rework.
   if (
     t.startsWith("[Cross-session") ||
+    t.startsWith("[MasterDeck ") ||
     t.startsWith("Base directory for this skill") ||
     t.startsWith("Caveat:")
   )

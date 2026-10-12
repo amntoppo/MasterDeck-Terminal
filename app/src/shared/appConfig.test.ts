@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_CONFIG, issueRef, issueUrl, parseConfig, projectKey, statusGroup, statusRank } from './appConfig'
+import { codeRepoOf, DEFAULT_CONFIG, issueRef, issueUrl, parseConfig, projectKey, statusGroup, statusRank } from './appConfig'
 
 describe('appConfig', () => {
   it('parses master config show output and fills defaults', () => {
@@ -80,5 +80,20 @@ describe('accounts', () => {
     expect(c.accounts.filter((a) => a.primary)).toHaveLength(1)
     expect(parseConfig({ accounts: [{ login: 'carol' }] }).accounts[0]).toMatchObject({ login: 'carol', name: 'carol', email: '', repos: [], projects: [] })
     warn.mockRestore()
+  })
+})
+
+describe('codeRepos (issue #61)', () => {
+  it('reads the pairs; a bad, self or second pair for one repository is dropped', () => {
+    const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', codeRepos: [
+      { issues: 'acme/tracker', code: 'acme/api' }, { issues: 'ACME/tracker', code: 'acme/web' }, { issues: 'acme/x', code: 'acme/x' },
+      { issues: 'nope', code: 'acme/api' }, 'acme/api', { issues: 'acme/y' },
+    ] })
+    expect(c.codeRepos).toEqual([{ issues: 'acme/tracker', code: 'acme/api' }])
+    expect(parseConfig({ owner: 'acme', issueRepo: 'tracker' }).codeRepos).toBeUndefined()
+  })
+  it('codeRepoOf: the pair, else the repository itself (null: the primary)', () => {
+    const c = parseConfig({ owner: 'acme', issueRepo: 'tracker', codeRepos: [{ issues: 'acme/tracker', code: 'acme/api' }] })
+    expect([codeRepoOf('Acme/Tracker', c), codeRepoOf(null, c), codeRepoOf('acme/web', c)]).toEqual(['acme/api', 'acme/api', 'acme/web'])
   })
 })

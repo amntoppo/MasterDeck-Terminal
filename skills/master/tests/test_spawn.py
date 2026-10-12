@@ -170,6 +170,23 @@ class SpawnTest(unittest.TestCase):
         self.assertIsNone(spawn.copy_of("backgrounded · 1a2b3c4d\n"))
         self.assertIsNone(spawn.copy_of(""))
 
+    # Claude Code 2.1.295, real output of `claude --bg -n probe59-a --model haiku "…"` with stdout
+    # not a terminal (as spawn runs it): the id line carries the name, then four hint lines.
+    BG_OUT = ("backgrounded · 582e44cc · probe59-a\n"
+              "  claude agents             list sessions\n"
+              "  claude attach 582e44cc    open in this terminal\n"
+              "  claude logs 582e44cc      show recent output\n"
+              "  claude stop 582e44cc      stop this session\n")
+
+    def test_bg_id_reads_the_real_start_output(self):
+        self.assertEqual(spawn.bg_id(self.BG_OUT), "582e44cc")
+        self.assertEqual(spawn.bg_id(self.COPY_OUT), "6d996951")
+        self.assertEqual(spawn.bg_id(self.WOKE_OUT), "e168c2bf")
+        # The hint lines alone (the id line lost): the attach line still names it.
+        self.assertEqual(spawn.bg_id("\n".join(self.BG_OUT.splitlines()[1:])), "582e44cc")
+        self.assertIsNone(spawn.bg_id("started\n"))
+        self.assertIsNone(spawn.bg_id(""))
+
     def test_a_bare_resume_wakes_the_session(self):
         sid = "e168c2bf-1234-4abc-9def-0123456789ab"
         p = self.add({"spawn": {"name": "5-y", "cwd": self.tmp.name, "resume": sid}})

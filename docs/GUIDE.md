@@ -10,12 +10,13 @@ One window for all your Claude Code sessions, laid out as a command center:
 - **Terminals:**
   - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
-    sessions starting, and Parked. Click one to open its terminal. **Split** shows two terminals
-    side by side; **+** opens the new-terminal / new-session menu.
+    sessions starting, and Parked; a **Filters** line above the groups narrows the list. Click one to open its terminal. **Split** shows two terminals
+    side by side; **+** opens the new-terminal / new-session menu. A row always shows the session's
+    name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
-    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Queue**
-    and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
+    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Tools**
+    (**Queue**, **BTW** and **Mods**) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
 - **Master:** master-agent's terminal in its own column at the far right, on every screen. The
   **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
 - **The other views** use the full width (next to Master when it shows).
@@ -136,17 +137,30 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   acme/api found in `<workspace>`." The session then starts in the workspace with the prompt it
   always had, and has to find the repository itself; you can still press Start. A very large
   workspace is not searched to the end (2000 folders): the line then says "No checkout of acme/api
-  found — only the first 2000 folders of `<workspace>` were searched." **Choose folder…** (on the
-  Mac, not in the web app) picks any other folder for this session; if it is a checkout of the
-  repository the prompt says so. The prompt changes with the folder only while it is MasterDeck's
+  found — only the first 2000 folders of `<workspace>` were searched." **Choose folder…** picks
+  another folder for this session; if it is a checkout of the repository the prompt says so. On
+  the Mac it opens the folder picker and any folder will do. In the web app it lists the workspace
+  and the repositories MasterDeck found in it, with a filter, and only those: a session started
+  from a browser never runs in a folder you type. The prompt changes with the folder only while it is MasterDeck's
   own text: one you edited, or one master wrote for its proposal, is left alone. With two or more
-  accounts the line also says who the session runs as. A ticket with no repository of its own is
-  looked up as the primary repository.
+  accounts the line also says who the session runs as, and the folder is looked for in that
+  account's workspace: picking another **Account** looks again in the picked account's workspace
+  (not after **Choose folder…**, and not for a refused start being tried again). A ticket with no
+  repository of its own is looked up as the primary repository.
+  **Issues built in another repository** (an issue tracker whose code lives elsewhere): add the pair
+  in Setup → Repos & boards, under **Issues whose code is in another repository** (issues filed in
+  `acme/tracker`, code in `acme/api`). A ticket of the tracker then starts in the checkout of
+  `acme/api`, as the account that has `acme/api` (else the tracker's), and the line says "your
+  checkout of acme/api (where acme/tracker's code lives)". The system prompt names the code
+  repository instead of asking the session to find it. The session runs as the code repository's
+  account, so that account must be able to read the tracker: a private tracker under another
+  account cannot be read from the session (pick the tracker's account in the Start dialog then).
   For master's proposal the dialog looks the ticket up again: a checkout that exists now replaces
   the proposal's folder only when that folder is the plain workspace (a folder master chose on
   purpose stays), and the new proposal keeps the proposal's model; when nothing differs, master's
   own proposal is approved as it is. master's ASSIGN proposals and a PR's **Start review** (for the
-  PR's repository) pick the folder the same way, and so does `master add` without `--cwd` for an
+  PR's repository, as the PR's repository's account: it reads and pushes there; the card's issue
+  repository's account only when no account has the PR's) pick the folder the same way, and so does `master add` without `--cwd` for an
   ASSIGN or a PR review of a real issue; a meeting's session and any other kind start in the
   workspace, as before.
 - **The PR of the folder's branch:** a session working by hand in a repository's main checkout on a
@@ -221,6 +235,40 @@ A session you start yourself (`claude` in a shell) is not linked to any ticket u
 updates the skill's own file, which MasterDeck no longer reads.) Being in a
 checkout whose branch was once linked to a ticket does not link it.
 
+## A session's tabs: files and diffs
+
+Each session's terminal has its own row of tabs above it. **Terminal** is always first; it cannot
+be closed or moved. Other tabs show files and changes from the session's folder:
+
+- **A file tab** shows the file: Markdown (`.md`) rendered (**Preview** / **Source**), anything
+  else with syntax colours for its language and line numbers. A binary file, one over 1 MB or
+  20,000 lines, or one that is gone says so instead. **Reload** reads it again (it also reloads
+  when the session's turn ends); **Open in editor** opens it in your editor (desktop only).
+- **A diff tab** shows what changed in one file: removed lines in red, added in green, with old
+  and new line numbers. **Split** shows old and new side by side when the pane is wide enough
+  (remembered). **Open file** opens the whole file next to it. It stays live while it shows.
+
+Close a file or diff tab with **×** or a middle-click; closing the tab you are on moves to the one
+on its right (else its left). Each session keeps its tabs when you switch sessions, after a
+resume and after a restart.
+
+Open files from:
+- **Details → Diff**: the files changed in the session's folder, each with **A** (added),
+  **M** (modified), **D** (deleted) or **R** (renamed) and its `+`/`−` line counts.
+  **Uncommitted** compares with the last commit (new, untracked files count as added); **Branch**
+  shows everything since the branch left the default branch, commits included: what a PR would
+  hold. The list updates by itself every few seconds while it shows. Click a file to open its diff
+  (or go to it when it is open already).
+- **Details → Files**: the session's folder as a tree (git's files, ignored ones left out), with a
+  filter box. Click a file to open it.
+- **⌘P**: type part of a file's name in the open session's folder, ↵ opens it.
+- **⌘-click a path in the terminal** (Ctrl-click on Windows) that Claude printed, relative or
+  absolute, inside the session's folder.
+
+MasterDeck only reads here: nothing in these tabs changes a file. The web app shows the same tabs,
+reading the files on your Mac over the encrypted line, only inside the session's folder; a file or
+diff too big to send says so.
+
 ## Keeping many sessions moving
 
 - **Closing a Needs-you card (×):** hides it until the situation changes. A session card comes back
@@ -257,6 +305,24 @@ checkout whose branch was once linked to a ticket does not link it.
     matches how the step went). Pick the kind for new arrows in the toolbar, or select an arrow to
     change it. Select a block or an arrow and its settings open in a card over the canvas (click
     the canvas or × to close it); Delete removes the selection. **Tidy up** lines the blocks up.
+  - **Loop:** a frame (under Actions) whose blocks the session repeats until the loop is done.
+    Drag skills, instructions, monitors or notifications into it (a trigger, a built-in or another
+    loop stays outside); drag one out to take it out. Move the frame by its header (its blocks
+    move with it) and resize it from its bottom-right corner. Its card sets what ends it: a
+    **check command** (passes when it exits with 0, or when its output matches or no longer
+    matches a pattern, within a time limit of 1 to 9 minutes), **the agent says it's done** (with
+    the goal it works toward; it ends its turn with a line starting `LOOP DONE:`), or both; and
+    its limits: **max iterations** (1 to 100), **max minutes**, and **rounds with no progress**
+    (3 on a new loop; 0 turns it off).
+    Arrows into a block in the frame go to the frame (a loop starts at its top); blocks in it lead
+    only to each other. Leave it with the toolbar's arrow kinds while the frame is selected: **when
+    met** (green) and **at the limit** (amber); *then* goes on either way. One loop runs at a time,
+    on the main path: put loops one after another, not side by side or inside an "if it
+    worked/failed" branch. While a loop runs, the session can't end its turn until the loop is
+    over (MasterDeck checks at each turn end and tells it to go on); **Stop loop** in the
+    session's Details ends it. Your *When the session finishes a turn* steps wait while a loop runs and come
+    with the message that ends the last loop. On a session's own workflow the frame's header shows where it is
+    (`3/10 · last check failed`).
   - Drag the palette's right edge to make it wider or narrower (remembered; double-click resets).
   - Problems (a block no trigger reaches, a missing pattern) show as a red **!** on the block and a
     count in the toolbar; click the count to step through them.
@@ -273,7 +339,9 @@ checkout whose branch was once linked to a ticket does not link it.
   builder to resize it (double-click resets it). The session runs with your project settings
   only (your hooks and workflow steps don't reach it), edits its own folder without asking, and
   doesn't show among your sessions. **New chat** starts over; reopening continues the last chat.
-  The first time, Claude may ask you to trust its folder.
+  The first time, Claude may ask you to trust its folder. It can draft loops too ("after a push:
+  until `npm test` passes, fix the failing tests; at most 8 rounds"), and the check reports a block
+  it put in a loop that can't repeat there instead of leaving it out quietly.
 - **Custom triggers:** besides the built-in triggers, a workflow can use triggers of your own: a
   Claude Code hook event (before a tool, after it, or when you send a prompt), the tool it applies
   to (e.g. `Bash`, `Edit|Write`), a regular expression on the command, the file path or the prompt,
@@ -300,6 +368,29 @@ checkout whose branch was once linked to a ticket does not link it.
 - **Workflow templates:** the Template bar edits the **Default** (what every new session copies) or
   a template: **+ New template** starts one as a copy of the one shown; Rename and Delete work on
   templates. Templates live in `~/.claude/masterdeck/workflows/templates/`.
+- **Built-in workflows:** MasterDeck ships five templates, marked **Built-in** on their tab; the line
+  under the bar says what each does and when to use it. Each keeps board moves, the self-review
+  before the PR and the PR watch, and loops until it can show its checks pass.
+  - **Superpowers**: a feature big enough to design first; you answer questions at the start and
+    approve the plan (it names the Superpowers skills, used if you have them installed).
+  - **Ticket to PR**: a well-described ticket of ordinary size that needs no design session.
+  - **Bug fix**: a bug report; it reproduces the bug and pins it with a failing test first.
+  - **TDD (locked tests)**: behaviour you can state as inputs and outputs; the tests are committed
+    first (a commit whose message starts with `tests:`), and MasterDeck checks that every test of
+    every `tests:` commit on the branch stays unchanged while the code is written. Inside the loop,
+    a reviewer looks for code that only fits the tests; a gap it finds gets a new `tests:` commit.
+  - **CI doctor**: a branch whose CI should be green before review; after each push the session
+    waits for every CI run of the commit, reads a failure and fixes it, until all of them pass. A
+    commit no CI runs for passes too, and the session says so.
+
+  Pick one in the Start dialog or apply it from a session's Details like any template. A built-in
+  can be edited and renamed. Once its blocks change, the chip reads **Built-in · edited**. Once its
+  blocks or its name differ from what MasterDeck ships, **Restore original** shows: it puts back the
+  flow and name MasterDeck ships (your edits are lost; it asks first). **Duplicate** (in place of
+  + New template) makes a copy of your own. Delete asks first and removes it for good until you
+  press **Restore built-ins (n)**, which brings back every deleted one. A new MasterDeck version
+  updates the built-ins whose blocks you have not changed (a renamed one keeps your name); an
+  edited one is left as it is, and its line says when a newer version ships.
 - **A session's own workflow:** each session gets its own copy the first time MasterDeck sees it: the
   Default, or the template picked under **Workflow** in the Start dialog. Its **Details** tab shows a
   **Workflow** line: the workflow point the session reached last (linked to its issue, pushed, PR
@@ -307,7 +398,19 @@ checkout whose branch was once linked to a ticket does not link it.
   hooks' log, with what the workflow does there (built-ins and the plan's first lines; click for
   all of it). It pulses as **running** while the session works on that step (since its last turn
   end) or waits on the watch a built-in started there, else it shows how long ago; *Next* lists
-  the points still ahead. A session keeps the hooks it started with (Claude Code reads them once),
+  the points still ahead. Above it, each of the session's workflow loops has a line: while one
+  runs, `↻ Fix the tests · iteration 3/10 · 12 min · last check failed` (pulsing); once it is over,
+  how it ended (`done: …`, the limit it hit, or `stopped by you`). **Stop loop** (while it runs, after
+  a confirm: a stopped loop can't be given more) lets the session end its turn at the next turn end.
+  **History** lists every round, newest first (at most 50): its time, how long the check took,
+  passed / failed / no check, *said done* when the session claimed it, and the check's output
+  (click a round to unfold it), and under it what the session said it tried that round; then the
+  loop's progress, every round's line, drawn as Markdown with every tag shown as text. A session in
+  a loop ends each round with a line starting `PROGRESS:` that says what it tried; MasterDeck keeps
+  those lines and shows the last three to the session at each round (the session writes no file for
+  them). The session row in the list shows `↻ 3/10` while a loop runs, and `↻ ✓` (met) or
+  `↻ !` (at a limit) for an hour after; hover it for the same line. On a phone the badge and the
+  Details line are the same. A session keeps the hooks it started with (Claude Code reads them once),
   so this works for sessions older than a workflow change too. **Edit** opens the same editor
   as the Workflow window, full size, for that session only, with **Use a template… → Apply** and
   **Save as template**. Changing the Default or a template doesn't change sessions that already have
@@ -336,6 +439,31 @@ checkout whose branch was once linked to a ticket does not link it.
   still linked to its issue. Settings → *After the Mac restarts* can resume them without asking, or
   turn this off. master-agent is left out (it has its own Start). A session already running again is
   never resumed twice, also when MasterDeck is started a second time.
+- **Session details (right panel → Details)** has two tabs, and the one you pick stays picked
+  (per window; the web app keeps its own):
+  - **Session:** what waits on you, the status, the workflow, schedules, linked sessions, the
+    session's **Processes**, the worktrees or folder and branch, context, tokens, model, diff, and
+    the session's actions.
+  - **Processes** lists what the session started that is still running: its background commands
+    (a dev server, `npm run dev`, `uv run …`), the tool call running now, and what a command left
+    running when it ended (`cmd &`), with everything they started below them. Each row shows the
+    command, how long it has been up, its pid, CPU and memory, its folder, and the **ports** it
+    listens on: click `localhost:8000 ↗` to open it in your browser (on the web app the port is
+    shown, not opened: it is on the Mac). Click the command to see the processes below it and its
+    last output, which follows along. The list refreshes every few seconds while it is on screen;
+    a background command that ends shows **exited** with its exit code for a minute, then drops
+    off. macOS and Linux only for now.
+  - **GitHub:** a row each for the **Ticket**, the **Pull requests** and the **Monitors**, with
+    counts and status badges while closed and **↗** to open the item on GitHub. Click a row to open
+    it, and open what is inside it in turn: the ticket's steps, its note and its **Sub-issues**
+    (done of total); each PR's **Checks** (failing first), **Reviews** (the latest per reviewer),
+    **Open threads** (file and the last comment), **Comments** (newest first) and, when MasterDeck
+    watches it, **PR watch** with what it found and **Stop**; each monitor with the lines it printed,
+    newest first, and **Stop**. Open rows refresh by themselves when the session's state changes (a
+    PR also each minute) and stay open when you switch tabs or sessions. The last 50 events of a
+    monitor are kept while MasterDeck runs; after a restart its list starts again. The tab's label
+    counts the PRs and monitors, in red when a PR's CI fails or changes were asked for. The account
+    the session works as is at the top.
 - **Worktrees (Details tab, or ⌘E for a popup):** list every git worktree the session created
   or worked in, in any repo (repo / worktree, branch, path; click a path to copy it), read from its
   transcript (EnterWorktree, `git worktree add`, where it ran). Each has **Open in editor**: on macOS
@@ -347,7 +475,9 @@ checkout whose branch was once linked to a ticket does not link it.
   branch's changes, and asks a small model (`claude -p --model haiku`, about 20 s) for the summary; it
   runs only when you press it, and it is kept per session in `~/.claude/masterdeck/summaries/`. The panel
   says when the session has moved on since. **Post to issue** comments it on the session's issue.
-- **Queue (right panel → Queue):** holds the focused session's `/queue`, the prompts it runs one by
+- **Mods (right panel → Tools → Mods):** this session's Claude Code mods, each with a switch for
+  this session; the label says how many are off (see MasterDeck's mods below).
+- **Queue (right panel → Tools → Queue):** holds the focused session's `/queue`, the prompts it runs one by
   one as each response ends. Add prompts, reorder (↑ ↓), remove or clear them; the list updates as the
   session works through it. Pick another session from the menu at the top. An idle session only
   moves on after its next response, so the panel offers **Send next now**. In a session, `/queue
@@ -356,6 +486,9 @@ checkout whose branch was once linked to a ticket does not link it.
   installed the queue skill's hooks by hand, MasterDeck leaves `/queue` to them. Sessions already
   running when MasterDeck took the queue skill's hooks out keep using those (Claude Code reads hooks
   when a session starts), and MasterDeck's hook stays out of `/queue` for them until they end.
+  While a workflow loop runs, queued prompts wait until it ends (`/queue` still adds to the list);
+  then the next one goes in, also when the loop ended and left the session idle (MasterDeck types it
+  in, as **Send next** does, once).
 - **Broadcast (📣):** one message to the sessions you tick; each shows how it's sent, or why it can't be.
 - **Set a status by hand:** click the status chip in the Details tab (or right-click the session in
   the column → Set status…). Pick a status (it stays, in the column, Details and board card, until you
@@ -369,12 +502,27 @@ checkout whose branch was once linked to a ticket does not link it.
   stays there whatever its status; its row still shows the status. Unstar it to send it back to its
   group. Stopping it, or it ending, takes the star off. Stars are kept across restarts (per
   window: the web app keeps its own). With nothing starred the section is hidden.
+- **Filter the sessions:** the **Filters** line above the session groups is closed by default;
+  click it to open the search (on the session name, its ticket and its repository's folder, every
+  word must match) and the
+  choices: **Status** (the column's groups, and Parked), **Account** (only with two or more
+  accounts; "gh's active account" for a session started without one), **Repo** (the folder each
+  session runs in; a session in a worktree counts under its repository) and **★ Starred only**.
+  Within one kind any picked value matches; different kinds must all match. Closed, the line shows
+  how many filters are on and a chip for each (× removes it; more than fit scroll sideways), and
+  **Clear all**; closed, the line stays at the top while the list scrolls. When nothing matches,
+  the column says so with **Clear filters**. Picking Parked opens the Parked fold (it stays open
+  while that filter is on). Shells and starting sessions show only when no status, account, repo
+  or star filter is on, and the search looks at their names. A folder chip shows as many parts of
+  the path as it takes to tell two folders of one name apart. Cleanup offers only the sessions the
+  filters show. The filters and
+  whether the line is open are kept across restarts (per window: the web app keeps its own).
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
   Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
 - **Session status:** the column and the Details tab show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more
-  instructions after its last PR merged; a new PR then shows its own status, and once that is merged
+  instructions after its last PR merged; MasterDeck's own PR watch and monitor messages do not count; a new PR then shows its own status, and once that is merged
   too the session is Merged again, however many PRs it takes), **Approved**, **Changes Requested**,
   **CI Failing** (a build or test check; not the review check), **Ready for Review**, **In Review**;
   **Working** also while background agents or background commands it started still run (its turn
@@ -402,6 +550,19 @@ checkout whose branch was once linked to a ticket does not link it.
   how. It is saved in `~/.claude/masterdeck/inbox.json`; every addition, action and resolution is
   appended to `inbox-events.jsonl`, and notifications come from those events. The PRs view's
   "Needs its session" list is the same inbox.
+- **A workflow loop at its limit:** when a loop ends at a limit (iterations, time, or no progress)
+  without its criterion met, a **LOOP AT ITS LIMIT** card names the session, the loop and why it
+  stopped. **Run 5 more** opens the loop again with five more iterations and, if the session is
+  idle, types MasterDeck's own `Continue the loop "<name>".` into it (also from the notification and
+  the web app). **Leave it** dismisses the card; **Open** opens the session. The card closes by
+  itself once the loop runs again, and a loop that reaches its limit again is a new card. The card
+  has no **Stop loop**: the loop is already over.
+- **A workflow loop that paused:** a loop still running on a session that has been idle for 5
+  minutes (Claude Code ends a turn after eight blocked stops in a row, or the session simply
+  stopped) shows a **LOOP PAUSED** card with the loop and its round. **Continue** types
+  MasterDeck's own `Continue the loop "<name>".` into the session (also from the notification and
+  the web app); **Stop loop** ends the loop (after a confirm); **Open** opens the session. The card
+  closes by itself once the session works again or the loop ends.
 - **Questions:** a session asking you something shows as a **QUESTION** card with the whole
   question, its options and a reply box.
   - An AskUserQuestion menu is read from the session's screen (`claude logs`; Claude Code writes it
@@ -502,20 +663,142 @@ after a restart.
 Not used: WorktreeCreate/WorktreeRemove, since a hook there would replace Claude Code's own worktree
 creation.
 
+## MasterDeck's mods
+
+Claude Code mods (Claude Code 2.1.287 or later) that show inside a session what MasterDeck knows
+about it, one mod per feature, each switched on or off per session.
+
+**Installing them.** Setup's **Mods** step (and Settings → **Hooks, mods & skills** → **Mods**)
+has **Install mods**: one press adds MasterDeck's folder of mods (`~/.claude/masterdeck/mods`) to
+Claude Code as a marketplace, installs every mod for your user, and puts the core first in
+`prependPlugins` in `~/.claude/settings.json`. It checks Claude Code's version first (2.1.287 or
+later) and backs up `settings.json` before every change (`~/.claude/masterdeck/settings.backup.*.json`).
+**Remove** takes the mods, the marketplace and the `prependPlugins` entry out again (the rest of
+your settings stays). **Repair** shows when only part of it is there (a mod switched off by hand,
+`prependPlugins` missing). New sessions load the mods; running ones at a reload.
+
+**Updates.** Each MasterDeck update copies its mods into `~/.claude/masterdeck/mods`, which Claude
+Code reads in place, so there is nothing to install again. Running sessions keep the older mods
+until they reload their plugins: Needs you then shows a **MODS** item with how many sessions run
+older mods (or none, after an install) and **Reload idle sessions**, which types `/reload-plugins`
+into each one that waits at an empty prompt (never into one asking a question or a permission).
+Settings → Mods has the same button. The others take the new mods when you reload them from
+Tools → Mods, or at their next start.
+
+**Where the order is not yours to set.** With your organization's managed settings in place, or
+signed in to Claude Code with a Team or Enterprise plan, Claude Code ignores `prependPlugins` in
+your own settings: the mods still load, but the core may load after the others and cannot switch
+them per session. Setup and Settings say so; an admin can list `masterdeck@masterdeck` in
+`prependPlugins` in the managed settings.
+
+Then start or resume a session (or run `/reload-plugins` in one). In a session on a ticket, with
+a PR or with linked sessions:
+
+- **Ticket line** (`masterdeck-ticket`): a line above the prompt with the ticket, its board column,
+  the PR with its CI and open review threads, and how many sessions are linked; short in a narrow
+  terminal, with the title when there is room. **Details** (or `/md-ticket`) opens a pane with links
+  to the ticket and the PR; **Hide** hides the line. With MasterDeck closed, the line says so and how
+  old its data is.
+- **Alerts** (`masterdeck-alerts`): toasts when the card moves, a review thread opens, CI fails or
+  passes, or the PR merges.
+- **Note command** (`masterdeck-note`): `/md-note <text>` adds the text to the ticket's note in
+  Notes at once, without a turn of Claude (macOS and Linux).
+- **Agent loop** (`masterdeck-loop`): `/md-loop [--max N] <check> -- <goal>`, for example
+  `/md-loop npm test -- fix the failing tests`. Claude works on the goal; when its turn ends the check
+  runs in the session's folder; while it fails, Claude gets its last lines and another round, up to N
+  (5 unless you say). A line above the prompt shows the round and what runs, with **Stop**; it ends
+  when the check passes, after N rounds, when you interrupt a round (Esc), press Stop, type
+  `/md-loop stop`, or switch the mod off. `/md-loop` alone says where it stands.
+- **Board** (`masterdeck-board`): `/md-board` opens a pane with the board of the session's account
+  (its sprint, each column with its cards and how many there are), this session's ticket marked.
+  Read only.
+- **MasterDeck core** (`masterdeck`): nothing on screen; it does the switching below and tells
+  MasterDeck which mods run in each session.
+
+**Tools → Mods** has a switch per mod, for that session only:
+
+- **MasterDeck** lists the core (always on: it does the switching) and the five feature mods. One
+  switched off stops at once (nothing drawn or toasted, its command does nothing), and comes back at
+  once when switched on.
+- **Other mods** lists every other mod MasterDeck has seen in your sessions (yours, marketplace ones,
+  ones loaded with `--plugin-dir`, the ones built into Claude Code). One switched off does not load
+  in that session; one that is running keeps running until the session starts again ("Off from the
+  session's next start"). Switched back on, it loads within seconds (Claude Code reloads its plugins
+  in that session, one line in the transcript). Mods your organization manages and mods built into
+  Claude Code cannot be switched here.
+- The choices last across a resume. Mods load in every other session as usual.
+- A running session takes new or updated mods only when it reloads its plugins. When a session runs
+  older ones the tab says so, with **Reload plugins** (it types `/reload-plugins` into the session
+  when it waits for you). MasterDeck's switches work before that too: the choice applies once the
+  mod runs there.
+
+The mods only read what MasterDeck writes and never talk to GitHub. In a session MasterDeck has
+nothing for, they show nothing. To remove them all: **Remove** in Settings → Mods.
+
+## Side questions (BTW)
+
+**Tools → BTW** (the right panel) asks a quick side question about the session, the way Claude Code's
+`/btw` does, without typing in the terminal:
+
+- Type the question and press **Enter** (**Shift+Enter** for a new line), or **Ask**. The answer
+  streams in under it ("Answering…" until the first words); **Stop** ends it.
+- The answer comes from the session's conversation so far, with no tools (it cannot read files or
+  run anything). It works while Claude is busy, does not interrupt it and is never added to the
+  conversation. Each question also sees your last 20 side questions and their answers, as `/btw` does.
+- Each answer shows Markdown and code, what it cost, **Copy** and **Remove**. One that failed says
+  why, in red, with **Try again**.
+- **History** lists every side question of the session, newest first, with its time (the exact time
+  on hover), and is kept across restarts (`~/.claude/masterdeck/btw/`).
+- A `/btw` you type in the session's terminal shows here too, marked **terminal**. Claude Code keeps
+  those answers nowhere, so MasterDeck reads the answer off a background session's screen while the
+  `/btw` box is open: only what fits in the box (the entry says so when the answer was longer). For
+  an interactive session, or one asked before MasterDeck was running, only the question is there;
+  **Ask here** puts it in the box to ask again from the tab.
+- Each question from the tab reads the session's whole conversation once (a separate run of
+  `claude`, with its own prompt cache), so it costs more than `/btw` in a long session; the cost is
+  shown on the answer.
+
 ## Cost and context
 
 - **Tokens:** the Details tab shows **Tokens** (input, output and prompt-cache, with the
   split on hover), and the Costs view shows tokens next to spend: per day, per ticket and per
   session. They are summed from the session's transcript and its subagents', counting each message
-  once, by the day it was sent. The first Costs view reads your history once (a few seconds, in the
+  once, by the hour it was sent. The first Costs view reads your history once (a few seconds, in the
   background); after that only new lines are read (`~/.claude/masterdeck/tokens.json`). Cache reads
   are usually most of the total.
-- **Costs view ($):** spend today, 7 and 30 days, a 14-day bar chart, and tables per ticket and per
-  session. The data is the status line's cumulative cost, recorded per session per day in
-  `~/.claude/masterdeck/costs.json`. Spend a session had before MasterDeck first saw it counts as a
-  baseline: it's in All time and ticket totals, but not in any day. **USD / Tokens** (top right)
+- **Costs view ($):** the total for the chosen period, the sessions and tickets that spent in it, a
+  bar chart and tables per ticket and per session. **The time filter** (top right) picks the period:
+  Last 1 hour, Last 5 hours, Last 12 hours, Today, Yesterday, Last 7 days (the default), Last 30
+  days, All time, or **Custom…**, a From and To date and time (the To minute counts; an end before
+  the start is refused). Today and Yesterday follow your Mac's time zone. The list shows the period
+  ("Last 7 days", or a custom "3 Oct – 9 Oct", with times when it has any; ✎ changes it), and the
+  choice is remembered across restarts. Everything but the **All time** column follows it; the
+  chart has a bar per hour (up to two days), per day (up to two months), per week, then per month.
+  A period with nothing in it says **No costs in this period**. The data is the status line's
+  cumulative cost, recorded per session per hour in `~/.claude/masterdeck/costs.json` (kept per day
+  once a month old, and from before this version). A period that starts or ends inside a clock hour
+  gets that hour's share by time (so Last 1 hour is an estimate within the hour); spend a session
+  had when MasterDeck first saw it today counts in that hour. Spend a session had before MasterDeck
+  first saw it on an earlier day counts as a baseline: it's in All time and ticket totals, but not
+  in any period. **USD / Tokens** (top right)
   switches the whole view to tokens: the figures, the chart and both tables (sorted by tokens), with
   dollars as the second figure. The choice is remembered.
+- **Hours (Costs view, desktop only):** the third choice beside USD / Tokens: an *estimate* of how
+  long you worked per GitHub account, per day and per ticket, from when your sessions on this Mac
+  were active (every line of their transcripts and their subagents'). It is not a time tracker. The
+  rule is written next to the numbers: a gap of up to 1 hour between a session's activity counts as
+  working, a longer one does not (pick 15 min, 30 min, 1 h or 2 h; remembered), whether you were there
+  or the session worked on its own. An account counts each minute once, however many of its sessions
+  were active then; a ticket gets its full time, so two tickets worked from 10:00 to 11:00 show 1 h
+  each and 1 h for the account. A session with no ticket counts for its account only. A session's
+  account is the one it was started as, else the account of its folder's repository, else of its
+  ticket's repository (a removed worktree), else (with one account) that account; anything else is
+  listed as **unknown account**. A resumed session is one session: the gap across the resume is
+  filled like any other. All of a session's time goes to the ticket it is linked to now. The numbers
+  refresh every minute while the tab is open; the time filter cuts them to its period. Click a day to see its tickets. **Export CSV…** saves `date,account,ticket,minutes` for the range (an `(account total)` row
+  per account and day, then its tickets) where you choose. Only this Mac's sessions are counted, and
+  only sessions the Costs view knows (those with a status line record). Nothing of it goes to the
+  web app, a phone or the API.
 - **Context warnings:** at the warning level (85% by default), a notification (once), a Needs-you card
   and **Compact now** in the Details tab, which types `/compact`.
 - **Budget per ticket:** past $X (Settings), a notification (once) and a Needs-you card. Board cards show
@@ -581,7 +864,15 @@ creation.
   `./create-ticket.sh` (the one command it may run without asking), and the Board refreshes with a
   note of what it created. What you typed in the dialog is handed over as a draft it shows you
   before creating. The first time, Claude asks you to trust its folder (it pre-approves the create
-  command). **New chat** starts over.
+  command). **New chat** starts over (the settings bar keeps its values).
+  - **The settings bar**, below the chat, says what every ticket it creates gets: repository,
+    people, column (and board, with several), sprint, labels and milestone, on one line. Click it to
+    change them (label and milestone choices follow the repository; column and sprint follow the
+    board); a change applies to the next ticket, without a new chat. It starts from where you
+    clicked: the column, the tab's filters and sprint, or what you picked in the New ticket dialog.
+    The bar always wins: MasterDeck creates the ticket with its values whatever Claude passes. Ask
+    for something else in the chat ("assign it to Ravi") and Claude says the bar's value applies, so
+    change it in the bar; if Claude passed another value anyway, it tells you which one was used.
   With two or more GitHub accounts each Board tab has its own Create with Claude session, working
   as the tab's account (its header says `as @login`; its folder is
   `~/.claude/masterdeck/ticket-builder/tab-<tab id>/`). Tickets it creates go in as that account.
@@ -636,6 +927,24 @@ A place for what you would otherwise keep in another app: your own notes, and on
   in the list under **Notes**, the one edited last first, with the start of its text. The search
   box above the list finds notes by their titles and texts (every word you type must be in the
   note), and a ticket's note by its ticket too, written `owner/name#12`. **Delete** (under the text) asks first and cannot be undone.
+- **Markdown:** write a note in Markdown (`# headings`, `- lists`, `- [ ] tasks`, `[links](https://…)`,
+  `` `code` ``, `**bold**`, `_italic_`, tables, quotes) and see it rendered. Under the text, **Write**
+  shows the text you edit, **Preview** the note rendered, and **Side by side** (in a window at least
+  1000 px wide) both, with the panel twice as wide. Each window and browser remembers its choice (a
+  new, empty note always opens in **Write**). In the
+  preview a link opens in your browser, never in MasterDeck, and only `https://` links are links. An
+  image (`![name](https://…)`) shows as a link to it: opening a note never loads anything. HTML
+  in a note is never run or drawn: `<b>`, `<img>`, `<script>` and the like show as the text you typed.
+  The list, a ticket's **Details** and the hover text of a card's note mark show the start of a note
+  as plain words (the marks left out). Nothing about the stored note changed: a note written before
+  reads the same (or better: a `- ` line is a list now), and nothing on disk was rewritten.
+- **Notes from a session:** ask any Claude session to "write this to a note" (or "add it to the
+  ticket's note"). MasterDeck installs the `masterdeck-notes` skill: with it a session can make a new
+  note (as many as you ask for, each with its own title), add text at the end of a note it made, or
+  add text at the end of a ticket's note (made when there is none). A session only adds; it never
+  reads your notes, changes what you wrote or deletes anything. The note shows up in the panel at
+  once; if you are typing in that same note, the editor says **Changed elsewhere** as usual. MasterDeck
+  must be running (the session is told when it is not). macOS only for now.
 - **A ticket's note:** one per ticket. In a session's **Details** tab, **Add note** (or **Edit
   note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
   on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
@@ -648,8 +957,9 @@ A place for what you would otherwise keep in another app: your own notes, and on
   editor says so with **Discard**, and keeps your text on screen until you choose. When the Mac
   does not answer (the web app, a lost connection), or could not write the file just then, it says
   **Not saved** and tries again every few seconds.
-- **Every note:** plain text (Markdown with a preview is planned). It is kept on this Mac, in
-  `~/.claude/masterdeck/notes/` (one small file each), never sent to a session or to GitHub, and
+- **Every note:** the text as you typed it (Markdown, shown rendered). It is kept on this Mac, in
+  `~/.claude/masterdeck/notes/` (one small file each), never sent to a session (sessions can add to
+  notes, not read them) or to GitHub, and
   not part of what the phone and API line carries. A browser gets notes only over the end-to-end
   encrypted connection: the list carries the first 120 characters of each; a whole note is sent
   when you open it, and when your save meets a newer version of that note (so the editor can offer
@@ -661,9 +971,16 @@ A place for what you would otherwise keep in another app: your own notes, and on
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
 Stored in `~/.claude/masterdeck/settings.json`.
 
+- **Appearance** (General): **Light**, **Dark** or **System**. System follows macOS (or Windows)
+  light or dark mode and switches with it. The change shows at once, terminals included, and is
+  kept. The default is Dark. In the web app, the choice applies to that browser only, so a phone
+  can be light while the Mac stays dark. In the light theme, terminal text is darkened
+  automatically where a program picked colours for a dark background. If Claude Code's own colours
+  still look wrong, run `/theme` in the session and pick a light theme there.
+
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.
-- **Hooks & skills:** status lines, not switches. **Queue** says who runs `/queue`: MasterDeck's
+- **Hooks, mods & skills:** status lines, not switches (but **Mods**, see MasterDeck's mods). **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
   (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the
   first `gh pr create` of each branch with an instruction to review the diff, then lets the retry (same branch) go through. It is a
@@ -775,7 +1092,9 @@ phone, curl or CI can see your sessions and act on them while you're away from t
   is connected to this account" and keeps retrying slowly.
 - **Status dot:** green Connected (with the last sync time), amber connecting or reconnecting (with
   the reason, e.g. it can't reach the backend, or at launch "waiting for sessions to load":
-  MasterDeck connects only once its session list is in, so waiting commands find their sessions), red an error that needs you (another Mac is
+  MasterDeck connects once its session list is in, so waiting commands find their sessions; if
+  `claude agents` fails the status says why, and after a minute it connects anyway: phone and API
+  commands then fail with that reason, and the phone keeps its last session list, until the list is in), red an error that needs you (another Mac is
   connected, or MasterDeck is too old for the backend), grey off. If the server signs this Mac out
   (or the account was deleted) the line stops and says so.
 - **Security:** anyone signed in to your account can drive your Claude sessions. Keep your password
@@ -813,7 +1132,7 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
   you), **Tasks**, **Board**, **PRs** (badge = PRs waiting on you), **Master** (when master-agent is
   on) and **More** (Costs, Janitor, Notes, Workflow, Settings, Broadcast, Standup, Skills, Commands).
 - **A session:** tap it in Sessions. The terminal fills the screen: **‹ Sessions** goes back,
-  **Panel** opens Details / Queue / Summary as a sheet (› closes it). One terminal at a time (no
+  **Panel** opens Details / Tools / Summary as a sheet (› closes it). One terminal at a time (no
   split).
 - **Quick keys** under the terminal (and under master): Esc, Tab, ⇧Tab, ^C, ↑ ↓ ← →, Enter, y, n
   and /. A tap types the key into the terminal without closing the keyboard;
@@ -900,8 +1219,9 @@ is a `gh` login (`gh auth status` lists them).
   the + menu's repos and standup cover every account's workspace.
 - **Each session works as one account**: its commits (name and email from Setup), its pushes and
   PRs, and every `gh` call inside it. New session and Start show an **Account** field (two or more
-  accounts): it defaults to the issue's repository's account (for a repository no account lists, on a
-  board: the account with that owner, else the account whose board holds the card), else the
+  accounts): it defaults to the account of the repository the issue's code is in (the issue's own
+  unless Setup says another), else the issue's repository's (for a repository no account lists, on
+  a board: the account with that owner, else the account whose board holds the card), else the
   folder's `origin`, else the primary; accounts needing a new login can't be picked. Details shows the session's account. A
   session keeps its account; to change it, stop it and resume it with another account picked in the
   Start dialog: that starts a copy of the conversation as the new account (a running session is
@@ -1018,6 +1338,13 @@ cards is in them.
   fails the popup says so and offers **Me** alone: assigning to yourself still works. A card on one of your boards whose repository is not ticked in Setup gets its repository's people too, read (and assigned) as the account whose organisation owns the repository, or else the account whose board holds the card, so a private repository on bob-work's board is not asked for as the primary account. The Board's
   Assignee filter lists the people seen on the tab's cards and the tab's account; the primary issue
   repo's people are added only on the primary account's tab (or with one account).
+- **Description and sub-issues in the popups:** the Assign popup shows the ticket's description as
+  GitHub renders it, so you can tell what the work is before you pick it up. The Assign popup and
+  the Start dialog (under Ticket) list the ticket's **Sub-issues**: each one's number, title and
+  status (its column when it is on the board, else Open or Closed), with "2 / 5 done" above the
+  list (done means closed, as on GitHub). Clicking a sub-issue opens it on GitHub. A ticket with no
+  sub-issues shows no section. A long description and a long list each scroll in their own box,
+  so the popup's buttons stay in view.
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue
   opens a PR, MasterDeck adds that PR to the issue as a closing reference (it shows under the
   issue's Development box on GitHub), exactly as writing "Closes #12" in the PR would. This holds for
@@ -1069,23 +1396,24 @@ cards is in them.
 
 | Keys | What |
 |---|---|
-| `⇧←` / `⇧→` | Previous / next view: Terminals, Board View, PRs, Tasks |
 | `⇧↑` / `⇧↓` | Previous / next terminal tab (switches to Terminals) |
 | `⌘1`–`⌘9` | Terminal tab 1–9 |
 | `⌘T` | New terminal in the workspace (+ menu) |
 | `⌘⇧W` | Close the tab (the session keeps running) |
 | `⌘\` | Split two tabs side by side, or close the split |
 | `⌘K` | Command palette |
+| `⌘P` | Open a file of the open session in a tab |
+| `⌘`-click | A file path in a session's terminal opens it in a tab |
 | `⌘F` | Find in the open terminal, or on the Board or PRs screen |
 | `⌘⇧F` | History: search every session, jump to the match |
 | `⌘J` | Open the first Needs-you item |
 | `⌘E` | The open session's worktrees (Open in editor) |
 | `⌘⇧M` | Show or hide master |
 | `⌘⇧G` | Refresh from GitHub |
-| `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks & skills, Remote, Keyboard shortcuts, About) |
+| `⌘,` | Settings (a page: Account, General, Needs you & alerts, Sessions, Hooks, mods & skills, Remote, Keyboard shortcuts, About) |
 | `⌘/` | The shortcut list |
 
-Shift+arrows work from a terminal too (they don't reach the shell), but not in a text box, where
+Shift+Up/Down work from a terminal too (they don't reach the shell), but not in a text box, where
 they select text, or while a dialog is open. `⌘C` copies a terminal selection.
 
 ## Windows notes

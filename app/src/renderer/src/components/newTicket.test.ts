@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardFor, boardTicketContext, claudeHandoff, claudePrompt, ticketDefaults, ticketRequest } from "./NewTicket";
+import { boardFor, boardSprints, boardTicketContext, changeSettings, claudeHandoff, claudePrompt, settingsFrom, ticketDefaults, ticketRequest } from "./NewTicket";
 import { paneCommand } from "@shared/paneCommand";
 import { ticketContext } from "@shared/ticketBuilder";
 import { defaultFilters, UNASSIGNED } from "@shared/boardFilter";
@@ -98,7 +98,8 @@ describe("new ticket", () => {
       ["aman", "ravi"],
       "aman",
     );
-    expect(md).toContain("./create-ticket.sh --repo");
+    expect(md).toContain("./create-ticket.sh --title");
+    expect(md).toContain("MasterDeck creates every ticket with exactly these values");
     expect(md).toContain(
       "`Org/2` (Ops): columns, in order: `Backlog`, `In Dev`. Sprint field: `Iteration`.",
     );
@@ -245,9 +246,9 @@ describe("a ticket for an account with no board", () => {
 describe("Create with Claude from the dialog", () => {
   const d = { title: " Fix login ", body: "Steps:\n1. open" } as never;
   it("names the column; without a board it names none", () => {
-    expect(claudePrompt("In Dev", d)).toBe("Write this ticket for In Dev: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
-    expect(claudePrompt("", d)).toBe("Write this ticket: Fix login. Steps: 1. open (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
-    expect(claudePrompt("Todo", { title: "T", body: " " } as never)).toBe("Write this ticket for Todo: T (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.");
+    expect(claudePrompt("In Dev", d)).toBe("Write this ticket for In Dev: Fix login. Steps: 1. open (where it goes is in the settings bar). Show it to me first; create it once I say so.");
+    expect(claudePrompt("", d)).toBe("Write this ticket: Fix login. Steps: 1. open (where it goes is in the settings bar). Show it to me first; create it once I say so.");
+    expect(claudePrompt("Todo", { title: "T", body: " " } as never)).toBe("Write this ticket for Todo: T (where it goes is in the settings bar). Show it to me first; create it once I say so.");
   });
   it("nothing typed: no prompt", () => {
     expect(claudePrompt("Todo", undefined)).toBeUndefined();
@@ -279,5 +280,49 @@ describe("Create with Claude from the dialog", () => {
   });
   it("the brief says what an empty status means", () => {
     expect(ticketContext(cfg as never, [], [], null)).toContain("An empty `status` and `project`: this account has no GitHub board");
+  });
+});
+
+describe("Create with Claude's settings bar", () => {
+  const ctx = boardTicketContext({
+    state,
+    col: "In Dev",
+    filters: { ...defaultFilters(null), assignees: ["ravi", UNASSIGNED], labels: ["bug"], projects: ["Org/2"] },
+    selectedSprint: "@current",
+    tab: "Mine",
+    fallback: false,
+    repoMode: false,
+    readyCol: "Todo",
+  });
+  it("starts from the column, the tab's filters and sprint, or the dialog's draft", () => {
+    expect(settingsFrom(state, ctx)).toEqual({
+      repo: "Org/Main", project: "Org/2", status: "In Dev", assignees: ["ravi"], labels: ["bug"],
+      milestone: "", sprint: "@current", sprintField: "Iteration",
+    });
+    const draft = { ...ticketDefaults(state, ctx), title: "T", body: "B", repo: "Org/app", assignees: [], milestone: "v1" };
+    expect(settingsFrom(state, ctx, draft)).toMatchObject({ repo: "Org/app", assignees: [], milestone: "v1" });
+    expect(settingsFrom(state, ctx, draft)).not.toHaveProperty("title");
+  });
+  it("an account with no board has no board, status or sprint", () => {
+    const none = { ...state, config: { ...cfg, projects: [] } } as unknown as AppState;
+    expect(settingsFrom(none, ctx)).toMatchObject({ project: "", status: "", sprint: "" });
+  });
+  it("another repository drops labels and milestone; another board keeps only what it has", () => {
+    const s = settingsFrom(state, ctx);
+    const sprints = [
+      { id: "1", title: "S1", startDate: "2026-01-01", duration: 14, completed: false, projects: ["Org/2"] },
+      { id: "2", title: "S2", startDate: "2026-01-15", duration: 14, completed: false },
+    ];
+    const boards = cfg.projects as never;
+    expect(changeSettings({ ...s, milestone: "v1" }, { repo: "Org/app" }, boards, sprints)).toMatchObject({ repo: "Org/app", labels: [], milestone: "" });
+    expect(changeSettings({ ...s, sprint: "S1" }, { project: "Org/1" }, boards, sprints)).toMatchObject({ project: "Org/1", status: "In Dev", sprint: "", sprintField: "Sprint" });
+    expect(changeSettings({ ...s, status: "Backlog" }, { project: "Org/1" }, boards, sprints).status).toBe("Todo");
+    expect(changeSettings(s, { project: "Org/1" }, boards, sprints).sprint).toBe("@current");
+    // The current sprint stays on any board with a sprint field, even before sprints are read.
+    expect(changeSettings(s, { project: "Org/1" }, boards, []).sprint).toBe("@current");
+    const sprintless = [{ ...cfg.projects[0], sprintless: true }] as never;
+    expect(changeSettings(s, { project: "Org/1" }, sprintless, sprints).sprint).toBe("");
+    expect(boardSprints(sprints, { ...cfg.projects[0], sprintless: true } as never)).toEqual([]);
+    expect(boardSprints(sprints, cfg.projects[0] as never).map((x) => x.title)).toEqual(["S2"]);
   });
 });

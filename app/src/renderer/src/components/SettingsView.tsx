@@ -7,6 +7,9 @@ import { deck, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
 import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
+import { MODS_ABOUT, ModsPanel } from './ModsPanel'
+import { setWebThemePref, useWebThemePref } from '../theme'
+import { THEME_PREFS, THEMES, type ThemePref } from '@shared/themes'
 
 export type SettingsSection = Section
 type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'hooks' | 'remote' | 'keys' | 'about'
@@ -16,7 +19,7 @@ const SECTIONS: [Section, string][] = [
   ['general', 'General'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
-  ['hooks', 'Hooks & skills'],
+  ['hooks', 'Hooks, mods & skills'],
   ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
   ['about', 'About'],
@@ -56,6 +59,11 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     <button className={`switch ${s[k] ? 'on' : ''}`} role="switch" aria-checked={!!s[k]} aria-label={label} onClick={() => set(k, !s[k] as never)} />
   )
 
+  // The window saves the Mac's setting; a browser keeps its own choice (theme.ts).
+  const webTheme = useWebThemePref()
+  const theme = isWeb() ? webTheme : s.theme
+  const setTheme = (t: ThemePref) => (isWeb() ? setWebThemePref(t) : set('theme', t))
+
   const now = useNow(5_000)
   const r = state.remote
   const dot = !r || r.conn === 'off' ? 'off' : r.conn === 'connected' ? 'ok' : r.conn === 'error' ? 'bad' : 'wait'
@@ -67,6 +75,15 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
     account: <AccountPanel account={state.account} />,
     general: (
       <>
+        <Field label="Appearance" hint={isWeb() ? 'For this browser. System follows its light or dark mode.' : `System follows ${deck().platform === 'win32' ? 'Windows' : 'macOS'} light or dark mode.`}>
+          <div className="seg" role="radiogroup" aria-label="Appearance">
+            {THEME_PREFS.map((t) => (
+              <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => setTheme(t)}>
+                {t === 'system' ? 'System' : THEMES[t].label}
+              </button>
+            ))}
+          </div>
+        </Field>
         <Field label="GitHub and boards" hint="Your account, repositories and boards (Setup).">
           <div className="f-row">
             {c.configured ? (
@@ -174,6 +191,9 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         </Field>
         <Field label="MasterDeck hook" hint="Permissions from Needs you, exact status, API errors, compactions and ticket context. Installed at launch (macOS and Linux).">
           <span className="ok">Managed by MasterDeck</span>
+        </Field>
+        <Field label="Mods" hint={`${MODS_ABOUT} An app update brings new mods; running sessions take them at a reload.`}>
+          <ModsPanel state={state} />
         </Field>
         <Field label="Skills" hint="The bundled skills, for use by hand. MasterDeck needs none of them.">
           <button className="btn" onClick={onSkills}>

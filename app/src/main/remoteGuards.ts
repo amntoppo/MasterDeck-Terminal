@@ -1,13 +1,43 @@
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
+import { insideRoot } from '@shared/filePath'
+import { isDiffBase, type DiffBase } from '@shared/sessionTabs'
+
+/**
+ * A call on a session's files (its tabs, Details → Diff / Files), from the window or the web app:
+ * the folder is the listed session's own `cwd`, looked up by key, never a folder the caller names;
+ * a path must stay inside it (`insideRoot`; main's reader then checks the real path) and a base is
+ * one of the two the Diff tab offers.
+ */
+export function sessionFileCall(
+  sessions: { key: string; cwd: string }[],
+  key: unknown,
+  want: { path?: unknown; base?: unknown } = {},
+): { ok: true; root: string; path?: string; base?: DiffBase } | { ok: false; message: string } {
+  const s = typeof key === 'string' ? sessions.find((x) => x.key === key) : undefined
+  if (!s) return { ok: false, message: 'That session is not listed.' }
+  if (!s.cwd) return { ok: false, message: 'That session has no folder.' }
+  const out: { ok: true; root: string; path?: string; base?: DiffBase } = { ok: true, root: s.cwd }
+  if ('path' in want) {
+    const p = insideRoot(want.path)
+    if (!p) return { ok: false, message: "Not a path in the session's folder." }
+    out.path = p
+  }
+  if ('base' in want) {
+    if (!isDiffBase(want.base)) return { ok: false, message: 'Not a diff base.' }
+    out.base = want.base
+  }
+  return out
+}
 
 /**
  * A remote save merges over the full current settings (a malformed payload changes nothing) and never changes
- * remoteEnabled (settings saves replace the whole object).
+ * remoteEnabled (settings saves replace the whole object), nor the Mac's theme (a browser keeps its own).
  */
 export function remoteSettings(patch: unknown, current: object): Record<string, unknown> {
   const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? (patch as Record<string, unknown>) : {}
-  return { ...current, ...p, remoteEnabled: (current as { remoteEnabled?: unknown }).remoteEnabled }
+  const c = current as { remoteEnabled?: unknown; theme?: unknown }
+  return { ...current, ...p, remoteEnabled: c.remoteEnabled, theme: c.theme }
 }
 
 /** Only dirs the deck already knows (workspace repos, session cwds); path.resolve normalises trailing slashes and `..`. */
@@ -16,14 +46,35 @@ export function knownDirsOnly(dirs: string[], known: Iterable<string>): string[]
   return dirs.map((d) => resolve(d)).filter((d) => ok.has(d))
 }
 
+/** A folder's real path (links followed), or null when it is not there. */
+function real(dir: string): string | null {
+  try {
+    return realpathSync(dir)
+  } catch {
+    return null
+  }
+}
+
 /**
- * The folder a draft is asked for (the Start dialog's Choose folder…). From a browser it is dropped
- * and the draft is made without it: choosing a folder on the Mac is the desktop's. From the Mac's
- * own window it must be an absolute path to a folder that is there.
+ * The folder a draft is asked for (the Start dialog's Choose folder…). From the Mac's own window it
+ * must be an absolute path to a folder that is there. From a browser only one of `known`, the
+ * folders MasterDeck found itself (the web app's pick of the workspace repositories), compared as
+ * real paths so a link cannot lead out of them; anything else is refused, never typed in.
  */
-export function chosenFolder(remote: boolean, cwd: unknown): { ok: true; cwd?: string } | { ok: false; message: string } {
-  if (remote || cwd === undefined || cwd === null || cwd === '') return { ok: true }
+export function chosenFolder(
+  remote: boolean,
+  cwd: unknown,
+  known: Iterable<string> = [],
+): { ok: true; cwd?: string } | { ok: false; message: string } {
+  if (cwd === undefined || cwd === null || cwd === '') return { ok: true }
   if (typeof cwd !== 'string') return { ok: false, message: 'not a folder on this Mac' }
+  if (remote) {
+    const want = isAbsolute(cwd) ? real(cwd) : null
+    const hit = want === null ? undefined : [...known].find((k) => real(k) === want)
+    return hit !== undefined
+      ? { ok: true, cwd: hit }
+      : { ok: false, message: `From the web app a session starts only in one of the workspace's repositories: ${cwd} is not one.` }
+  }
   let dir = false
   try {
     dir = isAbsolute(cwd) && statSync(cwd).isDirectory()

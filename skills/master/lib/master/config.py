@@ -319,11 +319,40 @@ def match_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
 
 
 def account_for_repo(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
-    """The login a spawned session for an issue in `repo` works as (None = the primary repo): its
-    account, else the primary. Only with two or more accounts: with one, sessions start as before."""
+    """The login MasterDeck's own calls for `repo` use (None = the primary repo): its account, else
+    the primary. Only with two or more accounts: with one, everything runs as before."""
     if not is_multi(cfg):
         return None
     return match_repo(repo, cfg) or accounts(cfg)[0]["login"]
+
+
+def code_repos(cfg: "dict | None" = None) -> dict:
+    """Setup's "code lives in" pairs: {issue repository in lower case: the repository its code is
+    in}. An issue filed in a tracker and built elsewhere starts its session in the other one's
+    checkout. A list in the file (`codeRepos: [{issues, code}]`), so a save replaces it whole."""
+    cfg = cfg or CONFIG
+    out: dict = {}
+    for e in cfg.get("codeRepos") or []:
+        if isinstance(e, dict) and all(isinstance(e.get(k), str) and re.fullmatch(REPO_RE, e[k]) for k in ("issues", "code")) \
+                and e["issues"].lower() != e["code"].lower():
+            out.setdefault(e["issues"].lower(), e["code"])
+    return out
+
+
+def code_repo(repo: "str | None", cfg: "dict | None" = None) -> str:
+    """Where the code of an issue in `repo` lives (None = the primary repo): Setup's pair, else `repo`."""
+    full = repo or primary_repo(cfg)
+    return code_repos(cfg).get(full.lower(), full) if full else full
+
+
+def start_account(repo: "str | None", cfg: "dict | None" = None) -> "str | None":
+    """The login a ticket's session works as (None = the primary repo): the account of the
+    repository its code is in (it pushes there), else the issue's, else the primary. The app's
+    `startAccount`. Only with two or more accounts: with one, sessions start as before."""
+    if not is_multi(cfg):
+        return None
+    full = repo or primary_repo(cfg)
+    return match_repo(code_repo(full, cfg), cfg) or match_repo(full, cfg) or accounts(cfg)[0]["login"]
 
 
 # https://github.com/o/r, git@<host or ssh alias>:o/r, ssh://git@<host or alias>/o/r (the app's repoFromRemote).
@@ -382,14 +411,16 @@ def workspace() -> Path:
     return Path(os.path.expanduser(os.environ.get("MASTER_WORKSPACE") or CONFIG["workspace"]))
 
 
-def workspace_for(repo: "str | None", cfg: "dict | None" = None) -> Path:
-    """The workspace of the account a ticket in `repo` belongs to (None = the primary issue repo):
-    the account that lists the repo, else the primary; an account without one of its own, and a
-    config without accounts, use the config's workspace. MASTER_WORKSPACE overrides them all."""
+def workspace_for(repo: "str | None", cfg: "dict | None" = None, account: "str | None" = None, mapped: bool = True) -> Path:
+    """The workspace of the account a ticket's session in `repo` runs as (None = the primary issue
+    repo): `account` when given (the Start dialog's pick), else `start_account`'s, else the primary;
+    an account without one of its own, and a config without accounts, use the config's workspace.
+    MASTER_WORKSPACE overrides them all. `mapped` False: `repo` is the code itself (a PR's repository)."""
     cfg = cfg or CONFIG
     views = accounts(cfg)
-    login = match_repo(repo, cfg)
-    view = next((v for v in views if v["login"] == login), views[0] if views else None)
+    full = repo or primary_repo(cfg)
+    login = (account or "").lower() or (match_repo(code_repo(full, cfg) if mapped else full, cfg) or match_repo(full, cfg) or "").lower()
+    view = next((v for v in views if v["login"].lower() == login), views[0] if views else None)
     own = view["workspace"] if view else ""
     return Path(os.path.expanduser(os.environ.get("MASTER_WORKSPACE") or own or cfg["workspace"]))
 

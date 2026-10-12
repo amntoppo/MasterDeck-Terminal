@@ -46,6 +46,15 @@ describe('sessionAsk', () => {
     expect(answeredInSession(sessionAsk([...lines, user(4, 'note', { isMeta: true })]), { repo: null, number: 12 })).toBe(false)
   })
 
+  it('does not count what MasterDeck types in (PR watch, monitors) as the user writing', () => {
+    const lines = [user(1, 'Fix the login bug'), said(2, 'Opened the PR.')]
+    expect(sessionAsk(lines).userAt).toBe(Date.parse(t(1)))
+    // The PR watch's "merged" message comes after the merge: it must not read as new instructions (Rework).
+    expect(sessionAsk([...lines, user(3, '[MasterDeck PR watch] acme/web#83: merged. The PR watch has ended.')]).userAt).toBe(Date.parse(t(1)))
+    expect(sessionAsk([...lines, user(3, '[MasterDeck monitor: deploy]\nok')]).userAt).toBe(Date.parse(t(1)))
+    expect(sessionAsk([...lines, user(3, 'Now also fix logout')]).userAt).toBe(Date.parse(t(3)))
+  })
+
   it('reads a report said in the session itself (no master-agent)', () => {
     const a = sessionAsk([said(1, '#7: question — ship it today?')])
     expect(a.report?.issue).toBe(7)

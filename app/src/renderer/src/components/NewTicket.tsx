@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import type { FilterState } from "@shared/boardFilter";
 import { UNASSIGNED } from "@shared/boardFilter";
 import type { NewTicket } from "@shared/ipc";
-import type { AppState } from "@shared/types";
+import type { AppState, Sprint } from "@shared/types";
+import type { ProjectConfig } from "@shared/appConfig";
+import type { TicketSettings } from "@shared/ticketSettings";
 import { accountChoices, isMulti, primaryLogin } from "@shared/accounts";
 import { boardless } from "@shared/derivedBoard";
 import { deck } from "../deck";
@@ -114,6 +116,85 @@ export function ticketDefaults(state: AppState, ctx: TicketContext): NewTicket {
   };
 }
 
+/** The boards and repositories a ticket of this account can go in (every one, with one account). */
+export function accountScope(
+  state: AppState,
+  account: string | null | undefined,
+): { repos: string[]; boards: ProjectConfig[] } {
+  const acc =
+    account && isMulti(state.config)
+      ? state.config.accounts.find((a) => a.login === account)
+      : undefined;
+  return acc
+    ? { repos: acc.repos, boards: acc.projects }
+    : { repos: state.config.repos, boards: state.config.projects };
+}
+
+/**
+ * Create with Claude's settings bar, from where it was asked for: the dialog's draft when it came
+ * from the dialog (what was picked there), else the + column, the tab's filters and sprint. An
+ * account with no board: no board, status or sprint.
+ */
+export function settingsFrom(
+  state: AppState,
+  ctx: TicketContext,
+  draft?: NewTicket,
+): TicketSettings {
+  const t = draft ?? ticketDefaults(state, ctx);
+  const noBoard = !accountScope(state, ctx.account).boards.length;
+  return {
+    repo: t.repo,
+    project: noBoard ? "" : t.project,
+    status: noBoard ? "" : t.status,
+    assignees: [...t.assignees],
+    labels: [...t.labels],
+    milestone: t.milestone,
+    sprint: noBoard ? "" : t.sprint,
+    sprintField: t.sprintField,
+  };
+}
+
+/** The sprints a board offers: its open ones (every open one when GitHub did not say), none on a board without a sprint field. */
+export function boardSprints(
+  sprints: Sprint[],
+  board: ProjectConfig | undefined,
+): Sprint[] {
+  if (!board || board.sprintless) return [];
+  const key = `${board.owner}/${board.number}`;
+  return sprints.filter(
+    (s) => !s.completed && (!s.projects || s.projects.includes(key)),
+  );
+}
+
+/**
+ * A change in the bar, with what depends on it: another repository drops the labels and milestone
+ * (they are the repository's); another board keeps the status and sprint only if it has them.
+ */
+export function changeSettings(
+  s: TicketSettings,
+  patch: Partial<TicketSettings>,
+  boards: ProjectConfig[],
+  sprints: Sprint[],
+): TicketSettings {
+  const next = { ...s, ...patch };
+  if (patch.repo !== undefined && patch.repo !== s.repo) {
+    next.labels = [];
+    next.milestone = "";
+  }
+  if (patch.project !== undefined && patch.project !== s.project) {
+    const b = boards.find((p) => `${p.owner}/${p.number}` === patch.project);
+    if (!b?.columns.includes(next.status)) next.status = b?.columns[0] ?? "";
+    const offered = boardSprints(sprints, b);
+    const kept =
+      next.sprint === "@current"
+        ? !!b && !b.sprintless
+        : offered.some((x) => x.title === next.sprint);
+    if (!kept) next.sprint = "";
+    next.sprintField = b?.sprintField || next.sprintField;
+  }
+  return next;
+}
+
 /** What Create sends. An account with no board: no board step (no project, status or sprint). */
 export function ticketRequest(
   t: NewTicket,
@@ -136,14 +217,14 @@ export function claudePrompt(
   draft: NewTicket | undefined,
 ): string | undefined {
   if (!draft || !(draft.title.trim() || draft.body.trim())) return undefined;
-  return `Write this ticket${status ? ` for ${status}` : ""}: ${draft.title.trim()}${draft.body.trim() ? `. ${draft.body.trim()}` : ""} (the rest of what I picked is in context.json's draft). Show it to me first; create it once I say so.`.replace(
+  return `Write this ticket${status ? ` for ${status}` : ""}: ${draft.title.trim()}${draft.body.trim() ? `. ${draft.body.trim()}` : ""} (where it goes is in the settings bar). Show it to me first; create it once I say so.`.replace(
     /\s*\n+\s*/g,
     " ",
   );
 }
 
 /** Several values from a list: chips, and "Add…" for the rest. */
-function MultiPick({
+export function MultiPick({
   value,
   options,
   onChange,

@@ -3,7 +3,7 @@ import type { RemoteCard, RemoteInboxEntry, RemoteSession, RemoteSnapshot } from
 import { jobName } from './schedules'
 import { columnsWithDerived } from './derivedBoard'
 import { fullRepo } from './ticket'
-import type { AppState } from './types'
+import type { AppState, SourceHealth } from './types'
 
 /**
  * What MasterDeck sends the remote backend: the Tasks view and Needs you, nothing else (no
@@ -170,4 +170,35 @@ export function fitSnapshot(
 export function remoteStatusWhenOff(s: { remoteEnabled: boolean }, hasToken: boolean): RemoteStatus & { hasToken: boolean } {
   const message = !s.remoteEnabled ? null : !hasToken ? 'Sign in first (Settings → Account)' : null
   return { conn: 'off', message, lastSyncAt: null, hasToken }
+}
+
+/**
+ * How long the line waits for the first session list before it dials anyway.
+ * ponytail: a fixed guess (a few `claude agents` polls); make it a setting if a slow Mac needs more.
+ */
+export const REMOTE_WAIT_MS = 60_000
+
+/**
+ * Whether the line to the backend may be dialled yet. It waits for the session list so commands
+ * queued while the Mac was off do not run (and fail) before sessions are known, but not for ever:
+ * after `REMOTE_WAIT_MS` it connects anyway (commands are then answered with `agentsFailure`).
+ */
+export function remoteWait(
+  agents: SourceHealth | undefined,
+  agentsError: string | undefined,
+  waitedMs: number,
+): { connect: true } | { connect: false; message: string } {
+  if (agents === 'ok' || waitedMs >= REMOTE_WAIT_MS) return { connect: true }
+  if (agents !== 'error') return { connect: false, message: 'waiting for sessions to load' }
+  return { connect: false, message: `waiting for sessions to load: ${agentsFailure(agentsError)}` }
+}
+
+/**
+ * Why `claude agents` failed, short: the first line of the source's error (which already starts
+ * with "claude agents"), at most 120 characters.
+ */
+export function agentsFailure(agentsError: string | undefined): string {
+  const why = (agentsError ?? '').trim().split('\n')[0].trim()
+  if (!why || /^claude agents:?$/.test(why)) return 'claude agents failed'
+  return why.length > 120 ? `${why.slice(0, 119)}…` : why
 }

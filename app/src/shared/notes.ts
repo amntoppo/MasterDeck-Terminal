@@ -1,3 +1,4 @@
+import { markdownText } from './markdown'
 import { asTicket, sameTicket, type Ticket } from './ticket'
 
 type Titled = { repo?: string | null; number: number; title: string }
@@ -28,7 +29,7 @@ export interface Note {
   id: string
   /** "" for a ticket note. */
   title: string
-  /** As typed. Plain text today; nothing here may assume more (Markdown is a later step). */
+  /** As typed: Markdown source, shown rendered (`parseMarkdown` with `html: false`). Never rewritten. */
   body: string
   ticket: NoteTicket | null
   created: number
@@ -113,9 +114,21 @@ export function storedNote(raw: unknown, id: string): Note | null {
   return { id, title: o.title, body: o.body, ticket, created: o.created as number, updated: o.updated as number }
 }
 
+/** A note's text as one plain line, its Markdown marks read (`**done**` is "done", a task "☐ …"); the first part only. */
+export function notePreview(body: string): string {
+  // The preview is 120 characters: the head of a long note is enough, and parsing all of it for every row is not.
+  return markdownText(body.slice(0, 4000)).slice(0, NOTE_PREVIEW)
+}
+
+// A note is replaced (never changed) on every save, so its object names one version: the list and every
+// search reuse the preview instead of parsing up to 4000 characters per note each time.
+const previews = new WeakMap<Note, string>()
+
 export function noteMeta(n: Note): NoteMeta {
   const { body, ...rest } = n
-  return { ...rest, preview: body.replace(/\s+/g, ' ').trim().slice(0, NOTE_PREVIEW) }
+  let preview = previews.get(n)
+  if (preview === undefined) previews.set(n, (preview = notePreview(body)))
+  return { ...rest, preview }
 }
 
 export const sortNotes = (metas: NoteMeta[]): NoteMeta[] =>

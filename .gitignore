@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .superpowers/
+
+# Laid by Claude Code for each build when it loads a mod from a folder it watches
+mods/*/.claude-plugin/types/
+mods/*/tsconfig.json

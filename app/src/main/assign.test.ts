@@ -208,3 +208,13 @@ describe('inRepoFolder', () => {
     expect(asked).toEqual(['globex/app'])
   })
 })
+
+describe('inRepoFolder with the session\'s account (issue #61)', () => {
+  it("asks for the PR's repository in the workspace of the account the session runs as", async () => {
+    const asked: unknown[] = []
+    const cli = { checkout: async (repo: string, account?: string | null) => (asked.push([repo, account ?? null]), { ok: true as const, cwd: `/ws-${account}/app` }) }
+    expect((await inRepoFolder(cli, req({ kind: 'PRREVIEW', cwdRepo: 'globex/app' }), 'alice')).cwd).toBe('/ws-alice/app')
+    await inRepoFolder(cli, req({ kind: 'PRREVIEW', cwdRepo: 'globex/app' }))
+    expect(asked).toEqual([['globex/app', 'alice'], ['globex/app', null]])
+  })
+})

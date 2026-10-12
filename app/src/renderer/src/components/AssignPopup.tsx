@@ -3,6 +3,8 @@ import { assignChoices, assignSeed, startSessionTitle } from '@shared/boardFilte
 import { fullRepo, ticketLabel, ticketOf } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
+import { MarkdownView } from './MarkdownView'
+import { SubIssues } from './SubIssues'
 
 interface Props {
   card: BoardCard
@@ -27,6 +29,28 @@ export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tab
   const [login, setLogin] = useState(me ?? others[0] ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The ticket's GitHub description, so what the work is shows before it is picked up: null while loading.
+  const [desc, setDesc] = useState<string | null>(null)
+  const [descError, setDescError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    Promise.resolve(deck().issueBody(ticketOf(card))).then(
+      (r) => {
+        if (!alive) return
+        setDesc(r.ok ? r.body : '')
+        if (!r.ok) setDescError(r.message)
+      },
+      (e) => {
+        if (!alive) return
+        setDesc('')
+        setDescError(String(e))
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (people) return
@@ -86,6 +110,19 @@ export function AssignPopup({ card, state, onClose, onAssigned, onStart, me: tab
             open on GitHub ↗
           </button>
         </div>
+        <label>Description</label>
+        {desc === null ? (
+          <div className="meta">Loading the description from GitHub…</div>
+        ) : (
+          <div className="desc-preview popup-desc" tabIndex={0} aria-label="Ticket description, rendered">
+            {desc.trim() ? (
+              <MarkdownView text={desc} />
+            ) : (
+              <span className="muted">{descError ? `Could not load the description: ${descError}` : 'This ticket has no description.'}</span>
+            )}
+          </div>
+        )}
+        <SubIssues ticket={ticketOf(card)} state={state} />
         <label>Assign it</label>
         <select className="fsel full" value={login} onChange={(e) => setLogin(e.target.value)} disabled={busy}>
           {me && <option value={me}>Me ({me})</option>}

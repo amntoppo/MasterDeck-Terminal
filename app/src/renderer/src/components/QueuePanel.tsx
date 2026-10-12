@@ -7,7 +7,8 @@ interface Props {
   state: AppState
   /** The session of the focused tab: its queue shows unless another one is picked here. */
   activeKey: string | null
-  onClose: () => void
+  /** Absent inside the panel's Tools tab: the tabs above leave it. */
+  onClose?: () => void
 }
 
 /**
@@ -75,9 +76,11 @@ export function QueuePanel({ state, activeKey, onClose }: Props) {
         <strong>Queue{items.length ? ` (${items.length})` : ''}</strong>
         <span className="muted">prompts run after each response, first to last</span>
         <span style={{ flex: 1 }} />
-        <button className="icon-btn" onClick={onClose} title="Hide the queue (Queue Prompts shows it again)">
-          ×
-        </button>
+        {onClose && (
+          <button className="icon-btn" onClick={onClose} title="Hide the queue (Queue Prompts shows it again)">
+            ×
+          </button>
+        )}
       </div>
       <div className="queue-head">
         <select className="fsel" value={key ?? ''} onChange={(e) => setPicked(e.target.value || null)} title="Whose queue">

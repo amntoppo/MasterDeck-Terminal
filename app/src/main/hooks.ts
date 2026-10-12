@@ -19,6 +19,7 @@ import {
   type CustomTrigger,
 } from "@shared/flow";
 import { DECK_EVENTS } from "@shared/deckHooks";
+import { LOOP_MARK, loopCommand } from "@shared/loopHook";
 
 /**
  * Claude Code hooks MasterDeck installs into ~/.claude/settings.json: its own deck hook
@@ -224,13 +225,7 @@ function remove(s: Settings, event: string, mark: string): void {
 }
 
 function write(settingsPath: string, backupDir: string, s: Settings): void {
-  if (existsSync(settingsPath)) {
-    mkdirSync(backupDir, { recursive: true });
-    copyFileSync(
-      settingsPath,
-      join(backupDir, `settings.backup.${Date.now()}.json`),
-    );
-  }
+  backupSettings(settingsPath, backupDir);
   // Follow a symlink so a dotfiles link stays a link.
   const target = existsSync(settingsPath)
     ? realpathSync(settingsPath)
@@ -240,6 +235,22 @@ function write(settingsPath: string, backupDir: string, s: Settings): void {
   writeFileSync(tmp, JSON.stringify(s, null, 2) + "\n");
   renameSync(tmp, target);
 }
+
+/** A copy of settings.json in backupDir (`settings.backup.<ms>[.<tag>].json`), when it exists:
+ * before every write, and before MasterDeck has the claude CLI change it (main/mods.ts). */
+export function backupSettings(settingsPath: string, backupDir: string, tag?: string): string | null {
+  if (!existsSync(settingsPath)) return null;
+  mkdirSync(backupDir, { recursive: true });
+  // Two in the same millisecond (an install's steps) must not overwrite each other.
+  const base = join(backupDir, `settings.backup.${Date.now()}${tag ? `.${tag}` : ""}`);
+  let to = `${base}.json`;
+  for (let i = 2; existsSync(to); i++) to = `${base}-${i}.json`;
+  copyFileSync(settingsPath, to);
+  return to;
+}
+
+/** settings.json read and written the way every MasterDeck install does (main/mods.ts too). */
+export { read as readSettings, write as writeSettings };
 
 /**
  * The workflow hooks: one per trigger, reading each session's own workflow (or the default) from
@@ -268,6 +279,7 @@ export function installWorkflowHooks(
       matcher: string | undefined;
       cmd: string;
       mark: string;
+      timeout?: number;
     }[] = on
       ? [
           ...HOOK_TRIGGERS.map((t) => ({
@@ -288,6 +300,15 @@ export function installWorkflowHooks(
               mark,
             };
           }),
+          // The loop hook (#82) runs a loop's check, which may take minutes (S4: up to 9). Its
+          // mark starts with STEP_MARK, so the removal and the "up to date" check cover it.
+          {
+            event: "Stop",
+            matcher: undefined,
+            cmd: loopCommand(dir),
+            mark: LOOP_MARK,
+            timeout: 600,
+          },
         ]
       : [];
     const current = Object.values(s.hooks ?? {})
@@ -303,7 +324,7 @@ export function installWorkflowHooks(
     )
       return { ok: true, message: "workflow saved" };
     for (const event of Object.keys(s.hooks ?? {})) remove(s, event, STEP_MARK);
-    for (const w of want) add(s, w.event, w.matcher, w.cmd, w.mark, 10);
+    for (const w of want) add(s, w.event, w.matcher, w.cmd, w.mark, w.timeout ?? 10);
     write(settingsPath, backupDir, s);
     return { ok: true, message: "workflow saved" };
   } catch (e) {
