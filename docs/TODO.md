@@ -789,7 +789,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   preview only: the first real read (GraphQL cost, a PR with 100+ checks, StatusContext links) is
   the user's.
 - **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
-  refresh while the row stays open.
+  refresh while the row stays open. An open sub-issue's description (#112) is as old as that read.
+- **P3 · A sub-issue's description is cut at 10 000 characters** in the read (#112), to keep the
+  answer near 1 MB for the web bridge; a longer one says so and links to GitHub. Read the full body
+  on expand (`issue:body`) if the cut turns out to bite.
 
 ## Session processes (#115): open points (2026-10-12)
 
@@ -825,6 +828,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Sub-issues open in place (#112)**: in the Start dialog, the Assign popup and Details → GitHub a
+  sub-issue row opens (click, Enter or Space) to its status, assignees, labels and description as
+  Markdown, with Open on GitHub; several at once, long ones scroll. Kept from the existing
+  sub-issues read (no new channel). Branch `112-subissue-details`.
 - **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
   running commands (background shells, the call running now, what a command left behind) with
   folder, pid, uptime, CPU / memory, listening ports that open in the browser, the processes below

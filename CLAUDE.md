@@ -407,7 +407,17 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-13)
+## Current state and next steps (2026-10-14)
+
+- **Sub-issues open in place (#112)** on branch `112-subissue-details` (not merged, **not
+  installed**: the rebuild of the real app waits for the user's word). In the Start dialog, the
+  Assign popup and Details → GitHub a sub-issue row opens (click, Enter or Space) to its status,
+  assignees, labels and description (Markdown, cut at 10 000 characters), with Open on GitHub;
+  several at once. The data comes from the sub-issues read already made (`SUB_ISSUES_JQ` keeps
+  more). Design and plan: `docs/plans/2026-10-14-subissue-details-{design,plan}.md`. Checked:
+  typecheck, vitest, and the web preview at 1280 and 390 px (click, Enter, Space, several open, a
+  long body scrolling in its box, no sideways scroll). Not checked: a real issue with sub-issues,
+  the Electron window, the real web app over the bridge, Windows.
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves
