@@ -85,6 +85,15 @@ describe('toRemoteSnapshot', () => {
     expect(Object.keys(r.menus)).toEqual(['a'])
   })
 
+  it('leaves out a meeting\'s items: their text stays on the Mac', () => {
+    const m = entry('meeting:added:m-1:5', 'meeting', null)
+    const s = state({ inbox: { open: [m, entry('q1', 'question', null)], snoozed: [m], history: [{ ...m, state: 'resolved' as const }] } })
+    const r = toRemoteSnapshot(s, 'v')
+    expect(r.inbox.open.map((e) => e.id)).toEqual(['q1'])
+    expect(r.inbox.snoozed).toEqual([])
+    expect(r.inbox.history).toEqual([])
+  })
+
   it('keeps the last 20 history entries', () => {
     const history = Array.from({ length: 30 }, (_, i) => ({ ...entry(`h${i}`, 'idle', null), state: 'resolved' as const }))
     expect(toRemoteSnapshot(state({ inbox: { open: [], snoozed: [], history } }), 'v').inbox.history).toHaveLength(20)

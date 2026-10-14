@@ -655,6 +655,63 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 - **Next ideas** (MODS.md): ticket context through `prompt.context`; the agent-loop driver for #82;
   `/queue`, typing and AskUserQuestion through the mod; the deck hook's guards in the mod (Windows).
 
+## Meetings (#102): open points (2026-10-10)
+
+Spec in the backend repo (`docs/superpowers/specs/2026-10-10-meetings-design.md`); ARCHITECTURE and
+OPERATIONS, "Meetings: …".
+
+- **A real capture is the user's, on the packaged app.** Never run by a test or an agent: the
+  microphone prompt, the System Audio Recording prompt (14.2+; Screen Recording on 13 to 14.1),
+  `setDisplayMediaRequestHandler`'s `request.frame` with `audio: 'loopback'`, the PCM worklet
+  loading from `file://` in the packaged capture window, and `getDisplayMedia` run through
+  `executeJavaScript` with a user gesture. Only unit tests and the fixture cover them.
+- **Permissions after every update.** The ad-hoc signature changes with each build, so macOS may
+  ask again, or show "granted" while capture is silent (the Record probe says so). A Developer ID
+  signature fixes it (as it would the keychain prompt under Shipping / ops); a stable self-signed
+  identity would help local builds.
+- **The offer knows Zoom and Webex only**, and their process names (`CptHost` / `aomhost`,
+  `Meeting Center`) are unverified on a real call. Teams, Slack huddles and Google Meet are not
+  detected; the upgrade is Core Audio's "microphone in use by another process"
+  (`kAudioDevicePropertyDeviceIsRunningSomewhere`) through a small Swift helper.
+- **Speakers are You and Others only**: no diarization of the others.
+- **Seeking in long recordings**: `audio.webm` is written as MediaRecorder writes it (no duration,
+  no cues); seeking in a long meeting is unmeasured. A remux at Stop (or cues) would fix it.
+- **No React tests for `MeetingsView`**: its logic is in `shared/meetingsPage.ts` (tested); the
+  view itself was checked only in the isolated app with the fixture.
+- **`.tmp` leftovers in the meetings folders** (an atomic write cut short) are left alone, not
+  removed.
+- **Delete audio after keeps running after Turn off meetings** (intended: it only removes the
+  stored audio the user asked to age out).
+- **A quit while `claude -p` matches** kills it now (the runner's AbortSignal); the meeting is
+  matched again at the next start (with the consent, `background()` loads the queue). Not seen on a
+  real quit.
+- **Windows CI skips the bash and symlink tests** of Meetings (`claudeOnce`, `whisper`, the audio
+  links in `meetingMedia` / `meetingsPage`), as the repo's other bash tests: Meetings is macOS only.
+- **Match quality is unmeasured**: no real meeting has gone through `claude -p` yet; precision of
+  the notes, the part size (about 100 000 characters) and the candidate cap (200) are guesses.
+
+### The mic follows the meeting app's mute (Plan M): open points (2026-10-12)
+
+Plan M in the backend repo (`docs/superpowers/plans/2026-10-12-plan-m-meetings-mute.md`);
+ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
+
+- **The apps' real labels are unverified.** md-mute's rules for Zoom, Teams, Webex and Google Meet
+  (in a browser) were written from documentation, not read from a real call; the first real check
+  is the user's, on the installed app.
+- **Localized meeting apps read unknown**: the rules match English labels (ASCII prefixes), so a
+  Zoom in another language keeps the mic (recorded), as unknown always does.
+- **Whether the Accessibility grant to MasterDeck reaches md-mute** (TCC's responsible process for a
+  helper the app spawns) is unverified; if not, the popout says "Allow Accessibility" for ever.
+- **Allow again after each update**: the ad-hoc signature changes with every build, so macOS drops
+  the Accessibility grant (as the other permissions); a Developer ID signature fixes it.
+- **A dead md-mute is restarted every 5 s, at most 3 times per recording**, with no backoff and
+  no notice when it gives up: the mic is recorded meanwhile ("The mute reader stopped; trying
+  again.", after about 3 s if it was muted), and the line keeps saying so after the last try.
+- **Partly gated chunks can still give whisper filler**: a chunk that is all zeros skips whisper,
+  but one muted for most of its 30 seconds is transcribed and may get a made-up line.
+- **The popout's mic line and switch were not seen on screen** (they show only while recording,
+  which no test or agent may start): typecheck and `micLine`'s tests only.
+
 ## Costs time filter: open points (2026-10-10, issue #88)
 
 - **Part hours are an even spread.** Costs are kept per clock hour, so Last 1/5/12 hours and a
@@ -786,6 +843,8 @@ See [MODS.md](MODS.md) for the research and the ideas list; ARCHITECTURE, "The M
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, 65937de and 081b82e (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
+| Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
 | Which account a card's calls and sessions use (issue #54): a status move (the Board's menu, BoardFlow, `linkSession`'s In Dev) goes as the account whose board holds the card (`forBoard`, `accountForProject`), even when another account lists the repository; the card's `project` travels in the ticket (`Ticket.project`, `knownProject`), so a my-issues card outside the loaded sprint routes by its board; `Sources.boardOf` without a number answers Setup's first board, not the first loaded card; a ticket session's account (Start, PR review: `startAccount`, after the code's repository) uses the card's board as `accountForCard` does. One account: unchanged | branch `worktree-MasterDeck-Terminal-54-card-account-routing` | — |
 | Per-session tabs (issue #113): each session pane has its own tab row (Terminal first, never closed), file tabs (Markdown rendered, code highlighted with highlight.js, a sentence for binary / too large / gone) and diff tabs (unified, Split when wide, live), closed with × or a middle-click and kept per session across restarts; Details → **Diff** (Uncommitted / Branch, A/M/D/R with +/− counts, live while it shows) and **Files** (tree, filter); ⌘P and ⌘-click on a path in the terminal open files; four read-only channels open to the web app, inside the session's folder only. The leftover ⇧← / ⇧→ view cycling and the old tab strip's CSS are gone | branch `113-session-tabs` | — |
 | Mods moved from Session details to the right panel's **Tools** tab (#86 follow-up): a third sub-tab after Queue and BTW (`SessionTools.tsx`), its label with "· n off"; Details is **Session · GitHub** again and a remembered `md.detailsTab` of `mods` opens Session | branch `worktree-MasterDeck-Terminal-86-mods-tools` | — |

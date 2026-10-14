@@ -14,6 +14,7 @@ import {
 } from "@shared/prDetail";
 import type { WatchEvent, WatchInfo } from "@shared/watches";
 import type { NoteMeta } from "@shared/notes";
+import type { NoteTarget } from "@shared/noteEditor";
 import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
 import { ticketNote } from "../notes";
@@ -24,7 +25,7 @@ interface Props {
   session: Session;
   state: AppState;
   notes?: NoteMeta[];
-  onNote?: (t: Ticket) => void;
+  onNote?: (t: NoteTarget) => void;
 }
 
 /** Which rows are open, per session (Session.key): kept while the window lives, across tab and session switches. */
@@ -199,7 +200,7 @@ function TicketRow({
   notes,
   onNote,
   ...row
-}: RowProps & { session: Session; state: AppState; ticket: Ticket | null; notes?: NoteMeta[]; onNote?: (t: Ticket) => void }) {
+}: RowProps & { session: Session; state: AppState; ticket: Ticket | null; notes?: NoteMeta[]; onNote?: (t: NoteTarget) => void }) {
   if (!t)
     return (
       <div className="gh-row">
@@ -251,7 +252,7 @@ function TicketRow({
       {onNote && can("notesList") && (
         <div className="d-note">
           {tn && <div className="d-note-text">{tn.preview}</div>}
-          <button className="d-link" onClick={() => onNote(t)}>
+          <button className="d-link" onClick={() => onNote({ ticket: t })}>
             {tn ? "Edit note" : "Add note"}
           </button>
         </div>

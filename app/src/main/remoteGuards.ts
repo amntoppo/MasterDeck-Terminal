@@ -110,7 +110,8 @@ export function worktreeFolder(remote: boolean, cwd: unknown): { ok: true; cwd: 
 /**
  * An inbox action as the `inboxAct` handler passes it on. The paired web app's actions take the
  * same path as the window's (reply, approve and the rest, unchanged); only **Open Claude there…**
- * (`trust`), which opens a tab on the Mac, is refused for a browser, whatever the item allows.
+ * (`trust`), which opens a tab on the Mac, and a meeting item's Open, Match again and Try again, are
+ * refused for a browser, whatever the item allows.
  */
 export function inboxActCall(
   remote: boolean,
@@ -120,6 +121,8 @@ export function inboxActCall(
 ): { ok: true; id: string; type: string; payload: Record<string, unknown> } | { ok: false; message: string } {
   if (typeof id !== 'string' || typeof type !== 'string') return { ok: false, message: 'bad inbox action' }
   if (remote && type === 'trust') return claudeFolder(true, null) as { ok: false; message: string }
+  // A meeting is opened, matched or transcribed again from the Mac's window only (meetings:* are blocked for a browser).
+  if (remote && (type === 'rematch' || type === 'retry' || (type === 'open' && id.startsWith('meeting:')))) return { ok: false, message: 'Do this in MasterDeck on the Mac.' }
   return { ok: true, id, type, payload: payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {} }
 }
 

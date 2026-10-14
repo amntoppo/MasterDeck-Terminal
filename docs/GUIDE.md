@@ -20,7 +20,7 @@ One window for all your Claude Code sessions, laid out as a command center:
     A plain click still selects text. In the web app the browser opens it, so a `localhost` link
     is that computer's, not the Mac's.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
-    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions), **Tools**
+    ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions; beside it the session's **Notes**), **Tools**
     (**Queue**, **BTW** and **Mods**) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
 - **Master:** master-agent's terminal in its own column at the far right, on every screen. The
   **★ Master** button (top right, always there; ⌘⇧M) shows or hides it; hidden, it stays attached.
@@ -902,6 +902,12 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
   skill: SAFE, PUSHED, DIRTY, UNPUSHED, or IN USE (a live session works there). Remove works for SAFE
   and PUSHED; DIRTY and UNPUSHED need the name typed; IN USE can't be removed. Branches are never
   deleted. Parked sessions can be removed too (their transcripts stay).
+- **Janitor → Meetings** (macOS, in MasterDeck's window only): every recorded meeting with its date,
+  title, audio size and transcript size, and the totals. **Older than 7 / 30 / 90 days** picks those
+  meetings (or tick them by hand); **Delete audio** removes their recordings and keeps the
+  transcripts, **Delete meetings** removes transcripts and audio. The notes a meeting added always
+  stay: they are your notes. MasterDeck asks on the Mac first; more than 10 at once need the number
+  typed. The meeting being recorded can't be picked. Works after **Turn off meetings** too.
 - **Templates:** the Start dialog's Template… menu inserts a saved snippet ("TDD, small PR",
   "Investigate only", "Fix and open PR", "Pair with me", plus yours). **Save as template** stores the
   current text in `~/.claude/masterdeck/templates.json`.
@@ -954,6 +960,21 @@ A place for what you would otherwise keep in another app: your own notes, and on
   note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
   on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
   the ticket and its title. It is listed under **Tickets**. Emptying it removes it.
+- **A session's notes (Session details → Notes):** the Details tab has the tabs **Session**, **GitHub**,
+  **Notes**, **Diff** and **Files**. **Notes** reads **Notes 3** when the session has notes: its ticket's
+  note (listed first, as **Ticket note**), the notes about the session, and the notes about its
+  ticket, newest first. A note that came from a meeting carries a **Meeting · 9 Oct** chip, and a
+  dot on the tab says one came since you last opened that session's Notes tab (each window and
+  browser keeps its own). Pick a note to read it, rendered, below the list. **Edit** opens it in the
+  Notes panel; **New note** opens the panel on a new note about this session (and its ticket),
+  which the editor shows as **About login-redirect · #112**. Editing is always in the panel, so a
+  note is never open in two editors at once. The web app's Details has the same tab.
+- **Filters:** under the search box, **All · Mine · Tickets · Sessions · Meetings**. **Mine** is your
+  own notes, about nothing in particular; **Tickets** a ticket's note or a note about a ticket;
+  **Sessions** the notes about a session; **Meetings** the notes that came from a meeting. A note can
+  be in several (a meeting note about a session and its ticket is in all three). Each window and
+  browser remembers its choice. A row shows the session a note is about, and the meeting it came
+  from, as chips. The search also finds a note by the session's name and the meeting's title.
 - **In the web app:** the same panel and the same notes. When a note is changed in two places at
   once (the Mac and a browser), the editor says **Changed elsewhere** and asks: **Reload** takes
   the other version, **Keep mine** saves yours over it. A note deleted elsewhere says so, and you
@@ -1038,6 +1059,184 @@ Stored in `~/.claude/masterdeck/settings.json`.
   session). Click one for its whole prompt. A job the session cancelled (CronDelete) disappears, and
   an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
   session itself.
+
+### Settings → Meetings (macOS)
+
+Where meetings are set up (issue #102). Only on a Mac,
+only in MasterDeck's own window: the web app and Windows do not show it. It is not part of the
+first-run Setup, so nobody who never wants meetings is asked anything.
+
+- **The consent card comes first.** It says what is recorded (your microphone and the sound the
+  Mac plays, from Record until Stop), where it stays (this Mac only), what leaves the Mac (once per
+  meeting the transcript's text and the list of your sessions, tickets and PRs go to Anthropic, to
+  find what relates to which session), and that **no one in the meeting is told**: recording people
+  without telling them is illegal in many places, and telling them is your job. **I agree** stores
+  the time and the card's version in `settings.json`; a new version of the card asks again.
+- **Microphone:** its status (Not asked yet, Allowed, Refused). **Allow microphone** brings up
+  macOS's own prompt; once refused, **Open System Settings** opens Privacy & Security → Microphone.
+- **Sound from the Mac** (the other people in the call): on macOS 14.2 and later this is the
+  **System Audio Recording Only** permission, which no app can read, so the status is the last
+  check MasterDeck made ("Not checked yet" until then). **Allow** listens to the Mac's sound for one
+  second (play something while it does); the first time, that brings up macOS's prompt. "No sound
+  came through" means it heard nothing: allow MasterDeck in System Settings, restart it and try
+  again. On macOS 13 to 14.1 it is the Screen & System Audio Recording permission. macOS 12 and
+  older cannot record the Mac's sound. macOS may want MasterDeck restarted after you allow it:
+  when the check heard nothing or the permission was refused, **Restart MasterDeck** does it (after
+  asking; terminals in MasterDeck close, Claude sessions keep running).
+- **Your microphone:** **Follow the meeting app's mute** (the default) keeps your mic out of the
+  recording while the meeting app has you muted, and puts it back when you unmute. **Always
+  record** records it the whole time. When MasterDeck can't see the mute (Accessibility not
+  allowed, no meeting app found, a control it can't read), your mic is recorded, as with Always
+  record, and the Record popout says why.
+- **Accessibility** (shown with Follow): how MasterDeck reads the mute. It reads only the meeting
+  app's mute button, nothing else on screen, and only while a meeting is being recorded. **Allow**
+  brings up macOS's prompt the first time; after that it opens System Settings → Privacy & Security
+  → Accessibility, where you switch MasterDeck on. Like the other permissions, macOS may want it
+  allowed again after an update.
+- **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
+  accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
+  first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
+  (nothing of yours is sent there), shows its progress and can be cancelled; a file that is not
+  exactly the expected one is thrown away. **Ready** means it is on disk; **Remove** deletes it.
+  "Speech engine missing" means this copy of MasterDeck has no speech engine: reinstall it.
+- **Language:** what your meetings are spoken in. **Detect automatically** (the default) works for
+  most; pick one when every meeting is in the same language.
+- **Offer to record** (on by default): offer to record when a meeting app is in a call (see
+  **The offer** under Record a meeting).
+- **Delete audio after** (30 days by default; 7, 90, a year or never): the recording goes, the
+  transcript and notes stay. MasterDeck checks a few minutes after it starts and then once a day,
+  and removes only audio (a transcript is never removed by a timer; Janitor → Meetings does that
+  when you ask). The meeting being recorded is left alone.
+- **Turn off meetings** takes your agreement back (the card shows again next time) and stops the
+  offers; a recording running then is stopped first (what was recorded is kept); recorded meetings stay.
+  Transcribing and matching stop at once: nothing more is transcribed or sent to Claude until you
+  agree again, and then they go on where they stopped. A speech model downloading then is cancelled,
+  and the model picked before it stays picked. macOS keeps the permissions it gave until you remove them in
+  System Settings.
+
+macOS remembers permissions per build of an ad-hoc signed app, so after an update it may ask again.
+
+### Record a meeting (macOS)
+
+- **Record** is the round button in the rail, under the tools (also ⌘K **Record meeting**). It is
+  there only in MasterDeck's window on a Mac. Before you agreed on Settings → Meetings it opens that
+  screen; the microphone must be allowed there too.
+- Its popout takes an optional title, then **Record**. Under it, every time: **Tell the others you
+  are recording.** No one in the meeting is told by MasterDeck.
+- It records your microphone (**You**) and the sound the Mac plays (**Others**: the people in the
+  call) apart, on this Mac. Without a speech model it still records, and says the transcript waits
+  until one is downloaded.
+- While recording, the button is red with the time recorded. Its popout has **Pause** / **Resume**
+  and **Stop**; paused time is not recorded. macOS shows its own recording indicators too.
+- **Your mic while recording:** the popout has one line about it. "Mic: muted in Zoom — not
+  recorded" and "Mic: on in Zoom" while it follows your mute; "Mic: always recorded." with Always
+  record. When the mute can't be followed the line says your mic is recorded and why: Accessibility
+  not allowed (with **Open Settings**, to Settings → Meetings), no meeting app found, the mute not
+  visible in the app, the mute reader missing (reinstall MasterDeck), or the mute reader stopped
+  (MasterDeck tries again; if you were muted, your mic stays out for about 3 s first). While
+  paused the line says "Mic: paused."
+
+- **Mic off in the recording** (a switch in the popout) keeps your mic out until you switch it back
+  or the recording ends, whatever the meeting app says; each new recording starts with the switch off.
+  While your mic is out of a running recording, the red time in the rail shows a struck mic.
+- One recording at a time. After 4 hours it stops by itself and says so. If the microphone goes
+  away (unplugged, taken by another app), the recording stops and a notification says why.
+- Quitting MasterDeck or closing its window while recording asks first: **Keep recording**, or
+  **Stop recording and quit** (what was recorded is kept). **Restart** on Settings → Meetings asks
+  the same, with **Stop recording and restart**. A crash keeps everything recorded up to
+  the last 30 seconds.
+- **The offer:** once you agreed on Settings → Meetings and with **Offer to record** on, MasterDeck
+  looks every 10 seconds at which programs run (their names only) while nothing is being recorded.
+  When Zoom or Webex joins a call, a notification says "Zoom call: record it?" (a click brings
+  MasterDeck up with the Record popout open) and a chip by the Record button asks the same, with
+  **Record** and **Not now**. It is asked once per call: after Not now, or after a recording, the
+  same call is not offered again (a call app gone for 20 seconds or less, such as a move to a
+  breakout room, is still the same call). With two calls at once, the second is offered after the
+  first chip goes. It never starts recording by itself. The web app is never told which call app is
+  in use. Microsoft Teams, Slack
+  huddles and calls in a browser (Google Meet) are not noticed: use Record. **Turn off meetings**
+  stops the looking.
+- The recording is kept in MasterDeck's folder (`~/.claude/masterdeck/meetings`): a playback copy
+  (`audio.webm`) and 30-second pieces that are turned into the transcript.
+
+### After Stop: the transcript
+
+- Each 30-second piece is turned into text on this Mac as soon as it is recorded, one at a time and
+  at low priority, so the transcript is ready about a minute after **Stop**. Nothing is sent
+  anywhere for this. A piece that is text is removed; the playback copy stays.
+- Lines say who spoke: **You** (your microphone) or **Others** (the sound the Mac played), in order
+  of time. When both talk at once, both lines stay.
+- Without a speech model the meeting waits ("Waiting for the speech model") and goes on by itself
+  once you download one on Settings → Meetings.
+- If turning a piece into text fails, the meeting says why and keeps the pieces; **Try again**
+  starts again where it stopped.
+- If MasterDeck quits or crashes during a recording or a transcript, the pieces on disk are turned
+  into text the next time MasterDeck starts (once you agreed on Settings → Meetings), without
+  opening Meetings. Starting asks macOS nothing and records nothing.
+
+### After the transcript: notes in your sessions
+
+- Once the transcript is ready, MasterDeck asks Claude once (`claude -p` with Sonnet, from an
+  empty folder, nothing saved) what in it was about which of your sessions, PRs and current-sprint
+  tickets. Claude gets the transcript and the list (names, folder names, branches, ticket and PR
+  numbers and titles), and is told the transcript is only data: anything said in the meeting that
+  sounds like an instruction to it is ignored. A long meeting is read in parts.
+- Its answer is checked before anything is written: a match on something not in the list, lines
+  that are not in the transcript, or text past its limits is dropped, never guessed or fixed.
+- Each match becomes a note about that session (and its ticket), or about the ticket (a PR without
+  a session: the ticket it closes, else the PR itself). It shows in the session's Details → Notes,
+  on the Board card, and under **Meetings** in the Notes panel. A note has:
+  - **From:** the meeting's title and when it was, then what was said about it in a few sentences,
+  - **Action items**, when there were any,
+  - the lines themselves, quoted with who spoke and when (`> **Others** 12:04 — …`),
+  - **Open in Meetings**, to open the meeting at the first quoted line on the Meetings page.
+  What Claude or the meeting said shows as plain text: it cannot make a hidden link, an image or a
+  heading in your note. A web address someone said stays a visible address.
+- The meeting also gets a title from Claude (unless you named it) and a summary.
+- **Match again** asks Claude again. Notes from this meeting that you have not changed are replaced;
+  notes you edited stay as they are, and get no second copy.
+- If the matching fails (Claude could not be reached, took longer than 5 minutes, or did not answer
+  in the asked form), nothing is written and the meeting says why.
+
+### The Meetings page (macOS)
+
+The waveform in the rail, between Notes and Workflow (also ⌘K **Go to Meetings**). Only in
+MasterDeck's window on a Mac: the web app has no Meetings page, and a meeting's transcript and
+audio never reach a browser or a phone.
+
+- **Left:** a month calendar (‹ ›), days with meetings marked with a dot, and the range: **Today**,
+  **This week**, **Last 30 days** (the default) or **Custom**, with its **From** and **To**. A click
+  on a day shows that day. Under it the meetings of the range, newest first: title, date, length,
+  how many notes it added, and its state (**Recording**, **Transcribing 3/12**, **Waiting for the
+  speech model**, **Matching**, **Done**, **Failed** with **Try again** or **Match again**).
+- **Right, the meeting:** its title (click it to rename; Enter keeps it, Escape goes back), date,
+  length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
+  (each opens the note).
+- **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
+  bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view until you
+  scroll; a click on a line (or Enter on it, with Tab to get there) plays from there, and Space plays
+  or pauses when you are not typing in a field. Lines Claude matched to a session or ticket carry its chip (click it for
+  the note).
+- **Search the transcript:** the words are marked in every line, **↑ / ↓** (or Enter, Shift+Enter)
+  go from one to the next, the count shows where you are.
+- **Match again** (asks Claude again; needs Settings → Meetings turned on), **Export transcript**
+  (a Markdown file), **Export audio** (the `.webm`), **Delete audio** (the transcript and notes
+  stay) and **Delete meeting** (the transcript and audio go; the notes it added stay, they are your
+  notes now). Both deletes ask first; neither works while that meeting is being recorded.
+- **Open in Meetings** in a meeting's note opens this page at that line's time (in the window; the
+  web shows the words only). **Open** on a meeting's Needs-you item opens it here too.
+- Before you set meetings up, the page says what it is for and has **Set up meetings**. After
+  **Turn off meetings** the meetings you kept are still listed, played, exported and deleted here;
+  nothing is recorded or transcribed.
+
+### Meetings in Needs you
+
+- **Meeting '<title>': notes added to 3 sessions** (and tickets): **Open** opens it on the
+  Meetings page, **Dismiss** leaves it. It goes once opened.
+- **Could not be matched: <why>**: **Match again**.
+- **Transcription failed: <why>**: **Try again** (also from the notification's button).
+- These are on the Mac only: they are not sent to a phone, and a browser shows them with Dismiss
+  only.
 
 ## Account
 

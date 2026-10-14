@@ -10,3 +10,8 @@ __pycache__/
 # Laid by Claude Code for each build when it loads a mod from a folder it watches
 mods/*/.claude-plugin/types/
 mods/*/tsconfig.json
+
+# whisper-cli for meetings, built by app/scripts/whisper.sh (with its source and build folders)
+app/resources/whisper/
+# md-mute for meetings (the mic follows the meeting app's mute), built by app/scripts/mute.sh
+app/resources/mute/

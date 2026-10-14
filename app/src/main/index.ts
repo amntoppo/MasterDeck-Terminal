@@ -33,9 +33,12 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  net,
   nativeTheme,
   Notification,
+  protocol,
   safeStorage,
+  session,
   shell,
 } from "electron";
 import {
@@ -88,6 +91,14 @@ import {
 import { Superseded } from "./superseded";
 import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
+import { guardSessions, MeetingsIpc } from "./meetingsIpc";
+import { MeetingNotices } from "./meetingNotices";
+import { serveMeetingAudio } from "./meetingMedia";
+import { copyMeetingsFixture } from "./meetingsFixture";
+import { MEDIA_SCHEME } from "@shared/meetingsPage";
+import { offerText } from "@shared/meetingApps";
+import { claudeOnce, tidyScratch } from "./claudeOnce";
+import { keepMeetings, meetingsAgreed, oneAtATime, webState } from "@shared/meetings";
 import { pumpNoteRequests } from "./noteRequests";
 import { assignNow as assignAs, inRepoFolder, retryHeld } from "./assign";
 import { randomUUID } from "node:crypto";
@@ -103,7 +114,7 @@ import { heldForTrust } from "@shared/trust";
 import { ParkedStore } from "./parked";
 import { accountChange, BrowserBridge, userChanged } from "./browserBridge";
 import { BrowserStore } from "./browserStore";
-import { loadMacKey } from "./macKey";
+import { loadMacKey, NO_KEYCHAIN, type SafeStore } from "./macKey";
 import { readToken, writeToken } from "./remoteToken";
 import { REMOTE_WAIT_MS, agentsFailure, remoteStatusWhenOff, remoteWait, toRemoteSnapshot } from "@shared/remoteSnapshot";
 import {
@@ -210,6 +221,9 @@ import {
 } from "./statusline";
 
 const SMOKE = process.env.MASTERDECK_SMOKE === "1";
+// The smoke test never opens the Keychain: a new ad-hoc-signed build makes it ask, and its dialog
+// blocks the main thread until answered (the smoke test then hangs with no output).
+const keychain: SafeStore = SMOKE ? NO_KEYCHAIN : safeStorage;
 // Dev aid: a separate profile so a test run never shares storage with the installed app.
 if (process.env.MASTERDECK_USER_DATA)
   app.setPath("userData", process.env.MASTERDECK_USER_DATA);
@@ -224,7 +238,8 @@ const reg = new IpcRegistry(ipcMain);
 function emit(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args);
   try {
-    bridge?.event(channel, args);
+    // Web tabs get the state without the offered call app (webState).
+    bridge?.event(channel, channel === CH.state && args[0] ? [webState(args[0] as AppState), ...args.slice(1)] : args);
   } catch (e) {
     // Never let a browser problem break delivery to the Mac's own window.
     console.error(`browser bridge: ${String(e)}`);
@@ -266,6 +281,14 @@ const sessionAccounts = new SessionAccounts(
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
 const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
+// Test aid: MASTERDECK_MEETINGS_FIXTURE=<dir> (isolated launches only) puts a meeting and its note
+// on disk, before the notes are read.
+try {
+  const id = copyMeetingsFixture(process.env, paths.home);
+  if (id) console.log(`meetings fixture: ${id}`);
+} catch (e) {
+  console.error(`meetings fixture: ${String(e)}`);
+}
 // MasterDeck's mods in Claude Code (Setup / Settings → Mods): its folder, install and uninstall.
 const mods = new ModsInstaller({
   run,
@@ -309,8 +332,9 @@ async function reloadMods(): Promise<CliResult> {
     : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
 }
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
-// and in this change event (a note's title and 120-character preview, to the window and to web
-// tabs that subscribed). Sessions may add to them (pumpNoteRequests) but never read them.
+// and in this change event (a note's NoteMeta: its title, 120-character preview, ticket, `link` (the
+// session's key and name, a ticket) and `meeting` (id, title, time), to the window and to web tabs
+// that subscribed; never the text). Sessions may add to them (pumpNoteRequests) but never read them.
 const notes = new NotesStore(join(paths.home, "notes"), {
   onChange: (c) => emit(CH.notesChanged, c),
   repoOf: (repo) => fullRepo(repo),
@@ -465,6 +489,9 @@ function notify(events: NotifyEvent[]): void {
   for (const e of events.slice(0, 4)) {
     const n = new Notification({ title: e.title, body: e.body, silent: false });
     n.on("click", () => reveal(e.target));
+    // Kept until it closes, so its click handler is not garbage-collected (`shown`, below).
+    n.on("close", () => shown.delete(n));
+    shown.add(n);
     n.show();
   }
 }
@@ -736,6 +763,8 @@ const sources = new Sources(
     for (const b of Object.values(beats)) catalog = mergeCatalog(catalog, b.mods) ?? catalog;
     if (catalog !== modCatalog.entries()) modCatalog.replace(catalog);
     state.modCatalog = catalog;
+    // The rail's recording indicator (never in toRemoteSnapshot).
+    state.meetingLive = meetings.live();
     state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
@@ -856,6 +885,9 @@ sources.setSessionAccount(
   (s) => sessionAccounts.ghActive(s),
 );
 sources.setSuperseded(() => superseded.ids());
+// Meetings' Needs-you items: a small file of their own, read here (it asks macOS nothing).
+const meetingNotices = new MeetingNotices(join(paths.home, "meeting-notices.json"), () => sources.changed());
+sources.setMeetingNotices(() => meetingNotices.list());
 
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
 function reveal(target: NotifyEvent["target"]): void {
@@ -871,6 +903,8 @@ function reveal(target: NotifyEvent["target"]): void {
 
 /** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
 const shown = new Set<Notification>();
+/** The meeting offer's notification, kept for the same reason. */
+let offerNote: Notification | null = null;
 
 /**
  * A new Needs-you item's notification (Settings: "Notify me…"). Clicking it opens the item. On
@@ -1048,7 +1082,7 @@ function publishBrowsers(): void {
 }
 /** DELETE /v1/browsers/:id with this Mac's device token: the hub then closes that browser with 4003. */
 async function revokeBrowserRow(id: string): Promise<boolean> {
-  const token = readToken(remoteTokenFile());
+  const token = readToken(remoteTokenFile(), keychain);
   if (!token) return false;
   try {
     const r = await fetch(`${REMOTE}/v1/browsers/${encodeURIComponent(id)}`, {
@@ -1069,7 +1103,7 @@ const account = new Account({
   fetch: (input, init) => fetch(input, init),
   openBrowser: (url) => void shell.openExternal(url),
   deviceName: hostname().replace(/\.local$/, "").slice(0, 80) || "Mac",
-  saveToken: (t) => writeToken(remoteTokenFile(), t),
+  saveToken: (t) => writeToken(remoteTokenFile(), t, keychain),
   readIdentity: () => {
     try {
       return parseIdentity(readFileSync(identityFile(), "utf8"));
@@ -1177,7 +1211,7 @@ function deviceId(): string {
 /** Start, restart or stop the line to the backend to match Settings → Remote and the token. */
 function syncRemote(): void {
   const s = latest?.settings ?? sources.getSettings();
-  const token = readToken(remoteTokenFile());
+  const token = readToken(remoteTokenFile(), keychain);
   const url = REMOTE;
   const key = s.remoteEnabled && token ? `${url}\n${token}` : "";
   if (key && key === cloudKey) return;
@@ -1425,6 +1459,22 @@ async function runInboxAction(
       const r = loopStore.stop(s.sessionId, d.loopId);
       if (r.ok) sources.pollLoops();
       return r;
+    }
+    case "open":
+    case "rematch":
+    case "retry": {
+      // Meetings are the Mac's window only: a browser or a phone neither opens nor matches them.
+      if (d.type !== "meeting") return { ok: false, message: `${type} is done in the window` };
+      if (remote) return { ok: false, message: "Do this in MasterDeck on the Mac." };
+      if (type === "open") {
+        // The window opens the meeting itself; this marks the item seen, so it resolves.
+        meetings.seen(d.meetingId);
+        return { ok: true, message: "opened" };
+      }
+      const r = type === "rematch" ? await meetings.rematch({}, d.meetingId) : await meetings.retry({}, d.meetingId);
+      return r.ok
+        ? { ok: true, message: type === "rematch" ? "matching again" : "transcribing again" }
+        : { ok: false, message: r.message };
     }
     case "login": {
       if (d.type !== "account")
@@ -2128,7 +2178,7 @@ function workspaceFolders(): string[] {
 }
 
 function registerIpc(): void {
-  reg.handle(CH.getState, () => latest);
+  reg.handle(CH.getState, (e) => (latest && isRemote(e) ? webState(latest) : latest));
   reg.handle(CH.approve, (_e, id: number) => cli.approve([id]));
   reg.handle(CH.reject, (_e, id: number) => cli.reject([id]));
   reg.handle(
@@ -2294,6 +2344,27 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
   });
+  // Meetings: the window's only (blocked on the web; each refuses a browser and any OS but macOS).
+  reg.handle(CH.meetingsSetup, (e) => meetings.setup(e));
+  reg.handle(CH.meetingsConsent, (e, agree: unknown) => meetings.consent(e, agree));
+  reg.handle(CH.meetingsPermission, (e, kind: unknown) => meetings.permission(e, kind));
+  reg.handle(CH.meetingsModel, (e, op: unknown, id: unknown) => meetings.model(e, op, id));
+  reg.handle(CH.meetingsRestart, (e) => meetings.restart(e));
+  reg.handle(CH.meetingsStart, (e, title: unknown) => meetings.start(e, title));
+  reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
+  reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
+  reg.handle(CH.meetingsMicOff, (e, on: unknown) => meetings.micOff(e, on));
+  reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
+  reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
+  reg.handle(CH.meetingsList, (e, from: unknown, to: unknown) => meetings.list(e, from, to));
+  reg.handle(CH.meetingsGet, (e, id: unknown) => meetings.get(e, id));
+  reg.handle(CH.meetingsRename, (e, id: unknown, title: unknown) => meetings.rename(e, id, title));
+  reg.handle(CH.meetingsDelete, (e, id: unknown) => meetings.delete(e, id));
+  reg.handle(CH.meetingsDeleteAudio, (e, id: unknown) => meetings.deleteAudio(e, id));
+  reg.handle(CH.meetingsExport, (e, id: unknown, kind: unknown) => meetings.export(e, id, kind));
+  reg.handle(CH.meetingsJanitor, (e) => meetings.janitor(e));
+  reg.handle(CH.meetingsClean, (e, req: unknown) => meetings.clean(e, req));
+  reg.handle(CH.meetingsNotNow, (e) => meetings.notNow(e));
   // Side questions: the store and the asker check every argument (key, id, question).
   reg.handle(CH.btwList, (_e, key: unknown) => btwStore.list(key));
   reg.handle(CH.btwAsk, (_e, key: unknown, question: unknown) => {
@@ -2651,11 +2722,16 @@ function registerIpc(): void {
     return r.filePath;
   });
   reg.handle(CH.dismissStopped, () => sources.dismissStopped());
-  reg.handle(CH.setSettings, (e, s: unknown) =>
-    sources.setSettings(
-      isRemote(e) ? remoteSettings(s, sources.getSettings()) : s,
-    ),
-  );
+  reg.handle(CH.setSettings, (e, s: unknown) => {
+    const cur = sources.getSettings();
+    // The meetings consent and sound check change only through meetings:*; a browser changes no meetings setting.
+    const saved = sources.setSettings(
+      keepMeetings(isRemote(e) ? remoteSettings(s, cur) : s, cur.meetings, isRemote(e)),
+    );
+    // Your microphone (follow / always) applies to a recording running now.
+    meetings.settingsChanged();
+    return saved;
+  });
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"
       ? id.startsWith("pr:")
@@ -3314,7 +3390,7 @@ function registerIpc(): void {
       return { ok: false, message: "invalid input" };
     return account.signInEmail(x.email, x.password, x.create, x.name as string | undefined);
   });
-  reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile())));
+  reg.handle(CH.accountSignOut, () => account.signOut(readToken(remoteTokenFile(), keychain)));
   reg.handle(CH.accountManage, () => void shell.openExternal(`${REMOTE}/account`));
   reg.handle(CH.browserDecide, (_e, id: unknown, allow: unknown) =>
     typeof id === "string" ? bridge!.decide(id, allow === true) : undefined,
@@ -3510,10 +3586,158 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL)
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(__dirname, "../renderer/index.html"));
+  // Closing the window while recording: ask first (the hidden capture window would keep the app,
+  // and the recording, running with no window to stop it).
+  win.on("close", (e) => {
+    if (quitConfirmed || !meetings.recording || !win) return;
+    e.preventDefault();
+    void confirmStopRecording(win).then((stop) => {
+      if (stop) win?.close();
+    });
+  });
   win.on("closed", () => {
     win = null;
   });
 }
+
+/** Set once the user said to stop the recording and quit (or close): nothing asks again. */
+let quitConfirmed = false;
+/**
+ * "A meeting is being recorded": stop it (the last chunks are written) and go on, or keep
+ * recording. One question at a time: closing the window, quitting and Restart while it is open
+ * get the same answer instead of a second dialog.
+ */
+const confirmStopRecording = oneAtATime(async (parent: BrowserWindow | null, then: "quit" | "restart" = "quit"): Promise<boolean> => {
+  const opts = {
+    type: "question" as const,
+    buttons: ["Keep recording", then === "restart" ? "Stop recording and restart" : "Stop recording and quit"],
+    defaultId: 0,
+    cancelId: 0,
+    message: "A meeting is being recorded.",
+    detail:
+      then === "restart"
+        ? "Stopping keeps what was recorded; the transcript is made the next time MasterDeck starts. Terminals in MasterDeck close; Claude sessions keep running in the background."
+        : "Stopping keeps what was recorded; the transcript is made the next time MasterDeck starts.",
+  };
+  const choice = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+  if (choice.response !== 1) return false;
+  quitConfirmed = true;
+  await meetings.stopForQuit().catch((e) => console.error(`meetings: stop on quit: ${String(e)}`));
+  return true;
+});
+
+// Settings → Meetings (issue #102). Its handlers load main/meetings/ on their first call only:
+// nothing at startup asks macOS for the microphone or the screen (spec §1, meetingsStartup.test.ts).
+const meetings = new MeetingsIpc({
+  platform: process.platform,
+  meetings: () => sources.getSettings().meetings,
+  setMeetings: (m) => {
+    sources.setSettings({ ...sources.getSettings(), meetings: m });
+  },
+  macosVersion: () => process.getSystemVersion(),
+  arch: process.arch,
+  modelsDir: join(paths.home, "meetings", "models"),
+  // Model downloads go through Electron's network stack (the system's proxy and certificates).
+  fetch: (url, init) => net.fetch(url, init),
+  whisper: () => ({
+    env: process.env,
+    resourcesPath: process.resourcesPath,
+    appRoot: app.getAppPath(),
+    packaged: app.isPackaged,
+    arch: process.arch,
+    pathEnv,
+  }),
+  // The window only: a model download is not the browser's business.
+  progress: (p) => win?.webContents.send(CH.meetingsModelProgress, p),
+  meetingsDir: join(paths.home, "meetings"),
+  // The hidden capture window (main/meetings/recorder.ts): its page and its own preload.
+  capturePage: () =>
+    process.env.ELECTRON_RENDERER_URL
+      ? { url: `${process.env.ELECTRON_RENDERER_URL}/capture.html` }
+      : { file: join(__dirname, "../renderer/capture.html") },
+  capturePreload: join(__dirname, "../preload/capture.js"),
+  // AppState.meetingLive is read in the state callback: send the state again now.
+  onLive: () => sources.changed(),
+  // Matching (spec §4): the session list as last built (once `claude agents` was read), the notes,
+  // and one claude -p from an empty temp folder. The transcript reaches only that prompt.
+  matching: {
+    state: () => (latest && latest.sources.agents === "ok" ? latest : null),
+    notes,
+    claude: (o) =>
+      claudeOnce({ run, claude: claudeBin, ...o, projectsDir: paths.projectsDir, prefix: "masterdeck-meeting-" }),
+    // A quit may end MasterDeck before claudeOnce removes its folder: folders older than a run can
+    // last (MATCH_TIMEOUT_MS is 5 minutes; main/meetings/ is not imported here) go at the next load.
+    tidy: () => tidyScratch("masterdeck-meeting-", paths.projectsDir, 15 * 60_000),
+  },
+  notices: meetingNotices,
+  // The Meetings page: changes to the window only; its questions and save dialogs on the Mac.
+  changed: (id) => win?.webContents.send(CH.meetingsChanged, { id }),
+  confirm: async (o) => {
+    if (!win) return false;
+    const choice = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["Cancel", o.button],
+      defaultId: 0,
+      cancelId: 0,
+      message: o.message,
+      detail: o.detail,
+    });
+    return choice.response === 1;
+  },
+  saveFile: async (o) => {
+    if (!win) return null;
+    const r = await dialog.showSaveDialog(win, {
+      defaultPath: join(app.getPath("downloads"), o.defaultName),
+      filters: o.kind === "md" ? [{ name: "Markdown", extensions: ["md"] }] : [{ name: "WebM audio", extensions: ["webm"] }],
+    });
+    return r.canceled || !r.filePath ? null : r.filePath;
+  },
+  notice: (text) => {
+    if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
+  },
+  // The offer: a notification only; its click shows the window's Record popout. Nothing records
+  // until the user presses Record there or on the rail's chip.
+  offer: (app) => {
+    if (SMOKE || !Notification.isSupported()) return;
+    const n = new Notification({ title: "MasterDeck · Meetings", body: offerText(app) });
+    // Kept (one offer at a time) so its click handler is not garbage-collected before a click.
+    offerNote = n;
+    n.on("close", () => {
+      if (offerNote === n) offerNote = null;
+    });
+    n.on("click", () => {
+      if (!win) return;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send(CH.meetingsShowRecord);
+    });
+    n.show();
+  },
+  restart: async () => {
+    if (!win) return false;
+    // While recording, the recording's question is the only one (it stops the recording and says
+    // Restart); else the plain one.
+    if (!meetings.recording) {
+      const choice = await dialog.showMessageBox(win, {
+        type: "question",
+        buttons: ["Cancel", "Restart"],
+        defaultId: 1,
+        cancelId: 0,
+        message: "Restart MasterDeck?",
+        detail: "Terminals in MasterDeck close. Claude sessions keep running in the background.",
+      });
+      if (choice.response !== 1) return false;
+    }
+    // A recording (one may have started while the plain question was open) asks first; relaunch
+    // only once the quit can no longer be refused, so a "Keep recording" leaves no relaunch behind.
+    if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart"))) return false;
+    // quit, not exit: will-quit still closes the terminals and the remote line.
+    app.relaunch();
+    app.quit();
+    return true;
+  },
+});
 
 /** What Setup needs to know: which tools are on PATH and who gh is logged in as. */
 /** One tool of Setup's first step. */
@@ -3665,6 +3889,12 @@ async function setupCheck(): Promise<SetupCheck> {
   };
 }
 
+// The Meetings page's audio (spec §6): a scheme the player can stream and seek in. Registered
+// before ready, as Electron requires; served on the window's session only (below).
+protocol.registerSchemesAsPrivileged([
+  { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+]);
+
 // Windows shows notifications only for an app with this id (the one the installer registers).
 if (process.platform === "win32")
   app.setAppUserModelId("io.github.amntoppo.masterdeck");
@@ -3689,6 +3919,9 @@ app.whenReady().then(async () => {
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
   registerIpc();
+  // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
+  // session only: the capture window's partition has no such scheme, and the web bridge never relays it.
+  session.defaultSession.protocol.handle(MEDIA_SCHEME, (req) => serveMeetingAudio(req, (id) => meetings.audioFile(id)));
   // Links made by babysit-ticket before MasterDeck kept its own: copied once.
   try {
     if (linkStore.importOnce()) sources.reloadLinks();
@@ -3696,7 +3929,7 @@ app.whenReady().then(async () => {
     console.error(`ticket links import: ${String(e)}`);
   }
   try {
-    macKey = await loadMacKey(join(paths.home, "browser-key"), safeStorage);
+    macKey = await loadMacKey(join(paths.home, "browser-key"), keychain);
   } catch (e) {
     console.error(`browser key unreadable; browsers cannot connect: ${String(e)}`);
   }
@@ -3864,7 +4097,12 @@ app.whenReady().then(async () => {
       console.error(`workflow draft: ${String(e)}`);
     }
   }, 1000);
+  // The microphone and screen capture: never for the window, only for the meetings capture
+  // partition and only while the user agrees. Sets handlers only; asks macOS nothing.
+  guardSessions(app, session, () => meetingsAgreed(sources.getSettings()));
   createWindow();
+  // Meetings' Delete audio after timer: timers only now; the first look is minutes later.
+  meetings.background();
   // The OS switching light/dark while the setting is System.
   nativeTheme.on("updated", () => win?.setBackgroundColor(themeBg()));
   sources.setResumer((e) =>
@@ -3932,11 +4170,21 @@ app.whenReady().then(async () => {
     }, 8000);
   }
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // Not getAllWindows(): the hidden meetings capture window is one.
+    if (!win) createWindow();
   });
 });
 
 app.on("window-all-closed", () => app.quit());
+
+// Quitting while a meeting is recorded asks first, in the window (spec §2).
+app.on("before-quit", (e) => {
+  if (quitConfirmed || !meetings.recording) return;
+  e.preventDefault();
+  void confirmStopRecording(win).then((stop) => {
+    if (stop) app.quit();
+  });
+});
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
@@ -3947,4 +4195,6 @@ app.on("will-quit", () => {
   watches.killAll();
   ptys.closeAll();
   sources.stop();
+  // Kills a whisper-cli still running (its chunk is transcribed at the next start); loads nothing.
+  meetings.quit();
 });

@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { parseMarkdown, type Block, type Inline } from "@shared/markdown";
+import { meetingLink, parseMarkdown, type Block, type Inline } from "@shared/markdown";
 import { deck } from "../deck";
+import { meetingsHere, openMeetingAt } from "../meetingLinks";
 
 /**
  * Markdown as GitHub shows it in an issue, drawn from `parseMarkdown`'s tree: React elements only,
@@ -20,6 +21,24 @@ function Img({ src, alt }: { src: string; alt: string }) {
 }
 
 function Link({ href, children }: { href: string; children: ReactNode }) {
+  // A meeting note's "Open in Meetings": the Meetings page at that time, in the Mac's window; the
+  // web shows the words only (meetings never reach a browser).
+  const meeting = meetingLink(href);
+  if (meeting)
+    return meetingsHere() ? (
+      <a
+        href={href}
+        title="Open in Meetings"
+        onClick={(e) => {
+          e.preventDefault();
+          openMeetingAt(meeting.id, meeting.t);
+        }}
+      >
+        {children}
+      </a>
+    ) : (
+      <span className="mdv-meeting">{children}</span>
+    );
   return (
     <a
       href={href}

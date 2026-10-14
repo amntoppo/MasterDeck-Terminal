@@ -5,7 +5,10 @@ import type { HistoryHit } from '@shared/history'
 import type { JanitorRow } from '@shared/ipc'
 import { isCleanupTarget, needsTypedConfirm } from '@shared/janitor'
 import type { AppState, Session } from '@shared/types'
+import { JANITOR_PICKS, janitorTotals, needsTypedCount, pickOlder, sizeLabel, type CleanWhat, type JanitorMeetingRow } from '@shared/meetingJanitor'
+import { meetingWhen } from '@shared/meetingMatch'
 import { deck, useNow } from '../deck'
+import { meetingsHere } from '../meetingLinks'
 import { webConfirm } from '../webConfirm'
 
 const CLS_ORDER = ['SAFE', 'PUSHED', 'DIRTY', 'UNPUSHED', 'IN USE']
@@ -180,6 +183,7 @@ export function JanitorView({ state }: { state: AppState }) {
             ))}
           </tbody>
         </table>
+        {meetingsHere() && <JanitorMeetings />}
       </div>
       {confirm && (
         <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && setConfirm(null)}>
@@ -212,6 +216,161 @@ export function JanitorView({ state }: { state: AppState }) {
         </div>
       )}
     </section>
+  )
+}
+
+/**
+ * Janitor → Meetings (spec §7; macOS, the window only): every meeting with its audio and transcript
+ * sizes, a pick of the older ones, Delete audio / Delete meetings. Main asks on the Mac before
+ * anything goes; more than 10 at once need the count typed here first.
+ */
+function JanitorMeetings() {
+  const now = useNow(60_000)
+  const [rows, setRows] = useState<JanitorMeetingRow[] | null>(null)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [typed, setTyped] = useState<{ what: CleanWhat; text: string } | null>(null)
+
+  const load = useCallback(async () => {
+    const r = await deck().meetingsJanitor()
+    if (!r.ok) return setMsg(r.message)
+    setRows(r.rows)
+    // Only what is still listed and not being recorded stays picked.
+    setPicked((cur) => new Set(r.rows.filter((x) => cur.has(x.id) && !x.recording).map((x) => x.id)))
+  }, [])
+  useEffect(() => {
+    void load()
+    return deck().onMeetingsChanged(() => void load())
+  }, [load])
+
+  const ids = [...picked]
+  const all = rows ? janitorTotals(rows) : null
+  const sel = rows ? janitorTotals(rows, ids) : null
+  const toggle = (id: string) =>
+    setPicked((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const clean = async (what: CleanWhat) => {
+    setBusy(true)
+    setTyped(null)
+    try {
+      const r = await deck().meetingsClean({ ids, what })
+      if (!r.ok) return setMsg(r.message === 'cancelled' ? null : r.message)
+      const noun = what === 'audio' ? 'Deleted the audio of' : 'Deleted'
+      setMsg(`${noun} ${r.done} meeting${r.done === 1 ? '' : 's'}${r.skipped ? `; ${r.skipped} not (${r.message ?? 'being recorded or gone'})` : ''}`)
+      setPicked(new Set())
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+  const ask = (what: CleanWhat) => (needsTypedCount(ids.length) ? setTyped({ what, text: '' }) : void clean(what))
+
+  return (
+    <>
+      <h3 className="sec">Meetings{all ? ` (${all.meetings})` : ''}</h3>
+      <div className="janitor-meetings-bar">
+        {all && (
+          <span className="muted">
+            Audio {sizeLabel(all.audioBytes)} · transcripts {sizeLabel(all.transcriptBytes)}
+          </span>
+        )}
+        <span style={{ flex: 1 }} />
+        {JANITOR_PICKS.map((d) => (
+          <button key={d} className="btn" disabled={!rows?.length} onClick={() => rows && setPicked(new Set(pickOlder(rows, d, now)))}>
+            Older than {d} days
+          </button>
+        ))}
+        <button className="btn" disabled={!ids.length || busy} onClick={() => ask('audio')} title="The transcripts and notes stay">
+          Delete audio{ids.length ? ` (${ids.length})` : ''}
+        </button>
+        <button className="btn danger" disabled={!ids.length || busy} onClick={() => ask('meetings')} title="Transcripts and audio go; the notes stay">
+          Delete meetings{ids.length ? ` (${ids.length})` : ''}
+        </button>
+      </div>
+      {(msg || (sel && ids.length > 0)) && (
+        <p className="muted janitor-meetings-msg">
+          {sel && ids.length > 0 ? `${sel.meetings} picked: audio ${sizeLabel(sel.audioBytes)}, transcripts ${sizeLabel(sel.transcriptBytes)}. Notes from meetings always stay. ` : ''}
+          {msg}
+        </p>
+      )}
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>
+              <input
+                type="checkbox"
+                aria-label="Pick every meeting"
+                disabled={!rows?.some((r) => !r.recording)}
+                checked={!!rows?.length && rows.filter((r) => !r.recording).every((r) => picked.has(r.id))}
+                onChange={(e) => setPicked(new Set(e.target.checked ? (rows ?? []).filter((r) => !r.recording).map((r) => r.id) : []))}
+              />
+            </th>
+            <th>Date</th>
+            <th>Meeting</th>
+            <th className="r">Audio</th>
+            <th className="r">Transcript</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows === null && (
+            <tr>
+              <td colSpan={5} className="muted">
+                Reading meetings…
+              </td>
+            </tr>
+          )}
+          {rows?.length === 0 && (
+            <tr>
+              <td colSpan={5} className="muted">
+                No meetings recorded.
+              </td>
+            </tr>
+          )}
+          {rows?.map((r) => (
+            <tr key={r.id}>
+              <td>
+                <input type="checkbox" aria-label={`Pick ${r.title || meetingWhen(r.started)}`} disabled={r.recording} checked={picked.has(r.id)} onChange={() => toggle(r.id)} />
+              </td>
+              <td className="nowrap muted">{meetingWhen(r.started)}</td>
+              <td>
+                {r.title || <span className="muted">Unnamed</span>}
+                {r.recording && <span className="muted"> · recording</span>}
+              </td>
+              <td className="r muted">{r.audioBytes ? sizeLabel(r.audioBytes) : '—'}</td>
+              <td className="r muted">{sizeLabel(r.transcriptBytes)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {typed && (
+        <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && setTyped(null)}>
+          <div className="dialog" style={{ borderTopColor: 'var(--red)' }}>
+            <h3>{typed.what === 'audio' ? `Delete the audio of ${ids.length} meetings?` : `Delete ${ids.length} meetings?`}</h3>
+            <p>
+              {typed.what === 'audio'
+                ? 'Their recordings go; the transcripts and the notes they added stay.'
+                : 'Their transcripts and audio go. The notes they added stay: they are your notes now.'}
+            </p>
+            <label>Type the number of meetings ({ids.length}) to confirm</label>
+            <input value={typed.text} onChange={(e) => setTyped({ ...typed, text: e.target.value })} autoFocus />
+            <div className="foot">
+              <span className="grow" />
+              <button className="btn" onClick={() => setTyped(null)}>
+                Cancel
+              </button>
+              <button className="btn danger" disabled={typed.text.trim() !== String(ids.length)} onClick={() => void clean(typed.what)}>
+                {typed.what === 'audio' ? 'Delete audio' : 'Delete meetings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

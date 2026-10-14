@@ -1,7 +1,7 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AskPanel } from "./AskPanel";
 import { StatusDialog } from "./StatusDialog";
-import type { Ticket } from "@shared/ticket";
+import { fullRepo } from "@shared/ticket";
 import { sessionTicket } from "@shared/derive";
 import { formatAgo, formatDiff, formatPct } from "@shared/format";
 import { contextLevel } from "@shared/stats";
@@ -9,7 +9,9 @@ import { formatTokens, tokenSum, tokenTitle } from "@shared/tokens";
 import { attentionFor, sessionStatus } from "@shared/review";
 import type { AppState, Session } from "@shared/types";
 import { deck, load, save, useNow } from "../deck";
-import type { NoteMeta } from "@shared/notes";
+import { sessionNotes, type NoteMeta } from "@shared/notes";
+import type { NoteTarget } from "@shared/noteEditor";
+import { meetingDot, newestMeetingNote } from "@shared/noteFilter";
 import { can } from "../web";
 import { toggleStar, useStars } from "../stars";
 import { webConfirm } from "../webConfirm";
@@ -19,6 +21,7 @@ import { PeersDialog } from "./PeersDialog";
 import { DiffList } from "./DiffList";
 import { FileTree } from "./FileTree";
 import { GitHubDetails, prLineOf, sessionPrUrls } from "./GitHubDetails";
+import { SessionNotes } from "./SessionNotes";
 import { peerRows } from "./peersView";
 import { SessionProcs } from "./SessionProcs";
 
@@ -30,21 +33,21 @@ interface Props {
   onAskMaster: (s: Session) => void;
   masterAttached: boolean;
   notes?: NoteMeta[];
-  /** Open the ticket's note (absent: Notes is not available here). */
-  onNote?: (t: Ticket) => void;
+  /** Open the Notes panel at a note, a ticket's note or a new note (absent: Notes is not available here). */
+  onNote?: (t: NoteTarget) => void;
 }
 
-type DetailsTab = "session" | "github" | "diff" | "files";
+type DetailsTab = "session" | "github" | "notes" | "diff" | "files";
 const TAB_KEY = "md.detailsTab";
 // "mods" (remembered from before Mods moved to the Tools tab) opens Session.
 const asTab = (v: unknown): DetailsTab =>
-  v === "github" || v === "diff" || v === "files" ? v : "session";
+  v === "github" || v === "notes" || v === "diff" || v === "files" ? v : "session";
 
 /**
  * Everything about the open session, in the right panel's Details tab (it replaced the status bar
  * above the terminal), in tabs: Session (what waits on you, status, workflow, linked sessions,
  * branch and worktrees, tokens, context, model, diff, and the session's actions), GitHub (ticket,
- * PRs, monitors: GitHubDetails; #103), Diff (changed files: DiffList) and Files (FileTree; #113).
+ * PRs, monitors: GitHubDetails; #103), Notes (the session's notes: SessionNotes; #102), Diff (changed files: DiffList) and Files (FileTree; #113).
  * Mods is in the Tools tab. Session also lists the session's running processes and their ports
  * (SessionProcs, #115). The picked tab is kept across sessions and restarts.
  */
@@ -120,6 +123,23 @@ export function SessionDetails({
     flash(r.ok ? r.message : `Editor: ${r.message}`);
   };
 
+  // The session's notes, and a dot for a meeting note that came since its Notes tab was last open
+  // (per session and per viewer: the window and each browser keep their own).
+  const notesOn = !!onNote && can("notesList");
+  const myNotes = notesOn ? sessionNotes(notes ?? [], s, sessionTicket(s), fullRepo) : [];
+  // ponytail: one md.sessionNotesSeen.<key> per session ever opened on its Notes tab, never pruned (a number each);
+  // upgrade: drop the keys of sessions no longer listed. The Inspector keys this component by session, so `seen` is
+  // read once per session.
+  const seenKey = `md.sessionNotesSeen.${s.key}`;
+  const [seen, setSeen] = useState<number | null>(() => load<number | null>(seenKey, null));
+  const newest = newestMeetingNote(myNotes);
+  useEffect(() => {
+    if (tab !== "notes" || !newest || newest === seen) return;
+    save(seenKey, newest);
+    setSeen(newest);
+  }, [tab, newest, seen, seenKey]);
+  const dot = tab !== "notes" && meetingDot(myNotes, seen);
+
   const tabButton = (t: DetailsTab, label: ReactNode) => (
     <button role="tab" aria-selected={tab === t} className={tab === t ? "on" : undefined} onClick={() => setTab(t)}>
       {label}
@@ -138,6 +158,15 @@ export function SessionDetails({
             )}
           </>,
         )}
+        {notesOn &&
+          tabButton(
+            "notes",
+            <>
+              Notes
+              {myNotes.length ? <span className="d-tab-count"> {myNotes.length}</span> : null}
+              {dot && <i className="d-tab-dot" aria-label="New from a meeting" title="A note from a meeting came since you last looked" />}
+            </>,
+          )}
         {tabButton(
           "diff",
           <>
@@ -154,6 +183,13 @@ export function SessionDetails({
       <div className="details">
         {tabs}
         <GitHubDetails session={s} state={state} notes={notes} onNote={onNote} />
+      </div>
+    );
+  if (tab === "notes" && notesOn && onNote)
+    return (
+      <div className="details">
+        {tabs}
+        <SessionNotes session={s} ticket={sessionTicket(s)} list={myNotes} onNote={onNote} />
       </div>
     );
   if (tab === "diff")

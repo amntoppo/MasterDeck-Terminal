@@ -18,7 +18,7 @@ import {
   type BtwEntry,
   type BtwEvent,
 } from '@shared/btw'
-import { tidyScratchProject } from './summary'
+import { tidyProjects } from './claudeOnce'
 
 const KEY = /^[A-Za-z0-9_-]{1,80}$/
 
@@ -198,7 +198,7 @@ export class BtwAsker {
       cur = { ...cur, answer: capAnswer(text), doneAt: Date.now(), ...patch }
       this.store.put(s.key, cur)
       rmSync(scratch, { recursive: true, force: true })
-      tidyScratchProject(this.projectsDir, scratch)
+      tidyProjects(this.projectsDir, scratch)
     }
     const killer = setTimeout(() => {
       child.kill()

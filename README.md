@@ -312,6 +312,10 @@ The backend for remote access (a Cloudflare Worker at `dev.masterdeck.dev`) live
 repository; see [docs/REMOTE.md](docs/REMOTE.md). [CLAUDE.md](CLAUDE.md) has the project's rules for
 working on it with Claude Code.
 
+MasterDeck asks macOS for the microphone and the Mac's sound (for meetings) only on Settings →
+Meetings, after you agree to how meetings work and press Allow there: never at launch, never from
+the web app. Until then it only reads whether they were given.
+
 ## License
 
 [MIT](LICENSE)

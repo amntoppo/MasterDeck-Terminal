@@ -43,6 +43,18 @@ export function safeHref(href: string): string | null {
   return /^https:\/\/[^\s]+$/i.test(h) ? h : null
 }
 
+/**
+ * A link to a moment of a meeting, as meeting notes write it (`meetingHref` in meetingMatch.ts):
+ * exactly `masterdeck://meetings/<id>?t=<seconds>`. The one address besides https a link may
+ * carry, and only in a note (`html: false`): in an issue's text it shows the words only. The window
+ * opens the Meetings page there, the web shows the words only.
+ */
+const MEETING_LINK = /^masterdeck:\/\/meetings\/(m-[0-9a-f]{32})\?t=(\d{1,6})$/
+export function meetingLink(href: string): { id: string; t: number } | null {
+  const m = MEETING_LINK.exec(href.trim())
+  return m ? { id: m[1]!, t: Number(m[2]) } : null
+}
+
 /** An image address the view may load: https only. */
 export function safeImage(src: string): string | null {
   const s = src.trim()
@@ -78,7 +90,7 @@ export function parseInline(src: string, depth = 0, html = true): Inline[] {
     }
     const rest = src.slice(i)
     let m: RegExpExecArray | null
-    if (ch === '\\' && /^\\[\\`*_{}[\]()#+\-.!~|<>]/.test(rest)) {
+    if (ch === '\\' && /^\\[\\`*_{}[\]()#+\-.!~|<>:=]/.test(rest)) {
       text(src[i + 1])
       i += 2
       continue
@@ -99,7 +111,8 @@ export function parseInline(src: string, depth = 0, html = true): Inline[] {
       // A note shows what was typed; an issue only the words.
       else text(html ? m[1] || m[2] : m[0])
     } else if (ch === '[' && (m = LINK.exec(rest))) {
-      const h = safeHref(m[2])
+      // A meeting link only in a note (html: false, where meetingNoteBody writes it), never in an issue's text.
+      const h = safeHref(m[2]) ?? (!html && meetingLink(m[2]) ? m[2].trim() : null)
       if (h) push({ t: 'link', href: h, c: inner(m[1]) })
       else if (!html) text(m[0])
       else for (const n of inner(m[1])) n.t === 'text' ? text(n.v) : push(n)

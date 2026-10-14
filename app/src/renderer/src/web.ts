@@ -67,6 +67,8 @@ const SCREEN_NEEDS: Partial<Record<Screen, Method>> = {
   'sprint-summary': 'setSprint',
   skills: 'skillReinstall',
   notes: 'notesList',
+  // Not in WEB_VIEWS: the Meetings page is the Mac's window only.
+  meetings: 'meetingsList',
 }
 export const screenOk = (s: Screen) => !isWeb() || (WEB_VIEWS.has(s) && can(SCREEN_NEEDS[s] ?? 'getState'))
 
@@ -92,6 +94,7 @@ const ACTION_NEEDS: Partial<Record<PaletteAction, Need>> = {
   settings: { screen: 'settings' },
   skills: { screen: 'skills' },
   notes: { screen: 'notes' },
+  'record-meeting': { method: 'meetingsStart' },
 }
 export const actionOk = (a: PaletteAction) =>
   !isWeb() || (a.startsWith('view:') && a !== 'view:history' ? screenOk(a.slice(5) as View) : ok(ACTION_NEEDS[a]))

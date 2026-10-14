@@ -1,5 +1,6 @@
 import type { WatchInfo } from "@shared/watches";
 import { hideSuperseded } from "@shared/superseded";
+import type { MeetingNotice } from "@shared/meetings";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import type { ModsReloadOffer } from "@shared/mods";
 import {
@@ -373,6 +374,7 @@ export class Sources {
   private accountOf: ((s: Session) => string | null) | null = null;
   private ghActiveOf: (s: Session) => boolean = () => false;
   private superseded: () => Set<string> = () => new Set();
+  private meetingNotices: () => MeetingNotice[] = () => [];
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -750,6 +752,11 @@ export class Sources {
   /** Ids of sessions a copy replaced (shared/superseded.ts): hidden while they do not run. */
   setSuperseded(f: () => Set<string>): void {
     this.superseded = f;
+  }
+
+  /** Meetings' Needs-you items (main/meetingNotices.ts). */
+  setMeetingNotices(f: () => MeetingNotice[]): void {
+    this.meetingNotices = f;
   }
 
   private withAccounts(ss: Session[]): Session[] {
@@ -2435,6 +2442,7 @@ export class Sources {
       accountNotices: accountNotices({ ghActive: this.ghActive, master: masterAs }, this.config),
       modsReload: this.modsReloadOf?.(sessions) ?? null,
       loops,
+      meetings: this.meetingNotices(),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);

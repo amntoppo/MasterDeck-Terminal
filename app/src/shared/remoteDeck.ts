@@ -73,6 +73,33 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   notesSearch: invoke(CH.notesSearch),
   notesSave: invoke(CH.notesSave),
   notesDelete: invoke(CH.notesDelete),
+  // Meetings are set up and recorded on the Mac only (issue #102): its microphone, its consent.
+  meetingsSetup: blocked,
+  meetingsConsent: blocked,
+  meetingsPermission: blocked,
+  meetingsModel: blocked,
+  onMeetingsModelProgress: blocked,
+  meetingsRestart: blocked,
+  meetingsStart: blocked,
+  meetingsStop: blocked,
+  meetingsPause: blocked,
+  meetingsMicOff: blocked,
+  meetingsRetry: blocked,
+  meetingsRematch: blocked,
+  // The Meetings page is the Mac's window only: its transcripts and audio never reach a browser.
+  meetingsList: blocked,
+  meetingsGet: blocked,
+  meetingsRename: blocked,
+  meetingsDelete: blocked,
+  meetingsDeleteAudio: blocked,
+  meetingsExport: blocked,
+  onMeetingsChanged: blocked,
+  // Janitor → Meetings: the Mac's window only, like the page.
+  meetingsJanitor: blocked,
+  meetingsClean: blocked,
+  // The offer to record a call: the Mac's window only, like Record.
+  meetingsNotNow: blocked,
+  onMeetingsShowRecord: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
   // A session's files and diffs, read only, inside its own folder (sessionFileCall), cut to fit the bridge (webFit).
   filesList: invoke(CH.filesList),

@@ -10,6 +10,10 @@ import type { SubIssue } from "./subIssues";
 import type { WatchEvent } from "./watches";
 import type { PrDetail } from "./prDetail";
 import type { Settings } from "./settings";
+import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
+import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
+import type { ExportKind, MeetingGetAnswer, MeetingsListAnswer } from "./meetingsPage";
+import type { CleanRequest, MeetingsCleanAnswer, MeetingsJanitorAnswer } from "./meetingJanitor";
 import type { HistoryHit, TranscriptWindow } from "./history";
 import type { StandupCommit } from "./standup";
 import type { WorktreeClass, WorktreeInfo } from "./janitor";
@@ -222,6 +226,29 @@ export const CH = {
   notesSearch: "notes:search",
   notesSave: "notes:save",
   notesDelete: "notes:delete",
+  meetingsSetup: "meetings:setup",
+  meetingsConsent: "meetings:consent",
+  meetingsPermission: "meetings:permission",
+  meetingsModel: "meetings:model",
+  meetingsModelProgress: "meetings:modelProgress",
+  meetingsRestart: "meetings:restart",
+  meetingsStart: "meetings:start",
+  meetingsStop: "meetings:stop",
+  meetingsPause: "meetings:pause",
+  meetingsMicOff: "meetings:micOff",
+  meetingsRetry: "meetings:retry",
+  meetingsRematch: "meetings:rematch",
+  meetingsList: "meetings:list",
+  meetingsGet: "meetings:get",
+  meetingsRename: "meetings:rename",
+  meetingsDelete: "meetings:delete",
+  meetingsDeleteAudio: "meetings:deleteAudio",
+  meetingsExport: "meetings:export",
+  meetingsChanged: "meetings:changed",
+  meetingsJanitor: "meetings:janitor",
+  meetingsClean: "meetings:clean",
+  meetingsNotNow: "meetings:notNow",
+  meetingsShowRecord: "meetings:showRecord",
   notesChanged: "notes:changed",
   filesList: "files:list",
   filesRead: "files:read",
@@ -438,6 +465,73 @@ export interface DeckApi {
   /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * Settings → Meetings' state (macOS, the window only). Reads macOS's grants without asking
+   * anything (getMediaAccessStatus).
+   */
+  meetingsSetup(): Promise<MeetingsAnswer>;
+  /** I agree (true) or Turn off meetings (false): stores or clears the consent. Asks macOS nothing. */
+  meetingsConsent(agree: boolean): Promise<MeetingsAnswer>;
+  /**
+   * Allow the microphone, the Mac's sound or Accessibility, only after consent: asks macOS (the
+   * microphone's or Accessibility's prompt), checks the sound, or opens System Settings at its
+   * pane when the grant was refused.
+   */
+  meetingsPermission(kind: MeetingsGrant): Promise<MeetingsAnswer>;
+  /**
+   * The speech model (Settings → Meetings): its state, pick one (stored as settings.meetings.model),
+   * download it (also picks it; progress through onMeetingsModelProgress), cancel, remove.
+   */
+  meetingsModel(op: ModelOp, id?: string): Promise<ModelsAnswer>;
+  onMeetingsModelProgress(cb: (p: ModelProgress) => void): () => void;
+  /** Restart MasterDeck after a confirmation on the Mac (macOS may want it after a permission). */
+  meetingsRestart(): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * Record a meeting (the rail, ⌘K; macOS, the window only, after consent and the microphone's
+   * grant). The title is optional. Without a speech model it records anyway and says the
+   * transcript waits. AppState.meetingLive follows.
+   */
+  meetingsStart(title?: string): Promise<RecordAnswer>;
+  /** Stop: the last chunks are written, then transcription takes over. */
+  meetingsStop(): Promise<RecordAnswer>;
+  /** Pause (true) or resume (false): the paused time is left out of the audio and the transcript. */
+  meetingsPause(paused: boolean): Promise<RecordAnswer>;
+  /**
+   * The Record popout's Mic off in the recording (true) or back to following the meeting app
+   * (false); only while recording, reset at the next recording. AppState.meetingLive.mic follows.
+   */
+  meetingsMicOff(on: boolean): Promise<RecordAnswer>;
+  /** Try again on a meeting whose transcription failed: its chunks still on disk are queued again. */
+  meetingsRetry(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Match again: the meeting's notes the user never edited are removed, then it is matched to sessions again (one claude -p). */
+  meetingsRematch(id: string): Promise<{ ok: boolean; message?: string }>;
+  /**
+   * The Meetings page (macOS, the window only): the meetings that started in [from, to), newest
+   * first, without transcripts. Works after Turn off meetings too (nothing is recorded then).
+   */
+  meetingsList(from: number, to: number): Promise<MeetingsListAnswer>;
+  /** One meeting with its transcript; marks its "notes added" Needs-you item seen. */
+  meetingsGet(id: string): Promise<MeetingGetAnswer>;
+  meetingsRename(id: string, title: string): Promise<{ ok: boolean; message?: string }>;
+  /** Delete a meeting after a native question on the Mac (its notes stay). */
+  meetingsDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Delete a meeting's audio after a native question (the transcript stays). */
+  meetingsDeleteAudio(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Save the transcript (Markdown) or the audio (.webm) through a save dialog. */
+  meetingsExport(id: string, kind: ExportKind): Promise<{ ok: boolean; message?: string }>;
+  /** A meeting changed (its state, title, transcript) or, null, the list did. The window only. */
+  onMeetingsChanged(cb: (c: { id: string | null }) => void): () => void;
+  /** Janitor → Meetings (macOS, the window only): every meeting with its audio's and transcript's size. */
+  meetingsJanitor(): Promise<MeetingsJanitorAnswer>;
+  /**
+   * Janitor's Delete audio / Delete meetings on the picked meetings (the window asked first). The
+   * meeting being recorded is skipped; notes stay.
+   */
+  meetingsClean(req: CleanRequest): Promise<MeetingsCleanAnswer>;
+  /** Not now on the offer to record a call (AppState.meetingLive.offer): it goes, and that call is not offered again. */
+  meetingsNotNow(): Promise<{ ok: boolean; message?: string }>;
+  /** The offer's notification was clicked: show the rail's Record popout. The window only. */
+  onMeetingsShowRecord(cb: () => void): () => void;
   onNotesChanged(cb: (c: NoteChange) => void): () => void;
   /** The files in a session's folder (its own `cwd`), for Details → Files and ⌘P. Read only. */
   filesList(key: string): Promise<FileList>;
