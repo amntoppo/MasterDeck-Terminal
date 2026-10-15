@@ -26,7 +26,7 @@ import { heldViews } from "@shared/heldMessages";
 import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname, release, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -1291,6 +1291,8 @@ function syncRemote(): void {
     token: token!,
     deviceId: deviceId(),
     appVersion: app.getVersion(),
+    platform: `${process.platform}-${process.arch}`,
+    osVersion: release(),
     run: (cmd) => remoteCommands.run(cmd),
     onItems: (items) => sources.setExternalItems(items),
     onStatus: (st) => sources.setRemote({ ...st, hasToken: true }),

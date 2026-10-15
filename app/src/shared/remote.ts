@@ -210,6 +210,9 @@ export const DesktopMsg = z.discriminatedUnion('t', [
     appVersion: z.string().max(40),
     protocol: z.number().int(),
     macPublicKey: z.string().regex(PUBKEY_RE).optional(),
+    /** Optional (2026-10-16): the Mac's OS and CPU, e.g. "darwin-arm64", and its OS release, for the admin dashboard. */
+    platform: z.string().max(40).regex(/^[\w.-]*$/).optional(),
+    osVersion: z.string().max(40).regex(/^[\w. ()-]*$/).optional(),
   }),
   z.object({ t: z.literal('snapshot'), data: z.record(z.string(), z.unknown()) }),
   /** JSON Patch against the server's stored snapshot at version `base`; answered by snapshotAck or snapshotNeeded. */

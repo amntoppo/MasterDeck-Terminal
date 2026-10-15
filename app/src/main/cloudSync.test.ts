@@ -89,6 +89,14 @@ describe('CloudSync', () => {
     expect(sent()[2].data.sessions[0].state).toBe('busy')
   })
 
+  it('names its platform and OS release in hello when given them (admin dashboard)', async () => {
+    const srv = await server()
+    const { s } = sync(srv.url, { platform: 'darwin-arm64', osVersion: '25.4.0' })
+    s.start()
+    await until(() => srv.got.some((m) => m.t === 'hello'))
+    expect(srv.got[0]).toEqual({ t: 'hello', deviceId: 'mac-1', appVersion: '0.7.0', protocol: PROTOCOL_VERSION, platform: 'darwin-arm64', osVersion: '25.4.0' })
+  })
+
   it('says hello, then sends snapshots debounced and only when changed', async () => {
     const srv = await server()
     const { s, statuses } = sync(srv.url)
