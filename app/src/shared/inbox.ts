@@ -3,6 +3,7 @@ import { ticketSpend } from "./costs";
 import {
   deriveNeedsYou,
   MASTER_NAME,
+  proposalLabel,
   proposalTicket,
   sessionTicket,
 } from "./derive";
@@ -303,7 +304,7 @@ export function collectItems(x: InboxInput): InboxItem[] {
         priority: PRIORITY.proposal,
         sessionKey: null,
         ticket: t,
-        title: `${p.kind} ${ticketLabel(t.repo, t.number)}`,
+        title: `${p.kind} ${proposalLabel(p)}`,
         body: p.summary,
         actions: [
           startable
@@ -332,7 +333,7 @@ export function collectItems(x: InboxInput): InboxItem[] {
       priority: PRIORITY[kind],
       sessionKey: null,
       ticket: t,
-      title: ticketLabel(t.repo, t.number),
+      title: proposalLabel(p),
       body: trust
         ? `${trustLine(trust.folder)} Open Claude in that folder once and accept its prompt, then try again.`
         : (p.note ?? p.summary),

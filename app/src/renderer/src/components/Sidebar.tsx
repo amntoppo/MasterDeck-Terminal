@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   MASTER_NAME,
+  proposalLabel,
   proposalTicket,
   sessionForIssue,
   sessionForProposal,
@@ -1179,9 +1180,9 @@ function ProposalCard({
         </span>
         <span
           className="title"
-          title={`${ticketLabel(p.repo, p.issue)} ${dest}`}
+          title={`${proposalLabel(p)} ${dest}`}
         >
-          {ticketLabel(p.repo, p.issue)}{" "}
+          {proposalLabel(p)}{" "}
           {question && target ? target.name : dest}
           <AccountBadge login={isMulti(state.config) ? p.target.spawn?.account : null} />
         </span>

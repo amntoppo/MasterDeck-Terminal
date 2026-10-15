@@ -1,4 +1,4 @@
-import { sameTicket, storedRepo, type Ticket } from './ticket'
+import { sameTicket, storedRepo, ticketLabel, type Ticket } from './ticket'
 import type { Issue, MasterState, NeedsItem, Pr, Proposal, Session } from './types'
 
 export const MASTER_NAME = 'master-agent'
@@ -120,6 +120,8 @@ export function parseLedger(raw: unknown): { proposals: Proposal[]; lastSnapshot
               account: /^[A-Za-z0-9-]{1,39}$/.test(s(spawn.account) ?? '') ? s(spawn.account)! : undefined,
               // The CLI's MODEL_RE: an alias or a full name, never an option.
               model: /^[A-Za-z0-9][A-Za-z0-9._[\]-]{0,63}$/.test(s(spawn.model) ?? '') ? s(spawn.model)! : undefined,
+              ...(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(s(spawn.worktree) ?? '') ? { worktree: s(spawn.worktree)! } : {}),
+              ...(spawn.assignMe === true ? { assignMe: true } : {}),
             }
           : undefined,
       },
@@ -178,6 +180,15 @@ export function deriveNeedsYou(proposals: Proposal[], sessions: Session[]): Need
 /** A proposal's ticket. */
 export function proposalTicket(p: Pick<Proposal, 'issue' | 'repo'>): Ticket {
   return { repo: p.repo ?? null, number: p.issue }
+}
+
+/**
+ * How a proposal is named in lists: its ticket (#12, api#12); one with no ticket (issue 0: a CHAT,
+ * a START from scratch) by the session it targets or starts.
+ */
+export function proposalLabel(p: Pick<Proposal, 'issue' | 'repo' | 'target'>): string {
+  if (p.issue) return ticketLabel(p.repo, p.issue)
+  return p.target.spawn?.name ?? p.target.session ?? '—'
 }
 
 /** An ASSIGN proposal for a ticket that has not been dispatched yet. */

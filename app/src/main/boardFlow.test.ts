@@ -64,6 +64,39 @@ describe('BoardFlow', () => {
     await flow.tick(state({ sessions: [sess({ issue: null })], proposals: [{ id: 1, kind: 'ASSIGN', issue: 12, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } }] }), 0)
     expect(linked).toEqual([`${SID} #12`])
   })
+  it('assigns the user once linked when master start asked for it (the newest proposal of that name), and only then', async () => {
+    const s = setup(emptyLinks(), {})
+    const assigned: string[] = []
+    s.deps.assignMe = async (t, account) => (assigned.push(`#${t.number} ${account}`), { ok: true, message: 'assigned' })
+    const flow = new BoardFlow(s.deps)
+    const prop = (id: number, assignMe: boolean) => ({ id, kind: 'ASSIGN', issue: 12, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12', account: 'alice', ...(assignMe ? { assignMe: true } : {}) } } })
+    await flow.tick(state({ sessions: [sess({ issue: null })], proposals: [prop(1, false), prop(2, true)] }), 0)
+    expect(s.linked).toEqual([`${SID} #12`])
+    expect(assigned).toEqual(['#12 alice'])
+    await flow.tick(state({ sessions: [sess({ issue: null })], proposals: [prop(1, false), prop(2, true)] }), 31_000)
+    expect(assigned).toEqual(['#12 alice']) // once
+    const plain = setup(emptyLinks(), {})
+    const none: string[] = []
+    plain.deps.assignMe = async (t) => (none.push(`#${t.number}`), { ok: true, message: '' })
+    await new BoardFlow(plain.deps).tick(state({ sessions: [sess({ issue: null })], proposals: [prop(1, false)] }), 0)
+    expect(none).toEqual([])
+  })
+  it('does not link a session whose newest proposal of that name is a START (no ticket)', async () => {
+    const { flow, linked } = setup(emptyLinks(), {})
+    await flow.tick(state({ sessions: [sess({ issue: null })], proposals: [
+      { id: 1, kind: 'ASSIGN', issue: 12, status: 'done', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } },
+      { id: 2, kind: 'START', issue: 0, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } },
+    ] }), 0)
+    expect(linked).toEqual([])
+  })
+  it('does not assign when the link failed', async () => {
+    const s = setup(emptyLinks(), {})
+    const assigned: string[] = []
+    s.deps.link = async () => ({ ok: false, message: 'not on any selected board' })
+    s.deps.assignMe = async (t) => (assigned.push(`#${t.number}`), { ok: true, message: '' })
+    await new BoardFlow(s.deps).tick(state({ sessions: [sess({ issue: null })], proposals: [{ id: 1, kind: 'ASSIGN', issue: 12, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12', assignMe: true } } }] }), 0)
+    expect(assigned).toEqual([])
+  })
   it('does nothing for sessions whose workflow left the ticket built-in out', async () => {
     const s = setup(withPr(withLink(emptyLinks(), SID, { repo: null, number: 12 }, 't', '', new Date(0)), SID, PR), { [PR]: { state: 'MERGED', isDraft: false } })
     s.deps.builtinOn = () => false

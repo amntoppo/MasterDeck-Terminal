@@ -840,6 +840,29 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).
 
+## Master starts sessions on demand (#126): open points (2026-10-16)
+
+- **Not checked live.** `master start` was run against fixtures and with a stand-in `claude` only:
+  a real `claude --bg --worktree <name>` start, the app assigning a real ticket after the link, and
+  a chat from the MasterBar app are still to be seen.
+- **The assignee waits for the link.** MasterDeck assigns the user when it links the session
+  (BoardFlow, every 30 s, and only when the session's workflow keeps the `ticket` built-in). With
+  MasterDeck closed, or the built-in left out, the ticket is not assigned; master never writes to
+  GitHub itself.
+- **Board filters read the current sprint by default.** `--sprint any` reads the whole board;
+  a boardless account's issues ignore `--sprint`. A filter over a big board reads every page
+  (`project_items`, 20 pages at most).
+- **Board-less column filters see no PRs.** For an account with no board, `master start --column`
+  matches `board.derived_status` without the PR facts (`_pr_facts` is not read), so every open issue
+  is Todo: `--column "In Dev"` / `"PR Raised"` never match there.
+- **Editing a master start in the Start dialog** (Needs you → Start…) makes a new proposal through
+  `master add`, which drops `assignMe` and `worktree` (the dialog has its own Assign to me and
+  Create worktree).
+- **`Sources.readLedger`'s extra `claude agents` read** has no in-flight guard: an older answer can
+  land after a newer one (the next 3 s poll corrects it).
+- **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
+  later links it to a ticket, the proposal stays issue 0.
+
 ## In-app updates (#122): open points (2026-10-16)
 
 - **P1 · The first real release.** The service is live (2026-10-16: R2 bucket `masterdeck-releases`,
@@ -885,6 +908,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Master starts sessions on demand (#126)**: `master start` from scratch (task, repo or folder,
+  name, worktree, model, permission mode, account) or for board tickets (by reference or by
+  column/assignee/label/sprint), every start a ledger proposal shown as a plan and spawned on the
+  user's yes (`--yes` for "start it now"); ticket sessions start in the repository's checkout with
+  the ticket's description and sub-issues, get linked, moved to In Dev and assigned by MasterDeck.
+  Branch `worktree-MasterDeck-Terminal-126-master-start`.
 - **MasterDeck messages never mix with a half-typed prompt (#123)**: the core mod (0.6.0) takes
   them as prompts of their own (`$.prompt.submit`); without it, typing waits for an empty prompt,
   a held message shows on the session (✉ badge, bar with Send now / Discard), goes when the prompt

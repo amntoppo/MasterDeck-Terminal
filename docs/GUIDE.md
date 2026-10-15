@@ -184,6 +184,27 @@ starts from anywhere, Esc cancels. With nothing changed, Start does what it alwa
   skill needed) and, as the `ticket` step of the session's workflow (the Default workflow has it),
   moves the ticket to your in-progress status if it's earlier on the board.
 
+### Asking master to start sessions
+
+In master-agent's terminal or the MasterBar app's chat, ask in your own words:
+
+- "start a session in MasterDeck-Terminal to fix the flaky tests" (from scratch: a task, optionally
+  a repository or folder, a name, a new worktree, a model, a permission mode, an account);
+- "start sessions for #42 and api#12", or "pick up everything in Ready For Dev assigned to me"
+  (tickets by number, or by column, assignee, label or sprint on your boards).
+
+master answers with a plan: one line per session (its name, folder, ticket, model, mode, account),
+warnings (no checkout found, a folder Claude Code was never allowed to work in) and what it will
+not start (a ticket not found, closed, or that already has a running session, with that session's
+name). Nothing starts until you say yes: approve all, or keep only some ("start 14 and 16"). Say
+"start it now" in the request to skip the question. Each session is a normal background session:
+it shows in the session list at once, master replies with its `claude attach` id, and it keeps
+running when master stops. A ticket's session starts in the ticket's repository checkout with the
+ticket's title, description and sub-issues as its first prompt (as background: it sets up and asks
+you for instructions first, unless your request gave some), and MasterDeck links it to the
+ticket, moves the card to In Dev and assigns the ticket to you (say "don't assign me" to leave
+that out). A start that fails stays in Needs you; nothing is tried again until you say so.
+
 ## Linked sessions
 
 Link sessions that should know about each other: a backend session and the client one, two repositories
