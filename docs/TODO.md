@@ -828,7 +828,29 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).
 
+## Master starts sessions on demand (#126): open points (2026-10-16)
+
+- **Not checked live.** `master start` was run against fixtures and with a stand-in `claude` only:
+  a real `claude --bg --worktree <name>` start, the app assigning a real ticket after the link, and
+  a chat from the MasterBar app are still to be seen.
+- **The assignee waits for the link.** MasterDeck assigns the user when it links the session
+  (BoardFlow, every 30 s, and only when the session's workflow keeps the `ticket` built-in). With
+  MasterDeck closed, or the built-in left out, the ticket is not assigned; master never writes to
+  GitHub itself.
+- **Board filters read the current sprint by default.** `--sprint any` reads the whole board;
+  a boardless account's issues ignore `--sprint`. A filter over a big board reads every page
+  (`project_items`, 20 pages at most).
+- **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
+  later links it to a ticket, the proposal stays issue 0.
+
 ## Recently done
+
+- **Master starts sessions on demand (#126)**: `master start` from scratch (task, repo or folder,
+  name, worktree, model, permission mode, account) or for board tickets (by reference or by
+  column/assignee/label/sprint), every start a ledger proposal shown as a plan and spawned on the
+  user's yes (`--yes` for "start it now"); ticket sessions start in the repository's checkout with
+  the ticket's description and sub-issues, get linked, moved to In Dev and assigned by MasterDeck.
+  Branch `worktree-MasterDeck-Terminal-126-master-start`.
 
 - **Terminal links (#119)**: ⌘-click (Ctrl-click off a Mac) opens an http/https address printed
   in a terminal in the browser (localhost and IP addresses with ports, paths and queries; one link

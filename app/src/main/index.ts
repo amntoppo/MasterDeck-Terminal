@@ -500,7 +500,7 @@ const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
 // Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
-const { forAccount, forRepo, forCard, forBoard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+const { forAccount, forRepo, forCard, forBoard, cardAccount, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
   config: getConfig,
   base: { gh, github, ops: boardOps },
   run,
@@ -575,6 +575,14 @@ const boardFlow = new BoardFlow({
       ? {}
       : prStatesFor((l) => forAccount(l || null).gh, getConfig(), urls),
   link: linkSession,
+  // `master start`'s ticket starts: the user, as the session's account (else the card's; one account: gh's login).
+  assignMe: async (t, account) => {
+    const login = isMulti(getConfig()) ? (account ?? cardAccount(t.repo, t.number)) : (latest?.me ?? null);
+    if (!login) return { ok: false, message: "who you are on GitHub is not known yet" };
+    const r = await forCard(t.repo, t.number).github.assign(t, login, []);
+    if (r.ok) sources.noteAssigned(t, login);
+    return r;
+  },
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
   log: (m) => console.error(m),

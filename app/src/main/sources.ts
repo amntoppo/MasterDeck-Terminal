@@ -1624,7 +1624,12 @@ export class Sources {
     }
     try {
       const led = parseLedger(JSON.parse(text));
+      // A session master just started (`master spawn`, `master start --yes`): list it now, not at the next poll.
+      const started = (ps: Proposal[]) => new Set(ps.filter((p) => p.status === "sent" && p.target.spawn).map((p) => p.id));
+      const before = started(this.proposals);
+      const fresh = this.health.ledger === "ok" && [...started(led.proposals)].some((id) => !before.has(id));
       this.proposals = led.proposals;
+      if (fresh) void this.pollAgents();
       // Master's last sweep fills what we lack: at startup, or when our own (cached or live) data
       // has no issues or PRs because GitHub failed. A working list is never replaced.
       const ls = led.lastSnapshot as Record<string, unknown> | null;

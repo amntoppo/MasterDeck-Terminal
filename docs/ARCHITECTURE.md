@@ -902,6 +902,35 @@ The same read serves the Board's repository view, narrowed: `collect.Live.repo_i
 
 `master snapshot` for such an account (`snapshot.build`: repositories, no board) takes the same repository read (the identical call, so `ghc` answers one of the two) and keeps only the open issues assigned to that account's login (`normalize.repo_issues`), each `derived: true` with the column GitHub alone gives it (`board.derived_status`: an open ready PR → PR Raised, a draft → In Dev, a merged one → Done and left out, else Todo); Todo becomes In Dev when a session owns the issue. `rules.propose` reads `config.DERIVED_STATUSES` for them (`rules._statuses`): ASSIGN only for Todo with no owner, ORPHAN for In Dev / PR Raised with a stopped owner; never an issue assigned to someone else or to nobody. On a `sprintless` board the issues assigned to me count as current (`normalize._issue`); unassigned ready ones are not offered.
 
+`master start` (`cli.cmd_start`, `start.py`, issue #126) starts sessions on demand from a chat with
+master. From scratch (`--prompt`, optional `--repo`/`--cwd`, `--name`, `--worktree`, `--model`,
+`--permission-mode`, `--account`): a `START` proposal for issue 0, its folder the repository's
+checkout (`checkout.resolve(…, mapped=False)`) or the workspace, its name from the task
+(`start.scratch_name`), its prompt the task plus the reply protocol with the session's name as the
+label. For tickets, by reference (`12`, `api#12`, `acme/api#12`) or by board filter (`--column`,
+`--assignee` login/`@me`/`none`, `--label`, `--sprint` `@current`/title/`none`/`any`, `--limit`;
+`_board_cards` reads every account's board, a boardless account's repository issues with
+`board.derived_status`, and matches in `start.board_match`; finished columns only when named): each
+ticket is read from GitHub as its repository's account (`Live.issue`, `Live.sub_issues`: REST
+`repos/…/issues/N` and `…/sub_issues`) and becomes an ASSIGN proposal (`rules._assign`, so the same
+name, folder and account as the sweep's) with source `start:<owner/name#N>:<now>`, its prompt
+`start.ticket_prompt` (the ASSIGN prompt, then the description cut at 20 000 characters, up to 50
+sub-issues and the user's instructions, as the app's `composePrompt`) and `assignMe: true` unless
+`--no-assign`. Refused before anything is added: not found, closed, a pull request, a repository
+`config.repo_readable` does not pass, a running owner session (`join.owner_of` over `claude agents`
+and `ticket-links.json`), an approved ASSIGN for it; a waiting (proposed) ASSIGN for the ticket is
+rejected with "replaced by start proposal N". Warnings only: no checkout found, a folder
+`trust.trusted` says no to, a stopped owner. A name in use (running, or a waiting proposal) gets
+`-2`, `-3` (`start.unique_name`). `--yes` approves and spawns each at once (one ledger lock each,
+a failure left held and said); `--dry-run` adds nothing and is a read. `master spawn` and
+`master start --yes` print `started <name> (proposal N) — claude attach <bg id>`. A spawn target
+may carry `worktree` (→ `claude --bg … --worktree <name>`) and `assignMe` (`spawn.validate_spawn_target`).
+On the app's side, `parseLedger` keeps both; `BoardFlow` links the session by the newest ASSIGN of
+its name and, when it says `assignMe`, assigns the ticket to the session's account (one account:
+`state.me`) through `forCard(…).github.assign` once, with the link; `Sources.readLedger` reads
+`claude agents` at once when a spawn proposal turns `sent`; Needs you and the Sidebar name a
+proposal without a ticket by its session (`proposalLabel`).
+
 `main/masterCli.ts` runs `python -m master.cli` (the `master` skill's lib, the installed copy in
 `~/.claude/skills/master/lib` wins over the bundled one): ledger approve/reject, `draft-assign`,
 `spawn`, snapshot, board, `config detect`. `master snapshot` reads MasterDeck's `ticket-links.json`
@@ -1108,8 +1137,9 @@ every one of them is the plain `gh`/`github`/`boardOps` singleton, called exactl
 time. Links imported from tt.sh (`imported: true` in `ticket-links.json`) are history: BoardFlow
 leaves them out of (2) and (3) until a session links that ticket again (`withLink` writes a fresh
 entry). (1) A session with no issue whose name matches the spawn target of a sent/question/blocked/done
-ASSIGN proposal is linked through `linkSession` (tried once per session, ever:
-`<home>/board-link-tried.json`). (2) Each new
+ASSIGN proposal (the newest of that name) is linked through `linkSession` (tried once per session, ever:
+`<home>/board-link-tried.json`); when that proposal is a `master start` with `assignMe`, the ticket is
+then assigned to the user (`deps.assignMe`, once, only after a link that went through). (2) Each new
 PR in `state.sessionPrs` of a linked session that it opened (its transcripts: `Sources.prsOpenedBy`)
 or whose repo and head branch are the link's branch key (`prOnBranch`, `PrLive.headRef`) is recorded
 (`LinkStore.addPr`; a failed write is logged and retried next tick) and, when the session keeps

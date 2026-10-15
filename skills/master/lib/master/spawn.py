@@ -60,6 +60,13 @@ def account_settings(account: str) -> Path:
     return config.masterdeck_home() / "accounts" / f"{account}.settings.json"
 
 
+def validate_worktree(worktree: "str | None") -> "str | None":
+    """`claude --worktree <name>`: a name like a session's (it becomes the folder and the branch `worktree-<name>`)."""
+    if worktree is not None and not NAME_RE.fullmatch(str(worktree)):
+        return f"invalid worktree name: {worktree!r}"
+    return None
+
+
 def validate_resume(resume: "str | None") -> "str | None":
     try:
         if str(uuid.UUID(resume)) != resume.lower():
@@ -77,9 +84,11 @@ def validate_spawn_target(sp: dict) -> "str | None":
     if sp.get("resume"):
         return validate_resume(sp["resume"])
     err = (validate_name(sp.get("name")) or validate_model(sp.get("model"))
-           or validate_permission_mode(sp.get("permissionMode")))
+           or validate_permission_mode(sp.get("permissionMode")) or validate_worktree(sp.get("worktree")))
     if err:
         return err
+    if "assignMe" in sp and not isinstance(sp["assignMe"], bool):
+        return f"invalid assignMe: {sp['assignMe']!r}"
     return validate_prompt(sp.get("prompt"))
 
 
@@ -112,7 +121,9 @@ def command(target: dict) -> list:
         return ["claude", "--bg", *acct, "--resume", sp["resume"]]
     model = ["--model", sp["model"]] if sp.get("model") else []
     mode = ["--permission-mode", sp["permissionMode"]] if sp.get("permissionMode") else []
-    return ["claude", "--bg", *acct, "-n", sp["name"], *model, *mode, sp["prompt"]]
+    # `master start --worktree`: Claude Code makes the worktree (in .claude/worktrees/ of the folder) and starts there.
+    wt = ["--worktree", sp["worktree"]] if sp.get("worktree") else []
+    return ["claude", "--bg", *acct, "-n", sp["name"], *model, *mode, *wt, sp["prompt"]]
 
 
 def default_account(led: dict, p: dict, cwd: str) -> "str | None":

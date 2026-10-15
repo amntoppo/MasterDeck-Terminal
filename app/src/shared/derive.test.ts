@@ -10,6 +10,7 @@ import {
   parseLedger,
   parseSnapshot,
   pendingAssign,
+  proposalLabel,
   sessionForIssue,
   sessionForProposal,
 } from './derive'
@@ -57,6 +58,21 @@ describe('parseSnapshot / parseLedger', () => {
   it('carries why `master spawn` held a proposal, and nothing else for it', () => {
     const l = parseLedger({ proposals: [{ id: 1, status: 'held', held_for: 'trust', target: { spawn: { name: 'a' } } }, { id: 2, status: 'held', held_for: 7, target: {} }, { id: 3, status: 'held', target: {} }] })
     expect(l.proposals.map((p) => p.heldFor)).toEqual(['trust', undefined, undefined])
+  })
+  it("keeps master start's assignMe (true only) and worktree name (a name only)", () => {
+    const l = parseLedger({
+      proposals: [
+        { id: 1, target: { spawn: { name: 'a', assignMe: true, worktree: 'flaky' } } },
+        { id: 2, target: { spawn: { name: 'b', assignMe: 'yes', worktree: '../x' } } },
+      ],
+    })
+    expect(l.proposals.map((p) => [p.target.spawn?.assignMe, p.target.spawn?.worktree])).toEqual([[true, 'flaky'], [undefined, undefined]])
+  })
+  it('names a proposal by its ticket, or by its session when it has none', () => {
+    const p = (o: Partial<Proposal>): Proposal => ({ id: 1, kind: 'START', issue: 0, status: 'proposed', summary: '', message: '', note: null, target: {}, ...o })
+    expect(proposalLabel(p({ target: { spawn: { name: 'fix-flaky-tests' } } }))).toBe('fix-flaky-tests')
+    expect(proposalLabel(p({ kind: 'CHAT', target: { session: 'paywall' } }))).toBe('paywall')
+    expect(proposalLabel(p({ kind: 'ASSIGN', issue: 12, repo: 'acme/api' }))).toBe('api#12')
   })
   it("keeps a spawn's account; a malformed login is dropped", () => {
     const l = parseLedger({
