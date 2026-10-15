@@ -249,6 +249,84 @@ export interface Meeting {
   progress: MeetingProgress | null
   /** Why it failed, or what went wrong while recording; plain text MasterDeck wrote. */
   error: string | null
+  /**
+   * Your microphone's changes during the recording (Plan M diagnostics): what md-mute read, why,
+   * and whether the mic was kept out. Only on change, at most MIC_LOG_MAX: the first and the last
+   * MIC_LOG_KEEP. Missing in files written before it, and in a file whose log did not read back.
+   */
+  micLog?: MicLogEntry[]
+  /** Changes left out between the first and the last MIC_LOG_KEEP of micLog (only when some were). */
+  micLogDropped?: number
+}
+
+/**
+ * Why md-mute read what it did for an app (its line's `why`): the control was found, the app is not
+ * running (the check's only: md-mute lists running apps alone), Accessibility does not reach the
+ * helper, the whole tree was searched without a matching control, the search hit its budget, or the
+ * app did not answer.
+ */
+export type MuteWhy = 'found' | 'not-running' | 'not-trusted' | 'no-control' | 'cut' | 'error'
+export const MUTE_WHYS: readonly MuteWhy[] = ['found', 'not-running', 'not-trusted', 'no-control', 'cut', 'error']
+
+/**
+ * One change of the mic during a recording. `t`: ms from the meeting's start (wall clock); `state`:
+ * what md-mute read for the app followed (unknown when nothing reads); `app`: that app's name;
+ * `why`: md-mute's why for it; `reason`: why the mute is not known (MicLive.reason); `gated`: the
+ * mic was kept out of the recording from then on.
+ */
+export interface MicLogEntry {
+  t: number
+  state: MuteState
+  app: string | null
+  why?: MuteWhy
+  reason?: MicUnknown
+  gated: boolean
+  /** The recording was paused (nothing of the mic recorded; md-mute not running). */
+  paused?: true
+}
+/** A recording keeps the first and the last this many changes of its Mic log. */
+export const MIC_LOG_KEEP = 250
+export const MIC_LOG_MAX = 2 * MIC_LOG_KEEP
+
+/** A Mic log entry with its wall-clock time (made relative to the meeting's start when written). */
+export type MicLogAt = Omit<MicLogEntry, 't'> & { at: number }
+
+/**
+ * A recording's Mic log as it is kept: the first and the last MIC_LOG_KEEP changes, and how many
+ * fell between. A change of `why` alone (state, app, reason, gate and pause the same as the last
+ * entry) is not a change worth an entry: a long search flips between no-control, cut and error
+ * every 2 s and would push out what matters.
+ */
+export class MicLogKeep {
+  private head: MicLogAt[] = []
+  private tail: MicLogAt[] = []
+  private last: MicLogAt | null = null
+  dropped = 0
+
+  /** Adds one change; false when it was the same as the last one but for its why. */
+  add(e: MicLogAt): boolean {
+    const l = this.last
+    if (l && l.state === e.state && l.app === e.app && l.reason === e.reason && l.gated === e.gated && !!l.paused === !!e.paused) return false
+    this.last = e
+    if (this.head.length < MIC_LOG_KEEP) this.head.push(e)
+    else {
+      this.tail.push(e)
+      if (this.tail.length > MIC_LOG_KEEP) {
+        this.tail.shift()
+        this.dropped++
+      }
+    }
+    return true
+  }
+
+  get length(): number {
+    return this.head.length + this.tail.length
+  }
+
+  /** What is kept, oldest first: the first MIC_LOG_KEEP, then the last (`dropped` fell between). */
+  entries(): MicLogAt[] {
+    return [...this.head, ...this.tail]
+  }
 }
 
 /** Stops a recording (spec §2: a notice says so). */
@@ -334,6 +412,12 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
   // Missing in the files of the first recordings: no progress then.
   const progress = o.progress === undefined || o.progress === null ? null : asProgress(o.progress)
   if (progress === undefined) return null
+  // A diagnostic: a log that does not read back is left out, never the meeting.
+  const micLog = asMicLog(o.micLog)
+  const micLogDropped =
+    micLog && micLog.length === MIC_LOG_MAX && typeof o.micLogDropped === 'number' && Number.isInteger(o.micLogDropped) && o.micLogDropped > 0 && o.micLogDropped <= 10_000_000
+      ? o.micLogDropped
+      : undefined
   return {
     id,
     title,
@@ -350,7 +434,35 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
     matches,
     progress,
     error: o.error,
+    ...(micLog ? { micLog } : {}),
+    ...(micLogDropped ? { micLogDropped } : {}),
   }
+}
+
+const MUTE_STATES: ReadonlySet<string> = new Set(['muted', 'unmuted', 'unknown'])
+
+/** A stored mic log, or undefined when there is none or it is not one. */
+function asMicLog(v: unknown): MicLogEntry[] | undefined {
+  if (!Array.isArray(v) || v.length > MIC_LOG_MAX) return undefined
+  const out: MicLogEntry[] = []
+  for (const x of v) {
+    const e = record(x)
+    if (!e || !time(e.t) || typeof e.state !== 'string' || !MUTE_STATES.has(e.state) || typeof e.gated !== 'boolean') return undefined
+    if (e.app !== null && (typeof e.app !== 'string' || e.app.length > 60 || LINE_CONTROL.test(e.app))) return undefined
+    if (e.why !== undefined && !MUTE_WHYS.includes(e.why as MuteWhy)) return undefined
+    if (e.reason !== undefined && !MIC_UNKNOWNS.includes(e.reason as MicUnknown)) return undefined
+    if (e.paused !== undefined && e.paused !== true) return undefined
+    out.push({
+      t: e.t,
+      state: e.state as MuteState,
+      app: e.app,
+      ...(e.why !== undefined ? { why: e.why as MuteWhy } : {}),
+      ...(e.reason !== undefined ? { reason: e.reason as MicUnknown } : {}),
+      gated: e.gated,
+      ...(e.paused ? { paused: true as const } : {}),
+    })
+  }
+  return out
 }
 
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 10 * CHUNK_SEQ_MAX
@@ -416,6 +528,7 @@ export interface MicLive {
  * control could not be read.
  */
 export type MicUnknown = 'not-trusted' | 'no-helper' | 'helper-ended' | 'no-app' | 'unreadable'
+export const MIC_UNKNOWNS: readonly MicUnknown[] = ['not-trusted', 'no-helper', 'helper-ended', 'no-app', 'unreadable']
 
 /**
  * The state as web tabs get it: the offered call app and the app the mic follows (which app the

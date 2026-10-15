@@ -1100,6 +1100,19 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   brings up macOS's prompt the first time; after that it opens System Settings → Privacy & Security
   → Accessibility, where you switch MasterDeck on. Like the other permissions, macOS may want it
   allowed again after an update.
+- **Check mute reading** (shown with Follow): shows what MasterDeck can see of each meeting app's
+  mute, without recording. Join a call, then press **Check** while muted and again while unmuted.
+  It looks for about 3 seconds and lists Zoom, Teams, Webex and Google Meet with what it reads and
+  why: "Muted (button says 'Turn on microphone')", "Not running", "No mute button found — is the
+  call in the front tab, or Meet is full screen / on another desktop — press Check from the same
+  desktop as the call", "Search cut short", "The app did not answer", or "Accessibility not given
+  to MasterDeck's helper". If macOS allowed MasterDeck but not the part of it that reads the mute,
+  it says so above the table, with what to do: remove MasterDeck from Accessibility in System
+  Settings and allow it again (each new build needs this). For Google Meet, keep the call in the
+  browser window's front tab, not full screen, and press Check from the same desktop as the call:
+  other tabs can't be seen, and only pages on meet.google.com are looked at. Like a recording,
+  Check turns on Chrome's accessibility tree (and other Chrome-family browsers') until Chrome
+  quits.
 - **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
   accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
   first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
@@ -1219,6 +1232,14 @@ audio never reach a browser or a phone.
 - **Right, the meeting:** its title (click it to rename; Enter keeps it, Escape goes back), date,
   length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
   (each opens the note).
+- **Mic log** (closed until you open it; only meetings recorded since it was added): each change
+  of your mic during the recording, with its time: what MasterDeck read in the meeting app (Muted,
+  Unmuted, Unknown), the app, why (button found, no mute button found, search cut short, no
+  Accessibility, …), and whether your mic was out of the recording or recorded from then on. A
+  meeting where your mic was never out shows why here. Times are wall clock since you pressed
+  Record (a pause counts, unlike the transcript's). A change of why alone is not listed. The first
+  and the last 250 changes are kept; in between it says how many were not kept. **Export
+  transcript** includes it.
 - **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
   bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view until you
   scroll; a click on a line (or Enter on it, with Tab to get there) plays from there, and Space plays

@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { classifyControl, classifyLabel, MUTE_RULES, MUTE_UNKNOWN_HOLD, MuteSettle, muteRuleId, muteRulesLine, parseMuteLine, pickApp } from './meetingMute'
+import {
+  classifyControl,
+  classifyLabel,
+  MUTE_CHECK_SPLIT_GRANT,
+  MUTE_RULES,
+  MUTE_UNKNOWN_HOLD,
+  muteCheckApps,
+  muteCheckView,
+  muteCheckWhy,
+  MuteSettle,
+  muteRuleId,
+  muteRulesLine,
+  parseMuteLine,
+  pickApp,
+  type MuteApp,
+  type MuteCheckApp,
+  type MuteReading,
+} from './meetingMute'
 
 const line = (o: unknown): string => JSON.stringify(o)
 
@@ -44,6 +61,118 @@ describe('MUTE_RULES', () => {
     expect(j.apps.every((a) => !('name' in a))).toBe(true)
     expect(j.apps.find((a) => a.id === 'zoom')).toEqual({ id: 'zoom', bundles: ['us.zoom.xos'], menu: MUTE_RULES[0].menu })
     expect(j.apps.find((a) => a.id === 'meet')?.chromium).toContain('com.google.Chrome')
+  })
+
+  it('Meet is a web rule over the roles a web toggle may have; the line carries roles and the older role', () => {
+    const meet = MUTE_RULES.find((r) => r.id === 'meet')!
+    expect(meet.web).toBe(true)
+    expect(meet.element?.roles).toEqual(['AXButton', 'AXCheckBox', 'AXToggleButton'])
+    expect(meet.element?.attrs).toContain('AXDescription')
+    const j = JSON.parse(muteRulesLine()) as { apps: { id: string; web?: boolean; element?: { role: string; roles: string[] } }[] }
+    const line = j.apps.find((a) => a.id === 'meet')!
+    expect(line.web).toBe(true)
+    expect(line.element).toMatchObject({ role: 'AXButton', roles: ['AXButton', 'AXCheckBox', 'AXToggleButton'] })
+    expect(j.apps.find((a) => a.id === 'teams')).not.toHaveProperty('web')
+  })
+
+  it('Meet is searched only on its host; the line carries hosts for a web rule only', () => {
+    expect(MUTE_RULES.find((r) => r.id === 'meet')?.hosts).toEqual(['meet.google.com'])
+    const j = JSON.parse(muteRulesLine()) as { apps: { id: string; hosts?: string[] }[] }
+    expect(j.apps.find((a) => a.id === 'meet')?.hosts).toEqual(['meet.google.com'])
+    for (const id of ['zoom', 'teams', 'webex']) expect(j.apps.find((a) => a.id === id)).not.toHaveProperty('hosts')
+    // Hosts without web mean nothing to md-mute: not sent.
+    const odd = JSON.parse(muteRulesLine([{ id: 'x', name: 'X', bundles: ['b'], hosts: ['acme.example'], menu: { title: 'M', muted: ['U'], unmuted: ['M'] } }]))
+    expect(odd.apps[0]).not.toHaveProperty('hosts')
+  })
+})
+
+describe('parseMuteLine: the diagnostics', () => {
+  const app = { id: 'meet', state: 'muted', why: 'found', label: 'Turn on microphone (? + d)', searched: 1834, ms: 212, cached: false }
+
+  it('reads them; a line without them (an older helper) still reads', () => {
+    expect(parseMuteLine(line({ t: 1, trusted: true, apps: [app, { id: 'zoom', state: 'unknown', why: 'no-control', searched: 40, ms: 3, cached: false }] }))?.apps).toEqual([
+      app,
+      { id: 'zoom', state: 'unknown', why: 'no-control', searched: 40, ms: 3, cached: false },
+    ])
+    expect(parseMuteLine(line({ t: 1, trusted: true, apps: [{ id: 'meet', state: 'unknown', why: 'cut', searched: 0, ms: 0 }] }))?.apps[0].why).toBe('cut')
+    expect(parseMuteLine(line({ t: 1, trusted: false, apps: [{ id: 'meet', state: 'unknown', why: 'not-trusted' }] }))?.apps[0].why).toBe('not-trusted')
+    expect(parseMuteLine(line({ t: 1, trusted: true, apps: [{ id: 'meet', state: 'unknown' }] }))?.apps).toEqual([{ id: 'meet', state: 'unknown' }])
+  })
+
+  it('stays strict: a wrong or inconsistent field makes the whole line junk', () => {
+    const bad = [
+      { ...app, why: 'maybe' },
+      { ...app, why: 'not-running' },
+      { ...app, why: 'no-control' },
+      { ...app, state: 'unknown' },
+      { ...app, label: 'Turn on microphone (⌘ + d)' },
+      { ...app, label: 'x'.repeat(81) },
+      { ...app, label: '' },
+      { ...app, label: 'a\nb' },
+      { ...app, label: 5 },
+      { id: 'meet', state: 'unknown', why: 'no-control', label: 'Turn off microphone' },
+      { id: 'meet', state: 'unknown', label: 'Turn off microphone' },
+      { ...app, searched: -1 },
+      { ...app, searched: 1.5 },
+      { ...app, ms: 'fast' },
+      { ...app, cached: 'no' },
+    ]
+    for (const a of bad) expect(parseMuteLine(line({ t: 1, trusted: true, apps: [a] })), JSON.stringify(a)).toBeNull()
+    // Not trusted: only not-trusted.
+    expect(parseMuteLine(line({ t: 1, trusted: false, apps: [{ id: 'meet', state: 'unknown', why: 'no-control' }] }))).toBeNull()
+  })
+})
+
+describe('Check mute reading', () => {
+  const reading = (apps: MuteApp[], trusted = true): MuteReading => ({ t: 1, trusted, apps })
+
+  it('every rule gets a row: the last reading, the last real search size, not running when never listed', () => {
+    const apps = muteCheckApps([
+      reading([{ id: 'meet', state: 'unknown', why: 'no-control', searched: 9000, ms: 640, cached: false }]),
+      reading([{ id: 'meet', state: 'unknown', why: 'no-control', searched: 0, ms: 0, cached: false }]),
+    ])
+    expect(apps.map((a) => a.id)).toEqual(MUTE_RULES.map((r) => r.id))
+    expect(apps.find((a) => a.id === 'meet')).toEqual({ id: 'meet', name: 'Google Meet', state: 'unknown', why: 'no-control', searched: 9000, ms: 640 })
+    expect(apps.find((a) => a.id === 'zoom')).toEqual({ id: 'zoom', name: 'Zoom', state: 'unknown', why: 'not-running', searched: 0, ms: 0 })
+    const found = muteCheckApps([reading([{ id: 'meet', state: 'muted', why: 'found', label: 'Turn on microphone', searched: 1, ms: 1, cached: true }])])
+    expect(found.find((a) => a.id === 'meet')).toMatchObject({ state: 'muted', why: 'found', label: 'Turn on microphone' })
+    // An older helper: the why from the state.
+    expect(muteCheckApps([reading([{ id: 'zoom', state: 'unmuted' }])])[0].why).toBe('found')
+    expect(muteCheckApps([reading([{ id: 'zoom', state: 'unknown' }])])[0].why).toBe('no-control')
+    expect(muteCheckApps([reading([{ id: 'zoom', state: 'unknown' }], false)])[0].why).toBe('not-trusted')
+  })
+
+  it('says why in plain sentences', () => {
+    const a = (o: Partial<MuteCheckApp>): MuteCheckApp => ({ id: 'meet', name: 'Google Meet', state: 'unknown', why: 'no-control', searched: 0, ms: 0, ...o })
+    const meet = MUTE_RULES.find((r) => r.id === 'meet')!
+    const zoom = MUTE_RULES.find((r) => r.id === 'zoom')!
+    expect(muteCheckWhy(a({ state: 'muted', why: 'found', label: 'Turn on microphone' }), meet)).toBe("Muted (button says 'Turn on microphone')")
+    expect(muteCheckWhy(a({ state: 'unmuted', why: 'found', label: 'Turn off microphone (? + d)' }), meet)).toBe("Unmuted (button says 'Turn off microphone (? + d)')")
+    expect(muteCheckWhy(a({ state: 'muted', why: 'found' }), zoom)).toBe('Muted (button found)')
+    expect(muteCheckWhy(a({ why: 'not-running' }), meet)).toBe('Not running')
+    const web = 'No mute button found — is the call in the front tab, or Meet is full screen / on another desktop — press Check from the same desktop as the call'
+    expect(muteCheckWhy(a({}), meet)).toBe(web)
+    expect(muteCheckWhy(a({ searched: 9000, ms: 640 }), meet)).toBe(`${web} (9000 elements in 640 ms)`)
+    expect(muteCheckWhy(a({}), zoom)).toBe('No mute button found — is a call open?')
+    expect(muteCheckWhy(a({ why: 'cut', searched: 40000, ms: 800 }), meet)).toBe('Search cut short (40000 elements in 800 ms)')
+    expect(muteCheckWhy(a({ why: 'not-trusted' }), meet)).toBe("Accessibility not given to MasterDeck's helper")
+    expect(muteCheckWhy(a({ why: 'error' }), meet)).toBe('The app did not answer (busy or not responding)')
+  })
+
+  it('the notes above the table: a missing helper, and a grant that reaches MasterDeck but not its helper', () => {
+    const apps = muteCheckApps([reading([{ id: 'meet', state: 'unknown', why: 'not-trusted' }], false)])
+    expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: true, apps }).notes).toEqual([MUTE_CHECK_SPLIT_GRANT])
+    expect(MUTE_CHECK_SPLIT_GRANT).toBe(
+      'macOS gave Accessibility to MasterDeck but not to its helper. Remove MasterDeck from Accessibility in System Settings and allow it again (each new build needs this).',
+    )
+    // A helper that failed or sent nothing said nothing about trust: only its message.
+    for (const message of ['The mute reader sent nothing.', 'The mute reader stopped: exit 2', 'The mute reader did not start.'])
+      expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: true, apps: [], message }).notes).toEqual([message])
+    expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: false, apps }).notes).toEqual(["Accessibility not given to MasterDeck's helper: Allow it above."])
+    expect(muteCheckView({ ok: true, found: false, trusted: false, gateTrusted: true, apps: [] })).toEqual({ notes: ['The mute reader is missing; reinstall MasterDeck.'], rows: [] })
+    const ok = muteCheckView({ ok: true, found: true, trusted: true, gateTrusted: true, apps: muteCheckApps([reading([])]) })
+    expect(ok.notes).toEqual([])
+    expect(ok.rows[0]).toEqual({ id: 'zoom', app: 'Zoom', reads: 'Unknown', why: 'Not running' })
   })
 })
 

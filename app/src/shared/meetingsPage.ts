@@ -1,4 +1,4 @@
-import { recordClock, type Meeting, type MeetingProgress, type MeetingState, type Segment } from './meetings'
+import { MIC_LOG_KEEP, recordClock, type Meeting, type MeetingProgress, type MeetingState, type MicLogEntry, type MicUnknown, type MuteWhy, type Segment } from './meetings'
 import { MATCH_FAILED, meetingWhen } from './meetingMatch'
 
 /**
@@ -251,7 +251,51 @@ export function meetingMarkdown(m: Meeting): string {
   if (m.summary) out.push('## Summary', m.summary)
   out.push('## Transcript')
   out.push(m.segments.length ? m.segments.map((s) => `**${speakerName(s.speaker)}** ${lineClock(s.start)}  ${s.text}`).join('\n\n') : '_No transcript._')
+  if (m.micLog?.length) out.push('## Mic log', `_${MIC_LOG_CLOCK}_`, micLogLines(m).map((l) => `- ${l}`).join('\n'))
   return `${out.join('\n\n')}\n`
+}
+
+const MIC_STATE: Record<MicLogEntry['state'], string> = { muted: 'Muted', unmuted: 'Unmuted', unknown: 'Unknown' }
+const MIC_WHY: Record<MuteWhy, string> = {
+  found: 'button found',
+  'not-running': 'not running',
+  'not-trusted': 'no Accessibility for the helper',
+  'no-control': 'no mute button found',
+  cut: 'search cut short',
+  error: 'the app did not answer',
+}
+const MIC_REASON: Record<MicUnknown, string> = {
+  'not-trusted': 'no Accessibility',
+  'no-helper': 'mute reader missing',
+  'helper-ended': 'mute reader stopped',
+  'no-app': 'no meeting app found',
+  unreadable: "can't see the mute",
+}
+
+/** One line of a meeting's Mic log (the Meetings page, the Markdown export): "0:12 · Muted · Zoom · button found · mic out". */
+export function micLogLine(e: MicLogEntry): string {
+  const parts = [lineClock(e.t), e.paused ? 'Paused' : MIC_STATE[e.state]]
+  if (e.app) parts.push(e.app)
+  if (e.why) parts.push(MIC_WHY[e.why])
+  if (e.reason) parts.push(MIC_REASON[e.reason])
+  parts.push(e.gated ? 'mic out' : 'mic recorded')
+  return parts.join(' · ')
+}
+
+/**
+ * What the Mic log's times are: wall clock from the press of Record (a pause counts), unlike the
+ * transcript's, which leave pauses out.
+ */
+export const MIC_LOG_CLOCK = 'Times are wall clock since Record.'
+
+/**
+ * A meeting's Mic log as lines: the kept entries, with "n changes not kept" where the ones between
+ * the first and the last MIC_LOG_KEEP were left out.
+ */
+export function micLogLines(m: Pick<Meeting, 'micLog' | 'micLogDropped'>): string[] {
+  const lines = (m.micLog ?? []).map(micLogLine)
+  if (m.micLogDropped) lines.splice(MIC_LOG_KEEP, 0, `${m.micLogDropped} ${m.micLogDropped === 1 ? 'change' : 'changes'} not kept`)
+  return lines
 }
 
 /** A file name for an export: the title with only safe characters, and the date. */

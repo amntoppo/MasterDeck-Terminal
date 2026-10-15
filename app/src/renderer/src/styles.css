@@ -1775,6 +1775,13 @@ details.sd-more > summary:hover { color: var(--text); }
 .mt-err { font-size: 12px; }
 .mt-summary { font-size: 13px; user-select: text; }
 .mt-notes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.mt-miclog { font-size: 12px; }
+.mt-miclog summary { cursor: pointer; }
+.mt-miclog p { margin: 6px 0 0; }
+.mt-miclog ol { margin: 6px 0 0; padding-left: 18px; max-height: 200px; overflow: auto; font-family: var(--mono); user-select: text; }
+.mute-check { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.mute-check th, .mute-check td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+.mute-check th { color: var(--muted); font-weight: 500; }
 .mt-player { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex: none; }
 .mt-play { min-width: 64px; }
 .mt-seek { flex: 1; min-width: 80px; accent-color: var(--accent); }

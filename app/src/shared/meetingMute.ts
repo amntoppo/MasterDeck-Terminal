@@ -4,8 +4,10 @@
  * (native/mute/main.swift is the other side):
  *
  *   stdin, once:  muteRulesLine(rules)  one line of JSON
- *   stdout:       {"t":<ms>,"trusted":bool,"apps":[{"id":"zoom","state":"muted"|"unmuted"|"unknown"}]}
- *                 every 400 ms; only apps with a running process are listed.
+ *   stdout:       {"t":<ms>,"trusted":bool,"apps":[{"id":"zoom","state":"muted"|"unmuted"|"unknown", …}]}
+ *                 every 400 ms; only apps with a running process are listed. Each app may also
+ *                 carry diagnostics: why, label (the matched control's only), searched, ms, cached
+ *                 (MuteApp; a helper from before them sends none).
  *
  * ponytail: every rule below is a guess from the apps' published shortcuts and screen-reader
  * labels; none was checked on a real call (none of the apps is installed here). They are data, so a
@@ -13,7 +15,15 @@
  * md-mute.
  */
 
+import { MUTE_WHYS, type MuteWhy } from './meetings'
+
 export type MuteState = 'muted' | 'unmuted' | 'unknown'
+
+/**
+ * The roles a mute control may have. A web page's toggle (Meet's mic button) shows as an AXButton
+ * (sometimes with subrole AXToggle), an AXCheckBox or an AXToggleButton depending on the browser.
+ */
+export type ControlRole = 'AXButton' | 'AXCheckBox' | 'AXToggleButton'
 
 /** A menu bar menu whose item says what the control would do (Zoom's Meeting menu). */
 export interface MenuRule {
@@ -29,7 +39,7 @@ export interface MenuRule {
  * differ between the two for other text (meetingMute.test.ts checks it).
  */
 export interface ElementRule {
-  role: 'AXButton'
+  roles: readonly ControlRole[]
   /** The label attributes read, in order, on controls of that role only. */
   attrs: readonly string[]
   muted: readonly string[]
@@ -54,6 +64,16 @@ export interface MuteRule {
   bundles: readonly string[]
   /** Chromium browsers among `bundles`: md-mute sets AXManualAccessibility so web content shows. */
   chromium?: readonly string[]
+  /**
+   * The control is in a web page (a browser): md-mute searches from the windows' AXWebArea
+   * elements (not the browser's toolbars) with a larger budget (800 ms, 40000 elements).
+   */
+  web?: boolean
+  /**
+   * With `web`: only pages whose address is on one of these hosts (or below one) are searched;
+   * md-mute reads each AXWebArea's AXURL for its host and nothing else of it.
+   */
+  hosts?: readonly string[]
   menu?: MenuRule
   element?: ElementRule
 }
@@ -112,7 +132,7 @@ export const MUTE_RULES: readonly MuteRule[] = [
     bundles: ['com.microsoft.teams2', 'com.microsoft.teams'],
     // ponytail: unverified; Teams' button reads "Mute (⌘+Shift+M)" / "Unmute (⌘+Shift+M)".
     element: {
-      role: 'AXButton',
+      roles: ['AXButton'],
       attrs: LABELS,
       // The most specific first; the longest prefix that matches decides.
       muted: ['Unmute microphone', 'Unmute mic', 'Unmute'],
@@ -127,7 +147,7 @@ export const MUTE_RULES: readonly MuteRule[] = [
     bundles: ['Cisco-Systems.Spark'],
     // ponytail: unverified; Webex's button reads "Mute" / "Unmute" (sometimes with "my audio").
     element: {
-      role: 'AXButton',
+      roles: ['AXButton'],
       attrs: LABELS,
       muted: ['Unmute my audio', 'Unmute'],
       unmuted: ['Mute my audio', 'Mute'],
@@ -140,10 +160,16 @@ export const MUTE_RULES: readonly MuteRule[] = [
     name: 'Google Meet',
     bundles: [...CHROMIUM, 'com.apple.Safari'],
     chromium: CHROMIUM,
-    // ponytail: unverified; Meet's button reads "Turn on microphone (⌘ + d)" while muted. Only
-    // the tab on screen is in a browser's tree: a Meet in a background tab reads as unknown.
+    web: true,
+    hosts: ['meet.google.com'],
+    // ponytail: unverified on a real call; Settings → Meetings → Check mute reading shows what
+    // md-mute sees. Meet's mic button has the aria-label "Turn off microphone" while you are heard
+    // and "Turn on microphone" while muted, often with a shortcut after it (" (⌘ + d)", " (ctrl +
+    // d)"), which the prefix covers. Chrome gives an aria-label as AXDescription, on an AXButton
+    // (subrole AXToggle) or, for a toggle, an AXCheckBox / AXToggleButton. English labels only.
+    // Only the tab on screen is in a browser's tree: a Meet in a background tab reads as unknown.
     element: {
-      role: 'AXButton',
+      roles: ['AXButton', 'AXCheckBox', 'AXToggleButton'],
       attrs: LABELS,
       muted: ['Turn on microphone'],
       unmuted: ['Turn off microphone'],
@@ -204,8 +230,12 @@ export function muteRulesLine(rules: readonly MuteRule[] = MUTE_RULES): string {
         id: r.id,
         bundles: r.bundles,
         ...(r.chromium ? { chromium: r.chromium } : {}),
+        ...(r.web ? { web: true } : {}),
+        // An md-mute from before `hosts` ignores it and searches every page.
+        ...(r.web && r.hosts?.length ? { hosts: r.hosts } : {}),
         ...(r.menu ? { menu: r.menu } : {}),
-        ...(r.element ? { element: r.element } : {}),
+        // `role` too: an md-mute from before `roles` reads only that.
+        ...(r.element ? { element: { ...r.element, role: r.element.roles[0] } } : {}),
       })),
     }) + '\n'
   )
@@ -214,6 +244,16 @@ export function muteRulesLine(rules: readonly MuteRule[] = MUTE_RULES): string {
 export interface MuteApp {
   id: string
   state: MuteState
+  /** Diagnostics (md-mute since they were added; none from an older one). */
+  why?: MuteWhy
+  /** The matched control's label (printable ASCII, at most 80): only with why 'found'. */
+  label?: string
+  /** Elements visited this tick (0: no search ran, the last one's why is said again). */
+  searched?: number
+  /** Time spent on this app this tick. */
+  ms?: number
+  /** Read from the control found before (no search). */
+  cached?: boolean
 }
 
 export interface MuteReading {
@@ -226,6 +266,10 @@ const STATES: ReadonlySet<string> = new Set(['muted', 'unmuted', 'unknown'])
 const ID = /^[a-z0-9-]{1,32}$/
 /** More apps than any rule set has is not a line md-mute wrote. */
 const MAX_APPS = 32
+/** What md-mute may say about a running app (never 'not-running': it lists running apps only). */
+const LINE_WHYS: ReadonlySet<string> = new Set(MUTE_WHYS.filter((w) => w !== 'not-running'))
+const LABEL = /^[\x20-\x7e]{1,80}$/
+const count = (v: unknown, max: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max
 
 /**
  * One line of md-mute's output, or null for anything else (a partial line, junk, a wrong shape).
@@ -249,14 +293,32 @@ export function parseMuteLine(line: string, known?: ReadonlySet<string>): MuteRe
   const seen = new Set<string>()
   for (const a of o.apps as unknown[]) {
     if (!a || typeof a !== 'object' || Array.isArray(a)) return null
-    const { id, state } = a as Record<string, unknown>
+    const { id, state, why, label, searched, ms, cached } = a as Record<string, unknown>
     if (typeof id !== 'string' || !ID.test(id) || seen.has(id)) return null
     if (known && !known.has(id)) return null
     if (typeof state !== 'string' || !STATES.has(state)) return null
     // Not trusted, nothing can be read: a line that says otherwise is not believed.
     if (!o.trusted && state !== 'unknown') return null
+    // The diagnostics, each optional, each checked, and consistent with the state.
+    if (why !== undefined) {
+      if (typeof why !== 'string' || !LINE_WHYS.has(why)) return null
+      if ((why === 'found') !== (state !== 'unknown')) return null
+      if (!o.trusted && why !== 'not-trusted') return null
+    }
+    if (label !== undefined && (typeof label !== 'string' || !LABEL.test(label) || why !== 'found')) return null
+    if (searched !== undefined && !count(searched, 10_000_000)) return null
+    if (ms !== undefined && !count(ms, 600_000)) return null
+    if (cached !== undefined && typeof cached !== 'boolean') return null
     seen.add(id)
-    apps.push({ id, state: state as MuteState })
+    apps.push({
+      id,
+      state: state as MuteState,
+      ...(why !== undefined ? { why: why as MuteWhy } : {}),
+      ...(label !== undefined ? { label: label as string } : {}),
+      ...(searched !== undefined ? { searched: searched as number } : {}),
+      ...(ms !== undefined ? { ms: ms as number } : {}),
+      ...(cached !== undefined ? { cached: cached as boolean } : {}),
+    })
   }
   return { t: o.t, trusted: o.trusted, apps }
 }
@@ -333,4 +395,104 @@ export class MuteSettle {
     this.last = null
     this.run = 0
   }
+}
+
+// ── Check mute reading (Settings → Meetings) ────────────────────────────────
+
+/** One app in the check's answer: every rule's app, running or not. */
+export interface MuteCheckApp {
+  id: string
+  name: string
+  state: MuteState
+  why: MuteWhy
+  label?: string
+  /** The last full search's elements and time (or the last reading's, when none ran). */
+  searched: number
+  ms: number
+}
+
+/**
+ * meetings:muteCheck: md-mute run with every rule for MUTE_CHECK_MS. `found`: the helper is there;
+ * `trusted`: what the helper says of Accessibility; `gateTrusted`: what macOS says of MasterDeck
+ * (the two differ when the grant does not reach the helper). `message`: the helper sent nothing.
+ */
+export type MuteCheckAnswer =
+  | { ok: true; found: boolean; trusted: boolean; gateTrusted: boolean; apps: MuteCheckApp[]; message?: string }
+  | { ok: false; message: string }
+
+/** How long the check reads (several ticks: a browser's first tree may come a tick late). */
+export const MUTE_CHECK_MS = 3000
+
+/**
+ * The check's apps from what md-mute said: per rule, its last reading (with the last real search's
+ * size and time), or 'not-running' when md-mute never listed it. A helper from before the
+ * diagnostics gets a why from its state.
+ */
+export function muteCheckApps(readings: readonly MuteReading[], rules: readonly MuteRule[] = MUTE_RULES): MuteCheckApp[] {
+  const last = readings.at(-1)
+  return rules.map((r): MuteCheckApp => {
+    const a = last?.apps.find((x) => x.id === r.id)
+    if (!last || !a) return { id: r.id, name: r.name, state: 'unknown', why: 'not-running', searched: 0, ms: 0 }
+    const search = [...readings]
+      .reverse()
+      .map((x) => x.apps.find((y) => y.id === r.id))
+      .find((y) => !!y && (y.searched ?? 0) > 0 && !y.cached)
+    const why: MuteWhy = a.why ?? (a.state !== 'unknown' ? 'found' : last.trusted ? 'no-control' : 'not-trusted')
+    return {
+      id: r.id,
+      name: r.name,
+      state: a.state,
+      why,
+      ...(a.label ? { label: a.label } : {}),
+      searched: (search ?? a).searched ?? 0,
+      ms: (search ?? a).ms ?? 0,
+    }
+  })
+}
+
+const READS: Record<MuteState, string> = { muted: 'Muted', unmuted: 'Unmuted', unknown: 'Unknown' }
+
+/** One row's Why: a plain sentence. */
+export function muteCheckWhy(a: MuteCheckApp, rule?: Pick<MuteRule, 'web'>): string {
+  const size = a.searched > 0 ? ` (${a.searched} elements in ${a.ms} ms)` : ''
+  switch (a.why) {
+    case 'found':
+      return a.label ? `${READS[a.state]} (button says '${a.label}')` : `${READS[a.state]} (button found)`
+    case 'not-running':
+      return 'Not running'
+    case 'not-trusted':
+      return "Accessibility not given to MasterDeck's helper"
+    case 'no-control':
+      return rule?.web
+        ? `No mute button found — is the call in the front tab, or Meet is full screen / on another desktop — press Check from the same desktop as the call${size}`
+        : `No mute button found — is a call open?${size}`
+    case 'cut':
+      return `Search cut short${size}`
+    case 'error':
+      return 'The app did not answer (busy or not responding)'
+  }
+}
+
+/** macOS trusts MasterDeck, its helper says it is not trusted: the grant is for an older build. */
+export const MUTE_CHECK_SPLIT_GRANT =
+  'macOS gave Accessibility to MasterDeck but not to its helper. Remove MasterDeck from Accessibility in System Settings and allow it again (each new build needs this).'
+
+/** The check's answer as Settings → Meetings shows it: notes above the table, then a row per app. */
+export function muteCheckView(
+  a: Extract<MuteCheckAnswer, { ok: true }>,
+  rules: readonly MuteRule[] = MUTE_RULES,
+): { notes: string[]; rows: { id: string; app: string; reads: string; why: string }[] } {
+  const notes: string[] = []
+  if (!a.found) notes.push('The mute reader is missing; reinstall MasterDeck.')
+  else if (a.message) notes.push(a.message)
+  // Only what the helper itself said (a line with trusted: false), never a helper that failed or sent nothing.
+  if (a.found && !a.message && !a.trusted && a.gateTrusted) notes.push(MUTE_CHECK_SPLIT_GRANT)
+  else if (a.found && !a.message && !a.trusted) notes.push("Accessibility not given to MasterDeck's helper: Allow it above.")
+  const rows = a.apps.map((x) => ({
+    id: x.id,
+    app: x.name,
+    reads: READS[x.state],
+    why: muteCheckWhy(x, rules.find((r) => r.id === x.id)),
+  }))
+  return { notes, rows }
 }

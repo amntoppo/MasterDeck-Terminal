@@ -2397,6 +2397,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
   reg.handle(CH.meetingsMicOff, (e, on: unknown) => meetings.micOff(e, on));
+  reg.handle(CH.meetingsMuteCheck, (e) => meetings.muteCheck(e));
   reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
   reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
   reg.handle(CH.meetingsList, (e, from: unknown, to: unknown) => meetings.list(e, from, to));
