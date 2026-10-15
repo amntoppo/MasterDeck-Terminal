@@ -3,11 +3,15 @@ import { createHash, createPublicKey, generateKeyPairSync, verify } from 'node:c
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { RELEASE_PUBLIC_KEY } from '../src/shared/releaseKey'
 import {
+  appReleaseKey,
   buildManifest,
   channelOf,
+  checkSigningKey,
   findUpdateFiles,
   hashFile,
+  parseAppKey,
   parseArgs,
   prepare,
   publicKeyOf,
@@ -67,6 +71,24 @@ describe('signing', () => {
     const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
     const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }) as string
     expect(() => signMessage('x', pem)).toThrow(/Ed25519/)
+  })
+})
+
+describe("the app's release key", () => {
+  it("reads the key built into the app from releaseKey.ts", async () => {
+    expect(parseAppKey("export const RELEASE_PUBLIC_KEY = 'AuokUivpXuPlZM7cfzzXh6veO1KFujjDji8HPyCHkUY='\n")).toBe(VECTOR.publicKey)
+    expect(() => parseAppKey('nothing here')).toThrow(/RELEASE_PUBLIC_KEY/)
+    expect(await appReleaseKey()).toBe(RELEASE_PUBLIC_KEY)
+  })
+
+  it('refuses a signing key whose public key is not the expected one', () => {
+    expect(() => checkSigningKey(VECTOR.privateKey, VECTOR.publicKey)).not.toThrow()
+    expect(() => checkSigningKey(VECTOR.privateKey, RELEASE_PUBLIC_KEY)).toThrow(/does not match/)
+  })
+
+  it('--expect-key names another key (an E2E or test key)', () => {
+    expect(parseArgs(['--dir', 'd', '--version', '1.0.0', '--expect-key', VECTOR.publicKey])).toMatchObject({ expectKey: VECTOR.publicKey })
+    expect(() => parseArgs(['--dir', 'd', '--version', '1.0.0', '--expect-key', 'short'])).toThrow(/expect-key/)
   })
 })
 
@@ -162,7 +184,7 @@ describe('manifest', () => {
 
 type Call = { method: string; url: string; body?: unknown; bytes?: number }
 
-function fakeServer(opts: { failPart?: { n: number; times: number } } = {}) {
+function fakeServer(opts: { failPart?: { n: number; times: number }; stored?: Record<string, number> } = {}) {
   const calls: Call[] = []
   let failures = 0
   const fetchFn = async (url: string, init: RequestInit) => {
@@ -173,6 +195,11 @@ function fakeServer(opts: { failPart?: { n: number; times: number } } = {}) {
     else if (body) call.bytes = (body as Buffer).length
     calls.push(call)
     const ok = (o: unknown) => new Response(JSON.stringify(o), { status: 200 })
+    const file = url.match(/\/v1\/updates\/files\/(.+)$/)
+    if (method === 'HEAD' && file) {
+      const size = opts.stored?.[file[1]]
+      return size === undefined ? new Response(null, { status: 404 }) : new Response(null, { status: 200, headers: { 'content-length': String(size) } })
+    }
     if (method === 'POST' && url.endsWith('/v1/admin/uploads')) return ok({ uploadId: 'up1' })
     const part = url.match(/\/parts\/(\d+)\?/)
     if (method === 'PUT' && part) {
@@ -244,6 +271,30 @@ describe('uploads', () => {
     const last = s.calls.at(-1)
     expect(last?.url).toBe('https://api.test/v1/admin/releases')
     expect(last?.body).toEqual(manifest)
+  })
+
+  it('skips a file the service already holds with the same size (a re-run reaches the idempotent publish)', async () => {
+    artifacts('0.10.0')
+    const { manifest, uploads } = await prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })
+    const [first, second] = uploads
+    const s = fakeServer({ stored: { [first.key]: first.size, [second.key]: second.size + 1 } })
+    await publish({ api: 'https://api.test', token: 'tok', manifest, uploads, fetch: s.fetch, sleep: noSleep })
+    expect(s.calls.filter((c) => c.method === 'HEAD').map((c) => c.url)).toEqual(uploads.map((u) => `https://api.test/v1/updates/files/${u.key}`))
+    const created = s.calls.filter((c) => c.url.endsWith('/v1/admin/uploads')).map((c) => (c.body as { key: string }).key)
+    // The same size: skipped. Another size (a broken earlier upload): uploaded again.
+    expect(created).toEqual(uploads.slice(1).map((u) => u.key))
+    expect(s.calls.at(-1)?.url).toBe('https://api.test/v1/admin/releases')
+  })
+
+  it('refuses an empty file', async () => {
+    artifacts('0.10.0')
+    writeFileSync(join(dir, 'masterdeck-macos-latest', 'MasterDeck-0.10.0-mac.zip'), '')
+    await expect(prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })).rejects.toThrow(
+      /MasterDeck-0\.10\.0-mac\.zip is empty/,
+    )
+    writeFileSync(join(dir, 'masterdeck-macos-latest', 'MasterDeck-0.10.0-mac.zip'), 'intel zip')
+    writeFileSync(join(dir, 'masterdeck-windows-latest', 'MasterDeck Setup 0.10.0.exe.blockmap'), '')
+    await expect(prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })).rejects.toThrow(/blockmap is empty/)
   })
 
   it('does not publish when an upload fails', async () => {

@@ -5,14 +5,18 @@
 // and registers the release. `--dry-run` signs and prints the manifest without any network call.
 //
 //   node scripts/release-publish.mjs --dir dist --version 0.10.0 [--channel stable|beta]
-//        [--notes notes.md] [--rollout 0-100] [--min-supported 0.9.0] [--dry-run]
+//        [--notes notes.md] [--rollout 0-100] [--min-supported 0.9.0] [--expect-key <b64>] [--dry-run]
+//
+// It refuses a signing key whose public key is not the one built into the app
+// (src/shared/releaseKey.ts), or `--expect-key`'s for an E2E run with a test key. A file the service
+// already holds with the same size is not uploaded again, so a re-run reaches the idempotent publish.
 //
 // Env: MD_RELEASE_API (default https://dev.masterdeck.dev), RELEASE_ADMIN_TOKEN,
 // RELEASE_SIGNING_KEY (PKCS8 PEM) or RELEASE_SIGNING_KEY_FILE. Node 22, no dependencies.
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const DEFAULT_API = 'https://dev.masterdeck.dev'
@@ -21,6 +25,27 @@ export const PART_SIZE = 90 * 1024 * 1024
 const PART_TRIES = 4
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const RAW_KEY = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/
+
+/** The key the app checks updates against, read out of releaseKey.ts's source. */
+export function parseAppKey(text) {
+  const m = /RELEASE_PUBLIC_KEY\s*=\s*'([A-Za-z0-9+/=]+)'/.exec(text)
+  if (!m || !RAW_KEY.test(m[1])) throw new Error('no RELEASE_PUBLIC_KEY found in releaseKey.ts')
+  return m[1]
+}
+
+/** The app's built-in release key (app/src/shared/releaseKey.ts). */
+export async function appReleaseKey() {
+  const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'shared', 'releaseKey.ts')
+  return parseAppKey(await readFile(file, 'utf8'))
+}
+
+/** Throws unless the signing key's public key is `expected`: the app would refuse every file it signs. */
+export function checkSigningKey(privateKeyPem, expected) {
+  const got = publicKeyOf(privateKeyPem)
+  if (got !== expected)
+    throw new Error(`the signing key's public key ${got} does not match the app's ${expected} (pass --expect-key for a test key)`)
+}
 
 /** `-` in the version (0.10.0-beta.1) is the beta channel, else stable. */
 export function channelOf(version) {
@@ -163,11 +188,13 @@ export async function prepare(o) {
   const uploads = []
   for (const f of found) {
     const { sha512, size } = await hashFile(f.path)
+    if (size === 0) throw new Error(`${f.name} is empty: ${f.path}`)
     const signature = signMessage(signedMessage({ ...f, version: o.version, sha512 }), o.privateKeyPem)
     files.push({ ...f, sha512, size, signature })
     uploads.push({ key: `${o.version}/${f.name}`, path: f.path, size })
     if (f.blockmap) {
       const bm = await stat(f.blockmap.path)
+      if (bm.size === 0) throw new Error(`${f.blockmap.name} is empty: ${f.blockmap.path}`)
       uploads.push({ key: `${o.version}/${f.blockmap.name}`, path: f.blockmap.path, size: bm.size })
     }
   }
@@ -186,6 +213,7 @@ export async function uploadFile(o) {
   const partSize = o.partSize ?? PART_SIZE
   const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
   const log = o.log ?? (() => {})
+  if (!(o.size > 0)) throw new Error(`${o.key} is empty`)
   const auth = { authorization: `Bearer ${o.token}` }
   const json = { ...auth, 'content-type': 'application/json' }
 
@@ -248,6 +276,10 @@ export async function uploadFile(o) {
  */
 export async function publish({ api, token, manifest, uploads, fetch: doFetch = fetch, partSize, sleep, log = () => {} }) {
   for (const u of uploads) {
+    if (await stored(doFetch, api, u)) {
+      log(`${u.key} is already there (${u.size} bytes)`)
+      continue
+    }
     log(`uploading ${u.key} (${u.size} bytes)`)
     await uploadFile({ api, token, key: u.key, path: u.path, size: u.size, fetch: doFetch, partSize, sleep, log })
   }
@@ -257,6 +289,16 @@ export async function publish({ api, token, manifest, uploads, fetch: doFetch = 
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(manifest),
   })
+}
+
+/** The service already serves this file with this size (a re-run after a later step failed). */
+async function stored(doFetch, api, u) {
+  try {
+    const res = await doFetch(`${api}/v1/updates/files/${u.key}`, { method: 'HEAD' })
+    return res.status === 200 && Number(res.headers.get('content-length')) === u.size
+  } catch {
+    return false
+  }
 }
 
 async function call(doFetch, url, init) {
@@ -282,6 +324,7 @@ export function parseArgs(argv) {
     else if (a === '--notes') o.notesFile = val()
     else if (a === '--rollout') o.rollout = val()
     else if (a === '--min-supported') o.minSupported = val().replace(/^v/, '')
+    else if (a === '--expect-key') o.expectKey = val()
     else if (a === '--dry-run') o.dryRun = true
     else throw new Error(`unknown argument ${a}`)
   }
@@ -294,6 +337,7 @@ export function parseArgs(argv) {
     o.rollout = Number(o.rollout)
   }
   if (o.minSupported != null && !SEMVER.test(o.minSupported)) throw new Error('--min-supported must be a version')
+  if (o.expectKey != null && !RAW_KEY.test(o.expectKey)) throw new Error('--expect-key must be a raw Ed25519 public key (base64, 32 bytes)')
   return o
 }
 
@@ -303,6 +347,8 @@ async function main() {
   let pem = env.RELEASE_SIGNING_KEY
   if (!pem && env.RELEASE_SIGNING_KEY_FILE) pem = await readFile(env.RELEASE_SIGNING_KEY_FILE, 'utf8')
   if (!pem || !pem.trim()) throw new Error('no signing key: set RELEASE_SIGNING_KEY (PKCS8 PEM) or RELEASE_SIGNING_KEY_FILE')
+  // A file signed with another key would be refused by every installed app: stop before anything.
+  checkSigningKey(pem, o.expectKey ?? (await appReleaseKey()))
   const notes = o.notesFile ? (await readFile(o.notesFile, 'utf8')).trim() : `MasterDeck ${o.version}`
   const token = env.RELEASE_ADMIN_TOKEN
   if (!o.dryRun && !token) throw new Error('RELEASE_ADMIN_TOKEN is not set')
@@ -317,7 +363,6 @@ async function main() {
     minSupportedVersion: o.minSupported,
     privateKeyPem: pem,
   })
-  // Printed so a key that does not match the app's built-in one is seen before users are.
   console.error(`signed with public key ${publicKeyOf(pem)}`)
   if (o.dryRun) {
     console.log(JSON.stringify(manifest, null, 2))

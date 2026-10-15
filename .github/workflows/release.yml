@@ -128,11 +128,8 @@ jobs:
           echo "notes=$notes" >> "$GITHUB_OUTPUT"
           echo "Update notes:"
           cat "$notes"
-      - name: Publish the update
-        run: node app/scripts/release-publish.mjs --dir artifacts --version "${{ steps.meta.outputs.version }}" --notes "${{ steps.meta.outputs.notes }}"
-        env:
-          RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      # Attached first: a live update always has its DMGs and EXE on GitHub for new installs. A
+      # re-run after a failed publish skips files already uploaded and re-registers idempotently.
       - name: Attach to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -144,3 +141,9 @@ jobs:
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.exe
+      # Registering the update makes it live for every install: last, once the files are on GitHub.
+      - name: Publish the update
+        run: node app/scripts/release-publish.mjs --dir artifacts --version "${{ steps.meta.outputs.version }}" --notes "${{ steps.meta.outputs.notes }}"
+        env:
+          RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
