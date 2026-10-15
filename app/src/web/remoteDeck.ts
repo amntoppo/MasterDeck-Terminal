@@ -1,6 +1,7 @@
 import { applyPatch, type Operation } from 'fast-json-patch'
 import type { Channel } from '@shared/e2e'
 import { CH, type DeckApi } from '@shared/ipc'
+import { isWebLink } from '@shared/termLinks'
 import type { MacToWeb, WebToMac } from '@shared/bridgeWire'
 import { ARG_FIX, DECK_ACCESS } from '@shared/remoteDeck'
 
@@ -90,6 +91,8 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
     home: hello.home,
     // Only https: a javascript:/data: URL from the Mac (or a page) must never run in this origin.
     openExternal: (url: string) => void (/^https:\/\//i.test(url) && window.open(url, '_blank', 'noopener,noreferrer')),
+    // A terminal's link: http too (a dev server), never another scheme.
+    openLink: (url: string) => void (isWebLink(url) && window.open(url, '_blank', 'noopener,noreferrer')),
     copy: (t: string) => void navigator.clipboard.writeText(t),
     setFocus: () => {},
     setVisible: () => {},

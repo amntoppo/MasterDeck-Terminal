@@ -98,6 +98,17 @@ describe('RemoteDeck', () => {
     expect(open).not.toHaveBeenCalled()
   })
 
+  it('openLink opens http and https only, locally', async () => {
+    const open = vi.fn()
+    vi.stubGlobal('window', { open })
+    const w = await world()
+    for (const u of ['javascript:alert(1)', 'data:text/html,<b>x</b>', 'file:///etc/passwd', 'ftp://x.test', 'http://a b']) w.deck.openLink(u)
+    w.deck.openLink('http://127.0.0.1:20060/docs?x=1')
+    await tick(20)
+    expect(open.mock.calls).toEqual([['http://127.0.0.1:20060/docs?x=1', '_blank', 'noopener,noreferrer']])
+    expect(w.got).toEqual([])
+  })
+
   it('a throwing listener does not stop the others; malformed events are ignored', async () => {
     const w = await world()
     const bad = vi.fn(() => { throw new Error('x') }), good = vi.fn()
