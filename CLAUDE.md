@@ -407,7 +407,22 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-13)
+## Current state and next steps (2026-10-16)
+
+- **Why the mic did not follow Meet's mute (#102)** is built on branch
+  `worktree-MasterDeck-Terminal-102-mute-check` (from `main` 7c346e2; not merged, not pushed, **not
+  installed**: the rebuild of the real app waits for the user's word). The user's Google Meet in
+  Chrome was recorded while muted (md-mute never read `muted`); the cause is still unknown. Added:
+  md-mute's per-app diagnostics (`why`, the matched `label` only, `searched`, `ms`, `cached`; the
+  parser accepts lines with or without them), Meet as a web rule (search from `AXWebArea`, 40000
+  elements / 800 ms, three roles, one retry after `AXManualAccessibility`), Settings → Meetings →
+  **Check mute reading** (`meetings:muteCheck`, 3 s, every rule, `gateTrusted` beside the helper's
+  `trusted`), and a per-meeting **Mic log** (`micLog`, at most 500, Meetings page and export).
+  Checked: typecheck, vitest (208 files passed, 2 skipped; 2569 tests passed, 4 skipped), `npm run
+  build`, md-mute rebuilt and run against bundle ids nothing runs. Not checked: the Check or the
+  Mic log on screen, any real meeting app (Chrome was never read). Next: the user presses Check in
+  a Meet call (muted, then unmuted) on the installed app; OPERATIONS § Meetings: md-mute says how
+  to read it. Open points: TODO ("The mic follows the meeting app's mute").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves

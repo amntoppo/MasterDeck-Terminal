@@ -697,11 +697,22 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 - **The apps' real labels are unverified.** md-mute's rules for Zoom, Teams, Webex and Google Meet
   (in a browser) were written from documentation, not read from a real call; the first real check
-  is the user's, on the installed app.
+  is the user's, on the installed app, with Settings → Meetings → **Check mute reading** (muted and
+  unmuted). Google Meet in Chrome is the reported failure (a 4-hour recording never gated, so
+  md-mute never read `muted`); the cause is unknown until the Check or a new recording's **Mic
+  log** says which: no control (role or label), cut (budget), not trusted (the grant not reaching
+  the helper), or the call in a background tab. Its rule now searches from the page's `AXWebArea`
+  with a larger budget, reads `AXCheckBox` / `AXToggleButton` too and retries once after
+  `AXManualAccessibility`, verified only against nothing running (no Chrome was read here).
+- **A browser's background tab is invisible**: Chrome exposes the front tab of each window only,
+  so a Meet tab behind another reads `no-control` and the mic records.
+- **The Mic log keeps the first 500 changes**; a flapping reading in a long call loses the later
+  ones. Upgrade: keep the first and last 250, or count the dropped ones.
 - **Localized meeting apps read unknown**: the rules match English labels (ASCII prefixes), so a
   Zoom in another language keeps the mic (recorded), as unknown always does.
 - **Whether the Accessibility grant to MasterDeck reaches md-mute** (TCC's responsible process for a
   helper the app spawns) is unverified; if not, the popout says "Allow Accessibility" for ever.
+  The Check now shows it ("macOS gave Accessibility to MasterDeck but not to its helper").
 - **Allow again after each update**: the ad-hoc signature changes with every build, so macOS drops
   the Accessibility grant (as the other permissions); a Developer ID signature fixes it.
 - **A dead md-mute is restarted every 5 s, at most 3 times per recording**, with no backoff and
@@ -833,6 +844,7 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Meetings: seeing why the mic did not follow the mute (#102, Google Meet in Chrome recorded while muted): md-mute's lines carry `why`, the matched `label`, `searched`, `ms`, `cached`; Meet's rule is a web rule (search from `AXWebArea`, 40000 elements / 800 ms, `AXButton` / `AXCheckBox` / `AXToggleButton`, one retry after `AXManualAccessibility`); Settings → Meetings → **Check mute reading**; a per-meeting **Mic log** on the Meetings page and in the export | branch `worktree-MasterDeck-Terminal-102-mute-check` (not merged, not installed) | none |
 | Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, 65937de and 081b82e (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
 | Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
 | Which account a card's calls and sessions use (issue #54): a status move (the Board's menu, BoardFlow, `linkSession`'s In Dev) goes as the account whose board holds the card (`forBoard`, `accountForProject`), even when another account lists the repository; the card's `project` travels in the ticket (`Ticket.project`, `knownProject`), so a my-issues card outside the loaded sprint routes by its board; `Sources.boardOf` without a number answers Setup's first board, not the first loaded card; a ticket session's account (Start, PR review: `startAccount`, after the code's repository) uses the card's board as `accountForCard` does. One account: unchanged | branch `worktree-MasterDeck-Terminal-54-card-account-routing` | — |

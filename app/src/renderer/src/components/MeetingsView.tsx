@@ -18,6 +18,7 @@ import {
   meetingAudioUrl,
   meetingLengthMs,
   meetingTitle,
+  micLogLine,
   monthGrid,
   presetRange,
   searchLines,
@@ -544,6 +545,16 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
               </button>
             ))}
           </div>
+        )}
+        {!!m.micLog?.length && (
+          <details className="mt-miclog">
+            <summary className="muted">Mic log ({m.micLog.length})</summary>
+            <ol>
+              {m.micLog.map((e, i) => (
+                <li key={i}>{micLogLine(e)}</li>
+              ))}
+            </ol>
+          </details>
         )}
       </div>
       <div className="mt-player">

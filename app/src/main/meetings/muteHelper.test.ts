@@ -100,7 +100,18 @@ printf '{"t":4,"trusted":false,"apps":[]}'`,
   // (the one rule names a bundle no Mac has) and asks for no permission (AXIsProcessTrusted only).
   const built = join(__dirname, '..', '..', '..', 'resources', 'mute', process.arch, 'md-mute')
   it.skipIf(process.platform !== 'darwin' || !existsSync(built))('the built md-mute speaks the protocol', { timeout: 20_000 }, async () => {
-    const rules: MuteRule[] = [{ id: 'none', name: 'None', bundles: ['dev.masterdeck.test.none'], menu: { title: 'Meeting', muted: ['a'], unmuted: ['b'] } }]
+    const rules: MuteRule[] = [
+      { id: 'none', name: 'None', bundles: ['dev.masterdeck.test.none'], menu: { title: 'Meeting', muted: ['a'], unmuted: ['b'] } },
+      // A web rule with several roles reads too (nothing runs it: no app is looked into).
+      {
+        id: 'web',
+        name: 'Web',
+        bundles: ['dev.masterdeck.test.web'],
+        chromium: ['dev.masterdeck.test.web'],
+        web: true,
+        element: { roles: ['AXButton', 'AXCheckBox'], attrs: ['AXDescription'], muted: ['a'], unmuted: ['b'] },
+      },
+    ]
     const r = await run(built, rules, 1000)
     expect(r.lines.length).toBeGreaterThanOrEqual(2)
     for (const l of r.lines) {

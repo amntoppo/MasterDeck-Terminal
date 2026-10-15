@@ -84,6 +84,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   meetingsStop: blocked,
   meetingsPause: blocked,
   meetingsMicOff: blocked,
+  meetingsMuteCheck: blocked,
   meetingsRetry: blocked,
   meetingsRematch: blocked,
   // The Meetings page is the Mac's window only: its transcripts and audio never reach a browser.

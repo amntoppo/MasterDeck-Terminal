@@ -78,6 +78,36 @@ describe('storedMeeting', () => {
   })
 })
 
+describe('storedMeeting: the Mic log', () => {
+  const entry = { t: 1200, state: 'muted', app: 'Google Meet', why: 'found', gated: true }
+
+  it('keeps a log that reads back; files without one have none', () => {
+    const log = [entry, { t: 3000, state: 'unknown', app: null, reason: 'not-trusted', gated: false }, { t: 4000, state: 'unknown', app: 'Zoom', gated: true, paused: true }]
+    expect(storedMeeting({ ...meeting(), micLog: log }, ID)?.micLog).toEqual(log)
+    expect(storedMeeting(meeting(), ID)).not.toHaveProperty('micLog')
+  })
+
+  it('a log that does not read back is left out, never the meeting', () => {
+    const bad: unknown[] = [
+      'x',
+      [{ ...entry, state: 'loud' }],
+      [{ ...entry, t: -1 }],
+      [{ ...entry, why: 'guess' }],
+      [{ ...entry, reason: 'nope' }],
+      [{ ...entry, gated: 'yes' }],
+      [{ ...entry, app: 'a\nb' }],
+      [{ ...entry, paused: false }],
+      Array.from({ length: 501 }, () => entry),
+    ]
+    for (const b of bad) {
+      const m = storedMeeting({ ...meeting(), micLog: b }, ID)
+      expect(m, JSON.stringify(b).slice(0, 80)).not.toBeNull()
+      expect(m).not.toHaveProperty('micLog')
+    }
+    expect(storedMeeting({ ...meeting(), micLog: Array.from({ length: 500 }, () => entry) }, ID)?.micLog).toHaveLength(500)
+  })
+})
+
 describe('cleanTitle', () => {
   it('trims, allows none, refuses lines, control characters and long titles', () => {
     expect(cleanTitle(undefined)).toBe('')

@@ -1,9 +1,9 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MEETINGS, IDLE_LIVE, MEETINGS_CONSENT_VERSION, webState, type MeetingLive, type MeetingsSettings } from '@shared/meetings'
-import type { MuteApp, MuteReading, MuteRule } from '@shared/meetingMute'
+import { DEFAULT_MEETINGS, IDLE_LIVE, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, MIC_LOG_MAX, webState, type MeetingLive, type MeetingsSettings } from '@shared/meetings'
+import { muteCheckView, type MuteApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
 
 // Plan M in MeetingsIpc: the mic follows the meeting app's mute. Nothing here asks macOS anything
 // (every Electron API is a spy), runs the real md-mute or reads a real app.
@@ -48,11 +48,14 @@ interface Fake extends MuteHelper {
   exit(): void
 }
 
-function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; env?: NodeJS.ProcessEnv; beforeStart?: () => void } = {}) {
+function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; env?: NodeJS.ProcessEnv; beforeStart?: () => void; id?: string; checkMs?: number } = {}) {
   let settings = o.m ?? agreed
   const events: string[] = []
   const helpers: Fake[] = []
   const state = { recording: false, paused: false }
+  const clock = { now: 1000 }
+  // The meeting's file as the store keeps it (update applies each change to it).
+  const stored = { meeting: { id: o.id ?? '', started: 1000 } as Record<string, unknown>, updates: 0 }
   const live = (): MeetingLive => (state.recording ? { ...IDLE_LIVE, recording: true, since: 1, paused: state.paused } : IDLE_LIVE)
   const rec: RecorderLike & { recording: boolean } = {
     get recording() {
@@ -60,7 +63,7 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
     },
     meetingId: null,
     live,
-    start: async () => (o.beforeStart?.(), events.push('start'), (state.recording = true), { ok: true, live: live() }),
+    start: async () => (o.beforeStart?.(), events.push('start'), (state.recording = true), { ok: true, live: live(), ...(o.id ? { id: o.id } : {}) }),
     stop: async () => (events.push('stop'), (state.recording = false), { ok: true, live: live() }),
     pause: async (p: unknown) => ((state.paused = p === true), { ok: true, live: live() }),
     probe: async () => false,
@@ -71,8 +74,9 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
     meetings: () => settings,
     setMeetings: (n) => (settings = n),
     macosVersion: () => '14.4.1',
-    now: () => 1000,
+    now: () => clock.now,
     arch: 'arm64',
+    muteCheckMs: o.checkMs ?? 1500,
     modelsDir: join(root, 'models'),
     whisper: () => ({ env: o.env ?? { MASTERDECK_MUTE: bin }, resourcesPath: root, appRoot: root, packaged: true, arch: 'arm64', pathEnv: '' }),
     progress: () => {},
@@ -100,7 +104,11 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
       ({
         MeetingStore: class {
           list = () => []
-          update = () => ({ ok: true })
+          update = (_id: string, change: (m: never) => Record<string, unknown>) => {
+            stored.meeting = change(stored.meeting as never)
+            stored.updates++
+            return { ok: true }
+          }
         },
         Transcriber: class {
           start() {}
@@ -132,7 +140,7 @@ function setup(o: { m?: MeetingsSettings; platform?: string; spawn?: boolean; en
           },
         }),
   })
-  return { ipc, events, helpers, last: () => helpers[helpers.length - 1], set: (m: MeetingsSettings) => (settings = m), state }
+  return { ipc, events, helpers, last: () => helpers[helpers.length - 1], set: (m: MeetingsSettings) => (settings = m), state, clock, stored }
 }
 
 describe('the mic in MeetingsIpc', () => {
@@ -320,5 +328,139 @@ describe('the mic in MeetingsIpc', () => {
     expect(t.ipc.live()?.mic).toMatchObject({ app: 'Zoom', state: 'muted', kept: false })
     await t.ipc.stop(local)
     expect(t.events.at(-1)).toBe('ungate')
+  })
+})
+
+describe('Check mute reading (meetings:muteCheck)', () => {
+  const posix = process.platform !== 'win32'
+  /** A stand-in md-mute: keeps its rules, then writes `line` every 50 ms. */
+  function standIn(line: string): string {
+    const p = join(root, 'stand-in')
+    writeFileSync(p, `#!/bin/bash\nread -r rules\necho "$rules" > "${join(root, 'rules.json')}"\nwhile true; do echo '${line}'; sleep 0.05; done\n`)
+    chmodSync(p, 0o755)
+    return p
+  }
+
+  it('refused from a browser, off macOS, without consent and while Record starts md-mute', async () => {
+    const t = setup()
+    expect(await t.ipc.muteCheck(remote)).toMatchObject({ ok: false })
+    expect(await setup({ platform: 'win32' }).ipc.muteCheck(local)).toEqual({ ok: false, message: MEETINGS_MAC_ONLY })
+    expect(await setup({ m: DEFAULT_MEETINGS }).ipc.muteCheck(local)).toEqual({ ok: false, message: 'Agree to how meetings work first.' })
+    let during: Promise<unknown> | null = null
+    const s = setup({ beforeStart: () => void (during = s.ipc.muteCheck(local)) })
+    await s.ipc.start(local)
+    expect(await during).toEqual({ ok: false, message: 'A recording is starting. Try again in a moment.' })
+    expect(electron.isTrustedAccessibilityClient).not.toHaveBeenCalledWith(true)
+  })
+
+  it.skipIf(!posix)('runs md-mute with every rule for the check time and answers per app', { timeout: 20_000 }, async () => {
+    const bin = standIn(
+      '{"t":1,"trusted":true,"apps":[{"id":"meet","state":"muted","why":"found","label":"Turn on microphone (? + d)","searched":1834,"ms":212,"cached":false}]}',
+    )
+    const t = setup({ spawn: false, env: { MASTERDECK_MUTE: bin }, checkMs: 1500 })
+    const t0 = Date.now()
+    const a = await t.ipc.muteCheck(local)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(1490)
+    expect(Date.now() - t0).toBeLessThan(5000)
+    expect(a).toMatchObject({ ok: true, found: true, trusted: true, gateTrusted: true })
+    if (!a.ok) throw new Error('not ok')
+    expect(a.apps.map((x) => x.id)).toEqual(['zoom', 'teams', 'webex', 'meet'])
+    expect(a.apps.find((x) => x.id === 'meet')).toEqual({
+      id: 'meet',
+      name: 'Google Meet',
+      state: 'muted',
+      why: 'found',
+      label: 'Turn on microphone (? + d)',
+      searched: 1834,
+      ms: 212,
+    })
+    expect(a.apps.find((x) => x.id === 'zoom')).toMatchObject({ why: 'not-running' })
+    const rules = JSON.parse(readFileSync(join(root, 'rules.json'), 'utf8')) as { apps: { id: string }[] }
+    expect(rules.apps.map((r) => r.id)).toEqual(['zoom', 'teams', 'webex', 'meet'])
+    expect(electron.isTrustedAccessibilityClient.mock.calls.every(([p]) => p === false)).toBe(true)
+  })
+
+  it.skipIf(!posix)('macOS trusts MasterDeck but the helper says not trusted: the answer shows both', { timeout: 20_000 }, async () => {
+    const bin = standIn('{"t":1,"trusted":false,"apps":[{"id":"meet","state":"unknown","why":"not-trusted","searched":0,"ms":0,"cached":false}]}')
+    const a = await setup({ spawn: false, env: { MASTERDECK_MUTE: bin } }).ipc.muteCheck(local)
+    expect(a).toMatchObject({ ok: true, found: true, trusted: false, gateTrusted: true })
+    if (!a.ok) throw new Error('not ok')
+    expect(muteCheckView(a).notes).toEqual(['macOS gave Accessibility to MasterDeck but not to its helper.'])
+    expect(muteCheckView(a).rows.find((r) => r.id === 'meet')?.why).toBe("Accessibility not given to MasterDeck's helper")
+  })
+
+  it.skipIf(!posix)('no helper, or one that ends at once: said so', { timeout: 20_000 }, async () => {
+    expect(await setup({ spawn: false, env: { MASTERDECK_MUTE: join(root, 'none') } }).ipc.muteCheck(local)).toEqual({
+      ok: true,
+      found: false,
+      trusted: false,
+      gateTrusted: true,
+      apps: [],
+    })
+    const bad = join(root, 'bad')
+    writeFileSync(bad, '#!/bin/bash\necho "md-mute: rules are not valid" >&2\nexit 2\n')
+    chmodSync(bad, 0o755)
+    const a = await setup({ spawn: false, env: { MASTERDECK_MUTE: bad } }).ipc.muteCheck(local)
+    expect(a).toMatchObject({ ok: true, found: true, apps: [], message: 'The mute reader stopped: md-mute: rules are not valid' })
+  })
+
+  it('runs beside a recording’s md-mute; two presses share one check', async () => {
+    const t = setup()
+    await t.ipc.start(local)
+    const p1 = t.ipc.muteCheck(local)
+    const p2 = t.ipc.muteCheck(local)
+    await vi.waitFor(() => expect(t.helpers).toHaveLength(2))
+    t.helpers[1].send([{ id: 'zoom', state: 'unmuted', why: 'found', label: 'Mute audio' }])
+    const [a, b] = await Promise.all([p1, p2])
+    expect(b).toEqual(a)
+    expect(t.helpers).toHaveLength(2)
+    expect(a).toMatchObject({ ok: true, trusted: true })
+    expect(t.helpers[1].killed).toBe(true)
+    expect(t.helpers[0].killed).toBe(false)
+    // The check's readings never reached the recording.
+    expect(t.ipc.live()?.mic).toMatchObject({ app: null, state: 'unknown' })
+  })
+})
+
+describe('the Mic log of a recording', () => {
+  const ID = 'm-' + 'c'.repeat(32)
+
+  it('writes the changes into the meeting with their time from its start, at the latest when it stops', async () => {
+    const t = setup({ id: ID })
+    t.clock.now = 1500
+    await t.ipc.start(local)
+    t.clock.now = 4000
+    t.last().send([{ id: 'zoom', state: 'muted', why: 'found', label: 'Unmute audio' }])
+    t.last().send([{ id: 'zoom', state: 'muted', why: 'found', label: 'Unmute audio', cached: true }])
+    t.clock.now = 9000
+    t.last().send([{ id: 'zoom', state: 'unmuted', why: 'found' }])
+    t.last().send([{ id: 'zoom', state: 'unmuted', why: 'found' }])
+    await t.ipc.stop(local)
+    expect(t.stored.meeting.micLog).toEqual([
+      { t: 500, state: 'unknown', app: null, reason: 'no-app', gated: false },
+      { t: 3000, state: 'muted', app: 'Zoom', why: 'found', gated: true },
+      { t: 8000, state: 'unmuted', app: 'Zoom', why: 'found', gated: true },
+      { t: 8000, state: 'unmuted', app: 'Zoom', why: 'found', gated: false },
+    ])
+    // Nothing more is written after the end.
+    const n = t.stored.updates
+    t.ipc.quit()
+    expect(t.stored.updates).toBe(n)
+  })
+
+  it(`keeps at most ${MIC_LOG_MAX} entries`, async () => {
+    const t = setup({ id: ID })
+    await t.ipc.start(local)
+    for (let i = 0; i < 700; i++) t.last().send([{ id: 'zoom', state: i % 2 ? 'muted' : 'unknown', why: i % 2 ? 'found' : 'no-control' }])
+    await t.ipc.stop(local)
+    expect(t.stored.meeting.micLog).toHaveLength(MIC_LOG_MAX)
+  })
+
+  it('a recording without a meeting id writes nothing', async () => {
+    const t = setup()
+    await t.ipc.start(local)
+    t.last().send([{ id: 'zoom', state: 'muted', why: 'found' }])
+    await t.ipc.stop(local)
+    expect(t.stored.updates).toBe(0)
   })
 })

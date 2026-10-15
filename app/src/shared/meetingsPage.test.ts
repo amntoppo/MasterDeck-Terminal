@@ -16,6 +16,7 @@ import {
   meetingMarkdown,
   meetingRow,
   meetingTitle,
+  micLogLine,
   monthGrid,
   presetRange,
   searchLines,
@@ -190,6 +191,18 @@ describe('export', () => {
     expect(md).toContain('## Summary\n\nThe login fix is ready.')
     expect(md).toContain('**You** 0:00  Morning, Alice.')
     expect(md).toContain('**You** 1:05  Ship it.')
+  })
+
+  it('the Mic log: one line per change, in the export only when there is one', () => {
+    expect(micLogLine({ t: 12_000, state: 'muted', app: 'Google Meet', why: 'found', gated: true })).toBe('0:12 · Muted · Google Meet · button found · mic out')
+    expect(micLogLine({ t: 0, state: 'unknown', app: null, reason: 'not-trusted', gated: false })).toBe('0:00 · Unknown · no Accessibility · mic recorded')
+    expect(micLogLine({ t: 65_000, state: 'unknown', app: 'Google Meet', why: 'no-control', reason: 'unreadable', gated: false })).toBe(
+      "1:05 · Unknown · Google Meet · no mute button found · can't see the mute · mic recorded",
+    )
+    expect(micLogLine({ t: 1000, state: 'unknown', app: 'Zoom', gated: true, paused: true })).toBe('0:01 · Paused · Zoom · mic out')
+    expect(meetingMarkdown(meeting())).not.toContain('Mic log')
+    const md = meetingMarkdown(meeting({ micLog: [{ t: 12_000, state: 'muted', app: 'Zoom', why: 'found', gated: true }] }))
+    expect(md).toContain('## Mic log\n\n- 0:12 · Muted · Zoom · button found · mic out\n')
   })
 
   it('file names keep only safe characters', () => {

@@ -12,6 +12,7 @@ import type { PrDetail } from "./prDetail";
 import type { Settings } from "./settings";
 import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
+import type { MuteCheckAnswer } from "./meetingMute";
 import type { ExportKind, MeetingGetAnswer, MeetingsListAnswer } from "./meetingsPage";
 import type { CleanRequest, MeetingsCleanAnswer, MeetingsJanitorAnswer } from "./meetingJanitor";
 import type { HistoryHit, TranscriptWindow } from "./history";
@@ -235,6 +236,7 @@ export const CH = {
   meetingsStop: "meetings:stop",
   meetingsPause: "meetings:pause",
   meetingsMicOff: "meetings:micOff",
+  meetingsMuteCheck: "meetings:muteCheck",
   meetingsRetry: "meetings:retry",
   meetingsRematch: "meetings:rematch",
   meetingsList: "meetings:list",
@@ -500,6 +502,11 @@ export interface DeckApi {
    * (false); only while recording, reset at the next recording. AppState.meetingLive.mic follows.
    */
   meetingsMicOff(on: boolean): Promise<RecordAnswer>;
+  /**
+   * Settings → Meetings' Check mute reading (macOS, the window only, after consent): md-mute reads
+   * every meeting app for about 3 s and says per app what it reads and why. Asks macOS nothing.
+   */
+  meetingsMuteCheck(): Promise<MuteCheckAnswer>;
   /** Try again on a meeting whose transcription failed: its chunks still on disk are queued again. */
   meetingsRetry(id: string): Promise<{ ok: boolean; message?: string }>;
   /** Match again: the meeting's notes the user never edited are removed, then it is matched to sessions again (one claude -p). */
