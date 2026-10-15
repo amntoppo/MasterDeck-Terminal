@@ -7,11 +7,20 @@ import type { RemoteOutcome } from './remoteCommands'
 
 const DELETED = 'This account was deleted'
 
+/** A hello's platform / OS release cut to what the server takes (\w . space ( ) -, 40 characters); undefined when nothing is left. */
+export function helloField(s: string | undefined): string | undefined {
+  const v = (s ?? '').replace(/[^\w. ()-]/g, '').slice(0, 40)
+  return v || undefined
+}
+
 export interface CloudSyncOpts {
   url: string
   token: string
   deviceId: string
   appVersion: string
+  /** For the admin dashboard's Devices & versions, e.g. "darwin-arm64" and os.release(); sent in hello when set. */
+  platform?: string
+  osVersion?: string
   run(cmd: Command): Promise<RemoteOutcome>
   onItems(items: ExternalItem[]): void
   onStatus(s: RemoteStatus): void
@@ -265,7 +274,8 @@ export class CloudSync {
     this.ws = ws
     ws.on('open', () => {
       const macPublicKey = this.o.macPublicKey?.()
-      ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION, ...(macPublicKey ? { macPublicKey } : {}) }))
+      const platform = helloField(this.o.platform), osVersion = helloField(this.o.osVersion)
+      ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION, ...(macPublicKey ? { macPublicKey } : {}), ...(platform ? { platform } : {}), ...(osVersion ? { osVersion } : {}) }))
       // Open but never welcomed (a proxy, a wedged server): drop it so the close path redials.
       if (this.welcomeWait) clearTimeout(this.welcomeWait)
       this.welcomeWait = setTimeout(() => {

@@ -906,6 +906,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   held messages over; they go once the prompt is empty.
 - Not checked: Windows, the installed app with real sessions and the real web app over the bridge.
 
+## Admin dashboard (#127): open points (2026-10-16)
+
+- Nothing is deployed: the backend (migration 0007, `/admin/*`), then the dashboard (its own repo,
+  `npm run deploy`) wait for the user's word (backend OPERATIONS § Admin dashboard). Then: sign in at
+  admin.masterdeck.dev as the admin, and as a non-admin ("Not authorised").
+- The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
+- Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
+
 ## Recently done
 
 - **Master starts sessions on demand (#126)**: `master start` from scratch (task, repo or folder,
