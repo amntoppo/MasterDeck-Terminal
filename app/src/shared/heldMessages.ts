@@ -7,7 +7,7 @@
  */
 
 /** Why a message waits. */
-export type HeldReason = 'draft' | 'typing' | 'unknown'
+export type HeldReason = 'draft' | 'typing' | 'unknown' | 'sending'
 
 export interface HeldMessage {
   id: string
@@ -46,6 +46,7 @@ export function heldViews(list: HeldMessage[]): HeldView[] {
 export function heldReasonText(r: HeldReason): string {
   if (r === 'draft') return 'Your prompt has text: it goes once the prompt is empty.'
   if (r === 'typing') return 'You were typing in it: it goes once you stop.'
+  if (r === 'sending') return 'Another message is going in first: it goes right after.'
   return "MasterDeck can't read its prompt: Send now if the prompt is empty."
 }
 

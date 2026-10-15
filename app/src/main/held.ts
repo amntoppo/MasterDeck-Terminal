@@ -83,5 +83,5 @@ export class HeldStore {
 function isHeld(v: unknown): v is HeldMessage {
   if (!v || typeof v !== 'object') return false
   const m = v as Record<string, unknown>
-  return typeof m.id === 'string' && typeof m.key === 'string' && typeof m.text === 'string' && typeof m.from === 'string' && typeof m.at === 'number' && (m.reason === 'draft' || m.reason === 'typing' || m.reason === 'unknown')
+  return typeof m.id === 'string' && typeof m.key === 'string' && typeof m.text === 'string' && typeof m.from === 'string' && typeof m.at === 'number' && ['draft', 'typing', 'unknown', 'sending'].includes(m.reason as string)
 }

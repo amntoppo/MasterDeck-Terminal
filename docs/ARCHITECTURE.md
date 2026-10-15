@@ -881,7 +881,8 @@ here (needs `hooks.queue`).
      (`hooks/deliver.ts`, every 2 s) writes `.claim`, MasterDeck answers `.go` only if the claim came
      within 5 s, the mod calls `$.prompt.submit({text, asUser: true})` once (a turn of its own, queued
      while busy; the prompt box and its cursor are not touched) and writes `.done`; MasterDeck removes
-     the files (`$.fs` can't rename or delete, so only MasterDeck decides). No claim → the next step;
+     the files (`$.fs` can't rename or delete, so only MasterDeck decides). A mod that waited 3 s for
+     `.go` in vain writes `.skip` and never submits that id (a stalled app). No claim, or `.skip` → the next step;
      a `.go` with no `.done` in 5 s counts as delivered (`handed`), never typed again. `prune` clears
      folders of ended sessions and files over 10 minutes old.
   2. **Typing, guarded**: into the open tab or through a short hidden `claude attach` (~3 s), only
@@ -891,15 +892,18 @@ here (needs `hooks.queue`).
      `❯` and its no-break space). Text there, a key typed into the pane in the last 4 s
      (`PtyManager.input` from `CH.ptyWrite`, `isTyping` leaves out focus, mouse and terminal reports),
      or no box to be seen → held. A key typed during the 150 ms between the paste and Enter keeps
-     Enter back (the text stays in the box, unsent). Relayed by master-agent for a session in another
+     Enter back (the text stays in the box, unsent; `ok: true, typedNotSent`, so no caller types it
+     again). Relayed by master-agent for a session in another
      terminal (only when `masterUp`): `master say --to` → `SendMessage`, which never types.
   3. **Held** (`main/held.ts` `HeldStore`, `<home>/held-messages.json`, atomic): per session in
-     order; a new message to a session with messages held waits behind them. `pumpHeld` (every 2 s,
+     order; a new message to a session with messages held, or with a send in flight, waits behind
+     them (reason `sending`). `pumpHeld` (every 2 s,
      once the session list is in) tries each session's first one again (an attach at most every
      20 s) and drops those of ended or unlisted sessions. A busy session's Stop hook gets it first:
      `deck/held/<sid>` marks (`DeckHooks.setHeldMarks`) make the hook ask through the queue handshake
      even with nothing queued, and `pumpQueue(…, held)` answers `heldAnswer` before any queued prompt
-     (only where the deck hook owns the queue). `AppState.held` (`heldViews`, 240-character
+     (only where the deck hook owns the queue; never while a send to the session is in flight, which
+     may be that very message, and never a command, which an answer would turn into words). `AppState.held` (`heldViews`, 240-character
      previews) drives the row's ✉ badge (`SessionRow`) and `HeldBar` above the session's tabs: **Send
      now** (`CH.heldSend`, `sendHeld`: `force` types it even if the box can't be read or the user just
      typed, never over text in it) and **Discard** (`CH.heldDrop`); both open to the web app.

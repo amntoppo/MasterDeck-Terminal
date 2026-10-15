@@ -109,7 +109,9 @@ export class Sender {
     // Never ahead of messages already waiting for this session.
     const waiting = opts.held ? [] : (this.d.held?.forKey(s.key) ?? [])
     if (waiting.length) return this.hold(s, text, waiting[0].reason, opts)
-    if (this.inFlight.has(s.key)) return { ok: false, message: `${s.name}: a message is already being sent` }
+    if (this.inFlight.has(s.key))
+      // Behind the one going in now: held (it goes right after), or refused without a store or for a retry.
+      return this.d.held && !opts.held ? this.hold(s, text, 'sending', opts) : { ok: false, message: `${s.name}: a message is already being sent` }
     this.inFlight.add(s.key)
     try {
       const viaMod = await this.viaMod(s, text)
@@ -128,7 +130,8 @@ export class Sender {
         await sleep(150)
         // The user typed while it went in: Enter would send their keys with it. It stays in the box.
         if (this.ptys.inputAt(paneId) !== typed)
-          return { ok: false, typedNotSent: true, message: `${s.name}: you typed while it went in, so it was not sent; it is in the prompt` }
+          // ok: it is in the prompt (the user sends it); a caller that retried would put it there twice.
+          return { ok: true, typedNotSent: true, message: `${s.name}: you typed while it went in, so it is in the prompt, not sent` }
         this.ptys.write(paneId, enter)
         return { ok: true, message: `sent to ${s.name}` }
       }
@@ -207,10 +210,15 @@ export class Sender {
     return out
   }
 
-  /** The Stop hook of a session whose turn ended: its first held message, to hand over as the hook's answer. */
+  /**
+   * The Stop hook of a session whose turn ended: its first held message, to hand over as the hook's
+   * answer. None while a send to it is in flight (that one may be the message going in now), and
+   * none when the first is a command (an answer is read as words, so it would never run).
+   */
   takeHeldFor(sessionId: string): { id: string; text: string; left: number } | null {
     const list = (this.d.held?.list() ?? []).filter((m) => this.current(m.key)?.sessionId === sessionId)
-    return list.length ? { id: list[0].id, text: list[0].text, left: list.length - 1 } : null
+    if (!list.length || this.inFlight.has(list[0].key) || isCommand(list[0].text)) return null
+    return { id: list[0].id, text: list[0].text, left: list.length - 1 }
   }
 
   /** The Stop hook read it: it reached the session. */

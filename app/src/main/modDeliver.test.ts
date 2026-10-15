@@ -66,6 +66,27 @@ describe('ModDelivery', () => {
     expect(handed).toEqual(['b'])
   })
 
+  it('a mod that gave up waiting for go (this side stalled): not delivered, so it can be typed', async () => {
+    const dir = join(deck, 'deliver', SID)
+    let stop = false
+    void (async () => {
+      while (!stop) {
+        await tick(10)
+        if (!existsSync(dir)) continue
+        for (const n of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+          const id = n.slice(0, -5)
+          if (existsSync(join(dir, `${id}.claim`))) continue
+          writeFileSync(join(dir, `${id}.claim`), '')
+          writeFileSync(join(dir, `${id}.skip`), '')
+        }
+      }
+    })()
+    const r = await new ModDelivery(deck, FAST).deliver(SID, 'a')
+    stop = true
+    expect(r).toEqual({ kind: 'unclaimed' })
+    expect(readdirSync(dir)).toEqual([])
+  })
+
   it('refuses a session id that is not one, and prunes folders of ended sessions', async () => {
     const m = new ModDelivery(deck, FAST)
     expect(await m.deliver('../x', 'a')).toEqual({ kind: 'unclaimed' })

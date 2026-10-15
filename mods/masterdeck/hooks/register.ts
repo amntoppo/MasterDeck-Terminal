@@ -84,8 +84,12 @@ async function deliver($: EngineInterface): Promise<void> {
         await sleep($, 200)
         isGo = await $.fs.exists(`${dir}/${id}.go`)
       }
-      // No go: MasterDeck took it back (it types it, or holds it); a later pass finds it gone.
-      if (!isGo) continue
+      // No go: MasterDeck took it back (it types it, or holds it), or it stalled: say so, so a late go
+      // is not counted as delivered. This load never submits this id.
+      if (!isGo) {
+        await $.fs.write(`${dir}/${id}.skip`, '')
+        continue
+      }
       try {
         await $.prompt.submit({ text, asUser: true })
         await $.fs.write(`${dir}/${id}.done`, JSON.stringify({ ok: true }))

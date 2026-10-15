@@ -2,8 +2,9 @@
  * MasterDeck's messages, handed to the session without typing (#123): MasterDeck writes
  * `deck/deliver/<sessionId>/<id>.json`; the core claims it (`<id>.claim`), MasterDeck answers
  * `<id>.go` when the claim came in time, and only then the core submits it, once, and writes
- * `<id>.done`. `$.fs` can neither rename nor delete, so MasterDeck alone decides who delivers (it
- * removes the files); a request this load did not claim itself is never submitted.
+ * `<id>.done` (`<id>.skip` when no go came: never submitted). `$.fs` can neither rename nor
+ * delete, so MasterDeck alone decides who delivers (it removes the files); a request this load did
+ * not claim itself is never submitted.
  */
 
 const ID = /^[0-9]+-[0-9a-z]+$/

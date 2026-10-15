@@ -113,8 +113,26 @@ describe('Sender: a message never mixes with what the user is typing (#123)', ()
     const s = sess()
     const p = pane(screen(''), { onPaste: () => (p.st.typedAt = Date.now()) })
     const r = await sender(p.ptys, s).snd.send(s, 'hello', false)
-    expect(r).toMatchObject({ ok: false, typedNotSent: true })
+    // ok: it is in the prompt for the user to send; a caller that retried would put it there twice.
+    expect(r).toMatchObject({ ok: true, typedNotSent: true })
     expect(p.writes).toEqual([PASTE('hello')])
+  })
+
+  it('a message sent while another is going in waits behind it instead of being refused', async () => {
+    const s = sess()
+    const p = pane(screen(''))
+    let release: (r: ModDeliverResult) => void = () => {}
+    const { snd, held } = sender(p.ptys, s, { mod: () => ({ kind: 'sent' }) })
+    ;(snd as unknown as { d: { mod: unknown } }).d.mod = { deliver: () => new Promise<ModDeliverResult>((r) => (release = r)) }
+    const first = snd.send(s, 'first', false)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(await snd.send(s, 'second', false)).toMatchObject({ ok: true, held: true })
+    expect(held.list()[0]).toMatchObject({ text: 'second', reason: 'sending' })
+    // While the first is in flight the Stop hook gets nothing (it might be that very message).
+    expect(snd.takeHeldFor(s.sessionId)).toBe(null)
+    release({ kind: 'sent' })
+    await first
+    expect(snd.takeHeldFor(s.sessionId)).toMatchObject({ text: 'second' })
   })
 
   it('open pane: no prompt box on screen holds it; Send now types it then', async () => {
@@ -252,5 +270,14 @@ describe('Sender: a message never mixes with what the user is typing (#123)', ()
     snd.heldDelivered(next!.id)
     expect(held.list().map((m) => m.text)).toEqual(['two'])
     expect(snd.takeHeldFor('other')).toBe(null)
+  })
+
+  it('the Stop hook never hands over a command: as an answer it would be read as words', async () => {
+    const s = sess()
+    const p = pane(screen('my draft'))
+    const { snd, held } = sender(p.ptys, s)
+    await snd.send(s, '/compact', false)
+    expect(held.list()).toHaveLength(1)
+    expect(snd.takeHeldFor(s.sessionId)).toBe(null)
   })
 })

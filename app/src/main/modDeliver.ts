@@ -14,7 +14,8 @@ const SID = /^[0-9a-f-]{36}$/i
 
 /**
  * MasterDeck's side of the core mod's delivery (mods/masterdeck/hooks/deliver.ts):
- * `deck/deliver/<session id>/<id>.json` → the mod's `.claim` → our `.go` → the mod's `.done`. The
+ * `deck/deliver/<session id>/<id>.json` → the mod's `.claim` → our `.go` → the mod's `.done` (or
+ * `.skip`: it gave up waiting for go and never submits it). The
  * mod can't rename or delete files, so this side decides: `.go` only for a claim that came in
  * time, and the files are removed here.
  */
@@ -49,7 +50,13 @@ export class ModDelivery {
       return { kind: 'unclaimed' }
     }
     writeFileSync(file('go'), '')
-    if (!(await this.waitFor(file('done'), this.times.doneMs))) return { kind: 'handed' }
+    // The mod gave up waiting for go (this side stalled): it never submits that id, so it is not delivered.
+    const gaveUp = () => existsSync(file('skip'))
+    if (!(await this.waitFor(file('done'), this.times.doneMs, gaveUp)) || gaveUp()) {
+      if (!gaveUp()) return { kind: 'handed' }
+      for (const ext of ['json', 'claim', 'go', 'skip']) rm(file(ext))
+      return { kind: 'unclaimed' }
+    }
     let done: { ok?: unknown; error?: unknown } = {}
     try {
       done = JSON.parse(readFileSync(file('done'), 'utf8'))
@@ -61,9 +68,10 @@ export class ModDelivery {
     return done.ok === false ? { kind: 'failed', error: typeof done.error === 'string' ? done.error : 'the mod could not submit it' } : { kind: 'sent' }
   }
 
-  private async waitFor(path: string, ms: number): Promise<boolean> {
+  private async waitFor(path: string, ms: number, stop: () => boolean = () => false): Promise<boolean> {
     for (let waited = 0; ; waited += this.times.stepMs) {
       if (existsSync(path)) return true
+      if (stop()) return false
       if (waited >= ms) return false
       await this.sleep(this.times.stepMs)
     }
