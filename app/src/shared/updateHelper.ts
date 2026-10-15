@@ -47,6 +47,16 @@ PID_WAIT="\${MD_PID_WAIT:-120}"
 HEALTH_WAIT="\${MD_HEALTH_WAIT:-60}"
 POLL="\${MD_POLL:-1}"
 
+# open starts the app without this environment: pass MasterDeck's own variables on, so an isolated
+# launch (MASTERDECK_USER_DATA …) writes its health marker where this script waits for it.
+ENV_ARGS=()
+for name in $(compgen -e | sort); do
+  case "$name" in
+    MASTERDECK_*|MASTER_HOME|MASTER_WORKSPACE|CLAUDE_CONFIG_DIR) ENV_ARGS+=(--env "$name=\${!name}") ;;
+  esac
+done
+open_app() { "$OPEN" \${ENV_ARGS[@]+"\${ENV_ARGS[@]}"} "$1"; }
+
 prev_of() { printf '%s/.%s.previous' "$(dirname "$1")" "$(basename "$1")"; }
 new_of() { printf '%s/.%s.new' "$(dirname "$1")" "$(basename "$1")"; }
 
@@ -170,14 +180,14 @@ done
 
 if [ ! -d "$STAGED" ]; then
   result_fail "missing"
-  [ "$RELAUNCH" = 1 ] && "$OPEN" "$APP"
+  [ "$RELAUNCH" = 1 ] && open_app "$APP"
   exit 1
 fi
 
 # 2. The swap.
 if ! priv swap "$APP" "$STAGED"; then
   result_fail "\${REASON:-swap-failed}"
-  [ "$RELAUNCH" = 1 ] && "$OPEN" "$APP"
+  [ "$RELAUNCH" = 1 ] && open_app "$APP"
   exit 1
 fi
 
@@ -192,7 +202,7 @@ fi
 for try in 1 2; do
   rm -f "$DIR/healthy-$VERSION"
   log "open $VERSION (try $try)"
-  "$OPEN" "$APP"
+  open_app "$APP"
   if wait_healthy; then
     # ponytail: as root the backup stays until the next update's swap removes it (no second password).
     [ "$ADMIN" = 0 ] && do_cleanup "$APP"
@@ -206,7 +216,7 @@ done
 REASON=""
 if ! priv restore "$APP"; then log "restore failed: \${REASON}"; fi
 result_fail "unhealthy"
-"$OPEN" "$APP"
+open_app "$APP"
 exit 1
 `
 }

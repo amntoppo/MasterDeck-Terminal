@@ -45,7 +45,7 @@ beforeEach(() => {
   // open: logs, and writes the health marker when FAKE_HEALTHY says so (the new app's "I am up").
   write(
     join(bin, 'open'),
-    `#!/bin/bash\necho "open $1 $(cat "$1/Contents/marker")" >> "${calls}"\nif [ "$FAKE_HEALTHY" = 1 ] && [ "$(cat "$1/Contents/marker")" = new ]; then touch "${dir}/healthy-0.10.0"; fi\n`,
+    `#!/bin/bash\na="\${@: -1}"\necho "open $a $(cat "$a/Contents/marker")" >> "${calls}"\nif [ $# -gt 1 ]; then echo "open-env \${*:1:$#-1}" >> "${calls}"; fi\nif [ "$FAKE_HEALTHY" = 1 ] && [ "$(cat "$a/Contents/marker")" = new ]; then touch "${dir}/healthy-0.10.0"; fi\n`,
     0o755,
   )
   write(join(bin, 'kill'), `#!/bin/bash\necho "kill $1" >> "${calls}"\n`, 0o755)
@@ -107,6 +107,17 @@ describe('update helper', () => {
     expect(existsSync(staged)).toBe(false)
     expect(r.log).toContain(`open ${app} new`)
     expect(r.log.some((l) => l.startsWith('xattr -dr com.apple.quarantine'))).toBe(true)
+  })
+
+  it("passes MasterDeck's own variables on to the app it opens (open drops the environment)", { timeout: 20_000 }, () => {
+    const r = run(deadPid(), true, { FAKE_HEALTHY: '1', MASTERDECK_USER_DATA: '/tmp/a b', MASTER_HOME: '/tmp/m', OTHER: 'x' })
+    expect(r.result?.ok).toBe(true)
+    expect(r.log).toContain('open-env --env MASTERDECK_USER_DATA=/tmp/a b --env MASTER_HOME=/tmp/m')
+  })
+
+  it('opens the app with no extra arguments when none of them is set', { timeout: 20_000 }, () => {
+    const r = run(deadPid(), true, { FAKE_HEALTHY: '1' })
+    expect(r.log.some((l) => l.startsWith('open-env'))).toBe(false)
   })
 
   it('tries twice, then puts the previous app back and opens it', { timeout: 20_000 }, () => {

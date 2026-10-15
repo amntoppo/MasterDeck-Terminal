@@ -831,10 +831,6 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   published with the test key, `MASTERDECK_ISOLATED=1` + `MASTERDECK_UPDATE_PUBKEY` +
   `MASTERDECK_UPDATE_URL=http://localhost:8787`), a broken N+1 rolling back, the real `osascript`
   password prompt, and Windows (`NsisUpdater` against the feed).
-- **P2 · The health marker follows the user data folder.** The helper opens the new app through
-  `open` (LaunchServices), so a test launch with `MASTERDECK_USER_DATA` gets the default user data
-  folder in the relaunched app and never writes the marker where the helper waits: E2E runs need
-  the default user data, or the helper rolls back.
 - **P2 · The backup stays after an admin install.** With the password path the helper does not
   remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
 - **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
