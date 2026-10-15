@@ -420,9 +420,15 @@ buttons; it does not go through macOS window drag regions.
   files already uploaded (same size and sha512 only; a published file with another hash stops it)
   and runs after the GitHub attach; the final review's fixes: the running check again right before
   the renames (also as root, after the password prompt), Windows' install on quit off for a
-  relaunch, a channel change during a failed Restart now checked at once. Checked: typecheck, vitest (the helper
-  with nasty paths through a `/bin/sh` stand-in for osascript). Not checked: the end-to-end recipe
-  (OPERATIONS "Testing in-app updates"), the real password prompt, Windows. Open points: TODO
+  relaunch, a channel change during a failed Restart now checked at once. A new GitHub release is
+  published as an update by `.github/workflows/ota-release.yml` (on `release: published`, called by
+  `release.yml` after it attaches the files, or by hand). Backend: branch `122-update-service`
+  (not pushed to `master`, not deployed). Checked: typecheck, vitest (the helper with nasty paths
+  through a `/bin/sh` stand-in for osascript), actionlint, the OTA download step against the real
+  v0.9.0 release (read only), and end to end (OPERATIONS "Testing in-app updates") before the final
+  review's fixes: local `wrangler dev`, packaged builds in a temp folder, 0.9.0 → 0.9.1 and 0.9.0 →
+  0.9.2 in place, a broken 0.9.3 rolled back to 0.9.2 and skipped. Not checked: real R2 and
+  Cloudflare, the workflows on GitHub Actions, the real password prompt, Windows. Open points: TODO
   ("In-app updates (#122)").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
