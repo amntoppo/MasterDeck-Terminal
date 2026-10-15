@@ -64,7 +64,7 @@ function fakeInstaller(over: Partial<Installer> = {}): Installer {
     restart: async () => {
       calls.push('restart')
     },
-    onQuit: () => calls.push('onQuit'),
+    onQuit: (_o, relaunching) => calls.push(relaunching ? 'onQuit relaunching' : 'onQuit'),
     ...over,
   }
 }
@@ -241,13 +241,53 @@ describe('Updater: ready, restart, remind later, quit', () => {
 })
 
 describe('Updater: relaunch, newer offers, channel changes', () => {
-  it("MasterDeck's own Restart (a relaunch) never installs on quit: the relaunched app would run from the bundle being swapped", async () => {
+  it("MasterDeck's own Restart (a relaunch) tells the installer, which must not install under the relaunched app", async () => {
     const { u } = makeUpdater({ status: 200, body: signedOffer() })
     await u.check()
     u.onQuit(true)
-    expect(calls).toEqual(['prepare'])
+    expect(calls).toEqual(['prepare', 'onQuit relaunching'])
     u.onQuit(false)
-    expect(calls).toEqual(['prepare', 'onQuit'])
+    expect(calls).toEqual(['prepare', 'onQuit relaunching', 'onQuit'])
+    // Even when installing would need the password (nothing installs then either, but Windows' own
+    // install on quit must still be switched off).
+    const admin = makeUpdater({ status: 200, body: signedOffer() }, { installer: () => fakeInstaller({ needsAdmin: () => true }) }).u
+    await admin.check()
+    calls = []
+    admin.onQuit(true)
+    expect(calls).toEqual(['onQuit relaunching'])
+  })
+
+  it('a channel change while installing checks again when Restart now fails (not 6 hours later)', async () => {
+    const urls: string[] = []
+    let refuse: (() => void) | null = null
+    const { u } = makeUpdater(
+      { status: 204 },
+      {
+        installer: () =>
+          fakeInstaller({
+            restart: () =>
+              new Promise<void>((_, rej) => {
+                refuse = () => rej(new UpdateFailure('install', 'The installer did not start'))
+              }),
+          }),
+        fetch: async (url) => {
+          urls.push(url)
+          return urls.length > 1 ? { status: 204, json: async () => null } : { status: 200, json: async () => signedOffer() }
+        },
+      },
+    )
+    await u.check()
+    expect(u.state().phase).toBe('ready')
+    const restarting = u.restart()
+    expect(u.state().phase).toBe('installing')
+    settings.updateChannel = 'beta'
+    u.settingsChanged({ autoDownloadUpdates: true, updateChannel: 'stable' }, settings)
+    expect(urls).toHaveLength(1)
+    await vi.waitFor(() => expect(refuse).not.toBeNull())
+    refuse!()
+    expect(await restarting).toMatchObject({ ok: false })
+    await vi.waitFor(() => expect(urls).toHaveLength(2))
+    expect(urls[1]).toContain('channel=beta')
   })
 
   it('a newer offer replacing a ready one discards the old staged update at once', async () => {
@@ -507,7 +547,10 @@ describe('macOS installer', () => {
     expect(m.spawned).toEqual([
       ['/bin/bash', script, 'install', '4242', '/Apps With Space/MasterDeck.app', join(stage, 'MasterDeck.app'), dir, '0.10.0', '0.9.0', '1', zip, offer.sha512],
     ])
-    m.inst.onQuit(offer)
+    // MasterDeck's own Restart (a relaunch): nothing is handed over.
+    m.inst.onQuit(offer, true)
+    expect(m.spawned).toHaveLength(1)
+    m.inst.onQuit(offer, false)
     expect(m.spawned[1].slice(-3)).toEqual(['0', zip, offer.sha512])
     expect(JSON.parse(readFileSync(join(dir, 'pending.json'), 'utf8'))).toMatchObject({ relaunch: false })
   })
@@ -691,6 +734,16 @@ describe('Windows installer', () => {
     expect(first.autoInstallOnAppQuit).toBe(false)
     // Nothing is ready now.
     await expect(w.restart()).rejects.toMatchObject({ kind: 'install', message: 'No update is ready' })
+  })
+
+  it("MasterDeck's own Restart (a relaunch) switches install on quit off; a normal quit leaves it on", async () => {
+    const { n } = fakeNsis(setupFile())
+    const w = new WinInstaller(deps(async () => n))
+    await w.prepare(winOffer(), () => {}, () => {})
+    w.onQuit(winOffer(), false)
+    expect(n.autoInstallOnAppQuit).toBe(true)
+    w.onQuit(winOffer(), true)
+    expect(n.autoInstallOnAppQuit).toBe(false)
   })
 
   it('discard stops a ready update from installing on quit', async () => {

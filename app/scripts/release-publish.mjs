@@ -8,14 +8,16 @@
 //        [--notes notes.md] [--rollout 0-100] [--min-supported 0.9.0] [--expect-key <b64>] [--dry-run]
 //
 // It refuses a signing key whose public key is not the one built into the app
-// (src/shared/releaseKey.ts), or `--expect-key`'s for an E2E run with a test key. A file the service
-// already holds with the same size is not uploaded again, so a re-run reaches the idempotent publish.
+// (src/shared/releaseKey.ts), or `--expect-key`'s for an E2E run with a test key. Each upload carries
+// its sha512 (kept by the service as R2 metadata and checked at publish). A file the service already
+// holds with the same size and sha512 is not uploaded again, so a re-run reaches the idempotent
+// publish; a published file with another sha512 stops the run (yank and ship a new version).
 //
 // Env: MD_RELEASE_API (default https://dev.masterdeck.dev), RELEASE_ADMIN_TOKEN,
 // RELEASE_SIGNING_KEY (PKCS8 PEM) or RELEASE_SIGNING_KEY_FILE. Node 22, no dependencies.
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -191,11 +193,11 @@ export async function prepare(o) {
     if (size === 0) throw new Error(`${f.name} is empty: ${f.path}`)
     const signature = signMessage(signedMessage({ ...f, version: o.version, sha512 }), o.privateKeyPem)
     files.push({ ...f, sha512, size, signature })
-    uploads.push({ key: `${o.version}/${f.name}`, path: f.path, size })
+    uploads.push({ key: `${o.version}/${f.name}`, path: f.path, size, sha512 })
     if (f.blockmap) {
-      const bm = await stat(f.blockmap.path)
+      const bm = await hashFile(f.blockmap.path)
       if (bm.size === 0) throw new Error(`${f.blockmap.name} is empty: ${f.blockmap.path}`)
-      uploads.push({ key: `${o.version}/${f.blockmap.name}`, path: f.blockmap.path, size: bm.size })
+      uploads.push({ key: `${o.version}/${f.blockmap.name}`, path: f.blockmap.path, size: bm.size, sha512: bm.sha512 })
     }
   }
   return { manifest: buildManifest({ ...o, files }), uploads }
@@ -203,8 +205,9 @@ export async function prepare(o) {
 
 /**
  * Uploads one file through the admin multipart routes, part by part, each part tried up to four
- * times; a part that keeps failing aborts the upload and throws.
- * @param {{api: string, token: string, key: string, path: string, size: number,
+ * times; a part that keeps failing aborts the upload and throws. The create carries the file's
+ * sha512, which the service keeps with the object (publish refuses a file whose stored hash differs).
+ * @param {{api: string, token: string, key: string, path: string, size: number, sha512: string,
  *   fetch?: typeof fetch, partSize?: number, sleep?: (ms: number) => Promise<void>,
  *   log?: (s: string) => void}} o
  */
@@ -217,7 +220,13 @@ export async function uploadFile(o) {
   const auth = { authorization: `Bearer ${o.token}` }
   const json = { ...auth, 'content-type': 'application/json' }
 
-  const created = await call(doFetch, `${o.api}/v1/admin/uploads`, { method: 'POST', headers: json, body: JSON.stringify({ key: o.key }) })
+  let created
+  try {
+    created = await call(doFetch, `${o.api}/v1/admin/uploads`, { method: 'POST', headers: json, body: JSON.stringify({ key: o.key, sha512: o.sha512 }) })
+  } catch (e) {
+    if (e.status === 409) throw republish(o.key)
+    throw e
+  }
   const uploadId = created.uploadId
   if (!uploadId) throw new Error(`no uploadId for ${o.key}`)
   const q = `key=${encodeURIComponent(o.key)}`
@@ -271,17 +280,24 @@ export async function uploadFile(o) {
 /**
  * Uploads every file, then registers the release.
  * @param {{api: string, token: string, manifest: ReturnType<typeof buildManifest>,
- *   uploads: Array<{key: string, path: string, size: number}>, fetch?: typeof fetch,
+ *   uploads: Array<{key: string, path: string, size: number, sha512: string}>, fetch?: typeof fetch,
  *   partSize?: number, sleep?: (ms: number) => Promise<void>, log?: (s: string) => void}} o
  */
 export async function publish({ api, token, manifest, uploads, fetch: doFetch = fetch, partSize, sleep, log = () => {} }) {
+  // Every file is looked at before any is uploaded: a published file with another build stops the run whole.
+  const there = []
   for (const u of uploads) {
-    if (await stored(doFetch, api, u)) {
-      log(`${u.key} is already there (${u.size} bytes)`)
+    const s = await stored(doFetch, api, u)
+    if (s === 'conflict') throw republish(u.key)
+    there.push(s === 'same')
+  }
+  for (const [i, u] of uploads.entries()) {
+    if (there[i]) {
+      log(`${u.key} is already there (${u.size} bytes, same sha512)`)
       continue
     }
     log(`uploading ${u.key} (${u.size} bytes)`)
-    await uploadFile({ api, token, key: u.key, path: u.path, size: u.size, fetch: doFetch, partSize, sleep, log })
+    await uploadFile({ api, token, key: u.key, path: u.path, size: u.size, sha512: u.sha512, fetch: doFetch, partSize, sleep, log })
   }
   log(`publishing ${manifest.version} (${manifest.channel})`)
   return call(doFetch, `${api}/v1/admin/releases`, {
@@ -291,20 +307,36 @@ export async function publish({ api, token, manifest, uploads, fetch: doFetch = 
   })
 }
 
-/** The service already serves this file with this size (a re-run after a later step failed). */
+/**
+ * What the service holds under this key: 'same' (this size and sha512: a re-run after a later step
+ * failed), 'conflict' (published, cached as immutable, with other bytes), else 'upload' (missing,
+ * or an unpublished upload that may be overwritten). The size alone is not enough: a rebuild can
+ * have the same size and other bytes.
+ */
 async function stored(doFetch, api, u) {
+  let res
   try {
-    const res = await doFetch(`${api}/v1/updates/files/${u.key}`, { method: 'HEAD' })
-    return res.status === 200 && Number(res.headers.get('content-length')) === u.size
+    res = await doFetch(`${api}/v1/updates/files/${u.key}`, { method: 'HEAD' })
   } catch {
-    return false
+    return 'upload'
   }
+  if (res.status !== 200) return 'upload'
+  if (Number(res.headers.get('content-length')) === u.size && res.headers.get('x-md-sha512') === u.sha512) return 'same'
+  // Only a published file (or its blockmap) is immutable; anything else in the bucket may be replaced.
+  return /immutable/.test(res.headers.get('cache-control') ?? '') ? 'conflict' : 'upload'
+}
+
+function republish(key) {
+  const version = key.split('/')[0]
+  return new Error(
+    `${key} is published with another build (another sha512): a published file never changes. Yank ${version} and ship a new version.`,
+  )
 }
 
 async function call(doFetch, url, init) {
   const res = await doFetch(url, init)
   const text = await res.text()
-  if (!res.ok) throw new Error(`${init.method} ${url.replace(/\?.*/, '')}: ${res.status} ${text.slice(0, 500)}`)
+  if (!res.ok) throw Object.assign(new Error(`${init.method} ${url.replace(/\?.*/, '')}: ${res.status} ${text.slice(0, 500)}`), { status: res.status })
   return text ? JSON.parse(text) : {}
 }
 

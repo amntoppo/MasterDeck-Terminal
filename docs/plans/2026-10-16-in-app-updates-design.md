@@ -44,7 +44,10 @@ Windows uses `electron-updater` (NSIS) against this backend's feed.
 - R2 bucket `masterdeck-releases`, binding `RELEASES`. Object key `<version>/<file name>`
   (`^[0-9A-Za-z._-]+/[0-9A-Za-z._-]+$`). Files are served **through the Worker** (no custom
   domain needed yet): `GET|HEAD /v1/updates/files/<version>/<name>`, with single-range `Range`
-  support (electron-updater's differential download), `etag`, long immutable cache.
+  support (electron-updater's differential download), `etag`, long immutable cache, and
+  `x-md-sha512` (the sha512 the upload was created with). Rate limit: 60 whole downloads and HEADs
+  an hour per address; a `Range` of part of the file is not counted (a Windows differential
+  download asks for many).
   ponytail: a public R2 custom domain (`releases.masterdeck.dev`) would take the bytes off the
   Worker; only the `url` column changes.
 - D1 migration `0006_releases.sql`, table `releases`, primary key `(version, platform, arch)`:
@@ -75,12 +78,13 @@ Windows uses `electron-updater` (NSIS) against this backend's feed.
 ### Admin routes (`authorization: Bearer <RELEASE_ADMIN_TOKEN>`, constant-time compare; `503`
 when the secret is unset; also registered before the auth middleware)
 - Uploads (R2 multipart; the Worker's request limit is 100 MB and the builds are 120-140 MB):
-  `POST /v1/admin/uploads {key}` → `{uploadId}`; `PUT /v1/admin/uploads/:uploadId/parts/:n?key=`
+  `POST /v1/admin/uploads {key, sha512}` → `{uploadId}` (the sha512 kept as R2 custom metadata); `PUT /v1/admin/uploads/:uploadId/parts/:n?key=`
   (body = bytes, ≤ 95 MB) → `{partNumber, etag}`; `POST /v1/admin/uploads/:uploadId/complete
   {key, parts}` → `{key, size}`; `DELETE /v1/admin/uploads/:uploadId?key=` aborts.
 - `POST /v1/admin/releases {version, channel, notes, minSupportedVersion?, rolloutPercent?,
   publishedAt?, files: [{platform, arch, name, key, sha512, size, signature}]}`: each object must
-  exist in R2 with that size, each signature must verify against `RELEASE_PUBLIC_KEY` (WebCrypto
+  exist in R2 with that size and that sha512 in its metadata (`409` when it is missing or differs:
+  the size alone cannot tell a same-size rebuild apart), each signature must verify against `RELEASE_PUBLIC_KEY` (WebCrypto
   Ed25519), `url` = `PUBLIC_URL + /v1/updates/files/ + key`. Re-publishing an identical row is
   idempotent; a different sha512 for an existing row is `409`. Blockmaps are uploaded but not rows.
 - `PATCH /v1/admin/releases/:version {rolloutPercent?, yanked?, notes?, minSupportedVersion?}`
@@ -106,8 +110,10 @@ when the secret is unset; also registered before the auth middleware)
   `https://dev.masterdeck.dev`, `RELEASE_ADMIN_TOKEN`) and registers the release; the installers
   are on GitHub before that, so a live update always has them. The script refuses a signing key whose
   public key is not the app's (`releaseKey.ts`; `--expect-key <b64>` for a test key) and an empty
-  file, and skips a file `HEAD /v1/updates/files/<key>` already serves with the same size (a
-  re-run reaches the idempotent publish instead of a `409`). Release notes for the update:
+  file, sends each file's sha512 when it creates the upload, and skips a file
+  `HEAD /v1/updates/files/<key>` already serves with the same size and `x-md-sha512` (a re-run
+  reaches the idempotent publish instead of a `409`); a published file with another hash stops the
+  run (yank and ship a new version). Release notes for the update:
   `.github/releases/v<version>.md` when present, else the GitHub release's text, else
   "MasterDeck <v>".
   `--dry-run` signs and prints the manifest without network calls. `ci.yml` no longer attaches on
@@ -155,8 +161,10 @@ updatedFrom? {from, at}, needsAdmin? }`, plus pure helpers: `compareVersions`, `
   with administrator privileges` (every path single-quoted), and as root copy the **zip** into a
   fresh root-owned `mktemp -d` folder, check its SHA-512 against the one the app verified with the
   signature, unpack it there, check its version, clear quarantine, give it the current app's
-  owner/group, then the two renames (restored on failure); the user's staged copy is not used. A
-  cancel is `reason: "permission"`. **Try again** after a failed install with no offer left (a new
+  owner/group, then the two renames (restored on failure); the user's staged copy is not used.
+  Review fix: both paths look again for a process running from the bundle right before the renames
+  (as root inside the root command, exit 17): the password prompt can take minutes, and an app
+  opened meanwhile gives `still-running` with nothing touched. A cancel is `reason: "permission"`. **Try again** after a failed install with no offer left (a new
   launch) checks again. The new app writes `healthy-<version>` 10 s after
   its window loaded. At launch the updater reads `result.json` (rolled back → `rolledBack`, that
   version is skipped until a newer one; ok → `updatedFrom`).
@@ -177,7 +185,9 @@ updatedFrom? {from, at}, needsAdmin? }`, plus pure helpers: `compareVersions`, `
   decide; the downloaded file's version must equal the offer and its sha512 and signature must
   verify before `ready` (then `autoInstallOnAppQuit` on); **Restart now** is
   `quitAndInstall(true, true)`, and a throw or an app still running 10 s later is an `install`
-  error. ponytail: no automatic rollback on Windows (NSIS replaces the
+  error (a channel change asked for meanwhile is checked at once). MasterDeck's own Restart (a
+  relaunch) turns `autoInstallOnAppQuit` off in will-quit (`Installer.onQuit(offer, relaunching)`),
+  so NSIS never runs under the relaunched app. ponytail: no automatic rollback on Windows (NSIS replaces the
   install); upgrade path: keep the previous installer and rerun it on a failed health check.
 - IPC (`DECK_ACCESS`: blocked on the web: a browser never updates the Mac): `update:state`,
   `update:check`, `update:download`, `update:restart`, `update:later`, event `update:changed`.

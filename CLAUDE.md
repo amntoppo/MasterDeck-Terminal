@@ -417,7 +417,10 @@ buttons; it does not go through macOS window drag regions.
   runs only inline root commands that unpack the verified zip again (never the helper file or the
   staged copy); the test key and update URL only in an update-test build
   (`MASTERDECK_UPDATE_TEST_BUILD=1`); the publish script checks the key against the app's, skips
-  files already uploaded and runs after the GitHub attach. Checked: typecheck, vitest (the helper
+  files already uploaded (same size and sha512 only; a published file with another hash stops it)
+  and runs after the GitHub attach; the final review's fixes: the running check again right before
+  the renames (also as root, after the password prompt), Windows' install on quit off for a
+  relaunch, a channel change during a failed Restart now checked at once. Checked: typecheck, vitest (the helper
   with nasty paths through a `/bin/sh` stand-in for osascript). Not checked: the end-to-end recipe
   (OPERATIONS "Testing in-app updates"), the real password prompt, Windows. Open points: TODO
   ("In-app updates (#122)").

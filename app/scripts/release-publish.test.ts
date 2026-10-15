@@ -184,7 +184,9 @@ describe('manifest', () => {
 
 type Call = { method: string; url: string; body?: unknown; bytes?: number }
 
-function fakeServer(opts: { failPart?: { n: number; times: number }; stored?: Record<string, number> } = {}) {
+type Stored = { size: number; sha512?: string; published?: boolean }
+
+function fakeServer(opts: { failPart?: { n: number; times: number }; stored?: Record<string, Stored>; createStatus?: number } = {}) {
   const calls: Call[] = []
   let failures = 0
   const fetchFn = async (url: string, init: RequestInit) => {
@@ -197,10 +199,14 @@ function fakeServer(opts: { failPart?: { n: number; times: number }; stored?: Re
     const ok = (o: unknown) => new Response(JSON.stringify(o), { status: 200 })
     const file = url.match(/\/v1\/updates\/files\/(.+)$/)
     if (method === 'HEAD' && file) {
-      const size = opts.stored?.[file[1]]
-      return size === undefined ? new Response(null, { status: 404 }) : new Response(null, { status: 200, headers: { 'content-length': String(size) } })
+      const f = opts.stored?.[file[1]]
+      if (!f) return new Response(null, { status: 404 })
+      const headers: Record<string, string> = { 'content-length': String(f.size), 'cache-control': f.published ? 'public, max-age=31536000, immutable' : 'no-store' }
+      if (f.sha512) headers['x-md-sha512'] = f.sha512
+      return new Response(null, { status: 200, headers })
     }
-    if (method === 'POST' && url.endsWith('/v1/admin/uploads')) return ok({ uploadId: 'up1' })
+    if (method === 'POST' && url.endsWith('/v1/admin/uploads'))
+      return opts.createStatus ? new Response(JSON.stringify({ error: 'is published' }), { status: opts.createStatus }) : ok({ uploadId: 'up1' })
     const part = url.match(/\/parts\/(\d+)\?/)
     if (method === 'PUT' && part) {
       const n = Number(part[1])
@@ -225,7 +231,7 @@ describe('uploads', () => {
     const p = join(dir, 'big')
     writeFileSync(p, Buffer.alloc(25, 1))
     const s = fakeServer()
-    await uploadFile({ api: 'https://api.test', token: 'tok', key: '1.0.0/big', path: p, size: 25, fetch: s.fetch, partSize: 10, sleep: noSleep })
+    await uploadFile({ api: 'https://api.test', token: 'tok', key: '1.0.0/big', path: p, size: 25, sha512: 'SUM', fetch: s.fetch, partSize: 10, sleep: noSleep })
     const puts = s.calls.filter((c) => c.method === 'PUT')
     expect(puts.map((c) => c.bytes)).toEqual([10, 10, 5])
     expect(puts[0].url).toBe('https://api.test/v1/admin/uploads/up1/parts/1?key=1.0.0%2Fbig')
@@ -238,14 +244,14 @@ describe('uploads', () => {
         { partNumber: 3, etag: 'e3' },
       ],
     })
-    expect(s.calls[0]).toEqual({ method: 'POST', url: 'https://api.test/v1/admin/uploads', body: { key: '1.0.0/big' } })
+    expect(s.calls[0]).toEqual({ method: 'POST', url: 'https://api.test/v1/admin/uploads', body: { key: '1.0.0/big', sha512: 'SUM' } })
   })
 
   it('retries a failing part', async () => {
     const p = join(dir, 'big')
     writeFileSync(p, Buffer.alloc(25, 1))
     const s = fakeServer({ failPart: { n: 2, times: 2 } })
-    await uploadFile({ api: 'https://api.test', token: 'tok', key: 'k/x', path: p, size: 25, fetch: s.fetch, partSize: 10, sleep: noSleep })
+    await uploadFile({ api: 'https://api.test', token: 'tok', key: 'k/x', path: p, size: 25, sha512: 'SUM', fetch: s.fetch, partSize: 10, sleep: noSleep })
     expect(s.calls.filter((c) => c.method === 'PUT').length).toBe(5)
     expect(s.calls.some((c) => c.method === 'DELETE')).toBe(false)
   })
@@ -255,7 +261,7 @@ describe('uploads', () => {
     writeFileSync(p, Buffer.alloc(25, 1))
     const s = fakeServer({ failPart: { n: 2, times: 99 } })
     await expect(
-      uploadFile({ api: 'https://api.test', token: 'tok', key: 'k/x', path: p, size: 25, fetch: s.fetch, partSize: 10, sleep: noSleep }),
+      uploadFile({ api: 'https://api.test', token: 'tok', key: 'k/x', path: p, size: 25, sha512: 'SUM', fetch: s.fetch, partSize: 10, sleep: noSleep }),
     ).rejects.toThrow(/500 boom/)
     expect(s.calls.at(-1)).toEqual({ method: 'DELETE', url: 'https://api.test/v1/admin/uploads/up1?key=k%2Fx' })
     expect(s.calls.some((c) => c.url.endsWith('/complete'))).toBe(false)
@@ -273,17 +279,56 @@ describe('uploads', () => {
     expect(last?.body).toEqual(manifest)
   })
 
-  it('skips a file the service already holds with the same size (a re-run reaches the idempotent publish)', async () => {
+  it('sends each upload its sha512, the blockmap too', async () => {
     artifacts('0.10.0')
     const { manifest, uploads } = await prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })
-    const [first, second] = uploads
-    const s = fakeServer({ stored: { [first.key]: first.size, [second.key]: second.size + 1 } })
+    const s = fakeServer()
+    await publish({ api: 'https://api.test', token: 'tok', manifest, uploads, fetch: s.fetch, sleep: noSleep })
+    const created = s.calls.filter((c) => c.url.endsWith('/v1/admin/uploads')).map((c) => c.body as { key: string; sha512: string })
+    expect(created.map((c) => c.sha512)).toEqual(uploads.map((u) => u.sha512))
+    for (const f of manifest.files) expect(created.find((c) => c.key === f.key)?.sha512).toBe(f.sha512)
+    expect(created.every((c) => /^[A-Za-z0-9+/]{86}==$/.test(c.sha512))).toBe(true)
+  })
+
+  it('skips a file only when the service holds it with the same size and sha512 (a re-run reaches the idempotent publish)', async () => {
+    artifacts('0.10.0')
+    const { manifest, uploads } = await prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })
+    expect(uploads.length).toBeGreaterThanOrEqual(4)
+    const [same, otherSize, otherHash, noHash] = uploads
+    const s = fakeServer({
+      stored: {
+        [same.key]: { size: same.size, sha512: same.sha512 },
+        [otherSize.key]: { size: otherSize.size + 1, sha512: otherSize.sha512 },
+        [otherHash.key]: { size: otherHash.size, sha512: same.sha512 === otherHash.sha512 ? 'x' : same.sha512 },
+        [noHash.key]: { size: noHash.size },
+      },
+    })
     await publish({ api: 'https://api.test', token: 'tok', manifest, uploads, fetch: s.fetch, sleep: noSleep })
     expect(s.calls.filter((c) => c.method === 'HEAD').map((c) => c.url)).toEqual(uploads.map((u) => `https://api.test/v1/updates/files/${u.key}`))
     const created = s.calls.filter((c) => c.url.endsWith('/v1/admin/uploads')).map((c) => (c.body as { key: string }).key)
-    // The same size: skipped. Another size (a broken earlier upload): uploaded again.
+    // Same size and hash: skipped. Another size, a same-size rebuild, or no hash stored: uploaded again
+    // (an unpublished key may be overwritten).
     expect(created).toEqual(uploads.slice(1).map((u) => u.key))
     expect(s.calls.at(-1)?.url).toBe('https://api.test/v1/admin/releases')
+  })
+
+  it('fails loudly, uploading and publishing nothing, when a published file has another hash', async () => {
+    artifacts('0.10.0')
+    const { manifest, uploads } = await prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })
+    const u = uploads[1]
+    const s = fakeServer({ stored: { [u.key]: { size: u.size, sha512: 'another', published: true } } })
+    await expect(publish({ api: 'https://api.test', token: 'tok', manifest, uploads, fetch: s.fetch, sleep: noSleep })).rejects.toThrow(
+      new RegExp(`${u.key.replace(/\./g, '\\.')} is published with another build.*yank 0\\.10\\.0 and ship a new version`, 'i'),
+    )
+    expect(s.calls.filter((c) => c.method !== 'HEAD')).toEqual([])
+  })
+
+  it('a create refused as published (409) fails with the same advice', async () => {
+    artifacts('0.10.0')
+    const { manifest, uploads } = await prepare({ dir, version: '0.10.0', channel: 'stable', notes: 'N', privateKeyPem: VECTOR.privateKey })
+    const s = fakeServer({ createStatus: 409 })
+    await expect(publish({ api: 'https://api.test', token: 'tok', manifest, uploads, fetch: s.fetch, sleep: noSleep })).rejects.toThrow(/yank 0\.10\.0 and ship a new version/i)
+    expect(s.calls.some((c) => c.url.endsWith('/v1/admin/releases'))).toBe(false)
   })
 
   it('refuses an empty file', async () => {

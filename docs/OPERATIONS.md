@@ -101,9 +101,12 @@ another, for a test key) and an empty file. It finds the update files (`MasterDe
 as `MasterDeck-Setup-<v>.exe[.blockmap]`), computes each one's base64 SHA-512 and size, signs
 `masterdeck-update\nv1\n<version>\n<platform>\n<arch>\n<name>\n<sha512>` with the release key
 (Ed25519), uploads every file to R2 through the backend's admin multipart routes (90 MB parts,
-each tried four times; a failed upload is aborted; a file `HEAD /v1/updates/files/<key>` already
-answers with the same size is skipped) and registers the release with
-`POST /v1/admin/releases`, which checks every size and signature. Nothing is offered to users until
+each tried four times; a failed upload is aborted; each upload is created with the file's sha512,
+which the backend keeps as R2 metadata; a file `HEAD /v1/updates/files/<key>` already answers with
+the same size **and** the same `x-md-sha512` is skipped, an unpublished one with another hash is
+uploaded over, a published one with another hash stops the run: yank the version and ship a new one)
+and registers the release with `POST /v1/admin/releases`, which checks every size, stored sha512 and
+signature. Nothing is offered to users until
 that last call. The DMGs stay on GitHub Releases for new installs (`install.sh`, the website).
 
 **Secrets** (repository → Settings → Secrets and variables → Actions; set by the owner):
@@ -132,7 +135,7 @@ RELEASE_ADMIN_TOKEN=… RELEASE_SIGNING_KEY_FILE=… node scripts/release-publis
 
 `--channel stable|beta` overrides the channel taken from the version; `--rollout <0-100>` starts a
 staged rollout; `--min-supported <v>` makes the update mandatory for anything older. Re-running is
-safe: files already uploaded with the same size are skipped, others are uploaded again, and
+safe: files already uploaded with the same size and sha512 are skipped, others are uploaded again, and
 registering an identical release again is a no-op (a different file for an existing version is
 refused with `409`: bump the version instead).
 

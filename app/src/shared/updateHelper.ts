@@ -144,7 +144,9 @@ if [ ! -w "$(dirname "$APP")" ] || [ ! -w "$APP" ]; then ADMIN=1; fi
 ROOT_VARS="APP=$(sq "$APP"); PREV=$(sq "$PREV"); NEW=$(sq "$NEW"); ZIP=$(sq "$ZIP"); SHA=$(sq "$SHA"); VER=$(sq "$VERSION")"
 
 # As root: the zip again, into a fresh root-owned folder, checked, unpacked, given the current app's
-# owner; then the two renames, the old app back on failure. Exit codes say where it stopped.
+# owner; then the two renames, the old app back on failure. Exit codes say where it stopped; 17 is
+# MasterDeck running from the bundle again (opened while macOS asked for the password, which can take
+# minutes): checked right before the renames, with nothing touched yet (still-running).
 read -r -d '' ROOT_SWAP <<'ROOTSWAP'
 fail() { /bin/rm -rf "$T"; exit "$1"; }
 T="$(/usr/bin/mktemp -d /tmp/masterdeck-update.XXXXXX)" || exit 10
@@ -154,6 +156,7 @@ T="$(/usr/bin/mktemp -d /tmp/masterdeck-update.XXXXXX)" || exit 10
 [ "$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$T/x/MasterDeck.app/Contents/Info.plist")" = "$VER" ] || fail 14
 /usr/bin/xattr -dr com.apple.quarantine "$T/x/MasterDeck.app" >/dev/null 2>&1
 /usr/sbin/chown -R "$(/usr/bin/stat -f %u:%g "$APP")" "$T/x/MasterDeck.app" || fail 15
+/bin/ps -axo command= 2>/dev/null | while read -r c; do case "$c" in "$APP/Contents/MacOS/"*) exit 1 ;; esac; done || fail 17
 /bin/rm -rf "$PREV" "$NEW" || fail 16
 /bin/mv "$T/x/MasterDeck.app" "$NEW" || fail 16
 /bin/mv "$APP" "$PREV" || { /bin/rm -rf "$NEW"; fail 16; }
@@ -174,6 +177,7 @@ $1" 2>&1)"
   if [ "$rc" != 0 ]; then
     case "$out" in
       *-128*) REASON="permission" ;;
+      *"(17)"*) REASON="still-running" ;;
       *) REASON="swap-failed" ;;
     esac
   fi
@@ -181,7 +185,12 @@ $1" 2>&1)"
 }
 
 # As the user: the staged app next to the current one, then two renames; the old one is kept as the backup.
+# The running check again right before (the step-2 check came before the staged copy was looked at).
 swap_user() {
+  if [ -n "$(app_pids)" ]; then
+    REASON="still-running"
+    return 1
+  fi
   rm -rf "$PREV" "$NEW" || return 1
   mv "$STAGED" "$NEW" || return 1
   if ! mv "$APP" "$PREV"; then
@@ -202,7 +211,7 @@ do_swap() {
     return $?
   fi
   swap_user >> "$LOG" 2>&1 && return 0
-  REASON="swap-failed"
+  REASON="\${REASON:-swap-failed}"
   return 1
 }
 
@@ -244,6 +253,12 @@ fi
 
 # 3. The swap.
 if ! do_swap; then
+  # Opened again meanwhile: it already runs, nothing was touched; the next quit tries again.
+  if [ "$REASON" = still-running ]; then
+    log "MasterDeck runs again from $APP"
+    result_fail "still-running"
+    exit 1
+  fi
   result_fail "\${REASON:-swap-failed}"
   [ "$RELAUNCH" = 1 ] && open_app "$APP"
   exit 1

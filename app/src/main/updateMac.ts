@@ -227,7 +227,9 @@ export class MacInstaller implements Installer {
     this.d.quit()
   }
 
-  onQuit(offer: UpdateOffer): void {
+  onQuit(offer: UpdateOffer, relaunching: boolean): void {
+    // A relaunch starts the new instance from this bundle: no swap under it (the next quit swaps).
+    if (relaunching) return
     this.handOver(offer, false)
   }
 

@@ -833,8 +833,9 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   `MASTERDECK_UPDATE_URL=http://localhost:8787`; OPERATIONS "Testing in-app updates"), a broken N+1
   rolling back, the real `osascript` password prompt (the root command's quoting was checked only
   through a `/bin/sh` stand-in, as the same user), and Windows (`NsisUpdater` against the
-  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, which the backend is
-  adding; until it is deployed a Windows download fails with "Could not read the update feed").
+  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, built on the backend's
+  branch `122-update-service` but not deployed: until it is, a Windows download fails with "Could
+  not read the update feed").
 - **P2 · The backup stays after an admin install.** With the password path the helper does not
   remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
 - **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app

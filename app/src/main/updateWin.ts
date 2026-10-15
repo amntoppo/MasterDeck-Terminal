@@ -118,7 +118,11 @@ export class WinInstaller implements Installer {
     this.u = null
   }
 
-  onQuit(): void {
-    // electron-updater installs on quit itself (autoInstallOnAppQuit).
+  onQuit(_offer: UpdateOffer, relaunching: boolean): void {
+    // A normal quit: electron-updater installs on quit itself (autoInstallOnAppQuit). MasterDeck's
+    // own Restart relaunches the app: the installer must not run under the new instance (will-quit
+    // comes before electron-updater's quit handler, which reads the flag then). The update stays
+    // downloaded; the relaunched app offers it again.
+    if (relaunching && this.u) this.u.autoInstallOnAppQuit = false
   }
 }

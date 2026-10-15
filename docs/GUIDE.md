@@ -1085,10 +1085,13 @@ the DMG has updates off (Settings → Updates says why).
   have more bugs. Off again: a beta update that was downloaded but not installed is dropped; a beta
   already installed stays until the next stable release is newer.
 - **Your password (Mac).** When MasterDeck sits in a folder your user cannot write to, macOS asks for
-  an administrator's password to replace it. Cancelling leaves the old version in place; **Try
-  again** asks again.
-- **When an update does not start (Mac).** If the new version does not start within two minutes, the
-  previous one is put back and opened. Settings → Updates says "Rolled back from vX: it did not
+  an administrator's password to replace it. Cancelling leaves the old version in place and opens it
+  again; Settings → Updates then shows the error with **Try again**, which checks and downloads the
+  update again before macOS asks for the password once more. If you open MasterDeck yourself while
+  macOS is still asking, nothing is replaced: the update waits for the next quit.
+- **When an update does not start (Mac).** MasterDeck opens the new version and waits up to two
+  minutes for it to start, then tries once more (about four minutes in all). If it still has not
+  started, the previous one is put back and opened. Settings → Updates says "Rolled back from vX: it did not
   start", and MasterDeck skips that version until a newer one comes out. After a good update the
   section says "Updated from vY".
 - **Errors** show as one line with **Try again** (it checks, downloads or installs again, whichever

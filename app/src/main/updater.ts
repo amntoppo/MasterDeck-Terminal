@@ -30,8 +30,12 @@ export interface Installer {
   needsAdmin(): boolean
   /** Restart now: hand over to the installer, which quits the app. Throws UpdateFailure. */
   restart(offer: UpdateOffer): Promise<void>
-  /** A normal quit with the update ready (macOS: swap without a relaunch). */
-  onQuit(offer: UpdateOffer): void
+  /**
+   * The app quits with the update ready. A normal quit installs it (macOS: swap without a relaunch;
+   * Windows: electron-updater's install on quit). `relaunching`: MasterDeck's own Restart relaunches
+   * it, so nothing may install under the new instance (Windows switches its install on quit off).
+   */
+  onQuit(offer: UpdateOffer, relaunching: boolean): void
   /** A staged update is no longer wanted (a newer one, or another channel): remove what it left. */
   discard?(offer: UpdateOffer): void
 }
@@ -314,6 +318,8 @@ export class Updater {
       const kind = errorKind(e, 'install')
       // The staged update is still there: back to ready, with the error shown.
       this.set({ phase: kind === 'verify' ? 'error' : 'ready', errorKind: kind, error: errorText(e, 'The update could not be installed') })
+      // A channel change asked for while installing checks now, not at the next 6-hourly check.
+      this.afterBusy()
       return { ok: false, message: this.s.error }
     }
   }
@@ -337,15 +343,16 @@ export class Updater {
   }
 
   /**
-   * A normal quit (will-quit): on macOS a ready update is swapped in, unless that needs a password.
-   * Never when MasterDeck's own Restart relaunches: the new instance would start from the bundle
-   * the helper is about to move away.
+   * A normal quit (will-quit): a ready update is installed (macOS: swapped in, unless that needs a
+   * password). Never when MasterDeck's own Restart relaunches: the new instance would start from the
+   * bundle the helper is about to move away, or under the NSIS installer; the installer is told so
+   * (Windows switches electron-updater's install on quit off).
    */
   onQuit(relaunching = false): void {
-    if (relaunching) return
-    if (this.s.phase !== 'ready' || !this.s.offer || this.s.needsAdmin || !this.inst) return
+    if (this.s.phase !== 'ready' || !this.s.offer || !this.inst) return
+    if (!relaunching && this.s.needsAdmin) return
     try {
-      this.inst.onQuit(this.s.offer)
+      this.inst.onQuit(this.s.offer, relaunching)
     } catch (e) {
       this.log(`install on quit: ${String(e)}`)
     }

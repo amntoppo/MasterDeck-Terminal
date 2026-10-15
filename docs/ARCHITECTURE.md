@@ -1779,13 +1779,15 @@ now** (`restartToUpdate`: a recording asks first, as Restart does) writes `updat
 file + rename) and `pending.json` (`{version, from, relaunch, at}`), starts the helper detached and
 calls `app.quit()` (will-quit still closes terminals and the remote line). A normal quit with an
 update ready runs the helper without a relaunch (`onQuit` in will-quit), unless it needs a password
-or the quit is MasterDeck's own **Restart** (`app.relaunch()`; `relaunching` in `index.ts`): the
-relaunched app would start from the bundle the helper is about to move.
+or the quit is MasterDeck's own **Restart** (`app.relaunch()`; `relaunching` in `index.ts`, handed to
+`Updater.onQuit(relaunching)` → `Installer.onQuit(offer, relaunching)`): the relaunched app would
+start from the bundle the helper is about to move. When **Restart now** fails (`restart()` throws) a
+check asked for meanwhile (a channel change while `installing`) runs at once (`afterBusy`).
 
 The helper (`update-helper.sh install <pid> <app> <staged> <dir> <version> <from> <relaunch> <zip> <sha512>`):
 1. waits up to 120 s for the old pid to exit (else `result.json {ok:false, reason:"still-running"}`, nothing touched);
 2. stops with `still-running`, nothing touched, when any process runs from `<app>/Contents/MacOS/` (the path compared literally against `ps -axo pid=,command=`: a folder name with `(` or `.` is no pattern), i.e. the app was opened again or relaunched;
-3. swaps. As the user: staged → `.MasterDeck.app.new` next to the app, `MasterDeck.app` → `.MasterDeck.app.previous`, `.new` → `MasterDeck.app`, clears quarantine. When the folder is not writable nothing of the helper file runs as root: the root commands go inline to `osascript -e 'do shell script (item 1 of argv) with administrator privileges'` with every path single-quoted for `/bin/sh`, and as root they copy the **zip** into a fresh root-owned `mktemp -d` folder, check its SHA-512 (`openssl dgst -sha512 -binary | base64`) against the one the app verified with the signature, `ditto -x -k` it there, check `CFBundleShortVersionString`, clear quarantine, give it the current app's owner (`stat -f %u:%g`), and do the two renames (the old app back on failure). The user's staged copy is never used there. A cancel (`-128`) is `reason: "permission"`, any other failure `swap-failed`; the old app is opened again;
+3. swaps. Right before the renames it looks again for a process running from the bundle (as the user: `app_pids` at the top of `swap_user`; as root: the same literal `ps -axo command=` match inside the root command, after the zip is checked and unpacked, exit 17): the password prompt can take minutes, and MasterDeck opened meanwhile must not have its bundle swapped under it. Found: `still-running`, nothing touched, nothing opened. As the user: staged → `.MasterDeck.app.new` next to the app, `MasterDeck.app` → `.MasterDeck.app.previous`, `.new` → `MasterDeck.app`, clears quarantine. When the folder is not writable nothing of the helper file runs as root: the root commands go inline to `osascript -e 'do shell script (item 1 of argv) with administrator privileges'` with every path single-quoted for `/bin/sh`, and as root they copy the **zip** into a fresh root-owned `mktemp -d` folder, check its SHA-512 (`openssl dgst -sha512 -binary | base64`) against the one the app verified with the signature, `ditto -x -k` it there, check `CFBundleShortVersionString`, clear quarantine, give it the current app's owner (`stat -f %u:%g`), and do the two renames (the old app back on failure). The user's staged copy is never used there. A cancel (`-128`) is `reason: "permission"`, any other failure `swap-failed`; the old app is opened again;
 4. without relaunch: writes `{ok:true, from, version}` and keeps the backup. The new app removes it (`removeMacBackup`, through `UpdaterDeps.removeBackup`) once it has written its health marker, only when `pending.json` says `relaunch: false`, its own bundle is the `MasterDeck.app` beside the backup and the backup's `Info.plist` version is older than its own. **No automatic rollback on this path**: a new version that never comes up leaves the backup for the user (TODO);
 5. opens the app and waits up to 120 s for `<dir>/healthy-<version>`; a second launch if not; still nothing → kills what runs from the bundle (TERM, then KILL after 3 s, same literal match), puts the backup back, writes `{ok:false, reason:"unhealthy"}` and opens the previous app. On success it removes the backup (as the user; as root it stays until the next swap) and writes `{ok:true, …}`.
 
@@ -1807,7 +1809,9 @@ feed's version must equal the offer's; after `downloadUpdate()` the installer fi
 signature (`platform: 'win32'`) are checked (a failure deletes it), then `autoInstallOnAppQuit` goes
 on. **Restart now** is `quitAndInstall(true, true)`; when it throws, or the app is still running
 10 s later, it is an `install` error (the update stays ready). `discard` turns
-`autoInstallOnAppQuit` off. No rollback on Windows (ponytail in `updateWin.ts`).
+`autoInstallOnAppQuit` off, and so does `onQuit(offer, true)`: MasterDeck's own **Restart** relaunches
+the app, and NSIS must not run under the new instance (will-quit comes before electron-updater's
+`quit` handler, which reads the flag; the relaunched app offers the update again). No rollback on Windows (ponytail in `updateWin.ts`).
 
 **IPC.** `update:state`, `update:check`, `update:download`, `update:restart`, `update:later`; events
 `update:changed` (the whole `UpdateState`) and `update:open` (the menu's Check for Updates…: show

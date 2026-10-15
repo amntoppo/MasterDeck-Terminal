@@ -294,6 +294,51 @@ describe('update helper', () => {
     expect(existsSync(join(apps, '.MasterDeck.app.new'))).toBe(false)
   })
 
+  it('with the password: MasterDeck opened again while macOS asked for it is left alone (checked again as root, right before the renames)', { timeout: 30_000 }, () => {
+    setup({ appsName: NASTY_APPS })
+    // The prompt can take minutes: the user opens MasterDeck meanwhile. This stand-in starts the app
+    // from the bundle after the helper's own check, waits until ps lists it, then runs the root command.
+    write(
+      join(bin, 'osascript-reopen'),
+      `#!/bin/bash
+echo "osascript" >> "$FAKE_CALLS"
+(exec -a "$FAKE_APP/Contents/MacOS/MasterDeck" /bin/sleep 60) >/dev/null 2>&1 &
+echo $! >> "$FAKE_DIR/../started"
+end=$((SECONDS + 10))
+until /bin/ps -axo command= | grep -qF "$FAKE_APP/Contents/MacOS/"; do [ "$SECONDS" -ge "$end" ] && exit 99; sleep 0.1; done
+chmod u+w "$FAKE_APPS"
+/bin/sh -c "\${@: -1}"
+rc=$?
+chmod u-w "$FAKE_APPS"
+[ "$rc" = 0 ] || echo "execution error: The command exited with a non-zero status. ($rc)" >&2
+exit $rc
+`,
+      0o755,
+    )
+    chmodSync(apps, 0o555)
+    const r = run(deadPid(), true, { FAKE_HEALTHY: '1', MD_OSASCRIPT: join(bin, 'osascript-reopen'), FAKE_APP: app }, zipSha, 25_000)
+    expect(r.code).toBe(1)
+    expect(r.result).toMatchObject({ ok: false, reason: 'still-running' })
+    expect(markerOf(app)).toBe('old')
+    expect(existsSync(prevOf())).toBe(false)
+    expect(existsSync(join(apps, '.MasterDeck.app.new'))).toBe(false)
+    // Nothing opened (it already runs), and what runs was not killed.
+    expect(r.log).toEqual(['osascript'])
+    const [pid] = readFileSync(join(dir, '..', 'started'), 'utf8').trim().split('\n').map(Number)
+    expect(alive(pid)).toBe(true)
+  })
+
+  it('the root swap and the user swap both check for a running app right before their renames', () => {
+    const s = helperScript()
+    const root = s.slice(s.indexOf("<<'ROOTSWAP'"), s.indexOf('ROOTSWAP\n\nread'))
+    expect(root.indexOf('/bin/ps -axo command=')).toBeGreaterThan(-1)
+    expect(root.indexOf('/bin/ps -axo command=')).toBeLessThan(root.indexOf('/bin/rm -rf "$PREV" "$NEW"'))
+    expect(root.indexOf('/usr/bin/plutil')).toBeLessThan(root.indexOf('/bin/ps -axo command='))
+    const user = s.slice(s.indexOf('swap_user() {'), s.indexOf('do_swap() {'))
+    expect(user.indexOf('app_pids')).toBeGreaterThan(-1)
+    expect(user.indexOf('app_pids')).toBeLessThan(user.indexOf('rm -rf "$PREV" "$NEW"'))
+  })
+
   it('with the password: a zip whose SHA-512 is not the verified one is not installed', { timeout: 20_000 }, () => {
     setup({ appsName: NASTY_APPS })
     chmodSync(apps, 0o555)
