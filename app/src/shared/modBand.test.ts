@@ -182,7 +182,10 @@ describe('modsStale', () => {
 describe('parseModBeat', () => {
   const now = 1_000_000
   it('takes a fresh beat', () => {
-    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.1.0', claude: '2.1.296', at: now - 20_000 }), now)).toEqual({ version: '0.1.0', claude: '2.1.296', at: now - 20_000, mods: [] })
+    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.1.0', claude: '2.1.296', at: now - 20_000 }), now)).toEqual({ version: '0.1.0', claude: '2.1.296', at: now - 20_000, mods: [], deliver: false })
+    // Core 0.6.0 on takes MasterDeck's messages (#123).
+    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.6.0', at: now, deliver: 1 }), now)?.deliver).toBe(true)
+    expect(parseModBeat(JSON.stringify({ v: 1, version: '0.6.0', at: now, deliver: true }), now)?.deliver).toBe(false)
     const mods = [seen('token-chart', { loaded: false }), { name: 'bad name', provenance: 'x', tier: 'user' }, 7]
     expect(parseModBeat(JSON.stringify({ v: 1, version: '0.3.0', at: now, mods }), now)?.mods).toEqual([seen('token-chart', { loaded: false })])
   })

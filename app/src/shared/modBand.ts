@@ -40,7 +40,7 @@ export interface ModBand {
 export const MOD_CORE = 'masterdeck'
 
 /** The mods' version this MasterDeck goes with (each mod's plugin.json; shared/modsShared.test.ts checks). */
-export const MOD_VERSION = '0.5.0'
+export const MOD_VERSION = '0.6.0'
 
 /**
  * The session runs MasterDeck's mods from before they were updated or installed: a running session
@@ -192,6 +192,8 @@ export interface ModBeat {
   at: number
   /** The mods it saw load after it in that session. */
   mods: ModSeen[]
+  /** It takes MasterDeck's messages (`deck/deliver/`, core 0.6.0 on): they never need typing. */
+  deliver: boolean
 }
 
 /** The mod writes every 15 s; three missed beats and the session counts as without it. */
@@ -209,7 +211,7 @@ export function parseModBeat(text: string, now: number): ModBeat | null {
   const b = o as Record<string, unknown>
   if (b.v !== 1 || b.ended === true || typeof b.at !== 'number' || typeof b.version !== 'string') return null
   if (!(now - b.at < MOD_BEAT_STALE_MS)) return null
-  return { version: b.version.slice(0, 40), claude: typeof b.claude === 'string' ? b.claude.slice(0, 40) : '', at: b.at, mods: parseSeen(b.mods) }
+  return { version: b.version.slice(0, 40), claude: typeof b.claude === 'string' ? b.claude.slice(0, 40) : '', at: b.at, mods: parseSeen(b.mods), deliver: b.deliver === 1 }
 }
 
 /** The board file a session reads: its account's login, else the primary's; `_` with no login known. */

@@ -11,9 +11,11 @@ import { MeetingsSetup } from './MeetingsSetup'
 import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { setWebThemePref, useWebThemePref } from '../theme'
 import { THEME_PREFS, THEMES, type ThemePref } from '@shared/themes'
+import type { UpdateState } from '@shared/updates'
+import { UpdatesPanel } from './Updates'
 
 export type SettingsSection = Section
-type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'meetings' | 'hooks' | 'remote' | 'keys' | 'about'
+type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'meetings' | 'hooks' | 'remote' | 'keys' | 'updates' | 'about'
 
 const SECTIONS: [Section, string][] = [
   ['account', 'Account'],
@@ -24,13 +26,31 @@ const SECTIONS: [Section, string][] = [
   ['hooks', 'Hooks, mods & skills'],
   ['remote', 'Remote'],
   ['keys', 'Keyboard shortcuts'],
+  ['updates', 'Updates'],
   ['about', 'About'],
 ]
 
 /** Settings as a page (Command Center): sections on the left; changes save as you make them. */
-export function SettingsView({ settings, state, onSetup, onSkills, initial }: { settings: Settings; state: AppState; onSetup: () => void; onSkills: () => void; initial?: { section: Section; at: number } | null }) {
-  // Meetings are recorded on a Mac, from its own window (never the web app, never Windows).
-  const sections = SECTIONS.filter(([k]) => k !== 'meetings' || (deck().platform === 'darwin' && can('meetingsSetup')))
+export function SettingsView({
+  settings,
+  state,
+  onSetup,
+  onSkills,
+  initial,
+  update,
+}: {
+  settings: Settings
+  state: AppState
+  onSetup: () => void
+  onSkills: () => void
+  initial?: { section: Section; at: number } | null
+  /** The update state (null on the web and until it is read). */
+  update?: UpdateState | null
+}) {
+  // Meetings are recorded on a Mac, from its own window (never the web app, never Windows); a browser never updates the Mac.
+  const sections = SECTIONS.filter(
+    ([k]) => (k !== 'meetings' || (deck().platform === 'darwin' && can('meetingsSetup'))) && (k !== 'updates' || (!isWeb() && can('updateState'))),
+  )
   const [section, setSection] = useState<Section>(initial?.section ?? 'general')
   useEffect(() => {
     if (initial) setSection(initial.section)
@@ -163,6 +183,7 @@ export function SettingsView({ settings, state, onSetup, onSkills, initial }: { 
         </Field>
       </>
     ),
+    updates: section !== 'updates' || isWeb() ? null : update ? <UpdatesPanel u={update} settings={s} set={set} /> : <p className="set-hint">Loading…</p>,
     meetings: section === 'meetings' && sections.some(([k]) => k === 'meetings') ? <MeetingsSetup settings={s} save={put} /> : null,
     hooks: (
       <>

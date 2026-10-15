@@ -25,6 +25,10 @@ export interface Settings {
   meetings: MeetingsSettings
   /** Light, Dark or System (follows the OS). The web app keeps its own choice per browser (renderer/src/theme.ts). */
   theme: ThemePref
+  /** Settings → Updates: download an offered update at once (else Download in Settings). */
+  autoDownloadUpdates: boolean
+  /** Settings → Updates: stable releases, or betas too. */
+  updateChannel: 'stable' | 'beta'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -43,6 +47,8 @@ export const DEFAULT_SETTINGS: Settings = {
   meetings: DEFAULT_MEETINGS,
   // Dark: an update keeps today's look until the user picks another.
   theme: 'dark',
+  autoDownloadUpdates: true,
+  updateChannel: 'stable',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -66,5 +72,7 @@ export function normalizeSettings(raw: unknown): Settings {
     instantTyping: typeof r.instantTyping === 'boolean' ? r.instantTyping : DEFAULT_SETTINGS.instantTyping,
     meetings: normalizeMeetings(r.meetings),
     theme: isThemePref(r.theme) ? r.theme : DEFAULT_SETTINGS.theme,
+    autoDownloadUpdates: typeof r.autoDownloadUpdates === 'boolean' ? r.autoDownloadUpdates : DEFAULT_SETTINGS.autoDownloadUpdates,
+    updateChannel: r.updateChannel === 'beta' ? 'beta' : 'stable',
   }
 }

@@ -44,6 +44,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   prDetail: invoke(CH.prDetail),
   startHere: invoke(CH.startHere),
   sendText: invoke(CH.sendText),
+  heldSend: invoke(CH.heldSend),
+  heldDrop: invoke(CH.heldDrop),
   answerMenu: invoke(CH.answerMenu),
   inboxAct: invoke(CH.inboxAct),
   queueList: invoke(CH.queueList),
@@ -84,6 +86,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   meetingsStop: blocked,
   meetingsPause: blocked,
   meetingsMicOff: blocked,
+  meetingsMuteCheck: blocked,
   meetingsRetry: blocked,
   meetingsRematch: blocked,
   // The Meetings page is the Mac's window only: its transcripts and audio never reach a browser.
@@ -122,6 +125,14 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   accountFor: invoke(CH.accountFor),
   resumeStopped: invoke(CH.resumeStopped),
   tokensByDay: invoke(CH.tokensByDay),
+  // A browser never updates the Mac: updates are the window's only.
+  updateState: blocked,
+  updateCheck: blocked,
+  updateDownload: blocked,
+  updateRestart: blocked,
+  updateLater: blocked,
+  onUpdateChanged: blocked,
+  onUpdateOpen: blocked,
   // Working hours stay on the Mac (issue #64): no Hours tab on the web.
   hoursActivity: blocked,
   hoursExport: blocked,

@@ -697,11 +697,23 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 - **The apps' real labels are unverified.** md-mute's rules for Zoom, Teams, Webex and Google Meet
   (in a browser) were written from documentation, not read from a real call; the first real check
-  is the user's, on the installed app.
+  is the user's, on the installed app, with Settings → Meetings → **Check mute reading** (muted and
+  unmuted). Google Meet in Chrome is the reported failure (a 4-hour recording never gated, so
+  md-mute never read `muted`); the cause is unknown until the Check or a new recording's **Mic
+  log** says which: no control (role or label), cut (budget), not trusted (the grant not reaching
+  the helper), or the call in a background tab. Its rule now searches from the page's `AXWebArea`
+  with a larger budget, reads `AXCheckBox` / `AXToggleButton` too and retries once after
+  `AXManualAccessibility`, verified only against nothing running (no Chrome was read here).
+- **A browser's background tab is invisible**: Chrome exposes the front tab of each window only,
+  so a Meet tab behind another reads `no-control` and the mic records.
+- **Meet's host is read from `AXURL`**: a browser that gives its web area no `AXURL` (unseen so
+  far) would never be searched for Meet. Unverified on a real Chrome / Safari, like the rest.
 - **Localized meeting apps read unknown**: the rules match English labels (ASCII prefixes), so a
   Zoom in another language keeps the mic (recorded), as unknown always does.
 - **Whether the Accessibility grant to MasterDeck reaches md-mute** (TCC's responsible process for a
   helper the app spawns) is unverified; if not, the popout says "Allow Accessibility" for ever.
+  The Check now shows it ("macOS gave Accessibility to MasterDeck but not to its helper", with the
+  fix: remove MasterDeck from Accessibility and allow it again).
 - **Allow again after each update**: the ad-hoc signature changes with every build, so macOS drops
   the Accessibility grant (as the other permissions); a Developer ID signature fixes it.
 - **A dead md-mute is restarted every 5 s, at most 3 times per recording**, with no backoff and
@@ -851,6 +863,49 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
   later links it to a ticket, the proposal stays issue 0.
 
+## In-app updates (#122): open points (2026-10-16)
+
+- **P1 · The first real release.** The service is live (2026-10-16: R2 bucket `masterdeck-releases`,
+  migration 0006 remote, `RELEASE_ADMIN_TOKEN` on the Worker and in GitHub, `RELEASE_SIGNING_KEY` in
+  GitHub, the backend deployed from branch `122-update-service`, version 004ba60c; the check
+  answers 204, admin routes 401 without the token and an empty list with it, `/v1/*` still 401).
+  The first tagged release (with this PR merged) is the workflows' first real run and the first
+  real upload to R2 (90 MB parts). Installs before it (0.9.0 and older) have no updater: they need
+  one more manual update.
+- **P1 · Not checked for real.** End to end ran locally (OPERATIONS "Testing in-app updates":
+  0.9.0 → 0.9.1 / 0.9.2 in place, a broken 0.9.3 rolled back), but before the final review's
+  fixes, and never against real Cloudflare. Still to run: the real `osascript` password prompt
+  (the root command's quoting was checked only through a `/bin/sh` stand-in, as the same user),
+  and Windows (`NsisUpdater` against the
+  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, deployed 2026-10-16).
+- **P2 · The backup stays after an admin install.** With the password path the helper does not
+  remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
+- **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
+  that did not quit in time show an error and offer the update again (not skipped).
+- **P2 · Install on quit has no automatic rollback.** The helper keeps `.MasterDeck.app.previous`
+  and the new app removes it once healthy (`removeMacBackup`), but nothing watches that launch: a
+  new version that never comes up leaves the user on it, with the backup beside it to put back by
+  hand. Upgrade path: a launch agent (or the next helper) that rolls back when no health marker
+  appears after the next open.
+- **P3 · A reopen just after the still-running check.** The helper checks that nothing runs from
+  the bundle right before the swap; an app opened in the second between that check and the
+  renames still runs from the moved bundle (the next quit's install would then find it fine).
+- **P3 · The update-test build flag.** `MASTERDECK_UPDATE_TEST_BUILD=1` must never be set for a
+  release build (release.yml does not set it); nothing checks that a published build was made
+  without it.
+- **P3 · Mandatory updates follow the auto-download setting**; the spec leaves open whether a
+  required update should download even with it off.
+
+## Held messages (#123): open points (2026-10-16)
+
+- Commands MasterDeck sends (`/compact`, `/reload-plugins`) still take the guarded typing path; the
+  core mod could run them with `$.command.run`.
+- The prompt box is read off the screen (`promptDraft`): a Claude Code redesign of the box would
+  make every typed message wait ("can't read its prompt", Send now) where the mod is not running.
+- With `queue-off` (the queue skill's own hooks) or a legacy session, the Stop hook does not hand
+  held messages over; they go once the prompt is empty.
+- Not checked: Windows, the installed app with real sessions and the real web app over the bridge.
+
 ## Recently done
 
 - **Master starts sessions on demand (#126)**: `master start` from scratch (task, repo or folder,
@@ -859,7 +914,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   user's yes (`--yes` for "start it now"); ticket sessions start in the repository's checkout with
   the ticket's description and sub-issues, get linked, moved to In Dev and assigned by MasterDeck.
   Branch `worktree-MasterDeck-Terminal-126-master-start`.
-
+- **MasterDeck messages never mix with a half-typed prompt (#123)**: the core mod (0.6.0) takes
+  them as prompts of their own (`$.prompt.submit`); without it, typing waits for an empty prompt,
+  a held message shows on the session (✉ badge, bar with Send now / Discard), goes when the prompt
+  is empty or at the session's next turn end. Branch `worktree-MasterDeck-Terminal-123-held-messages`.
 - **Terminal links (#119)**: ⌘-click (Ctrl-click off a Mac) opens an http/https address printed
   in a terminal in the browser (localhost and IP addresses with ports, paths and queries; one link
   across wrapped rows; trailing punctuation left out; OSC 8 links), underlined with a pointer only
@@ -873,6 +931,7 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 | What | MasterDeck | Backend |
 |---|---|---|
+| Meetings: seeing why the mic did not follow the mute (#102, Google Meet in Chrome recorded while muted): md-mute's lines carry `why`, the matched `label`, `searched`, `ms`, `cached`; Meet's rule is a web rule (search from `AXWebArea`, 40000 elements / 800 ms, `AXButton` / `AXCheckBox` / `AXToggleButton`, one retry after `AXManualAccessibility`); Settings → Meetings → **Check mute reading**; a per-meeting **Mic log** on the Meetings page and in the export; from the review: Meet searched only on pages whose `AXURL` host is `meet.google.com` (`hosts`), toolbars and Chromium's tab strip skipped, cached processes first, `AXManualAccessibility` remembered only on success, failed AX reads as `error`, plainer Check sentences, the Mic log's first and last 250 with a dropped count and no why-only entries | branch `worktree-MasterDeck-Terminal-102-mute-check` (not merged, not installed) | none |
 | Meetings: your mic follows the meeting app's mute (Plan M, issue #102): `md-mute` (a Swift helper reading the meeting app's mute button through Accessibility, built by `scripts/mute.sh`), a mic gate in the capture (gated audio is zeros; an all-zero chunk skips whisper), `MuteWatch` and `meetingLive.mic`, Settings → Meetings' **Your microphone** (Follow / Always record) and **Accessibility**, the Record popout's mic line and **Mic off in the recording**, a struck mic on the rail's red time | fc97904, a321ec6, 0466563, 65937de and 081b82e (`worktree-MasterDeck-Terminal-102-meetings`, not merged) | plan M on the backend's meetings worktree (not pushed) |
 | Meetings (issue #102; spec in the backend repo): Settings → **Meetings** with consent before any permission (microphone; the Mac's sound by macOS version, with a probe on 14.2+), whisper.cpp built by `scripts/whisper.sh` and speech models downloaded and checked, **Record** in the rail (a hidden capture window, You and Others apart, 30-second chunks, `audio.webm`, Pause and Stop, crash recovery), transcription per chunk on the Mac, one `claude -p` per meeting adding notes to the sessions and tickets it was about (Needs you, Match again), the **Meetings** page (dates, transcript, audio over `masterdeck-media://`, search, keyboard, Export, Delete), Janitor → Meetings and **Delete audio after**, an offer when Zoom or Webex is in a call; notes gained `link` and `meeting`, Session details → **Notes n** and the panel's filters | 537cd0f, f097936, ca27252, 4e9d5c5, bc683e4, 0cb904e, 9b4496f, b33cb51, bada2d7, d539f4d, 31dbd57, 5c6ff28, ccdebbf, 569e436, d451644, a0d8733, 2093b71, ea2fe9c, 23de609, 7ce5079, bbb236c, 70f4e3a, and the final review's fixes after them (`worktree-MasterDeck-Terminal-102-meetings`, not merged, installed locally) | spec on `docs/meetings-102` (not pushed) |
 | Which account a card's calls and sessions use (issue #54): a status move (the Board's menu, BoardFlow, `linkSession`'s In Dev) goes as the account whose board holds the card (`forBoard`, `accountForProject`), even when another account lists the repository; the card's `project` travels in the ticket (`Ticket.project`, `knownProject`), so a my-issues card outside the loaded sprint routes by its board; `Sources.boardOf` without a number answers Setup's first board, not the first loaded card; a ticket session's account (Start, PR review: `startAccount`, after the code's repository) uses the card's board as `accountForCard` does. One account: unchanged | branch `worktree-MasterDeck-Terminal-54-card-account-routing` | — |

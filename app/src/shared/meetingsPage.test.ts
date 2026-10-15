@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Meeting } from './meetings'
+import { MIC_LOG_KEEP, MIC_LOG_MAX, type Meeting } from './meetings'
 import {
   customRange,
   dayKey,
@@ -16,6 +16,8 @@ import {
   meetingMarkdown,
   meetingRow,
   meetingTitle,
+  micLogLine,
+  micLogLines,
   monthGrid,
   presetRange,
   searchLines,
@@ -190,6 +192,30 @@ describe('export', () => {
     expect(md).toContain('## Summary\n\nThe login fix is ready.')
     expect(md).toContain('**You** 0:00  Morning, Alice.')
     expect(md).toContain('**You** 1:05  Ship it.')
+  })
+
+  it('the Mic log: the changes not kept are said where they fell', () => {
+    const e = { t: 0, state: 'muted' as const, app: 'Zoom', gated: true }
+    const log = Array.from({ length: MIC_LOG_MAX }, (_, i) => ({ ...e, t: i * 1000 }))
+    const lines = micLogLines({ micLog: log, micLogDropped: 7 })
+    expect(lines).toHaveLength(MIC_LOG_MAX + 1)
+    expect(lines[MIC_LOG_KEEP]).toBe('7 changes not kept')
+    expect(lines[MIC_LOG_KEEP - 1]).toBe(micLogLine(log[MIC_LOG_KEEP - 1]))
+    expect(micLogLines({ micLog: log, micLogDropped: 1 })[MIC_LOG_KEEP]).toBe('1 change not kept')
+    expect(micLogLines({ micLog: log.slice(0, 3) })).toEqual(log.slice(0, 3).map(micLogLine))
+    expect(meetingMarkdown(meeting({ micLog: log, micLogDropped: 7 }))).toContain('- 7 changes not kept\n')
+  })
+
+  it('the Mic log: one line per change, in the export only when there is one', () => {
+    expect(micLogLine({ t: 12_000, state: 'muted', app: 'Google Meet', why: 'found', gated: true })).toBe('0:12 · Muted · Google Meet · button found · mic out')
+    expect(micLogLine({ t: 0, state: 'unknown', app: null, reason: 'not-trusted', gated: false })).toBe('0:00 · Unknown · no Accessibility · mic recorded')
+    expect(micLogLine({ t: 65_000, state: 'unknown', app: 'Google Meet', why: 'no-control', reason: 'unreadable', gated: false })).toBe(
+      "1:05 · Unknown · Google Meet · no mute button found · can't see the mute · mic recorded",
+    )
+    expect(micLogLine({ t: 1000, state: 'unknown', app: 'Zoom', gated: true, paused: true })).toBe('0:01 · Paused · Zoom · mic out')
+    expect(meetingMarkdown(meeting())).not.toContain('Mic log')
+    const md = meetingMarkdown(meeting({ micLog: [{ t: 12_000, state: 'muted', app: 'Zoom', why: 'found', gated: true }] }))
+    expect(md).toContain('## Mic log\n\n_Times are wall clock since Record._\n\n- 0:12 · Muted · Zoom · button found · mic out\n')
   })
 
   it('file names keep only safe characters', () => {

@@ -309,6 +309,13 @@ diff too big to send says so.
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **Your half-typed prompt is safe:** a message from MasterDeck (a PR review, a monitor, a workflow
+  step, a broadcast) never goes out mixed with what you were typing. With MasterDeck's mods
+  installed, Claude gets it as a prompt of its own (shown as "Prompt from the masterdeck plugin")
+  and your text stays in the prompt, cursor and all. Without them, MasterDeck waits while your
+  prompt has text or you are typing: the session gets a **✉ 1** badge and a bar above its terminal
+  with the message, who sent it, **Send now** (sends it now if your prompt is empty) and **Discard**.
+  It goes by itself once your prompt is empty, or when Claude finishes the turn it is working on.
 - **★ Master (top right, every screen, ⌘⇧M):** shows or hides master-agent's column. Drag its edge
   to resize it. Hiding it doesn't stop or detach master.
 - **Workflow (on the rail):** a canvas where you build what sessions do, from an issue to a merged
@@ -1081,6 +1088,52 @@ Stored in `~/.claude/masterdeck/settings.json`.
   an idle session with jobs shows as Waiting ("scheduled: …"), not Idle. Cancelling is done in the
   session itself.
 
+### Settings → Updates
+
+MasterDeck updates itself (issue #122). Only in the Mac's (or Windows PC's) own window: the web app
+never sees or starts an update, and a development build (`npm run dev`) or an app run straight from
+the DMG has updates off (Settings → Updates says why).
+
+- **Finding an update.** MasterDeck checks 30 seconds after it starts and then every six hours.
+  **Check for updates** in Settings → Updates (or **Check for Updates…** in the MasterDeck menu on a
+  Mac) checks now. The section shows your version, when it last checked, and one status line: Up to
+  date, Update available, Downloading 42%, Ready to install. A newer version shows its release notes
+  below.
+- **The dot on Settings.** While an update is available or ready, the rail's Settings icon has a
+  dot (blue: available, green: ready, red: required). Hover it for which.
+- **Downloading.** With **Automatically download updates** on (the default), a new version downloads
+  as soon as it is found. Off: press **Download**. Every download is checked against MasterDeck's
+  signature before it is installed; one that does not match is thrown away.
+- **Restarting.** When the update is ready, a card in the corner says "MasterDeck 0.10.0 is ready.
+  Restart now to update." **Restart now** closes MasterDeck, installs the new version and opens it
+  again. Your Claude sessions keep running (they run under Claude Code's daemon), and the session
+  list and tabs come back with the window. **Remind me later** hides the card for four hours; the
+  next start asks again. On a Mac, quitting MasterDeck normally also installs a ready update (not
+  MasterDeck's own **Restart**, and not while MasterDeck is opened again at once: then the next quit
+  installs it). After such a quit nothing checks that the new version starts: the previous copy
+  stays hidden beside it (`.MasterDeck.app.previous`) until the new version has started once.
+- **Required update.** When your version is no longer supported, a **Required update** banner shows
+  over the terminals until you update; **Open Updates** leads to Settings → Updates.
+- **Beta channel.** On: MasterDeck also offers beta versions, before they are released. They may
+  have more bugs. Off again: a beta update that was downloaded but not installed is dropped; a beta
+  already installed stays until the next stable release is newer.
+- **Your password (Mac).** When MasterDeck sits in a folder your user cannot write to, macOS asks for
+  an administrator's password to replace it. Cancelling leaves the old version in place and opens it
+  again; Settings → Updates then shows the error with **Try again**, which checks and downloads the
+  update again before macOS asks for the password once more. If you open MasterDeck yourself while
+  macOS is still asking, nothing is replaced: the update waits for the next quit.
+- **When an update does not start (Mac).** MasterDeck opens the new version and waits up to two
+  minutes for it to start, then tries once more (about four minutes in all). If it still has not
+  started, the previous one is put back and opened. Settings → Updates says "Rolled back from vX: it did not
+  start", and MasterDeck skips that version until a newer one comes out. After a good update the
+  section says "Updated from vY".
+- **Errors** show as one line with **Try again** (it checks, downloads or installs again, whichever
+  failed; after a failed install that MasterDeck reports when it opens again, it checks again);
+  never a popup.
+- **Windows.** The update runs MasterDeck's installer in the background on restart. There is no
+  automatic roll back on Windows yet. If Windows SmartScreen stops the installer ("Windows protected
+  your PC"), choose **More info → Run anyway**, or download the installer from the releases page.
+
 ### Settings → Meetings (macOS)
 
 Where meetings are set up (issue #102). Only on a Mac,
@@ -1114,6 +1167,19 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   brings up macOS's prompt the first time; after that it opens System Settings → Privacy & Security
   → Accessibility, where you switch MasterDeck on. Like the other permissions, macOS may want it
   allowed again after an update.
+- **Check mute reading** (shown with Follow): shows what MasterDeck can see of each meeting app's
+  mute, without recording. Join a call, then press **Check** while muted and again while unmuted.
+  It looks for about 3 seconds and lists Zoom, Teams, Webex and Google Meet with what it reads and
+  why: "Muted (button says 'Turn on microphone')", "Not running", "No mute button found — is the
+  call in the front tab, or Meet is full screen / on another desktop — press Check from the same
+  desktop as the call", "Search cut short", "The app did not answer", or "Accessibility not given
+  to MasterDeck's helper". If macOS allowed MasterDeck but not the part of it that reads the mute,
+  it says so above the table, with what to do: remove MasterDeck from Accessibility in System
+  Settings and allow it again (each new build needs this). For Google Meet, keep the call in the
+  browser window's front tab, not full screen, and press Check from the same desktop as the call:
+  other tabs can't be seen, and only pages on meet.google.com are looked at. Like a recording,
+  Check turns on Chrome's accessibility tree (and other Chrome-family browsers') until Chrome
+  quits.
 - **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
   accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
   first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
@@ -1233,6 +1299,14 @@ audio never reach a browser or a phone.
 - **Right, the meeting:** its title (click it to rename; Enter keeps it, Escape goes back), date,
   length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
   (each opens the note).
+- **Mic log** (closed until you open it; only meetings recorded since it was added): each change
+  of your mic during the recording, with its time: what MasterDeck read in the meeting app (Muted,
+  Unmuted, Unknown), the app, why (button found, no mute button found, search cut short, no
+  Accessibility, …), and whether your mic was out of the recording or recorded from then on. A
+  meeting where your mic was never out shows why here. Times are wall clock since you pressed
+  Record (a pause counts, unlike the transcript's). A change of why alone is not listed. The first
+  and the last 250 changes are kept; in between it says how many were not kept. **Export
+  transcript** includes it.
 - **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
   bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view until you
   scroll; a click on a line (or Enter on it, with Tab to get there) plays from there, and Space plays
