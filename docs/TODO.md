@@ -823,7 +823,22 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).
 
+## Held messages (#123): open points (2026-10-16)
+
+- Commands MasterDeck sends (`/compact`, `/reload-plugins`) still take the guarded typing path; the
+  core mod could run them with `$.command.run`.
+- The prompt box is read off the screen (`promptDraft`): a Claude Code redesign of the box would
+  make every typed message wait ("can't read its prompt", Send now) where the mod is not running.
+- With `queue-off` (the queue skill's own hooks) or a legacy session, the Stop hook does not hand
+  held messages over; they go once the prompt is empty.
+- Not checked: Windows, the installed app with real sessions and the real web app over the bridge.
+
 ## Recently done
+
+- **MasterDeck messages never mix with a half-typed prompt (#123)**: the core mod (0.6.0) takes
+  them as prompts of their own (`$.prompt.submit`); without it, typing waits for an empty prompt,
+  a held message shows on the session (✉ badge, bar with Send now / Discard), goes when the prompt
+  is empty or at the session's next turn end. Branch `worktree-MasterDeck-Terminal-123-held-messages`.
 
 - **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
   running commands (background shells, the call running now, what a command left behind) with

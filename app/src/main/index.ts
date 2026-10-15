@@ -21,7 +21,8 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard, type ModBeat } from "@shared/modBand";
+import { heldViews } from "@shared/heldMessages";
 import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
@@ -143,6 +144,8 @@ import { GitHub } from "./github";
 import { accountClients } from "./accountClients";
 import { AssignableUsers } from "./assignUsers";
 import { Sender } from "./send";
+import { HeldStore } from "./held";
+import { ModDelivery } from "./modDeliver";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
 import { MasterCli } from "./masterCli";
@@ -322,7 +325,7 @@ async function reloadMods(): Promise<CliResult> {
   const failed: string[] = [];
   // Never relayed through master-agent: its message would not run the command.
   for (const s of idle) {
-    const r = await sender.send(s, "/reload-plugins", false);
+    const r = await sender.send(s, "/reload-plugins", false, { from: "Mods" });
     if (!r.ok) failed.push(r.message);
   }
   const done = idle.length - failed.length;
@@ -547,12 +550,32 @@ const boardCreator = new BoardCreator({
   // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
   progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),
 });
+// MasterDeck messages never mix with what the user is typing (#123): the core mod takes them
+// without typing (deck/deliver/), else they are typed only into an empty prompt box, else held.
+const heldStore = new HeldStore(join(paths.home, "held-messages.json"), () => sources.changed());
+const modDelivery = new ModDelivery(join(paths.home, "deck"));
+let beatsRead = 0;
+let beatsNow: Record<string, ModBeat> = {};
+/** The session's core mod takes messages (its heartbeat, read again at most every 5 s). */
+function modDelivers(sessionId: string): boolean {
+  if (Date.now() - beatsRead > 5_000) {
+    beatsNow = deckHooks.modBeats();
+    beatsRead = Date.now();
+  }
+  return !!beatsNow[sessionId]?.deliver;
+}
 const sender = new Sender(
   ptys,
   cli,
   env,
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
+  {
+    held: heldStore,
+    mod: modDelivery,
+    modTakes: (s) => modDelivers(s.sessionId),
+    log: (m) => console.error(m),
+  },
 );
 const ops = new Ops(
   run,
@@ -592,6 +615,7 @@ const linkedSteps = new LinkedSteps({
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "Workflow" },
     ),
   logRun: (sid, trigger, ids) => workflows().logRun(sid, trigger, ids),
   log: (m) => console.error(m),
@@ -607,6 +631,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "PR watch" },
     ),
   onChange: () => sources.changed(),
   ended: (url) => void sources.prEnded(url).catch(() => {}),
@@ -621,6 +646,7 @@ const watches = new Watches(
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "Monitor" },
     ),
   () => sources.changed(),
 );
@@ -643,7 +669,12 @@ const answeredWatches = new Map<string, number>();
 let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
-  deckHooks.pumpQueue();
+  // A session's turn ended with a MasterDeck message held for it: its Stop hook gets it first (#123).
+  deckHooks.setHeldMarks(sender.heldSessionIds());
+  deckHooks.pumpQueue(undefined, undefined, {
+    take: (sid) => sender.takeHeldFor(sid),
+    delivered: (id) => sender.heldDelivered(id),
+  });
   // Sessions adding to the notes (the masterdeck-notes skill's note.sh). They get the note's id back, never its text.
   pumpNoteRequests(deckHooks.dir, notes);
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
@@ -742,12 +773,14 @@ const sources = new Sources(
         deckHooks.setBand(s.sessionId, bandFor(modBand(state, s, key), modOff.of(s.key)));
       }
       deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      modDelivery.prune(new Set(live.map((s) => s.sessionId)));
       // One board file per account a live session works as (masterdeck-board's /md-board).
       for (const key of boardKeys) deckHooks.setBoard(key, modBoard(state.board, key, state.config));
       deckHooks.pruneBoards(boardKeys);
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
     state.modOff = modOff.all();
+    state.held = heldViews(heldStore.list());
     const beats = deckHooks.modBeats();
     state.modLive = Object.fromEntries(
       state.sessions
@@ -864,7 +897,7 @@ const peerSync = new PeerSync({
   hooksLive: () =>
     process.platform !== "win32" && deckHooksInstalled(paths.claudeSettings),
   deliver: (s, text) =>
-    sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+    sender.send(s, text, sendMasterUp(true, latest?.master.kind), { from: "Linked sessions" }),
   auto: () => getConfig().peerSync?.auto !== false,
 });
 sources.onSessionStop((sid) => peerSync.onStop(sid));
@@ -1167,7 +1200,7 @@ const remoteCommands = new RemoteCommands(
     stopBg,
     resume: (id, name, cwd) => resumeBg(id, name, cwd),
     // Never relayed through master-agent: remote text goes straight to the session or not at all.
-    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind), { from: "Remote" }),
     queueEdit: (sessionId, edit) => {
       const { ok, message } = editQueue(sessionId, edit);
       return { ok, message };
@@ -1377,7 +1410,7 @@ async function runInboxAction(
           message:
             "remote text may not start with / or ! or contain control characters",
         };
-      return sender.send(s, msg, masterUp);
+      return sender.send(s, msg, masterUp, { from: "Needs you" });
     }
     case "menu":
       if (!item.sessionKey) return { ok: false, message: "no session" };
@@ -1392,6 +1425,7 @@ async function runInboxAction(
         s,
         type === "continue" ? "continue" : "/compact",
         masterUp,
+        { from: "Needs you" },
       );
     }
     case "approve":
@@ -1426,7 +1460,7 @@ async function runInboxAction(
       const s = owner();
       if (!s)
         return { ok: false, message: "no session owns this PR; start one" };
-      const r = await sender.send(s, d.offer.message, masterUp);
+      const r = await sender.send(s, d.offer.message, masterUp, { from: "Needs you" });
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
     case "loop-more": {
@@ -1896,7 +1930,7 @@ async function nudgeLoop(
 ): Promise<CliResult> {
   const s = latest?.sessions.find((x) => x.sessionId === sessionId);
   if (!s || s.state !== "idle") return { ok: true, message: busy };
-  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind), { from: "Loop" });
 }
 /**
  * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
@@ -1907,7 +1941,7 @@ async function sendNextQueued(s: Session): Promise<CliResult> {
   if (next === null) return { ok: false, message: "the queue is empty" };
   const masterUp =
     latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-  const r = await sender.send(s, next, !!masterUp);
+  const r = await sender.send(s, next, !!masterUp, { from: "Queue" });
   // Not sent: back to the front, so the Stop hook still runs it later.
   if (!r.ok) unshiftQueue(s.sessionId, next);
   return r;
@@ -2198,8 +2232,17 @@ function registerIpc(): void {
     if (!s) return { ok: false, message: "session not found" };
     const masterUp =
       latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    return sender.send(s, text, !!masterUp);
+    return sender.send(s, text, !!masterUp, { from: "You" });
   });
+  // Never relayed through master-agent for a browser (as every remote send).
+  reg.handle(CH.heldSend, (e, id: unknown) =>
+    typeof id === "string"
+      ? sender.sendHeld(id, sendMasterUp(isRemote(e), latest?.master.kind))
+      : { ok: false, message: "bad id" },
+  );
+  reg.handle(CH.heldDrop, (_e, id: unknown) =>
+    typeof id === "string" ? sender.dropHeld(id) : { ok: false, message: "bad id" },
+  );
   reg.handle(
     CH.answerMenu,
     (_e, key: string, question: string | null, answer: unknown) =>
@@ -3522,7 +3565,7 @@ function registerIpc(): void {
     },
   );
   reg.on(CH.ptyWrite, (_e, id: string, data: string) =>
-    ptys.write(id, data),
+    ptys.input(id, data),
   );
   reg.on(CH.ptyResize, (e, id: string, cols: number, rows: number) => {
     if (!isRemote(e)) macPanes.local(id, cols);
@@ -4012,6 +4055,14 @@ app.whenReady().then(async () => {
       };
       watches.load();
       setInterval(pumpWatches, 1000);
+      // Held MasterDeck messages go once their session's prompt is empty (#123); not before the
+      // session list is in (a message of a session not listed yet would be dropped).
+      setInterval(() => {
+        if (!sessionsLoaded || !latest) return;
+        void sender
+          .pumpHeld(latest.sessions, sendMasterUp(false, latest.master.kind))
+          .catch((e) => console.error(`held messages: ${String(e)}`));
+      }, 2_000);
       sources.setDeckHooks(deckHooks, (sid) => {
         const s = summaries.get(sid);
         return s ? { text: s.text, at: s.at } : null;

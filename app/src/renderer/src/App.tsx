@@ -65,6 +65,7 @@ import { FindBar, type FindTarget } from "./components/FindBar";
 import { cycle, matchShortcut } from "@shared/shortcuts";
 import { TerminalView, terminalKey, typeInto } from "./components/TerminalView";
 import { SessionTabBody, SessionTabRow } from "./components/SessionTabs";
+import { HeldBar } from "./components/HeldBar";
 import { QuickOpen } from "./components/QuickOpen";
 import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
 import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
@@ -1807,6 +1808,7 @@ function SessionPane(p: {
         </div>
       )}
       <SessionTabRow sessionKey={s.key} />
+      <HeldBar held={(p.state.held ?? []).filter((m) => m.sessionKey === s.key)} />
       {!onTerminal && openTab && openTab.kind !== "terminal" && (
         <div className="stab-body">
           <SessionTabBody session={s} tab={openTab} visible={p.visible} />

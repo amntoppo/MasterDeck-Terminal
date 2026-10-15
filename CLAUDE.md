@@ -152,6 +152,7 @@ web tabs keep working.
 | Sessions, GitHub, board, polling, `AppState` | `main/sources.ts` (`Sources.build()`), `shared/derive.ts`, `shared/review.ts` |
 | Needs you (inbox) | `shared/inbox.ts` (items), `main/inbox.ts` (store, events), `runInboxAction` in `main/index.ts` |
 | Typing into sessions | `main/send.ts` (`Sender`), `shared/send.ts`, `shared/promptGuard.ts` |
+| Messages that never mix with the user's draft (#123): the core mod first, typing only into an empty prompt, else held | `main/modDeliver.ts` (`ModDelivery`, `deck/deliver/<sid>/`) + `mods/masterdeck/hooks/deliver.ts`, `shared/heldMessages.ts` (`promptDraft`, `isTyping`, `heldAnswer`), `promptLines` in `main/screen.ts`, `main/held.ts` (`HeldStore`), `Sender.pumpHeld` / `sendHeld` / `takeHeldFor`, `DeckHooks.setHeldMarks` + `pumpQueue(…, held)`, `renderer/.../HeldBar.tsx`, `srow-held` in `Sidebar.tsx` |
 | Terminals | `main/ptys.ts` (`PtyManager`), `shared/paneCommand.ts`, `renderer/.../TerminalView.tsx` |
 | Hooks | `main/hooks.ts` (settings.json installs, `hookStatus`, one-time `migrateLegacyHooks` of the old skill hooks), `main/deckHooks.ts` (MasterDeck's hook script, incl. the master reports guard on `SendMessage`), `shared/deckHooks.ts` |
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
@@ -407,7 +408,22 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-13)
+## Current state and next steps (2026-10-16)
+
+- **MasterDeck messages never mix with a half-typed prompt (#123)**, branch
+  `worktree-MasterDeck-Terminal-123-held-messages` (draft PR, not merged, **not installed**: the
+  rebuild of the real app copies the 0.6.0 mods over `~/.claude/masterdeck/mods`, so it waits for
+  the user's word). The core mod submits MasterDeck's messages with `$.prompt.submit` (all mods are
+  0.6.0, so running sessions get the reload offer); without it, typing waits for an empty prompt and
+  a held message shows on the session with Send now / Discard, and goes when the prompt is empty or
+  at the next turn end (Stop hook). Spec and plan in this repo's `docs/superpowers/`
+  (`2026-10-16-held-messages*`); ARCHITECTURE "Sender and PTYs". Checked: typecheck, vitest, the
+  mod's `claude plugin validate` / `test`, a probe of `$.prompt.submit` and then the real core mod
+  in a throwaway haiku session (draft `refactor the login` with the cursor moved: the message ran
+  as its own turn, the draft and cursor unchanged), `promptDraft` against that session's real
+  screens, the web preview at 1400 and 390 px. Not checked: the installed app with real sessions,
+  the Stop-hook hand-off in a live session, Windows, the real web app. Open points: TODO ("Held
+  messages (#123)").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves

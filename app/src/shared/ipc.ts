@@ -198,6 +198,8 @@ export const CH = {
   defaultModel: "models:default",
   startHere: "session:startHere",
   sendText: "session:sendText",
+  heldSend: "held:send",
+  heldDrop: "held:drop",
   answerMenu: "session:answerMenu",
   inboxAct: "inbox:act",
   queueList: "queue:list",
@@ -398,6 +400,10 @@ export interface DeckApi {
   }): Promise<CliResult>;
   /** Type text into a session as if the user typed it (open tab, hidden attach, or via master). */
   sendText(sessionKey: string, text: string): Promise<CliResult>;
+  /** A held MasterDeck message (#123): Send now (never over text in the prompt). */
+  heldSend(id: string): Promise<CliResult>;
+  /** A held MasterDeck message: Discard. */
+  heldDrop(id: string): Promise<CliResult>;
   /** Answer the question on a session's AskUserQuestion menu (`question` as shown), or 'submit' its review. */
   answerMenu(
     sessionKey: string,

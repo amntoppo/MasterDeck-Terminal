@@ -47,6 +47,8 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.assignIssue, issue, login, current),
   startHere: (o) => ipcRenderer.invoke(CH.startHere, o),
   sendText: (key, text) => ipcRenderer.invoke(CH.sendText, key, text),
+  heldSend: (id) => ipcRenderer.invoke(CH.heldSend, id),
+  heldDrop: (id) => ipcRenderer.invoke(CH.heldDrop, id),
   answerMenu: (key, question, answer) =>
     ipcRenderer.invoke(CH.answerMenu, key, question, answer),
   inboxAct: (id, type, payload) =>
