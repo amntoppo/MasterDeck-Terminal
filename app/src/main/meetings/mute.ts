@@ -1,5 +1,5 @@
-import { MUTE_RULES, MUTE_TICK_MS, MuteSettle, muteRuleId, pickApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
-import type { MicLive, MicMode, MicUnknown } from '@shared/meetings'
+import { MUTE_RULES, MUTE_TICK_MS, MuteSettle, muteCheckApps, muteRuleId, pickApp, type MuteCheckApp, type MuteReading, type MuteRule, type MuteState } from '@shared/meetingMute'
+import type { MicLive, MicLogEntry, MicMode, MicUnknown, MuteWhy } from '@shared/meetings'
 import { findMute, spawnMute, type MuteHelper, type MuteWhere } from './muteHelper'
 
 export interface MuteWatchDeps {
@@ -16,6 +16,8 @@ export interface MuteWatchDeps {
   /** How md-mute is started (tests pass a fake); default spawnMute. */
   spawn?: (bin: string, rules: readonly MuteRule[]) => MuteHelper
   rules?: readonly MuteRule[]
+  /** The mic changed while recording (the meeting's Mic log; MeetingsIpc adds the time). Only on change. */
+  log?(e: Omit<MicLogEntry, 't'>): void
 }
 
 /** The recording as the watch needs it. */
@@ -61,6 +63,9 @@ export class MuteWatch {
   /** md-mute processes that ended (or failed to start) in this recording: past MUTE_RESTARTS, no more. */
   private deaths = 0
   private lastKey = ''
+  /** What md-mute read last for the app followed (null: nothing reads now). */
+  private raw: { state: MuteState; why?: MuteWhy } | null = null
+  private lastLog = ''
   private readonly rules: readonly MuteRule[]
 
   constructor(private d: MuteWatchDeps) {
@@ -77,6 +82,7 @@ export class MuteWatch {
    */
   begin(preferred: string | null): void {
     this.kill()
+    this.lastLog = ''
     this.preferred = preferred ? muteRuleId(preferred, this.rules) : null
     this.manualOff = false
     this.reset()
@@ -175,10 +181,12 @@ export class MuteWatch {
     this.settle.reset()
     this.app = null
     this.cause = null
+    this.raw = null
   }
 
   private kill(): void {
     this.stopHold()
+    this.raw = null
     const h = this.helper
     this.helper = null
     h?.kill()
@@ -258,6 +266,7 @@ export class MuteWatch {
       console.error(`meetings: md-mute ended (${code ?? 'signal'})${error ? `: ${error}` : ''}`)
       this.deaths++
       this.helper = null
+      this.raw = null
       this.lose('helper-ended')
       this.apply()
     })
@@ -273,6 +282,7 @@ export class MuteWatch {
         this.reset()
         this.cause = 'not-trusted'
       }
+      this.raw = { state: 'unknown', why: 'not-trusted' }
       return this.apply()
     }
     this.cause = null
@@ -290,7 +300,9 @@ export class MuteWatch {
       this.settle.switched()
       this.app = id
     }
-    this.settle.push(id ? (r.apps.find((a) => a.id === id)?.state ?? 'unknown') : 'unknown')
+    const got = id ? r.apps.find((a) => a.id === id) : undefined
+    this.raw = got ? { state: got.state, ...(got.why ? { why: got.why } : {}) } : null
+    this.settle.push(got?.state ?? 'unknown')
     this.apply()
   }
 
@@ -301,10 +313,74 @@ export class MuteWatch {
       this.gated = gated
       this.d.gate(gated)
     }
-    const key = JSON.stringify(this.live())
+    const live = this.live()
+    const key = JSON.stringify(live)
     if (key !== this.lastKey) {
       this.lastKey = key
       this.d.onChange()
     }
+    this.logChange(live)
   }
+
+  /** The Mic log: one entry per change of what md-mute reads, why, and the gate (while recording). */
+  private logChange(live: MicLive | null): void {
+    if (!live || !this.d.log) return
+    const raw = this.helper ? this.raw : null
+    const e: Omit<MicLogEntry, 't'> = {
+      state: raw?.state ?? 'unknown',
+      app: live.app,
+      ...(raw?.why ? { why: raw.why } : {}),
+      ...(live.reason ? { reason: live.reason } : {}),
+      gated: this.gated,
+      ...(live.paused ? { paused: true } : {}),
+    }
+    const key = JSON.stringify(e)
+    if (key === this.lastLog) return
+    this.lastLog = key
+    this.d.log(e)
+  }
+}
+
+/** What Settings → Meetings' Check mute reading gets back from md-mute (MeetingsIpc adds the gate's view). */
+export interface MuteCheckResult {
+  found: boolean
+  trusted: boolean
+  apps: MuteCheckApp[]
+  message?: string
+}
+
+/**
+ * Check mute reading: md-mute with every rule for `ms`, independent of a recording, then killed.
+ * It asks macOS nothing but what md-mute does (AXIsProcessTrusted, no prompt), and a Chromium
+ * browser that runs gets AXManualAccessibility as during a recording.
+ */
+export async function checkMute(o: {
+  where: MuteWhere
+  ms: number
+  rules?: readonly MuteRule[]
+  spawn?: (bin: string, rules: readonly MuteRule[]) => MuteHelper
+}): Promise<MuteCheckResult> {
+  const rules = o.rules ?? MUTE_RULES
+  const bin = findMute(o.where)
+  if (!bin) return { found: false, trusted: false, apps: [] }
+  const readings: MuteReading[] = []
+  let h: MuteHelper
+  try {
+    h = (o.spawn ?? spawnMute)(bin, rules)
+  } catch (e) {
+    console.error(`meetings: md-mute check: ${String(e)}`)
+    return { found: true, trusted: false, apps: [], message: 'The mute reader did not start.' }
+  }
+  const ended = await new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), o.ms)
+    h.onLine((r) => void readings.push(r))
+    h.onExit((code, error) => {
+      clearTimeout(timer)
+      resolve((error || `exit ${code ?? 'signal'}`).slice(0, 200))
+    })
+  })
+  h.kill()
+  const last = readings.at(-1)
+  if (!last) return { found: true, trusted: false, apps: [], message: ended ? `The mute reader stopped: ${ended}` : 'The mute reader sent nothing.' }
+  return { found: true, trusted: last.trusted, apps: muteCheckApps(readings, rules) }
 }

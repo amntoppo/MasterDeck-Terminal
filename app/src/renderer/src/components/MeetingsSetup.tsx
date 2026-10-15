@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/settings'
 import { MEETING_LANGUAGES, type MeetingsAnswer, type MeetingsSettings, type MeetingsSetupInfo, type SoundStatus } from '@shared/meetings'
+import { muteCheckView, type MuteCheckAnswer } from '@shared/meetingMute'
 import { modelSize, type ModelOp, type ModelProgress, type ModelsAnswer, type ModelsInfo } from '@shared/meetingModels'
 import { deck } from '../deck'
 import { Field } from './AccountPanel'
@@ -103,6 +104,77 @@ function ModelRow() {
         </span>
       )}
     </Field>
+  )
+}
+
+/**
+ * Check mute reading: md-mute reads every meeting app for about 3 s (meetings:muteCheck) and the
+ * table says what it sees and why. Asks macOS nothing; the window only.
+ */
+function MuteCheck() {
+  const [answer, setAnswer] = useState<MuteCheckAnswer | null>(null)
+  const [busy, setBusy] = useState(false)
+  const run = async () => {
+    setBusy(true)
+    try {
+      setAnswer(await deck().meetingsMuteCheck())
+    } catch {
+      setAnswer({ ok: false, message: 'Could not run the check.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const view = answer?.ok ? muteCheckView(answer) : null
+  return (
+    <div className="set-field" style={{ display: 'block' }}>
+      <div className="f-row" style={{ justifyContent: 'space-between' }}>
+        <div>
+          <div className="set-label">Check mute reading</div>
+          <div className="set-hint">
+            Join a call, then press Check while muted and again while unmuted. For Meet, keep the call in the front tab, not
+            full screen, and press Check from the same desktop as the call. Check turns on Chrome's accessibility tree until
+            Chrome quits.
+          </div>
+        </div>
+        <button className="btn" disabled={busy} onClick={() => void run()}>
+          {busy ? 'Checking…' : 'Check'}
+        </button>
+      </div>
+      {answer && !answer.ok && (
+        <p className="set-hint error" role="alert">
+          {answer.message}
+        </p>
+      )}
+      {view && (
+        <div role="status">
+          {view.notes.map((n) => (
+            <p key={n} className="set-hint error">
+              {n}
+            </p>
+          ))}
+          {view.rows.length > 0 && (
+            <table className="mute-check">
+              <thead>
+                <tr>
+                  <th>App</th>
+                  <th>Reads</th>
+                  <th>Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.app}</td>
+                    <td>{r.reads}</td>
+                    <td>{r.why}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -242,6 +314,7 @@ export function MeetingsSetup({ settings, save }: { settings: Settings; save: (n
           )}
         </Field>
       )}
+      {m.mic === 'follow' && <MuteCheck />}
       <ModelRow />
       <Field label="Language" hint="What the meetings are spoken in. Automatic detection works for most; pick one when a meeting is in one language.">
         <select className="input" aria-label="Meeting language" value={m.language} onChange={(e) => setM({ language: e.target.value })}>

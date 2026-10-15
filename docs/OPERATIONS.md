@@ -545,8 +545,30 @@ change. To see what the helper reads for a rule, run it from a terminal with one
 cd app
 { echo '{"apps":[{"id":"zoom","bundles":["us.zoom.xos"],"menu":{"title":"Meeting","muted":["Unmute audio"],"unmuted":["Mute audio"]}}]}'; sleep 10; } \
   | resources/mute/arm64/md-mute
-# {"t":…,"trusted":true,"apps":[{"id":"zoom","state":"muted"}]}   every 400 ms
+# {"t":…,"trusted":true,"apps":[{"id":"zoom","state":"muted","why":"found","label":"Unmute audio","searched":14,"ms":3,"cached":false}]}   every 400 ms
 ```
+
+The easier way, in the app: Settings → Meetings → **Check mute reading** runs the same helper with
+every rule for 3 s and shows a row per app (it needs no terminal grant: it runs as MasterDeck's
+helper, as during a recording). Reading its answers (`why`, ARCHITECTURE § Meetings: the mute
+reader):
+
+| Shows | `why` | What it means, what to do |
+|---|---|---|
+| Muted / Unmuted (button says '…') | `found` | The rule works for that app; the label is the control it read. Check both while muted and unmuted. |
+| Not running | (none) | md-mute did not list the app: no process with the rule's bundle id. |
+| No mute button found — … (n elements in m ms) | `no-control` | The whole tree was searched, nothing matched: not in a call, the call in a background tab (browsers expose the front tab only), Meet full screen or on another desktop (Space) than the one Check was pressed from (press it from the call's desktop), no page on `meet.google.com` found (the Meet rule's `hosts`: only pages whose `AXURL` host is on them are searched), a label or role the rule does not know (a localized app), or, for Chrome, the page tree not built yet (press again). |
+| Search cut short (n elements in m ms) | `cut` | The search hit its budget (6000 elements / 150 ms, a web rule 40000 / 800 ms) first: a huge page or a slow app. |
+| The app did not answer | `error` | The app's windows or menu bar could not be read (busy, hung), or a read of some element's children or role failed during the search and nothing was found elsewhere. |
+| Accessibility not given to MasterDeck's helper | `not-trusted` | md-mute is not trusted. With "macOS gave Accessibility to MasterDeck but not to its helper" above the table (shown only when the helper itself said `trusted: false`, never when it failed or sent nothing), the grant does not reach the helper: remove MasterDeck from System Settings → Privacy & Security → Accessibility and allow it again (each new build needs this: the ad-hoc signature changes); otherwise Allow it. |
+
+**Google Meet's labels.** Meet's mic button carries the aria-label "Turn off microphone" while you
+are heard and "Turn on microphone" while muted, often with the shortcut after it (" (⌘ + d)" on a
+Mac, " (ctrl + d)" elsewhere; the check shows `⌘` as `?`). Chrome exposes an aria-label as
+`AXDescription`, on an `AXButton` (subrole `AXToggle`) or, for a toggle, an `AXCheckBox` /
+`AXToggleButton`: the rule reads all three roles and the three label attributes, and excludes
+"Turn on/off microphone for everyone" (a host's control). The rule matches English only. These come
+from Meet's page, not from a call checked here: the Check is how they are verified.
 
 `trusted` is the Accessibility grant of the process that started it (from a terminal: the
 terminal's, System Settings → Privacy & Security → Accessibility); `false` means every app reads
@@ -560,9 +582,20 @@ exit 2 with a message.
 
 - A control found is re-read each tick; a full search runs again only when it stops reading, at
   most every 2 s per process, so for up to 2 s after a window is rebuilt the state is `unknown`.
+  A browser's first search after `AXManualAccessibility` was set that finds nothing is tried again
+  on the next tick (once). A set that did not return success is not remembered: the next search
+  asks again. Of several browsers, one whose control was found before is read first.
+- Meet's rule reads each page's `AXURL` (its host only, compared with `hosts`, never sent out)
+  and searches only pages on `meet.google.com`; the walk to the pages skips toolbars and, in a
+  Chromium browser, the tab strip (`AXTabGroup`; Safari keeps its pages inside one, so not there).
+- A meeting recorded since the Mic log keeps the changes of what md-mute read and the gate (a
+  change of `why` alone is not one), the first and the last 250, with `micLogDropped` counting
+  the ones between (`micLog` in its JSON; the Meetings page's **Mic log**, the Markdown export;
+  its times are wall clock since Record). A recording whose
+  "you" track was never zeroed: the log says whether md-mute ever read `muted` and, if not, why.
 - For Google Meet the helper sets `AXManualAccessibility` on each running Chromium browser (Chrome,
   Arc, Edge, Brave) when the Meet rule is in the rules it was sent (no call app offered: all rules).
-  It stays on until that browser quits; the browser may be a little slower while it builds its
+  The Check does the same. It stays on until that browser quits; the browser may be a little slower while it builds its
   accessibility tree. With Zoom or Webex offered only their rule is sent and no browser is touched.
 
 ## Meetings: the fixture

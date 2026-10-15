@@ -3,7 +3,14 @@ import { join } from 'node:path'
 import { applyEventLine, parseRequest, type HookRequest, type HookSessionState } from '@shared/deckHooks'
 import { parseModBeat, type ModBand, type ModBeat, type ModBoard } from '@shared/modBand'
 import { readNewLines, type FollowState } from './files'
+import { heldAnswer } from '@shared/heldMessages'
 import { queueAnswer, queueDir, readQueue, shiftQueue } from './queue'
+
+/** Where the Stop hook's hand-off finds MasterDeck messages held for a session (Sender.takeHeldFor). */
+export interface HeldHandOff {
+  take(sessionId: string): { id: string; text: string; left: number } | null
+  delivered(id: string): void
+}
 
 /** events.jsonl is emptied at launch once it grows past this. */
 const EVENTS_MAX = 4 * 1024 * 1024
@@ -68,6 +75,8 @@ def set: type == "string" and test("\\S");
  *   claimed: the hook takes the request back by renaming it itself and drains one item; claimed:
  *   it waits until 7s after its start for the answer. One rename wins, so exactly one of them
  *   takes the item. Deadlines are by the clock: at most ~7s, under the 10s hook timeout.
+ *   MasterDeck messages held for the session (`held/<session id>`, #123) make it ask too, and
+ *   MasterDeck answers the first of them before any queued prompt; MasterDeck not running, they wait.
  *   While a workflow loop is open (`<loopsDir>/<session id>.json`, #82) it hands nothing over: the
  *   loop hook owns those stops, and the queue goes on once the loop is over.
  * - `queue-off` (the queue skill's hooks installed by hand): both leave /queue to those hooks.
@@ -172,7 +181,8 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
     [ -f "$LD/$sid.json" ] && jq -e '[.loops[]? | select(.state? == "open")] | length > 0' "$LD/$sid.json" >/dev/null 2>&1 && exit 0
     legacy && exit 0
     f="$Q/$sid.jsonl"
-    [ -s "$f" ] || exit 0
+    # MasterDeck messages held for this session (#123, held/<session id>): MasterDeck hands the first one over.
+    [ -s "$f" ] || [ -f "$D/held/$sid" ] || exit 0
     m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
     if [ $((now - m)) -lt 30 ]; then
       # MasterDeck runs: it picks the next prompt. It claims the request by renaming it, so only
@@ -198,6 +208,7 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
         exit 0
       fi
     fi
+    [ -s "$f" ] || exit 0
     command -v jq >/dev/null 2>&1 || exit 0
     next=$(head -n 1 "$f" | jq -r '.')
     tail -n +2 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
@@ -232,6 +243,8 @@ export class DeckHooks {
   private masterNew = new Map<string, number>()
   /** When each session was last answered a queued prompt (`pumpQueue`), by session id. */
   private served = new Map<string, number>()
+  /** What `held/` holds (setHeldMarks); null: not written by this run yet. */
+  private heldMarks: string | null = null
 
   /** Where the workflow loops are (`<home>/workflows/loops`): the queue waits for an open one. */
   private loops: string
@@ -404,10 +417,19 @@ export class DeckHooks {
    * answer or still runs to read it. Peek, answer, then take it off: a crash, or a hook that died
    * before reading, repeats a prompt rather than losing it.
    */
-  pumpQueue(now = Date.now(), isAlive = alive): void {
+  pumpQueue(now = Date.now(), isAlive = alive, held?: HeldHandOff): void {
     for (const r of this.queueRequests(now)) {
       const pid = Number(r.id.split('-')[1])
       if (!isAlive(pid) || !this.claimQueue(r.id)) continue
+      // A MasterDeck message held for this session goes first (#123); the queue's turn comes next stop.
+      const h = held?.take(r.sid)
+      if (h) {
+        this.answerQueue(r.id, heldAnswer(h.text, h.left))
+        const unread = join(this.dir, 'queue-answers', `${r.id}.json`)
+        if (isAlive(pid) || !existsSync(unread)) held?.delivered(h.id)
+        else rm(unread)
+        continue
+      }
       const items = readQueue(r.sid, this.queues)
       this.answerQueue(r.id, items.length ? queueAnswer(items[0], items.length - 1) : {})
       if (!items.length) continue
@@ -424,6 +446,22 @@ export class DeckHooks {
       for (const n of readdirSync(dir)) if (now - Number(n.split('-')[0]) * 1000 > 60_000) rm(join(dir, n))
     } catch {
       // none yet
+    }
+  }
+
+  /** Sessions (session ids) with MasterDeck messages held: their Stop hook asks for them (`held/<id>`). */
+  setHeldMarks(sids: Set<string>): void {
+    const dir = join(this.dir, 'held')
+    const want = [...sids].filter((id) => SID.test(id))
+    const key = want.sort().join(',')
+    if (key === this.heldMarks) return
+    try {
+      mkdirSync(dir, { recursive: true })
+      for (const n of readdirSync(dir)) if (!want.includes(n)) rm(join(dir, n))
+      for (const id of want) if (!existsSync(join(dir, id))) writeFileSync(join(dir, id), '')
+      this.heldMarks = key
+    } catch {
+      // next state
     }
   }
 

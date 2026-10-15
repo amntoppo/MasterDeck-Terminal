@@ -1383,6 +1383,13 @@ button.d-port:hover { border-color: var(--accent); }
 .wfl-prog { max-height: 260px; overflow: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .srow-loop { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 9px; color: var(--accent); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
 .srow-loop.met { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, transparent); }
+.srow-held { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: 9px; color: var(--amber); font-family: var(--mono); font-size: 10px; line-height: 16px; white-space: nowrap; }
+/* MasterDeck messages waiting for the session's prompt to be empty (#123), above its tabs. */
+.held-bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 6px 10px; border-bottom: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); background: color-mix(in srgb, var(--amber) 10%, var(--bg-2)); font-size: 12.5px; min-width: 0; }
+.held-kind { flex: none; color: var(--amber); font-weight: 600; }
+.held-text { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.held-why { flex: 1 1 100%; order: 3; font-size: 11.5px; }
+.held-actions { flex: none; display: flex; gap: 6px; margin-left: auto; }
 .srow-loop.limit { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 50%, transparent); }
 /* Workflow builder (a Claude session on the right of the Workflow window) and its drafts */
 .wf-editor { gap: 10px; }
@@ -1768,6 +1775,13 @@ details.sd-more > summary:hover { color: var(--text); }
 .mt-err { font-size: 12px; }
 .mt-summary { font-size: 13px; user-select: text; }
 .mt-notes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.mt-miclog { font-size: 12px; }
+.mt-miclog summary { cursor: pointer; }
+.mt-miclog p { margin: 6px 0 0; }
+.mt-miclog ol { margin: 6px 0 0; padding-left: 18px; max-height: 200px; overflow: auto; font-family: var(--mono); user-select: text; }
+.mute-check { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.mute-check th, .mute-check td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+.mute-check th { color: var(--muted); font-weight: 500; }
 .mt-player { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex: none; }
 .mt-play { min-width: 64px; }
 .mt-seek { flex: 1; min-width: 80px; accent-color: var(--accent); }

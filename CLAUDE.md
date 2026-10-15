@@ -152,6 +152,7 @@ web tabs keep working.
 | Sessions, GitHub, board, polling, `AppState` | `main/sources.ts` (`Sources.build()`), `shared/derive.ts`, `shared/review.ts` |
 | Needs you (inbox) | `shared/inbox.ts` (items), `main/inbox.ts` (store, events), `runInboxAction` in `main/index.ts` |
 | Typing into sessions | `main/send.ts` (`Sender`), `shared/send.ts`, `shared/promptGuard.ts` |
+| Messages that never mix with the user's draft (#123): the core mod first, typing only into an empty prompt, else held | `main/modDeliver.ts` (`ModDelivery`, `deck/deliver/<sid>/`) + `mods/masterdeck/hooks/deliver.ts`, `shared/heldMessages.ts` (`promptDraft`, `isTyping`, `heldAnswer`), `promptLines` in `main/screen.ts`, `main/held.ts` (`HeldStore`), `Sender.pumpHeld` / `sendHeld` / `takeHeldFor`, `DeckHooks.setHeldMarks` + `pumpQueue(…, held)`, `renderer/.../HeldBar.tsx`, `srow-held` in `Sidebar.tsx` |
 | Terminals | `main/ptys.ts` (`PtyManager`), `shared/paneCommand.ts`, `renderer/.../TerminalView.tsx` |
 | Hooks | `main/hooks.ts` (settings.json installs, `hookStatus`, one-time `migrateLegacyHooks` of the old skill hooks), `main/deckHooks.ts` (MasterDeck's hook script, incl. the master reports guard on `SendMessage`), `shared/deckHooks.ts` |
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
@@ -177,6 +178,7 @@ web tabs keep working.
 | Web app | `src/web/*`, `renderer/src/web.ts`, `renderer/src/webConfirm.ts`, `vite.web.config.ts`, `web/wrangler.jsonc` |
 | Instant typing | `renderer/src/predictiveEcho.ts` (+ `.test.ts`, `test/fixtures/claude-echo.json`) |
 | A session's tabs (Terminal, files, diffs), Details → Diff / Files, ⌘P, ⌘-click paths | `shared/sessionTabs.ts` (model), `renderer/src/sessionTabsStore.ts` (per `Session.key`, localStorage, `onOpen`), `renderer/.../SessionTabs.tsx`, `FileTab.tsx`, `DiffTab.tsx`, `DiffList.tsx`, `FileTree.tsx`, `QuickOpen.tsx`, `renderer/src/usePull.ts` (3 s while shown), `renderer/src/highlight.ts`; reads: `main/sessionFiles.ts` behind `files:*` / `diff:*`, guarded by `sessionFileCall` (`main/remoteGuards.ts`) and `insideRoot` / `relativeTo` / `findPaths` (`shared/filePath.ts`), parsers `shared/diff.ts`, limits `shared/fileView.ts`, web size cap `webFit` (`shared/sessionFiles.ts`). Nothing in `AppState` |
+| Links in a terminal (⌘-click opens http/https in the browser, #119) | `shared/termLinks.ts` (`findUrls`, `isWebLink`), `renderer/src/termText.ts` (`logicalLine`, `cellRange`: a wrapped line read through its cells), the link provider and `linkHandler` (OSC 8) in `renderer/.../TerminalView.tsx`, `deck.openLink` (`app:openLink`, `local`: main's `shell.openExternal`, the web's `window.open`, both after `isWebLink`); `openExternal` stays https only |
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`, `sessionNotes`; a note's `link` (the session and/or ticket an `n-` note is about) and `meeting` (set by `NotesStore.addMeetingNote` alone)), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `shared/noteFilter.ts` (the panel's All · Mine · Tickets · Sessions · Meetings, the Notes tab's meeting dot), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (the one editor: Write / Preview / Side by side, `MarkdownView` with `html={false}`); Session details → **Notes n**: `renderer/.../SessionNotes.tsx` (read only; Edit and New note open the panel); entry points in `Rail.tsx`, `GitHubDetails.tsx` (Details → GitHub), `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Meetings (macOS; record, transcribe on the Mac, match to sessions; issue #102) | IPC and lazy loading: `main/meetingsIpc.ts` (`MeetingsIpc`; the only importer of `main/meetings/`, by dynamic `import()`); `main/meetings/gate.ts` (consent, permissions), `recorder.ts` (capture window, chunks, `audio.webm`), `store.ts` (`MASTERDECK_HOME/meetings`), `transcriber.ts` (queue, crash recovery), `matcher.ts` (the one `claude -p`, meeting notes), `models.ts` + `whisper.ts` (speech models, `whisper-cli`), `apps.ts` (the offer's process check), `muteHelper.ts` (`findMute`, `spawnMute`: the `md-mute` helper, `native/mute/main.swift`, `scripts/mute.sh`; its rules and protocol in `shared/meetingMute.ts`), `mute.ts` (`MuteWatch`: the mic follows the meeting app's mute, `meetingLive.mic`, `meetings:micOff`); `main/meetingMedia.ts` (`masterdeck-media://` audio), `main/meetingNotices.ts` (Needs you), `main/meetingsFixture.ts`, `main/claudeOnce.ts` (`claude -p` from an empty temp folder); `shared/meetings.ts` (types, settings, consent, `systemAudioPath`), `meetingAudio.ts`, `meetingModels.ts`, `meetingMatch.ts` (candidates, answer check, `MATCH_FAILED`), `meetingsPage.ts`, `meetingJanitor.ts`, `meetingApps.ts` (Zoom, Webex); capture window: `renderer/capture.html`, `renderer/src/capture.ts`, `renderer/src/pcmWorklet.ts`, `preload/capture.ts`; UI: `renderer/.../MeetingsSetup.tsx` (Settings → Meetings), `RecordMeeting.tsx`, `MeetingsView.tsx` (the page), Janitor's section in `HygieneViews.tsx`; `scripts/whisper.sh`, `scripts/meeting-fixture.cjs`; ARCHITECTURE "Meetings: …", OPERATIONS "Meetings: …" |
 | Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
@@ -411,7 +413,7 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-16)
 
 - **In-app updates (#122)** are built on branch `worktree-MasterDeck-Terminal-122-in-app-updates`
-  (not merged, not installed, nothing published or deployed), with the code review's fixes: no
+  (PR #128, not merged, not installed, nothing published or deployed), with the code review's fixes: no
   install on quit for MasterDeck's own Restart and none while the app runs from the bundle; the
   backup kept after an install on quit and removed by the healthy new app; the administrator path
   runs only inline root commands that unpack the verified zip again (never the helper file or the
@@ -423,13 +425,59 @@ buttons; it does not go through macOS window drag regions.
   relaunch, a channel change during a failed Restart now checked at once. A new GitHub release is
   published as an update by `.github/workflows/ota-release.yml` (on `release: published`, called by
   `release.yml` after it attaches the files, or by hand). Backend: branch `122-update-service`
-  (not pushed to `master`, not deployed). Checked: typecheck, vitest (the helper with nasty paths
+  (backend PR #12, not merged, not deployed; go-live steps in the backend's OPERATIONS). Checked: typecheck, vitest (the helper with nasty paths
   through a `/bin/sh` stand-in for osascript), actionlint, the OTA download step against the real
   v0.9.0 release (read only), and end to end (OPERATIONS "Testing in-app updates") before the final
   review's fixes: local `wrangler dev`, packaged builds in a temp folder, 0.9.0 → 0.9.1 and 0.9.0 →
   0.9.2 in place, a broken 0.9.3 rolled back to 0.9.2 and skipped. Not checked: real R2 and
   Cloudflare, the workflows on GitHub Actions, the real password prompt, Windows. Open points: TODO
   ("In-app updates (#122)").
+
+- **Why the mic did not follow Meet's mute (#102)** is built on branch
+  `worktree-MasterDeck-Terminal-102-mute-check` (from `main` 7c346e2; PR #125, not merged;
+  installed locally 2026-10-16). The user's Google Meet in
+  Chrome was recorded while muted (md-mute never read `muted`); the cause is still unknown. Added:
+  md-mute's per-app diagnostics (`why`, the matched `label` only, `searched`, `ms`, `cached`; the
+  parser accepts lines with or without them), Meet as a web rule (search from `AXWebArea`, 40000
+  elements / 800 ms, three roles, one retry after `AXManualAccessibility`), Settings → Meetings →
+  **Check mute reading** (`meetings:muteCheck`, 3 s, every rule, `gateTrusted` beside the helper's
+  `trusted`), and a per-meeting **Mic log** (`micLog`, the first and last 250 with `micLogDropped`,
+  no why-only changes, Meetings page and export). Review fixes (second commit): Meet searched only
+  on pages whose `AXURL` host is `meet.google.com` (rule field `hosts`), toolbars and Chromium's
+  tab strip skipped, cached processes first, `AXManualAccessibility` remembered only on success,
+  failed AX reads give `error`, the split-grant note only when the helper said `trusted: false`.
+  Checked: typecheck, vitest (208 files passed, 2 skipped; 2569 tests passed, 4 skipped), `npm run
+  build`, md-mute rebuilt and run against bundle ids nothing runs. Not checked: the Check or the
+  Mic log on screen, any real meeting app (Chrome was never read). Next: the user presses Check in
+  a Meet call (muted, then unmuted) on the installed app; OPERATIONS § Meetings: md-mute says how
+  to read it. Open points: TODO ("The mic follows the meeting app's mute").
+
+- **MasterDeck messages never mix with a half-typed prompt (#123)**, branch
+  `worktree-MasterDeck-Terminal-123-held-messages` (draft PR, not merged, **not installed**: the
+  rebuild of the real app copies the 0.6.0 mods over `~/.claude/masterdeck/mods`, so it waits for
+  the user's word). The core mod submits MasterDeck's messages with `$.prompt.submit` (all mods are
+  0.6.0, so running sessions get the reload offer); without it, typing waits for an empty prompt and
+  a held message shows on the session with Send now / Discard, and goes when the prompt is empty or
+  at the next turn end (Stop hook). Spec and plan in this repo's `docs/superpowers/`
+  (`2026-10-16-held-messages*`); ARCHITECTURE "Sender and PTYs". Checked: typecheck, vitest, the
+  mod's `claude plugin validate` / `test`, a probe of `$.prompt.submit` and then the real core mod
+  in a throwaway haiku session (draft `refactor the login` with the cursor moved: the message ran
+  as its own turn, the draft and cursor unchanged), `promptDraft` against that session's real
+  screens, the web preview at 1400 and 390 px. Not checked: the installed app with real sessions,
+  the Stop-hook hand-off in a live session, Windows, the real web app. Open points: TODO ("Held
+  messages (#123)").
+
+- **Links in a terminal (#119)** are built on branch
+  `worktree-MasterDeck-Terminal-119-terminal-links` (PR #121, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). ⌘-click (Ctrl-click off a Mac) opens an
+  http/https address in the browser: localhost / IP with ports, paths and queries, one link across
+  wrapped rows, trailing punctuation left out, OSC 8 links; underline and pointer only while the
+  key is held (paths too, which now also wrap and survive wide characters). Checked: typecheck,
+  vitest (one timing flake in `browserBridge.test.ts` under the full run, passing alone), and the
+  isolated app over CDP with `shell.openExternal` stubbed in main: hover with and without ⌘, ⌘ down
+  and up while hovering, a plain click opening nothing, a ⌘-click on a plain, a wrapped and an OSC 8
+  link opening the right address, a `file:` OSC 8 link ignored. Not checked: the web app over the
+  bridge, Windows, a real Claude session's output. Open points: TODO ("Terminal links (#119)").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves

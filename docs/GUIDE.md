@@ -14,6 +14,11 @@ One window for all your Claude Code sessions, laid out as a command center:
     side by side; **+** opens the new-terminal / new-session menu. A row always shows the session's
     name first; its ticket and account badge sit beside it, or on the line below when the column is narrow.
   - **Terminal:** the session's own `claude` terminal, in the middle, with no bar above it.
+    **⌘-click** (Ctrl-click on Windows and in a browser off a Mac) an `http://` or `https://` link in
+    it to open it in your browser: a dev server's `http://127.0.0.1:20060`, a link that wraps onto
+    the next line, or a link with its own text (OSC 8). Hold the key over a link to see it underlined.
+    A plain click still selects text. In the web app the browser opens it, so a `localhost` link
+    is that computer's, not the Mac's.
   - **Right panel:** tabs **Details** (everything about the session: what it waits on, status,
     ticket and progress, PRs, worktrees, tokens, context, model, diff, and its actions; beside it the session's **Notes**), **Tools**
     (**Queue**, **BTW** and **Mods**) and **Summary**. Drag its edge to resize it; › hides it, **‹ Panel** brings it back.
@@ -263,7 +268,7 @@ Open files from:
   filter box. Click a file to open it.
 - **⌘P**: type part of a file's name in the open session's folder, ↵ opens it.
 - **⌘-click a path in the terminal** (Ctrl-click on Windows) that Claude printed, relative or
-  absolute, inside the session's folder.
+  absolute, inside the session's folder (underlined while you hold the key).
 
 MasterDeck only reads here: nothing in these tabs changes a file. The web app shows the same tabs,
 reading the files on your Mac over the encrypted line, only inside the session's folder; a file or
@@ -283,6 +288,13 @@ diff too big to send says so.
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **Your half-typed prompt is safe:** a message from MasterDeck (a PR review, a monitor, a workflow
+  step, a broadcast) never goes out mixed with what you were typing. With MasterDeck's mods
+  installed, Claude gets it as a prompt of its own (shown as "Prompt from the masterdeck plugin")
+  and your text stays in the prompt, cursor and all. Without them, MasterDeck waits while your
+  prompt has text or you are typing: the session gets a **✉ 1** badge and a bar above its terminal
+  with the message, who sent it, **Send now** (sends it now if your prompt is empty) and **Discard**.
+  It goes by itself once your prompt is empty, or when Claude finishes the turn it is working on.
 - **★ Master (top right, every screen, ⌘⇧M):** shows or hides master-agent's column. Drag its edge
   to resize it. Hiding it doesn't stop or detach master.
 - **Workflow (on the rail):** a canvas where you build what sessions do, from an issue to a merged
@@ -1134,6 +1146,19 @@ first-run Setup, so nobody who never wants meetings is asked anything.
   brings up macOS's prompt the first time; after that it opens System Settings → Privacy & Security
   → Accessibility, where you switch MasterDeck on. Like the other permissions, macOS may want it
   allowed again after an update.
+- **Check mute reading** (shown with Follow): shows what MasterDeck can see of each meeting app's
+  mute, without recording. Join a call, then press **Check** while muted and again while unmuted.
+  It looks for about 3 seconds and lists Zoom, Teams, Webex and Google Meet with what it reads and
+  why: "Muted (button says 'Turn on microphone')", "Not running", "No mute button found — is the
+  call in the front tab, or Meet is full screen / on another desktop — press Check from the same
+  desktop as the call", "Search cut short", "The app did not answer", or "Accessibility not given
+  to MasterDeck's helper". If macOS allowed MasterDeck but not the part of it that reads the mute,
+  it says so above the table, with what to do: remove MasterDeck from Accessibility in System
+  Settings and allow it again (each new build needs this). For Google Meet, keep the call in the
+  browser window's front tab, not full screen, and press Check from the same desktop as the call:
+  other tabs can't be seen, and only pages on meet.google.com are looked at. Like a recording,
+  Check turns on Chrome's accessibility tree (and other Chrome-family browsers') until Chrome
+  quits.
 - **Speech model:** what turns the audio into text, on this Mac. Pick **Best** (574 MB, the most
   accurate; chosen first on Apple Silicon) or **Fast** (148 MB, quicker and less accurate; chosen
   first on Intel), then **Download**. It comes once from whisper.cpp's model page on Hugging Face
@@ -1253,6 +1278,14 @@ audio never reach a browser or a phone.
 - **Right, the meeting:** its title (click it to rename; Enter keeps it, Escape goes back), date,
   length and the apps seen, its state, the summary, and **Notes added:** a chip per note it wrote
   (each opens the note).
+- **Mic log** (closed until you open it; only meetings recorded since it was added): each change
+  of your mic during the recording, with its time: what MasterDeck read in the meeting app (Muted,
+  Unmuted, Unknown), the app, why (button found, no mute button found, search cut short, no
+  Accessibility, …), and whether your mic was out of the recording or recorded from then on. A
+  meeting where your mic was never out shows why here. Times are wall clock since you pressed
+  Record (a pause counts, unlike the transcript's). A change of why alone is not listed. The first
+  and the last 250 changes are kept; in between it says how many were not kept. **Export
+  transcript** includes it.
 - **The player** over the whole transcript: **Play** / **Pause**, **−15s** / **+15s**, the position
   bar, and **1x / 1.5x / 2x**. The line being played is highlighted and kept in view until you
   scroll; a click on a line (or Enter on it, with Tab to get there) plays from there, and Space plays

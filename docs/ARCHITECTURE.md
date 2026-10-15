@@ -788,7 +788,19 @@ keeps every session's row by `Session.key` in localStorage (`session-tabs`), so 
 resume and a restart; the App prunes keys no longer listed (never on an empty list). Every opener
 goes through the store: Details → Diff (`DiffList.tsx`) and Files (`FileTree.tsx`), ⌘P
 (`QuickOpen.tsx`), ⌘-click in a terminal (an xterm link provider in `TerminalView.tsx`,
-`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**. The store's
+`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**.
+
+The same link provider opens web links (#119). It reads the whole line a row belongs to, its
+wrapped rows joined, through the cells (`renderer/src/termText.ts`: `logicalLine`, `cellRange`), so
+a link or path that wraps is one link and wide characters before it do not shift it. `findUrls`
+(`shared/termLinks.ts`) finds http/https addresses and drops trailing punctuation and a closing
+bracket the address did not open; a path inside an address is not a path. OSC 8 links go through
+xterm's `linkHandler` (xterm itself drops non-http schemes). A click opens only with ⌘ (Ctrl off a
+Mac); the underline and pointer follow the key (`showMod` sets the hovered link's decorations),
+except on OSC 8 links, which xterm always underlines on hover. The click goes to `deck.openLink`
+(`app:openLink`, `local`): the window's main checks `isWebLink` (http or https, a host, no spaces or
+control characters, at most 2048 characters) before `shell.openExternal`; the web app checks the
+same and calls `window.open` itself. `openExternal` stays https only for everything else. The store's
 `onOpen` lets the phone close its panel sheet. The terminal stays mounted (hidden) under another tab.
 
 Main reads, never writes: `main/sessionFiles.ts` `SessionFiles` behind four `remote` channels
@@ -872,11 +884,45 @@ here (needs `hooks.queue`).
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).
-- `main/send.ts` `Sender.send(session, text, masterUp)`: types as the user would, into the open
-  tab, through a short hidden `claude attach` (~3 s), or relayed by master-agent for a session in
-  another terminal (only when `masterUp`). One send per session at a time; re-checks right before
-  typing that the session didn't start waiting on a prompt (`looksLikePrompt`). `answerMenu`
-  sends key steps for menus.
+- `main/send.ts` `Sender.send(session, text, masterUp, {from, force, held})`: a message never mixes
+  with what the user is typing in the session's prompt (#123; spec
+  `docs/superpowers/specs/2026-10-16-held-messages-design.md`). In order:
+  1. **The core mod** (`mods/masterdeck` 0.6.0 on, heartbeat `deliver: 1`, `ModBeat.deliver`), for any
+     text that is not a command (`isCommand`: `/`, `!`) to a session not done, waiting on a prompt or
+     parked: `main/modDeliver.ts` `ModDelivery.deliver` writes `deck/deliver/<sid>/<id>.json`, the mod
+     (`hooks/deliver.ts`, every 2 s) writes `.claim`, MasterDeck answers `.go` only if the claim came
+     within 5 s, the mod calls `$.prompt.submit({text, asUser: true})` once (a turn of its own, queued
+     while busy; the prompt box and its cursor are not touched) and writes `.done`; MasterDeck removes
+     the files (`$.fs` can't rename or delete, so only MasterDeck decides). A mod that waited 3 s for
+     `.go` in vain writes `.skip` and never submits that id (a stalled app). No claim, or `.skip` → the next step;
+     a `.go` with no `.done` in 5 s counts as delivered (`handed`), never typed again. `prune` clears
+     folders of ended sessions and files over 10 minutes old.
+  2. **Typing, guarded**: into the open tab or through a short hidden `claude attach` (~3 s), only
+     when the prompt box is empty: `promptLines` (`main/screen.ts`: headless xterm at the pane's size,
+     `PtyManager.screen`; 120x40 for an attach; dim cells blanked: the placeholder and suggestions)
+     then `promptDraft` (`shared/heldMessages.ts`: the last pair of rules whose first line starts with
+     `❯` and its no-break space). Text there, a key typed into the pane in the last 4 s
+     (`PtyManager.input` from `CH.ptyWrite`, `isTyping` leaves out focus, mouse and terminal reports),
+     or no box to be seen → held. A key typed during the 150 ms between the paste and Enter keeps
+     Enter back (the text stays in the box, unsent; `ok: true, typedNotSent`, so no caller types it
+     again). Relayed by master-agent for a session in another
+     terminal (only when `masterUp`): `master say --to` → `SendMessage`, which never types.
+  3. **Held** (`main/held.ts` `HeldStore`, `<home>/held-messages.json`, atomic): per session in
+     order; a new message to a session with messages held, or with a send in flight, waits behind
+     them (reason `sending`). `pumpHeld` (every 2 s,
+     once the session list is in) tries each session's first one again (an attach at most every
+     20 s) and drops those of ended or unlisted sessions. A busy session's Stop hook gets it first:
+     `deck/held/<sid>` marks (`DeckHooks.setHeldMarks`) make the hook ask through the queue handshake
+     even with nothing queued, and `pumpQueue(…, held)` answers `heldAnswer` before any queued prompt
+     (only where the deck hook owns the queue; never while a send to the session is in flight, which
+     may be that very message, and never a command, which an answer would turn into words). `AppState.held` (`heldViews`, 240-character
+     previews) drives the row's ✉ badge (`SessionRow`) and `HeldBar` above the session's tabs: **Send
+     now** (`CH.heldSend`, `sendHeld`: `force` types it even if the box can't be read or the user just
+     typed, never over text in it) and **Discard** (`CH.heldDrop`); both open to the web app.
+  One send per session at a time; re-checks right before typing that the session didn't start
+  waiting on a prompt (`looksLikePrompt`). The result is `{ok: true, held: true}` for a held
+  message, so callers (PR watch, monitors, workflow steps, linked sessions, the queue's Send next)
+  count it as taken. `answerMenu` sends key steps for menus (no prompt box involved).
 
 ### master-agent integration
 
@@ -1601,12 +1647,33 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
 
 - `native/mute/main.swift`, built by `scripts/mute.sh` into `resources/mute/<arch>/md-mute`
   (OPERATIONS § Meetings: md-mute). One line of JSON rules on stdin, then every 400 ms one line
-  `{"t":<ms>,"trusted":bool,"apps":[{"id","state"}]}` (`muted` / `unmuted` / `unknown`, only apps
-  with a running process, found by bundle id with `NSWorkspace`). Not trusted: every app is
-  `unknown`. It calls `AXIsProcessTrusted()` only (never the prompting variant: the app asks, after
+  `{"t":<ms>,"trusted":bool,"apps":[{"id","state",…}]}` (`muted` / `unmuted` / `unknown`, only apps
+  with a running process, found by bundle id with `NSWorkspace`). Each app also carries
+  diagnostics (additive; `parseMuteLine` accepts lines with or without them): `why` (`found`,
+  `not-trusted`, `no-control`: searched everything without a match, `cut`: hit the element or time
+  budget, `error`: the app did not answer the windows / menu bar read, or a children / role read
+  failed during the walk (other than an element gone: `invalidUIElement`) and nothing was found),
+  `label` (the matched
+  control's label only, at most 80 characters, anything outside printable ASCII as `?`; nothing
+  else on screen ever leaves the helper), `searched` (elements visited this tick; 0 when the
+  throttle skipped the search and the last search's `why` is repeated), `ms`, `cached` (re-read
+  from the control found before). Not trusted: every app is `unknown` with `why: not-trusted`. It
+  calls `AXIsProcessTrusted()` only (never the prompting variant: the app asks, after
   consent). A **menu rule** reads the titles of one menu bar menu's items; an **element rule** walks
   the app's windows breadth first and reads the rule's label attributes (`AXTitle`,
-  `AXDescription`, `AXHelp`) only on controls of the rule's role. Matching is a case-insensitive
+  `AXDescription`, `AXHelp`) only on controls of one of the rule's `roles` (`role`, one string, is
+  the older form; the app sends both). A **web rule** (`web: true`, Google Meet) first walks down
+  to the windows' `AXWebArea` elements without going into them (nor into `AXToolbar`, nor, in a
+  Chromium process, `AXTabGroup`: the tab strip; Safari's pages sit inside one), keeping with
+  `hosts` (Meet: `meet.google.com`) only pages whose `AXURL` host is one of them or below one (the
+  URL is read for that alone and never leaves the helper), then searches from those, with a larger
+  budget: depth 150, 40000 elements, 800 ms; still at most one failed search every 2 s per
+  process. After it sets `AXManualAccessibility` (remembered only when the set returned success;
+  otherwise asked again at the next search) on a
+  Chromium process, a first search that finds nothing is tried again on the next tick without the
+  2 s wait (once): Chromium may build the page's tree only after that. Several processes of one
+  rule: the ones with a cached control first, the first that reads, else the most telling `why` (`cut`, then `error`, then
+  `no-control`). Matching is a case-insensitive
   prefix; the longest matching prefix decides (muted on a tie); a prefix in the rule's `whole`
   (Teams' and Webex's bare "Mute" / "Unmute") matches only the whole label or the label followed
   by " (" (a shortcut), so "Mute Alice" is nothing; and a control any of whose labels
@@ -1617,7 +1684,7 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   process and only its labels are read again each tick; when it no longer reads, a full search
   runs in the same tick, and only failed searches in a row are held to one every 2 s per process
   (`unknown` in between). Caps per search: depth 60, 6000
-  elements, 150 ms (past any: `unknown`); a 50 ms messaging timeout set once on the system-wide
+  elements, 150 ms (past any: `unknown`, `why: cut`; a web rule's are larger, above); a 50 ms messaging timeout set once on the system-wide
   element (the default for every element; an app element's own would not reach its children);
   each tick in an `autoreleasepool`. For the Chromium bundles of a rule it was sent it sets
   `AXManualAccessibility` once per process (how screen readers get web content; it stays on until
@@ -1625,10 +1692,14 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   line on stderr, exit 2.
 - `shared/meetingMute.ts`: `MUTE_RULES` (Zoom: the **Meeting** menu, "Unmute audio" while muted,
   "Mute audio" while heard; Teams, Webex: buttons "Unmute…" / "Mute…"; Google Meet in Chrome, Arc,
-  Edge, Brave, Safari: "Turn on microphone…" / "Turn off microphone…"; all `ponytail:` guesses
-  until checked on real calls, data so a fix is no rebuild), `muteRulesLine`, `parseMuteLine(line,
-  known?)` (strict: any wrong field, an app twice, an id not in `known`, or a muted/unmuted state
-  while not trusted is `null`), `muteRuleId` (a rule from the offer's app name or an id),
+  Edge, Brave, Safari: a web rule over `AXButton`, `AXCheckBox`, `AXToggleButton`, "Turn on
+  microphone…" / "Turn off microphone…" (Meet's aria-label, with or without a shortcut such as
+  " (⌘ + d)"), "…for everyone" excluded; all `ponytail:` guesses until checked on real calls, data
+  so a fix is no rebuild), `muteRulesLine`, `parseMuteLine(line, known?)` (strict: any wrong field,
+  an app twice, an id not in `known`, a muted/unmuted state while not trusted, a diagnostic of the
+  wrong type, `why` other than `found` with a muted/unmuted state (or the other way round), a
+  `label` without `found` or outside printable ASCII, or `not-running` is `null`), the check's
+  `muteCheckApps` / `muteCheckWhy` / `muteCheckView` (below), `muteRuleId` (a rule from the offer's app name or an id),
   `pickApp(apps, preferred)` (the preferred app while listed, else the first read as
   muted/unmuted), `MuteSettle` (the first `muted` reading settles at once; leaving `muted` takes two
   `unmuted` readings in a row, or `MUTE_UNKNOWN_HOLD` (7, about 3 s) `unknown` ones, so a brief gap
@@ -1685,6 +1756,32 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
 - **The manual switch.** `meetings:micOff(on)` (`deck.meetingsMicOff`, `blocked` on the web;
   refused from a browser and off macOS; only while recording): Mic off in the recording, in either
   mode; the next recording starts with it off.
+- **The Mic log.** `MuteWatch` calls `deps.log(entry)` on every change, while recording, of
+  `{state, app, why?, reason?, gated, paused?}` (`state` and `why`: what md-mute read for the app
+  followed, `unknown` with no `why` while it does not run; `reason`: `MicLive.reason`). MeetingsIpc
+  keeps them with their wall-clock time from `start()` (before `begin()`) in a `MicLogKeep`
+  (`shared/meetings.ts`): a change of `why` alone (state, app, reason, gate and pause as the last
+  entry) is not kept, and of the rest the first and the last `MIC_LOG_KEEP` (250), counting the ones
+  between. It writes them into the meeting as `micLog`, with `micLogDropped` when some fell out
+  (`storedMeeting` reads it only beside a full log) (`t` = time − the
+  meeting's `started`, at least 0) once Record gave the id, at most every 5 s while recording, and
+  when the recording ends (`syncMute` sees it stopped: Stop, the 4-hour limit, a quit, Turn off).
+  `storedMeeting` reads files without it, and leaves out (never refuses the meeting for) a log
+  that does not read back. The Meetings page shows it as a closed **Mic log** under the meeting;
+  `meetingMarkdown` adds a "Mic log" section (`micLogLines`: "n changes not kept" where they fell,
+  and `MIC_LOG_CLOCK`: the times are wall clock since Record, `shared/meetingsPage.ts`).
+- **Check mute reading.** `meetings:muteCheck` (`deck.meetingsMuteCheck`, `blocked` on the web;
+  refused from a browser, off macOS, without consent, and while `Recorder.start` is starting the
+  recording's md-mute; one check at a time, a second press shares it): `checkMute` in
+  `main/meetings/mute.ts` (loaded by `import()`) runs md-mute with every rule for `MUTE_CHECK_MS`
+  (3 s), whatever records (beside a recording's md-mute is fine), kills it, and answers `{found,
+  trusted, gateTrusted, apps: [{id, name, state, why, label?, searched, ms}], message?}`:
+  `muteCheckApps` takes each rule's last reading and the last real search's size and time, and
+  `not-running` for a rule md-mute never listed; `gateTrusted` is the gate's
+  `accessibilityTrusted()` (no prompt), so a grant that reaches MasterDeck but not md-mute shows
+  (`MUTE_CHECK_SPLIT_GRANT`, only when md-mute sent a line with `trusted: false`, not when it failed
+  or sent nothing).
+  Settings → Meetings (`MuteCheck` in `MeetingsSetup.tsx`) draws `muteCheckView`'s notes and table.
 
 ### Working hours (issue #64)
 
