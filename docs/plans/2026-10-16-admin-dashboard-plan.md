@@ -3,7 +3,7 @@
 Design: [2026-10-16-admin-dashboard-design.md](2026-10-16-admin-dashboard-design.md). Three repositories: the
 backend (B), the dashboard's own private repo (D), this repo (M). Each task: files, the test first, the check.
 
-1. **B: migration 0006.** `migrations/0006_admin.sql` (admins, admin_audit, disabled_users, md_events,
+1. **B: migration 0007** (0006 is #122's `releases`). `migrations/0007_admin.sql` (admins, admin_audit, disabled_users, md_events,
    md_activity, download_counts, md_kv, devices columns). Check: `npx vitest run` applies it (test setup).
 2. **B: events and activity.** `src/activity.ts`; hooks in `src/auth/options.ts` (sign_up, sign_in, user_deleted,
    disabled refusal), `src/auth.ts`, `src/auth/devices.ts`, `src/worker.ts` (pairings, browser socket).

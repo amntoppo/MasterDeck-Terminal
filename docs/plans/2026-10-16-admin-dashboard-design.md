@@ -36,7 +36,7 @@ the page shows "Not authorised".
 Already there: `user`, `account`, `session` (time, IP, UA), `devices`, `browsers`, the hub (counts only:
 desktop status, snapshot version and session count, commands and items by state, sockets).
 
-Added (migration 0006): `md_events` (sign-up, sign-in with method, pairings, revokes, deletions), `md_activity`
+Added (migration 0007): `md_events` (sign-up, sign-in with method, pairings, revokes, deletions), `md_activity`
 (one row per user, UTC day and client: desktop, browser, web, api) for DAU/WAU/MAU over time, `download_counts`
 (GitHub Release totals per asset per day; a daily cron; `source` leaves room for #122 / #89), the Mac's
 version/protocol/platform/OS on `devices` (from `hello`), `admins`, `admin_audit`, `disabled_users`, `md_kv`.
