@@ -7,6 +7,12 @@ import type { RemoteOutcome } from './remoteCommands'
 
 const DELETED = 'This account was deleted'
 
+/** A hello's platform / OS release cut to what the server takes (\w . space ( ) -, 40 characters); undefined when nothing is left. */
+export function helloField(s: string | undefined): string | undefined {
+  const v = (s ?? '').replace(/[^\w. ()-]/g, '').slice(0, 40)
+  return v || undefined
+}
+
 export interface CloudSyncOpts {
   url: string
   token: string
@@ -268,7 +274,7 @@ export class CloudSync {
     this.ws = ws
     ws.on('open', () => {
       const macPublicKey = this.o.macPublicKey?.()
-      const { platform, osVersion } = this.o
+      const platform = helloField(this.o.platform), osVersion = helloField(this.o.osVersion)
       ws.send(JSON.stringify({ t: 'hello', deviceId: this.o.deviceId, appVersion: this.o.appVersion, protocol: PROTOCOL_VERSION, ...(macPublicKey ? { macPublicKey } : {}), ...(platform ? { platform } : {}), ...(osVersion ? { osVersion } : {}) }))
       // Open but never welcomed (a proxy, a wedged server): drop it so the close path redials.
       if (this.welcomeWait) clearTimeout(this.welcomeWait)

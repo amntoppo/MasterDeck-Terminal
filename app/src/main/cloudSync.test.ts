@@ -3,7 +3,7 @@ import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
 import { PROTOCOL_VERSION, type RemoteSnapshot } from '@shared/remote'
 import type { RemoteStatus } from '@shared/remoteSnapshot'
 import { applyPatch } from 'fast-json-patch'
-import { CloudSync } from './cloudSync'
+import { CloudSync, helloField } from './cloudSync'
 
 const TOKEN = 't'.repeat(40)
 let servers: WebSocketServer[] = []
@@ -95,6 +95,13 @@ describe('CloudSync', () => {
     s.start()
     await until(() => srv.got.some((m) => m.t === 'hello'))
     expect(srv.got[0]).toEqual({ t: 'hello', deviceId: 'mac-1', appVersion: '0.7.0', protocol: PROTOCOL_VERSION, platform: 'darwin-arm64', osVersion: '25.4.0' })
+  })
+
+  it('cleans the platform and OS strings to what the server takes (never a reason to refuse hello)', () => {
+    expect(helloField('6.1.0+deb12-amd64')).toBe('6.1.0deb12-amd64')
+    expect(helloField('10.0.26100')).toBe('10.0.26100')
+    expect(helloField('x'.repeat(60))).toBe('x'.repeat(40))
+    expect(helloField('+++')).toBeUndefined()
   })
 
   it('says hello, then sends snapshots debounced and only when changed', async () => {

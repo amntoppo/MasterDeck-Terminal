@@ -27,7 +27,7 @@ Approaches considered:
 ## Access (server side, every request)
 
 ADMIN_ORIGIN set → Origin equals it (reads too) → a session → a **cookie** session (no bearer, device, dev or
-pairing token) → verified email → not disabled → admin. Admins: `ADMIN_EMAILS` var (amntoppo@gmail.com; never
+pairing token) → verified email → not disabled → admin. Admins: `ADMIN_EMAILS` var (the owner's email; never
 removable in the dashboard) plus an `admins` table by lower-case email, read on every request. 401 / 403 otherwise;
 the page shows "Not authorised".
 
