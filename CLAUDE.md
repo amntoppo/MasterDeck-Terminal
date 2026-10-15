@@ -425,7 +425,9 @@ buttons; it does not go through macOS window drag regions.
   relaunch, a channel change during a failed Restart now checked at once. A new GitHub release is
   published as an update by `.github/workflows/ota-release.yml` (on `release: published`, called by
   `release.yml` after it attaches the files, or by hand). Backend: branch `122-update-service`
-  (backend PR #12, not merged, not deployed; go-live steps in the backend's OPERATIONS). Checked: typecheck, vitest (the helper with nasty paths
+  (backend PR #12, not merged; **deployed from that branch 2026-10-16** with the R2 bucket,
+  migration 0006, the Worker secret and both GitHub secrets: the update service is live, nothing
+  published yet). Checked: typecheck, vitest (the helper with nasty paths
   through a `/bin/sh` stand-in for osascript), actionlint, the OTA download step against the real
   v0.9.0 release (read only), and end to end (OPERATIONS "Testing in-app updates") before the final
   review's fixes: local `wrangler dev`, packaged builds in a temp folder, 0.9.0 → 0.9.1 and 0.9.0 →

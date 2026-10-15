@@ -842,18 +842,19 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## In-app updates (#122): open points (2026-10-16)
 
-- **P1 · Go live.** Owner's steps, none done yet: the R2 bucket `masterdeck-releases`, migration
-  0006 remote, `RELEASE_ADMIN_TOKEN` on the Worker and in GitHub, `RELEASE_SIGNING_KEY` in GitHub,
-  the backend deploy (backend OPERATIONS § Releases). Then the first tagged release is the
-  workflows' first real run, and the first real upload to R2 (90 MB parts).
+- **P1 · The first real release.** The service is live (2026-10-16: R2 bucket `masterdeck-releases`,
+  migration 0006 remote, `RELEASE_ADMIN_TOKEN` on the Worker and in GitHub, `RELEASE_SIGNING_KEY` in
+  GitHub, the backend deployed from branch `122-update-service`, version 004ba60c; the check
+  answers 204, admin routes 401 without the token and an empty list with it, `/v1/*` still 401).
+  The first tagged release (with this PR merged) is the workflows' first real run and the first
+  real upload to R2 (90 MB parts). Installs before it (0.9.0 and older) have no updater: they need
+  one more manual update.
 - **P1 · Not checked for real.** End to end ran locally (OPERATIONS "Testing in-app updates":
   0.9.0 → 0.9.1 / 0.9.2 in place, a broken 0.9.3 rolled back), but before the final review's
   fixes, and never against real Cloudflare. Still to run: the real `osascript` password prompt
   (the root command's quoting was checked only through a `/bin/sh` stand-in, as the same user),
   and Windows (`NsisUpdater` against the
-  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, built on the backend's
-  branch `122-update-service` but not deployed: until it is, a Windows download fails with "Could
-  not read the update feed").
+  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, deployed 2026-10-16).
 - **P2 · The backup stays after an admin install.** With the password path the helper does not
   remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
 - **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
