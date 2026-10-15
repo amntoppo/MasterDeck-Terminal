@@ -806,11 +806,16 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   checked against this machine's real `ps` / `lsof` and a live session's tree), the web app over the
   bridge, a phone, Linux.
 
+## Terminal links (#119): open points (2026-10-13)
+
+- **P3 · OSC 8 links underline on hover without the modifier.** xterm's own OSC link provider
+  sets their decorations and offers no way to change them; a click still needs ⌘ / Ctrl.
+- **P3 · A localhost link in the web app** opens the browser's own machine, not the Mac's (as
+  `openPort` is refused there). A tunnel through the bridge would be its own feature.
+- **P3 · Not checked:** Windows (Ctrl-click), a real phone (no modifier key, so no link there).
+
 ## Session tabs, files and diffs (#113): open points
 
-- **P3 · Wide characters before a path.** The ⌘-click link provider uses string offsets as
-  columns, so a line with CJK or emoji before a path underlines the wrong cells (`ponytail:` in
-  `TerminalView.tsx`). A path xterm wraps onto the next row is not found at all.
 - **P3 · File tabs reload on a state change, not live.** Diff tabs and Details → Diff pull every
   3 s; a file tab reads again when it shows, when the session's turn ends, and on Reload. Pull it
   too (on mtime) if files edited mid-turn need to show at once.
@@ -839,7 +844,11 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   them as prompts of their own (`$.prompt.submit`); without it, typing waits for an empty prompt,
   a held message shows on the session (✉ badge, bar with Send now / Discard), goes when the prompt
   is empty or at the session's next turn end. Branch `worktree-MasterDeck-Terminal-123-held-messages`.
-
+- **Terminal links (#119)**: ⌘-click (Ctrl-click off a Mac) opens an http/https address printed
+  in a terminal in the browser (localhost and IP addresses with ports, paths and queries; one link
+  across wrapped rows; trailing punctuation left out; OSC 8 links), underlined with a pointer only
+  while the key is held; paths now wrap and survive wide characters too. Branch
+  `worktree-MasterDeck-Terminal-119-terminal-links`.
 - **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's
   running commands (background shells, the call running now, what a command left behind) with
   folder, pid, uptime, CPU / memory, listening ports that open in the browser, the processes below

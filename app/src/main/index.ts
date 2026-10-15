@@ -215,6 +215,7 @@ import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import { SessionProcs } from "./sessionProcs";
 import { isPortUrl } from "@shared/sessionProcs";
+import { isWebLink } from "@shared/termLinks";
 import {
   installStatusline,
   isInstalled,
@@ -3391,6 +3392,9 @@ function registerIpc(): void {
   reg.on(CH.setVisible, (_e, ids: string[]) => sources.setVisible(ids));
   reg.on(CH.openExternal, (_e, url: string) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
+  });
+  reg.on(CH.openLink, (_e, url: unknown) => {
+    if (isWebLink(url)) void shell.openExternal(url);
   });
   reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
   reg.handle(CH.procsList, (_e, key: unknown) => {

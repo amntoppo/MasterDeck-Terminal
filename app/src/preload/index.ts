@@ -198,6 +198,7 @@ const api: DeckApi = {
   setFocus: (id) => ipcRenderer.send(CH.setFocus, id),
   setVisible: (ids) => ipcRenderer.send(CH.setVisible, ids),
   openExternal: (url) => ipcRenderer.send(CH.openExternal, url),
+  openLink: (url) => ipcRenderer.send(CH.openLink, url),
   openEditor: (dir) => ipcRenderer.invoke(CH.openEditor, dir),
   copy: (text) => ipcRenderer.send(CH.copy, text),
   stopSession: (bgId, name) => ipcRenderer.invoke(CH.stopSession, bgId, name),

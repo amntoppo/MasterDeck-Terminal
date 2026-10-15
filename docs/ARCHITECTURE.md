@@ -788,7 +788,19 @@ keeps every session's row by `Session.key` in localStorage (`session-tabs`), so 
 resume and a restart; the App prunes keys no longer listed (never on an empty list). Every opener
 goes through the store: Details → Diff (`DiffList.tsx`) and Files (`FileTree.tsx`), ⌘P
 (`QuickOpen.tsx`), ⌘-click in a terminal (an xterm link provider in `TerminalView.tsx`,
-`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**. The store's
+`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**.
+
+The same link provider opens web links (#119). It reads the whole line a row belongs to, its
+wrapped rows joined, through the cells (`renderer/src/termText.ts`: `logicalLine`, `cellRange`), so
+a link or path that wraps is one link and wide characters before it do not shift it. `findUrls`
+(`shared/termLinks.ts`) finds http/https addresses and drops trailing punctuation and a closing
+bracket the address did not open; a path inside an address is not a path. OSC 8 links go through
+xterm's `linkHandler` (xterm itself drops non-http schemes). A click opens only with ⌘ (Ctrl off a
+Mac); the underline and pointer follow the key (`showMod` sets the hovered link's decorations),
+except on OSC 8 links, which xterm always underlines on hover. The click goes to `deck.openLink`
+(`app:openLink`, `local`): the window's main checks `isWebLink` (http or https, a host, no spaces or
+control characters, at most 2048 characters) before `shell.openExternal`; the web app checks the
+same and calls `window.open` itself. `openExternal` stays https only for everything else. The store's
 `onOpen` lets the phone close its panel sheet. The terminal stays mounted (hidden) under another tab.
 
 Main reads, never writes: `main/sessionFiles.ts` `SessionFiles` behind four `remote` channels
