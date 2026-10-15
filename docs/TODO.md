@@ -823,6 +823,28 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).
 
+## In-app updates (#122): open points (2026-10-16)
+
+- **P1 · Not checked end to end.** The updater, the helper and the installers are unit-tested
+  (fake server, fake installers, the helper against fake `.app` folders with stand-ins). Still to
+  run: the spec §5 end-to-end (local `wrangler dev`, a packaged v N in a temp folder, v N+1
+  published with the test key, `MASTERDECK_ISOLATED=1` + `MASTERDECK_UPDATE_PUBKEY` +
+  `MASTERDECK_UPDATE_URL=http://localhost:8787`), a broken N+1 rolling back, the real `osascript`
+  password prompt, and Windows (`NsisUpdater` against the feed).
+- **P2 · The health marker follows the user data folder.** The helper opens the new app through
+  `open` (LaunchServices), so a test launch with `MASTERDECK_USER_DATA` gets the default user data
+  folder in the relaunched app and never writes the marker where the helper waits: E2E runs need
+  the default user data, or the helper rolls back.
+- **P2 · The backup stays after an admin install.** With the password path the helper does not
+  remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
+- **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
+  that did not quit in time show an error and offer the update again (not skipped).
+- **P3 · Install on quit is not health-checked** (spec ponytail): the next launch's own marker is the
+  upgrade path.
+- **P3 · Mandatory updates follow the auto-download setting**; the spec leaves open whether a
+  required update should download even with it off.
+- **UI is U4's** (Settings → Updates, the rail dot, the ready prompt, `update:open`).
+
 ## Recently done
 
 - **Session processes in Details (#115)**: Details → Session → **Processes** lists the session's

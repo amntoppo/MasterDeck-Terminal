@@ -122,6 +122,14 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   accountFor: invoke(CH.accountFor),
   resumeStopped: invoke(CH.resumeStopped),
   tokensByDay: invoke(CH.tokensByDay),
+  // A browser never updates the Mac: updates are the window's only.
+  updateState: blocked,
+  updateCheck: blocked,
+  updateDownload: blocked,
+  updateRestart: blocked,
+  updateLater: blocked,
+  onUpdateChanged: blocked,
+  onUpdateOpen: blocked,
   // Working hours stay on the Mac (issue #64): no Hours tab on the web.
   hoursActivity: blocked,
   hoursExport: blocked,

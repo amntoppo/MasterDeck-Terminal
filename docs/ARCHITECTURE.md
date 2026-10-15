@@ -1729,6 +1729,74 @@ figure from `[from, to)`; the ticket table's All time column stays all-time (the
 `HoursView` takes the same `from`/`to`: `estimateHours` cuts the joined spans to it before the
 per-day split.
 
+### In-app updates (issue #122)
+
+Spec: backend repo, `docs/superpowers/specs/2026-10-16-in-app-updates-design.md` (§1 the release
+signature, §2 the server, §4 this client). macOS has its own updater (the app is ad-hoc signed, no
+Developer ID, so no Squirrel.Mac); Windows uses `electron-updater`'s NSIS updater. The state is
+**not** in `AppState`: it reaches the window through `update:*` only, and every one of those is
+`blocked` in `DECK_ACCESS` (a browser never updates the Mac; `remoteSettings` also keeps the Mac's
+`autoDownloadUpdates` / `updateChannel`).
+
+| Module | What |
+|---|---|
+| `shared/updates.ts` | `UpdateState` / `UpdateOffer` / phases / error kinds, `compareVersions` (semver with prereleases), `signedMessage`, `parseOffer`, `parseResult`, `checkUrl`, and the UI's `statusLine`, `shouldPrompt`, `badge`, `readyLine`; `REMIND_MS` (4 h), `CHECK_EVERY_MS` (6 h), `FIRST_CHECK_MS` (30 s), `HEALTHY_AFTER_MS` (10 s) |
+| `shared/releaseKey.ts` | the release public key (raw Ed25519, base64); `releaseKey(env)` takes `MASTERDECK_UPDATE_PUBKEY` only with `MASTERDECK_ISOLATED=1` |
+| `shared/updateHelper.ts` | the macOS helper script (bash 3.2) and its arguments |
+| `main/updater.ts` | `Updater`: the state and its events, the schedule, the check, downloads through an `Installer`, restart / remind later / install on quit, what the last install left; `updatesOffReason` |
+| `main/updateVerify.ts` | `UpdateFailure(kind)`, `signatureOk` (SPKI prefix + raw key, `crypto.verify`), `hashFile`, `checkRelease` (hash, size and signature) |
+| `main/updateMac.ts` | `MacInstaller`, `macBundle`, `macDisabledReason` (`/Volumes/`, App Translocation), `plistVersion` |
+| `main/updateWin.ts` | `WinInstaller` over `NsisUpdater` (`electron-updater`, imported on first use on win32 only), `feedUrl` |
+| `main/appMenu.ts` | the macOS app menu: Electron's default roles plus **Check for Updates…** / **Restart to Update…** |
+
+**When it runs.** `makeUpdater()` in `index.ts` before `registerIpc`. Off (with the reason Settings
+shows) in a development build (`!app.isPackaged`), with `MASTERDECK_UPDATES=0`, on Linux, and on a
+Mac app run from `/Volumes/…` or App Translocation. `start()` (after `sources.start()`, not in
+`MASTERDECK_SMOKE`) reads what the last install left, checks 30 s later and every 6 h; **Check for
+updates** and the menu item check at once; another `updateChannel` checks again. The server is
+`MASTERDECK_UPDATE_URL` when it passes `validBackendUrl` (https, or http on localhost), else the
+remote URL (`remoteUrl`). The check is `GET <base>/v1/updates/check?version&platform&arch&channel&id`
+with a 20 s timeout through `net.fetch`: `204` up to date, `200` an offer, a thrown fetch `offline`,
+anything else `check`. An offer not above this version, or the version a rollback skipped, counts as
+up to date. A ready update stays ready through later checks; only a newer offer replaces it. With
+`autoDownloadUpdates` (default on) an offer downloads at once, else it waits for **Download**.
+
+**macOS.** `prepare`: the zip goes to `<userData>/updates/<version>/<name>`, hashed (SHA-512) as it
+streams, stopped when it grows past the offer's size; then the hash, size and the Ed25519 signature
+of `signedMessage({version, platform: 'darwin', arch, name, sha512})` are checked against the built-in
+key. Any failure deletes the folder (`verify`). Then `ditto -x -k` into `<version>/stage/`, the
+staged `MasterDeck.app/Contents/Info.plist` must say the offer's version (else `verify`), quarantine
+is cleared → `ready`; `needsAdmin` when the bundle or its folder is not writable. **Restart now**
+(`restartToUpdate`: a recording asks first, as Restart does) writes `update-helper.sh` (temp file +
+rename) and `pending.json` (`{version, from, at}`), starts the helper detached and calls
+`app.quit()` (will-quit still closes terminals and the remote line). A normal quit with an update
+ready runs the helper without a relaunch (`onQuit` in will-quit), unless it needs a password.
+
+The helper (`update-helper.sh install <pid> <app> <staged> <dir> <version> <from> <relaunch>`):
+1. waits up to 120 s for the old pid to exit (else `result.json {ok:false, reason:"still-running"}`, nothing touched);
+2. swaps: staged → `.MasterDeck.app.new` next to the app, `MasterDeck.app` → `.MasterDeck.app.previous`, `.new` → `MasterDeck.app`, clears quarantine. When the folder is not writable the helper runs itself (`swap`, `restore`) as root through `osascript … with administrator privileges`; a cancel (`-128`) is `reason: "permission"` and the old app is opened again;
+3. without relaunch: removes the backup, writes `{ok:true, from, version}`, done;
+4. opens the app and waits up to 60 s for `<dir>/healthy-<version>`; a second launch if not; still nothing → kills it (`pkill -f <app>/Contents/MacOS/`), puts the backup back, writes `{ok:false, reason:"unhealthy"}` and opens the previous app. On success it removes the backup and writes `{ok:true, …}`.
+
+The new app writes `healthy-<version>` 10 s after its window's `did-finish-load` when `pending.json`
+names its version (`Updater.windowLoaded`), then reads `result.json` 3 s and 15 s later. At launch
+`readLaunchFiles` reads `result.json` once and removes it: ok → `updatedFrom`; `unhealthy` →
+`rolledBack`, kept in `rolled-back.json` so that version is skipped until a newer one; other reasons
+→ an `install` / `permission` error. Stale `<version>/` folders are removed at launch. Stand-ins for
+the helper's tests: `MD_OPEN`, `MD_OSASCRIPT`, `MD_KILL`, `MD_XATTR`, `MD_PID_WAIT`,
+`MD_HEALTH_WAIT`, `MD_POLL`.
+
+**Windows.** `WinInstaller.prepare` makes an `NsisUpdater` on the feed
+`<base>/v1/updates/feed/<channel>/<install id>/` (the server's rollout decides), `autoDownload`,
+`autoInstallOnAppQuit` and `allowDowngrade` off; the feed's version must equal the offer's; after
+`downloadUpdate()` the installer file's hash and signature (`platform: 'win32'`) are checked (a
+failure deletes it), then `autoInstallOnAppQuit` goes on. **Restart now** is
+`quitAndInstall(true, true)`. No rollback on Windows (ponytail in `updateWin.ts`).
+
+**IPC.** `update:state`, `update:check`, `update:download`, `update:restart`, `update:later`; events
+`update:changed` (the whole `UpdateState`) and `update:open` (the menu's Check for Updates…: show
+Settings → Updates). Settings: `autoDownloadUpdates` (true), `updateChannel` (`'stable'` | `'beta'`).
+
 ## Shared modules (`shared/`)
 
 Pure TypeScript, no electron/node imports in the types, tested with vitest. The main groups:
@@ -1880,3 +1948,9 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 Elsewhere: `~/.claude/settings.json` (hooks, status line), `~/.claude/skills/` (bundled skills),
 `~/.claude/master/{config.json,ledger.json}` (plus `config.backup.<ts>.json`, written once before the first-launch accounts migration), `~/.claude/queue/` (or `MASTERDECK_QUEUE_DIR`), `~/.claude/babysit-ticket/`,
 `~/.claude/gh-cache/`, `~/.claude/projects/` (transcripts, read-only), Electron user data.
+
+In Electron's user data (`MASTERDECK_USER_DATA`), `updates/` (in-app updates, issue #122):
+`install-id` (random UUID, the server's rollout bucket), `<version>/` (the download and its
+`stage/MasterDeck.app`; removed at the next launch), `update-helper.sh`, `helper.log`, `pending.json`
+(the version being installed), `healthy-<version>` (the new app's health marker), `result.json` (the
+helper's outcome, read once), `rolled-back.json` (the skipped version).
