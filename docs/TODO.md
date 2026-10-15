@@ -840,6 +840,39 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   real bridge, a real phone, Windows (paths with `\`: `insideRoot` refuses them), a very large repo
   (50,000-path list, `git status` time).
 
+## In-app updates (#122): open points (2026-10-16)
+
+- **P1 · The first real release.** The service is live (2026-10-16: R2 bucket `masterdeck-releases`,
+  migration 0006 remote, `RELEASE_ADMIN_TOKEN` on the Worker and in GitHub, `RELEASE_SIGNING_KEY` in
+  GitHub, the backend deployed from branch `122-update-service`, version 004ba60c; the check
+  answers 204, admin routes 401 without the token and an empty list with it, `/v1/*` still 401).
+  The first tagged release (with this PR merged) is the workflows' first real run and the first
+  real upload to R2 (90 MB parts). Installs before it (0.9.0 and older) have no updater: they need
+  one more manual update.
+- **P1 · Not checked for real.** End to end ran locally (OPERATIONS "Testing in-app updates":
+  0.9.0 → 0.9.1 / 0.9.2 in place, a broken 0.9.3 rolled back), but before the final review's
+  fixes, and never against real Cloudflare. Still to run: the real `osascript` password prompt
+  (the root command's quoting was checked only through a `/bin/sh` stand-in, as the same user),
+  and Windows (`NsisUpdater` against the
+  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, deployed 2026-10-16).
+- **P2 · The backup stays after an admin install.** With the password path the helper does not
+  remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
+- **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
+  that did not quit in time show an error and offer the update again (not skipped).
+- **P2 · Install on quit has no automatic rollback.** The helper keeps `.MasterDeck.app.previous`
+  and the new app removes it once healthy (`removeMacBackup`), but nothing watches that launch: a
+  new version that never comes up leaves the user on it, with the backup beside it to put back by
+  hand. Upgrade path: a launch agent (or the next helper) that rolls back when no health marker
+  appears after the next open.
+- **P3 · A reopen just after the still-running check.** The helper checks that nothing runs from
+  the bundle right before the swap; an app opened in the second between that check and the
+  renames still runs from the moved bundle (the next quit's install would then find it fine).
+- **P3 · The update-test build flag.** `MASTERDECK_UPDATE_TEST_BUILD=1` must never be set for a
+  release build (release.yml does not set it); nothing checks that a published build was made
+  without it.
+- **P3 · Mandatory updates follow the auto-download setting**; the spec leaves open whether a
+  required update should download even with it off.
+
 ## Held messages (#123): open points (2026-10-16)
 
 - Commands MasterDeck sends (`/compact`, `/reload-plugins`) still take the guarded typing path; the

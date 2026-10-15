@@ -36,8 +36,9 @@ export function sessionFileCall(
  */
 export function remoteSettings(patch: unknown, current: object): Record<string, unknown> {
   const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? (patch as Record<string, unknown>) : {}
-  const c = current as { remoteEnabled?: unknown; theme?: unknown }
-  return { ...current, ...p, remoteEnabled: c.remoteEnabled, theme: c.theme }
+  const c = current as { remoteEnabled?: unknown; theme?: unknown; autoDownloadUpdates?: unknown; updateChannel?: unknown }
+  // A browser never updates the Mac, so it never changes how the Mac updates either.
+  return { ...current, ...p, remoteEnabled: c.remoteEnabled, theme: c.theme, autoDownloadUpdates: c.autoDownloadUpdates, updateChannel: c.updateChannel }
 }
 
 /** Only dirs the deck already knows (workspace repos, session cwds); path.resolve normalises trailing slashes and `..`. */
@@ -124,6 +125,28 @@ export function inboxActCall(
   // A meeting is opened, matched or transcribed again from the Mac's window only (meetings:* are blocked for a browser).
   if (remote && (type === 'rematch' || type === 'retry' || (type === 'open' && id.startsWith('meeting:')))) return { ok: false, message: 'Do this in MasterDeck on the Mac.' }
   return { ok: true, id, type, payload: payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {} }
+}
+
+/** The part of the Updater the update:* handlers call (main/updater.ts). */
+interface UpdaterCalls {
+  state(): unknown
+  check(): Promise<unknown>
+  download(): Promise<unknown>
+  remindLater(): unknown
+}
+
+/**
+ * update:* (in-app updates, #122): the Mac's window only. DECK_ACCESS blocks them for the web; a
+ * call that reaches main from a browser anyway gets null (Restart: a refusal) and runs nothing.
+ */
+export function updateHandlers(updater: () => UpdaterCalls | null, restart: () => Promise<{ ok: boolean; message?: string }>) {
+  return {
+    state: async (remote: boolean) => (remote ? null : (updater()?.state() ?? null)),
+    check: async (remote: boolean) => (remote ? null : ((await updater()?.check()) ?? null)),
+    download: async (remote: boolean) => (remote ? null : ((await updater()?.download()) ?? null)),
+    later: async (remote: boolean) => (remote ? null : (updater()?.remindLater() ?? null)),
+    restart: async (remote: boolean) => (remote ? { ok: false, message: "Updates are the Mac's own" } : restart()),
+  }
 }
 
 /**

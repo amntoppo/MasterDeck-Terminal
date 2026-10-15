@@ -1,4 +1,10 @@
 import { parseIdentity, remoteUrl } from "@shared/account";
+import { releaseKey, updateBase } from "@shared/releaseKey";
+import type { UpdateState } from "@shared/updates";
+import { Updater, updatesOffReason } from "./updater";
+import { MacInstaller, macBundle, macDisabledReason, removeMacBackup } from "./updateMac";
+import { nsisUpdater, WinInstaller } from "./updateWin";
+import { macMenuTemplate, updateMenuLabel } from "./appMenu";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
@@ -6,7 +12,7 @@ import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
 import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -34,6 +40,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
   net,
   nativeTheme,
   Notification,
@@ -106,7 +113,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, updateHandlers, worktreeFolder } from "./remoteGuards";
 import { SessionFiles } from "./sessionFiles";
 import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
@@ -2774,8 +2781,17 @@ function registerIpc(): void {
     );
     // Your microphone (follow / always) applies to a recording running now.
     meetings.settingsChanged();
+    // Another update channel checks again; automatic downloads switched on take a waiting offer.
+    updater?.settingsChanged(cur, saved);
     return saved;
   });
+  // In-app updates: the Mac's window only (DECK_ACCESS blocks them; refused here too: updateHandlers).
+  const upd = updateHandlers(() => updater, restartToUpdate);
+  reg.handle(CH.updateState, (e) => upd.state(isRemote(e)));
+  reg.handle(CH.updateCheck, (e) => upd.check(isRemote(e)));
+  reg.handle(CH.updateDownload, (e) => upd.download(isRemote(e)));
+  reg.handle(CH.updateRestart, (e) => upd.restart(isRemote(e)));
+  reg.handle(CH.updateLater, (e) => upd.later(isRemote(e)));
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"
       ? id.startsWith("pr:")
@@ -3596,6 +3612,118 @@ const themeBg = (): string =>
   resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
     .tokens.bg;
 
+// In-app updates (#122; docs/ARCHITECTURE.md "In-app updates"): macOS's own updater (updateMac.ts
+// and the helper script) or electron-updater on Windows. Its state is not in AppState: it reaches
+// the window through update:* only, and a browser never sees or drives it (DECK_ACCESS: blocked).
+let updater: Updater | null = null;
+// MasterDeck's own Restart (app.relaunch): the quit must not install a ready update, or the helper
+// would swap the bundle under the relaunched app.
+let relaunching = false;
+
+// electron.vite.config.ts defines it: true only in a build made with MASTERDECK_UPDATE_TEST_BUILD=1.
+declare const __MD_UPDATE_TEST__: boolean;
+const UPDATE_TEST_BUILD = typeof __MD_UPDATE_TEST__ !== "undefined" && __MD_UPDATE_TEST__ === true;
+
+function makeUpdater(): Updater {
+  const dir = join(app.getPath("userData"), "updates");
+  const mac = process.platform === "darwin";
+  const bundle = mac ? macBundle(app.getPath("exe")) : null;
+  const disabledReason = updatesOffReason({
+    env: process.env,
+    packaged: app.isPackaged,
+    platform: process.platform,
+    macReason: mac ? macDisabledReason(bundle) : null,
+  });
+  // The test overrides (a test key, a local service) only in an update-test build (releaseKey.ts).
+  const build = { testBuild: UPDATE_TEST_BUILD, env: process.env };
+  const base = updateBase({ ...build, packaged: app.isPackaged });
+  const publicKey = releaseKey(build);
+  const u = new Updater({
+    current: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    dir,
+    base,
+    disabledReason,
+    // Electron's network stack: the system's proxy and certificates.
+    fetch: (url, init) => net.fetch(url, init),
+    settings: () => sources.getSettings(),
+    // After an install on quit, the healthy new version removes the copy the helper kept.
+    removeBackup: bundle ? () => void removeMacBackup(bundle, app.getVersion()) : undefined,
+    installer: (id) =>
+      process.platform === "win32"
+        ? new WinInstaller({
+            base,
+            channel: () => sources.getSettings().updateChannel,
+            id,
+            current: app.getVersion(),
+            arch: process.arch,
+            publicKey,
+            make: nsisUpdater,
+          })
+        : new MacInstaller({
+            dir,
+            bundle: bundle ?? "",
+            arch: process.arch,
+            current: app.getVersion(),
+            publicKey,
+            pid: process.pid,
+            fetch: (url, init) => net.fetch(url, init),
+            run: (cmd, args) => run(cmd, args, { timeoutMs: 600_000 }),
+            spawnDetached: (cmd, args) =>
+              spawn(cmd, args, { detached: true, stdio: "ignore" }).unref(),
+            // quit, not exit: will-quit still closes the terminals and the remote line.
+            quit: () => app.quit(),
+          }),
+  });
+  u.on((s) => {
+    win?.webContents.send(CH.updateChanged, s);
+    setAppMenu(s);
+  });
+  return u;
+}
+
+/** Restart now (Settings, the ready prompt, the app menu): a recording asks first, as Restart does. */
+async function restartToUpdate(): Promise<{ ok: boolean; message?: string }> {
+  if (!updater) return { ok: false, message: "Updates are not running" };
+  if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart")))
+    return { ok: false, message: "Kept recording" };
+  return updater.restart();
+}
+
+/** The app menu's Check for Updates…: show Settings → Updates and check. */
+function checkFromMenu(): void {
+  if (!win) createWindow();
+  else {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  win?.webContents.send(CH.updateOpen);
+  void updater?.check();
+}
+
+let menuLabel = "";
+/** macOS: Electron's default menu plus the update item (appMenu.ts); rebuilt when the item's label changes. */
+function setAppMenu(s: UpdateState | null): void {
+  if (process.platform !== "darwin") return;
+  const label = updateMenuLabel(s?.phase ?? "idle");
+  if (label === menuLabel) return;
+  menuLabel = label;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      macMenuTemplate(app.name, {
+        updateLabel: label,
+        onUpdate: () => {
+          if (updater?.state().phase === "ready") void restartToUpdate();
+          else checkFromMenu();
+        },
+        openUrl: (url) => void shell.openExternal(url),
+      }),
+    ),
+  );
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -3616,6 +3744,8 @@ function createWindow(): void {
   win.on("ready-to-show", () => {
     if (!SMOKE) win?.show();
   });
+  // An update's first launch says it is healthy 10 s after this (the helper waits for it).
+  win.webContents.once("did-finish-load", () => updater?.windowLoaded());
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -3777,6 +3907,7 @@ const meetings = new MeetingsIpc({
     // only once the quit can no longer be refused, so a "Keep recording" leaves no relaunch behind.
     if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart"))) return false;
     // quit, not exit: will-quit still closes the terminals and the remote line.
+    relaunching = true;
     app.relaunch();
     app.quit();
     return true;
@@ -3962,6 +4093,8 @@ app.whenReady().then(async () => {
   }
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
+  updater = makeUpdater();
+  setAppMenu(updater.state());
   registerIpc();
   // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
   // session only: the capture window's partition has no such scheme, and the web bridge never relays it.
@@ -4177,6 +4310,8 @@ app.whenReady().then(async () => {
   sources.start();
   // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
   applyNativeTheme(sources.getSettings().theme);
+  // Updates: what the last install left, then a check in 30 s and every 6 h (settings are read now).
+  if (!SMOKE) updater?.start();
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {
@@ -4240,6 +4375,10 @@ app.on("before-quit", (e) => {
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
+  // macOS: a ready update is swapped in after this quit (no relaunch); a Restart now is already under
+  // way; MasterDeck's own Restart (a relaunch) leaves it for the next quit.
+  updater?.onQuit(relaunching);
+  updater?.stop();
   cloud?.stop();
   peerStore.flush();
   sender.killAll();

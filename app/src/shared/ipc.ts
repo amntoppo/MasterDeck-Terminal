@@ -10,6 +10,7 @@ import type { SubIssue } from "./subIssues";
 import type { WatchEvent } from "./watches";
 import type { PrDetail } from "./prDetail";
 import type { Settings } from "./settings";
+import type { UpdateState } from "./updates";
 import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
 import type { ModelOp, ModelProgress, ModelsAnswer } from "./meetingModels";
 import type { MuteCheckAnswer } from "./meetingMute";
@@ -273,6 +274,13 @@ export const CH = {
   accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
+  updateState: "update:state",
+  updateCheck: "update:check",
+  updateDownload: "update:download",
+  updateRestart: "update:restart",
+  updateLater: "update:later",
+  updateChanged: "update:changed",
+  updateOpen: "update:open",
   hoursActivity: "costs:hoursActivity",
   hoursExport: "costs:hoursExport",
   dismissStopped: "session:dismissStopped",
@@ -605,6 +613,23 @@ export interface DeckApi {
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */
   tokensByDay(sessionIds: string[]): Promise<Record<string, TokensByDay>>;
+  /**
+   * In-app updates (Settings → Updates; the Mac's window only, never a browser). The state is not in
+   * AppState: read it here and follow onUpdateChanged.
+   */
+  updateState(): Promise<UpdateState>;
+  /** Check for updates now (with automatic downloads on, an offer downloads at once). */
+  updateCheck(): Promise<UpdateState>;
+  /** Download the offered update (automatic downloads off), or try a failed download again. */
+  updateDownload(): Promise<UpdateState>;
+  /** Restart now: install the ready update and relaunch (asks first while a meeting is recorded). */
+  updateRestart(): Promise<{ ok: boolean; message?: string }>;
+  /** Remind me later: no ready prompt for four hours (this run only). */
+  updateLater(): Promise<UpdateState>;
+  /** The update state changed (phase, progress, offer …). */
+  onUpdateChanged(cb: (s: UpdateState) => void): () => void;
+  /** The app menu's Check for Updates… was chosen: show Settings → Updates. */
+  onUpdateOpen(cb: () => void): () => void;
   /** When each of these sessions was active since `since` (epoch ms; sessions with nothing since left out), and the account its time goes to (the Costs view's Hours; the window only). */
   hoursActivity(sessionIds: string[], since: number): Promise<Record<string, SessionActivity>>;
   /** Save this CSV where the user picks (a save dialog, `name` its suggested file name); the path, or null when cancelled. */

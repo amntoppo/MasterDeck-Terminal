@@ -188,6 +188,7 @@ web tabs keep working.
 | Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
 | A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
+| In-app updates (#122: check, download, verify, install; Settings → Updates; the app menu) | `shared/updates.ts` (model, `compareVersions`, `signedMessage`, `statusLine`, `shouldPrompt`, `badge`), `shared/releaseKey.ts` (the public key; `releaseKey` / `updateBase`: `MASTERDECK_UPDATE_PUBKEY` and `MASTERDECK_UPDATE_URL` only in an update-test build, `MASTERDECK_UPDATE_TEST_BUILD=1` → define `__MD_UPDATE_TEST__`), `shared/updateHelper.ts` (the macOS helper script, bash 3.2), `main/updater.ts` (`Updater`, `updatesOffReason`), `main/updateMac.ts` (`MacInstaller`), `main/updateWin.ts` (`WinInstaller`, `electron-updater` on win32 only), `main/updateVerify.ts` (hash + Ed25519), `main/appMenu.ts`, `makeUpdater` / `restartToUpdate` / `setAppMenu` and the `update:*` handlers in `main/index.ts`; files in `<userData>/updates/`. Never in `AppState`; every `update:*` is `blocked` for the web. Off unless packaged; `MASTERDECK_UPDATES=0` turns it off; the `update:*` handlers are `updateHandlers` in `main/remoteGuards.ts`; MasterDeck's own Restart (`relaunching`) never installs on quit |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -410,6 +411,29 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-16)
+
+- **In-app updates (#122)** are built on branch `worktree-MasterDeck-Terminal-122-in-app-updates`
+  (PR #128, not merged, not installed, nothing published or deployed), with the code review's fixes: no
+  install on quit for MasterDeck's own Restart and none while the app runs from the bundle; the
+  backup kept after an install on quit and removed by the healthy new app; the administrator path
+  runs only inline root commands that unpack the verified zip again (never the helper file or the
+  staged copy); the test key and update URL only in an update-test build
+  (`MASTERDECK_UPDATE_TEST_BUILD=1`); the publish script checks the key against the app's, skips
+  files already uploaded (same size and sha512 only; a published file with another hash stops it)
+  and runs after the GitHub attach; the final review's fixes: the running check again right before
+  the renames (also as root, after the password prompt), Windows' install on quit off for a
+  relaunch, a channel change during a failed Restart now checked at once. A new GitHub release is
+  published as an update by `.github/workflows/ota-release.yml` (on `release: published`, called by
+  `release.yml` after it attaches the files, or by hand). Backend: branch `122-update-service`
+  (backend PR #12, not merged; **deployed from that branch 2026-10-16** with the R2 bucket,
+  migration 0006, the Worker secret and both GitHub secrets: the update service is live, nothing
+  published yet). Checked: typecheck, vitest (the helper with nasty paths
+  through a `/bin/sh` stand-in for osascript), actionlint, the OTA download step against the real
+  v0.9.0 release (read only), and end to end (OPERATIONS "Testing in-app updates") before the final
+  review's fixes: local `wrangler dev`, packaged builds in a temp folder, 0.9.0 → 0.9.1 and 0.9.0 →
+  0.9.2 in place, a broken 0.9.3 rolled back to 0.9.2 and skipped. Not checked: real R2 and
+  Cloudflare, the workflows on GitHub Actions, the real password prompt, Windows. Open points: TODO
+  ("In-app updates (#122)").
 
 - **Why the mic did not follow Meet's mute (#102)** is built on branch
   `worktree-MasterDeck-Terminal-102-mute-check` (from `main` 7c346e2; PR #125, not merged;

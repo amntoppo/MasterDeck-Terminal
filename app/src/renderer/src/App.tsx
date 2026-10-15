@@ -43,6 +43,9 @@ import { LinkDialog } from "./components/LinkDialog";
 import { MasterPane, masterPaneId } from "./components/MasterPane";
 import { ConnectGithub } from "./components/ConnectGithub";
 import { RestoreBanner } from "./components/RestoreBanner";
+import { UpdateBanner, UpdatePrompt } from "./components/Updates";
+import { useUpdate } from "./updates";
+import { badge } from "@shared/updates";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -279,6 +282,18 @@ export function App() {
     return deck().onMeetingsShowRecord(() => setRecordOpen(true));
   }, []);
   const notes = useNotes(!!state);
+  // In-app updates (#122): the window only (null on the web).
+  const update = useUpdate();
+  const openUpdates = () => {
+    setNotesAt(null);
+    setSettingsAt({ section: "updates", at: Date.now() });
+    setView("settings");
+  };
+  // The app menu's Check for Updates… / Restart to Update…: show Settings → Updates.
+  useEffect(() => {
+    if (isWeb() || !can("onUpdateOpen")) return;
+    return deck().onUpdateOpen(openUpdates);
+  }, []);
   // The Terminals screen's right panel: its tab (Details, Tools, Summary) and whether it shows.
   const [inspTab, setInspTab] = useState<InspectorTab>(() =>
     load<InspectorTab>("inspTab", "details"),
@@ -1136,6 +1151,7 @@ export function App() {
           setView("settings");
         }}
         onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
+        update={update ? badge(update) : null}
         needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
         prAttention={
           state.inbox.open.filter((e) => e.item.detail.type === "offer")
@@ -1270,6 +1286,7 @@ export function App() {
           onSetup={() => setDialog("setup")}
           onSkills={() => setDialog("skills")}
           initial={settingsAt}
+          update={update}
         />
       )}
 
@@ -1277,6 +1294,7 @@ export function App() {
         {state.missingBinaries.includes("claude") && (
           <div className="banner">`claude` was not found on PATH.</div>
         )}
+        <UpdateBanner u={update} onOpen={openUpdates} />
         <RestoreBanner state={state} />
         {phone && (
           <div className="phone-head">
@@ -1676,6 +1694,7 @@ export function App() {
       )}
       {can("browserDecide") && <BrowserApproval state={state} />}
       <WebConfirm />
+      <UpdatePrompt u={update} />
       {/* Last on purpose: Electron applies drag and no-drag regions in DOM order, so a button placed
           before the headers under it (drag regions for moving the window) could not be clicked. */}
       {useMaster && (
