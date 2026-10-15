@@ -1,0 +1,135 @@
+name: OTA release
+
+# Publishes a GitHub release as an in-app update (OTA): takes the update files attached to the
+# release (the mac zips, the Windows EXE and its blockmap), signs them with the release key and
+# registers them with the MasterDeck update service (app/scripts/release-publish.mjs). From then on
+# every MasterDeck finds it (Settings → Updates). docs/OPERATIONS.md § Release.
+#
+# It runs:
+# - when a release is published on GitHub (by hand, or by anything using a token other than
+#   GITHUB_TOKEN). A release still without its files (release.yml is building them) is skipped:
+#   release.yml calls this workflow itself once they are attached;
+# - from release.yml, after it attached the files (a release made with GITHUB_TOKEN starts no
+#   other workflow, so the event above never fires for it);
+# - by hand (Run workflow), for an existing release: to publish again, or with a staged rollout.
+# Running twice is safe: files already stored are skipped and an identical publish changes nothing.
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      RELEASE_ADMIN_TOKEN:
+        required: true
+      RELEASE_SIGNING_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release to publish as an update, like v0.10.0'
+        required: true
+      rollout:
+        description: 'Percent of installs that get it at first (0-100; raise it later with PATCH)'
+        required: false
+        default: '100'
+      min_supported:
+        description: 'Optional: installs below this version must update (a Required update)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ota-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release and its update files
+        id: meta
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::not a release tag: $TAG"
+            exit 1
+          fi
+          version="${TAG#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          mkdir -p assets
+          # GitHub turns the spaces of "MasterDeck Setup <v>.exe" into dots.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D assets \
+            -p "MasterDeck-$version-arm64-mac.zip" -p "MasterDeck-$version-mac.zip" \
+            -p "MasterDeck.Setup.$version.exe" -p "MasterDeck.Setup.$version.exe.blockmap" || true
+          missing=""
+          for f in "MasterDeck-$version-arm64-mac.zip" "MasterDeck-$version-mac.zip" \
+                   "MasterDeck.Setup.$version.exe" "MasterDeck.Setup.$version.exe.blockmap"; do
+            [ -s "assets/$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            if [ "$GITHUB_EVENT_NAME" = release ]; then
+              # Published before its files: release.yml attaches them and then runs this itself.
+              echo "::notice::$TAG has no update files yet ($missing); release.yml publishes the update once they are attached."
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::$TAG lacks update files:$missing"
+            exit 1
+          fi
+          mv "assets/MasterDeck.Setup.$version.exe" "assets/MasterDeck-Setup-$version.exe"
+          mv "assets/MasterDeck.Setup.$version.exe.blockmap" "assets/MasterDeck-Setup-$version.exe.blockmap"
+          # The update's notes: .github/releases/v<version>.md (read below, from the tag), else
+          # the GitHub release's text, else "MasterDeck <version>".
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          ls -l assets
+      - uses: actions/checkout@v4
+        if: steps.meta.outputs.skip != '1'
+        with:
+          # The tag's own script and release key: the key check compares with the app being shipped.
+          ref: refs/tags/${{ env.TAG }}
+          path: src
+      - uses: actions/setup-node@v4
+        if: steps.meta.outputs.skip != '1'
+        with:
+          node-version: 22
+      - name: Check the version and pick the notes
+        if: steps.meta.outputs.skip != '1'
+        id: notes
+        run: |
+          version="${TAG#v}"
+          pkg="$(node -p "require('./src/app/package.json').version")"
+          if [ "$version" != "$pkg" ]; then
+            echo "::error::release $TAG does not match app/package.json's version $pkg"
+            exit 1
+          fi
+          notes="$RUNNER_TEMP/update-notes.md"
+          if [ -f "src/.github/releases/v$version.md" ]; then
+            cp "src/.github/releases/v$version.md" "$notes"
+          elif grep -q '[^[:space:]]' "$RUNNER_TEMP/body.md"; then
+            cp "$RUNNER_TEMP/body.md" "$notes"
+          else
+            echo "MasterDeck $version" > "$notes"
+          fi
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          echo "Update notes:"
+          cat "$notes"
+      - name: Publish the update
+        if: steps.meta.outputs.skip != '1'
+        run: |
+          args=(--dir assets --version "${TAG#v}" --notes "$RUNNER_TEMP/update-notes.md")
+          if [ -n "$ROLLOUT" ]; then args+=(--rollout "$ROLLOUT"); fi
+          if [ -n "$MIN_SUPPORTED" ]; then args+=(--min-supported "$MIN_SUPPORTED"); fi
+          node src/app/scripts/release-publish.mjs "${args[@]}"
+        env:
+          ROLLOUT: ${{ inputs.rollout }}
+          MIN_SUPPORTED: ${{ inputs.min_supported }}
+          RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

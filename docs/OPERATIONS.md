@@ -60,7 +60,7 @@ and v0.8.1 had no Windows build).
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock
 cd .. && $EDITOR .github/releases/vX.Y.Z.md         # optional: the update's notes (see below)
 git add app/package.json app/package-lock.json .github/releases && git commit -m "Version X.Y.Z"
-git tag -a vX.Y.Z -m "MasterDeck X.Y.Z"             # an annotated tag's message is the fallback notes
+git tag -a vX.Y.Z -m "MasterDeck X.Y.Z"
 git push origin main && git push origin vX.Y.Z
 ```
 
@@ -74,12 +74,25 @@ an existing tag):
 
 1. **build** (mac and win, the same steps as `ci.yml`, `--publish never`) uploads the DMGs, the mac
    zips, the EXE, the blockmaps and `latest*.yml` as artifacts.
-2. **publish** (ubuntu) checks the tag against `app/package.json`'s version, picks the update's
-   notes (`.github/releases/v<version>.md`, else the annotated tag's message, else
-   `MasterDeck <version>`; see [.github/releases/README.md](../.github/releases/README.md)),
-   attaches the DMGs and EXE to the GitHub release with `.github/release-notes.md` as the body (the
-   install page, as before), and only then runs `app/scripts/release-publish.mjs`, so a live update
-   always has its installers on GitHub.
+2. **release** (ubuntu) checks the tag against `app/package.json`'s version and attaches the DMGs
+   and EXE (new installs) and the update files (the two mac zips, the EXE's `.blockmap`) to the
+   GitHub release, with `.github/release-notes.md` as the body.
+3. **ota** calls `.github/workflows/ota-release.yml` (below), last, so a live update always has its
+   installers on GitHub.
+
+**OTA release** (`.github/workflows/ota-release.yml`) publishes a GitHub release as an in-app
+update. It runs when a release is **published** on GitHub, when `release.yml` calls it, and by hand
+(**Run workflow** with the tag, and optionally a starting rollout percent and a minimum supported
+version). It downloads the update files from the release (GitHub names the EXE
+`MasterDeck.Setup.<v>.exe`; it is renamed back), checks out the tag (its `release-publish.mjs` and
+its `releaseKey.ts`, so the key check is against the app being shipped), checks the version, picks
+the update's notes (`.github/releases/v<version>.md`, else the GitHub release's text, else
+`MasterDeck <version>`; see [.github/releases/README.md](../.github/releases/README.md)) and runs
+`app/scripts/release-publish.mjs`. A release published before its files are attached (by hand,
+while `release.yml` is still building) is skipped with a notice: `release.yml` calls the workflow
+itself once they are there. A release that `release.yml` makes with `GITHUB_TOKEN` starts no
+other workflow, which is why it calls this one directly. Running it twice is safe. Drafts are never
+published (GitHub sends `published` only when a draft is published).
 
 `release-publish.mjs` first refuses a signing key whose public key is not the app's
 (`RELEASE_PUBLIC_KEY` read out of `app/src/shared/releaseKey.ts`; `--expect-key <b64>` names

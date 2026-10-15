@@ -94,15 +94,22 @@ when the secret is unset; also registered before the auth middleware)
   generic provider (`https://dev.masterdeck.dev/v1/updates/stable`) so `app-update.yml`,
   `latest.yml` and the NSIS `.blockmap` are produced; `--publish never` still stops uploads.
 - `.github/workflows/release.yml` on tags `v*`: build mac and win (the same steps as `ci.yml`),
-  then a publish job: `node app/scripts/release-publish.mjs` computes sha512 and size, signs with
-  `RELEASE_SIGNING_KEY`, uploads to R2 through the admin upload routes (`MD_RELEASE_API`, default
-  `https://dev.masterdeck.dev`, `RELEASE_ADMIN_TOKEN`) and registers the release. The DMGs and EXE
-  are attached to the GitHub release (with `.github/release-notes.md`) **before** the script runs,
-  so a live update always has its installers on GitHub. The script refuses a signing key whose
+  attach the DMGs, the EXE and the update files (mac zips, the EXE's blockmap) to the GitHub
+  release (with `.github/release-notes.md`), then call `.github/workflows/ota-release.yml`.
+- `.github/workflows/ota-release.yml` (added 2026-10-16 at the user's request: an OTA publish for
+  every new release) runs when a GitHub release is published, when `release.yml` calls it (a
+  release made with `GITHUB_TOKEN` starts no other workflow) and by hand (tag, rollout, minimum
+  version). It downloads the update files from the release (a release still without them is
+  skipped: `release.yml` calls it once they are attached), checks out the tag and runs
+  `node app/scripts/release-publish.mjs`: sha512 and size, signs with `RELEASE_SIGNING_KEY`,
+  uploads to R2 through the admin upload routes (`MD_RELEASE_API`, default
+  `https://dev.masterdeck.dev`, `RELEASE_ADMIN_TOKEN`) and registers the release; the installers
+  are on GitHub before that, so a live update always has them. The script refuses a signing key whose
   public key is not the app's (`releaseKey.ts`; `--expect-key <b64>` for a test key) and an empty
   file, and skips a file `HEAD /v1/updates/files/<key>` already serves with the same size (a
   re-run reaches the idempotent publish instead of a `409`). Release notes for the update:
-  `.github/releases/v<version>.md` when present, else the tag's message, else "MasterDeck <v>".
+  `.github/releases/v<version>.md` when present, else the GitHub release's text, else
+  "MasterDeck <v>".
   `--dry-run` signs and prints the manifest without network calls. `ci.yml` no longer attaches on
   tags.
 - `install.sh` and the DMG on GitHub Releases keep working for new installs.

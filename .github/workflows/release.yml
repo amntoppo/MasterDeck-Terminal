@@ -1,7 +1,7 @@
 name: Release
 
-# A tag v* builds the installers, publishes the update to the MasterDeck update service (signed,
-# through app/scripts/release-publish.mjs) and attaches the DMGs and the EXE to the GitHub release.
+# A tag v* builds the installers, attaches them and the update files to the GitHub release, then
+# runs ota-release.yml, which publishes the in-app update (signed, app/scripts/release-publish.mjs).
 # ci.yml does not run on tags, so a tag is built once. docs/OPERATIONS.md § Release.
 on:
   push:
@@ -87,63 +87,50 @@ jobs:
             app/dist/*.blockmap
             app/dist/latest*.yml
 
-  publish:
+  release:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # One folder per build job (artifacts/masterdeck-<os>/); the script searches below --dir.
+      # One folder per build job (artifacts/masterdeck-<os>/).
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Version and update notes
-        id: meta
+      - name: Check the version
         run: |
-          version="${TAG#v}"
           pkg="$(node -p "require('./app/package.json').version")"
-          if [ "$version" != "$pkg" ]; then
+          if [ "${TAG#v}" != "$pkg" ]; then
             echo "::error::tag $TAG does not match app/package.json's version $pkg"
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          # The update's notes: .github/releases/v<version>.md, else an annotated tag's message,
-          # else "MasterDeck <version>".
-          notes="$RUNNER_TEMP/update-notes.md"
-          if [ -f ".github/releases/v$version.md" ]; then
-            cp ".github/releases/v$version.md" "$notes"
-          else
-            git fetch --force --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-            if [ "$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)')" = tag ]; then
-              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG" > "$notes"
-            fi
-            if ! grep -q '[^[:space:]]' "$notes" 2>/dev/null; then
-              echo "MasterDeck $version" > "$notes"
-            fi
-          fi
-          echo "notes=$notes" >> "$GITHUB_OUTPUT"
-          echo "Update notes:"
-          cat "$notes"
-      # Attached first: a live update always has its DMGs and EXE on GitHub for new installs. A
-      # re-run after a failed publish skips files already uploaded and re-registers idempotently.
+      # The DMGs and EXE for new installs, and the update files (the mac zips, the EXE's blockmap)
+      # that ota-release.yml publishes as the in-app update. Attached first, so a live update always
+      # has its installers on GitHub.
       - name: Attach to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          # How to install (the one-line macOS installer first), on every release.
+          # How to install and what's new, on every release; also the in-app update's notes unless
+          # .github/releases/v<version>.md exists.
           body_path: .github/release-notes.md
           # A beta tag (v0.10.0-beta.1) is a prerelease, so install.sh's "latest" stays stable.
           prerelease: ${{ contains(env.TAG, '-') }}
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.exe
-      # Registering the update makes it live for every install: last, once the files are on GitHub.
-      - name: Publish the update
-        run: node app/scripts/release-publish.mjs --dir artifacts --version "${{ steps.meta.outputs.version }}" --notes "${{ steps.meta.outputs.notes }}"
-        env:
-          RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+            artifacts/**/*-mac.zip
+            artifacts/**/*.exe.blockmap
+
+  # A release made with GITHUB_TOKEN starts no other workflow, so its `release: published` event
+  # never reaches ota-release.yml: it is called here. Registering the update makes it live for every
+  # install, so it comes last.
+  ota:
+    needs: release
+    uses: ./.github/workflows/ota-release.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+    secrets:
+      RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
