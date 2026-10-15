@@ -1605,7 +1605,9 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   with a running process, found by bundle id with `NSWorkspace`). Each app also carries
   diagnostics (additive; `parseMuteLine` accepts lines with or without them): `why` (`found`,
   `not-trusted`, `no-control`: searched everything without a match, `cut`: hit the element or time
-  budget, `error`: the app did not answer the windows / menu bar read), `label` (the matched
+  budget, `error`: the app did not answer the windows / menu bar read, or a children / role read
+  failed during the walk (other than an element gone: `invalidUIElement`) and nothing was found),
+  `label` (the matched
   control's label only, at most 80 characters, anything outside printable ASCII as `?`; nothing
   else on screen ever leaves the helper), `searched` (elements visited this tick; 0 when the
   throttle skipped the search and the last search's `why` is repeated), `ms`, `cached` (re-read
@@ -1615,12 +1617,16 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   the app's windows breadth first and reads the rule's label attributes (`AXTitle`,
   `AXDescription`, `AXHelp`) only on controls of one of the rule's `roles` (`role`, one string, is
   the older form; the app sends both). A **web rule** (`web: true`, Google Meet) first walks down
-  to the windows' `AXWebArea` elements without going into them, then searches from those (never
-  the browser's own toolbars), with a larger budget: depth 150, 40000 elements, 800 ms; still at
-  most one failed search every 2 s per process. After it sets `AXManualAccessibility` on a
+  to the windows' `AXWebArea` elements without going into them (nor into `AXToolbar`, nor, in a
+  Chromium process, `AXTabGroup`: the tab strip; Safari's pages sit inside one), keeping with
+  `hosts` (Meet: `meet.google.com`) only pages whose `AXURL` host is one of them or below one (the
+  URL is read for that alone and never leaves the helper), then searches from those, with a larger
+  budget: depth 150, 40000 elements, 800 ms; still at most one failed search every 2 s per
+  process. After it sets `AXManualAccessibility` (remembered only when the set returned success;
+  otherwise asked again at the next search) on a
   Chromium process, a first search that finds nothing is tried again on the next tick without the
   2 s wait (once): Chromium may build the page's tree only after that. Several processes of one
-  rule: the first that reads, else the most telling `why` (`cut`, then `error`, then
+  rule: the ones with a cached control first, the first that reads, else the most telling `why` (`cut`, then `error`, then
   `no-control`). Matching is a case-insensitive
   prefix; the longest matching prefix decides (muted on a tie); a prefix in the rule's `whole`
   (Teams' and Webex's bare "Mute" / "Unmute") matches only the whole label or the label followed
@@ -1707,13 +1713,17 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
 - **The Mic log.** `MuteWatch` calls `deps.log(entry)` on every change, while recording, of
   `{state, app, why?, reason?, gated, paused?}` (`state` and `why`: what md-mute read for the app
   followed, `unknown` with no `why` while it does not run; `reason`: `MicLive.reason`). MeetingsIpc
-  keeps them with their wall-clock time from `start()` (before `begin()`), at most `MIC_LOG_MAX`
-  (500, the first ones), and writes the whole list into the meeting as `micLog` (`t` = time − the
+  keeps them with their wall-clock time from `start()` (before `begin()`) in a `MicLogKeep`
+  (`shared/meetings.ts`): a change of `why` alone (state, app, reason, gate and pause as the last
+  entry) is not kept, and of the rest the first and the last `MIC_LOG_KEEP` (250), counting the ones
+  between. It writes them into the meeting as `micLog`, with `micLogDropped` when some fell out
+  (`storedMeeting` reads it only beside a full log) (`t` = time − the
   meeting's `started`, at least 0) once Record gave the id, at most every 5 s while recording, and
   when the recording ends (`syncMute` sees it stopped: Stop, the 4-hour limit, a quit, Turn off).
   `storedMeeting` reads files without it, and leaves out (never refuses the meeting for) a log
   that does not read back. The Meetings page shows it as a closed **Mic log** under the meeting;
-  `meetingMarkdown` adds a "Mic log" section (`micLogLine`, `shared/meetingsPage.ts`).
+  `meetingMarkdown` adds a "Mic log" section (`micLogLines`: "n changes not kept" where they fell,
+  and `MIC_LOG_CLOCK`: the times are wall clock since Record, `shared/meetingsPage.ts`).
 - **Check mute reading.** `meetings:muteCheck` (`deck.meetingsMuteCheck`, `blocked` on the web;
   refused from a browser, off macOS, without consent, and while `Recorder.start` is starting the
   recording's md-mute; one check at a time, a second press shares it): `checkMute` in
@@ -1722,7 +1732,9 @@ through Accessibility. `MuteWatch` (below) runs it while a recording runs.
   trusted, gateTrusted, apps: [{id, name, state, why, label?, searched, ms}], message?}`:
   `muteCheckApps` takes each rule's last reading and the last real search's size and time, and
   `not-running` for a rule md-mute never listed; `gateTrusted` is the gate's
-  `accessibilityTrusted()` (no prompt), so a grant that reaches MasterDeck but not md-mute shows.
+  `accessibilityTrusted()` (no prompt), so a grant that reaches MasterDeck but not md-mute shows
+  (`MUTE_CHECK_SPLIT_GRANT`, only when md-mute sent a line with `trusted: false`, not when it failed
+  or sent nothing).
   Settings → Meetings (`MuteCheck` in `MeetingsSetup.tsx`) draws `muteCheckView`'s notes and table.
 
 ### Working hours (issue #64)

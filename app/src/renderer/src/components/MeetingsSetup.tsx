@@ -130,7 +130,11 @@ function MuteCheck() {
       <div className="f-row" style={{ justifyContent: 'space-between' }}>
         <div>
           <div className="set-label">Check mute reading</div>
-          <div className="set-hint">Join a call, then press Check while muted and again while unmuted.</div>
+          <div className="set-hint">
+            Join a call, then press Check while muted and again while unmuted. For Meet, keep the call in the front tab, not
+            full screen, and press Check from the same desktop as the call. Check turns on Chrome's accessibility tree until
+            Chrome quits.
+          </div>
         </div>
         <button className="btn" disabled={busy} onClick={() => void run()}>
           {busy ? 'Checking…' : 'Check'}

@@ -1770,6 +1770,7 @@ details.sd-more > summary:hover { color: var(--text); }
 .mt-notes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .mt-miclog { font-size: 12px; }
 .mt-miclog summary { cursor: pointer; }
+.mt-miclog p { margin: 6px 0 0; }
 .mt-miclog ol { margin: 6px 0 0; padding-left: 18px; max-height: 200px; overflow: auto; font-family: var(--mono); user-select: text; }
 .mute-check { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
 .mute-check th, .mute-check td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }

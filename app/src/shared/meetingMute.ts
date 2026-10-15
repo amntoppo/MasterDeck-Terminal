@@ -69,6 +69,11 @@ export interface MuteRule {
    * elements (not the browser's toolbars) with a larger budget (800 ms, 40000 elements).
    */
   web?: boolean
+  /**
+   * With `web`: only pages whose address is on one of these hosts (or below one) are searched;
+   * md-mute reads each AXWebArea's AXURL for its host and nothing else of it.
+   */
+  hosts?: readonly string[]
   menu?: MenuRule
   element?: ElementRule
 }
@@ -156,6 +161,7 @@ export const MUTE_RULES: readonly MuteRule[] = [
     bundles: [...CHROMIUM, 'com.apple.Safari'],
     chromium: CHROMIUM,
     web: true,
+    hosts: ['meet.google.com'],
     // ponytail: unverified on a real call; Settings → Meetings → Check mute reading shows what
     // md-mute sees. Meet's mic button has the aria-label "Turn off microphone" while you are heard
     // and "Turn on microphone" while muted, often with a shortcut after it (" (⌘ + d)", " (ctrl +
@@ -225,6 +231,8 @@ export function muteRulesLine(rules: readonly MuteRule[] = MUTE_RULES): string {
         bundles: r.bundles,
         ...(r.chromium ? { chromium: r.chromium } : {}),
         ...(r.web ? { web: true } : {}),
+        // An md-mute from before `hosts` ignores it and searches every page.
+        ...(r.web && r.hosts?.length ? { hosts: r.hosts } : {}),
         ...(r.menu ? { menu: r.menu } : {}),
         // `role` too: an md-mute from before `roles` reads only that.
         ...(r.element ? { element: { ...r.element, role: r.element.roles[0] } } : {}),
@@ -455,13 +463,19 @@ export function muteCheckWhy(a: MuteCheckApp, rule?: Pick<MuteRule, 'web'>): str
     case 'not-trusted':
       return "Accessibility not given to MasterDeck's helper"
     case 'no-control':
-      return `No mute button found — ${rule?.web ? 'is the call in the front tab?' : 'is a call open?'}${size}`
+      return rule?.web
+        ? `No mute button found — is the call in the front tab, or Meet is full screen / on another desktop — press Check from the same desktop as the call${size}`
+        : `No mute button found — is a call open?${size}`
     case 'cut':
       return `Search cut short${size}`
     case 'error':
       return 'The app did not answer (busy or not responding)'
   }
 }
+
+/** macOS trusts MasterDeck, its helper says it is not trusted: the grant is for an older build. */
+export const MUTE_CHECK_SPLIT_GRANT =
+  'macOS gave Accessibility to MasterDeck but not to its helper. Remove MasterDeck from Accessibility in System Settings and allow it again (each new build needs this).'
 
 /** The check's answer as Settings → Meetings shows it: notes above the table, then a row per app. */
 export function muteCheckView(
@@ -471,8 +485,9 @@ export function muteCheckView(
   const notes: string[] = []
   if (!a.found) notes.push('The mute reader is missing; reinstall MasterDeck.')
   else if (a.message) notes.push(a.message)
-  if (a.found && !a.trusted && a.gateTrusted) notes.push('macOS gave Accessibility to MasterDeck but not to its helper.')
-  else if (a.found && !a.trusted && !a.message) notes.push("Accessibility not given to MasterDeck's helper: Allow it above.")
+  // Only what the helper itself said (a line with trusted: false), never a helper that failed or sent nothing.
+  if (a.found && !a.message && !a.trusted && a.gateTrusted) notes.push(MUTE_CHECK_SPLIT_GRANT)
+  else if (a.found && !a.message && !a.trusted) notes.push("Accessibility not given to MasterDeck's helper: Allow it above.")
   const rows = a.apps.map((x) => ({
     id: x.id,
     app: x.name,

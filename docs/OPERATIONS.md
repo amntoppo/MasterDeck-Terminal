@@ -445,10 +445,10 @@ reader):
 |---|---|---|
 | Muted / Unmuted (button says '…') | `found` | The rule works for that app; the label is the control it read. Check both while muted and unmuted. |
 | Not running | (none) | md-mute did not list the app: no process with the rule's bundle id. |
-| No mute button found — … (n elements in m ms) | `no-control` | The whole tree was searched, nothing matched: not in a call, the call in a background tab (browsers expose the front tab only), a label or role the rule does not know (a localized app), or, for Chrome, the page tree not built yet (press again). |
+| No mute button found — … (n elements in m ms) | `no-control` | The whole tree was searched, nothing matched: not in a call, the call in a background tab (browsers expose the front tab only), Meet full screen or on another desktop (Space) than the one Check was pressed from (press it from the call's desktop), no page on `meet.google.com` found (the Meet rule's `hosts`: only pages whose `AXURL` host is on them are searched), a label or role the rule does not know (a localized app), or, for Chrome, the page tree not built yet (press again). |
 | Search cut short (n elements in m ms) | `cut` | The search hit its budget (6000 elements / 150 ms, a web rule 40000 / 800 ms) first: a huge page or a slow app. |
-| The app did not answer | `error` | The app's windows or menu bar could not be read (busy, hung). |
-| Accessibility not given to MasterDeck's helper | `not-trusted` | md-mute is not trusted. With "macOS gave Accessibility to MasterDeck but not to its helper" above the table, the grant does not reach the helper (TCC's responsible process); otherwise Allow it. |
+| The app did not answer | `error` | The app's windows or menu bar could not be read (busy, hung), or a read of some element's children or role failed during the search and nothing was found elsewhere. |
+| Accessibility not given to MasterDeck's helper | `not-trusted` | md-mute is not trusted. With "macOS gave Accessibility to MasterDeck but not to its helper" above the table (shown only when the helper itself said `trusted: false`, never when it failed or sent nothing), the grant does not reach the helper: remove MasterDeck from System Settings → Privacy & Security → Accessibility and allow it again (each new build needs this: the ad-hoc signature changes); otherwise Allow it. |
 
 **Google Meet's labels.** Meet's mic button carries the aria-label "Turn off microphone" while you
 are heard and "Turn on microphone" while muted, often with the shortcut after it (" (⌘ + d)" on a
@@ -471,13 +471,19 @@ exit 2 with a message.
 - A control found is re-read each tick; a full search runs again only when it stops reading, at
   most every 2 s per process, so for up to 2 s after a window is rebuilt the state is `unknown`.
   A browser's first search after `AXManualAccessibility` was set that finds nothing is tried again
-  on the next tick (once).
-- A meeting recorded since the Mic log keeps every change of what md-mute read, why, and the gate
-  (`micLog` in its JSON; the Meetings page's **Mic log**, the Markdown export). A recording whose
+  on the next tick (once). A set that did not return success is not remembered: the next search
+  asks again. Of several browsers, one whose control was found before is read first.
+- Meet's rule reads each page's `AXURL` (its host only, compared with `hosts`, never sent out)
+  and searches only pages on `meet.google.com`; the walk to the pages skips toolbars and, in a
+  Chromium browser, the tab strip (`AXTabGroup`; Safari keeps its pages inside one, so not there).
+- A meeting recorded since the Mic log keeps the changes of what md-mute read and the gate (a
+  change of `why` alone is not one), the first and the last 250, with `micLogDropped` counting
+  the ones between (`micLog` in its JSON; the Meetings page's **Mic log**, the Markdown export;
+  its times are wall clock since Record). A recording whose
   "you" track was never zeroed: the log says whether md-mute ever read `muted` and, if not, why.
 - For Google Meet the helper sets `AXManualAccessibility` on each running Chromium browser (Chrome,
   Arc, Edge, Brave) when the Meet rule is in the rules it was sent (no call app offered: all rules).
-  It stays on until that browser quits; the browser may be a little slower while it builds its
+  The Check does the same. It stays on until that browser quits; the browser may be a little slower while it builds its
   accessibility tree. With Zoom or Webex offered only their rule is sent and no browser is touched.
 
 ## Meetings: the fixture

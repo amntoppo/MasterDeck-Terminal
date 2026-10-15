@@ -2,7 +2,7 @@
 // recording can leave the microphone out while you are muted (Meetings, issue #102).
 //
 // Protocol (shared/meetingMute.ts is the other side):
-//   stdin, once: one line of JSON rules  {"apps":[{"id","bundles","chromium"?,"web"?,"menu"?|"element"?}]}
+//   stdin, once: one line of JSON rules  {"apps":[{"id","bundles","chromium"?,"web"?,"hosts"?,"menu"?|"element"?}]}
 //   stdout, every 400 ms: one line      {"t":<ms>,"trusted":bool,"apps":[{"id","state",<diagnostics>}]}
 //   state is "muted", "unmuted" or "unknown"; only apps with a running process are listed.
 //   Diagnostics (added later; readers before them ignore them): "why" ("found", "not-trusted",
@@ -15,7 +15,8 @@
 // What it may do, and nothing else: ask AXIsProcessTrusted() (never the prompting variant: the app
 // asks, after consent), list running apps by bundle id, walk the role and children of the meeting
 // app's windows or menu bar, and read the label attributes the rules name on controls of the
-// rule's roles. It never reads text content or keystrokes, and never presses anything. For
+// rule's roles; for a web rule with hosts, a page's AXURL, only to compare its host (it never leaves
+// the helper). It never reads text content or keystrokes, and never presses anything. For
 // Chromium browsers it sets AXManualAccessibility on the app element, as screen readers do, so
 // the web page's controls are exposed.
 
@@ -54,6 +55,8 @@ struct AppRule: Decodable {
   let chromium: [String]?
   /** A web page's control (a browser): searched from the windows' AXWebArea elements, with a larger budget. */
   let web: Bool?
+  /** With web: only pages whose AXURL host is one of these (or below one) are searched. */
+  let hosts: [String]?
   let menu: MenuRule?
   let element: ElementRule?
 }
@@ -197,11 +200,21 @@ func isFailure(_ e: AXError) -> Bool {
   e == .cannotComplete || e == .apiDisabled || e == .failure || e == .invalidUIElement || e == .notImplemented
 }
 
+/**
+ * A failure during a walk: the app did not answer or refused. An element that went away while
+ * the page redrew (invalidUIElement) is part of a live tree, not a failure.
+ */
+func isWalkFailure(_ e: AXError) -> Bool {
+  e != .invalidUIElement && isFailure(e)
+}
+
 struct Budget {
   let deadline: UInt64
   let max: Int
   var seen = 0
   var cut = false
+  /** An AX read failed somewhere (isWalkFailure): a search that then finds nothing says "error". */
+  var failed = false
   init(elements: Int = maxElements, ns: UInt64 = searchBudgetNs) {
     deadline = DispatchTime.now().uptimeNanoseconds + ns
     max = elements
@@ -211,6 +224,20 @@ struct Budget {
     if seen <= max && DispatchTime.now().uptimeNanoseconds < deadline { return true }
     cut = true
     return false
+  }
+
+  /** An element's children; a failed read is noted, and counts as none. */
+  mutating func kids(_ el: AXUIElement) -> [AXUIElement] {
+    let (v, e) = attrErr(el, kAXChildrenAttribute as String)
+    if isWalkFailure(e) { failed = true }
+    return (v as? [AXUIElement]) ?? []
+  }
+
+  /** An element's role; a failed read is noted. */
+  mutating func role(_ el: AXUIElement) -> String? {
+    let (v, e) = attrErr(el, kAXRoleAttribute as String)
+    if isWalkFailure(e) { failed = true }
+    return v as? String
   }
 }
 
@@ -234,11 +261,11 @@ func searchMenu(_ app: AXUIElement, _ rule: MenuRule) -> Search {
     return out
   }
   let barEl = bar as! AXUIElement  // checked by its type id above
-  for top in children(barEl) {
+  for top in budget.kids(barEl) {
     guard budget.spend() else { out.why = "cut"; return out }
     guard let t = string(top, kAXTitleAttribute as String), norm(t) == norm(rule.title) else { continue }
-    for menu in children(top) {
-      for item in children(menu) {
+    for menu in budget.kids(top) {
+      for item in budget.kids(menu) {
         guard budget.spend() else { out.why = "cut"; return out }
         if let title = string(item, kAXTitleAttribute as String),
            let s = classify(title, muted: rule.muted, unmuted: rule.unmuted) {
@@ -250,8 +277,10 @@ func searchMenu(_ app: AXUIElement, _ rule: MenuRule) -> Search {
         }
       }
     }
+    if budget.failed { out.why = "error" }
     return out
   }
+  if budget.failed { out.why = "error" }
   return out
 }
 
@@ -274,16 +303,38 @@ func classifyControl(_ labels: [String], _ rule: ElementRule) -> (String, String
 
 /** A control of one of the rule's roles and what its labels say (state, the label that said it), or nil. */
 func readControl(_ el: AXUIElement, _ rule: ElementRule) -> (String, String)? {
-  guard let role = string(el, kAXRoleAttribute as String), rule.roleList.contains(role) else { return nil }
+  guard let role = string(el, kAXRoleAttribute as String) else { return nil }
+  return readControl(el, role: role, rule)
+}
+
+func readControl(_ el: AXUIElement, role: String, _ rule: ElementRule) -> (String, String)? {
+  guard rule.roleList.contains(role) else { return nil }
   return classifyControl(rule.attrs.compactMap { string(el, $0) }, rule)
+}
+
+/** A page's host, from its AXURL (a URL or a string), lowercased; nil when it has none. */
+func pageHost(_ el: AXUIElement) -> String? {
+  guard let v = attr(el, "AXURL") else { return nil }
+  if CFGetTypeID(v) == CFURLGetTypeID() { return (v as! URL).host?.lowercased() }  // checked by its type id
+  if let s = v as? String { return URL(string: s)?.host?.lowercased() }
+  return nil
+}
+
+/** The host is one of `hosts` or below one ("meet.google.com" covers "x.meet.google.com"). */
+func hostMatches(_ host: String, _ hosts: [String]) -> Bool {
+  hosts.contains { h in
+    let n = norm(h)
+    return !n.isEmpty && (host == n || host.hasSuffix("." + n))
+  }
 }
 
 /**
  * A breadth-first walk for the first control of the rule's roles and label: from the app's
  * windows, or, for a web page (`web`), from the windows' AXWebArea elements, found first by a walk
- * that does not go into them (the browser's own toolbars are never searched for the control).
+ * that does not go into them, nor into toolbars (and, in a Chromium browser, the tab strip's
+ * AXTabGroup): the browser's own controls are never searched. With `hosts`, only pages on them.
  */
-func searchElement(_ app: AXUIElement, _ rule: ElementRule, web: Bool) -> Search {
+func searchElement(_ app: AXUIElement, _ rule: ElementRule, web: Bool, hosts: [String]?, chromium: Bool) -> Search {
   var budget = web ? Budget(elements: webMaxElements, ns: webBudgetNs) : Budget()
   var out = Search()
   defer { out.searched = budget.seen }
@@ -300,17 +351,30 @@ func searchElement(_ app: AXUIElement, _ rule: ElementRule, web: Bool) -> Search
       var next: [AXUIElement] = []
       for el in level {
         guard budget.spend() else { out.why = "cut"; return out }
-        if string(el, kAXRoleAttribute as String) == "AXWebArea" {
-          areas.append(el)
+        let role = budget.role(el)
+        if role == "AXWebArea" {
+          // One AXURL read per page found; a page without one is not a call's.
+          if let hs = hosts, !hs.isEmpty {
+            if let h = pageHost(el), hostMatches(h, hs) { areas.append(el) }
+          } else {
+            areas.append(el)
+          }
+        } else if role == "AXToolbar" || (chromium && role == "AXTabGroup") {
+          // The browser's own controls. Safari keeps its pages inside an AXTabGroup, so only
+          // Chromium's (the tab strip) is skipped.
+          continue
         } else {
-          next.append(contentsOf: children(el))
+          next.append(contentsOf: budget.kids(el))
         }
       }
       level = next
       depth += 1
     }
-    // No page in any window (or Chromium has not built its tree yet): nothing to find.
-    if areas.isEmpty { return out }
+    // No page (on the rule's hosts) in any window, or Chromium has not built its tree yet.
+    if areas.isEmpty {
+      if budget.failed { out.why = "error" }
+      return out
+    }
     level = areas
     depth = 0
   }
@@ -319,18 +383,21 @@ func searchElement(_ app: AXUIElement, _ rule: ElementRule, web: Bool) -> Search
     var next: [AXUIElement] = []
     for el in level {
       guard budget.spend() else { out.why = "cut"; return out }
-      if let (s, label) = readControl(el, rule) {
+      if let role = budget.role(el), let (s, label) = readControl(el, role: role, rule) {
         out.state = s
         out.why = "found"
         out.label = safeLabel(label)
         out.el = el
         return out
       }
-      next.append(contentsOf: children(el))
+      next.append(contentsOf: budget.kids(el))
     }
     level = next
     depth += 1
   }
+  // The walk ended without the control but some reads failed: the app did not answer, not "no
+  // control" (the part it did not answer for may hold it).
+  if budget.failed { out.why = "error" }
   return out
 }
 
@@ -397,16 +464,19 @@ final class Watcher {
     var justSet = false
     if let b = proc.bundleIdentifier, rule.chromium?.contains(b) == true, !manualSet.contains(pid) {
       // Chromium builds its tree for web content only when asked; the next searches see it. It
-      // stays on until that browser quits (OPERATIONS § Meetings: md-mute).
-      _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-      manualSet.insert(pid)
-      justSet = true
+      // stays on until that browser quits (OPERATIONS § Meetings: md-mute). Only a set that
+      // worked is remembered: a busy browser is asked again at the next search.
+      if AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success {
+        manualSet.insert(pid)
+        justSet = true
+      }
     }
     var hit = Search()
     if let m = rule.menu {
       hit = searchMenu(app, m)
     } else if let e = rule.element {
-      hit = searchElement(app, e, web: rule.web == true)
+      let chromium = proc.bundleIdentifier.map { rule.chromium?.contains($0) == true } ?? false
+      hit = searchElement(app, e, web: rule.web == true, hosts: rule.hosts, chromium: chromium)
     }
     let ms = elapsedMs(start)
     guard let el = hit.el else {
@@ -435,8 +505,12 @@ final class Watcher {
     let running = NSWorkspace.shared.runningApplications
     var out: [AppState] = []
     for rule in rules.apps {
-      let procs = running.filter { p in p.bundleIdentifier.map { rule.bundles.contains($0) } ?? false }
-      if procs.isEmpty { continue }
+      let all = running.filter { p in p.bundleIdentifier.map { rule.bundles.contains($0) } ?? false }
+      if all.isEmpty { continue }
+      // A process whose control was found before goes first: it is re-read cheaply, and while it
+      // reads the others are not searched.
+      let cached = all.filter { found["\(rule.id):\($0.processIdentifier)"] != nil }
+      let procs = cached + all.filter { found["\(rule.id):\($0.processIdentifier)"] == nil }
       if !trusted {
         out.append(AppState(id: rule.id, state: "unknown", why: "not-trusted", label: nil, searched: 0, ms: 0, cached: false))
         continue

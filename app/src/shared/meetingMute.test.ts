@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyControl,
   classifyLabel,
+  MUTE_CHECK_SPLIT_GRANT,
   MUTE_RULES,
   MUTE_UNKNOWN_HOLD,
   muteCheckApps,
@@ -73,6 +74,16 @@ describe('MUTE_RULES', () => {
     expect(line.element).toMatchObject({ role: 'AXButton', roles: ['AXButton', 'AXCheckBox', 'AXToggleButton'] })
     expect(j.apps.find((a) => a.id === 'teams')).not.toHaveProperty('web')
   })
+
+  it('Meet is searched only on its host; the line carries hosts for a web rule only', () => {
+    expect(MUTE_RULES.find((r) => r.id === 'meet')?.hosts).toEqual(['meet.google.com'])
+    const j = JSON.parse(muteRulesLine()) as { apps: { id: string; hosts?: string[] }[] }
+    expect(j.apps.find((a) => a.id === 'meet')?.hosts).toEqual(['meet.google.com'])
+    for (const id of ['zoom', 'teams', 'webex']) expect(j.apps.find((a) => a.id === id)).not.toHaveProperty('hosts')
+    // Hosts without web mean nothing to md-mute: not sent.
+    const odd = JSON.parse(muteRulesLine([{ id: 'x', name: 'X', bundles: ['b'], hosts: ['acme.example'], menu: { title: 'M', muted: ['U'], unmuted: ['M'] } }]))
+    expect(odd.apps[0]).not.toHaveProperty('hosts')
+  })
 })
 
 describe('parseMuteLine: the diagnostics', () => {
@@ -139,8 +150,9 @@ describe('Check mute reading', () => {
     expect(muteCheckWhy(a({ state: 'unmuted', why: 'found', label: 'Turn off microphone (? + d)' }), meet)).toBe("Unmuted (button says 'Turn off microphone (? + d)')")
     expect(muteCheckWhy(a({ state: 'muted', why: 'found' }), zoom)).toBe('Muted (button found)')
     expect(muteCheckWhy(a({ why: 'not-running' }), meet)).toBe('Not running')
-    expect(muteCheckWhy(a({}), meet)).toBe('No mute button found — is the call in the front tab?')
-    expect(muteCheckWhy(a({ searched: 9000, ms: 640 }), meet)).toBe('No mute button found — is the call in the front tab? (9000 elements in 640 ms)')
+    const web = 'No mute button found — is the call in the front tab, or Meet is full screen / on another desktop — press Check from the same desktop as the call'
+    expect(muteCheckWhy(a({}), meet)).toBe(web)
+    expect(muteCheckWhy(a({ searched: 9000, ms: 640 }), meet)).toBe(`${web} (9000 elements in 640 ms)`)
     expect(muteCheckWhy(a({}), zoom)).toBe('No mute button found — is a call open?')
     expect(muteCheckWhy(a({ why: 'cut', searched: 40000, ms: 800 }), meet)).toBe('Search cut short (40000 elements in 800 ms)')
     expect(muteCheckWhy(a({ why: 'not-trusted' }), meet)).toBe("Accessibility not given to MasterDeck's helper")
@@ -149,7 +161,13 @@ describe('Check mute reading', () => {
 
   it('the notes above the table: a missing helper, and a grant that reaches MasterDeck but not its helper', () => {
     const apps = muteCheckApps([reading([{ id: 'meet', state: 'unknown', why: 'not-trusted' }], false)])
-    expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: true, apps }).notes).toEqual(['macOS gave Accessibility to MasterDeck but not to its helper.'])
+    expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: true, apps }).notes).toEqual([MUTE_CHECK_SPLIT_GRANT])
+    expect(MUTE_CHECK_SPLIT_GRANT).toBe(
+      'macOS gave Accessibility to MasterDeck but not to its helper. Remove MasterDeck from Accessibility in System Settings and allow it again (each new build needs this).',
+    )
+    // A helper that failed or sent nothing said nothing about trust: only its message.
+    for (const message of ['The mute reader sent nothing.', 'The mute reader stopped: exit 2', 'The mute reader did not start.'])
+      expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: true, apps: [], message }).notes).toEqual([message])
     expect(muteCheckView({ ok: true, found: true, trusted: false, gateTrusted: false, apps }).notes).toEqual(["Accessibility not given to MasterDeck's helper: Allow it above."])
     expect(muteCheckView({ ok: true, found: false, trusted: false, gateTrusted: true, apps: [] })).toEqual({ notes: ['The mute reader is missing; reinstall MasterDeck.'], rows: [] })
     const ok = muteCheckView({ ok: true, found: true, trusted: true, gateTrusted: true, apps: muteCheckApps([reading([])]) })

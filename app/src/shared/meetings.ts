@@ -251,10 +251,12 @@ export interface Meeting {
   error: string | null
   /**
    * Your microphone's changes during the recording (Plan M diagnostics): what md-mute read, why,
-   * and whether the mic was kept out. Only on change, at most MIC_LOG_MAX. Missing in files
-   * written before it, and in a file whose log did not read back.
+   * and whether the mic was kept out. Only on change, at most MIC_LOG_MAX: the first and the last
+   * MIC_LOG_KEEP. Missing in files written before it, and in a file whose log did not read back.
    */
   micLog?: MicLogEntry[]
+  /** Changes left out between the first and the last MIC_LOG_KEEP of micLog (only when some were). */
+  micLogDropped?: number
 }
 
 /**
@@ -282,7 +284,50 @@ export interface MicLogEntry {
   /** The recording was paused (nothing of the mic recorded; md-mute not running). */
   paused?: true
 }
-export const MIC_LOG_MAX = 500
+/** A recording keeps the first and the last this many changes of its Mic log. */
+export const MIC_LOG_KEEP = 250
+export const MIC_LOG_MAX = 2 * MIC_LOG_KEEP
+
+/** A Mic log entry with its wall-clock time (made relative to the meeting's start when written). */
+export type MicLogAt = Omit<MicLogEntry, 't'> & { at: number }
+
+/**
+ * A recording's Mic log as it is kept: the first and the last MIC_LOG_KEEP changes, and how many
+ * fell between. A change of `why` alone (state, app, reason, gate and pause the same as the last
+ * entry) is not a change worth an entry: a long search flips between no-control, cut and error
+ * every 2 s and would push out what matters.
+ */
+export class MicLogKeep {
+  private head: MicLogAt[] = []
+  private tail: MicLogAt[] = []
+  private last: MicLogAt | null = null
+  dropped = 0
+
+  /** Adds one change; false when it was the same as the last one but for its why. */
+  add(e: MicLogAt): boolean {
+    const l = this.last
+    if (l && l.state === e.state && l.app === e.app && l.reason === e.reason && l.gated === e.gated && !!l.paused === !!e.paused) return false
+    this.last = e
+    if (this.head.length < MIC_LOG_KEEP) this.head.push(e)
+    else {
+      this.tail.push(e)
+      if (this.tail.length > MIC_LOG_KEEP) {
+        this.tail.shift()
+        this.dropped++
+      }
+    }
+    return true
+  }
+
+  get length(): number {
+    return this.head.length + this.tail.length
+  }
+
+  /** What is kept, oldest first: the first MIC_LOG_KEEP, then the last (`dropped` fell between). */
+  entries(): MicLogAt[] {
+    return [...this.head, ...this.tail]
+  }
+}
 
 /** Stops a recording (spec §2: a notice says so). */
 export const MEETING_MAX_MS = 4 * 60 * 60 * 1000
@@ -369,6 +414,10 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
   if (progress === undefined) return null
   // A diagnostic: a log that does not read back is left out, never the meeting.
   const micLog = asMicLog(o.micLog)
+  const micLogDropped =
+    micLog && micLog.length === MIC_LOG_MAX && typeof o.micLogDropped === 'number' && Number.isInteger(o.micLogDropped) && o.micLogDropped > 0 && o.micLogDropped <= 10_000_000
+      ? o.micLogDropped
+      : undefined
   return {
     id,
     title,
@@ -386,6 +435,7 @@ export function storedMeeting(raw: unknown, id: string): Meeting | null {
     progress,
     error: o.error,
     ...(micLog ? { micLog } : {}),
+    ...(micLogDropped ? { micLogDropped } : {}),
   }
 }
 

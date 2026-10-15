@@ -417,7 +417,11 @@ buttons; it does not go through macOS window drag regions.
   parser accepts lines with or without them), Meet as a web rule (search from `AXWebArea`, 40000
   elements / 800 ms, three roles, one retry after `AXManualAccessibility`), Settings → Meetings →
   **Check mute reading** (`meetings:muteCheck`, 3 s, every rule, `gateTrusted` beside the helper's
-  `trusted`), and a per-meeting **Mic log** (`micLog`, at most 500, Meetings page and export).
+  `trusted`), and a per-meeting **Mic log** (`micLog`, the first and last 250 with `micLogDropped`,
+  no why-only changes, Meetings page and export). Review fixes (second commit): Meet searched only
+  on pages whose `AXURL` host is `meet.google.com` (rule field `hosts`), toolbars and Chromium's
+  tab strip skipped, cached processes first, `AXManualAccessibility` remembered only on success,
+  failed AX reads give `error`, the split-grant note only when the helper said `trusted: false`.
   Checked: typecheck, vitest (208 files passed, 2 skipped; 2569 tests passed, 4 skipped), `npm run
   build`, md-mute rebuilt and run against bundle ids nothing runs. Not checked: the Check or the
   Mic log on screen, any real meeting app (Chrome was never read). Next: the user presses Check in

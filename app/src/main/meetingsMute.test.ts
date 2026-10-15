@@ -2,8 +2,8 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MEETINGS, IDLE_LIVE, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, MIC_LOG_MAX, webState, type MeetingLive, type MeetingsSettings } from '@shared/meetings'
-import { muteCheckView, type MuteApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
+import { DEFAULT_MEETINGS, IDLE_LIVE, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, MIC_LOG_KEEP, MIC_LOG_MAX, webState, type MeetingLive, type MeetingsSettings } from '@shared/meetings'
+import { MUTE_CHECK_SPLIT_GRANT, muteCheckView, type MuteApp, type MuteReading, type MuteRule } from '@shared/meetingMute'
 
 // Plan M in MeetingsIpc: the mic follows the meeting app's mute. Nothing here asks macOS anything
 // (every Electron API is a spy), runs the real md-mute or reads a real app.
@@ -385,7 +385,7 @@ describe('Check mute reading (meetings:muteCheck)', () => {
     const a = await setup({ spawn: false, env: { MASTERDECK_MUTE: bin } }).ipc.muteCheck(local)
     expect(a).toMatchObject({ ok: true, found: true, trusted: false, gateTrusted: true })
     if (!a.ok) throw new Error('not ok')
-    expect(muteCheckView(a).notes).toEqual(['macOS gave Accessibility to MasterDeck but not to its helper.'])
+    expect(muteCheckView(a).notes).toEqual([MUTE_CHECK_SPLIT_GRANT])
     expect(muteCheckView(a).rows.find((r) => r.id === 'meet')?.why).toBe("Accessibility not given to MasterDeck's helper")
   })
 
@@ -448,12 +448,29 @@ describe('the Mic log of a recording', () => {
     expect(t.stored.updates).toBe(n)
   })
 
-  it(`keeps at most ${MIC_LOG_MAX} entries`, async () => {
+  it(`keeps the first and the last ${MIC_LOG_KEEP} entries and counts the ones between`, async () => {
     const t = setup({ id: ID })
     await t.ipc.start(local)
     for (let i = 0; i < 700; i++) t.last().send([{ id: 'zoom', state: i % 2 ? 'muted' : 'unknown', why: i % 2 ? 'found' : 'no-control' }])
     await t.ipc.stop(local)
-    expect(t.stored.meeting.micLog).toHaveLength(MIC_LOG_MAX)
+    const log = t.stored.meeting.micLog as { state: string; gated: boolean }[]
+    expect(log).toHaveLength(MIC_LOG_MAX)
+    // The entry at Record, then 700 changes of what md-mute read (each with its gate's change).
+    expect(t.stored.meeting.micLogDropped).toBeGreaterThan(0)
+    expect(log.at(-1)).toMatchObject({ state: 'muted', gated: true })
+  })
+
+  it('a change of why alone is not an entry', async () => {
+    const t = setup({ id: ID })
+    await t.ipc.start(local)
+    t.last().send([{ id: 'meet', state: 'unknown', why: 'no-control' }])
+    t.last().send([{ id: 'meet', state: 'unknown', why: 'cut' }])
+    t.last().send([{ id: 'meet', state: 'unknown', why: 'error' }])
+    t.last().send([{ id: 'meet', state: 'unknown', why: 'no-control' }])
+    await t.ipc.stop(local)
+    const log = t.stored.meeting.micLog as { why?: string }[]
+    expect(log.filter((e) => e.why)).toHaveLength(1)
+    expect(t.stored.meeting).not.toHaveProperty('micLogDropped')
   })
 
   it('a recording without a meeting id writes nothing', async () => {

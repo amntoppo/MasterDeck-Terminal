@@ -10,7 +10,7 @@ import {
   MEETINGS_MAC_ONLY,
   mediaAllowed,
   meetingsAgreed,
-  MIC_LOG_MAX,
+  MicLogKeep,
   type MeetingLive,
   type MicLogEntry,
   MEETINGS_GRANTS,
@@ -216,7 +216,7 @@ export class MeetingsIpc {
    * The recording's Mic log: entries with their wall-clock time, the meeting they belong to once
    * Record made it, and the pending write. Started by start(), written and dropped when it stops.
    */
-  private micLog: { meeting: string | null; entries: (Omit<MicLogEntry, 't'> & { at: number })[]; timer: ReturnType<typeof setTimeout> | null } | null = null
+  private micLog: { meeting: string | null; keep: MicLogKeep; timer: ReturnType<typeof setTimeout> | null } | null = null
   /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
   private generation = 0
   /** audioFile's answers for a while: the meeting's JSON is not read again for every Range request. */
@@ -447,11 +447,13 @@ export class MeetingsIpc {
     if (!rec.recording && this.micLog?.meeting) this.endMicLog()
   }
 
-  /** One change of the mic (MuteWatch.log): kept with the time, up to MIC_LOG_MAX per recording. */
+  /**
+   * One change of the mic (MuteWatch.log), kept with the time: the first and the last MIC_LOG_KEEP
+   * per recording, a change of its why alone not at all (MicLogKeep).
+   */
   private addMicLog(e: Omit<MicLogEntry, 't'>): void {
     const log = this.micLog
-    if (!log || log.entries.length >= MIC_LOG_MAX) return
-    log.entries.push({ ...e, at: (this.d.now ?? Date.now)() })
+    if (!log || !log.keep.add({ ...e, at: (this.d.now ?? Date.now)() })) return
     if (log.meeting && !log.timer) {
       log.timer = setTimeout(() => {
         log.timer = null
@@ -464,10 +466,12 @@ export class MeetingsIpc {
   /** The whole log into the meeting's file (each write replaces it: entries are only added). */
   private writeMicLog(log: NonNullable<MeetingsIpc['micLog']>): void {
     const store = this.svc?.store
-    if (!log.meeting || !store || !log.entries.length) return
+    if (!log.meeting || !store || !log.keep.length) return
+    const dropped = log.keep.dropped
     const res = store.update(log.meeting, (m) => ({
       ...m,
-      micLog: log.entries.map(({ at, ...e }) => ({ ...e, t: Math.max(0, at - m.started) })),
+      micLog: log.keep.entries().map(({ at, ...e }) => ({ ...e, t: Math.max(0, at - m.started) })),
+      ...(dropped ? { micLogDropped: dropped } : {}),
     }))
     if (!res.ok) console.error(`meetings: mic log: ${res.message}`)
   }
@@ -549,7 +553,7 @@ export class MeetingsIpc {
     // begin() also starts md-mute, so a first 'muted' reading can gate before the mic opens.
     let res: RecordAnswer
     if (!rec.recording) {
-      this.micLog = { meeting: null, entries: [], timer: null }
+      this.micLog = { meeting: null, keep: new MicLogKeep(), timer: null }
       this.mute?.begin(app)
       this.muteStarting = true
     }

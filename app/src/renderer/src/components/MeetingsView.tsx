@@ -18,7 +18,8 @@ import {
   meetingAudioUrl,
   meetingLengthMs,
   meetingTitle,
-  micLogLine,
+  MIC_LOG_CLOCK,
+  micLogLines,
   monthGrid,
   presetRange,
   searchLines,
@@ -548,10 +549,11 @@ function MeetingDetail({ id, seek, changed, agreed, notes, onNote, onGone }: Det
         )}
         {!!m.micLog?.length && (
           <details className="mt-miclog">
-            <summary className="muted">Mic log ({m.micLog.length})</summary>
+            <summary className="muted">Mic log ({m.micLog.length + (m.micLogDropped ?? 0)})</summary>
+            <p className="muted">{MIC_LOG_CLOCK}</p>
             <ol>
-              {m.micLog.map((e, i) => (
-                <li key={i}>{micLogLine(e)}</li>
+              {micLogLines(m).map((l, i) => (
+                <li key={i}>{l}</li>
               ))}
             </ol>
           </details>
