@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { heldAnswer } from '@shared/heldMessages'
 import { DeckHooks, hookScript } from './deckHooks'
 import { deckHooksInstalled, installDeckHooks } from './hooks'
 import { editQueue, queueAnswer, readQueue, shiftQueue } from './queue'
@@ -114,6 +115,29 @@ describe.skipIf(process.platform === 'win32')('the /queue hook', () => {
     await new Promise((r) => p.on('exit', r))
     expect(JSON.parse(out)).toEqual(queueAnswer('next one', 1))
     expect(readQueue(SID, queues)).toEqual(['after'])
+  }, 20_000)
+  it('Stop with a MasterDeck message held: asks MasterDeck with nothing queued, and prints its answer (#123)', async () => {
+    const { d } = setup()
+    d.setHeldMarks(new Set([SID]))
+    const { spawn } = await import('node:child_process')
+    const p = spawn(d.script, ['Stop'])
+    let out = ''
+    p.stdout.on('data', (b) => (out += b))
+    p.stdin.end(JSON.stringify({ session_id: SID }))
+    for (let i = 0; i < 40 && !d.queueRequests().length; i++) await new Promise((r) => setTimeout(r, 100))
+    const delivered: string[] = []
+    d.pumpQueue(Date.now(), undefined, { take: () => ({ id: 'm1', text: 'PR #3 has a review', left: 0 }), delivered: (id) => delivered.push(id) })
+    await new Promise((r) => p.on('exit', r))
+    expect(JSON.parse(out)).toEqual(heldAnswer('PR #3 has a review', 0))
+    expect(delivered).toEqual(['m1'])
+  }, 20_000)
+  it('Stop with a message held but MasterDeck not running: nothing to hand over', () => {
+    const { d, run, stale } = setup()
+    d.setHeldMarks(new Set([SID]))
+    stale()
+    expect(run('Stop', { session_id: SID })).toBe('')
+    d.setHeldMarks(new Set())
+    expect(readdirSync(join(d.dir, 'held'))).toEqual([])
   }, 20_000)
   it('Stop without MasterDeck: the hook drains one item itself', () => {
     const { d, queues, run, stale } = setup()
@@ -237,6 +261,15 @@ describe('pumpQueue (MasterDeck answers a Stop)', () => {
     d.pumpQueue()
     expect(JSON.parse(readFileSync(answer(id), 'utf8'))).toEqual(queueAnswer('a', 1))
     expect(readQueue(SID, queues)).toEqual(['b'])
+  })
+  it('a held MasterDeck message goes before the queue, and the queue keeps its items (#123)', () => {
+    const { d, queues, request, answer } = setup()
+    const id = request(process.pid)
+    const delivered: string[] = []
+    d.pumpQueue(Date.now(), undefined, { take: () => ({ id: 'm1', text: 'hello', left: 2 }), delivered: (m) => delivered.push(m) })
+    expect(JSON.parse(readFileSync(answer(id), 'utf8'))).toEqual(heldAnswer('hello', 2))
+    expect(delivered).toEqual(['m1'])
+    expect(readQueue(SID, queues)).toEqual(['a', 'b'])
   })
   it('remembers when it served a session a prompt (the loop queue asks)', () => {
     const { d, request } = setup()
@@ -548,7 +581,7 @@ describe('the MasterDeck mod files', () => {
     writeFileSync(join(dir, `${other}.json`), JSON.stringify({ v: 1, version: '0.1.0', at: now, ended: true }))
     utimesSync(join(dir, `${other}.json`), new Date(now - 2 * 86_400_000), new Date(now - 2 * 86_400_000))
     writeFileSync(join(dir, 'notes.txt'), 'x')
-    expect(d.modBeats(now)).toEqual({ [SID]: { version: '0.1.0', claude: '2.1.296', at: now - 1000, mods: [] } })
+    expect(d.modBeats(now)).toEqual({ [SID]: { version: '0.1.0', claude: '2.1.296', at: now - 1000, mods: [], deliver: false } })
     expect(readdirSync(dir).sort()).toEqual([`${SID}.json`, 'notes.txt'])
     expect(new DeckHooks(mkdtempSync(join(tmpdir(), 'deck-'))).modBeats(now)).toEqual({})
   })

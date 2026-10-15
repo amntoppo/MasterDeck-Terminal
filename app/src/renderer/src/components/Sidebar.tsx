@@ -302,6 +302,7 @@ export function Sidebar({
         starred={stars.includes(s.key)}
         onStar={() => toggleStar(s.key)}
         loop={rowLoop(state.loops?.[s.sessionId], now)}
+        held={(state.held ?? []).filter((m) => m.sessionKey === s.key).length}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
       />
@@ -944,6 +945,7 @@ export function SessionRow({
   starred,
   onStar,
   loop,
+  held,
   dragging,
   dropBefore,
   ...drag
@@ -960,6 +962,8 @@ export function SessionRow({
   onStar?: () => void;
   /** Its workflow loop's badge and line (`rowLoop`); none without a loop to show. */
   loop?: { badge: string; line: string } | null;
+  /** MasterDeck messages waiting for its prompt to be empty (#123). */
+  held?: number;
   dragging?: boolean;
   dropBefore?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -1006,6 +1010,11 @@ export function SessionRow({
             title={loop.line}
           >
             {loop.badge}
+          </span>
+        )}
+        {!!held && (
+          <span className="srow-held" title={`${held} MasterDeck message${held === 1 ? "" : "s"} waiting for its prompt to be empty`}>
+            ✉ {held}
           </span>
         )}
         {onStar && (

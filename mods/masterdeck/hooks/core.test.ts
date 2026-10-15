@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { SeenMod } from '../types'
 import { refuses, seenWith, toReload } from './core'
 import { ago, deckFolder, deckRead, isOff, parseBand } from './deck'
+import { requestText, toClaim } from './deliver'
 
 const BAND = { v: 1, name: 's', ticket: null, status: null, pr: null, peers: [] }
 
@@ -45,4 +46,14 @@ test('keeps one entry per mod and asks for a reload once when a refused one is s
   expect(toReload(list, [], new Set())).toEqual(['a'])
   expect(toReload(list, [], new Set(['a']))).toEqual([])
   expect(toReload([{ ...a, loaded: true }], [], new Set())).toEqual([])
+})
+
+test('claims each MasterDeck message once, oldest first, and reads only a real request', async () => {
+  const names = ['20-b.json', '3-a.json', '3-a.claim', '5-c.json', '5-c.done', '9-d.json', 'x.json', '9-d.json.tmp']
+  expect(toClaim(names)).toEqual(['9-d', '20-b'])
+  expect(toClaim([])).toEqual([])
+  expect(requestText(JSON.stringify({ v: 1, text: 'hello' }))).toBe('hello')
+  expect(requestText(JSON.stringify({ v: 2, text: 'hello' }))).toBe(null)
+  expect(requestText(JSON.stringify({ v: 1, text: '  ' }))).toBe(null)
+  expect(requestText('{')).toBe(null)
 })

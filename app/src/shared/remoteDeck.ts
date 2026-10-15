@@ -44,6 +44,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   prDetail: invoke(CH.prDetail),
   startHere: invoke(CH.startHere),
   sendText: invoke(CH.sendText),
+  heldSend: invoke(CH.heldSend),
+  heldDrop: invoke(CH.heldDrop),
   answerMenu: invoke(CH.answerMenu),
   inboxAct: invoke(CH.inboxAct),
   queueList: invoke(CH.queueList),

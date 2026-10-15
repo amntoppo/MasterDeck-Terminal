@@ -62,7 +62,7 @@ Not checked yet: a mod installed at user scope (the probe used `--plugin-dir`), 
 
 | MasterDeck today | With a mod |
 |---|---|
-| `Sender` types into the session's PTY | `$.prompt.submit` / `$.prompt.fill` (queued until idle, no typing) |
+| `Sender` types into the session's PTY | `$.prompt.submit` (queued until idle, no typing): **built** in the core (#123, `deck/deliver/`); typing stays the fallback |
 | `/queue` caught at UserPromptSubmit, handed over at Stop through files and rename claims | a real `/queue` command answered at once; `turn.complete` → `$.prompt.submit` |
 | AskUserQuestion menus read off the screen (`claude logs` + headless xterm) | `tool.call` on AskUserQuestion: the question as data, and an answer from MasterDeck or a phone |
 | The master reports guard: a jq regex in bash | `session.send` in TypeScript |

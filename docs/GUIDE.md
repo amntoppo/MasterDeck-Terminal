@@ -288,6 +288,13 @@ diff too big to send says so.
   hidden `claude attach` that closes after about 3 s (the session keeps running). A session in another
   terminal gets it relayed by master-agent. Never into a session waiting on a permission prompt: its
   text would answer the prompt, so those show **Open** instead.
+- **Your half-typed prompt is safe:** a message from MasterDeck (a PR review, a monitor, a workflow
+  step, a broadcast) never goes out mixed with what you were typing. With MasterDeck's mods
+  installed, Claude gets it as a prompt of its own (shown as "Prompt from the masterdeck plugin")
+  and your text stays in the prompt, cursor and all. Without them, MasterDeck waits while your
+  prompt has text or you are typing: the session gets a **✉ 1** badge and a bar above its terminal
+  with the message, who sent it, **Send now** (sends it now if your prompt is empty) and **Discard**.
+  It goes by itself once your prompt is empty, or when Claude finishes the turn it is working on.
 - **★ Master (top right, every screen, ⌘⇧M):** shows or hides master-agent's column. Drag its edge
   to resize it. Hiding it doesn't stop or detach master.
 - **Workflow (on the rail):** a canvas where you build what sessions do, from an issue to a merged
