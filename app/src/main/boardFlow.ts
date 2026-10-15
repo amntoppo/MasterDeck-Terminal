@@ -19,6 +19,8 @@ export interface BoardFlowDeps {
   /** Live state of PRs (through ghc); unknown ones are left out. */
   prStates: (urls: string[]) => Promise<Record<string, { state: string; isDraft: boolean }>>
   link: (t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>
+  /** Assign the ticket to the user (a `master start` that asked for it: `assignMe`), as `account` (null: the card's). */
+  assignMe?: (t: Ticket, account: string | null) => Promise<CliResult>
   builtinOn: (sessionId: string) => boolean
   onMoved: (t: Ticket, status: string) => void
   log?: (m: string) => void
@@ -70,12 +72,20 @@ export class BoardFlow {
   private async autoLink(state: AppState): Promise<void> {
     for (const s of state.sessions) {
       if (s.issue !== null || s.state === 'done' || s.name === MASTER_NAME || this.linkTried.has(s.sessionId)) continue
-      const p = state.proposals.find((x) => x.kind === 'ASSIGN' && ['sent', 'question', 'blocked', 'done'].includes(x.status) && x.target.spawn?.name === s.name)
-      if (!p || !this.deps.builtinOn(s.sessionId)) continue
+      // The newest of that name: an older one may be an earlier session's start of the same ticket.
+      // A newer START of the same name (no ticket) wins over an older ASSIGN: such a session is not linked.
+      const p = [...state.proposals].reverse().find((x) => ['sent', 'question', 'blocked', 'done'].includes(x.status) && x.target.spawn?.name === s.name)
+      if (!p || p.kind !== 'ASSIGN' || !p.issue || !this.deps.builtinOn(s.sessionId)) continue
       this.linkTried.add(s.sessionId)
       if (this.deps.linkTriedFile) writeJson(this.deps.linkTriedFile, [...this.linkTried], this.deps.log)
-      const r = await this.deps.link({ repo: p.repo ?? null, number: p.issue }, s.sessionId, s.cwd || null)
+      const t: Ticket = { repo: p.repo ?? null, number: p.issue }
+      const r = await this.deps.link(t, s.sessionId, s.cwd || null)
       if (!r.ok) this.deps.log?.(`link ${s.name}: ${r.message}`)
+      // Once, with the link (linkTried): a user who unassigns themselves later is not assigned again.
+      else if (p.target.spawn?.assignMe && this.deps.assignMe) {
+        const a = await this.deps.assignMe(t, p.target.spawn.account ?? null)
+        if (!a.ok) this.deps.log?.(`assign ${s.name}: ${a.message}`)
+      }
     }
   }
 

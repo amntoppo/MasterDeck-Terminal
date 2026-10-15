@@ -536,6 +536,13 @@ class ParkedTest(Base):
         self.assertEqual(sorted(got), ["0badc0de", "4f2a9c1e"])
         self.assertTrue(got["0badc0de"]["review"])
 
+    def test_a_start_from_scratch_in_a_checkout_is_parked_unless_it_has_its_own_worktree(self):
+        self.start("START", {"name": "flaky", "prompt": "go", "cwd": str(self.api)}, n=0)
+        self.assertEqual(self.parked()["4f2a9c1e"]["branch"], "feat/someone-elses")
+        self.start("START", {"name": "wt", "prompt": "go", "cwd": str(self.api), "worktree": "wt"},
+                   out="backgrounded · 0badc0de\n", n=0)
+        self.assertNotIn("0badc0de", self.parked())
+
     def test_no_bg_id_in_the_output_falls_back_to_the_name(self):
         self.start("ASSIGN", {"name": "api-7-x", "prompt": "go"}, out="started\n")
         self.assertEqual(list(self.parked()), ["name:api-7-x"])

@@ -3,12 +3,19 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, sessionFileCall, worktreeFolder } from './remoteGuards'
+import { remoteSettings, knownDirsOnly, chosenFolder, claudeFolder, inboxActCall, MacPanes, sessionFileCall, updateHandlers, worktreeFolder } from './remoteGuards'
 it('remote save keeps current remoteEnabled and theme and passes other keys', () => {
   expect(remoteSettings({ remoteEnabled: false, font: 14 }, { remoteEnabled: true, theme: 'dark' })).toEqual({ remoteEnabled: true, font: 14, theme: 'dark' })
   expect(remoteSettings({ font: 14 }, { remoteEnabled: true, font: 12, theme: 'light' })).toEqual({ remoteEnabled: true, font: 14, theme: 'light' })
   // A browser picks its own theme; saving settings from it never changes the Mac's.
   expect(remoteSettings({ theme: 'light' }, { remoteEnabled: true, theme: 'system' })).toEqual({ remoteEnabled: true, theme: 'system' })
+  // Nor how the Mac updates.
+  expect(remoteSettings({ autoDownloadUpdates: false, updateChannel: 'beta' }, { remoteEnabled: true, theme: 'dark', autoDownloadUpdates: true, updateChannel: 'stable' })).toEqual({
+    remoteEnabled: true,
+    theme: 'dark',
+    autoDownloadUpdates: true,
+    updateChannel: 'stable',
+  })
 })
 it('non-object payload keeps every current setting', () => {
   for (const bad of [null, 'x', 3, [1]]) expect(remoteSettings(bad, { remoteEnabled: true, font: 12 })).toEqual({ remoteEnabled: true, font: 12 })
@@ -134,5 +141,48 @@ describe('sessionFileCall', () => {
     expect(sessionFileCall(sessions, 'k1', { path: '/etc/passwd' }).ok).toBe(false)
     expect(sessionFileCall(sessions, 'k1', { path: 7 }).ok).toBe(false)
     expect(sessionFileCall(sessions, 'k1', { base: 'HEAD~3' }).ok).toBe(false)
+  })
+})
+
+describe('updateHandlers (update:*: the Mac window only)', () => {
+  function fake() {
+    const ran: string[] = []
+    const u = {
+      state: () => (ran.push('state'), { phase: 'idle' }),
+      check: async () => (ran.push('check'), { phase: 'checking' }),
+      download: async () => (ran.push('download'), { phase: 'downloading' }),
+      remindLater: () => (ran.push('later'), { phase: 'ready' }),
+    }
+    const h = updateHandlers(
+      () => u as never,
+      async () => (ran.push('restart'), { ok: true }),
+    )
+    return { h, ran }
+  }
+
+  it('a browser is refused and nothing runs', async () => {
+    const { h, ran } = fake()
+    expect(await h.state(true)).toBeNull()
+    expect(await h.check(true)).toBeNull()
+    expect(await h.download(true)).toBeNull()
+    expect(await h.later(true)).toBeNull()
+    expect(await h.restart(true)).toEqual({ ok: false, message: "Updates are the Mac's own" })
+    expect(ran).toEqual([])
+  })
+
+  it("the Mac's window reaches the updater", async () => {
+    const { h, ran } = fake()
+    await h.state(false)
+    await h.check(false)
+    await h.download(false)
+    await h.later(false)
+    expect(await h.restart(false)).toEqual({ ok: true })
+    expect(ran).toEqual(['state', 'check', 'download', 'later', 'restart'])
+  })
+
+  it('no updater (not made yet): null, never a throw', async () => {
+    const h = updateHandlers(() => null, async () => ({ ok: false }))
+    expect(await h.state(false)).toBeNull()
+    expect(await h.check(false)).toBeNull()
   })
 })

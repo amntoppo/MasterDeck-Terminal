@@ -168,7 +168,7 @@ web tabs keep working.
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`, `rawFlowHash`, `sameAsMark`: the one "edited" rule), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
-| master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master` |
+| master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master`; sessions started on demand from master's chat: `skills/master/lib/master/start.py` + `cli.cmd_start` (`master start`), `assignMe` in `main/boardFlow.ts` |
 | The Start dialog's options (worktree made before the start, permission mode, remembered choices) and its Markdown preview | `shared/startOptions.ts`, `main/startWorktree.ts` (`worktreeInfo`, `createWorktree`), `worktreeFolder` in `main/remoteGuards.ts`, `AssignRequest.permissionMode` → `master add --permission-mode` → `spawn.command`, `shared/markdown.ts` + `renderer/.../MarkdownView.tsx` (reuse for any Markdown view), `renderer/.../AssignDialog.tsx` |
 | Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); whether a folder's branch is the session's: `ownsFolderBranch` in `shared/parked.ts`, `main/parked.ts` (`parked-sessions.json`, written by `master spawn`: `checkout.parked`), `Sources.ownsBranch`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
 | Whether Claude Code may work in a folder (its trust prompt), and a start it refused | `skills/master/lib/master/trust.py` (the one reader of Claude Code's `.claude.json`, read only: `trusted`, `wait`, `not_trusted`; `master trust`, `trusted` in `draft-assign` / `checkout`), `MasterCli.trust`, `shared/trust.ts` (`isNotTrusted`, `trustView`, `startBlocked`, `heldForTrust`, `trustHeldAssign`, `startFlags`, `retryRequest`, `waitForTrust`), `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`: Start dialog, `StartRefused` in `App.tsx`, the held `ProposalCard`), **Open Claude there…**: `openClaude` in `main/index.ts`, `claudeFolder` in `main/remoteGuards.ts`, the `claude-here` pane; Try again: `AssignRequest.retry` / `retryHeld` in `main/assign.ts` → `MasterCli.spawnHeld` (`master spawn --held-for-trust`, `held_for` in the ledger); who asked an inbox action: `inboxActCall` in `main/remoteGuards.ts` |
@@ -189,6 +189,7 @@ web tabs keep working.
 | Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
 | A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
+| In-app updates (#122: check, download, verify, install; Settings → Updates; the app menu) | `shared/updates.ts` (model, `compareVersions`, `signedMessage`, `statusLine`, `shouldPrompt`, `badge`), `shared/releaseKey.ts` (the public key; `releaseKey` / `updateBase`: `MASTERDECK_UPDATE_PUBKEY` and `MASTERDECK_UPDATE_URL` only in an update-test build, `MASTERDECK_UPDATE_TEST_BUILD=1` → define `__MD_UPDATE_TEST__`), `shared/updateHelper.ts` (the macOS helper script, bash 3.2), `main/updater.ts` (`Updater`, `updatesOffReason`), `main/updateMac.ts` (`MacInstaller`), `main/updateWin.ts` (`WinInstaller`, `electron-updater` on win32 only), `main/updateVerify.ts` (hash + Ed25519), `main/appMenu.ts`, `makeUpdater` / `restartToUpdate` / `setAppMenu` and the `update:*` handlers in `main/index.ts`; files in `<userData>/updates/`. Never in `AppState`; every `update:*` is `blocked` for the web. Off unless packaged; `MASTERDECK_UPDATES=0` turns it off; the `update:*` handlers are `updateHandlers` in `main/remoteGuards.ts`; MasterDeck's own Restart (`relaunching`) never installs on quit |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -413,13 +414,65 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-16)
 
 - **Admin dashboard (#127)**, 2026-10-16, **not deployed, not merged**: the API is in the backend (branch
-  `127-admin-dashboard`, `/admin/*`, migration 0006, docs `docs/ADMIN.md`), the page in its own new private repo
+  `127-admin-dashboard`, `/admin/*`, its own D1 migration, docs `docs/ADMIN.md`), the page in its own new private repo
   (named in the backend's `docs/ADMIN.md`; branch `127-admin-dashboard`, pushed). In this repo only the hello's optional
   `platform` / `osVersion` (`CloudSync`, protocol copy synced; branch `worktree-127-admin-dashboard`). Checked:
   backend typecheck + vitest (278), MasterDeck typecheck + vitest (2596 passed), the drift test against the
   backend branch, the dashboard's typecheck/tests/build, and every page locally (wrangler dev + headless Chrome,
   light/dark, 390 px). Not checked: production (no deploy), a real Mac's hello with the new fields, Windows.
   Open points: TODO ("Admin dashboard (#127)").
+
+- **Master starts sessions on demand (#126)** on branch
+  `worktree-MasterDeck-Terminal-126-master-start` (PR #129, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). `master start` (`skills/master/lib/master/start.py`,
+  `cli.cmd_start`): from scratch (a `START` proposal) or for tickets by reference or board filter
+  (ASSIGN proposals with the ticket's description and sub-issues, `assignMe`); a plan to approve or
+  trim, `--yes` for "start it now"; `claude --worktree` through the spawn target; the app assigns the
+  user after linking and lists a started session at once (ARCHITECTURE "master-agent integration").
+  Checked: the Python suite, typecheck, vitest. Not checked: a real start, the real assign, the
+  MasterBar app. Open points: TODO ("Master starts sessions on demand (#126)").
+
+- **In-app updates (#122)** are built on branch `worktree-MasterDeck-Terminal-122-in-app-updates`
+  (PR #128, not merged, not installed, nothing published or deployed), with the code review's fixes: no
+  install on quit for MasterDeck's own Restart and none while the app runs from the bundle; the
+  backup kept after an install on quit and removed by the healthy new app; the administrator path
+  runs only inline root commands that unpack the verified zip again (never the helper file or the
+  staged copy); the test key and update URL only in an update-test build
+  (`MASTERDECK_UPDATE_TEST_BUILD=1`); the publish script checks the key against the app's, skips
+  files already uploaded (same size and sha512 only; a published file with another hash stops it)
+  and runs after the GitHub attach; the final review's fixes: the running check again right before
+  the renames (also as root, after the password prompt), Windows' install on quit off for a
+  relaunch, a channel change during a failed Restart now checked at once. A new GitHub release is
+  published as an update by `.github/workflows/ota-release.yml` (on `release: published`, called by
+  `release.yml` after it attaches the files, or by hand). Backend: branch `122-update-service`
+  (backend PR #12, not merged; **deployed from that branch 2026-10-16** with the R2 bucket,
+  migration 0006, the Worker secret and both GitHub secrets: the update service is live, nothing
+  published yet). Checked: typecheck, vitest (the helper with nasty paths
+  through a `/bin/sh` stand-in for osascript), actionlint, the OTA download step against the real
+  v0.9.0 release (read only), and end to end (OPERATIONS "Testing in-app updates") before the final
+  review's fixes: local `wrangler dev`, packaged builds in a temp folder, 0.9.0 → 0.9.1 and 0.9.0 →
+  0.9.2 in place, a broken 0.9.3 rolled back to 0.9.2 and skipped. Not checked: real R2 and
+  Cloudflare, the workflows on GitHub Actions, the real password prompt, Windows. Open points: TODO
+  ("In-app updates (#122)").
+
+- **Why the mic did not follow Meet's mute (#102)** is built on branch
+  `worktree-MasterDeck-Terminal-102-mute-check` (from `main` 7c346e2; PR #125, not merged;
+  installed locally 2026-10-16). The user's Google Meet in
+  Chrome was recorded while muted (md-mute never read `muted`); the cause is still unknown. Added:
+  md-mute's per-app diagnostics (`why`, the matched `label` only, `searched`, `ms`, `cached`; the
+  parser accepts lines with or without them), Meet as a web rule (search from `AXWebArea`, 40000
+  elements / 800 ms, three roles, one retry after `AXManualAccessibility`), Settings → Meetings →
+  **Check mute reading** (`meetings:muteCheck`, 3 s, every rule, `gateTrusted` beside the helper's
+  `trusted`), and a per-meeting **Mic log** (`micLog`, the first and last 250 with `micLogDropped`,
+  no why-only changes, Meetings page and export). Review fixes (second commit): Meet searched only
+  on pages whose `AXURL` host is `meet.google.com` (rule field `hosts`), toolbars and Chromium's
+  tab strip skipped, cached processes first, `AXManualAccessibility` remembered only on success,
+  failed AX reads give `error`, the split-grant note only when the helper said `trusted: false`.
+  Checked: typecheck, vitest (208 files passed, 2 skipped; 2569 tests passed, 4 skipped), `npm run
+  build`, md-mute rebuilt and run against bundle ids nothing runs. Not checked: the Check or the
+  Mic log on screen, any real meeting app (Chrome was never read). Next: the user presses Check in
+  a Meet call (muted, then unmuted) on the installed app; OPERATIONS § Meetings: md-mute says how
+  to read it. Open points: TODO ("The mic follows the meeting app's mute").
 
 - **MasterDeck messages never mix with a half-typed prompt (#123)**, branch
   `worktree-MasterDeck-Terminal-123-held-messages` (draft PR, not merged, **not installed**: the

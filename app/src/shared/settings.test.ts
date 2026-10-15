@@ -57,3 +57,13 @@ describe('theme', () => {
     expect(normalizeSettings({ theme: 'solarized' }).theme).toBe('dark')
   })
 })
+
+describe('update settings', () => {
+  it('default to automatic downloads on the stable channel', () => {
+    expect(normalizeSettings({})).toMatchObject({ autoDownloadUpdates: true, updateChannel: 'stable' })
+  })
+  it('keep a boolean and a known channel', () => {
+    expect(normalizeSettings({ autoDownloadUpdates: false, updateChannel: 'beta' })).toMatchObject({ autoDownloadUpdates: false, updateChannel: 'beta' })
+    expect(normalizeSettings({ autoDownloadUpdates: 'no', updateChannel: 'nightly' })).toMatchObject({ autoDownloadUpdates: true, updateChannel: 'stable' })
+  })
+})

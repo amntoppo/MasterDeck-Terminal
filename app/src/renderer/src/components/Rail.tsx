@@ -6,6 +6,7 @@ import { isWeb, screenOk } from '../web'
 import { RecordMeeting } from './RecordMeeting'
 import type { MeetingLive } from '@shared/meetings'
 import { meetingsHere } from '../meetingLinks'
+import { badgeLabel } from '../updates'
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
@@ -53,6 +54,8 @@ interface Props {
   /** The Notes panel is open. */
   notesOpen: boolean
   onNotes: () => void
+  /** An update to show on the Settings icon (the window only). */
+  update?: 'required' | 'ready' | 'available' | null
   /** Record a meeting (macOS, the window only; RecordMeeting hides itself elsewhere). */
   meeting?: {
     live: MeetingLive | null | undefined
@@ -138,13 +141,17 @@ const ACTIONS: [RailAction, string, string][] = [
 ]
 
 /** The Command Center rail: views on top, tools, then actions and Settings at the bottom. */
-export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes, meeting }: Props) {
-  const viewBtn = (v: View, label: string, hint = '', badge = 0) => (
-    <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${label}  ${hint}` : label} aria-label={label} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
-      <RailIcon name={v} />
-      {badge > 0 && <span className="rb-badge">{badge}</span>}
-    </button>
-  )
+export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes, meeting, update }: Props) {
+  const viewBtn = (v: View, label: string, hint = '', badge = 0, dot: Props['update'] = null) => {
+    const name = dot ? `${label} · ${badgeLabel(dot)}` : label
+    return (
+      <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${name}  ${hint}` : name} aria-label={name} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
+        <RailIcon name={v} />
+        {badge > 0 && <span className="rb-badge">{badge}</span>}
+        {dot && <span className={`rb-dot ${dot}`} aria-hidden="true" />}
+      </button>
+    )
+  }
   return (
     <nav className="rail" aria-label="Views">
       <div className="rail-drag" />
@@ -167,7 +174,7 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
           <RailIcon name={a} />
         </button>
       ))}
-      {screenOk('settings') && viewBtn('settings', 'Settings', '⌘,')}
+      {screenOk('settings') && viewBtn('settings', 'Settings', '⌘,', 0, update)}
     </nav>
   )
 }

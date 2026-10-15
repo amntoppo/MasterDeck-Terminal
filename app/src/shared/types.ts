@@ -90,6 +90,10 @@ export interface SpawnTarget {
   model?: string;
   /** `claude --permission-mode` the proposal names; absent: Claude Code's default. */
   permissionMode?: string;
+  /** `claude --worktree <name>` (`master start --worktree`): the session starts in a new worktree of that name. */
+  worktree?: string;
+  /** A ticket start from `master start`: once the session is linked, MasterDeck assigns the ticket to the user. */
+  assignMe?: boolean;
 }
 
 export interface Proposal {

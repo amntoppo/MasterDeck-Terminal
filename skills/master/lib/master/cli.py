@@ -9,9 +9,9 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import board, checkout, collect, config, guard, inbox, ledger, refs, rules, snapshot, spawn, trust
+from . import board, checkout, collect, config, guard, inbox, join, ledger, refs, rules, snapshot, spawn, start, trust
 
-WRITE_CMDS = {"add", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
+WRITE_CMDS = {"add", "start", "approve", "reject", "mark", "spawn", "say", "sweep-request", "reply", "ack"}
 
 
 def _now(args) -> str:
@@ -220,7 +220,294 @@ def cmd_spawn(args) -> int:
         print(err)
         return 1
     print(f"{args.id}: sent — {p['note']}")
+    if "spawn" in p["target"] and not p["target"]["spawn"].get("resume"):
+        print(_started(p))
     return 0
+
+
+def _started(p: dict) -> str:
+    """A spawned proposal for the user: its name and how to attach to it."""
+    sp = p["target"]["spawn"]
+    bg = spawn.bg_id(p.get("note") or "")
+    return f"started {sp['name']} (proposal {p['id']})" + (f" — claude attach {bg}" if bg else "")
+
+
+def _issue_reader(args):
+    """Read one issue (and its sub-issues) as the account that owns its repository; one source per account."""
+    srcs: dict = {}
+
+    def read(repo: str, n: int) -> "tuple[dict, list]":
+        login = None if args.fixtures else config.account_for_repo(repo)
+        if login not in srcs:
+            srcs[login] = _repo_source(args, login)
+        src = srcs[login]
+        raw = src.issue(repo, n)
+        try:
+            subs = start.subs_from_api(src.sub_issues(repo, n))
+        except Exception:
+            subs = []  # context only: a start does not fail over it
+        return start.issue_from_api(raw, repo), subs
+    return read
+
+
+def _board_cards(args) -> "tuple[list, list, str | None]":
+    """Cards of every configured board (an account with no board: its repositories' issues), for
+    `master start`'s filters: (cards, errors, me). The sprint part is asked of GitHub; the column,
+    assignee and label are matched here (`start.board_match`)."""
+    mine = (args.assignee or "").lower() == "@me"
+    sprint = args.sprint or "@current"
+    query = ("is:issue" + (" assignee:@me" if mine else "")) if sprint == "any" else board.sprint_query(sprint, mine=mine)
+    srcs = _sources(args)
+    logins = [a["login"] for a in config.accounts()] if len(srcs) > 1 else [None]
+    items, errors = [], []
+    for login, src in zip(logins, srcs):
+        try:
+            if config.boardless(getattr(src, "cfg", None)):
+                got = [dict(it, status=board.derived_status(it)) for it in src.repo_issues(_today(args))["items"]
+                       if it.get("state") != "CLOSED"]
+            else:
+                got = src.board_sprint(query)
+            items += [dict(it, account=login) for it in got] if login else got
+        except Exception as e:
+            errors.append(str(e).strip() or type(e).__name__)
+    me = None
+    if len(srcs) == 1 and mine:
+        try:
+            me = srcs[0].me()
+        except Exception as e:
+            errors.append(f"who you are on GitHub is not known: {str(e).strip() or type(e).__name__}")
+    return board.build(items, {}, _now(args))["cards"], errors, me
+
+
+def _ticket_refs(args) -> "tuple[list, list]":
+    """The tickets `master start` names, as (stored repo, number): from references, else the board
+    filters. Returns them and lines to show the user (refusals, notes)."""
+    if args.tickets:
+        out, bad = [], []
+        for t in args.tickets:
+            for part in [x for x in re.split(r"[,\s]+", t) if x]:
+                try:
+                    out.append(refs.parse(part))
+                except ValueError as e:
+                    bad.append(f"{part}: {e}")
+        return list(dict.fromkeys(out)), bad
+    cards, errors, me = _board_cards(args)
+    notes = [f"board: {e}" for e in errors]
+    picked = []
+    for c in cards:
+        if not args.column and (c.get("status") or "") in set(config.statuses_for(c.get("project"))["done"]):
+            continue  # finished cards only when their column is asked for by name
+        if start.board_match(c, args.column, args.assignee, args.label or [], c.get("account") or me):
+            picked.append((refs.stored(c.get("repo")), c["number"]))
+    if len(picked) > args.limit:
+        notes.append(f"{len(picked) - args.limit} more tickets matched; only the first {args.limit} are planned (--limit)")
+        picked = picked[:args.limit]
+    if not picked:
+        notes.append("no ticket on the board matches")
+    return picked, notes
+
+
+def _plan_ticket(args, read, sessions, led, taken: set, now: str) -> "tuple[list, list]":
+    """Each named ticket's start (proposal fields, warnings), and the ones refused with why."""
+    plans, refused = [], []
+    tickets, notes = _ticket_refs(args)
+    refused += notes
+    if len(tickets) > start.BATCH_MAX:
+        refused.append(f"{len(tickets) - start.BATCH_MAX} tickets left out: one start takes {start.BATCH_MAX} at most")
+        tickets = tickets[:start.BATCH_MAX]
+    if args.name and len(tickets) > 1:
+        return [], ["--name takes one ticket; leave it out to name each session after its ticket"]
+    if args.worktree_name and len(tickets) > 1:
+        return [], ["--worktree-name takes one ticket; with --worktree each session's worktree is named after it"]
+    for repo, n in tickets:
+        lab = refs.label(repo, n)
+        full = refs.full(repo)
+        if not config.repo_readable(full):
+            refused.append(f"{lab}: {full} is not selected in Setup, so MasterDeck could not link the session")
+            continue
+        try:
+            issue, subs = read(full, n)
+        except Exception as e:
+            msg = str(e).strip()
+            refused.append(f"{lab}: not found" if "404" in msg or "Not Found" in msg else f"{lab}: not read ({msg[:200]})")
+            continue
+        if issue["is_pr"]:
+            refused.append(f"{lab}: is a pull request, not an issue")
+            continue
+        if issue["state"] == "closed":
+            refused.append(f"{lab}: is closed")
+            continue
+        no, warn = start.owner_problem(sessions, issue)
+        if no:
+            refused.append(f"{lab}: {no}")
+            continue
+        old = start.pending_assign(led, issue)
+        if old and old["status"] == "approved":
+            refused.append(f"{lab}: proposal {old['id']} for it is approved and about to start")
+            continue
+        a = rules._assign(issue, args.cwd, args.account)
+        sp = a["target"]["spawn"]
+        where = checkout.resolve(repo, args.cwd, account=args.account)
+        sp["name"] = start.unique_name(args.name or sp["name"], taken)
+        taken.add(sp["name"])
+        sp["prompt"] = start.ticket_prompt(issue, where, subs, args.prompt or "", bool(args.worktree or args.worktree_name))
+        if args.model:
+            sp["model"] = args.model
+        if args.permission_mode:
+            sp["permissionMode"] = args.permission_mode
+        if args.worktree or args.worktree_name:
+            sp["worktree"] = args.worktree_name or sp["name"]
+        if not args.no_assign:
+            sp["assignMe"] = True
+        a.update(source=f"start:{refs.ref(repo, n)}:{now}", message=sp["prompt"])
+        warnings = ([warn] if warn else []) + start.folder_warnings(None if args.cwd else where, sp["cwd"], True)
+        plans.append({"fields": a, "warnings": warnings, "replaces": old["id"] if old else None})
+    return plans, refused
+
+
+def _plan_scratch(args, taken: set, now: str) -> dict:
+    """A start from scratch: the task in the folder asked for (a repository's checkout, else the workspace)."""
+    where = None
+    if args.cwd:
+        cwd = args.cwd
+    elif args.repo:
+        where = checkout.resolve(args.repo, account=args.account, mapped=False)
+        cwd = where["cwd"]
+    else:
+        cwd = str(config.workspace_for(None, account=args.account) if args.account else config.workspace())
+    name = start.unique_name(args.name or start.scratch_name(args.prompt), taken)
+    taken.add(name)
+    worktree = (args.worktree_name or name) if (args.worktree or args.worktree_name) else None
+    sp = {"name": name, "cwd": cwd, "prompt": start.scratch_prompt(args.prompt, name, where, worktree)}
+    acct = (args.account or (config.account_for_repo(args.repo) if args.repo else config.accounts()[0]["login"])) \
+        if config.is_multi() else None
+    for k, v in (("account", acct), ("model", args.model), ("permissionMode", args.permission_mode), ("worktree", worktree)):
+        if v:
+            sp[k] = v
+    first = re.sub(r"\s+", " ", args.prompt.strip().splitlines()[0])
+    fields = {"kind": "START", "issue": 0, "repo": None, "source": f"start:{name}:{now}", "target": {"spawn": sp},
+              "message": sp["prompt"], "summary": first[:60] + ("…" if len(first) > 60 else "")}
+    return {"fields": fields, "warnings": start.folder_warnings(where, cwd, False), "replaces": None}
+
+
+def cmd_start(args) -> int:
+    err = _fill_stdin(args, "prompt")
+    if err:
+        print(err)
+        return 2
+    tickets = bool(args.tickets or args.column or args.assignee or args.label or args.sprint)
+    if not tickets and not (args.prompt or "").strip():
+        print("master start needs a task (--prompt) for a session from scratch, or tickets (#N … or --column/--assignee/--label/--sprint)")
+        return 2
+    if args.tickets and (args.column or args.assignee or args.label or args.sprint):
+        print("name tickets or filter the board, not both")
+        return 2
+    if args.repo and (args.cwd or tickets):
+        print("--repo is for a session from scratch, without --cwd" if not tickets else "--repo is for a session from scratch; a ticket starts in its own repository")
+        return 2
+    if args.repo and not re.fullmatch(config.REPO_RE, args.repo):
+        print(f"not a repository (owner/name): {args.repo}")
+        return 2
+    if args.prompt and args.prompt.lstrip().startswith("-"):
+        print("the task must not start with '-'")
+        return 2
+    for e in (spawn.validate_name(args.name) if args.name else None, spawn.validate_model(args.model),
+              spawn.validate_permission_mode(args.permission_mode), spawn.validate_account(args.account),
+              spawn.validate_worktree(args.worktree_name)):
+        if e:
+            print(e)
+            return 2
+    if args.account and config.is_multi() and not any(a["login"].lower() == args.account.lower() for a in config.accounts()):
+        print(f"GitHub account {args.account} is not a connected account (Setup → GitHub accounts)")
+        return 2
+    if args.limit < 1:
+        print("--limit takes 1 or more")
+        return 2
+    if args.sprint and ('"' in args.sprint or "\\" in args.sprint):
+        print(f"bad sprint name: {args.sprint!r}")
+        return 2
+    if args.cwd and not Path(args.cwd).is_dir():
+        print(f"folder does not exist: {args.cwd}")
+        return 2
+    now = _now(args)
+    src = _source(args)
+    # Who runs now: a ticket with a running session is refused, and a name in use gets a suffix.
+    sessions, notes = [], []
+    try:
+        agents = src.agents()
+        sessions = join.sessions(agents, src.state(), config.MASTER_NAME, src.session_cwd, config.superseded_ids())
+    except Exception as e:
+        agents = []
+        notes.append(f"`claude agents` failed ({str(e).strip()[:200] or type(e).__name__}): running sessions were not checked")
+    led = ledger.load()
+    taken = {a.get("name") for a in agents if isinstance(a, dict) and a.get("name") and a.get("state") != "done"}
+    taken |= {p["target"]["spawn"]["name"] for p in led["proposals"]
+              if p["status"] in ("proposed", "approved", "held") and (p["target"].get("spawn") or {}).get("name")}
+    if tickets:
+        plans, refused = _plan_ticket(args, _issue_reader(args), sessions, led, taken, now)
+    else:
+        plans, refused = [_plan_scratch(args, taken, now)], []
+    for p in plans:
+        e = spawn.validate_spawn_target(p["fields"]["target"]["spawn"])
+        if e:
+            print(e)
+            return 2
+    added = []
+    if plans and not args.dry_run:
+        with ledger.locked() as led:
+            for p in plans:
+                got = ledger.add(led, now=now, **p["fields"])
+                if got is None:
+                    continue
+                if p["replaces"]:
+                    old = ledger.get(led, p["replaces"])
+                    if old["status"] in ("proposed", "held"):
+                        ledger.transition(led, old["id"], "rejected", now=now, note=f"replaced by start proposal {got['id']}")
+                    else:
+                        p["replaces"] = None
+                if args.yes:
+                    ledger.transition(led, got["id"], "approved", now=now, note="started on the user's word")
+                added.append((got, p))
+    shown = added if not args.dry_run else [({**p["fields"], "id": 0}, p) for p in plans]
+    if shown:
+        if args.dry_run:
+            head = f"{len(shown)} start{'s' if len(shown) != 1 else ''} planned (dry run, nothing added)"
+        elif args.yes:
+            head = f"{len(shown)} start{'s' if len(shown) != 1 else ''} approved on your word"
+        else:
+            head = (f"{len(shown)} start{'s' if len(shown) != 1 else ''} waiting for your yes "
+                    f"(approve all, or name the ids to keep; the rest are rejected)")
+        print(head)
+        for p, plan in shown:
+            print(start.describe(p, plan["warnings"]))
+            if plan["replaces"]:
+                print(f"      replaces proposal {plan['replaces']} (rejected)")
+    if refused:
+        print("not started:")
+        for r in refused:
+            print(f"  {r}")
+    for n in notes:
+        print(f"note: {n}")
+    if args.yes and not args.dry_run:
+        # One lock per start, as `master spawn` takes it: nothing is retried; a failure leaves it held.
+        failed = False
+        for p, _ in added:
+            # Caught inside the block, so the note and the hold are saved (as in cmd_spawn).
+            with ledger.locked() as led:
+                try:
+                    line = _started(spawn.spawn(led, p["id"], now=now))
+                except spawn.SpawnError as e:
+                    cur = ledger.get(led, p["id"])
+                    if cur["status"] in ("sent", "question", "blocked", "done"):
+                        # master's watch spawned it between the approval and here: it did start.
+                        line = _started(cur)
+                    else:
+                        failed = True
+                        line = f"{p['target']['spawn']['name']} did not start: {e} (proposal {p['id']} is held; say retry to try again)"
+            print(line)
+        if failed:
+            return 1
+    return 0 if shown else 1
 
 
 def cmd_list(args) -> int:
@@ -572,6 +859,27 @@ def parser() -> argparse.ArgumentParser:
                                               "omitted: Claude Code's default")
     ad.set_defaults(fn=cmd_add)
 
+    st = with_src(sub.add_parser("start", help="start sessions on demand: from scratch with a task, or for board tickets"))
+    st.add_argument("tickets", nargs="*", help="tickets: 12, #12, name#12 or owner/name#12 (space or comma separated)")
+    st.add_argument("--prompt", help="the task (from scratch; '-' reads stdin), or the user's instructions added to each ticket's prompt")
+    st.add_argument("--column", help="board filter: the status column, e.g. 'Ready For Dev'")
+    st.add_argument("--assignee", help="board filter: a login, @me, or none")
+    st.add_argument("--label", action="append", help="board filter: a label (repeat: all of them)")
+    st.add_argument("--sprint", help="board filter: @current (default), a sprint title, none, or any")
+    st.add_argument("--limit", type=int, default=start.DEFAULT_LIMIT, help="tickets a board filter picks at most")
+    st.add_argument("--name", help="the session's name (one start); omitted: from the ticket or the task")
+    st.add_argument("--repo", help="from scratch: owner/name; the session starts in its checkout")
+    st.add_argument("--cwd", help="the folder to start in (a folder the user named)")
+    st.add_argument("--worktree", action="store_true", help="start in a new git worktree (claude --worktree), named after the session")
+    st.add_argument("--worktree-name", help="that worktree's name (one start only; implies --worktree)")
+    st.add_argument("--model", help="claude --model; omitted: the default model")
+    st.add_argument("--permission-mode", help="claude --permission-mode (plan, acceptEdits, …)")
+    st.add_argument("--account", help="gh login the sessions work as (two or more connected accounts)")
+    st.add_argument("--no-assign", action="store_true", help="tickets: do not assign the user when the session is linked")
+    st.add_argument("--yes", action="store_true", help="the user said start it now: approve and spawn at once")
+    st.add_argument("--dry-run", action="store_true", help="show the plan; add nothing")
+    st.set_defaults(fn=cmd_start)
+
     for name, to in (("approve", "approved"), ("reject", "rejected")):
         p = sub.add_parser(name)
         p.add_argument("ids", type=int, nargs="+")
@@ -660,7 +968,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _is_write(args) -> bool:
-    if args.cmd == "sweep":
+    if args.cmd in ("sweep", "start"):
         return not args.dry_run
     if args.cmd == "cursor":
         return bool(args.meetings_since)

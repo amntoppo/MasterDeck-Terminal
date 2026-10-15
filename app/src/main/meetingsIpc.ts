@@ -10,7 +10,9 @@ import {
   MEETINGS_MAC_ONLY,
   mediaAllowed,
   meetingsAgreed,
+  MicLogKeep,
   type MeetingLive,
+  type MicLogEntry,
   MEETINGS_GRANTS,
   type MeetingNotice,
   type MeetingsAnswer,
@@ -47,7 +49,7 @@ import type { Matcher } from './meetings/matcher'
 import type { OfferWatch } from './meetings/apps'
 import type { MuteWatch } from './meetings/mute'
 import type { MuteHelper } from './meetings/muteHelper'
-import type { MuteRule } from '@shared/meetingMute'
+import { MUTE_CHECK_MS, type MuteCheckAnswer, type MuteRule } from '@shared/meetingMute'
 
 type GateModule = typeof import('./meetings/gate')
 type EngineModule = typeof import('./meetings/models') & typeof import('./meetings/whisper')
@@ -56,6 +58,8 @@ type AppsModule = typeof import('./meetings/apps')
 type MuteModule = typeof import('./meetings/mute')
 /** How often a recording that follows the mute but cannot read it yet looks again. */
 const MUTE_RETRY_MS = 5000
+/** The Mic log is written to the meeting at most this often while recording (and at the end). */
+const MIC_LOG_FLUSH_MS = 5000
 type ServiceModule = typeof import('./meetings/store') & typeof import('./meetings/transcriber') & Partial<typeof import('./meetings/matcher')>
 /** The part of the recorder MeetingsIpc uses (tests pass a fake). */
 export type RecorderLike = Pick<Recorder, 'start' | 'stop' | 'pause' | 'probe' | 'live' | 'recording' | 'meetingId' | 'setMicGate'>
@@ -144,6 +148,8 @@ export interface MeetingsDeps {
   loadMute?: () => Promise<MuteModule>
   /** How md-mute is started (tests pass a fake helper); default spawnMute. md-mute is found through whisper(). */
   spawnMute?: (bin: string, rules: readonly MuteRule[]) => MuteHelper
+  /** How long Check mute reading reads (tests shorten it); default MUTE_CHECK_MS. */
+  muteCheckMs?: number
 }
 
 /** How long the media scheme reuses the audio path it found for a meeting (a seek makes many Range requests). */
@@ -204,6 +210,13 @@ export class MeetingsIpc {
   private muteRetry: ReturnType<typeof setInterval> | null = null
   /** Recorder.start is running: its own onChange syncs must not kill the md-mute begin() started. */
   private muteStarting = false
+  /** A Check mute reading running (one at a time: a second press gets the same answer). */
+  private muteChecking: Promise<MuteCheckAnswer> | null = null
+  /**
+   * The recording's Mic log: entries with their wall-clock time, the meeting they belong to once
+   * Record made it, and the pending write. Started by start(), written and dropped when it stops.
+   */
+  private micLog: { meeting: string | null; keep: MicLogKeep; timer: ReturnType<typeof setTimeout> | null } | null = null
   /** Bumped by Turn off meetings: a service still loading then is stopped, not kept. */
   private generation = 0
   /** audioFile's answers for a while: the meeting's JSON is not read again for every Range request. */
@@ -412,6 +425,7 @@ export class MeetingsIpc {
             this.armMuteRetry()
             this.d.onLive()
           },
+          log: (e) => this.addMicLog(e),
           ...(this.d.spawnMute ? { spawn: this.d.spawnMute } : {}),
         })
       } catch (err) {
@@ -429,6 +443,46 @@ export class MeetingsIpc {
     if (!rec || !this.mute || this.muteStarting) return
     this.mute.sync({ recording: rec.recording, paused: rec.live().paused })
     this.armMuteRetry()
+    // The recording ended (Stop, the 4-hour limit, a quit, Turn off): its Mic log is written now.
+    if (!rec.recording && this.micLog?.meeting) this.endMicLog()
+  }
+
+  /**
+   * One change of the mic (MuteWatch.log), kept with the time: the first and the last MIC_LOG_KEEP
+   * per recording, a change of its why alone not at all (MicLogKeep).
+   */
+  private addMicLog(e: Omit<MicLogEntry, 't'>): void {
+    const log = this.micLog
+    if (!log || !log.keep.add({ ...e, at: (this.d.now ?? Date.now)() })) return
+    if (log.meeting && !log.timer) {
+      log.timer = setTimeout(() => {
+        log.timer = null
+        this.writeMicLog(log)
+      }, MIC_LOG_FLUSH_MS)
+      log.timer.unref?.()
+    }
+  }
+
+  /** The whole log into the meeting's file (each write replaces it: entries are only added). */
+  private writeMicLog(log: NonNullable<MeetingsIpc['micLog']>): void {
+    const store = this.svc?.store
+    if (!log.meeting || !store || !log.keep.length) return
+    const dropped = log.keep.dropped
+    const res = store.update(log.meeting, (m) => ({
+      ...m,
+      micLog: log.keep.entries().map(({ at, ...e }) => ({ ...e, t: Math.max(0, at - m.started) })),
+      ...(dropped ? { micLogDropped: dropped } : {}),
+    }))
+    if (!res.ok) console.error(`meetings: mic log: ${res.message}`)
+  }
+
+  private endMicLog(): void {
+    const log = this.micLog
+    this.micLog = null
+    if (!log) return
+    if (log.timer) clearTimeout(log.timer)
+    log.timer = null
+    this.writeMicLog(log)
   }
 
   /**
@@ -499,6 +553,7 @@ export class MeetingsIpc {
     // begin() also starts md-mute, so a first 'muted' reading can gate before the mic opens.
     let res: RecordAnswer
     if (!rec.recording) {
+      this.micLog = { meeting: null, keep: new MicLogKeep(), timer: null }
       this.mute?.begin(app)
       this.muteStarting = true
     }
@@ -512,8 +567,43 @@ export class MeetingsIpc {
       // Recorded from the offer (or with one showing): the call's app is the meeting's, and the chip goes.
       if (app && res.id) this.svc?.store.update(res.id, (m) => ({ ...m, apps: [app] }))
       this.watch?.dismiss()
+      if (res.id && this.micLog && !this.micLog.meeting) {
+        this.micLog.meeting = res.id
+        this.writeMicLog(this.micLog)
+      }
     }
+    if (!rec.recording && this.micLog && !this.micLog.meeting) this.micLog = null
     return res
+  }
+
+  /**
+   * Settings → Meetings' Check mute reading (the window only, macOS, after consent): md-mute runs
+   * with every rule for a few seconds, whatever records, and says per app what it reads and why.
+   * Not while Record is starting md-mute for a recording (two at once are fine otherwise).
+   */
+  async muteCheck(e: unknown): Promise<MuteCheckAnswer> {
+    const r = this.refused(e)
+    if (r) return r
+    if (!meetingsAgreed({ meetings: this.d.meetings() })) return { ok: false, message: 'Agree to how meetings work first.' }
+    if (this.muteStarting) return { ok: false, message: 'A recording is starting. Try again in a moment.' }
+    this.muteChecking ??= (async (): Promise<MuteCheckAnswer> => {
+      try {
+        const gate = await this.loadGate()
+        const mod = await (this.d.loadMute ?? (() => import('./meetings/mute')))()
+        const res = await mod.checkMute({
+          where: this.d.whisper(),
+          ms: this.d.muteCheckMs ?? MUTE_CHECK_MS,
+          ...(this.d.spawnMute ? { spawn: this.d.spawnMute } : {}),
+        })
+        return { ok: true, ...res, gateTrusted: gate.accessibilityTrusted() }
+      } catch (err) {
+        console.error(`meetings: mute check: ${String(err)}`)
+        return { ok: false, message: 'Could not run the check.' }
+      } finally {
+        this.muteChecking = null
+      }
+    })()
+    return this.muteChecking
   }
 
   /** Not now on the offer: the chip goes, and this call is not offered again. */
@@ -593,6 +683,7 @@ export class MeetingsIpc {
    */
   quit(): void {
     this.mute?.stop()
+    this.endMicLog()
     this.stopMuteRetry()
     this.stopBackground()
     this.stopOffers()
