@@ -58,15 +58,76 @@ and v0.8.1 had no Windows build).
 
 ```bash
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock
-cd .. && git commit -am "Version X.Y.Z"
-git tag vX.Y.Z
+cd .. && $EDITOR .github/releases/vX.Y.Z.md         # optional: the update's notes (see below)
+git add app/package.json app/package-lock.json .github/releases && git commit -m "Version X.Y.Z"
+git tag -a vX.Y.Z -m "MasterDeck X.Y.Z"             # an annotated tag's message is the fallback notes
 git push origin main && git push origin vX.Y.Z
 ```
 
-CI (`.github/workflows/ci.yml`, on push to `main`, tags `v*`, PRs) runs Python tests, typecheck,
-vitest and builds DMGs (macos-latest) and the NSIS EXE (windows-latest); on a tag it attaches them
-to the GitHub release with `.github/release-notes.md` as the body. `install.sh` downloads the
-latest release.
+A version with a `-` (`0.10.0-beta.1`) is the **beta** channel and a GitHub prerelease (so
+`install.sh`, which takes the latest release, stays on stable); anything else is **stable**.
+
+**CI.** `.github/workflows/ci.yml` (push to `main`, PRs) runs the Python tests, typecheck and
+vitest and builds the DMGs and zips (macos-latest) and the NSIS EXE (windows-latest); it no longer
+runs on tags. `.github/workflows/release.yml` runs on a tag `v*` (or by hand, **Run workflow** with
+an existing tag):
+
+1. **build** (mac and win, the same steps as `ci.yml`, `--publish never`) uploads the DMGs, the mac
+   zips, the EXE, the blockmaps and `latest*.yml` as artifacts.
+2. **publish** (ubuntu) checks the tag against `app/package.json`'s version, picks the update's
+   notes (`.github/releases/v<version>.md`, else the annotated tag's message, else
+   `MasterDeck <version>`; see [.github/releases/README.md](../.github/releases/README.md)), runs
+   `app/scripts/release-publish.mjs` and attaches the DMGs and EXE to the GitHub release with
+   `.github/release-notes.md` as the body (the install page, as before).
+
+`release-publish.mjs` finds the update files (`MasterDeck-<v>-arm64-mac.zip`,
+`MasterDeck-<v>-mac.zip` for Intel, and `MasterDeck Setup <v>.exe` with its `.blockmap`, published
+as `MasterDeck-Setup-<v>.exe[.blockmap]`), computes each one's base64 SHA-512 and size, signs
+`masterdeck-update\nv1\n<version>\n<platform>\n<arch>\n<name>\n<sha512>` with the release key
+(Ed25519), uploads every file to R2 through the backend's admin multipart routes (90 MB parts,
+each tried four times; a failed upload is aborted) and registers the release with
+`POST /v1/admin/releases`, which checks every size and signature. Nothing is offered to users until
+that last call. The DMGs stay on GitHub Releases for new installs (`install.sh`, the website).
+
+**Secrets** (repository → Settings → Secrets and variables → Actions; set by the owner):
+
+| Secret | What |
+|---|---|
+| `RELEASE_ADMIN_TOKEN` | The backend's `RELEASE_ADMIN_TOKEN` (the admin routes' bearer token) |
+| `RELEASE_SIGNING_KEY` | The release private key, PKCS8 PEM (the whole file, `-----BEGIN PRIVATE KEY-----` included) |
+
+The private key is also kept on the owner's Mac at
+`~/.config/masterdeck-remote/release-signing-key.pem` (mode 600), and nowhere else. Its public key
+(raw, base64) is built into the app (`app/src/shared/releaseKey.ts`) and set on the backend as the
+var `RELEASE_PUBLIC_KEY`. The API defaults to `https://dev.masterdeck.dev` (`MD_RELEASE_API`
+overrides it).
+
+**Publish by hand** (a failed publish job, or a release built locally): put the builds in one
+folder (subfolders are searched), then
+
+```bash
+cd app
+RELEASE_SIGNING_KEY_FILE=~/.config/masterdeck-remote/release-signing-key.pem \
+  node scripts/release-publish.mjs --dir ../artifacts --version X.Y.Z --notes ../.github/releases/vX.Y.Z.md --dry-run
+# the manifest is printed, with "signed with public key …" on stderr: it must be the app's key
+RELEASE_ADMIN_TOKEN=… RELEASE_SIGNING_KEY_FILE=… node scripts/release-publish.mjs --dir ../artifacts --version X.Y.Z [--notes f] [--rollout 10] [--min-supported X.Y.Z]
+```
+
+`--channel stable|beta` overrides the channel taken from the version; `--rollout <0-100>` starts a
+staged rollout; `--min-supported <v>` makes the update mandatory for anything older. Re-running is
+safe: uploads are replaced, and registering an identical release again is a no-op (a different
+file for an existing version is refused with `409`: bump the version instead).
+
+**Rollout, yank, notes after the fact:** `PATCH /v1/admin/releases/<version>` with
+`{rolloutPercent, yanked, notes, minSupportedVersion}` (all rows of that version; `yanked: true`
+hides it from every check at once). See the backend's `docs/OPERATIONS.md` for the commands.
+
+**Key rotation:** make a new key with `node app/scripts/release-key.mjs <path>` (writes the PEM with
+mode 600, refuses to overwrite, prints the public key). Ship an app release that carries the new
+public key in `src/shared/releaseKey.ts` first, signed with the **old** key; once users run it,
+set the backend's `RELEASE_PUBLIC_KEY` and the `RELEASE_SIGNING_KEY` secret to the new pair. An app
+only installs updates signed with the key it has built in, so skipping the first step strands
+every installed copy on its version (they would need a manual download).
 
 ## Web app deploy
 

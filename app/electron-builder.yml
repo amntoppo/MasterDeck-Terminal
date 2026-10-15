@@ -29,10 +29,22 @@ extraResources:
       - "!shared/**"
       - "!sync-shared.sh"
 npmRebuild: true
+# The update feed (MasterDeck-Terminal#122). It makes electron-builder write app-update.yml into the
+# app, latest*.yml beside the builds and the NSIS installer's .blockmap (Windows' differential
+# download). CI builds with --publish never: release.yml uploads through scripts/release-publish.mjs.
+# The app picks its own feed at run time (per channel and install id); this is the default.
+publish:
+  - provider: generic
+    url: https://dev.masterdeck.dev/v1/updates/stable
 mac:
   category: public.app-category.developer-tools
   target:
     - target: dmg
+      arch: [arm64, x64]
+    # The update file of the mac updater. Default names, which the publish script looks for:
+    # MasterDeck-<v>-arm64-mac.zip and MasterDeck-<v>-mac.zip (x64). An explicit artifactName
+    # would add "-x64" to the Intel one.
+    - target: zip
       arch: [arm64, x64]
   # Ad-hoc signed ("-"): no Apple account needed. A whole-bundle signature binds the bundle id,
   # which macOS needs to register the app for notifications (a linker-only signature does not).

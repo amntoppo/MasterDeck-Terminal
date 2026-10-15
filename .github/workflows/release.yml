@@ -1,0 +1,146 @@
+name: Release
+
+# A tag v* builds the installers, publishes the update to the MasterDeck update service (signed,
+# through app/scripts/release-publish.mjs) and attaches the DMGs and the EXE to the GitHub release.
+# ci.yml does not run on tags, so a tag is built once. docs/OPERATIONS.md § Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'An existing tag to release (again), like v0.10.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      # A release needs both builds; one failing stops the other (no half release).
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            dist: dist:mac
+          - os: windows-latest
+            dist: dist:win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python tests
+        run: |
+          python -m pip install pytest
+          python -m pytest skills/master/tests -q
+      - name: Install
+        working-directory: app
+        run: npm ci
+      - name: Typecheck and test
+        working-directory: app
+        run: |
+          npm run typecheck
+          npm test
+      - name: Build whisper-cli (meetings' speech engine, macOS only)
+        if: runner.os == 'macOS'
+        working-directory: app
+        run: |
+          command -v cmake >/dev/null || brew install cmake
+          ./scripts/whisper.sh arm64
+          ./scripts/whisper.sh x64
+      - name: Build md-mute (meetings' mute reader, macOS only)
+        if: runner.os == 'macOS'
+        working-directory: app
+        run: |
+          ./scripts/mute.sh arm64
+          ./scripts/mute.sh x64
+      - name: Build installers
+        working-directory: app
+        run: npm run ${{ matrix.dist }} -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: masterdeck-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/*.exe
+            app/dist/*.blockmap
+            app/dist/latest*.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # One folder per build job (artifacts/masterdeck-<os>/); the script searches below --dir.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Version and update notes
+        id: meta
+        run: |
+          version="${TAG#v}"
+          pkg="$(node -p "require('./app/package.json').version")"
+          if [ "$version" != "$pkg" ]; then
+            echo "::error::tag $TAG does not match app/package.json's version $pkg"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The update's notes: .github/releases/v<version>.md, else an annotated tag's message,
+          # else "MasterDeck <version>".
+          notes="$RUNNER_TEMP/update-notes.md"
+          if [ -f ".github/releases/v$version.md" ]; then
+            cp ".github/releases/v$version.md" "$notes"
+          else
+            git fetch --force --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+            if [ "$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)')" = tag ]; then
+              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG" > "$notes"
+            fi
+            if ! grep -q '[^[:space:]]' "$notes" 2>/dev/null; then
+              echo "MasterDeck $version" > "$notes"
+            fi
+          fi
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          echo "Update notes:"
+          cat "$notes"
+      - name: Publish the update
+        run: node app/scripts/release-publish.mjs --dir artifacts --version "${{ steps.meta.outputs.version }}" --notes "${{ steps.meta.outputs.notes }}"
+        env:
+          RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      - name: Attach to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          # How to install (the one-line macOS installer first), on every release.
+          body_path: .github/release-notes.md
+          # A beta tag (v0.10.0-beta.1) is a prerelease, so install.sh's "latest" stays stable.
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
