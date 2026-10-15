@@ -788,7 +788,19 @@ keeps every session's row by `Session.key` in localStorage (`session-tabs`), so 
 resume and a restart; the App prunes keys no longer listed (never on an empty list). Every opener
 goes through the store: Details → Diff (`DiffList.tsx`) and Files (`FileTree.tsx`), ⌘P
 (`QuickOpen.tsx`), ⌘-click in a terminal (an xterm link provider in `TerminalView.tsx`,
-`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**. The store's
+`findPaths` / `relativeTo` in `shared/filePath.ts`), a diff tab's **Open file**.
+
+The same link provider opens web links (#119). It reads the whole line a row belongs to, its
+wrapped rows joined, through the cells (`renderer/src/termText.ts`: `logicalLine`, `cellRange`), so
+a link or path that wraps is one link and wide characters before it do not shift it. `findUrls`
+(`shared/termLinks.ts`) finds http/https addresses and drops trailing punctuation and a closing
+bracket the address did not open; a path inside an address is not a path. OSC 8 links go through
+xterm's `linkHandler` (xterm itself drops non-http schemes). A click opens only with ⌘ (Ctrl off a
+Mac); the underline and pointer follow the key (`showMod` sets the hovered link's decorations),
+except on OSC 8 links, which xterm always underlines on hover. The click goes to `deck.openLink`
+(`app:openLink`, `local`): the window's main checks `isWebLink` (http or https, a host, no spaces or
+control characters, at most 2048 characters) before `shell.openExternal`; the web app checks the
+same and calls `window.open` itself. `openExternal` stays https only for everything else. The store's
 `onOpen` lets the phone close its panel sheet. The terminal stays mounted (hidden) under another tab.
 
 Main reads, never writes: `main/sessionFiles.ts` `SessionFiles` behind four `remote` channels
@@ -872,11 +884,45 @@ here (needs `hooks.queue`).
 - PTY size rule (spec §4, `MacPanes` in `main/remoteGuards.ts`): while the Mac window shows a pane
   its size wins; a browser's size applies only to panes the Mac doesn't show (`cols 0` from the
   window = hidden).
-- `main/send.ts` `Sender.send(session, text, masterUp)`: types as the user would, into the open
-  tab, through a short hidden `claude attach` (~3 s), or relayed by master-agent for a session in
-  another terminal (only when `masterUp`). One send per session at a time; re-checks right before
-  typing that the session didn't start waiting on a prompt (`looksLikePrompt`). `answerMenu`
-  sends key steps for menus.
+- `main/send.ts` `Sender.send(session, text, masterUp, {from, force, held})`: a message never mixes
+  with what the user is typing in the session's prompt (#123; spec
+  `docs/superpowers/specs/2026-10-16-held-messages-design.md`). In order:
+  1. **The core mod** (`mods/masterdeck` 0.6.0 on, heartbeat `deliver: 1`, `ModBeat.deliver`), for any
+     text that is not a command (`isCommand`: `/`, `!`) to a session not done, waiting on a prompt or
+     parked: `main/modDeliver.ts` `ModDelivery.deliver` writes `deck/deliver/<sid>/<id>.json`, the mod
+     (`hooks/deliver.ts`, every 2 s) writes `.claim`, MasterDeck answers `.go` only if the claim came
+     within 5 s, the mod calls `$.prompt.submit({text, asUser: true})` once (a turn of its own, queued
+     while busy; the prompt box and its cursor are not touched) and writes `.done`; MasterDeck removes
+     the files (`$.fs` can't rename or delete, so only MasterDeck decides). A mod that waited 3 s for
+     `.go` in vain writes `.skip` and never submits that id (a stalled app). No claim, or `.skip` → the next step;
+     a `.go` with no `.done` in 5 s counts as delivered (`handed`), never typed again. `prune` clears
+     folders of ended sessions and files over 10 minutes old.
+  2. **Typing, guarded**: into the open tab or through a short hidden `claude attach` (~3 s), only
+     when the prompt box is empty: `promptLines` (`main/screen.ts`: headless xterm at the pane's size,
+     `PtyManager.screen`; 120x40 for an attach; dim cells blanked: the placeholder and suggestions)
+     then `promptDraft` (`shared/heldMessages.ts`: the last pair of rules whose first line starts with
+     `❯` and its no-break space). Text there, a key typed into the pane in the last 4 s
+     (`PtyManager.input` from `CH.ptyWrite`, `isTyping` leaves out focus, mouse and terminal reports),
+     or no box to be seen → held. A key typed during the 150 ms between the paste and Enter keeps
+     Enter back (the text stays in the box, unsent; `ok: true, typedNotSent`, so no caller types it
+     again). Relayed by master-agent for a session in another
+     terminal (only when `masterUp`): `master say --to` → `SendMessage`, which never types.
+  3. **Held** (`main/held.ts` `HeldStore`, `<home>/held-messages.json`, atomic): per session in
+     order; a new message to a session with messages held, or with a send in flight, waits behind
+     them (reason `sending`). `pumpHeld` (every 2 s,
+     once the session list is in) tries each session's first one again (an attach at most every
+     20 s) and drops those of ended or unlisted sessions. A busy session's Stop hook gets it first:
+     `deck/held/<sid>` marks (`DeckHooks.setHeldMarks`) make the hook ask through the queue handshake
+     even with nothing queued, and `pumpQueue(…, held)` answers `heldAnswer` before any queued prompt
+     (only where the deck hook owns the queue; never while a send to the session is in flight, which
+     may be that very message, and never a command, which an answer would turn into words). `AppState.held` (`heldViews`, 240-character
+     previews) drives the row's ✉ badge (`SessionRow`) and `HeldBar` above the session's tabs: **Send
+     now** (`CH.heldSend`, `sendHeld`: `force` types it even if the box can't be read or the user just
+     typed, never over text in it) and **Discard** (`CH.heldDrop`); both open to the web app.
+  One send per session at a time; re-checks right before typing that the session didn't start
+  waiting on a prompt (`looksLikePrompt`). The result is `{ok: true, held: true}` for a held
+  message, so callers (PR watch, monitors, workflow steps, linked sessions, the queue's Send next)
+  count it as taken. `answerMenu` sends key steps for menus (no prompt box involved).
 
 ### master-agent integration
 

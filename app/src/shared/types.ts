@@ -216,6 +216,8 @@ export interface AppState {
   peers: Record<string, string[]>;
   /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
   modLive?: Record<string, { version: string; claude: string; mods: import("./modBand").ModSeen[] }>;
+  /** MasterDeck messages waiting for a session's prompt box to be empty (#123), oldest first; set in the state callback. */
+  held?: import("./heldMessages").HeldView[];
   /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
   modOff?: Record<string, string[]>;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */

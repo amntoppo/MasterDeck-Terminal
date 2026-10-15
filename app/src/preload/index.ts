@@ -47,6 +47,8 @@ const api: DeckApi = {
     ipcRenderer.invoke(CH.assignIssue, issue, login, current),
   startHere: (o) => ipcRenderer.invoke(CH.startHere, o),
   sendText: (key, text) => ipcRenderer.invoke(CH.sendText, key, text),
+  heldSend: (id) => ipcRenderer.invoke(CH.heldSend, id),
+  heldDrop: (id) => ipcRenderer.invoke(CH.heldDrop, id),
   answerMenu: (key, question, answer) =>
     ipcRenderer.invoke(CH.answerMenu, key, question, answer),
   inboxAct: (id, type, payload) =>
@@ -197,6 +199,7 @@ const api: DeckApi = {
   setFocus: (id) => ipcRenderer.send(CH.setFocus, id),
   setVisible: (ids) => ipcRenderer.send(CH.setVisible, ids),
   openExternal: (url) => ipcRenderer.send(CH.openExternal, url),
+  openLink: (url) => ipcRenderer.send(CH.openLink, url),
   openEditor: (dir) => ipcRenderer.invoke(CH.openEditor, dir),
   copy: (text) => ipcRenderer.send(CH.copy, text),
   stopSession: (bgId, name) => ipcRenderer.invoke(CH.stopSession, bgId, name),

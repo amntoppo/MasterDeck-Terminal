@@ -126,6 +126,7 @@ export const CH = {
   setFocus: "app:setFocus",
   setVisible: "app:setVisible",
   openExternal: "app:openExternal",
+  openLink: "app:openLink",
   openEditor: "app:openEditor",
   procsList: "procs:list",
   procsOutput: "procs:output",
@@ -199,6 +200,8 @@ export const CH = {
   defaultModel: "models:default",
   startHere: "session:startHere",
   sendText: "session:sendText",
+  heldSend: "held:send",
+  heldDrop: "held:drop",
   answerMenu: "session:answerMenu",
   inboxAct: "inbox:act",
   queueList: "queue:list",
@@ -400,6 +403,10 @@ export interface DeckApi {
   }): Promise<CliResult>;
   /** Type text into a session as if the user typed it (open tab, hidden attach, or via master). */
   sendText(sessionKey: string, text: string): Promise<CliResult>;
+  /** A held MasterDeck message (#123): Send now (never over text in the prompt). */
+  heldSend(id: string): Promise<CliResult>;
+  /** A held MasterDeck message: Discard. */
+  heldDrop(id: string): Promise<CliResult>;
   /** Answer the question on a session's AskUserQuestion menu (`question` as shown), or 'submit' its review. */
   answerMenu(
     sessionKey: string,
@@ -767,6 +774,8 @@ export interface DeckApi {
   setFocus(sessionId: string | null): void;
   setVisible(sessionIds: string[]): void;
   openExternal(url: string): void;
+  /** A link clicked in a terminal: http or https only (`isWebLink`), anything else is ignored. */
+  openLink(url: string): void;
   /** The session's running processes: its Claude Code shells, what runs below them, their ports (Details). */
   procsList(key: string): Promise<ProcsAnswer>;
   /** The last few KB one of them wrote, when its output goes to a file (a background command). */

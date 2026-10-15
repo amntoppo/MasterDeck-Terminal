@@ -44,6 +44,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   prDetail: invoke(CH.prDetail),
   startHere: invoke(CH.startHere),
   sendText: invoke(CH.sendText),
+  heldSend: invoke(CH.heldSend),
+  heldDrop: invoke(CH.heldDrop),
   answerMenu: invoke(CH.answerMenu),
   inboxAct: invoke(CH.inboxAct),
   queueList: invoke(CH.queueList),
@@ -184,6 +186,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setFocus: local,
   setVisible: local,
   openExternal: local,
+  // A browser opens it itself (a localhost address is then the browser's own machine).
+  openLink: local,
   procsList: invoke(CH.procsList),
   procsOutput: invoke(CH.procsOutput),
   // A port is on the Mac: a browser elsewhere cannot open its localhost.
