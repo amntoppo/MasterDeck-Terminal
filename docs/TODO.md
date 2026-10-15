@@ -840,6 +840,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **Board filters read the current sprint by default.** `--sprint any` reads the whole board;
   a boardless account's issues ignore `--sprint`. A filter over a big board reads every page
   (`project_items`, 20 pages at most).
+- **Board-less column filters see no PRs.** For an account with no board, `master start --column`
+  matches `board.derived_status` without the PR facts (`_pr_facts` is not read), so every open issue
+  is Todo: `--column "In Dev"` / `"PR Raised"` never match there.
+- **Editing a master start in the Start dialog** (Needs you → Start…) makes a new proposal through
+  `master add`, which drops `assignMe` and `worktree` (the dialog has its own Assign to me and
+  Create worktree).
+- **`Sources.readLedger`'s extra `claude agents` read** has no in-flight guard: an older answer can
+  land after a newer one (the next 3 s poll corrects it).
 - **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
   later links it to a ticket, the proposal stays issue 0.
 

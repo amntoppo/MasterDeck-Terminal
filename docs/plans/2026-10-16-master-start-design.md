@@ -35,9 +35,11 @@ Nothing starts without the user's yes; a batch is one list to approve or trim.
 - **Tickets**: read from GitHub as their repository's account (`Live.issue`, `Live.sub_issues`);
   `rules._assign` gives name, folder and account (the sweep's rules); the prompt is the ASSIGN
   prompt plus description (cut at 20 000 characters), up to 50 sub-issues and the user's
-  instructions, as the app's `composePrompt`. `assignMe: true` unless `--no-assign`.
+  instructions. After review: the description is context only (the user approved a one-line plan and
+  never read it), so the session still stops and asks unless the user gave instructions.
+  `assignMe: true` unless `--no-assign`.
 - **Refused** (never added): not found, closed, a PR, a repository not selected in Setup, a running
-  owner session, an approved ASSIGN for it. A waiting (proposed) ASSIGN is replaced. **Warnings**:
+  owner session, an approved ASSIGN for it. A waiting (proposed) or held ASSIGN is replaced. **Warnings**:
   no checkout, a folder Claude Code does not trust, a stopped owner. A name in use gets `-2`.
 - **Spawn target**: optional `worktree` (→ `claude --bg --worktree <name>`) and `assignMe`.
 - **App**: `BoardFlow` links by the newest ASSIGN of the session's name and then, if `assignMe`,

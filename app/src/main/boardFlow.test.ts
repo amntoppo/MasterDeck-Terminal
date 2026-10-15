@@ -81,6 +81,14 @@ describe('BoardFlow', () => {
     await new BoardFlow(plain.deps).tick(state({ sessions: [sess({ issue: null })], proposals: [prop(1, false)] }), 0)
     expect(none).toEqual([])
   })
+  it('does not link a session whose newest proposal of that name is a START (no ticket)', async () => {
+    const { flow, linked } = setup(emptyLinks(), {})
+    await flow.tick(state({ sessions: [sess({ issue: null })], proposals: [
+      { id: 1, kind: 'ASSIGN', issue: 12, status: 'done', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } },
+      { id: 2, kind: 'START', issue: 0, status: 'sent', summary: '', message: '', note: null, target: { spawn: { name: 'fix-12' } } },
+    ] }), 0)
+    expect(linked).toEqual([])
+  })
   it('does not assign when the link failed', async () => {
     const s = setup(emptyLinks(), {})
     const assigned: string[] = []

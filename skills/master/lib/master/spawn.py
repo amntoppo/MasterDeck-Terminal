@@ -259,7 +259,8 @@ def spawn(led: dict, pid: int, *, now: str, runner=subprocess.run, held_for_trus
         raise SpawnError(f"proposal {pid}: {note}")
     resume = p["target"]["spawn"].get("resume")
     # Before the session exists: the branch its folder is on now is not its own.
-    park = None if resume else checkout.parked(p["kind"], cwd, p["target"]["spawn"].get("name") or "")
+    # A session Claude Code starts in its own new worktree (`--worktree`) has its own branch there.
+    park = None if resume or p["target"]["spawn"].get("worktree") else checkout.parked(p["kind"], cwd, p["target"]["spawn"].get("name") or "")
     if resume:
         live = running(resume, runner)
         if live:

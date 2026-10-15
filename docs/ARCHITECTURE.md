@@ -915,18 +915,23 @@ ticket is read from GitHub as its repository's account (`Live.issue`, `Live.sub_
 `repos/…/issues/N` and `…/sub_issues`) and becomes an ASSIGN proposal (`rules._assign`, so the same
 name, folder and account as the sweep's) with source `start:<owner/name#N>:<now>`, its prompt
 `start.ticket_prompt` (the ASSIGN prompt, then the description cut at 20 000 characters, up to 50
-sub-issues and the user's instructions, as the app's `composePrompt`) and `assignMe: true` unless
+sub-issues as context, not instructions: the user approved a one-line plan and never read them, so the
+session still stops and asks in step 2 unless the user's own instructions follow, which it follows; with
+`--worktree` it is told it already runs in its worktree) and `assignMe: true` unless
 `--no-assign`. Refused before anything is added: not found, closed, a pull request, a repository
 `config.repo_readable` does not pass, a running owner session (`join.owner_of` over `claude agents`
-and `ticket-links.json`), an approved ASSIGN for it; a waiting (proposed) ASSIGN for the ticket is
+and `ticket-links.json`), an approved ASSIGN for it; a waiting (proposed) or held ASSIGN for the ticket is
 rejected with "replaced by start proposal N". Warnings only: no checkout found, a folder
 `trust.trusted` says no to, a stopped owner. A name in use (running, or a waiting proposal) gets
-`-2`, `-3` (`start.unique_name`). `--yes` approves and spawns each at once (one ledger lock each,
-a failure left held and said); `--dry-run` adds nothing and is a read. `master spawn` and
+`-2`, `-3` (`start.unique_name`). `--worktree` is a flag (each session's worktree named after it),
+`--worktree-name` names one (one ticket only). `--yes` approves and spawns each at once (one ledger lock each,
+a failure left held and said, exit 1; one master's watch spawned first counts as started); `--dry-run` adds nothing and is a read. `master spawn` and
 `master start --yes` print `started <name> (proposal N) — claude attach <bg id>`. A spawn target
 may carry `worktree` (→ `claude --bg … --worktree <name>`) and `assignMe` (`spawn.validate_spawn_target`).
+A START in a repository's checkout is recorded in `parked-sessions.json` as ticket work is
+(`checkout.parked`); a start with its own worktree is not.
 On the app's side, `parseLedger` keeps both; `BoardFlow` links the session by the newest ASSIGN of
-its name and, when it says `assignMe`, assigns the ticket to the session's account (one account:
+its name (a newer START of that name means no link) and, when it says `assignMe`, assigns the ticket to the session's account (one account:
 `state.me`) through `forCard(…).github.assign` once, with the link; `Sources.readLedger` reads
 `claude agents` at once when a spawn proposal turns `sent`; Needs you and the Sidebar name a
 proposal without a ticket by its session (`proposalLabel`).

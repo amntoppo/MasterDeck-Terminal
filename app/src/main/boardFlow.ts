@@ -73,8 +73,9 @@ export class BoardFlow {
     for (const s of state.sessions) {
       if (s.issue !== null || s.state === 'done' || s.name === MASTER_NAME || this.linkTried.has(s.sessionId)) continue
       // The newest of that name: an older one may be an earlier session's start of the same ticket.
-      const p = [...state.proposals].reverse().find((x) => x.kind === 'ASSIGN' && ['sent', 'question', 'blocked', 'done'].includes(x.status) && x.target.spawn?.name === s.name)
-      if (!p || !this.deps.builtinOn(s.sessionId)) continue
+      // A newer START of the same name (no ticket) wins over an older ASSIGN: such a session is not linked.
+      const p = [...state.proposals].reverse().find((x) => ['sent', 'question', 'blocked', 'done'].includes(x.status) && x.target.spawn?.name === s.name)
+      if (!p || p.kind !== 'ASSIGN' || !p.issue || !this.deps.builtinOn(s.sessionId)) continue
       this.linkTried.add(s.sessionId)
       if (this.deps.linkTriedFile) writeJson(this.deps.linkTriedFile, [...this.linkTried], this.deps.log)
       const t: Ticket = { repo: p.repo ?? null, number: p.issue }

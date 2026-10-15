@@ -200,7 +200,8 @@ name). Nothing starts until you say yes: approve all, or keep only some ("start 
 "start it now" in the request to skip the question. Each session is a normal background session:
 it shows in the session list at once, master replies with its `claude attach` id, and it keeps
 running when master stops. A ticket's session starts in the ticket's repository checkout with the
-ticket's title, description and sub-issues as its first prompt, and MasterDeck links it to the
+ticket's title, description and sub-issues as its first prompt (as background: it sets up and asks
+you for instructions first, unless your request gave some), and MasterDeck links it to the
 ticket, moves the card to In Dev and assigns the ticket to you (say "don't assign me" to leave
 that out). A start that fails stays in Needs you; nothing is tried again until you say so.
 

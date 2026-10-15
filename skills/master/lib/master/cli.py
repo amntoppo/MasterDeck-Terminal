@@ -317,6 +317,8 @@ def _plan_ticket(args, read, sessions, led, taken: set, now: str) -> "tuple[list
         tickets = tickets[:start.BATCH_MAX]
     if args.name and len(tickets) > 1:
         return [], ["--name takes one ticket; leave it out to name each session after its ticket"]
+    if args.worktree_name and len(tickets) > 1:
+        return [], ["--worktree-name takes one ticket; with --worktree each session's worktree is named after it"]
     for repo, n in tickets:
         lab = refs.label(repo, n)
         full = refs.full(repo)
@@ -348,13 +350,13 @@ def _plan_ticket(args, read, sessions, led, taken: set, now: str) -> "tuple[list
         where = checkout.resolve(repo, args.cwd, account=args.account)
         sp["name"] = start.unique_name(args.name or sp["name"], taken)
         taken.add(sp["name"])
-        sp["prompt"] = start.ticket_prompt(issue, where, subs, args.prompt or "")
+        sp["prompt"] = start.ticket_prompt(issue, where, subs, args.prompt or "", bool(args.worktree or args.worktree_name))
         if args.model:
             sp["model"] = args.model
         if args.permission_mode:
             sp["permissionMode"] = args.permission_mode
-        if args.worktree is not None:
-            sp["worktree"] = args.worktree or sp["name"]
+        if args.worktree or args.worktree_name:
+            sp["worktree"] = args.worktree_name or sp["name"]
         if not args.no_assign:
             sp["assignMe"] = True
         a.update(source=f"start:{refs.ref(repo, n)}:{now}", message=sp["prompt"])
@@ -375,7 +377,7 @@ def _plan_scratch(args, taken: set, now: str) -> dict:
         cwd = str(config.workspace_for(None, account=args.account) if args.account else config.workspace())
     name = start.unique_name(args.name or start.scratch_name(args.prompt), taken)
     taken.add(name)
-    worktree = None if args.worktree is None else (args.worktree or name)
+    worktree = (args.worktree_name or name) if (args.worktree or args.worktree_name) else None
     sp = {"name": name, "cwd": cwd, "prompt": start.scratch_prompt(args.prompt, name, where, worktree)}
     acct = (args.account or (config.account_for_repo(args.repo) if args.repo else config.accounts()[0]["login"])) \
         if config.is_multi() else None
@@ -411,12 +413,18 @@ def cmd_start(args) -> int:
         return 2
     for e in (spawn.validate_name(args.name) if args.name else None, spawn.validate_model(args.model),
               spawn.validate_permission_mode(args.permission_mode), spawn.validate_account(args.account),
-              spawn.validate_worktree(args.worktree or None)):
+              spawn.validate_worktree(args.worktree_name)):
         if e:
             print(e)
             return 2
     if args.account and config.is_multi() and not any(a["login"].lower() == args.account.lower() for a in config.accounts()):
         print(f"GitHub account {args.account} is not a connected account (Setup → GitHub accounts)")
+        return 2
+    if args.limit < 1:
+        print("--limit takes 1 or more")
+        return 2
+    if args.sprint and ('"' in args.sprint or "\\" in args.sprint):
+        print(f"bad sprint name: {args.sprint!r}")
         return 2
     if args.cwd and not Path(args.cwd).is_dir():
         print(f"folder does not exist: {args.cwd}")
@@ -453,7 +461,7 @@ def cmd_start(args) -> int:
                     continue
                 if p["replaces"]:
                     old = ledger.get(led, p["replaces"])
-                    if old["status"] == "proposed":
+                    if old["status"] in ("proposed", "held"):
                         ledger.transition(led, old["id"], "rejected", now=now, note=f"replaced by start proposal {got['id']}")
                     else:
                         p["replaces"] = None
@@ -482,14 +490,23 @@ def cmd_start(args) -> int:
         print(f"note: {n}")
     if args.yes and not args.dry_run:
         # One lock per start, as `master spawn` takes it: nothing is retried; a failure leaves it held.
+        failed = False
         for p, _ in added:
             # Caught inside the block, so the note and the hold are saved (as in cmd_spawn).
             with ledger.locked() as led:
                 try:
                     line = _started(spawn.spawn(led, p["id"], now=now))
                 except spawn.SpawnError as e:
-                    line = f"{p['target']['spawn']['name']} did not start: {e} (proposal {p['id']} is held; say retry to try again)"
+                    cur = ledger.get(led, p["id"])
+                    if cur["status"] in ("sent", "question", "blocked", "done"):
+                        # master's watch spawned it between the approval and here: it did start.
+                        line = _started(cur)
+                    else:
+                        failed = True
+                        line = f"{p['target']['spawn']['name']} did not start: {e} (proposal {p['id']} is held; say retry to try again)"
             print(line)
+        if failed:
+            return 1
     return 0 if shown else 1
 
 
@@ -853,7 +870,8 @@ def parser() -> argparse.ArgumentParser:
     st.add_argument("--name", help="the session's name (one start); omitted: from the ticket or the task")
     st.add_argument("--repo", help="from scratch: owner/name; the session starts in its checkout")
     st.add_argument("--cwd", help="the folder to start in (a folder the user named)")
-    st.add_argument("--worktree", nargs="?", const="", help="start in a new git worktree (claude --worktree); its name, else the session's")
+    st.add_argument("--worktree", action="store_true", help="start in a new git worktree (claude --worktree), named after the session")
+    st.add_argument("--worktree-name", help="that worktree's name (one start only; implies --worktree)")
     st.add_argument("--model", help="claude --model; omitted: the default model")
     st.add_argument("--permission-mode", help="claude --permission-mode (plan, acceptEdits, …)")
     st.add_argument("--account", help="gh login the sessions work as (two or more connected accounts)")

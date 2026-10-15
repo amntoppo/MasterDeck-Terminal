@@ -231,6 +231,7 @@ def parked(kind: str, cwd: str, name: str) -> "dict | None":
     out there. That branch (and its open PR) is not the session's; MasterDeck reads this record
     (`parked-sessions.json`) and keeps the two apart until the session has its own worktree or
     branch. None: nothing to remember (not ticket work, or a workspace)."""
-    if kind not in TICKET_KINDS or is_workspace(cwd):
+    # A START from scratch in a repository's checkout (`master start --repo`) sits there the same way.
+    if kind not in (*TICKET_KINDS, "START") or is_workspace(cwd):
         return None
     return {"dir": cwd, "branch": branch_of(cwd), "review": kind == "PRREVIEW", "name": name}
