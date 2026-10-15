@@ -1740,25 +1740,32 @@ Developer ID, so no Squirrel.Mac); Windows uses `electron-updater`'s NSIS update
 
 | Module | What |
 |---|---|
-| `shared/updates.ts` | `UpdateState` / `UpdateOffer` / phases / error kinds, `compareVersions` (semver with prereleases), `signedMessage`, `parseOffer`, `parseResult`, `checkUrl`, and the UI's `statusLine`, `shouldPrompt`, `badge`, `readyLine`; `REMIND_MS` (4 h), `CHECK_EVERY_MS` (6 h), `FIRST_CHECK_MS` (30 s), `HEALTHY_AFTER_MS` (10 s) |
-| `shared/releaseKey.ts` | the release public key (raw Ed25519, base64); `releaseKey(env)` takes `MASTERDECK_UPDATE_PUBKEY` only with `MASTERDECK_ISOLATED=1` |
+| `shared/updates.ts` | `UpdateState` / `UpdateOffer` / phases / error kinds, `compareVersions` (semver with prereleases), `signedMessage`, `parseOffer` (an `https:` download, plain `http:` only to `localhost` / `127.0.0.1`: `downloadUrlOk`), `parseResult`, `checkUrl`, and the UI's `statusLine`, `shouldPrompt`, `badge`, `readyLine`; `REMIND_MS` (4 h), `CHECK_EVERY_MS` (6 h), `FIRST_CHECK_MS` (30 s), `HEALTHY_AFTER_MS` (10 s) |
+| `shared/releaseKey.ts` | the release public key (raw Ed25519, base64; `release-publish.mjs` reads it from this file); `releaseKey({testBuild, env})` takes `MASTERDECK_UPDATE_PUBKEY` only in an update-test build with `MASTERDECK_ISOLATED=1`; `updateBase({testBuild, packaged, env})` takes `MASTERDECK_UPDATE_URL` only in an update-test build or a development run |
 | `shared/updateHelper.ts` | the macOS helper script (bash 3.2) and its arguments |
 | `main/updater.ts` | `Updater`: the state and its events, the schedule, the check, downloads through an `Installer`, restart / remind later / install on quit, what the last install left; `updatesOffReason` |
 | `main/updateVerify.ts` | `UpdateFailure(kind)`, `signatureOk` (SPKI prefix + raw key, `crypto.verify`), `hashFile`, `checkRelease` (hash, size and signature) |
-| `main/updateMac.ts` | `MacInstaller`, `macBundle`, `macDisabledReason` (`/Volumes/`, App Translocation), `plistVersion` |
-| `main/updateWin.ts` | `WinInstaller` over `NsisUpdater` (`electron-updater`, imported on first use on win32 only), `feedUrl` |
+| `main/updateMac.ts` | `MacInstaller`, `macBundle`, `macDisabledReason` (`/Volumes/`, App Translocation), `plistVersion`, `removeMacBackup` |
+| `main/updateWin.ts` | `WinInstaller` over `NsisUpdater` (`electron-updater`, imported on first use on win32 only), `feedUrl`, `nsisOptions` |
+| `main/remoteGuards.ts` | `updateHandlers`: the `update:*` handlers, refusing a browser (`isRemote`) |
 | `main/appMenu.ts` | the macOS app menu: Electron's default roles plus **Check for Updates…** / **Restart to Update…** |
 
 **When it runs.** `makeUpdater()` in `index.ts` before `registerIpc`. Off (with the reason Settings
 shows) in a development build (`!app.isPackaged`), with `MASTERDECK_UPDATES=0`, on Linux, and on a
 Mac app run from `/Volumes/…` or App Translocation. `start()` (after `sources.start()`, not in
 `MASTERDECK_SMOKE`) reads what the last install left, checks 30 s later and every 6 h; **Check for
-updates** and the menu item check at once; another `updateChannel` checks again. The server is
-`MASTERDECK_UPDATE_URL` when it passes `validBackendUrl` (https, or http on localhost), else the
-remote URL (`remoteUrl`). The check is `GET <base>/v1/updates/check?version&platform&arch&channel&id`
+updates** and the menu item check at once; another `updateChannel` checks again (queued until a
+check or download already running is done; a ready **beta** offer is dropped, its staged files
+removed, when the channel goes back to stable). The server is the real service
+(`DEFAULT_REMOTE_URL`); `MASTERDECK_UPDATE_URL` (passing `validBackendUrl`) replaces it only in an
+update-test build or a development run, and `MASTERDECK_UPDATE_PUBKEY` replaces the key only in an
+update-test build launched with `MASTERDECK_ISOLATED=1`. An update-test build is one made with
+`MASTERDECK_UPDATE_TEST_BUILD=1` (electron-vite's define `__MD_UPDATE_TEST__`, false in every
+release build), because any process of the user can `launchctl setenv` a variable for every app. The check is `GET <base>/v1/updates/check?version&platform&arch&channel&id`
 with a 20 s timeout through `net.fetch`: `204` up to date, `200` an offer, a thrown fetch `offline`,
 anything else `check`. An offer not above this version, or the version a rollback skipped, counts as
-up to date. A ready update stays ready through later checks; only a newer offer replaces it. With
+up to date. A ready update stays ready through later checks; only a newer offer replaces it, and
+the old staged one is discarded at once (`Installer.discard`). With
 `autoDownloadUpdates` (default on) an offer downloads at once, else it waits for **Download**.
 
 **macOS.** `prepare`: the zip goes to `<userData>/updates/<version>/<name>`, hashed (SHA-512) as it
@@ -1766,32 +1773,41 @@ streams, stopped when it grows past the offer's size; then the hash, size and th
 of `signedMessage({version, platform: 'darwin', arch, name, sha512})` are checked against the built-in
 key. Any failure deletes the folder (`verify`). Then `ditto -x -k` into `<version>/stage/`, the
 staged `MasterDeck.app/Contents/Info.plist` must say the offer's version (else `verify`), quarantine
-is cleared → `ready`; `needsAdmin` when the bundle or its folder is not writable. **Restart now**
-(`restartToUpdate`: a recording asks first, as Restart does) writes `update-helper.sh` (temp file +
-rename) and `pending.json` (`{version, from, at}`), starts the helper detached and calls
-`app.quit()` (will-quit still closes terminals and the remote line). A normal quit with an update
-ready runs the helper without a relaunch (`onQuit` in will-quit), unless it needs a password.
+is cleared → `ready`; the zip stays beside it until the install is done (the administrator path
+unpacks it again as root). `needsAdmin` when the bundle or its folder is not writable. **Restart
+now** (`restartToUpdate`: a recording asks first, as Restart does) writes `update-helper.sh` (temp
+file + rename) and `pending.json` (`{version, from, relaunch, at}`), starts the helper detached and
+calls `app.quit()` (will-quit still closes terminals and the remote line). A normal quit with an
+update ready runs the helper without a relaunch (`onQuit` in will-quit), unless it needs a password
+or the quit is MasterDeck's own **Restart** (`app.relaunch()`; `relaunching` in `index.ts`): the
+relaunched app would start from the bundle the helper is about to move.
 
-The helper (`update-helper.sh install <pid> <app> <staged> <dir> <version> <from> <relaunch>`):
+The helper (`update-helper.sh install <pid> <app> <staged> <dir> <version> <from> <relaunch> <zip> <sha512>`):
 1. waits up to 120 s for the old pid to exit (else `result.json {ok:false, reason:"still-running"}`, nothing touched);
-2. swaps: staged → `.MasterDeck.app.new` next to the app, `MasterDeck.app` → `.MasterDeck.app.previous`, `.new` → `MasterDeck.app`, clears quarantine. When the folder is not writable the helper runs itself (`swap`, `restore`) as root through `osascript … with administrator privileges`; a cancel (`-128`) is `reason: "permission"` and the old app is opened again;
-3. without relaunch: removes the backup, writes `{ok:true, from, version}`, done;
-4. opens the app and waits up to 60 s for `<dir>/healthy-<version>`; a second launch if not; still nothing → kills it (`pkill -f <app>/Contents/MacOS/`), puts the backup back, writes `{ok:false, reason:"unhealthy"}` and opens the previous app. On success it removes the backup and writes `{ok:true, …}`.
+2. stops with `still-running`, nothing touched, when any process runs from `<app>/Contents/MacOS/` (the path compared literally against `ps -axo pid=,command=`: a folder name with `(` or `.` is no pattern), i.e. the app was opened again or relaunched;
+3. swaps. As the user: staged → `.MasterDeck.app.new` next to the app, `MasterDeck.app` → `.MasterDeck.app.previous`, `.new` → `MasterDeck.app`, clears quarantine. When the folder is not writable nothing of the helper file runs as root: the root commands go inline to `osascript -e 'do shell script (item 1 of argv) with administrator privileges'` with every path single-quoted for `/bin/sh`, and as root they copy the **zip** into a fresh root-owned `mktemp -d` folder, check its SHA-512 (`openssl dgst -sha512 -binary | base64`) against the one the app verified with the signature, `ditto -x -k` it there, check `CFBundleShortVersionString`, clear quarantine, give it the current app's owner (`stat -f %u:%g`), and do the two renames (the old app back on failure). The user's staged copy is never used there. A cancel (`-128`) is `reason: "permission"`, any other failure `swap-failed`; the old app is opened again;
+4. without relaunch: writes `{ok:true, from, version}` and keeps the backup. The new app removes it (`removeMacBackup`, through `UpdaterDeps.removeBackup`) once it has written its health marker, only when `pending.json` says `relaunch: false`, its own bundle is the `MasterDeck.app` beside the backup and the backup's `Info.plist` version is older than its own. **No automatic rollback on this path**: a new version that never comes up leaves the backup for the user (TODO);
+5. opens the app and waits up to 120 s for `<dir>/healthy-<version>`; a second launch if not; still nothing → kills what runs from the bundle (TERM, then KILL after 3 s, same literal match), puts the backup back, writes `{ok:false, reason:"unhealthy"}` and opens the previous app. On success it removes the backup (as the user; as root it stays until the next swap) and writes `{ok:true, …}`.
 
 The new app writes `healthy-<version>` 10 s after its window's `did-finish-load` when `pending.json`
 names its version (`Updater.windowLoaded`), then reads `result.json` 3 s and 15 s later. At launch
 `readLaunchFiles` reads `result.json` once and removes it: ok → `updatedFrom`; `unhealthy` →
 `rolledBack`, kept in `rolled-back.json` so that version is skipped until a newer one; other reasons
-→ an `install` / `permission` error. Stale `<version>/` folders are removed at launch. Stand-ins for
-the helper's tests: `MD_OPEN`, `MD_OSASCRIPT`, `MD_KILL`, `MD_XATTR`, `MD_PID_WAIT`,
-`MD_HEALTH_WAIT`, `MD_POLL`.
+→ an `install` / `permission` error with no offer (Try again then checks again: `retryAction(state)`).
+Stale `<version>/` folders are removed at launch. Stand-ins for the helper's tests: `MD_OPEN`,
+`MD_OSASCRIPT` (gets the root command as its last argument; the tests' stand-in runs it with `/bin/sh`
+as the same user), `MD_KILL`, `MD_XATTR`, `MD_PID_WAIT`, `MD_HEALTH_WAIT`, `MD_KILL_WAIT`, `MD_POLL`.
 
-**Windows.** `WinInstaller.prepare` makes an `NsisUpdater` on the feed
-`<base>/v1/updates/feed/<channel>/<install id>/` (the server's rollout decides), `autoDownload`,
-`autoInstallOnAppQuit` and `allowDowngrade` off; the feed's version must equal the offer's; after
-`downloadUpdate()` the installer file's hash and signature (`platform: 'win32'`) are checked (a
-failure deletes it), then `autoInstallOnAppQuit` goes on. **Restart now** is
-`quitAndInstall(true, true)`. No rollback on Windows (ponytail in `updateWin.ts`).
+**Windows.** `WinInstaller.prepare` first stops a previous ready updater from installing on quit,
+then makes an `NsisUpdater` (`nsisOptions`: `useMultipleRangeRequest: false`, as the backend
+answers single ranges only) on the per-install, per-version feed
+`<base>/v1/updates/feed/<channel>/<install id>/<current version>/` (the same decision as `/check`,
+mandatory updates included), `autoDownload`, `autoInstallOnAppQuit` and `allowDowngrade` off; the
+feed's version must equal the offer's; after `downloadUpdate()` the installer file's hash and
+signature (`platform: 'win32'`) are checked (a failure deletes it), then `autoInstallOnAppQuit` goes
+on. **Restart now** is `quitAndInstall(true, true)`; when it throws, or the app is still running
+10 s later, it is an `install` error (the update stays ready). `discard` turns
+`autoInstallOnAppQuit` off. No rollback on Windows (ponytail in `updateWin.ts`).
 
 **IPC.** `update:state`, `update:check`, `update:download`, `update:restart`, `update:later`; events
 `update:changed` (the whole `UpdateState`) and `update:open` (the menu's Check for Updates…: show

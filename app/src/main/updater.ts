@@ -32,6 +32,8 @@ export interface Installer {
   restart(offer: UpdateOffer): Promise<void>
   /** A normal quit with the update ready (macOS: swap without a relaunch). */
   onQuit(offer: UpdateOffer): void
+  /** A staged update is no longer wanted (a newer one, or another channel): remove what it left. */
+  discard?(offer: UpdateOffer): void
 }
 
 export interface UpdateSettings {
@@ -57,6 +59,11 @@ export interface UpdaterDeps {
   log?: (m: string) => void
   /** The check's timeout (ms). */
   timeoutMs?: number
+  /**
+   * macOS, after an install on quit (no helper watching): the healthy new version removes the
+   * previous copy the helper kept (updateMac.ts removeMacBackup).
+   */
+  removeBackup?: () => void
 }
 
 export const PENDING = 'pending.json'
@@ -96,6 +103,8 @@ export class Updater {
   private preparing: Promise<UpdateState> | null = null
   private inst: Installer | null = null
   private id: string | null = null
+  /** A check asked for while another check or a download ran (the channel changed meanwhile). */
+  private recheck = false
   private readonly now: () => number
 
   constructor(private readonly d: UpdaterDeps) {
@@ -177,15 +186,38 @@ export class Updater {
     if (this.s.phase === 'downloading' || this.s.phase === 'verifying' || this.s.phase === 'installing') return Promise.resolve(this.state())
     this.checking = this.doCheck().finally(() => {
       this.checking = null
+      this.afterBusy()
     })
     return this.checking
   }
 
+  /** Run a check that was asked for while busy, once nothing runs any more. */
+  private afterBusy(): void {
+    if (!this.recheck || this.checking || this.preparing) return
+    this.recheck = false
+    void this.check()
+  }
+
+  /** Tell the installer a staged update is not wanted any more (its files go at once). */
+  private discard(offer: UpdateOffer): void {
+    try {
+      this.inst?.discard?.(offer)
+    } catch (e) {
+      this.log(`discard ${offer.version}: ${String(e)}`)
+    }
+  }
+
   private async doCheck(): Promise<UpdateState> {
+    const { updateChannel } = this.d.settings()
+    // A beta offer while the setting is stable is not wanted any more: drop it (and its staged files).
+    const offered = this.s.offer
+    if (offered && offered.channel === 'beta' && updateChannel === 'stable') {
+      if (this.s.phase === 'ready') this.discard(offered)
+      this.set({ phase: 'checking', mandatory: false }, ['offer', 'progress', 'needsAdmin', 'remindAt'])
+    }
     const ready = this.s.phase === 'ready' ? this.s.offer : undefined
     // A ready update stays ready while a check runs; only a newer offer replaces it.
     if (!ready) this.set({ phase: 'checking' }, ['error', 'errorKind'])
-    const { updateChannel } = this.d.settings()
     const url = checkUrl(this.d.base, {
       version: this.d.current,
       platform: this.d.platform,
@@ -219,6 +251,8 @@ export class Updater {
       this.set({ lastChecked })
       return this.state()
     }
+    // A newer offer replaces a ready one: the old staged copy goes at once.
+    if (ready) this.discard(ready)
     this.set({ phase: 'available', offer, mandatory: offer.mandatory, lastChecked }, ['progress', 'error', 'errorKind', 'remindAt', 'needsAdmin'])
     if (this.d.settings().autoDownloadUpdates) return this.download()
     return this.state()
@@ -243,6 +277,7 @@ export class Updater {
     if (!this.s.enabled || !offer || !can) return Promise.resolve(this.state())
     this.preparing = this.doDownload(offer).finally(() => {
       this.preparing = null
+      this.afterBusy()
     })
     return this.preparing
   }
@@ -289,15 +324,25 @@ export class Updater {
     return this.state()
   }
 
-  /** Settings changed: another channel checks again; automatic downloads switched on take a waiting offer. */
+  /**
+   * Settings changed: another channel checks again (after a check or download already running);
+   * automatic downloads switched on take a waiting offer.
+   */
   settingsChanged(prev: UpdateSettings, next: UpdateSettings): void {
     if (!this.s.enabled) return
-    if (prev.updateChannel !== next.updateChannel) void this.check()
-    else if (!prev.autoDownloadUpdates && next.autoDownloadUpdates && this.s.phase === 'available') void this.download()
+    if (prev.updateChannel !== next.updateChannel) {
+      if (this.checking || this.preparing || this.s.phase === 'installing') this.recheck = true
+      else void this.check()
+    } else if (!prev.autoDownloadUpdates && next.autoDownloadUpdates && this.s.phase === 'available') void this.download()
   }
 
-  /** A normal quit (will-quit): on macOS a ready update is swapped in, unless that needs a password. */
-  onQuit(): void {
+  /**
+   * A normal quit (will-quit): on macOS a ready update is swapped in, unless that needs a password.
+   * Never when MasterDeck's own Restart relaunches: the new instance would start from the bundle
+   * the helper is about to move away.
+   */
+  onQuit(relaunching = false): void {
+    if (relaunching) return
     if (this.s.phase !== 'ready' || !this.s.offer || this.s.needsAdmin || !this.inst) return
     try {
       this.inst.onQuit(this.s.offer)
@@ -308,7 +353,8 @@ export class Updater {
 
   /**
    * The window loaded. When this launch is the update pending.json names, write the health marker
-   * the helper waits for 10 s later, then pick up its result.
+   * the helper waits for 10 s later, then pick up its result. After an install on quit (no helper
+   * watching) the healthy app removes the previous copy itself.
    */
   windowLoaded(): void {
     const pending = this.readPending()
@@ -324,6 +370,8 @@ export class Updater {
           mkdirSync(this.d.dir, { recursive: true })
           writeFileSync(join(this.d.dir, `healthy-${this.d.current}`), String(this.now()))
           this.remove(PENDING)
+          // Restart now (or a pending.json from before the field): the helper removes the backup.
+          if (pending.relaunch === false) this.d.removeBackup?.()
         } catch (e) {
           this.log(`health marker: ${String(e)}`)
         }
@@ -333,10 +381,10 @@ export class Updater {
     )
   }
 
-  private readPending(): { version: string } | null {
+  private readPending(): { version: string; relaunch?: boolean } | null {
     try {
       const v = JSON.parse(readFileSync(join(this.d.dir, PENDING), 'utf8'))
-      return v && isVersion(v.version) ? { version: v.version } : null
+      return v && isVersion(v.version) ? { version: v.version, ...(typeof v.relaunch === 'boolean' ? { relaunch: v.relaunch } : {}) } : null
     } catch {
       return null
     }

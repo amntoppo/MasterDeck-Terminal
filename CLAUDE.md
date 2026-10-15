@@ -186,7 +186,7 @@ web tabs keep working.
 | Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
 | A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
-| In-app updates (#122: check, download, verify, install; Settings → Updates; the app menu) | `shared/updates.ts` (model, `compareVersions`, `signedMessage`, `statusLine`, `shouldPrompt`, `badge`), `shared/releaseKey.ts` (the public key; `MASTERDECK_UPDATE_PUBKEY` only with `MASTERDECK_ISOLATED=1`), `shared/updateHelper.ts` (the macOS helper script, bash 3.2), `main/updater.ts` (`Updater`, `updatesOffReason`), `main/updateMac.ts` (`MacInstaller`), `main/updateWin.ts` (`WinInstaller`, `electron-updater` on win32 only), `main/updateVerify.ts` (hash + Ed25519), `main/appMenu.ts`, `makeUpdater` / `restartToUpdate` / `setAppMenu` and the `update:*` handlers in `main/index.ts`; files in `<userData>/updates/`. Never in `AppState`; every `update:*` is `blocked` for the web. Off unless packaged; `MASTERDECK_UPDATES=0` turns it off, `MASTERDECK_UPDATE_URL` points it at another backend |
+| In-app updates (#122: check, download, verify, install; Settings → Updates; the app menu) | `shared/updates.ts` (model, `compareVersions`, `signedMessage`, `statusLine`, `shouldPrompt`, `badge`), `shared/releaseKey.ts` (the public key; `releaseKey` / `updateBase`: `MASTERDECK_UPDATE_PUBKEY` and `MASTERDECK_UPDATE_URL` only in an update-test build, `MASTERDECK_UPDATE_TEST_BUILD=1` → define `__MD_UPDATE_TEST__`), `shared/updateHelper.ts` (the macOS helper script, bash 3.2), `main/updater.ts` (`Updater`, `updatesOffReason`), `main/updateMac.ts` (`MacInstaller`), `main/updateWin.ts` (`WinInstaller`, `electron-updater` on win32 only), `main/updateVerify.ts` (hash + Ed25519), `main/appMenu.ts`, `makeUpdater` / `restartToUpdate` / `setAppMenu` and the `update:*` handlers in `main/index.ts`; files in `<userData>/updates/`. Never in `AppState`; every `update:*` is `blocked` for the web. Off unless packaged; `MASTERDECK_UPDATES=0` turns it off; the `update:*` handlers are `updateHandlers` in `main/remoteGuards.ts`; MasterDeck's own Restart (`relaunching`) never installs on quit |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
 
 ## Adding a feature
@@ -408,7 +408,19 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-13)
+## Current state and next steps (2026-10-16)
+
+- **In-app updates (#122)** are built on branch `worktree-MasterDeck-Terminal-122-in-app-updates`
+  (not merged, not installed, nothing published or deployed), with the code review's fixes: no
+  install on quit for MasterDeck's own Restart and none while the app runs from the bundle; the
+  backup kept after an install on quit and removed by the healthy new app; the administrator path
+  runs only inline root commands that unpack the verified zip again (never the helper file or the
+  staged copy); the test key and update URL only in an update-test build
+  (`MASTERDECK_UPDATE_TEST_BUILD=1`); the publish script checks the key against the app's, skips
+  files already uploaded and runs after the GitHub attach. Checked: typecheck, vitest (the helper
+  with nasty paths through a `/bin/sh` stand-in for osascript). Not checked: the end-to-end recipe
+  (OPERATIONS "Testing in-app updates"), the real password prompt, Windows. Open points: TODO
+  ("In-app updates (#122)").
 
 - **Which account a card's calls and sessions use (#54)** is fixed on branch
   `worktree-MasterDeck-Terminal-54-card-account-routing` (not merged, not installed): status moves

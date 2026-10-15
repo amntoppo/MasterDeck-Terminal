@@ -18,7 +18,7 @@ export function UpdatesPanel({ u, settings, set }: { u: UpdateState; settings: S
     if (!r.ok) setMsg(r.message ?? 'Could not restart')
   }
   const retry = () => {
-    const a = retryAction(u.errorKind)
+    const a = retryAction(u)
     if (a === 'restart') void restart()
     else void (a === 'download' ? deck().updateDownload() : deck().updateCheck())
   }

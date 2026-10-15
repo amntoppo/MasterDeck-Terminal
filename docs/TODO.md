@@ -827,16 +827,29 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 - **P1 · Not checked end to end.** The updater, the helper and the installers are unit-tested
   (fake server, fake installers, the helper against fake `.app` folders with stand-ins). Still to
-  run: the spec §5 end-to-end (local `wrangler dev`, a packaged v N in a temp folder, v N+1
-  published with the test key, `MASTERDECK_ISOLATED=1` + `MASTERDECK_UPDATE_PUBKEY` +
-  `MASTERDECK_UPDATE_URL=http://localhost:8787`), a broken N+1 rolling back, the real `osascript`
-  password prompt, and Windows (`NsisUpdater` against the feed).
+  run: the spec §5 end-to-end (local `wrangler dev`, a packaged v N **built with
+  `MASTERDECK_UPDATE_TEST_BUILD=1`** in a temp folder, v N+1 published with the test key and
+  `--expect-key`, `MASTERDECK_ISOLATED=1` + `MASTERDECK_UPDATE_PUBKEY` +
+  `MASTERDECK_UPDATE_URL=http://localhost:8787`; OPERATIONS "Testing in-app updates"), a broken N+1
+  rolling back, the real `osascript` password prompt (the root command's quoting was checked only
+  through a `/bin/sh` stand-in, as the same user), and Windows (`NsisUpdater` against the
+  versioned feed `/v1/updates/feed/<channel>/<id>/<version>/latest.yml`, which the backend is
+  adding; until it is deployed a Windows download fails with "Could not read the update feed").
 - **P2 · The backup stays after an admin install.** With the password path the helper does not
   remove `.MasterDeck.app.previous` (a second prompt); the next update's swap removes it.
 - **P3 · Only `unhealthy` skips a version.** A refused password, a swap that failed or an old app
   that did not quit in time show an error and offer the update again (not skipped).
-- **P3 · Install on quit is not health-checked** (spec ponytail): the next launch's own marker is the
-  upgrade path.
+- **P2 · Install on quit has no automatic rollback.** The helper keeps `.MasterDeck.app.previous`
+  and the new app removes it once healthy (`removeMacBackup`), but nothing watches that launch: a
+  new version that never comes up leaves the user on it, with the backup beside it to put back by
+  hand. Upgrade path: a launch agent (or the next helper) that rolls back when no health marker
+  appears after the next open.
+- **P3 · A reopen just after the still-running check.** The helper checks that nothing runs from
+  the bundle right before the swap; an app opened in the second between that check and the
+  renames still runs from the moved bundle (the next quit's install would then find it fine).
+- **P3 · The update-test build flag.** `MASTERDECK_UPDATE_TEST_BUILD=1` must never be set for a
+  release build (release.yml does not set it); nothing checks that a published build was made
+  without it.
 - **P3 · Mandatory updates follow the auto-download setting**; the spec leaves open whether a
   required update should download even with it off.
 - **UI is U4's** (Settings → Updates, the rail dot, the ready prompt, `update:open`).

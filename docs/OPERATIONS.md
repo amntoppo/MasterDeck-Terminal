@@ -76,16 +76,20 @@ an existing tag):
    zips, the EXE, the blockmaps and `latest*.yml` as artifacts.
 2. **publish** (ubuntu) checks the tag against `app/package.json`'s version, picks the update's
    notes (`.github/releases/v<version>.md`, else the annotated tag's message, else
-   `MasterDeck <version>`; see [.github/releases/README.md](../.github/releases/README.md)), runs
-   `app/scripts/release-publish.mjs` and attaches the DMGs and EXE to the GitHub release with
-   `.github/release-notes.md` as the body (the install page, as before).
+   `MasterDeck <version>`; see [.github/releases/README.md](../.github/releases/README.md)),
+   attaches the DMGs and EXE to the GitHub release with `.github/release-notes.md` as the body (the
+   install page, as before), and only then runs `app/scripts/release-publish.mjs`, so a live update
+   always has its installers on GitHub.
 
-`release-publish.mjs` finds the update files (`MasterDeck-<v>-arm64-mac.zip`,
+`release-publish.mjs` first refuses a signing key whose public key is not the app's
+(`RELEASE_PUBLIC_KEY` read out of `app/src/shared/releaseKey.ts`; `--expect-key <b64>` names
+another, for a test key) and an empty file. It finds the update files (`MasterDeck-<v>-arm64-mac.zip`,
 `MasterDeck-<v>-mac.zip` for Intel, and `MasterDeck Setup <v>.exe` with its `.blockmap`, published
 as `MasterDeck-Setup-<v>.exe[.blockmap]`), computes each one's base64 SHA-512 and size, signs
 `masterdeck-update\nv1\n<version>\n<platform>\n<arch>\n<name>\n<sha512>` with the release key
 (Ed25519), uploads every file to R2 through the backend's admin multipart routes (90 MB parts,
-each tried four times; a failed upload is aborted) and registers the release with
+each tried four times; a failed upload is aborted; a file `HEAD /v1/updates/files/<key>` already
+answers with the same size is skipped) and registers the release with
 `POST /v1/admin/releases`, which checks every size and signature. Nothing is offered to users until
 that last call. The DMGs stay on GitHub Releases for new installs (`install.sh`, the website).
 
@@ -115,8 +119,9 @@ RELEASE_ADMIN_TOKEN=… RELEASE_SIGNING_KEY_FILE=… node scripts/release-publis
 
 `--channel stable|beta` overrides the channel taken from the version; `--rollout <0-100>` starts a
 staged rollout; `--min-supported <v>` makes the update mandatory for anything older. Re-running is
-safe: uploads are replaced, and registering an identical release again is a no-op (a different
-file for an existing version is refused with `409`: bump the version instead).
+safe: files already uploaded with the same size are skipped, others are uploaded again, and
+registering an identical release again is a no-op (a different file for an existing version is
+refused with `409`: bump the version instead).
 
 **Rollout, yank, notes after the fact:** `PATCH /v1/admin/releases/<version>` with
 `{rolloutPercent, yanked, notes, minSupportedVersion}` (all rows of that version; `yanked: true`
@@ -128,6 +133,36 @@ public key in `src/shared/releaseKey.ts` first, signed with the **old** key; onc
 set the backend's `RELEASE_PUBLIC_KEY` and the `RELEASE_SIGNING_KEY` secret to the new pair. An app
 only installs updates signed with the key it has built in, so skipping the first step strands
 every installed copy on its version (they would need a manual download).
+
+### Testing in-app updates (end to end, local only)
+
+A release build ignores every update override in the environment (any process of the user can
+`launchctl setenv` one). The test overrides work only in an **update-test build**: one built with
+`MASTERDECK_UPDATE_TEST_BUILD=1`, which sets electron-vite's define `__MD_UPDATE_TEST__`. Never
+publish such a build (release.yml never sets the variable).
+
+```bash
+# 0. A test key pair (never the real one); note the printed public key.
+mkdir -p /tmp/md-update-test && node app/scripts/release-key.mjs /tmp/md-update-test/key.pem
+# 1. The backend locally (its repo): wrangler dev with local D1/R2, RELEASE_PUBLIC_KEY = the test key.
+# 2. v N and v N+1 as update-test builds (bump app/package.json between them; do not commit it).
+cd app
+MASTERDECK_UPDATE_TEST_BUILD=1 npm run build && npx electron-builder --mac dir zip --arm64 --publish never
+npx electron-builder install-app-deps
+# 3. Publish v N+1 to the local backend with the test key.
+MD_RELEASE_API=http://localhost:8787 RELEASE_ADMIN_TOKEN=<local token> RELEASE_SIGNING_KEY_FILE=/tmp/md-update-test/key.pem \
+  node scripts/release-publish.mjs --dir <folder with v N+1's zip> --version <N+1> --expect-key <test public key>
+# 4. Copy v N's MasterDeck.app to a temp folder and launch it isolated against the local backend.
+MASTERDECK_ISOLATED=1 MASTERDECK_HOME=<tmp>/home MASTERDECK_USER_DATA=<tmp>/ud \
+  MASTERDECK_UPDATE_URL=http://localhost:8787 MASTERDECK_UPDATE_PUBKEY=<test public key> \
+  <tmp>/MasterDeck.app/Contents/MacOS/MasterDeck
+```
+
+Settings → Updates → Check for updates finds N+1, downloads and verifies it; Restart now swaps it
+in and the helper waits for the health marker (`<tmp>/ud/updates/helper.log`). For the rollback,
+publish an N+1 whose window never loads. `release-publish.mjs` wants all three update files (both
+mac zips and the EXE with its blockmap): for a mac-only test put small non-empty stand-ins for the
+others beside the real zip.
 
 ## Web app deploy
 

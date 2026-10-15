@@ -1075,20 +1075,25 @@ the DMG has updates off (Settings → Updates says why).
   Restart now to update." **Restart now** closes MasterDeck, installs the new version and opens it
   again. Your Claude sessions keep running (they run under Claude Code's daemon), and the session
   list and tabs come back with the window. **Remind me later** hides the card for four hours; the
-  next start asks again. On a Mac, quitting MasterDeck normally also installs a ready update.
+  next start asks again. On a Mac, quitting MasterDeck normally also installs a ready update (not
+  MasterDeck's own **Restart**, and not while MasterDeck is opened again at once: then the next quit
+  installs it). After such a quit nothing checks that the new version starts: the previous copy
+  stays hidden beside it (`.MasterDeck.app.previous`) until the new version has started once.
 - **Required update.** When your version is no longer supported, a **Required update** banner shows
   over the terminals until you update; **Open Updates** leads to Settings → Updates.
 - **Beta channel.** On: MasterDeck also offers beta versions, before they are released. They may
-  have more bugs. Off again: you stay on the beta until the next stable release is newer.
+  have more bugs. Off again: a beta update that was downloaded but not installed is dropped; a beta
+  already installed stays until the next stable release is newer.
 - **Your password (Mac).** When MasterDeck sits in a folder your user cannot write to, macOS asks for
   an administrator's password to replace it. Cancelling leaves the old version in place; **Try
   again** asks again.
-- **When an update does not start (Mac).** If the new version does not start within a minute, the
+- **When an update does not start (Mac).** If the new version does not start within two minutes, the
   previous one is put back and opened. Settings → Updates says "Rolled back from vX: it did not
   start", and MasterDeck skips that version until a newer one comes out. After a good update the
   section says "Updated from vY".
 - **Errors** show as one line with **Try again** (it checks, downloads or installs again, whichever
-  failed); never a popup.
+  failed; after a failed install that MasterDeck reports when it opens again, it checks again);
+  never a popup.
 - **Windows.** The update runs MasterDeck's installer in the background on restart. There is no
   automatic roll back on Windows yet. If Windows SmartScreen stops the installer ("Windows protected
   your PC"), choose **More info → Run anyway**, or download the installer from the releases page.

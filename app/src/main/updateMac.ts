@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import { accessSync, constants, createWriteStream, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { helperArgs, helperScript, HELPER_NAME } from '@shared/updateHelper'
-import type { UpdateOffer } from '@shared/updates'
+import { compareVersions, type UpdateOffer } from '@shared/updates'
 import type { Installer } from './updater'
 import { PENDING } from './updater'
 import { checkRelease, UpdateFailure } from './updateVerify'
@@ -64,6 +64,30 @@ function canWrite(path: string): boolean {
 export function plistVersion(text: string): string | null {
   const m = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(text)
   return m ? m[1].trim() : null
+}
+
+/**
+ * After an install on quit (the helper kept the previous copy and watched nothing), the healthy new
+ * app removes `.MasterDeck.app.previous` beside it: only when its own bundle is that MasterDeck.app
+ * and the backup's version is older than the running one. True when it removed it. A folder the
+ * user cannot write (an admin's /Applications) keeps the backup: the next update's swap replaces it.
+ */
+export function removeMacBackup(bundle: string, current: string): boolean {
+  if (basename(bundle) !== 'MasterDeck.app') return false
+  const prev = join(dirname(bundle), '.MasterDeck.app.previous')
+  let version: string | null = null
+  try {
+    version = plistVersion(readFileSync(join(prev, 'Contents', 'Info.plist'), 'utf8'))
+  } catch {
+    return false
+  }
+  if (!version || compareVersions(version, current) >= 0) return false
+  try {
+    rmSync(prev, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export class MacInstaller implements Installer {
@@ -145,7 +169,8 @@ export class MacInstaller implements Installer {
     mkdirSync(stage, { recursive: true })
     const r = await this.d.run('/usr/bin/ditto', ['-x', '-k', zip, stage])
     if (r.code !== 0) throw new UpdateFailure('install', 'The update could not be unpacked')
-    rmSync(zip, { force: true })
+    // The zip stays until the install is done: an install that needs the administrator's password
+    // unpacks it again as root, checked against its SHA-512, and never trusts this staged copy.
     const app = this.staged(offer.version)
     let version: string | null = null
     try {
@@ -172,12 +197,24 @@ export class MacInstaller implements Installer {
     writeFileSync(tmp, helperScript(), { mode: 0o755 })
     renameSync(tmp, script)
     const pending = join(this.d.dir, PENDING)
-    writeFileSync(`${pending}.tmp`, JSON.stringify({ version: offer.version, from: this.d.current, at: Date.now() }) + '\n')
+    // relaunch: false tells the new app that no helper watches it, so it removes the backup itself.
+    writeFileSync(`${pending}.tmp`, JSON.stringify({ version: offer.version, from: this.d.current, relaunch, at: Date.now() }) + '\n')
     renameSync(`${pending}.tmp`, pending)
     const staged = this.staged(offer.version)
+    const zip = join(this.versionDir(offer.version), offer.name)
     this.d.spawnDetached('/bin/bash', [
       script,
-      ...helperArgs({ pid: this.d.pid, app: this.d.bundle, staged, dir: this.d.dir, version: offer.version, from: this.d.current, relaunch }),
+      ...helperArgs({
+        pid: this.d.pid,
+        app: this.d.bundle,
+        staged,
+        dir: this.d.dir,
+        version: offer.version,
+        from: this.d.current,
+        relaunch,
+        zip,
+        sha512: offer.sha512,
+      }),
     ])
   }
 
@@ -192,5 +229,9 @@ export class MacInstaller implements Installer {
 
   onQuit(offer: UpdateOffer): void {
     this.handOver(offer, false)
+  }
+
+  discard(offer: UpdateOffer): void {
+    rmSync(this.versionDir(offer.version), { recursive: true, force: true })
   }
 }

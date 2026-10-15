@@ -2,10 +2,13 @@
 // <userData>/updates/update-helper.sh and starts, detached, right before it quits. It swaps the
 // staged app in by two renames, opens it, waits for the new app's health marker, and puts the
 // previous app back when the new one does not come up. It never deletes the running app before the
-// new one is in place, and the previous one stays (.MasterDeck.app.previous) until the new is healthy.
+// new one is in place, and the previous one stays (.MasterDeck.app.previous) until the new is healthy
+// (after an install on quit, the new app removes it itself: updateMac.ts removeMacBackup). It touches
+// nothing while any process runs from the bundle (a relaunch, or the app opened again at once).
 //
-// Stand-ins (tests): MD_OPEN, MD_OSASCRIPT, MD_KILL (called with the app's path), MD_XATTR,
-// MD_PID_WAIT (s, default 120), MD_HEALTH_WAIT (s, default 60), MD_POLL (s, default 1).
+// Stand-ins (tests): MD_OPEN, MD_OSASCRIPT (run with the root command as its last argument),
+// MD_KILL (called with the app's path), MD_XATTR, MD_PID_WAIT (s, default 120), MD_HEALTH_WAIT
+// (s, default 120), MD_KILL_WAIT (s, default 3), MD_POLL (s, default 1).
 
 /** The name the script is written under, in `<userData>/updates/`. */
 export const HELPER_NAME = 'update-helper.sh'
@@ -23,28 +26,33 @@ export interface HelperRun {
   from: string
   /** Open the new app and check it (Restart now), or only swap (the next normal quit). */
   relaunch: boolean
+  /** The downloaded zip, kept: an administrator install unpacks it again as root. */
+  zip: string
+  /** The zip's SHA-512 (base64) the app verified with the release signature. */
+  sha512: string
 }
 
 /** The script's arguments for one install. */
 export function helperArgs(r: HelperRun): string[] {
-  return ['install', String(r.pid), r.app, r.staged, r.dir, r.version, r.from, r.relaunch ? '1' : '0']
+  return ['install', String(r.pid), r.app, r.staged, r.dir, r.version, r.from, r.relaunch ? '1' : '0', r.zip, r.sha512]
 }
 
 /** The script itself. Every path is quoted: "Application Support" has a space. */
 export function helperScript(): string {
   return `#!/bin/bash
 # MasterDeck update helper (written by MasterDeck: src/shared/updateHelper.ts). Runs under macOS bash 3.2.
-#   update-helper.sh install <pid> <app> <staged app> <updates dir> <version> <from> <relaunch 1|0>
-#   update-helper.sh swap <app> <staged app>    (as root through osascript when the folder is not writable)
-#   update-helper.sh restore <app>
-#   update-helper.sh cleanup <app>
+#   update-helper.sh install <pid> <app> <staged app> <updates dir> <version> <from> <relaunch 1|0> <zip> <sha512>
+# This file never runs as root. When the app's folder is not writable, the commands that need root
+# go inline to osascript (do shell script … with administrator privileges): as root they copy the
+# downloaded zip into a fresh root-owned folder, check its SHA-512 against the one the app verified
+# with the release signature, unpack it there and check its version; the user's staged copy is not used.
 
-SELF="$0"
 OPEN="\${MD_OPEN:-/usr/bin/open}"
 OSA="\${MD_OSASCRIPT:-/usr/bin/osascript}"
 XATTR="\${MD_XATTR:-/usr/bin/xattr}"
 PID_WAIT="\${MD_PID_WAIT:-120}"
-HEALTH_WAIT="\${MD_HEALTH_WAIT:-60}"
+HEALTH_WAIT="\${MD_HEALTH_WAIT:-120}"
+KILL_WAIT="\${MD_KILL_WAIT:-3}"
 POLL="\${MD_POLL:-1}"
 
 # open starts the app without this environment: pass MasterDeck's own variables on, so an isolated
@@ -57,47 +65,10 @@ for name in $(compgen -e | sort); do
 done
 open_app() { "$OPEN" \${ENV_ARGS[@]+"\${ENV_ARGS[@]}"} "$1"; }
 
-prev_of() { printf '%s/.%s.previous' "$(dirname "$1")" "$(basename "$1")"; }
-new_of() { printf '%s/.%s.new' "$(dirname "$1")" "$(basename "$1")"; }
-
-# The staged app next to the current one, then two renames; the old one is kept as the backup.
-do_swap() {
-  app="$1"
-  staged="$2"
-  prev="$(prev_of "$app")"
-  new="$(new_of "$app")"
-  rm -rf "$prev" "$new" || return 1
-  mv "$staged" "$new" || return 1
-  if ! mv "$app" "$prev"; then
-    rm -rf "$new"
-    return 1
-  fi
-  if ! mv "$new" "$app"; then
-    mv "$prev" "$app"
-    return 1
-  fi
-  "$XATTR" -dr com.apple.quarantine "$app" >/dev/null 2>&1
-  return 0
-}
-
-do_restore() {
-  app="$1"
-  prev="$(prev_of "$app")"
-  [ -d "$prev" ] || return 1
-  rm -rf "$app" && mv "$prev" "$app"
-}
-
-do_cleanup() {
-  rm -rf "$(prev_of "$1")"
-}
-
-case "$1" in
-  swap) do_swap "$2" "$3"; exit $? ;;
-  restore) do_restore "$2"; exit $? ;;
-  cleanup) do_cleanup "$2"; exit $? ;;
-  install) ;;
-  *) echo "usage: $0 install|swap|restore|cleanup ..." >&2; exit 2 ;;
-esac
+if [ "$1" != install ] || [ $# -lt 10 ]; then
+  echo "usage: $0 install <pid> <app> <staged app> <updates dir> <version> <from> <relaunch 1|0> <zip> <sha512>" >&2
+  exit 2
+fi
 
 PID="$2"
 APP="$3"
@@ -106,6 +77,10 @@ DIR="$5"
 VERSION="$6"
 FROM="$7"
 RELAUNCH="$8"
+ZIP="$9"
+SHA="\${10}"
+PREV="$(dirname "$APP")/.$(basename "$APP").previous"
+NEW="$(dirname "$APP")/.$(basename "$APP").new"
 LOG="$DIR/helper.log"
 REASON=""
 
@@ -123,38 +98,32 @@ result_fail() {
   log "failed: $1"
 }
 
-# The folder is not writable (an admin's /Applications): the moves run as root after macOS asks
-# for the password. A cancel there is reason "permission".
-ADMIN=0
-if [ ! -w "$(dirname "$APP")" ] || [ ! -w "$APP" ]; then ADMIN=1; fi
+# One word for /bin/sh in single quotes, whatever it holds (spaces, quotes, $, backslashes).
+sq() { printf "'%s'" "$(printf '%s' "$1" | /usr/bin/sed -e "s/'/'\\\\\\\\''/g")"; }
 
-priv() {
-  if [ "$ADMIN" = 1 ]; then
-    out="$("$OSA" -e 'on run argv' -e 'set c to ""' -e 'repeat with a in argv' -e 'set c to c & quoted form of (a as text) & " "' -e 'end repeat' -e 'do shell script c with administrator privileges' -e 'end run' /bin/bash "$SELF" "$@" 2>&1)"
-    rc=$?
-    [ -n "$out" ] && log "osascript: $out"
-    if [ "$rc" != 0 ]; then
-      case "$out" in
-        *-128*) REASON="permission" ;;
-        *) REASON="swap-failed" ;;
-      esac
-    fi
-    return $rc
-  fi
-  /bin/bash "$SELF" "$@" >> "$LOG" 2>&1
-  rc=$?
-  [ "$rc" != 0 ] && REASON="swap-failed"
-  return $rc
+# The processes running from this bundle, matched as a plain path prefix (a folder name with ( or .
+# is no pattern): the quitting app's own executable, or one opened again since.
+app_pids() {
+  /bin/ps -axo pid=,command= 2>/dev/null | while read -r p c; do
+    case "$c" in
+      "$APP/Contents/MacOS/"*) echo "$p" ;;
+    esac
+  done
 }
 
 kill_app() {
   if [ -n "$MD_KILL" ]; then
     "$MD_KILL" "$APP"
-  else
-    /usr/bin/pkill -f "$APP/Contents/MacOS/" >/dev/null 2>&1
-    sleep 3
-    /usr/bin/pkill -9 -f "$APP/Contents/MacOS/" >/dev/null 2>&1
+    return 0
   fi
+  pids="$(app_pids)"
+  [ -z "$pids" ] && return 0
+  kill $pids 2>/dev/null
+  end=$((SECONDS + KILL_WAIT))
+  while [ -n "$(app_pids)" ] && [ "$SECONDS" -lt "$end" ]; do sleep "$POLL"; done
+  pids="$(app_pids)"
+  [ -n "$pids" ] && kill -9 $pids 2>/dev/null
+  return 0
 }
 
 wait_healthy() {
@@ -164,6 +133,86 @@ wait_healthy() {
     sleep "$POLL"
   done
   return 0
+}
+
+# The folder is not writable (an admin's /Applications): the swap runs as root after macOS asks for
+# the password. A cancel there is reason "permission".
+ADMIN=0
+if [ ! -w "$(dirname "$APP")" ] || [ ! -w "$APP" ]; then ADMIN=1; fi
+
+# The values the root commands use, each quoted for /bin/sh.
+ROOT_VARS="APP=$(sq "$APP"); PREV=$(sq "$PREV"); NEW=$(sq "$NEW"); ZIP=$(sq "$ZIP"); SHA=$(sq "$SHA"); VER=$(sq "$VERSION")"
+
+# As root: the zip again, into a fresh root-owned folder, checked, unpacked, given the current app's
+# owner; then the two renames, the old app back on failure. Exit codes say where it stopped.
+read -r -d '' ROOT_SWAP <<'ROOTSWAP'
+fail() { /bin/rm -rf "$T"; exit "$1"; }
+T="$(/usr/bin/mktemp -d /tmp/masterdeck-update.XXXXXX)" || exit 10
+/bin/cp "$ZIP" "$T/update.zip" || fail 11
+[ "$(/usr/bin/openssl dgst -sha512 -binary "$T/update.zip" | /usr/bin/base64)" = "$SHA" ] || fail 12
+/usr/bin/ditto -x -k "$T/update.zip" "$T/x" || fail 13
+[ "$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$T/x/MasterDeck.app/Contents/Info.plist")" = "$VER" ] || fail 14
+/usr/bin/xattr -dr com.apple.quarantine "$T/x/MasterDeck.app" >/dev/null 2>&1
+/usr/sbin/chown -R "$(/usr/bin/stat -f %u:%g "$APP")" "$T/x/MasterDeck.app" || fail 15
+/bin/rm -rf "$PREV" "$NEW" || fail 16
+/bin/mv "$T/x/MasterDeck.app" "$NEW" || fail 16
+/bin/mv "$APP" "$PREV" || { /bin/rm -rf "$NEW"; fail 16; }
+/bin/mv "$NEW" "$APP" || { /bin/mv "$PREV" "$APP"; fail 16; }
+/bin/rm -rf "$T"
+ROOTSWAP
+
+read -r -d '' ROOT_RESTORE <<'ROOTRESTORE'
+[ -d "$PREV" ] && [ ! -L "$PREV" ] || exit 1
+/bin/rm -rf "$APP" && /bin/mv "$PREV" "$APP"
+ROOTRESTORE
+
+as_root() {
+  out="$("$OSA" -e 'on run argv' -e 'do shell script (item 1 of argv) with administrator privileges' -e 'end run' "$ROOT_VARS
+$1" 2>&1)"
+  rc=$?
+  [ -n "$out" ] && log "osascript ($rc): $out"
+  if [ "$rc" != 0 ]; then
+    case "$out" in
+      *-128*) REASON="permission" ;;
+      *) REASON="swap-failed" ;;
+    esac
+  fi
+  return $rc
+}
+
+# As the user: the staged app next to the current one, then two renames; the old one is kept as the backup.
+swap_user() {
+  rm -rf "$PREV" "$NEW" || return 1
+  mv "$STAGED" "$NEW" || return 1
+  if ! mv "$APP" "$PREV"; then
+    rm -rf "$NEW"
+    return 1
+  fi
+  if ! mv "$NEW" "$APP"; then
+    mv "$PREV" "$APP"
+    return 1
+  fi
+  "$XATTR" -dr com.apple.quarantine "$APP" >/dev/null 2>&1
+  return 0
+}
+
+do_swap() {
+  if [ "$ADMIN" = 1 ]; then
+    as_root "$ROOT_SWAP"
+    return $?
+  fi
+  swap_user >> "$LOG" 2>&1 && return 0
+  REASON="swap-failed"
+  return 1
+}
+
+do_restore() {
+  if [ "$ADMIN" = 1 ]; then
+    as_root "$ROOT_RESTORE"
+    return $?
+  fi
+  [ -d "$PREV" ] || return 1
+  rm -rf "$APP" && mv "$PREV" "$APP"
 }
 
 log "install $VERSION over $FROM (pid $PID, relaunch $RELAUNCH, admin $ADMIN)"
@@ -178,34 +227,43 @@ while kill -0 "$PID" 2>/dev/null; do
   sleep "$POLL"
 done
 
-if [ ! -d "$STAGED" ]; then
+# 2. Nothing may run from the bundle while it is swapped (a relaunch, or the app opened again at
+# once): leave everything as it is; the next quit tries again.
+if [ -n "$(app_pids)" ]; then
+  log "MasterDeck runs again from $APP"
+  result_fail "still-running"
+  exit 1
+fi
+
+if [ "$ADMIN" = 1 ]; then src="$ZIP"; else src="$STAGED"; fi
+if [ ! -e "$src" ]; then
   result_fail "missing"
   [ "$RELAUNCH" = 1 ] && open_app "$APP"
   exit 1
 fi
 
-# 2. The swap.
-if ! priv swap "$APP" "$STAGED"; then
+# 3. The swap.
+if ! do_swap; then
   result_fail "\${REASON:-swap-failed}"
   [ "$RELAUNCH" = 1 ] && open_app "$APP"
   exit 1
 fi
 
-# The next normal quit: no relaunch, so no health check (ponytail: the next launch's own marker).
+# The next normal quit: no relaunch, so no health check here. The backup stays: the new app
+# removes it once it has written its own health marker (no automatic rollback on this path).
 if [ "$RELAUNCH" != 1 ]; then
-  [ "$ADMIN" = 0 ] && do_cleanup "$APP"
   result_ok
   exit 0
 fi
 
-# 3. Open the new app and wait for its health marker; a second try, then roll back.
+# 4. Open the new app and wait for its health marker; a second try, then roll back.
 for try in 1 2; do
   rm -f "$DIR/healthy-$VERSION"
   log "open $VERSION (try $try)"
   open_app "$APP"
   if wait_healthy; then
     # ponytail: as root the backup stays until the next update's swap removes it (no second password).
-    [ "$ADMIN" = 0 ] && do_cleanup "$APP"
+    [ "$ADMIN" = 0 ] && rm -rf "$PREV"
     result_ok
     exit 0
   fi
@@ -214,7 +272,7 @@ for try in 1 2; do
 done
 
 REASON=""
-if ! priv restore "$APP"; then log "restore failed: \${REASON}"; fi
+if ! do_restore; then log "restore failed: \${REASON}"; fi
 result_fail "unhealthy"
 open_app "$APP"
 exit 1

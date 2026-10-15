@@ -127,6 +127,28 @@ export function inboxActCall(
   return { ok: true, id, type, payload: payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {} }
 }
 
+/** The part of the Updater the update:* handlers call (main/updater.ts). */
+interface UpdaterCalls {
+  state(): unknown
+  check(): Promise<unknown>
+  download(): Promise<unknown>
+  remindLater(): unknown
+}
+
+/**
+ * update:* (in-app updates, #122): the Mac's window only. DECK_ACCESS blocks them for the web; a
+ * call that reaches main from a browser anyway gets null (Restart: a refusal) and runs nothing.
+ */
+export function updateHandlers(updater: () => UpdaterCalls | null, restart: () => Promise<{ ok: boolean; message?: string }>) {
+  return {
+    state: async (remote: boolean) => (remote ? null : (updater()?.state() ?? null)),
+    check: async (remote: boolean) => (remote ? null : ((await updater()?.check()) ?? null)),
+    download: async (remote: boolean) => (remote ? null : ((await updater()?.download()) ?? null)),
+    later: async (remote: boolean) => (remote ? null : (updater()?.remindLater() ?? null)),
+    restart: async (remote: boolean) => (remote ? { ok: false, message: "Updates are the Mac's own" } : restart()),
+  }
+}
+
 /**
  * Spec §4 size rule: one size per PTY; while the Mac's window shows a pane its size wins, otherwise the latest
  * browser size applies. The window reports a shown pane with cols > 0 (ptyOpen/ptyResize) and a hidden one with 0.

@@ -14,7 +14,8 @@ import {
   type UpdateOffer,
   type UpdateState,
 } from './updates'
-import { isRawKey, RELEASE_PUBLIC_KEY, releaseKey } from './releaseKey'
+import { isRawKey, RELEASE_PUBLIC_KEY, releaseKey, updateBase } from './releaseKey'
+import { DEFAULT_REMOTE_URL } from './account'
 
 // The spec's shared test vector (spec §1): every implementation checks against it.
 const VECTOR = {
@@ -51,11 +52,30 @@ describe('signedMessage and the shared test vector', () => {
 })
 
 describe('releaseKey', () => {
-  it('honours a test key only in an isolated launch', () => {
-    expect(releaseKey({})).toBe(RELEASE_PUBLIC_KEY)
-    expect(releaseKey({ MASTERDECK_UPDATE_PUBKEY: VECTOR.publicKey })).toBe(RELEASE_PUBLIC_KEY)
-    expect(releaseKey({ MASTERDECK_UPDATE_PUBKEY: VECTOR.publicKey, MASTERDECK_ISOLATED: '1' })).toBe(VECTOR.publicKey)
-    expect(releaseKey({ MASTERDECK_UPDATE_PUBKEY: 'nope', MASTERDECK_ISOLATED: '1' })).toBe(RELEASE_PUBLIC_KEY)
+  const K = VECTOR.publicKey
+  const iso = { MASTERDECK_UPDATE_PUBKEY: K, MASTERDECK_ISOLATED: '1' }
+  it('honours a test key only in an update-test build launched isolated', () => {
+    expect(releaseKey({ testBuild: true, env: {} })).toBe(RELEASE_PUBLIC_KEY)
+    expect(releaseKey({ testBuild: true, env: { MASTERDECK_UPDATE_PUBKEY: K } })).toBe(RELEASE_PUBLIC_KEY)
+    expect(releaseKey({ testBuild: true, env: iso })).toBe(K)
+    expect(releaseKey({ testBuild: true, env: { MASTERDECK_UPDATE_PUBKEY: 'nope', MASTERDECK_ISOLATED: '1' } })).toBe(RELEASE_PUBLIC_KEY)
+  })
+  it('a release build never takes it, whatever the environment says (launchctl setenv reaches every app)', () => {
+    expect(releaseKey({ testBuild: false, env: iso })).toBe(RELEASE_PUBLIC_KEY)
+  })
+})
+
+describe('updateBase', () => {
+  const env = { MASTERDECK_UPDATE_URL: 'http://localhost:8787/', MASTERDECK_REMOTE_URL: 'https://evil.example' }
+  it('a packaged release build always asks the real service', () => {
+    expect(updateBase({ testBuild: false, packaged: true, env })).toBe(DEFAULT_REMOTE_URL)
+    expect(updateBase({ testBuild: false, packaged: true, env: {} })).toBe(DEFAULT_REMOTE_URL)
+  })
+  it('an update-test build or a development run takes MASTERDECK_UPDATE_URL', () => {
+    expect(updateBase({ testBuild: true, packaged: true, env })).toBe('http://localhost:8787')
+    expect(updateBase({ testBuild: false, packaged: false, env })).toBe('http://localhost:8787')
+    // Not a backend address: the real service.
+    expect(updateBase({ testBuild: true, packaged: true, env: { MASTERDECK_UPDATE_URL: 'file:///x' } })).toBe(DEFAULT_REMOTE_URL)
   })
 })
 
@@ -102,6 +122,15 @@ describe('parseOffer', () => {
     expect(parseOffer({ ...offer, name: '../evil.zip' })).toBeNull()
     expect(parseOffer({ ...offer, size: -1 })).toBeNull()
     expect(parseOffer({ ...offer, url: 'file:///etc/passwd' })).toBeNull()
+  })
+  it('wants an https download, plain http only to this machine', () => {
+    expect(parseOffer({ ...offer, url: 'http://dev.masterdeck.dev/v1/updates/files/x.zip' })).toBeNull()
+    expect(parseOffer({ ...offer, url: 'http://localhost.evil.com/x.zip' })).toBeNull()
+    expect(parseOffer({ ...offer, url: 'http://127.0.0.1.nip.io/x.zip' })).toBeNull()
+    expect(parseOffer({ ...offer, url: 'http://user@evil.com:80@localhost/x' })).toBeNull()
+    expect(parseOffer({ ...offer, url: 'ftp://dev.masterdeck.dev/x.zip' })).toBeNull()
+    expect(parseOffer({ ...offer, url: 'http://localhost:8787/v1/updates/files/x.zip' })?.url).toBe('http://localhost:8787/v1/updates/files/x.zip')
+    expect(parseOffer({ ...offer, url: 'http://127.0.0.1:8787/x.zip' })).not.toBeNull()
   })
 })
 

@@ -130,6 +130,20 @@ export function signedMessage(f: SignedFields): string {
 
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/
 
+/** An update's download address: https, or plain http only to this machine (a local test backend). */
+export function downloadUrlOk(url: string): boolean {
+  if (!/^\S+$/.test(url)) return false
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return false
+  }
+  if (u.username || u.password) return false
+  if (u.protocol === 'https:') return true
+  return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+}
+
 /** The check's 200 answer, or null when it is not the expected shape (an unsafe file name included). */
 export function parseOffer(raw: unknown): UpdateOffer | null {
   if (!raw || typeof raw !== 'object') return null
@@ -139,7 +153,7 @@ export function parseOffer(raw: unknown): UpdateOffer | null {
     typeof r.name === 'string' &&
     /^[0-9A-Za-z._-]{1,200}$/.test(r.name) &&
     typeof r.url === 'string' &&
-    /^https?:\/\/\S+$/.test(r.url) &&
+    downloadUrlOk(r.url) &&
     typeof r.sha512 === 'string' &&
     B64.test(r.sha512) &&
     typeof r.signature === 'string' &&

@@ -64,7 +64,9 @@ Windows uses `electron-updater` (NSIS) against this backend's feed.
   `{ version, channel, notes, name, url, sha512, size, signature, publishedAt, mandatory }`
   (the highest offered version).
 - `GET /v1/updates/feed/:channel/:id/latest.yml` (win32 x64) and `.../latest-mac.yml` (darwin, the
-  arm64 and x64 zips): electron-updater's generic-provider file for the release the check would
+  arm64 and x64 zips), and the versioned `GET /v1/updates/feed/:channel/:id/:version/latest.yml`
+  the Windows client uses (review fix: with the current version the feed and `/check` agree on
+  mandatory updates): electron-updater's generic-provider file for the release the check would
   offer this id (`version`, `files[{url, sha512, size}]`, `path`, `sha512`, `releaseDate`),
   `404` when none. `GET /v1/updates/:channel/latest.yml` / `latest-mac.yml`: the same for the
   newest non-yanked release, with `stagingPercentage` when its rollout is below 100 (for standard
@@ -94,8 +96,12 @@ when the secret is unset; also registered before the auth middleware)
 - `.github/workflows/release.yml` on tags `v*`: build mac and win (the same steps as `ci.yml`),
   then a publish job: `node app/scripts/release-publish.mjs` computes sha512 and size, signs with
   `RELEASE_SIGNING_KEY`, uploads to R2 through the admin upload routes (`MD_RELEASE_API`, default
-  `https://dev.masterdeck.dev`, `RELEASE_ADMIN_TOKEN`), registers the release, and attaches the
-  DMGs and EXE to the GitHub release with `.github/release-notes.md`. Release notes for the update:
+  `https://dev.masterdeck.dev`, `RELEASE_ADMIN_TOKEN`) and registers the release. The DMGs and EXE
+  are attached to the GitHub release (with `.github/release-notes.md`) **before** the script runs,
+  so a live update always has its installers on GitHub. The script refuses a signing key whose
+  public key is not the app's (`releaseKey.ts`; `--expect-key <b64>` for a test key) and an empty
+  file, and skips a file `HEAD /v1/updates/files/<key>` already serves with the same size (a
+  re-run reaches the idempotent publish instead of a `409`). Release notes for the update:
   `.github/releases/v<version>.md` when present, else the tag's message, else "MasterDeck <v>".
   `--dry-run` signs and prints the manifest without network calls. `ci.yml` no longer attaches on
   tags.
@@ -115,35 +121,56 @@ updatedFrom? {from, at}, needsAdmin? }`, plus pure helpers: `compareVersions`, `
 - Enabled only when packaged (`app.isPackaged`), not with `MASTERDECK_UPDATES=0`, and on mac not
   from a read-only place (`/Volumes/…`, App Translocation): Settings says why.
 - Checks: 30 s after launch, every 6 h, and **Check for updates**. Base URL `MASTERDECK_UPDATE_URL`
-  else the remote URL rules (`https://dev.masterdeck.dev`). Install id: random UUID in
-  `<userData>/updates/install-id`. Test overrides (`MASTERDECK_UPDATE_PUBKEY`) are honoured only
-  with `MASTERDECK_ISOLATED=1`.
+  else `https://dev.masterdeck.dev`. Install id: random UUID in `<userData>/updates/install-id`.
+  Review fix: the overrides are honoured only in an **update-test build** (built with
+  `MASTERDECK_UPDATE_TEST_BUILD=1`, electron-vite's define `__MD_UPDATE_TEST__`; never a release
+  build), since any user process can `launchctl setenv`: `MASTERDECK_UPDATE_PUBKEY` there and with
+  `MASTERDECK_ISOLATED=1`, `MASTERDECK_UPDATE_URL` there or in a development run. An offer's
+  download URL must be `https:` (plain `http:` only to `localhost` / `127.0.0.1`).
 - With **Automatically download updates** on (default), an offer downloads at once; else
   **Download** in Settings.
 - **macOS**: download the zip to `<userData>/updates/<version>/`, streaming the SHA-512; verify
   sha512 **and** the signature (`crypto.verify` with the built-in key); a failure deletes the file
   and reports `verify`. Unpack with `ditto -x -k` into `<userData>/updates/<version>/stage/`, check
   `MasterDeck.app/Contents/Info.plist`'s version equals the offer, clear quarantine → `ready`.
-  **Restart now** writes `pending.json` and a helper script (`src/shared/updateHelper.ts`
-  generates it: bash 3.2) to `<userData>/updates/`, spawns it detached, and quits normally. The
-  helper: waits for the old pid to exit (≤ 120 s), moves the staged app next to the current one,
-  swaps by two renames (`MasterDeck.app` → `.MasterDeck.app.previous`, staged → `MasterDeck.app`),
-  clears quarantine, opens the app and waits ≤ 60 s for `<userData>/updates/healthy-<version>`;
-  a second launch on failure; still nothing → kill it, put the previous app back, write
-  `result.json {ok:false, version, reason}` and open the previous app. On success it deletes the
-  backup and writes `result.json {ok:true, from, version}`. When the folder is not writable the
-  helper runs the moves through `osascript … with administrator privileges` (macOS asks for the
-  password); a cancel is `reason: "permission"`. The new app writes `healthy-<version>` 10 s after
+  **Restart now** writes `pending.json` (`{version, from, relaunch}`) and a helper script
+  (`src/shared/updateHelper.ts` generates it: bash 3.2) to `<userData>/updates/`, spawns it
+  detached, and quits normally. The zip is kept until the install is done. The helper: waits for
+  the old pid to exit (≤ 120 s); stops with `still-running`, touching nothing, when any process
+  runs from `<app>/Contents/MacOS/` (compared literally, not as a pattern: a relaunch or a quick
+  reopen); moves the staged app next to the current one, swaps by two renames (`MasterDeck.app` →
+  `.MasterDeck.app.previous`, staged → `MasterDeck.app`), clears quarantine, opens the app and
+  waits ≤ 120 s for `<userData>/updates/healthy-<version>`; a second launch on failure; still
+  nothing → kill what runs from the bundle, put the previous app back, write `result.json
+  {ok:false, version, reason}` and open the previous app. On success it deletes the backup and
+  writes `result.json {ok:true, from, version}`. When the folder is not writable (review fix) no
+  user-writable file runs as root: the root commands go inline to `osascript … do shell script …
+  with administrator privileges` (every path single-quoted), and as root copy the **zip** into a
+  fresh root-owned `mktemp -d` folder, check its SHA-512 against the one the app verified with the
+  signature, unpack it there, check its version, clear quarantine, give it the current app's
+  owner/group, then the two renames (restored on failure); the user's staged copy is not used. A
+  cancel is `reason: "permission"`. **Try again** after a failed install with no offer left (a new
+  launch) checks again. The new app writes `healthy-<version>` 10 s after
   its window loaded. At launch the updater reads `result.json` (rolled back → `rolledBack`, that
   version is skipped until a newer one; ok → `updatedFrom`).
 - **The next normal quit installs** a ready update on mac (helper without relaunch) unless the
-  folder needs a password. ponytail: no health check on that path (the helper is not there at the
-  next launch); upgrade path: the next launch's own health marker.
-- **Windows**: `electron-updater`'s `NsisUpdater`, loaded only on win32; `autoDownload` and
-  `autoInstallOnAppQuit` off; the feed is `/v1/updates/feed/<channel>/<id>/` so the server's
-  rollout decides; the downloaded file's version must equal the offer and its sha512 and signature
-  must verify before `ready` (then `autoInstallOnAppQuit` on); **Restart now** is
-  `quitAndInstall(true, true)`. ponytail: no automatic rollback on Windows (NSIS replaces the
+  folder needs a password or the quit is MasterDeck's own Restart (`app.relaunch()`: the relaunched
+  app would run from the bundle being swapped). Review fix: the helper keeps the backup on that
+  path, and the new app removes it once it has written its health marker (only when
+  `pending.json` says `relaunch: false`, its bundle is the `MasterDeck.app` beside the backup and the
+  backup's `Info.plist` version is older). ponytail: **no automatic rollback** on that path (nothing
+  watches that launch); upgrade path: a watcher of the next open that rolls back without a marker.
+- A newer offer replacing a ready one deletes the old staged folder at once. Changing the channel
+  while a check or download runs checks again once it is done; a ready beta offer is dropped (and
+  its staged files removed) when the setting goes back to stable.
+- **Windows**: `electron-updater`'s `NsisUpdater`, loaded only on win32, with
+  `useMultipleRangeRequest: false` (the server answers single ranges only); `autoDownload` and
+  `autoInstallOnAppQuit` off (a new `prepare` first turns the previous updater's off); the feed is
+  `/v1/updates/feed/<channel>/<id>/<current version>/` so the server's rollout and mandatory rule
+  decide; the downloaded file's version must equal the offer and its sha512 and signature must
+  verify before `ready` (then `autoInstallOnAppQuit` on); **Restart now** is
+  `quitAndInstall(true, true)`, and a throw or an app still running 10 s later is an `install`
+  error. ponytail: no automatic rollback on Windows (NSIS replaces the
   install); upgrade path: keep the previous installer and rerun it on a failed health check.
 - IPC (`DECK_ACCESS`: blocked on the web: a browser never updates the Mac): `update:state`,
   `update:check`, `update:download`, `update:restart`, `update:later`, event `update:changed`.

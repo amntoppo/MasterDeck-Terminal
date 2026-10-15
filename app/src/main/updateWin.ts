@@ -23,21 +23,36 @@ export interface WinDeps {
   base: string
   channel: () => UpdateChannel
   id: string
+  /** This app's version: the feed answers what the check would offer it (mandatory updates included). */
+  current: string
   arch: string
   publicKey: string
   /** Makes the updater for a feed URL; electron-updater is loaded only here, on win32. */
   make: (feedUrl: string) => Promise<NsisLike>
+  /** How long Restart now waits for the app to quit before it says the installer did not start (ms). */
+  quitWaitMs?: number
 }
 
-/** The generic-provider feed for this install: the server answers latest.yml with what the check would offer it. */
-export function feedUrl(base: string, channel: UpdateChannel, id: string): string {
-  return `${base}/v1/updates/feed/${channel}/${encodeURIComponent(id)}/`
+/**
+ * The generic-provider feed for this install and version: the server answers latest.yml with what
+ * the check would offer it, so the feed and /check agree on rollout and mandatory updates.
+ */
+export function feedUrl(base: string, channel: UpdateChannel, id: string, current: string): string {
+  return `${base}/v1/updates/feed/${channel}/${encodeURIComponent(id)}/${encodeURIComponent(current)}/`
+}
+
+/**
+ * NsisUpdater's options. The backend answers single ranges only, so electron-updater asks for one
+ * range per request (its multi-range request would fail and fall back to a full download).
+ */
+export function nsisOptions(feed: string): { provider: 'generic'; url: string; useMultipleRangeRequest: false } {
+  return { provider: 'generic', url: feed, useMultipleRangeRequest: false }
 }
 
 /** The real maker: electron-updater, loaded lazily. */
 export async function nsisUpdater(feed: string): Promise<NsisLike> {
   const { NsisUpdater } = await import('electron-updater')
-  const u = new NsisUpdater({ provider: 'generic', url: feed })
+  const u = new NsisUpdater(nsisOptions(feed))
   u.logger = { info: () => {}, warn: (m: unknown) => console.error(`updates: ${String(m)}`), error: (m: unknown) => console.error(`updates: ${String(m)}`) }
   return u as unknown as NsisLike
 }
@@ -52,7 +67,9 @@ export class WinInstaller implements Installer {
   }
 
   async prepare(offer: UpdateOffer, progress: (p: number) => void, verifying: () => void): Promise<void> {
-    const u = await this.d.make(feedUrl(this.d.base, this.d.channel(), this.d.id))
+    // A newer offer replaces a ready one: the old updater must not install on quit any more.
+    this.discard()
+    const u = await this.d.make(feedUrl(this.d.base, this.d.channel(), this.d.id, this.d.current))
     u.autoDownload = false
     u.autoInstallOnAppQuit = false
     u.allowDowngrade = false
@@ -86,7 +103,19 @@ export class WinInstaller implements Installer {
 
   async restart(): Promise<void> {
     if (!this.u) throw new UpdateFailure('install', 'No update is ready')
-    this.u.quitAndInstall(true, true)
+    try {
+      this.u.quitAndInstall(true, true)
+    } catch {
+      throw new UpdateFailure('install', 'The installer could not start')
+    }
+    // quitAndInstall quits the app; still here after the wait, it did not (Settings shows the error).
+    await new Promise((r) => setTimeout(r, this.d.quitWaitMs ?? 10_000))
+    throw new UpdateFailure('install', 'The installer did not start')
+  }
+
+  discard(): void {
+    if (this.u) this.u.autoInstallOnAppQuit = false
+    this.u = null
   }
 
   onQuit(): void {

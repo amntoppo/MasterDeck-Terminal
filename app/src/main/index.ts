@@ -1,8 +1,8 @@
-import { parseIdentity, remoteUrl, validBackendUrl } from "@shared/account";
-import { releaseKey } from "@shared/releaseKey";
+import { parseIdentity, remoteUrl } from "@shared/account";
+import { releaseKey, updateBase } from "@shared/releaseKey";
 import type { UpdateState } from "@shared/updates";
 import { Updater, updatesOffReason } from "./updater";
-import { MacInstaller, macBundle, macDisabledReason } from "./updateMac";
+import { MacInstaller, macBundle, macDisabledReason, removeMacBackup } from "./updateMac";
 import { nsisUpdater, WinInstaller } from "./updateWin";
 import { macMenuTemplate, updateMenuLabel } from "./appMenu";
 import { Account } from "./account";
@@ -112,7 +112,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, updateHandlers, worktreeFolder } from "./remoteGuards";
 import { SessionFiles } from "./sessionFiles";
 import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
@@ -2740,14 +2740,13 @@ function registerIpc(): void {
     updater?.settingsChanged(cur, saved);
     return saved;
   });
-  // In-app updates: the Mac's window only (DECK_ACCESS blocks them; refused here too).
-  reg.handle(CH.updateState, (e) => (isRemote(e) ? null : (updater?.state() ?? null)));
-  reg.handle(CH.updateCheck, (e) => (isRemote(e) ? null : (updater?.check() ?? null)));
-  reg.handle(CH.updateDownload, (e) => (isRemote(e) ? null : (updater?.download() ?? null)));
-  reg.handle(CH.updateRestart, (e) =>
-    isRemote(e) ? { ok: false, message: "Updates are the Mac's own" } : restartToUpdate(),
-  );
-  reg.handle(CH.updateLater, (e) => (isRemote(e) ? null : (updater?.remindLater() ?? null)));
+  // In-app updates: the Mac's window only (DECK_ACCESS blocks them; refused here too: updateHandlers).
+  const upd = updateHandlers(() => updater, restartToUpdate);
+  reg.handle(CH.updateState, (e) => upd.state(isRemote(e)));
+  reg.handle(CH.updateCheck, (e) => upd.check(isRemote(e)));
+  reg.handle(CH.updateDownload, (e) => upd.download(isRemote(e)));
+  reg.handle(CH.updateRestart, (e) => upd.restart(isRemote(e)));
+  reg.handle(CH.updateLater, (e) => upd.later(isRemote(e)));
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"
       ? id.startsWith("pr:")
@@ -3569,6 +3568,13 @@ const themeBg = (): string =>
 // and the helper script) or electron-updater on Windows. Its state is not in AppState: it reaches
 // the window through update:* only, and a browser never sees or drives it (DECK_ACCESS: blocked).
 let updater: Updater | null = null;
+// MasterDeck's own Restart (app.relaunch): the quit must not install a ready update, or the helper
+// would swap the bundle under the relaunched app.
+let relaunching = false;
+
+// electron.vite.config.ts defines it: true only in a build made with MASTERDECK_UPDATE_TEST_BUILD=1.
+declare const __MD_UPDATE_TEST__: boolean;
+const UPDATE_TEST_BUILD = typeof __MD_UPDATE_TEST__ !== "undefined" && __MD_UPDATE_TEST__ === true;
 
 function makeUpdater(): Updater {
   const dir = join(app.getPath("userData"), "updates");
@@ -3580,8 +3586,10 @@ function makeUpdater(): Updater {
     platform: process.platform,
     macReason: mac ? macDisabledReason(bundle) : null,
   });
-  const base = validBackendUrl(process.env.MASTERDECK_UPDATE_URL) ?? remoteUrl(process.env);
-  const publicKey = releaseKey(process.env);
+  // The test overrides (a test key, a local service) only in an update-test build (releaseKey.ts).
+  const build = { testBuild: UPDATE_TEST_BUILD, env: process.env };
+  const base = updateBase({ ...build, packaged: app.isPackaged });
+  const publicKey = releaseKey(build);
   const u = new Updater({
     current: app.getVersion(),
     platform: process.platform,
@@ -3592,12 +3600,15 @@ function makeUpdater(): Updater {
     // Electron's network stack: the system's proxy and certificates.
     fetch: (url, init) => net.fetch(url, init),
     settings: () => sources.getSettings(),
+    // After an install on quit, the healthy new version removes the copy the helper kept.
+    removeBackup: bundle ? () => void removeMacBackup(bundle, app.getVersion()) : undefined,
     installer: (id) =>
       process.platform === "win32"
         ? new WinInstaller({
             base,
             channel: () => sources.getSettings().updateChannel,
             id,
+            current: app.getVersion(),
             arch: process.arch,
             publicKey,
             make: nsisUpdater,
@@ -3848,6 +3859,7 @@ const meetings = new MeetingsIpc({
     // only once the quit can no longer be refused, so a "Keep recording" leaves no relaunch behind.
     if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart"))) return false;
     // quit, not exit: will-quit still closes the terminals and the remote line.
+    relaunching = true;
     app.relaunch();
     app.quit();
     return true;
@@ -4307,8 +4319,9 @@ app.on("before-quit", (e) => {
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
-  // macOS: a ready update is swapped in after this quit (no relaunch); a Restart now is already under way.
-  updater?.onQuit();
+  // macOS: a ready update is swapped in after this quit (no relaunch); a Restart now is already under
+  // way; MasterDeck's own Restart (a relaunch) leaves it for the next quit.
+  updater?.onQuit(relaunching);
   updater?.stop();
   cloud?.stop();
   peerStore.flush();

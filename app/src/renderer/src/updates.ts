@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { UpdateErrorKind, UpdatePhase, UpdateState } from '@shared/updates'
+import type { UpdatePhase, UpdateState } from '@shared/updates'
 import { deck } from './deck'
 import { can } from './web'
 
@@ -25,9 +25,13 @@ export function useUpdate(): UpdateState | null {
   return state
 }
 
-/** What Try again does after an error: check again, download again, or install again. */
-export function retryAction(kind: UpdateErrorKind | undefined): 'check' | 'download' | 'restart' {
-  switch (kind) {
+/**
+ * What Try again does after an error: check again, download again, or install again. With no offer
+ * (a launch after the helper failed: nothing is staged any more) only a new check can help.
+ */
+export function retryAction(s: Pick<UpdateState, 'errorKind' | 'offer'>): 'check' | 'download' | 'restart' {
+  if (!s.offer) return 'check'
+  switch (s.errorKind) {
     case 'download':
     case 'verify':
       return 'download'
