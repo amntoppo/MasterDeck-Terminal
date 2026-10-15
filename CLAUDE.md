@@ -411,7 +411,7 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-16)
 
 - **Master starts sessions on demand (#126)** on branch
-  `worktree-MasterDeck-Terminal-126-master-start` (not pushed, not merged, **not installed**: the
+  `worktree-MasterDeck-Terminal-126-master-start` (PR #129, not merged, **not installed**: the
   rebuild of the real app waits for the user's word). `master start` (`skills/master/lib/master/start.py`,
   `cli.cmd_start`): from scratch (a `START` proposal) or for tickets by reference or board filter
   (ASSIGN proposals with the ticket's description and sub-issues, `assignMe`); a plan to approve or
