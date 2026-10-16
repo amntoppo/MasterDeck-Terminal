@@ -9,19 +9,53 @@ export interface SubIssue {
   title: string
   url: string
   state: 'open' | 'closed'
+  /** Its description (Markdown), '' when it has none; cut at SUB_BODY_MAX characters. */
+  body: string
+  /** The read cut the description. */
+  bodyCut: boolean
+  /** Logins. */
+  assignees: string[]
+  /** color: six hex digits, null when GitHub gave none we can use. */
+  labels: { name: string; color: string | null }[]
 }
 
+/** A description longer than this (characters) is cut in the read; fitSubIssues then bounds the answer in bytes. */
+export const SUB_BODY_MAX = 10000
+
+/**
+ * The answer's budget in bytes of JSON: the web bridge drops an answer over about 1.05 MB whole, and
+ * would lose the rows with it (as sessionFiles' WEB_ANSWER_MAX).
+ */
+export const SUB_ANSWER_MAX = 900_000
+
 /** The jq filter for the REST answer: one compact object per line, the repository as owner/name. */
-export const SUB_ISSUES_JQ = '.[] | {number, title, state, url: .html_url, repo: ((.repository_url // "") | sub("^.*/repos/"; ""))}'
+export const SUB_ISSUES_JQ =
+  '.[] | {number, title, state, url: .html_url, repo: ((.repository_url // "") | sub("^.*/repos/"; "")), ' +
+  `body: ((.body // "") | .[0:${SUB_BODY_MAX}]), bodyCut: ((.body // "") | length > ${SUB_BODY_MAX}), ` +
+  'assignees: [.assignees[]?.login], labels: [.labels[]? | {name, color}]}'
 
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+// An app assigned shows as its bot: name[bot].
+const LOGIN = /^[A-Za-z0-9-]{1,39}(\[bot\])?$/
+const COLOR = /^[0-9a-f]{6}$/i
+
+function labelsOf(v: unknown): SubIssue['labels'] {
+  if (!Array.isArray(v)) return []
+  const out: SubIssue['labels'] = []
+  for (const l of v) {
+    if (!l || typeof l !== 'object' || typeof (l as { name?: unknown }).name !== 'string') continue
+    const { name, color } = l as { name: string; color?: unknown }
+    out.push({ name, color: typeof color === 'string' && COLOR.test(color) ? color.toLowerCase() : null })
+  }
+  return out
+}
 
 /** The lines `gh api … --jq SUB_ISSUES_JQ` prints, as sub-issues; a malformed line is skipped. */
 export function parseSubIssues(stdout: string, parentRepo: string | null = null): SubIssue[] {
   const out: SubIssue[] = []
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue
-    let o: { number?: unknown; title?: unknown; state?: unknown; url?: unknown; repo?: unknown } | null
+    let o: Record<string, unknown> | null
     try {
       o = JSON.parse(line)
     } catch {
@@ -35,6 +69,10 @@ export function parseSubIssues(stdout: string, parentRepo: string | null = null)
       title: typeof o.title === 'string' ? o.title : '',
       url: typeof o.url === 'string' && o.url.startsWith('https://github.com/') ? o.url : '',
       state: o.state === 'closed' ? 'closed' : 'open',
+      body: typeof o.body === 'string' ? o.body.replace(/\r\n/g, '\n').trim() : '',
+      bodyCut: o.bodyCut === true,
+      assignees: Array.isArray(o.assignees) ? o.assignees.filter((a): a is string => typeof a === 'string' && LOGIN.test(a)) : [],
+      labels: labelsOf(o.labels),
     })
   }
   return out
@@ -59,4 +97,23 @@ export function subIssueRows(subs: SubIssue[], cards: BoardCard[] = []): SubIssu
 /** "2 / 5 done". */
 export function subIssueProgress(rows: { done: boolean }[]): string {
   return `${rows.filter((r) => r.done).length} / ${rows.length} done`
+}
+
+const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length
+
+/**
+ * The sub-issues with the longest descriptions (in bytes) emptied and marked cut until the answer
+ * `{ok, subIssues}` fits `max`: every row stays, a dropped description says "Cut short" and links out.
+ */
+export function fitSubIssues(subs: SubIssue[], max = SUB_ANSWER_MAX): SubIssue[] {
+  let total = bytes({ ok: true, subIssues: subs })
+  if (total <= max) return subs
+  const out = subs.slice()
+  const longest = out.map((s, i) => ({ i, n: bytes(s.body) - 2 })).sort((a, b) => b.n - a.n)
+  for (const { i, n } of longest) {
+    if (total <= max || n <= 0) break
+    out[i] = { ...out[i], body: '', bodyCut: true }
+    total -= n
+  }
+  return out
 }

@@ -789,7 +789,11 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   preview only: the first real read (GraphQL cost, a PR with 100+ checks, StatusContext links) is
   the user's.
 - **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
-  refresh while the row stays open.
+  refresh while the row stays open. An open sub-issue's description (#112) is as old as that read.
+- **P3 · A sub-issue's description is cut at 10 000 characters** in the read (#112), and when the
+  whole answer is over 900 000 bytes the longest descriptions are dropped (`fitSubIssues`), so the
+  web bridge never refuses it; a cut one says so and links to GitHub. Read the full body on expand
+  (`issue:body`) if the cut turns out to bite.
 
 ## Session processes (#115): open points (2026-10-12)
 
@@ -912,6 +916,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   seconds of an account check) are described in GUIDE § Several GitHub accounts → Known limits.
   The two with their own items above stay there (the global SSH rewrite, the polling gaps). Branch
   `worktree-MasterDeck-Terminal-37-accounts-simplifications`.
+- **Sub-issues open in place (#112)**: in the Start dialog, the Assign popup and Details → GitHub a
+  sub-issue row opens (click, Enter or Space) to its status, assignees, labels and description as
+  Markdown, with Open on GitHub; several at once, long ones scroll. Kept from the existing
+  sub-issues read (no new channel). Branch `112-subissue-details`.
 - **Master starts sessions on demand (#126)**: `master start` from scratch (task, repo or folder,
   name, worktree, model, permission mode, account) or for board tickets (by reference or by
   column/assignee/label/sprint), every start a ledger proposal shown as a plan and spawned on the

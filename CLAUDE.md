@@ -419,6 +419,15 @@ buttons; it does not go through macOS window drag regions.
   as the primary account (`builderSettings` in `PtyManager`); the other items are GUIDE § Several
   GitHub accounts → **Known limits**, and the list left TODO. Checked: typecheck, vitest. Not
   checked: the builder pane in the app with two accounts.
+- **Sub-issues open in place (#112)** on branch `112-subissue-details` (PR #131, not merged, **not
+  installed**: the rebuild of the real app waits for the user's word). In the Start dialog, the
+  Assign popup and Details → GitHub a sub-issue row opens (click, Enter or Space) to its status,
+  assignees, labels and description (Markdown, cut at 10 000 characters), with Open on GitHub;
+  several at once. The data comes from the sub-issues read already made (`SUB_ISSUES_JQ` keeps
+  more). Design and plan: `docs/plans/2026-10-14-subissue-details-{design,plan}.md`. Checked:
+  typecheck, vitest, and the web preview at 1280 and 390 px (click, Enter, Space, several open, a
+  long body scrolling in its box, no sideways scroll). Not checked: a real issue with sub-issues,
+  the Electron window, the real web app over the bridge, Windows.
 
 - **Admin dashboard (#127)**, 2026-10-16, **not deployed, not merged**: the API is in the backend (branch
   `127-admin-dashboard`, `/admin/*`, its own D1 migration, docs `docs/ADMIN.md`), the page in its own new private repo

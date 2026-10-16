@@ -3,7 +3,7 @@ import { fullRepo, ticketLabel, type Ticket } from '@shared/ticket'
 import { buildPrSummary, parsePrUrl, type PrSummary } from '@shared/prSummary'
 import { parsePrDetail, prDetailQuery, type PrDetail } from '@shared/prDetail'
 import { safeRef } from '@shared/prWatch'
-import { parseSubIssues, SUB_ISSUES_JQ, type SubIssue } from '@shared/subIssues'
+import { fitSubIssues, parseSubIssues, SUB_ISSUES_JQ, type SubIssue } from '@shared/subIssues'
 import type { CliResult } from '@shared/types'
 import type { GhRunner } from './ghc'
 import { CLOSED_MAX, TEAM_PR_CLOSED_QUERY, TEAM_PR_QUERY, teamPrSearches } from '@shared/teamPrs'
@@ -58,7 +58,7 @@ export class GitHub {
   async subIssues(t: Ticket): Promise<{ ok: true; subIssues: SubIssue[] } | { ok: false; message: string }> {
     const r = await this.api([`${issueRepoPath(t.repo)}/issues/${t.number}/sub_issues?per_page=100`, '--jq', SUB_ISSUES_JQ], 300)
     if (r.code !== 0) return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) || `could not read the sub-issues of ${ticketLabel(t.repo, t.number)}` }
-    return { ok: true, subIssues: parseSubIssues(r.stdout, t.repo) }
+    return { ok: true, subIssues: fitSubIssues(parseSubIssues(r.stdout, t.repo)) }
   }
 
   /** A PR's checks, reviews, threads and comments in one GraphQL read; cached for a minute. */
