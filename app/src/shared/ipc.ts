@@ -39,6 +39,16 @@ import type { DraftCheck, DraftMonitor, DraftSkill } from "./flowBuilder";
 
 /** A workflow the builder session wrote, as MasterDeck read and checked it. */
 /** A ticket to create from the Board. */
+/** Clone (#136): what the dialog sends. Main finds the session by key and takes its ids and folder from its own list. */
+export interface CloneRequest {
+  key: string;
+  name: string;
+  /** What the clone should do next; empty: none. */
+  prompt?: string;
+  /** Link the clone to the original's ticket (off: board flow and PR watch stay with the original). */
+  keepTicket?: boolean;
+}
+
 export interface NewTicket {
   repo: string;
   title: string;
@@ -271,6 +281,7 @@ export const CH = {
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
+  cloneSession: "session:clone",
   accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
@@ -601,6 +612,8 @@ export interface DeckApi {
     /** Session keys to link the new session to (two-way). */
     peers?: string[];
   }): Promise<CliResult>;
+  /** Clone (#136): a new background session from a copy of this session's conversation. */
+  cloneSession(req: CloneRequest): Promise<CliResult>;
   resumeSession(
     sessionId: string,
     name: string,

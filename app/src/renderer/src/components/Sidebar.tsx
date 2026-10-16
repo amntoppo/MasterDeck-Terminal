@@ -97,7 +97,7 @@ export interface ColumnTab {
   onClose: () => void;
 }
 
-export type SessionAction = "summary" | "close-tab";
+export type SessionAction = "summary" | "close-tab" | "clone";
 
 const ORDER_KEY = "sessionOrder";
 const FILTER_KEY = "sessionFilter";
@@ -594,6 +594,7 @@ export function Sidebar({
             }
             starred={stars.includes(menu.s.key)}
             onStar={() => toggleStar(menu.s.key)}
+            onClone={() => onSessionAction(menu.s, "clone")}
             flash={flash}
           />
         )}

@@ -552,7 +552,20 @@ diff too big to send says so.
   filters show. The filters and
   whether the line is open are kept across restarts (per window: the web app keeps its own).
 - **Right-click a session** for: Open, Set status…, Summary, Open ticket, Open PR (its newest),
-  Open folder in editor, Star / Unstar, Move to top, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
+  Open folder in editor, Star / Unstar, Move to top, Clone…, and Stop session…. The copy commands, Close terminal and Stop are in the Details tab.
+- **Clone a session** (right-click → **Clone…**) to try another approach from the same point, or
+  to run a side task with the same context. The dialog asks for a **Name** (`<name> (clone)` by
+  default; `(clone 2)`, … when taken), an optional **First message** (what the clone should do
+  next) and, when the session has a ticket, **Keep ticket link** (off by default: the board and the
+  PR watch stay with the original). **Clone** starts a new background session with a copy of the
+  whole conversation, in the same folder, as the same GitHub account, with the same model and
+  permission mode when MasterDeck can read them from the conversation (plan, accept edits and auto
+  carry over; bypass permissions never does; otherwise Claude Code's defaults). The clone's
+  terminal opens as soon as it is listed (a "Starting…" tab until then, with Try again if it did
+  not start); Details says "Cloned from <name>". The original keeps running, with its name,
+  ticket and PRs: the clone does not take over the PRs the original made or its branch's PR (only
+  ones it makes itself, or its own branch's once it switches). Clone is greyed out, with the
+  reason, for a session with no conversation yet and for one waiting on your answer.
 - **Session status:** the column and the Details tab show one status, first match wins:
   **Needs Input** (a prompt or permission), **Working**, **Question** or **Blocked** (what it told
   master, or a question its last message asks you), then where its PR stands: **Merged** (all merged), **Rework** (you gave it more

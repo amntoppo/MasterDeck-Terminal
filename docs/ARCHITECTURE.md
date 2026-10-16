@@ -159,6 +159,26 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
     session that does not run is left out of the snapshot, so it owns no issue and gets no
     ORPHAN proposal beside its copy. The copy does not carry
     the old session's `--model` / `--permission-mode` (not known reliably; see TODO).
+  - **Clone (#136) is not a copy.** Right-click → Clone… (`SessionMenu`, `CloneDialog`) →
+    `CH.cloneSession` (`DECK_ACCESS` remote) → `cloneSession` in `main/index.ts`: the session is
+    found by key in the last state (ids and folder never come from the request), refused by
+    `cloneBlock` (no transcript: `Session.noConversation`, set from the transcript index each
+    agents poll; needs input or a menu on screen), and started as `claude --bg [--settings]
+    --resume <id> --fork-session -n <name> [--model] [--permission-mode] [<first message>]` in its
+    `cwd` (`cloneArgs`). The account is the session's (`settingsFor` with `accountOfSession`);
+    model and mode come from the end of its transcript (`cloneOptions`: newest assistant
+    `requestedModel`, else `message.model`; newest `permission-mode` only when `plan`,
+    `acceptEdits` or `auto`). Nothing is superseded and `noteCopy` is not called. The clone is
+    recorded in `session-clones.json` (`main/clones.ts` `CloneStore`, by bg id, by name until
+    listed when no bg id was printed): `from` (key, name), `at`, the folder's `branch`, and the
+    ticket for Keep ticket link. `Sources` uses it to (1) skip the copied transcript lines in
+    `followPrs` (`clonedLine`: they keep the original's timestamps), so the clone takes none of
+    the original's PRs, worktrees or workflow progress; (2) give a clone its folder branch's PR
+    only once the branch differs from the recorded one (`cloneOwnsBranch` in `branchDir`); (3)
+    link a kept ticket once the clone is listed (`carryLinks`, the resume linker, once,
+    `linked: true`); (4) set `Session.clonedFrom` (Details: "Cloned from"). The renderer opens a
+    "Starting…" tab (`clone` on the pending tab, Try again) that becomes the clone's terminal.
+    Design and plan: `docs/plans/2026-10-17-clone-session-{design,plan}.md`.
   - Not a listed background session (History, an interactive session for Start here): there are no
     saved options and nothing to copy, so `--settings` and `-n` as for a new start.
   - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown,
