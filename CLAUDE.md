@@ -113,8 +113,11 @@ It never opens the Keychain (a new ad-hoc build would put a dialog up that block
 
 ## Operating rules (from the user; follow exactly)
 
-- **Never push** MasterDeck (or the backend) unless the user asks. `main` is ahead of `origin/main`
-  (21 commits as of 2026-10-03). Never deploy the web app or the backend unless asked.
+- **Always open a PR once a change is done**: commit on the feature branch, push that branch and
+  open a draft PR against `main` (description ends with the session's attribution line), then
+  report its link. Never push `main` (or the backend's `master`) directly, never force-push, never
+  merge a PR yourself. `main` is ahead of `origin/main` (21 commits as of 2026-10-03). Never deploy
+  the web app or the backend unless asked.
 - **After every change: rebuild, reinstall and relaunch** the local app (recipe above).
 - **No real GitHub writes in tests** (issues, comments, board moves, PRs): dry runs only.
 - **Never type into the user's real Claude sessions**, and never answer their Needs-you items. For
