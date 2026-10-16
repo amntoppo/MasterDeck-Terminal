@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { sameTicket, ticketLabel, ticketUrl, type Ticket } from "@shared/ticket";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { sameTicket, ticketKey, ticketLabel, ticketUrl, type Ticket } from "@shared/ticket";
 import { sessionTicket } from "@shared/derive";
 import { formatAgo } from "@shared/format";
 import { attentionFor, sessionStatus } from "@shared/review";
 import { STEPS, taskStep } from "@shared/tasks";
-import { subIssueProgress, subIssueRows } from "@shared/subIssues";
+import { subIssueProgress, subIssueRows, type SubIssueRow } from "@shared/subIssues";
 import {
   checkCounts,
   worstPrStatus,
@@ -19,7 +19,7 @@ import type { AppState, Session } from "@shared/types";
 import { deck, useNow } from "../deck";
 import { ticketNote } from "../notes";
 import { can } from "../web";
-import { useSubIssues } from "./SubIssues";
+import { SubIssueDetail, useOpenSubs, useSubIssues } from "./SubIssues";
 
 interface Props {
   session: Session;
@@ -265,6 +265,7 @@ function TicketRow({
 /** Mounted only while the ticket is open: the sub-issues are read then. */
 function SubIssuesRow({ ticket, state, ...row }: RowProps & { ticket: Ticket; state: AppState }) {
   const { subs, error } = useSubIssues(ticket);
+  const [open, toggle] = useOpenSubs();
   const rows = subIssueRows(subs ?? [], [...(state.repoView?.cards ?? []), ...(state.board?.cards ?? [])]);
   return (
     <GhRow
@@ -286,18 +287,33 @@ function SubIssuesRow({ ticket, state, ...row }: RowProps & { ticket: Ticket; st
       {subs === null && <Empty>Reading from GitHub…</Empty>}
       {error && <Empty>Could not read the sub-issues: {error}</Empty>}
       {subs !== null && !error && !rows.length && <Empty>No sub-issues.</Empty>}
-      {rows.map((r) => (
-        <div key={`${r.repo ?? ""}#${r.number}`} className={`gh-item${r.done ? " done" : ""}`}>
-          <div className="gh-item-main">
-            <div className="gh-item-lead">
-              <span className="mono gh-ref">{ticketLabel(r.repo, r.number)}</span> <span className="gh-sub-title">{r.title}</span>
-            </div>
-          </div>
-          <Badge tone={r.done ? "done" : "off"}>{r.status}</Badge>
-          <OutLink url={r.url || ticketUrl(r.repo, r.number)} />
-        </div>
-      ))}
+      {rows.map((r) => {
+        const key = ticketKey(r.repo, r.number);
+        return <SubIssueItem key={key} row={r} open={open.has(key)} onToggle={() => toggle(key)} />;
+      })}
     </GhRow>
+  );
+}
+
+/** One sub-issue: a line that opens in place to its description, with the link out beside it. */
+export function SubIssueItem({ row: r, open, onToggle }: { row: SubIssueRow; open: boolean; onToggle: () => void }) {
+  const id = `${useId()}-sub`;
+  return (
+    <div className={`gh-sub${open ? " open" : ""}`}>
+      <div className={`gh-item${r.done ? " done" : ""}`}>
+        <button type="button" className="gh-item-main gh-sub-toggle" aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle}>
+          <span className="gh-item-lead">
+            <span className="gh-caret" aria-hidden="true">
+              ▸
+            </span>{" "}
+            <span className="mono gh-ref">{ticketLabel(r.repo, r.number)}</span> <span className="gh-sub-title">{r.title}</span>
+          </span>
+        </button>
+        <Badge tone={r.done ? "done" : "off"}>{r.status}</Badge>
+        <OutLink url={r.url || ticketUrl(r.repo, r.number)} />
+      </div>
+      {open && <SubIssueDetail row={r} id={id} />}
+    </div>
   );
 }
 

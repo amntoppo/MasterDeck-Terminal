@@ -244,10 +244,18 @@ function previewDeck(noBoard: boolean): DeckApi {
     issueSubIssues: () => ({
       ok: true,
       subIssues: [
-        { repo: null, number: 118, title: 'Export invoices as CSV', url: 'https://github.com/acme/web/issues/118', state: 'open' },
-        { repo: null, number: 125, title: 'Dark mode for settings', url: 'https://github.com/acme/web/issues/125', state: 'open' },
-        { repo: null, number: 101, title: 'Keep the session cookie across restarts', url: 'https://github.com/acme/web/issues/101', state: 'closed' },
-        { repo: null, number: 102, title: 'Show the sign-in error under the form', url: 'https://github.com/acme/web/issues/102', state: 'open' },
+        {
+          repo: null, number: 118, title: 'Export invoices as CSV', url: 'https://github.com/acme/web/issues/118', state: 'open', bodyCut: false,
+          body: '## What\n\nA **CSV** button on the invoices page.\n\n- [x] Columns agreed\n- [ ] Export the visible rows\n- [ ] Dates as `YYYY-MM-DD`\n\n```ts\nexportCsv(rows, { header: true })\n```\n\nSee [the spec](https://github.com/acme/web/issues/90).',
+          assignees: ['alice'], labels: [{ name: 'feature', color: 'a2eeef' }, { name: 'billing', color: 'd4c5f9' }],
+        },
+        {
+          repo: null, number: 125, title: 'Dark mode for settings', url: 'https://github.com/acme/web/issues/125', state: 'open', bodyCut: true,
+          body: Array.from({ length: 30 }, (_, i) => `${i + 1}. Check the ${['toggle', 'form', 'banner'][i % 3]} in dark mode and note what still uses a fixed colour.`).join('\n'),
+          assignees: ['alice', 'bob-work'], labels: [{ name: 'ui', color: '0e8a16' }],
+        },
+        { repo: null, number: 101, title: 'Keep the session cookie across restarts', url: 'https://github.com/acme/web/issues/101', state: 'closed', body: '', bodyCut: false, assignees: [], labels: [{ name: 'bug', color: 'd73a4a' }] },
+        { repo: null, number: 102, title: 'Show the sign-in error under the form', url: 'https://github.com/acme/web/issues/102', state: 'open', body: 'The error shows in a toast today and is gone before it can be read.', bodyCut: false, assignees: ['bob-work'], labels: [] },
       ],
     }),
     assignableUsers: () => ({ ok: true, users: ['alice', 'bob-work'] }),

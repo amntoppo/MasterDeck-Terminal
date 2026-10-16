@@ -489,7 +489,8 @@ diff too big to send says so.
   - **GitHub:** a row each for the **Ticket**, the **Pull requests** and the **Monitors**, with
     counts and status badges while closed and **↗** to open the item on GitHub. Click a row to open
     it, and open what is inside it in turn: the ticket's steps, its note and its **Sub-issues**
-    (done of total); each PR's **Checks** (failing first), **Reviews** (the latest per reviewer),
+    (done of total; click one, or press Enter or Space on it, to read its description, status,
+    assignees and labels in place); each PR's **Checks** (failing first), **Reviews** (the latest per reviewer),
     **Open threads** (file and the last comment), **Comments** (newest first) and, when MasterDeck
     watches it, **PR watch** with what it found and **Stop**; each monitor with the lines it printed,
     newest first, and **Stop**. Open rows refresh by themselves when the session's state changes (a
@@ -1641,9 +1642,13 @@ cards is in them.
   GitHub renders it, so you can tell what the work is before you pick it up. The Assign popup and
   the Start dialog (under Ticket) list the ticket's **Sub-issues**: each one's number, title and
   status (its column when it is on the board, else Open or Closed), with "2 / 5 done" above the
-  list (done means closed, as on GitHub). Clicking a sub-issue opens it on GitHub. A ticket with no
-  sub-issues shows no section. A long description and a long list each scroll in their own box,
-  so the popup's buttons stay in view.
+  list (done means closed, as on GitHub). Click a sub-issue (or press Enter or Space on it) to open
+  it in place: its status, who is assigned, its labels and its description as GitHub renders it,
+  with **Open on GitHub ↗**; click it again to close it. Several can be open at once (a very long
+  description, or a list of many long ones, is cut short with a note). A ticket with no
+  sub-issues shows no section. The ticket's description and the sub-issue list each scroll in
+  their own box, so the popup's buttons stay in view; in Details a long sub-issue description
+  scrolls in its own box.
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue
   opens a PR, MasterDeck adds that PR to the issue as a closing reference (it shows under the
   issue's Development box on GitHub), exactly as writing "Closes #12" in the PR would. This holds for
