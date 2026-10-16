@@ -416,7 +416,7 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-17)
 
 - **Clone a session (#136)** is built on branch `worktree-MasterDeck-Terminal-136-clone-session`
-  (PR, not merged; **not installed**: the rebuild of the real app waits for the user's word).
+  (PR #148, not merged; **not installed**: the rebuild of the real app waits for the user's word).
   Right-click → **Clone…** (name, first message, Keep ticket link) starts `claude --bg --resume
   <id> --fork-session -n <name>` in the session's folder as its account, with its model and
   permission mode when valid; the original keeps running and is not superseded; the clone skips
