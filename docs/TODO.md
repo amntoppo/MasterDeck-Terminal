@@ -73,18 +73,6 @@ fixes it, and move the item here to "Recently done".
   carries `GH_TOKEN` (or `GITHUB_TOKEN`) for another user, the notice that gh's active account is
   not the primary gives wrong advice (gh uses the token, not the active account). Approach:
   suppress the notice when `GH_TOKEN`/`GITHUB_TOKEN` is set.
-- **P3 · Accepted simplifications of several accounts.** (a) A rate limit on one account pauses
-  MasterDeck's own polling for all accounts (`Sources.githubPaused` is global; ghcache's pause is per
-  account): per-account pause if it bites. (b) Skills run by hand inside a session use its token and
-  `GHC_ACCOUNT` but the primary's config and boards; outside a session, gh's active account. (c) SSH aliases are only read from `~/.ssh/config`. (d) A global
-  `url.<ssh>.insteadOf` rewrite beats the session's (see the P2 item above). (e) The workflow
-  builder sessions use gh's active account. (f) master starts without `--settings` when the primary
-  needs to log in again (Needs you says so). (g) The current branch's PR for a session in a folder
-  without an `origin` of any connected account is read as the primary. (h) A card's issue calls
-  (assign, a PR link) go as its repository's account even when its board is another account's
-  (status moves go as the board's, #54); the assignable-users cache is per repository, so its read
-  has no card to ask. (i) Select all in one account's Repos & boards may widen what another account
-  lists. (j) An account can show healthy for a few seconds before its background check fails.
 - **P3 · Phone/API clients and `session.start.account`.** The protocol field is merged and deployed
   in the backend (PR #10); no web or phone UI sends it yet.
 - **P3 · Several-accounts review leftovers (small).**
@@ -920,6 +908,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
+  now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
+  the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by
+  hand, aliases from other ssh configs, a global SSH rewrite, master without the primary's
+  settings, the branch PR of an unknown `origin`, boards of one account, Select all, the first
+  seconds of an account check) are described in GUIDE § Several GitHub accounts → Known limits.
+  The two with their own items above stay there (the global SSH rewrite, the polling gaps). Branch
+  `worktree-MasterDeck-Terminal-37-accounts-simplifications`.
 - **Sub-issues open in place (#112)**: in the Start dialog, the Assign popup and Details → GitHub a
   sub-issue row opens (click, Enter or Space) to its status, assignees, labels and description as
   Markdown, with Open on GitHub; several at once, long ones scroll. Kept from the existing

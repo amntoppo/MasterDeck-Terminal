@@ -63,4 +63,18 @@ describe('PtyManager', () => {
     expect(m.open('sh:1', { kind: 'builder', resume: false }, 80, 24, true)).toMatchObject({ ok: false })
     expect(spawned.length).toBe(1)
   })
+  it("the workflow builder runs with the primary account's settings, and only it", () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ws-'))
+    const primary = ['--settings', '/a/alice.settings.json']
+    const m = new PtyManager(() => ({}), () => {}, () => 'claude', () => tmp, () => tmp,
+      () => ({ cwd: tmp, tab: 't1', settings: ['--settings', '/a/bob-work.settings.json'] }), () => primary)
+    m.open('wb', { kind: 'builder', resume: false }, 80, 24)
+    m.open('tb', { kind: 'ticket-builder', resume: false, tab: 't1', account: 'bob-work' }, 80, 24)
+    m.open('in', { kind: 'installer', tools: [] }, 80, 24)
+    expect(spawned.map((s) => s.args.slice(0, 4))).toEqual([
+      ['-n', 'md-workflow-builder', ...primary],
+      ['-n', 'md-ticket-builder-t1', '--settings', '/a/bob-work.settings.json'],
+      [expect.not.stringContaining('--settings')],
+    ])
+  })
 })

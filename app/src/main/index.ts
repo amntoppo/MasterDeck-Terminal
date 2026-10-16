@@ -492,6 +492,11 @@ const ptys = new PtyManager(
     ticketPane(paths.home, isMulti(getConfig()), spec, (l) =>
       accountEnv.settingsArgs(l),
     ),
+  // As master: the primary, or gh's active account while the primary needs to log in again.
+  () => {
+    const s = accountEnv.settingsArgs(null);
+    return s.ok ? s.args : [];
+  },
 );
 
 function notify(events: NotifyEvent[]): void {

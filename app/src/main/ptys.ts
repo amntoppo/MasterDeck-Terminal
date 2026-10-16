@@ -45,6 +45,8 @@ export class PtyManager {
       cwd: homedir(),
       settings: [],
     }),
+    /** The workflow builder's account settings: the primary's with two or more accounts, else none. */
+    private builderSettings: () => string[] = () => [],
   ) {}
 
   /** `remote`: asked by a browser, which gets an existing pane only as the kind it really is. */
@@ -103,7 +105,7 @@ export class PtyManager {
       process.platform,
       process.env.SHELL,
       this.claude(),
-      ticket?.settings,
+      ticket?.settings ?? (spec.kind === "builder" ? this.builderSettings() : []),
     );
     if (spec.kind === "installer") {
       cmd.cwd = this.installerDir();

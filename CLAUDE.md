@@ -413,6 +413,12 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-16)
 
+- **Several accounts' accepted simplifications (#37)** on branch
+  `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not
+  installed**: the rebuild of the real app waits for the user's word). The workflow builder runs
+  as the primary account (`builderSettings` in `PtyManager`); the other items are GUIDE § Several
+  GitHub accounts → **Known limits**, and the list left TODO. Checked: typecheck, vitest. Not
+  checked: the builder pane in the app with two accounts.
 - **Sub-issues open in place (#112)** on branch `112-subissue-details` (PR #131, not merged, **not
   installed**: the rebuild of the real app waits for the user's word). In the Start dialog, the
   Assign popup and Details → GitHub a sub-issue row opens (click, Enter or Space) to its status,

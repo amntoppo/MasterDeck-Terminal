@@ -867,6 +867,9 @@ here (needs `hooks.queue`).
   prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
   (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
   from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
+- The workflow builder (`builder` spec) runs as the primary account with two or more: the
+  `builderSettings` callback of `PtyManager` gives `AccountEnv.settingsArgs(null)`'s `--settings`,
+  and nothing while the primary needs to log in again (gh's active account then, as master).
 - Create with Claude's settings bar (#68; `renderer/.../TicketSettingsBar.tsx`, `shared/ticketSettings.ts`):
   the panel holds `TicketSession.settings` (repo, board, status, assignees, labels, milestone, sprint
   and its field), started by `settingsFrom` (the dialog's draft, else `ticketDefaults` of the + column,
