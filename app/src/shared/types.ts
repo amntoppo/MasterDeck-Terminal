@@ -90,6 +90,10 @@ export interface SpawnTarget {
   model?: string;
   /** `claude --permission-mode` the proposal names; absent: Claude Code's default. */
   permissionMode?: string;
+  /** `claude --worktree <name>` (`master start --worktree`): the session starts in a new worktree of that name. */
+  worktree?: string;
+  /** A ticket start from `master start`: once the session is linked, MasterDeck assigns the ticket to the user. */
+  assignMe?: boolean;
 }
 
 export interface Proposal {
@@ -216,6 +220,8 @@ export interface AppState {
   peers: Record<string, string[]>;
   /** Sessions the MasterDeck mod runs in now (its heartbeat), by Session.key; set in the state callback. */
   modLive?: Record<string, { version: string; claude: string; mods: import("./modBand").ModSeen[] }>;
+  /** MasterDeck messages waiting for a session's prompt box to be empty (#123), oldest first; set in the state callback. */
+  held?: import("./heldMessages").HeldView[];
   /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
   modOff?: Record<string, string[]>;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */

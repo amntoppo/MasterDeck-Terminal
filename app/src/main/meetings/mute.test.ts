@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MuteApp, MuteReading, MuteRule } from '@shared/meetingMute'
-import type { MicMode } from '@shared/meetings'
+import type { MicLogEntry, MicMode } from '@shared/meetings'
 import { MUTE_TICK_MS, MUTE_UNKNOWN_HOLD } from '@shared/meetingMute'
 import { MUTE_RESTARTS, MuteWatch } from './mute'
 import type { MuteHelper } from './muteHelper'
@@ -31,6 +31,7 @@ function watch(over: { mode?: MicMode; trusted?: boolean; noHelper?: boolean } =
   let trusted = over.trusted ?? true
   const gates: boolean[] = []
   const helpers: FakeHelper[] = []
+  const logs: Omit<MicLogEntry, 't'>[] = []
   let changes = 0
   const w = new MuteWatch({
     mode: () => mode,
@@ -38,6 +39,7 @@ function watch(over: { mode?: MicMode; trusted?: boolean; noHelper?: boolean } =
     where: () => ({ env: { MASTERDECK_MUTE: over.noHelper ? join(root, 'none') : bin }, resourcesPath: root, appRoot: root, packaged: true, arch: 'arm64' }),
     gate: (on) => void gates.push(on),
     onChange: () => void changes++,
+    log: (e) => void logs.push(e),
     spawn: (_bin, rules) => {
       const lines: ((r: MuteReading) => void)[] = []
       const exits: ((c: number | null, e: string) => void)[] = []
@@ -58,6 +60,7 @@ function watch(over: { mode?: MicMode; trusted?: boolean; noHelper?: boolean } =
   return {
     w,
     gates,
+    logs,
     helpers,
     last: () => helpers[helpers.length - 1],
     changes: () => changes,
@@ -387,5 +390,35 @@ describe('MuteWatch', () => {
     t.last().send(zoom('unmuted'))
     t.last().send(zoom('unmuted'))
     expect(t.changes()).toBe(n)
+  })
+
+  it('the Mic log: what md-mute read, why and the gate, only on change and only while recording', () => {
+    const t = watch()
+    t.w.begin('Google Meet')
+    const meet = (state: MuteApp['state'], why: MuteApp['why'], extra: Partial<MuteApp> = {}): MuteApp[] => [{ id: 'meet', state, why, ...extra }]
+    // Before the recording runs: nothing logged.
+    t.last().send(meet('unknown', 'no-control'))
+    expect(t.logs).toEqual([])
+    t.w.sync(run)
+    t.last().send(meet('unknown', 'no-control', { searched: 900, ms: 30 }))
+    t.last().send(meet('unknown', 'no-control', { searched: 0, ms: 0 }))
+    t.last().send(meet('muted', 'found', { label: 'Turn on microphone', cached: false }))
+    t.last().send(meet('muted', 'found', { label: 'Turn on microphone', cached: true }))
+    t.last().send(meet('unmuted', 'found'))
+    t.last().send(meet('unmuted', 'found'))
+    t.w.sync({ recording: true, paused: true })
+    t.w.sync(run)
+    t.last().send(meet('unknown', 'not-trusted'), false)
+    t.w.stop()
+    expect(t.logs).toEqual([
+      { state: 'unknown', app: 'Google Meet', why: 'no-control', reason: 'unreadable', gated: false },
+      { state: 'muted', app: 'Google Meet', why: 'found', gated: true },
+      // One unmuted reading keeps the settled mute (MuteSettle); the second lets the mic in.
+      { state: 'unmuted', app: 'Google Meet', why: 'found', gated: true },
+      { state: 'unmuted', app: 'Google Meet', why: 'found', gated: false },
+      { state: 'unknown', app: 'Google Meet', gated: false, paused: true },
+      { state: 'unknown', app: 'Google Meet', gated: false },
+      { state: 'unknown', app: null, why: 'not-trusted', reason: 'not-trusted', gated: false },
+    ])
   })
 })

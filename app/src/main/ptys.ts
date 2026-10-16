@@ -4,6 +4,7 @@ import * as pty from "node-pty";
 import { isSafeBgId, paneCommand } from "@shared/paneCommand";
 import type { PaneSpec } from "@shared/types";
 import type { PtyOpenResult } from "@shared/ipc";
+import { isTyping } from "@shared/heldMessages";
 import { claudeFolder } from "./remoteGuards";
 
 const REPLAY_MAX = 200 * 1024;
@@ -16,6 +17,11 @@ interface Pane {
   /** Total characters emitted so far; lets a view drop data already in its replay. */
   seq: number;
   exited: boolean;
+  /** Its size now, to render its screen as it stands (`screen`). */
+  cols: number;
+  rows: number;
+  /** When the user last typed into it (`input`); 0: never. */
+  inputAt: number;
 }
 
 /**
@@ -111,13 +117,22 @@ export class PtyManager {
       cmd.cwd = ticket.cwd;
       mkdirSync(cmd.cwd, { recursive: true });
     }
-    const pane: Pane = { kind: spec.kind, proc: null, buffer: "", seq: 0, exited: false };
+    const pane: Pane = {
+      kind: spec.kind,
+      proc: null,
+      buffer: "",
+      seq: 0,
+      exited: false,
+      cols: cols > 0 ? Math.max(cols, 2) : 120,
+      rows: rows > 0 ? Math.max(rows, 2) : 34,
+      inputAt: 0,
+    };
     this.panes.set(id, pane);
     try {
       const proc = pty.spawn(cmd.file, cmd.args, {
         name: "xterm-256color",
-        cols: cols > 0 ? Math.max(cols, 2) : 120,
-        rows: rows > 0 ? Math.max(rows, 2) : 34,
+        cols: pane.cols,
+        rows: pane.rows,
         cwd: startDir(cmd.cwd),
         env: {
           ...this.env(),
@@ -163,13 +178,36 @@ export class PtyManager {
     return !!p && !p.exited && !!p.proc;
   }
 
+  /** The pane's output so far and its size: its screen as it stands, once rendered. */
+  screen(id: string): { raw: string; cols: number; rows: number } | null {
+    const p = this.panes.get(id);
+    return p ? { raw: p.buffer, cols: p.cols, rows: p.rows } : null;
+  }
+
+  /** When the user last typed into the pane (0: never). */
+  inputAt(id: string): number {
+    return this.panes.get(id)?.inputAt ?? 0;
+  }
+
+  /** Keys from a terminal view (the user, in the window or a browser); MasterDeck's own typing uses `write`. */
+  input(id: string, data: string): void {
+    const p = this.panes.get(id);
+    if (p && isTyping(data)) p.inputAt = Date.now();
+    p?.proc?.write(data);
+  }
+
   write(id: string, data: string): void {
     this.panes.get(id)?.proc?.write(data);
   }
 
   resize(id: string, cols: number, rows: number): void {
+    const p = this.panes.get(id);
+    if (p && p.proc) {
+      p.cols = Math.max(cols, 2);
+      p.rows = Math.max(rows, 2);
+    }
     try {
-      this.panes.get(id)?.proc?.resize(Math.max(cols, 2), Math.max(rows, 2));
+      p?.proc?.resize(Math.max(cols, 2), Math.max(rows, 2));
     } catch {
       // resizing an exiting pty throws; harmless
     }

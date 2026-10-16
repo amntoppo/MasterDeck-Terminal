@@ -6,6 +6,10 @@ import {
   cleanTitle,
   MEETING_LANGUAGES,
   MEETING_TITLE_MAX,
+  MIC_LOG_KEEP,
+  MIC_LOG_MAX,
+  MicLogKeep,
+  type MicLogAt,
   mergeSegments,
   oneAtATime,
   normalizeMeetings,
@@ -75,6 +79,77 @@ describe('storedMeeting', () => {
     ]
     for (const b of bad) expect(storedMeeting(b, ID), JSON.stringify(b)).toBeNull()
     expect(storedMeeting({ ...meeting(), id: '../etc' }, '../etc')).toBeNull()
+  })
+})
+
+describe('storedMeeting: the Mic log', () => {
+  const entry = { t: 1200, state: 'muted', app: 'Google Meet', why: 'found', gated: true }
+
+  it('keeps a log that reads back; files without one have none', () => {
+    const log = [entry, { t: 3000, state: 'unknown', app: null, reason: 'not-trusted', gated: false }, { t: 4000, state: 'unknown', app: 'Zoom', gated: true, paused: true }]
+    expect(storedMeeting({ ...meeting(), micLog: log }, ID)?.micLog).toEqual(log)
+    expect(storedMeeting(meeting(), ID)).not.toHaveProperty('micLog')
+  })
+
+  it('a log that does not read back is left out, never the meeting', () => {
+    const bad: unknown[] = [
+      'x',
+      [{ ...entry, state: 'loud' }],
+      [{ ...entry, t: -1 }],
+      [{ ...entry, why: 'guess' }],
+      [{ ...entry, reason: 'nope' }],
+      [{ ...entry, gated: 'yes' }],
+      [{ ...entry, app: 'a\nb' }],
+      [{ ...entry, paused: false }],
+      Array.from({ length: 501 }, () => entry),
+    ]
+    for (const b of bad) {
+      const m = storedMeeting({ ...meeting(), micLog: b }, ID)
+      expect(m, JSON.stringify(b).slice(0, 80)).not.toBeNull()
+      expect(m).not.toHaveProperty('micLog')
+    }
+    expect(storedMeeting({ ...meeting(), micLog: Array.from({ length: 500 }, () => entry) }, ID)?.micLog).toHaveLength(500)
+  })
+
+  it('the count of changes not kept reads back with a full log only; a bad one is left out', () => {
+    const full = Array.from({ length: MIC_LOG_MAX }, () => entry)
+    expect(storedMeeting({ ...meeting(), micLog: full, micLogDropped: 42 }, ID)?.micLogDropped).toBe(42)
+    for (const bad of [0, -1, 1.5, '42', null])
+      expect(storedMeeting({ ...meeting(), micLog: full, micLogDropped: bad }, ID)).not.toHaveProperty('micLogDropped')
+    expect(storedMeeting({ ...meeting(), micLog: [entry], micLogDropped: 42 }, ID)).not.toHaveProperty('micLogDropped')
+    expect(storedMeeting({ ...meeting(), micLogDropped: 42 }, ID)).not.toHaveProperty('micLogDropped')
+  })
+})
+
+describe('MicLogKeep', () => {
+  const e = (i: number, o: Partial<MicLogAt> = {}): MicLogAt => ({ at: i, state: i % 2 ? 'muted' : 'unmuted', app: 'Zoom', why: 'found', gated: i % 2 === 1, ...o })
+
+  it('keeps the first and the last MIC_LOG_KEEP and counts the ones between', () => {
+    const k = new MicLogKeep()
+    for (let i = 0; i < 1000; i++) expect(k.add(e(i))).toBe(true)
+    const kept = k.entries()
+    expect(kept).toHaveLength(MIC_LOG_MAX)
+    expect(k.dropped).toBe(1000 - MIC_LOG_MAX)
+    expect(kept[0].at).toBe(0)
+    expect(kept[MIC_LOG_KEEP - 1].at).toBe(MIC_LOG_KEEP - 1)
+    expect(kept[MIC_LOG_KEEP].at).toBe(1000 - MIC_LOG_KEEP)
+    expect(kept.at(-1)?.at).toBe(999)
+    const few = new MicLogKeep()
+    for (let i = 0; i < 300; i++) few.add(e(i))
+    expect(few.entries().map((x) => x.at)).toEqual(Array.from({ length: 300 }, (_, i) => i))
+    expect(few.dropped).toBe(0)
+  })
+
+  it('a change of why alone is not kept; any other change is', () => {
+    const k = new MicLogKeep()
+    expect(k.add(e(0, { state: 'unknown', why: 'no-control', gated: false }))).toBe(true)
+    expect(k.add(e(1, { state: 'unknown', why: 'cut', gated: false }))).toBe(false)
+    expect(k.add(e(2, { state: 'unknown', why: 'error', gated: false }))).toBe(false)
+    expect(k.add(e(3, { state: 'unknown', why: 'error', gated: true }))).toBe(true)
+    expect(k.add(e(4, { state: 'unknown', why: 'error', gated: true, reason: 'unreadable' }))).toBe(true)
+    expect(k.add(e(5, { state: 'unknown', why: 'error', gated: true, reason: 'unreadable', app: 'Teams' }))).toBe(true)
+    expect(k.add(e(6, { state: 'unknown', why: 'error', gated: true, reason: 'unreadable', app: 'Teams', paused: true }))).toBe(true)
+    expect(k.entries().map((x) => x.at)).toEqual([0, 3, 4, 5, 6])
   })
 })
 

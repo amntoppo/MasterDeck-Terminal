@@ -8,8 +8,13 @@ export const DEFAULT_REMOTE_URL = 'https://dev.masterdeck.dev'
 
 /** The backend address: the default, or a development override (https, or http on localhost). */
 export function remoteUrl(env: Record<string, string | undefined>): string {
-  const v = (env.MASTERDECK_REMOTE_URL ?? '').trim().replace(/\/+$/, '')
-  return /^https:\/\/[^\s/@?#]+$/.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v) ? v : DEFAULT_REMOTE_URL
+  return validBackendUrl(env.MASTERDECK_REMOTE_URL) ?? DEFAULT_REMOTE_URL
+}
+
+/** A backend address MasterDeck may talk to (https, or http on localhost), trailing slashes cut; else null. */
+export function validBackendUrl(raw: string | undefined): string | null {
+  const v = (raw ?? '').trim().replace(/\/+$/, '')
+  return /^https:\/\/[^\s/@?#]+$/.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v) ? v : null
 }
 
 export type Identity = { email: string; provider: Provider; deviceId: string }

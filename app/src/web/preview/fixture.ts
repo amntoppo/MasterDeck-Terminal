@@ -173,17 +173,21 @@ export function fixtureState(noBoard = false): AppState {
     hookInfo: {},
     sessionWorktrees: {},
     peers: { [SESSIONS[0].key]: [SESSIONS[1].key], [SESSIONS[1].key]: [SESSIONS[0].key] },
+    // A PR watch message waiting for the second session's prompt to be empty (#123).
+    held: [
+      { id: 'h1', sessionKey: SESSIONS[1].key, from: 'PR watch', at: now - 2 * min, reason: 'draft', preview: '[MasterDeck PR watch] acme/web#131 has 2 new review comments: address them, push, and reply on each thread.' },
+    ],
     // Tools → Mods: the MasterDeck mod runs in the first session and reported these.
     modLive: {
       [SESSIONS[0].key]: {
-        version: '0.5.0',
+        version: '0.6.0',
         claude: '2.1.296',
         mods: [
-          { name: 'masterdeck-ticket', provenance: 'masterdeck-ticket@masterdeck', version: '0.5.0', tier: 'user', loaded: true },
-          { name: 'masterdeck-alerts', provenance: 'masterdeck-alerts@masterdeck', version: '0.5.0', tier: 'user', loaded: true },
-          { name: 'masterdeck-note', provenance: 'masterdeck-note@masterdeck', version: '0.5.0', tier: 'user', loaded: true },
-          { name: 'masterdeck-loop', provenance: 'masterdeck-loop@masterdeck', version: '0.5.0', tier: 'user', loaded: true },
-          { name: 'masterdeck-board', provenance: 'masterdeck-board@masterdeck', version: '0.5.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-ticket', provenance: 'masterdeck-ticket@masterdeck', version: '0.6.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-alerts', provenance: 'masterdeck-alerts@masterdeck', version: '0.6.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-note', provenance: 'masterdeck-note@masterdeck', version: '0.6.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-loop', provenance: 'masterdeck-loop@masterdeck', version: '0.6.0', tier: 'user', loaded: true },
+          { name: 'masterdeck-board', provenance: 'masterdeck-board@masterdeck', version: '0.6.0', tier: 'user', loaded: true },
           { name: 'token-weather', provenance: 'token-weather@claude-code-playground-mods', version: '0.1.0', tier: 'user', loaded: true },
           { name: 'blast-radius', provenance: 'blast-radius@claude-code-playground-mods', version: '0.2.0', tier: 'user', loaded: false },
           { name: 'my-turn-timer', provenance: 'my-turn-timer@inline', version: null, tier: 'user', loaded: true },

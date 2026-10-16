@@ -1,4 +1,10 @@
 import { parseIdentity, remoteUrl } from "@shared/account";
+import { releaseKey, updateBase } from "@shared/releaseKey";
+import type { UpdateState } from "@shared/updates";
+import { Updater, updatesOffReason } from "./updater";
+import { MacInstaller, macBundle, macDisabledReason, removeMacBackup } from "./updateMac";
+import { nsisUpdater, WinInstaller } from "./updateWin";
+import { macMenuTemplate, updateMenuLabel } from "./appMenu";
 import { Account } from "./account";
 import { Watches } from "./watches";
 import { BoardFlow, LinkedSteps } from "./boardFlow";
@@ -6,7 +12,7 @@ import { PrWatch, prStatesFor } from "./prWatch";
 import { canSend } from "@shared/send";
 import { resolveTheme, type ThemePref } from "@shared/themes";
 import { handedOver, parseWatchRequest } from "@shared/watches";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -21,11 +27,12 @@ import {
   chmodSync,
 } from "node:fs";
 import { canStop } from "@shared/cleanup";
-import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard } from "@shared/modBand";
+import { bandFor, boardKeyOf, mergeCatalog, modBand, modBoard, type ModBeat } from "@shared/modBand";
+import { heldViews } from "@shared/heldMessages";
 import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname, release, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   app,
@@ -33,6 +40,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
   net,
   nativeTheme,
   Notification,
@@ -105,7 +113,7 @@ import { randomUUID } from "node:crypto";
 import { RemoteCommands } from "./remoteCommands";
 import { CloudSync } from "./cloudSync";
 import { IpcRegistry, isRemote } from "./ipcRegistry";
-import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, worktreeFolder } from "./remoteGuards";
+import { chosenFolder, claudeFolder, inboxActCall, knownDirsOnly, MacPanes, remoteSettings, sessionFileCall, updateHandlers, worktreeFolder } from "./remoteGuards";
 import { SessionFiles } from "./sessionFiles";
 import { webFit, type ChangeList, type DiffRead, type FileList, type FileRead } from "@shared/sessionFiles";
 import { createWorktree, worktreeInfo } from "./startWorktree";
@@ -143,6 +151,8 @@ import { GitHub } from "./github";
 import { accountClients } from "./accountClients";
 import { AssignableUsers } from "./assignUsers";
 import { Sender } from "./send";
+import { HeldStore } from "./held";
+import { ModDelivery } from "./modDeliver";
 import { Ops } from "./ops";
 import { cleanEnv, loginPath, resolveClaude } from "./env";
 import { MasterCli } from "./masterCli";
@@ -212,6 +222,7 @@ import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import { SessionProcs } from "./sessionProcs";
 import { isPortUrl } from "@shared/sessionProcs";
+import { isWebLink } from "@shared/termLinks";
 import {
   installStatusline,
   isInstalled,
@@ -322,7 +333,7 @@ async function reloadMods(): Promise<CliResult> {
   const failed: string[] = [];
   // Never relayed through master-agent: its message would not run the command.
   for (const s of idle) {
-    const r = await sender.send(s, "/reload-plugins", false);
+    const r = await sender.send(s, "/reload-plugins", false, { from: "Mods" });
     if (!r.ok) failed.push(r.message);
   }
   const done = idle.length - failed.length;
@@ -499,7 +510,7 @@ const gh = makeGhRunner(run, paths.libDir, paths.python);
 const github = new GitHub(run, gh);
 const boardOps = new BoardOps(gh);
 // Which account each of MasterDeck's own GitHub calls goes out as (two or more; with one, the three above).
-const { forAccount, forRepo, forCard, forBoard, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
+const { forAccount, forRepo, forCard, forBoard, cardAccount, ghRouted, ghDirect, boardOps: boardOpsByRepo } = accountClients({
   config: getConfig,
   base: { gh, github, ops: boardOps },
   run,
@@ -547,12 +558,32 @@ const boardCreator = new BoardCreator({
   // To the Mac's own window only: a browser cannot start this, so it has nothing to follow.
   progress: (p) => win?.webContents.send(CH.boardCreateProgress, p),
 });
+// MasterDeck messages never mix with what the user is typing (#123): the core mod takes them
+// without typing (deck/deliver/), else they are typed only into an empty prompt box, else held.
+const heldStore = new HeldStore(join(paths.home, "held-messages.json"), () => sources.changed());
+const modDelivery = new ModDelivery(join(paths.home, "deck"));
+let beatsRead = 0;
+let beatsNow: Record<string, ModBeat> = {};
+/** The session's core mod takes messages (its heartbeat, read again at most every 5 s). */
+function modDelivers(sessionId: string): boolean {
+  if (Date.now() - beatsRead > 5_000) {
+    beatsNow = deckHooks.modBeats();
+    beatsRead = Date.now();
+  }
+  return !!beatsNow[sessionId]?.deliver;
+}
 const sender = new Sender(
   ptys,
   cli,
   env,
   () => claudeBin,
   (key) => latest?.sessions.find((x) => x.key === key),
+  {
+    held: heldStore,
+    mod: modDelivery,
+    modTakes: (s) => modDelivers(s.sessionId),
+    log: (m) => console.error(m),
+  },
 );
 const ops = new Ops(
   run,
@@ -574,6 +605,14 @@ const boardFlow = new BoardFlow({
       ? {}
       : prStatesFor((l) => forAccount(l || null).gh, getConfig(), urls),
   link: linkSession,
+  // `master start`'s ticket starts: the user, as the session's account (else the card's; one account: gh's login).
+  assignMe: async (t, account) => {
+    const login = isMulti(getConfig()) ? (account ?? cardAccount(t.repo, t.number)) : (latest?.me ?? null);
+    if (!login) return { ok: false, message: "who you are on GitHub is not known yet" };
+    const r = await forCard(t.repo, t.number).github.assign(t, login, []);
+    if (r.ok) sources.noteAssigned(t, login);
+    return r;
+  },
   builtinOn: (sid) => workflows().builtinsFor(sid).includes("ticket"),
   onMoved: (t, status) => sources.noteStatus(t, status),
   log: (m) => console.error(m),
@@ -592,6 +631,7 @@ const linkedSteps = new LinkedSteps({
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "Workflow" },
     ),
   logRun: (sid, trigger, ids) => workflows().logRun(sid, trigger, ids),
   log: (m) => console.error(m),
@@ -607,6 +647,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "PR watch" },
     ),
   onChange: () => sources.changed(),
   ended: (url) => void sources.prEnded(url).catch(() => {}),
@@ -621,6 +662,7 @@ const watches = new Watches(
       text,
       latest?.master.kind === "attached" ||
         latest?.master.kind === "elsewhere",
+      { from: "Monitor" },
     ),
   () => sources.changed(),
 );
@@ -643,7 +685,12 @@ const answeredWatches = new Map<string, number>();
 let settingsSeen = 0;
 /** Take over the Monitor calls the hook hands in, then give sessions what their monitors printed. */
 function pumpWatches(): void {
-  deckHooks.pumpQueue();
+  // A session's turn ended with a MasterDeck message held for it: its Stop hook gets it first (#123).
+  deckHooks.setHeldMarks(sender.heldSessionIds());
+  deckHooks.pumpQueue(undefined, undefined, {
+    take: (sid) => sender.takeHeldFor(sid),
+    delivered: (id) => sender.heldDelivered(id),
+  });
   // Sessions adding to the notes (the masterdeck-notes skill's note.sh). They get the note's id back, never its text.
   pumpNoteRequests(deckHooks.dir, notes);
   // The queue skill's hooks installed by hand while MasterDeck runs: leave /queue to them now.
@@ -742,12 +789,14 @@ const sources = new Sources(
         deckHooks.setBand(s.sessionId, bandFor(modBand(state, s, key), modOff.of(s.key)));
       }
       deckHooks.pruneBands(new Set(live.map((s) => s.sessionId)));
+      modDelivery.prune(new Set(live.map((s) => s.sessionId)));
       // One board file per account a live session works as (masterdeck-board's /md-board).
       for (const key of boardKeys) deckHooks.setBoard(key, modBoard(state.board, key, state.config));
       deckHooks.pruneBoards(boardKeys);
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
     state.modOff = modOff.all();
+    state.held = heldViews(heldStore.list());
     const beats = deckHooks.modBeats();
     state.modLive = Object.fromEntries(
       state.sessions
@@ -864,7 +913,7 @@ const peerSync = new PeerSync({
   hooksLive: () =>
     process.platform !== "win32" && deckHooksInstalled(paths.claudeSettings),
   deliver: (s, text) =>
-    sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+    sender.send(s, text, sendMasterUp(true, latest?.master.kind), { from: "Linked sessions" }),
   auto: () => getConfig().peerSync?.auto !== false,
 });
 sources.onSessionStop((sid) => peerSync.onStop(sid));
@@ -1167,7 +1216,7 @@ const remoteCommands = new RemoteCommands(
     stopBg,
     resume: (id, name, cwd) => resumeBg(id, name, cwd),
     // Never relayed through master-agent: remote text goes straight to the session or not at all.
-    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind)),
+    sendNow: (s, text) => sender.send(s, text, sendMasterUp(true, latest?.master.kind), { from: "Remote" }),
     queueEdit: (sessionId, edit) => {
       const { ok, message } = editQueue(sessionId, edit);
       return { ok, message };
@@ -1257,6 +1306,8 @@ function syncRemote(): void {
     token: token!,
     deviceId: deviceId(),
     appVersion: app.getVersion(),
+    platform: `${process.platform}-${process.arch}`,
+    osVersion: release(),
     run: (cmd) => remoteCommands.run(cmd),
     onItems: (items) => sources.setExternalItems(items),
     onStatus: (st) => sources.setRemote({ ...st, hasToken: true }),
@@ -1377,7 +1428,7 @@ async function runInboxAction(
           message:
             "remote text may not start with / or ! or contain control characters",
         };
-      return sender.send(s, msg, masterUp);
+      return sender.send(s, msg, masterUp, { from: "Needs you" });
     }
     case "menu":
       if (!item.sessionKey) return { ok: false, message: "no session" };
@@ -1392,6 +1443,7 @@ async function runInboxAction(
         s,
         type === "continue" ? "continue" : "/compact",
         masterUp,
+        { from: "Needs you" },
       );
     }
     case "approve":
@@ -1426,7 +1478,7 @@ async function runInboxAction(
       const s = owner();
       if (!s)
         return { ok: false, message: "no session owns this PR; start one" };
-      const r = await sender.send(s, d.offer.message, masterUp);
+      const r = await sender.send(s, d.offer.message, masterUp, { from: "Needs you" });
       return r.ok ? { ok: true, message: `sent to ${s.name}` } : r;
     }
     case "loop-more": {
@@ -1896,7 +1948,7 @@ async function nudgeLoop(
 ): Promise<CliResult> {
   const s = latest?.sessions.find((x) => x.sessionId === sessionId);
   if (!s || s.state !== "idle") return { ok: true, message: busy };
-  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind));
+  return sender.send(s, loopNudge(name), sendMasterUp(remote, latest?.master.kind), { from: "Loop" });
 }
 /**
  * Send next: the session's first queued prompt typed in as the user's (Queue tab, and the queue
@@ -1907,7 +1959,7 @@ async function sendNextQueued(s: Session): Promise<CliResult> {
   if (next === null) return { ok: false, message: "the queue is empty" };
   const masterUp =
     latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-  const r = await sender.send(s, next, !!masterUp);
+  const r = await sender.send(s, next, !!masterUp, { from: "Queue" });
   // Not sent: back to the front, so the Stop hook still runs it later.
   if (!r.ok) unshiftQueue(s.sessionId, next);
   return r;
@@ -2198,8 +2250,17 @@ function registerIpc(): void {
     if (!s) return { ok: false, message: "session not found" };
     const masterUp =
       latest?.master.kind === "attached" || latest?.master.kind === "elsewhere";
-    return sender.send(s, text, !!masterUp);
+    return sender.send(s, text, !!masterUp, { from: "You" });
   });
+  // Never relayed through master-agent for a browser (as every remote send).
+  reg.handle(CH.heldSend, (e, id: unknown) =>
+    typeof id === "string"
+      ? sender.sendHeld(id, sendMasterUp(isRemote(e), latest?.master.kind))
+      : { ok: false, message: "bad id" },
+  );
+  reg.handle(CH.heldDrop, (_e, id: unknown) =>
+    typeof id === "string" ? sender.dropHeld(id) : { ok: false, message: "bad id" },
+  );
   reg.handle(
     CH.answerMenu,
     (_e, key: string, question: string | null, answer: unknown) =>
@@ -2353,6 +2414,7 @@ function registerIpc(): void {
   reg.handle(CH.meetingsStop, (e) => meetings.stop(e));
   reg.handle(CH.meetingsPause, (e, paused: unknown) => meetings.pause(e, paused));
   reg.handle(CH.meetingsMicOff, (e, on: unknown) => meetings.micOff(e, on));
+  reg.handle(CH.meetingsMuteCheck, (e) => meetings.muteCheck(e));
   reg.handle(CH.meetingsRetry, (e, id: unknown) => meetings.retry(e, id));
   reg.handle(CH.meetingsRematch, (e, id: unknown) => meetings.rematch(e, id));
   reg.handle(CH.meetingsList, (e, from: unknown, to: unknown) => meetings.list(e, from, to));
@@ -2729,8 +2791,17 @@ function registerIpc(): void {
     );
     // Your microphone (follow / always) applies to a recording running now.
     meetings.settingsChanged();
+    // Another update channel checks again; automatic downloads switched on take a waiting offer.
+    updater?.settingsChanged(cur, saved);
     return saved;
   });
+  // In-app updates: the Mac's window only (DECK_ACCESS blocks them; refused here too: updateHandlers).
+  const upd = updateHandlers(() => updater, restartToUpdate);
+  reg.handle(CH.updateState, (e) => upd.state(isRemote(e)));
+  reg.handle(CH.updateCheck, (e) => upd.check(isRemote(e)));
+  reg.handle(CH.updateDownload, (e) => upd.download(isRemote(e)));
+  reg.handle(CH.updateRestart, (e) => upd.restart(isRemote(e)));
+  reg.handle(CH.updateLater, (e) => upd.later(isRemote(e)));
   reg.handle(CH.watchStop, (_e, id: unknown) =>
     typeof id === "string"
       ? id.startsWith("pr:")
@@ -3349,6 +3420,9 @@ function registerIpc(): void {
   reg.on(CH.openExternal, (_e, url: string) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
   });
+  reg.on(CH.openLink, (_e, url: unknown) => {
+    if (isWebLink(url)) void shell.openExternal(url);
+  });
   reg.handle(CH.openEditor, (_e, dir: string) => openEditor(dir));
   reg.handle(CH.procsList, (_e, key: unknown) => {
     const s = typeof key === "string" ? latest?.sessions.find((x) => x.key === key) : undefined;
@@ -3522,7 +3596,7 @@ function registerIpc(): void {
     },
   );
   reg.on(CH.ptyWrite, (_e, id: string, data: string) =>
-    ptys.write(id, data),
+    ptys.input(id, data),
   );
   reg.on(CH.ptyResize, (e, id: string, cols: number, rows: number) => {
     if (!isRemote(e)) macPanes.local(id, cols);
@@ -3548,6 +3622,118 @@ const themeBg = (): string =>
   resolveTheme(sources.getSettings().theme, nativeTheme.shouldUseDarkColors)
     .tokens.bg;
 
+// In-app updates (#122; docs/ARCHITECTURE.md "In-app updates"): macOS's own updater (updateMac.ts
+// and the helper script) or electron-updater on Windows. Its state is not in AppState: it reaches
+// the window through update:* only, and a browser never sees or drives it (DECK_ACCESS: blocked).
+let updater: Updater | null = null;
+// MasterDeck's own Restart (app.relaunch): the quit must not install a ready update, or the helper
+// would swap the bundle under the relaunched app.
+let relaunching = false;
+
+// electron.vite.config.ts defines it: true only in a build made with MASTERDECK_UPDATE_TEST_BUILD=1.
+declare const __MD_UPDATE_TEST__: boolean;
+const UPDATE_TEST_BUILD = typeof __MD_UPDATE_TEST__ !== "undefined" && __MD_UPDATE_TEST__ === true;
+
+function makeUpdater(): Updater {
+  const dir = join(app.getPath("userData"), "updates");
+  const mac = process.platform === "darwin";
+  const bundle = mac ? macBundle(app.getPath("exe")) : null;
+  const disabledReason = updatesOffReason({
+    env: process.env,
+    packaged: app.isPackaged,
+    platform: process.platform,
+    macReason: mac ? macDisabledReason(bundle) : null,
+  });
+  // The test overrides (a test key, a local service) only in an update-test build (releaseKey.ts).
+  const build = { testBuild: UPDATE_TEST_BUILD, env: process.env };
+  const base = updateBase({ ...build, packaged: app.isPackaged });
+  const publicKey = releaseKey(build);
+  const u = new Updater({
+    current: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    dir,
+    base,
+    disabledReason,
+    // Electron's network stack: the system's proxy and certificates.
+    fetch: (url, init) => net.fetch(url, init),
+    settings: () => sources.getSettings(),
+    // After an install on quit, the healthy new version removes the copy the helper kept.
+    removeBackup: bundle ? () => void removeMacBackup(bundle, app.getVersion()) : undefined,
+    installer: (id) =>
+      process.platform === "win32"
+        ? new WinInstaller({
+            base,
+            channel: () => sources.getSettings().updateChannel,
+            id,
+            current: app.getVersion(),
+            arch: process.arch,
+            publicKey,
+            make: nsisUpdater,
+          })
+        : new MacInstaller({
+            dir,
+            bundle: bundle ?? "",
+            arch: process.arch,
+            current: app.getVersion(),
+            publicKey,
+            pid: process.pid,
+            fetch: (url, init) => net.fetch(url, init),
+            run: (cmd, args) => run(cmd, args, { timeoutMs: 600_000 }),
+            spawnDetached: (cmd, args) =>
+              spawn(cmd, args, { detached: true, stdio: "ignore" }).unref(),
+            // quit, not exit: will-quit still closes the terminals and the remote line.
+            quit: () => app.quit(),
+          }),
+  });
+  u.on((s) => {
+    win?.webContents.send(CH.updateChanged, s);
+    setAppMenu(s);
+  });
+  return u;
+}
+
+/** Restart now (Settings, the ready prompt, the app menu): a recording asks first, as Restart does. */
+async function restartToUpdate(): Promise<{ ok: boolean; message?: string }> {
+  if (!updater) return { ok: false, message: "Updates are not running" };
+  if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart")))
+    return { ok: false, message: "Kept recording" };
+  return updater.restart();
+}
+
+/** The app menu's Check for Updates…: show Settings → Updates and check. */
+function checkFromMenu(): void {
+  if (!win) createWindow();
+  else {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  win?.webContents.send(CH.updateOpen);
+  void updater?.check();
+}
+
+let menuLabel = "";
+/** macOS: Electron's default menu plus the update item (appMenu.ts); rebuilt when the item's label changes. */
+function setAppMenu(s: UpdateState | null): void {
+  if (process.platform !== "darwin") return;
+  const label = updateMenuLabel(s?.phase ?? "idle");
+  if (label === menuLabel) return;
+  menuLabel = label;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      macMenuTemplate(app.name, {
+        updateLabel: label,
+        onUpdate: () => {
+          if (updater?.state().phase === "ready") void restartToUpdate();
+          else checkFromMenu();
+        },
+        openUrl: (url) => void shell.openExternal(url),
+      }),
+    ),
+  );
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1560,
@@ -3568,6 +3754,8 @@ function createWindow(): void {
   win.on("ready-to-show", () => {
     if (!SMOKE) win?.show();
   });
+  // An update's first launch says it is healthy 10 s after this (the helper waits for it).
+  win.webContents.once("did-finish-load", () => updater?.windowLoaded());
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -3729,6 +3917,7 @@ const meetings = new MeetingsIpc({
     // only once the quit can no longer be refused, so a "Keep recording" leaves no relaunch behind.
     if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart"))) return false;
     // quit, not exit: will-quit still closes the terminals and the remote line.
+    relaunching = true;
     app.relaunch();
     app.quit();
     return true;
@@ -3914,6 +4103,8 @@ app.whenReady().then(async () => {
   }
   pathEnv = await loginPath();
   claudeBin = await resolveClaude(env());
+  updater = makeUpdater();
+  setAppMenu(updater.state());
   registerIpc();
   // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
   // session only: the capture window's partition has no such scheme, and the web bridge never relays it.
@@ -4012,6 +4203,14 @@ app.whenReady().then(async () => {
       };
       watches.load();
       setInterval(pumpWatches, 1000);
+      // Held MasterDeck messages go once their session's prompt is empty (#123); not before the
+      // session list is in (a message of a session not listed yet would be dropped).
+      setInterval(() => {
+        if (!sessionsLoaded || !latest) return;
+        void sender
+          .pumpHeld(latest.sessions, sendMasterUp(false, latest.master.kind))
+          .catch((e) => console.error(`held messages: ${String(e)}`));
+      }, 2_000);
       sources.setDeckHooks(deckHooks, (sid) => {
         const s = summaries.get(sid);
         return s ? { text: s.text, at: s.at } : null;
@@ -4121,6 +4320,8 @@ app.whenReady().then(async () => {
   sources.start();
   // The window was made before start() read settings.json: put it on the saved theme now (still hidden).
   applyNativeTheme(sources.getSettings().theme);
+  // Updates: what the last install left, then a check in 30 s and every 6 h (settings are read now).
+  if (!SMOKE) updater?.start();
   syncRemote();
   if (SMOKE) {
     setTimeout(() => {
@@ -4184,6 +4385,10 @@ app.on("before-quit", (e) => {
 
 // Cmd+Q skips window-all-closed; clean up here so no `claude attach` outlives the app.
 app.on("will-quit", () => {
+  // macOS: a ready update is swapped in after this quit (no relaunch); a Restart now is already under
+  // way; MasterDeck's own Restart (a relaunch) leaves it for the next quit.
+  updater?.onQuit(relaunching);
+  updater?.stop();
   cloud?.stop();
   peerStore.flush();
   sender.killAll();

@@ -1,6 +1,6 @@
 ---
 name: master
-description: Use when the user types /master, asks what work is pending across their Claude sessions, wants issues/PRs/meeting action items delegated to sessions, asks to message or spawn a session for an issue, when a /loop sweep fires, or when a `master watch` Monitor event arrives. Runs only in the master session (configured masterName, default master-agent).
+description: Use when the user types /master, asks what work is pending across their Claude sessions, wants issues/PRs/meeting action items delegated to sessions, asks to message or spawn a session for an issue, asks to start a session (from scratch with a task, or for board tickets: "start sessions for #42 and api#12", "pick up everything in Ready For Dev assigned to me"), when a /loop sweep fires, or when a `master watch` Monitor event arrives. Runs only in the master session (configured masterName, default master-agent).
 ---
 
 # master — delegate the user's work to their Claude sessions
@@ -78,6 +78,7 @@ master ack N
   MASTER_EOF_7f3a
   ```
   then `master approve <id>`, dispatch it, and reply `sent to <name> (proposal <id>)`.
+- **A request to start a session** ("start a session in MasterDeck-Terminal to fix the flaky tests", "pick up #42 and #57", "start everything in Ready For Dev assigned to me"): see "Start sessions on demand" below; reply with the plan `master start` printed.
 - **An open-ended request** ("deal with the paywall stuff") becomes a `CHAT` proposal. Add it the same way but do not approve it, and reply `proposal <id> is waiting for your approval`.
 - **A question** ("what is paywall doing?") gets an answer in the reply. Use `master status`, `ListAgents` and the transcripts as needed.
 - **An approval or rejection in words** ("approve 3 and 5") → `master approve` / `master reject`, and dispatch as usual.
@@ -110,6 +111,25 @@ master ack N
 3. Show the user one combined batch. Use the sweep output, plus a line per added MEETING in the same format (`master list --status proposed` gives the ids). Then stop and wait for the user's answer. **Do not dispatch anything before the user answers.**
 4. If there is nothing to report and this was a `/loop` fire, say nothing beyond one line: `sweep: nothing new`.
 
+## Start sessions on demand
+
+`master start` turns "start a session for X" into proposals: it reads what it needs, records each start in the ledger and prints the plan (id, ticket, session name, folder, model, permission mode, account, warnings) and what it refused. Every start is a real `claude --bg` session, listed by `claude agents` and in MasterDeck the moment it starts, and it keeps running when this session exits.
+
+- **From scratch** (no ticket): the task goes in `--prompt` (`-` reads stdin, use the heredoc):
+  ```
+  master start --prompt - [--repo owner/name | --cwd <folder>] [--name <name>] [--worktree | --worktree-name <name>] \
+    [--model <model>] [--permission-mode plan|acceptEdits|auto|dontAsk|manual] [--account <login>] <<'MASTER_EOF_7f3a'
+  <the task, in the user's words>
+  MASTER_EOF_7f3a
+  ```
+  It becomes a `START` proposal (issue 0). The name comes from the task unless `--name`; the folder is the repository's checkout in the account's workspace (`--repo`), else the workspace; `--worktree` starts it in a new git worktree (`claude --worktree`) named after the session, `--worktree-name <name>` names it (one start only). The session reports with its name as the label (`<name>: done`).
+- **Board tickets by reference**: `master start 42 api#12 acme/web#7 [--prompt - <<…instructions…]` (also comma separated).
+- **Board tickets by filter**: `master start --column "Ready For Dev" --assignee @me [--label bug] [--sprint @current|<title>|none|any] [--limit 10]`. Column and labels match without case; `--assignee` takes a login, `@me` or `none`. Finished columns are left out unless `--column` names one.
+- A ticket's start is an `ASSIGN` proposal: it starts in the ticket's repository checkout (as the sweep's ASSIGN does), its first prompt is master's ASSIGN prompt plus the ticket's description and sub-issues (as context: the session still stops and asks the user, unless the user gave instructions with `--prompt`, which it follows), and MasterDeck links the session to the ticket when it shows up (Details, PR watch and board moves work; the card moves to In Dev) and assigns the ticket to the user (`--no-assign` leaves the assignees alone). A sweep proposal still waiting for the same ticket, or a start of it held (for example refused for its folder), is replaced (rejected) by it. `--worktree` with tickets gives each session its own worktree.
+- Options for both: `--model`, `--permission-mode` (never `bypassPermissions`), `--account` (two or more accounts), `--cwd` (only when the user named a folder), `--name` (one start only), `--dry-run` (show the plan, add nothing).
+- **Refused, and said under "not started:"** (never added): a ticket not found, closed, a pull request, in a repository not selected in Setup, one that already has a running session (its name and `claude attach` id are given), or one whose proposal is already approved. **Warnings** (added, said on the start's line): no checkout of the repository was found (it starts in the workspace), Claude Code was never allowed to work in the folder (the start would be refused until the user runs `claude` there and accepts its prompt; MasterDeck's Needs you has **Open Claude there…**), an earlier session of the ticket stopped (its ORPHAN would resume it instead). Pass every line of the output on to the user.
+- **The yes.** Show the plan and wait: the user approves all, some ids, or drops some ("start 14 and 16, not 15"): `master approve` / `master reject` those ids and dispatch as below. A batch is one list; ids the user did not keep are rejected. Only when the user's own words already say to start now ("start it now", "go ahead and start …") add `--yes`: it approves and spawns at once and prints a `started <name> (proposal N) — claude attach <id>` line per session, or why one did not start (left `held`; nothing is retried until the user says retry).
+
 ## The user's answer — dispatch
 
 The user answers in free text, for example `1 3 yes, 2 no`, `all yes`, or `2 yes but tell it to skip the web half`.
@@ -117,7 +137,7 @@ The user answers in free text, for example `1 3 yes, 2 no`, `all yes`, or `2 yes
 1. `master approve <ids>` and `master reject <ids>`. Ids the user didn't mention stay `proposed`. Ask about them once, at the end.
 2. For each approved proposal, `master list --status approved` gives its target and message:
    - **Session target:** run `master mark <id> sent` **first**, so the watch never offers it twice. If `master mark <id> sent` fails, do not send. Then `SendMessage` to `target.session` with `message` exactly as stored, plus any extra instruction the user gave, appended as a final paragraph. Pass `notify_when_idle: true`. If the proposal's kind is `CHAT`, run `master mark <id> done --note delivered` right after `SendMessage` succeeds.
-   - **Spawn target:** `master spawn <id>`. On success it prints the background id. The new session appears in `ListAgents` under its name. On failure it prints the error and the proposal becomes `held` with a note. Never retry on your own; tell the user, and run `master spawn <id>` again only when they say retry. If the error says the workspace is not trusted, Claude Code was never allowed to work in that folder: tell the user that MasterDeck's Needs you has this start with **Open Claude there…** and **Try again** (or to run `claude` in that folder once and accept its prompt). Never answer that prompt or edit `~/.claude.json` yourself.
+   - **Spawn target:** `master spawn <id>`. On success it prints `started <name> (proposal <id>) — claude attach <id>`. The new session appears in `ListAgents` under its name. On failure it prints the error and the proposal becomes `held` with a note. Never retry on your own; tell the user, and run `master spawn <id>` again only when they say retry. If the error says the workspace is not trusted, Claude Code was never allowed to work in that folder: tell the user that MasterDeck's Needs you has this start with **Open Claude there…** and **Try again** (or to run `claude` in that folder once and accept its prompt). Never answer that prompt or edit `~/.claude.json` yourself.
    - If `SendMessage` fails or says the name doesn't match a live session, run:
      ```
      master mark <id> held --note - <<'MASTER_EOF_7f3a'
@@ -129,6 +149,7 @@ The user answers in free text, for example `1 3 yes, 2 no`, `all yes`, or `2 yes
 
 ## Messages and notices from sessions
 
+- A session started from scratch (`START`, issue 0) reports with its own name in place of `#N` (`flaky-tests: done`): match it to the `START` proposal whose spawn name is that session, and handle it as below.
 - A `<cross-session-message from="X">` whose first line is `#N: done` or `#N: blocked — …`: find the `sent` proposal for that session and issue (`master list --status sent`), then `master mark <id> done` or:
   ```
   master mark <id> blocked --note - <<'MASTER_EOF_7f3a'
@@ -178,7 +199,8 @@ So never tell the user a session is "gone" or that sessions "don't survive Claud
 
 - Nothing is sent or spawned without the user's yes on that specific proposal id.
 - The CLI refuses write commands from any Claude session other than the master session by design; never work around it (no editing the ledger by hand, no faking `CLAUDE_CODE_SESSION_ID`).
-- Never create issues, comment on GitHub, move board status, push, or merge from this session. Sessions (and MasterDeck, for board moves and PR watching) do that, after the user gives them instructions.
+- Never create issues, comment on GitHub, move board status, assign anyone, push, or merge from this session. Sessions (and MasterDeck, for board moves, a `master start` ticket's assignee and PR watching) do that, after the user gives them instructions.
+- `master start --yes` only on the user's own words to start now, for that request; never for a batch the user has not seen.
 - Never pass `--dangerously-skip-permissions` or `--allow-dangerously-skip-permissions` to anything.
 - Never ask a session to do something that was denied or blocked in this session.
 - Send message text inline. `@file` references attach nothing across sessions.

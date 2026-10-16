@@ -331,6 +331,14 @@ class Live:
                 "missing": missing, "unread": unread, "boards_unread": boards_unread,
                 "boards_partial": boards_partial}
 
+    def issue(self, repo: str, n: int) -> dict:
+        """One issue as GitHub's REST API answers it (`master start`: title, body, state, assignees)."""
+        return json.loads(self._gh(["gh", "api", f"repos/{repo}/issues/{int(n)}"]))
+
+    def sub_issues(self, repo: str, n: int) -> list:
+        """An issue's sub-issues (the first 100), as GitHub's REST API answers them."""
+        return json.loads(self._gh(["gh", "api", f"repos/{repo}/issues/{int(n)}/sub_issues?per_page=100"]))
+
     def sprints(self) -> list:
         from . import board
         ps = config.projects(self.cfg)
@@ -422,6 +430,16 @@ class Fixtures:
         return dict(got, items=keep, repos=list(only))
 
     def sprints(self) -> list: return self._json("sprints.json")
+
+    def issue(self, repo: str, n: int) -> dict:
+        got = self._json("issues.json").get(f"{repo}#{n}".lower())
+        if got is None:
+            raise RuntimeError("HTTP 404: Not Found")
+        return got
+
+    def sub_issues(self, repo: str, n: int) -> list:
+        p = self.dir / "sub_issues.json"
+        return (json.loads(p.read_text()) if p.exists() else {}).get(f"{repo}#{n}".lower(), [])
     def pr_details(self, urls: list) -> dict: return self._json("board_prs.json")
     def prs_mine(self) -> list: return self._json("prs_mine.json")
     def prs_review(self) -> list: return self._json("prs_review.json")

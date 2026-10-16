@@ -6,6 +6,9 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     resolve: { alias: { '@shared': resolve('src/shared') } },
+    // An update-test build (docs/OPERATIONS.md "Testing in-app updates") takes a test release key and
+    // a local update service from the environment; a release build never does (shared/releaseKey.ts).
+    define: { __MD_UPDATE_TEST__: JSON.stringify(process.env.MASTERDECK_UPDATE_TEST_BUILD === '1') },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

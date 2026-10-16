@@ -64,6 +64,7 @@ export function save(key: string, value: unknown): void {
 
 export const KIND_COLOR: Record<string, string> = {
   ASSIGN: 'var(--purple)',
+  START: 'var(--purple)',
   REVIEW: 'var(--accent)',
   CI: 'var(--red)',
   STALE: 'var(--amber)',
