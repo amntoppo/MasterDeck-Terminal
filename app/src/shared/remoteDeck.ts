@@ -53,6 +53,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   queueSendNext: invoke(CH.queueSendNext),
   getSettings: invoke(CH.getSettings),
   setSettings: invoke(CH.setSettings),
+  notifyTest: invoke(CH.notifyTest),
   onAutoOpen: blocked,
   onGhLogin: blocked,
   // Claude Code's trust prompt is answered on the Mac, in a tab of its window.

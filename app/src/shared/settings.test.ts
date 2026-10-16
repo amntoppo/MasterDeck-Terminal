@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, normalizeSettings } from './settings'
+import { defaultRoutes } from './notifications'
 
 describe('normalizeSettings', () => {
   it('defaults and clamps', () => {
@@ -65,5 +66,23 @@ describe('update settings', () => {
   it('keep a boolean and a known channel', () => {
     expect(normalizeSettings({ autoDownloadUpdates: false, updateChannel: 'beta' })).toMatchObject({ autoDownloadUpdates: false, updateChannel: 'beta' })
     expect(normalizeSettings({ autoDownloadUpdates: 'no', updateChannel: 'nightly' })).toMatchObject({ autoDownloadUpdates: true, updateChannel: 'stable' })
+  })
+})
+
+describe('notification settings (#135)', () => {
+  it('default to today: all on as before, not paused', () => {
+    expect(normalizeSettings({})).toMatchObject({ notifications: defaultRoutes(), notifyPaused: false })
+  })
+  it('migrate notifyNeedsYou and drop it', () => {
+    const s = normalizeSettings({ notifyNeedsYou: false })
+    expect(s.notifications['session-input'].system).toBe(false)
+    expect(s.notifications['session-finished'].system).toBe(true)
+    expect('notifyNeedsYou' in s).toBe(false)
+  })
+  it('round-trip through a save (kept across restarts)', () => {
+    const once = normalizeSettings({ notifyNeedsYou: false, notifyPaused: true })
+    const again = normalizeSettings(JSON.parse(JSON.stringify(once)))
+    expect(again).toEqual(once)
+    expect(again.notifyPaused).toBe(true)
   })
 })

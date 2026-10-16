@@ -44,6 +44,8 @@ export class Watches {
     private env: () => NodeJS.ProcessEnv,
     private send: (s: Session, text: string) => Promise<CliResult>,
     private onChange: () => void,
+    /** What a monitor printed, as it came (Settings → Notifications → Monitor event). */
+    private onLines: (w: Pick<Watch, 'id' | 'sessionId' | 'description'>, lines: string[]) => void = () => {},
   ) {}
 
   /** Start the monitors saved by the last launch. */
@@ -110,6 +112,7 @@ export class Watches {
       w.lastEventAt = Date.now()
       w.dropped += enqueue(w.queue, got)
       pushEvents(w.log, got.map((text) => ({ at: w.lastEventAt!, text })))
+      this.onLines(w, got)
       this.onChange()
     })
     w.proc.on('error', (e) => this.finish(w, `failed: ${String(e)}`))
