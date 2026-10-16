@@ -1546,7 +1546,7 @@ is a `gh` login (`gh auth status` lists them).
 With two or more GitHub accounts connected, MasterDeck reads each one's token from `gh` (it never
 switches gh's active account) and gives sessions started as that account their own token and git
 identity; GitHub remotes are pushed over HTTPS with that token, including `git@github.com:` and ssh
-aliases from `~/.ssh/config`. An account whose token GitHub refuses shows as needing a new login; an
+aliases from `~/.ssh/config` (and the files it `Include`s). An account whose token GitHub refuses shows as needing a new login; an
 offline check changes nothing. With one account nothing changes.
 
 **How commits, pushes and PRs work in a session.** The commands are the ordinary ones, with no
@@ -1591,9 +1591,36 @@ the primary set in Setup, Needs you says so and how to switch (`gh auth switch -
 several, a master-agent started without the primary's settings (by hand, or before the second
 account was connected) shows "restart master-agent so it runs as <primary>".
 
-Also still single-account: the workflow-builder sessions use `gh`'s active account; SSH host aliases are only found in
-`~/.ssh/config`; and a rate limit on one account pauses MasterDeck's own polling for all accounts
-until it lifts.
+The workflow builder (the Workflow window's Claude session) runs as the primary account, like
+master; while the primary needs to log in again it uses gh's active account.
+
+**Known limits.** These are deliberate; each may be lifted when it gets in the way
+([#37](https://github.com/amntoppo/MasterDeck-Terminal/issues/37) tracks them).
+
+- **A rate limit on one account pauses MasterDeck's own polling for every account** (board, PRs,
+  the snapshot) until it lifts. Sessions are not paused: the shared
+  GitHub cache pauses only the calls of the account that hit the limit.
+- **Skills run by hand** (`tt.sh`, babysit-pr, `/babysit-ticket`) use the session's account for
+  GitHub but the primary's config and boards; outside a session, gh's active account (see above).
+- **SSH host aliases** are read from `~/.ssh/config` and the files it `Include`s, not from a config
+  given elsewhere (`ssh -F`, `GIT_SSH_COMMAND`, `core.sshCommand`, `/etc/ssh/ssh_config`). A remote
+  that uses such an alias is pushed with the SSH key, so as the key's account.
+- **A global git rule sending GitHub over SSH** beats the session's account (see "One limit" above).
+- **When the primary needs to log in again, master starts as gh's active account** (without the
+  primary's settings). Needs you shows the Log in item; after logging in, it asks to restart
+  master-agent so it runs as the primary.
+- **A session in a folder whose `origin` is no repository of a connected account** (or has no
+  `origin`): the PR of its current branch is read as the primary account.
+- **A board belongs to one account.** A card on it whose issue is in another account's repository
+  moves between columns as the board's account, while assigning it and linking its PR go as the
+  repository's account. Who can be assigned is read per repository, not per board.
+- **Select all under one account counts every repository as yours** for the lists that ask "is this
+  ticket or PR one of mine" (PRs, sessions' tickets, master's sweep), also for the other accounts.
+  The Board's repository view is stricter (one account's Select all never opens another account's
+  owner).
+- **An account shows healthy for a few seconds after launch or a new login**, until GitHub has
+  answered its check. A session started as it in those seconds with a token GitHub refuses fails
+  at its first GitHub call; the account then shows as needing a new login.
 
 ## Board View
 

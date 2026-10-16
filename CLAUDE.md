@@ -412,6 +412,13 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-16)
 
+- **Several accounts' accepted simplifications (#37)** on branch
+  `worktree-MasterDeck-Terminal-37-accounts-simplifications` (not merged, not pushed, **not
+  installed**: the rebuild of the real app waits for the user's word). The workflow builder runs
+  as the primary account (`builderSettings` in `PtyManager`); the other items are GUIDE § Several
+  GitHub accounts → **Known limits**, and the list left TODO. Checked: typecheck, vitest. Not
+  checked: the builder pane in the app with two accounts.
+
 - **Master starts sessions on demand (#126)** on branch
   `worktree-MasterDeck-Terminal-126-master-start` (PR #129, not merged, **not installed**: the
   rebuild of the real app waits for the user's word). `master start` (`skills/master/lib/master/start.py`,

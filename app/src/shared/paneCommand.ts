@@ -10,7 +10,8 @@ export interface PaneCommand {
 
 /**
  * The process a pane runs. `shell` is $SHELL (unused on Windows); `claude` is the resolved binary;
- * `settings`: a ticket builder's account (`--settings <file>`, two or more accounts only).
+ * `settings`: the account of a ticket builder (its tab's) or the workflow builder (the primary's)
+ * (`--settings <file>`, two or more accounts only).
  */
 export function paneCommand(
   spec: PaneSpec,
@@ -50,6 +51,7 @@ export function paneCommand(
         ...(spec.resume ? ["--continue"] : []),
         "-n",
         "md-workflow-builder",
+        ...settings,
         "--setting-sources",
         "project,local",
         "--permission-mode",
