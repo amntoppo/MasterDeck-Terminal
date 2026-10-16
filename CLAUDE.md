@@ -411,7 +411,17 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-16)
+## Current state and next steps (2026-10-17)
+
+- **Resuming a session opens its terminal (#133)** on branch
+  `worktree-MasterDeck-Terminal-133-resume-opens-terminal` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). A resume's answer carries the background id
+  (`ResumeResult.key`); Board cards, the Start dialog and History close and open the session's
+  Terminal tab with focus (`openResumed`, `shared/resumeOpen.ts`); Resume all is unchanged. Checked:
+  typecheck, vitest, the web preview over CDP (card Resume and the Start dialog's Resume: Terminals
+  view, `tab:bg-5` active, focus in the xterm, dialog closed), and the isolated app with a stand-in
+  `claude` (`resumeSession` answered `key: "4f2a9c1e"`, the session listed under it). Not checked: a
+  real `claude --bg --resume` in the installed app, History's Resume on screen, a phone, Windows.
 
 - **Several accounts' accepted simplifications (#37)** on branch
   `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not

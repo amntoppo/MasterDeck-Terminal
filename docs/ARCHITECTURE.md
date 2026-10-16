@@ -125,6 +125,14 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   session started by name is matched by name for 10 min; a live session known by only one of its
   ids gets the other one on the next state build, `claim`) and shown as `Session.account` (`sessionAccount`: recorded, then its spawn
   proposal's `target.spawn.account`, then its folder's `origin`, then the primary).
+- A resume from the window (`session:resume` → `resumeBg`) answers `ResumeResult`: `key` is the
+  background id the output names (`bgIdFromOutput`, else `wokeFromOutput`; null when neither).
+  The window opens that session (#133): `openResumed` in `App.tsx` finds it with `resumedSession`
+  (`shared/resumeOpen.ts`: by key, else sessionId, else name started after the resume; only a
+  running background row), at once or through a "Resuming …" pending tab (`resumed`), puts its tab
+  row on Terminal and gives the pane a wake mark (reattach an exited terminal; `TerminalView`'s
+  `focusAt` focuses it). Board cards, the Start dialog and History call it through `onResumed`;
+  Resume all does not.
 - Resume (`resumeAs` in `main/sessionAccounts.ts`, for `resumeBg`, `startHere` and the restorer;
   `spawn.command` in the master skill). Claude Code 2.1.288: `claude --bg --resume <id>` with **no
   other flag** wakes the background session itself (same session id and bg id, its saved options:

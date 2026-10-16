@@ -3,11 +3,14 @@ import { createPortal } from 'react-dom'
 import type { HistoryHit, TranscriptWindow } from '@shared/history'
 import { formatAgo } from '@shared/format'
 import type { AppState, Session } from '@shared/types'
+import type { ResumeTarget } from '@shared/resumeOpen'
 import { deck, useNow } from '../deck'
 
 interface Props {
   state: AppState
   onOpenSession: (s: Session) => void
+  /** A Resume succeeded (the dialog closes): open the session's terminal. */
+  onResumed: (t: ResumeTarget) => void
   onClose: () => void
 }
 
@@ -19,7 +22,7 @@ type Target = { hit: HistoryHit; uuid: string | null; at: number }
  * scrolled to the message it was found in, with the text highlighted. Up and down step through the
  * other matches in it.
  */
-export function HistoryDialog({ state, onOpenSession, onClose }: Props) {
+export function HistoryDialog({ state, onOpenSession, onResumed, onClose }: Props) {
   const now = useNow(60_000)
   const [q, setQ] = useState('')
   const [searched, setSearched] = useState('')
@@ -183,8 +186,11 @@ export function HistoryDialog({ state, onOpenSession, onClose }: Props) {
                       className="btn primary"
                       onClick={async () => {
                         setMsg('Resuming…')
+                        const at = Date.now()
                         const r = await deck().resumeSession(hit.sessionId, hit.title.replace(/[^A-Za-z0-9 ._-]/g, '').slice(0, 60) || 'resumed', hit.cwd)
-                        setMsg(r.ok ? `Resuming as ${r.message}` : r.message)
+                        if (!r.ok) return setMsg(r.message)
+                        onClose()
+                        onResumed({ key: r.key ?? null, sessionId: hit.sessionId, name: r.message, at })
                       }}
                     >
                       Resume
