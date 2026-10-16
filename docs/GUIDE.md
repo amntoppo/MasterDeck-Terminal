@@ -1544,10 +1544,11 @@ cards is in them.
   status (its column when it is on the board, else Open or Closed), with "2 / 5 done" above the
   list (done means closed, as on GitHub). Click a sub-issue (or press Enter or Space on it) to open
   it in place: its status, who is assigned, its labels and its description as GitHub renders it,
-  with **Open on GitHub ↗**; click it again to close it. Several can be open at once, and a long
-  description scrolls in its own box (one over 10 000 characters is cut short, with a note). A
-  ticket with no sub-issues shows no section. A long description and a long list each scroll in their own box,
-  so the popup's buttons stay in view.
+  with **Open on GitHub ↗**; click it again to close it. Several can be open at once (a very long
+  description, or a list of many long ones, is cut short with a note). A ticket with no
+  sub-issues shows no section. The ticket's description and the sub-issue list each scroll in
+  their own box, so the popup's buttons stay in view; in Details a long sub-issue description
+  scrolls in its own box.
 - **A linked session's PR closes the issue when it is merged.** When the session linked to an issue
   opens a PR, MasterDeck adds that PR to the issue as a closing reference (it shows under the
   issue's Development box on GitHub), exactly as writing "Closes #12" in the PR would. This holds for

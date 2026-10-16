@@ -21,8 +21,9 @@ that fetches only the body through `issue:body` (a loading state per row for lit
 
 - `SUB_ISSUES_JQ` adds `body` (cut in jq to `SUB_BODY_MAX` = 10 000 characters, with
   `bodyCut: true` when cut), `assignees: [.assignees[]?.login]`, `labels: [.labels[]? | {name, color}]`.
-  The cut bounds the answer (100 sub-issues × 10 000 characters ≈ 1 MB at most), which also
-  travels to the web app over the bridge.
+  The cut counts characters, not bytes, so `fitSubIssues` then empties the longest descriptions
+  (marked cut) until the answer's JSON is under 900 000 bytes: the web bridge drops a larger answer
+  whole, rows and all (review finding).
 - `SubIssue` gains `body: string`, `bodyCut: boolean`, `assignees: string[]`,
   `labels: { name: string; color: string | null }[]`.
 - `parseSubIssues` checks each field: `\r\n` → `\n`, a login must match GitHub's login shape, a
@@ -34,7 +35,7 @@ that fetches only the body through `issue:body` (a loading state per row for lit
 - One component, `SubIssueDetail` (in `SubIssues.tsx`): a line with the status badge, assignees
   (`@login`) and label chips (the label's colour as a border/dot through a CSS variable, text in
   theme tokens: no colour literal), then the description in `MarkdownView` (`html` as for issue
-  bodies) inside a box that scrolls past about 40vh, "No description." when empty, a note when
+  bodies) (in Details inside a box that scrolls past 32vh; in the popups the list is the one scroll box), "No description." when empty, a note when
   `bodyCut`, and **Open on GitHub ↗** (`deck().openExternal`).
 - `SubIssues` (Start dialog, Assign popup): a click on a row toggles it instead of opening GitHub;
   a ▸ / ▾ chevron; the row stays a `<button>` with `aria-expanded` and `aria-controls`, so Enter
@@ -43,7 +44,7 @@ that fetches only the body through `issue:body` (a loading state per row for lit
   chevron, `aria-expanded`); its ↗ stays. Same `SubIssueDetail` below it.
 - Loading and failure: the list's existing "Loading…" / "Could not load…" messages (the details
   arrive with the list). Empty description: "No description."
-- Long descriptions scroll in their own box; the list's own `max-height` stays, so the dialog
+- In the popups the list's own `max-height` (30vh) stays and is the one scroll box, so the dialog
   never grows past the screen. Which rows are open is not remembered.
 
 ## Tests

@@ -19,11 +19,14 @@ export interface SubIssue {
   labels: { name: string; color: string | null }[]
 }
 
-/**
- * A description longer than this is cut in the read: 100 sub-issues (GitHub's limit) stay near 1 MB,
- * an answer the web app also gets over the bridge.
- */
+/** A description longer than this (characters) is cut in the read; fitSubIssues then bounds the answer in bytes. */
 export const SUB_BODY_MAX = 10000
+
+/**
+ * The answer's budget in bytes of JSON: the web bridge drops an answer over about 1.05 MB whole, and
+ * would lose the rows with it (as sessionFiles' WEB_ANSWER_MAX).
+ */
+export const SUB_ANSWER_MAX = 900_000
 
 /** The jq filter for the REST answer: one compact object per line, the repository as owner/name. */
 export const SUB_ISSUES_JQ =
@@ -32,7 +35,8 @@ export const SUB_ISSUES_JQ =
   'assignees: [.assignees[]?.login], labels: [.labels[]? | {name, color}]}'
 
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
-const LOGIN = /^[A-Za-z0-9-]{1,39}$/
+// An app assigned shows as its bot: name[bot].
+const LOGIN = /^[A-Za-z0-9-]{1,39}(\[bot\])?$/
 const COLOR = /^[0-9a-f]{6}$/i
 
 function labelsOf(v: unknown): SubIssue['labels'] {
@@ -93,4 +97,23 @@ export function subIssueRows(subs: SubIssue[], cards: BoardCard[] = []): SubIssu
 /** "2 / 5 done". */
 export function subIssueProgress(rows: { done: boolean }[]): string {
   return `${rows.filter((r) => r.done).length} / ${rows.length} done`
+}
+
+const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length
+
+/**
+ * The sub-issues with the longest descriptions (in bytes) emptied and marked cut until the answer
+ * `{ok, subIssues}` fits `max`: every row stays, a dropped description says "Cut short" and links out.
+ */
+export function fitSubIssues(subs: SubIssue[], max = SUB_ANSWER_MAX): SubIssue[] {
+  let total = bytes({ ok: true, subIssues: subs })
+  if (total <= max) return subs
+  const out = subs.slice()
+  const longest = out.map((s, i) => ({ i, n: bytes(s.body) - 2 })).sort((a, b) => b.n - a.n)
+  for (const { i, n } of longest) {
+    if (total <= max || n <= 0) break
+    out[i] = { ...out[i], body: '', bodyCut: true }
+    total -= n
+  }
+  return out
 }

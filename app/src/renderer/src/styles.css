@@ -1683,8 +1683,8 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .sub-row.done .sub-title { color: var(--muted); text-decoration: line-through; }
 .sub-row .sub-status { flex: none; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .sub-row .sub-status.closed, .sub-meta .sub-status.closed { color: var(--purple); border-color: var(--purple); }
-/* An open sub-issue (#112): the list grows to make room, the description scrolls in its own box. */
-.sub-list:has(li.open) { max-height: 60vh; }
+/* An open sub-issue (issue 112): in the popups the list stays the one scroll box (the dialog's buttons
+   stay in view); in Details the description scrolls in its own box. */
 .sub-list li.open { background: color-mix(in srgb, var(--bg-3) 55%, transparent); border-radius: 5px; }
 .sub-row .sub-caret { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
 .sub-detail { padding: 2px 8px 8px 25px; min-width: 0; }
@@ -1696,8 +1696,9 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .sub-label.coloured::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--label); }
 .sub-none { color: var(--muted); }
 .sub-empty { font-size: 12px; margin-bottom: 6px; }
-.sub-body { max-height: 32vh; overflow: auto; padding: 8px 10px; margin-bottom: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.sub-body { padding: 8px 10px; margin-bottom: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 .sub-body .mdv { font-size: 12.5px; }
+.gh-sub .sub-body { max-height: 32vh; overflow: auto; overscroll-behavior: contain; }
 .sub-cut { margin-top: 8px; color: var(--muted); font-size: 11px; }
 .sub-open { font-size: 12px; font-weight: 500; color: var(--accent); }
 .gh-sub.open { background: color-mix(in srgb, var(--bg-3) 55%, transparent); border-radius: 6px; }
@@ -1705,6 +1706,7 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .gh-sub-toggle .gh-item-lead { display: block; }
 .gh-sub-toggle .gh-caret { display: inline-block; line-height: inherit; }
 .gh-sub.open .gh-sub-toggle .gh-caret { transform: rotate(90deg); }
+.gh-sub-toggle:hover .gh-sub-title, .gh-sub-toggle:hover .gh-ref { text-decoration: underline; }
 .gh-sub-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 details.sd-more { margin-top: 10px; }
 details.sd-more > summary { cursor: pointer; width: fit-content; font-size: 11px; color: var(--muted); border-radius: 4px; padding: 1px 3px; margin-left: -3px; }

@@ -59,6 +59,7 @@ describe('SubIssueList (Start dialog, Assign popup)', () => {
     expect(out.match(/aria-expanded="false"/g)).toHaveLength(2)
     expect(out).not.toContain('one body')
     expect(out).toContain('▸')
+    expect(out).not.toContain('aria-controls')
   })
   it('opens several rows at once, each tied to its detail', () => {
     const out = list([1, 2])
@@ -82,6 +83,7 @@ describe('SubIssueItem (Details → GitHub)', () => {
     expect(closed).toContain('aria-expanded="false"')
     expect(closed).toContain('↗')
     expect(closed).not.toContain('three body')
+    expect(closed).not.toContain('aria-controls')
     const open = item(true)
     expect(open).toContain('aria-expanded="true"')
     expect(open).toContain('three body')

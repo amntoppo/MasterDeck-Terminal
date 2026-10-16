@@ -790,9 +790,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   the user's.
 - **P3 · Sub-issues are read once per opening** of the Ticket row (cached 5 min in ghc); they do not
   refresh while the row stays open. An open sub-issue's description (#112) is as old as that read.
-- **P3 · A sub-issue's description is cut at 10 000 characters** in the read (#112), to keep the
-  answer near 1 MB for the web bridge; a longer one says so and links to GitHub. Read the full body
-  on expand (`issue:body`) if the cut turns out to bite.
+- **P3 · A sub-issue's description is cut at 10 000 characters** in the read (#112), and when the
+  whole answer is over 900 000 bytes the longest descriptions are dropped (`fitSubIssues`), so the
+  web bridge never refuses it; a cut one says so and links to GitHub. Read the full body on expand
+  (`issue:body`) if the cut turns out to bite.
 
 ## Session processes (#115): open points (2026-10-12)
 

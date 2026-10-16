@@ -301,7 +301,7 @@ export function SubIssueItem({ row: r, open, onToggle }: { row: SubIssueRow; ope
   return (
     <div className={`gh-sub${open ? " open" : ""}`}>
       <div className={`gh-item${r.done ? " done" : ""}`}>
-        <button type="button" className="gh-item-main gh-sub-toggle" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+        <button type="button" className="gh-item-main gh-sub-toggle" aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle}>
           <span className="gh-item-lead">
             <span className="gh-caret" aria-hidden="true">
               ▸

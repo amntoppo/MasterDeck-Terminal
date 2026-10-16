@@ -105,7 +105,7 @@ export function SubIssueList({ rows, open, onToggle }: { rows: SubIssueRow[]; op
               type="button"
               className={`sub-row${s.done ? ' done' : ''}`}
               aria-expanded={isOpen}
-              aria-controls={id}
+              aria-controls={isOpen ? id : undefined}
               title={`${isOpen ? 'Hide' : 'Show'} ${ticketLabel(s.repo, s.number)}`}
               onClick={() => onToggle(key)}
             >
