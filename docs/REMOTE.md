@@ -72,7 +72,8 @@ WebSocket `wss://…/v1/desktop` with `Authorization: Bearer <device token>`.
   `remote-done.json`); while it is in `error` it fails at once and finally (`notLoaded`: "MasterDeck
   has no session list: claude agents: …"), so a queue of commands does not hold the line a minute each.
 - Each (re)start clears external items (`sources.setExternalItems([])`).
-- On `open`: `hello {deviceId, appVersion, protocol: 3, macPublicKey?}`. No `welcome` within 15 s
+- On `open`: `hello {deviceId, appVersion, protocol: 3, macPublicKey?, platform?, osVersion?}` (`platform` is
+  `${process.platform}-${process.arch}`, `osVersion` is `os.release()`: the admin dashboard's Devices & versions, #127). No `welcome` within 15 s
   → terminate and redial. Ping every 30 s; nothing received for 2 × ping → terminate.
 - Close codes: **4003** signed out (reason `account deleted` → "This account was deleted"),
   **4005** another Mac is connected (error, retry at the backoff cap), **4001** protocol mismatch
@@ -172,7 +173,7 @@ replies.
 
 | Direction | `t` | Fields | Notes |
 |---|---|---|---|
-| D→S | `hello` | `deviceId, appVersion, protocol, macPublicKey?` | first frame |
+| D→S | `hello` | `deviceId, appVersion, protocol, macPublicKey?, platform?, osVersion?` | first frame |
 | D→S | `snapshot` | `data` | full; > 1 MB → `error too_large` |
 | D→S | `snapshotPatch` | `base, ops[]` (add/remove/replace, ≤ 2000, ≤ 1 MB) | → `snapshotAck` / `snapshotNeeded` |
 | D→S | `result` | `cmdId, ok, status?: 'stale', message, data?` | one per command |

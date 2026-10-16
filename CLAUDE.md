@@ -23,12 +23,13 @@ Start here, then read what the task needs:
 | [docs/THEMES.md](docs/THEMES.md) | Themes: the token set, the light palette, adding a theme |
 | [TODO.md](TODO.md) | Older design note: supporting Codex / Copilot CLIs |
 
-## Two repos, one product
+## Three repos, one product
 
 | Repo | Where | What |
 |---|---|---|
 | MasterDeck (this) | `~/Documents/MasterDeck-Terminal`, public, `main` | Desktop app (`app/`), skills (`skills/`), web app source (`app/src/web` + the renderer) |
 | masterdeck-backend | `~/Documents/masterdeck-backend`, private, `master` | Cloudflare Worker + Durable Objects (UserHub per user, SQLite), accounts (Better Auth), browser relay. API at https://dev.masterdeck.dev |
+| admin dashboard | private repo (its name and checkout: backend `docs/ADMIN.md`) | The admin dashboard at https://admin.masterdeck.dev (static React page; its API is the backend's `/admin/*`) |
 
 Specs, plans and reports for the remote/account/web work live in the **backend** repo:
 `masterdeck-backend/docs/superpowers/{specs,plans,reports}` (plans A-G, 2026-10-02).
@@ -413,11 +414,20 @@ buttons; it does not go through macOS window drag regions.
 ## Current state and next steps (2026-10-16)
 
 - **Several accounts' accepted simplifications (#37)** on branch
-  `worktree-MasterDeck-Terminal-37-accounts-simplifications` (not merged, not pushed, **not
+  `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not
   installed**: the rebuild of the real app waits for the user's word). The workflow builder runs
   as the primary account (`builderSettings` in `PtyManager`); the other items are GUIDE § Several
   GitHub accounts → **Known limits**, and the list left TODO. Checked: typecheck, vitest. Not
   checked: the builder pane in the app with two accounts.
+
+- **Admin dashboard (#127)**, 2026-10-16, **not deployed, not merged**: the API is in the backend (branch
+  `127-admin-dashboard`, `/admin/*`, its own D1 migration, docs `docs/ADMIN.md`), the page in its own new private repo
+  (named in the backend's `docs/ADMIN.md`; branch `127-admin-dashboard`, pushed). In this repo only the hello's optional
+  `platform` / `osVersion` (`CloudSync`, protocol copy synced; branch `worktree-127-admin-dashboard`). Checked:
+  backend typecheck + vitest (278), MasterDeck typecheck + vitest (2596 passed), the drift test against the
+  backend branch, the dashboard's typecheck/tests/build, and every page locally (wrangler dev + headless Chrome,
+  light/dark, 390 px). Not checked: production (no deploy), a real Mac's hello with the new fields, Windows.
+  Open points: TODO ("Admin dashboard (#127)").
 
 - **Master starts sessions on demand (#126)** on branch
   `worktree-MasterDeck-Terminal-126-master-start` (PR #129, not merged, **not installed**: the
