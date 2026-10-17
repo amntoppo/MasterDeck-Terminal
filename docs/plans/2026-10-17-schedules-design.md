@@ -118,11 +118,10 @@ instead of instants if it matters).
 
 On finish (`done`) and failure (`failed`, `stopped`) when the schedule's own switch is on, a system
 notification "<schedule>: finished · $0.42" / "<schedule>: failed — reason"; clicking opens the
-session (`target.sessionKey`). Notifications (#135) is being built in parallel: until it lands,
-these go out through `notify()` like the workflow notify step; when it lands, the type
-`schedule-run` (System on, Needs you off) is added to `NOTIFY_TYPES` and these route through its
-dispatcher, so Pause all and the per-type cells apply (TODO item for whichever lands second).
-Skipped runs never notify.
+session (`target.sessionKey`). They are the `schedule-run` type of Notifications (#135, merged
+while this was built): System on, Needs you off by default, routed by its dispatcher, so Pause all
+and the type's cells apply after the schedule's own switch. Skipped runs notify only for the first
+of a stretch of overlap skips.
 
 ## The Schedules view
 

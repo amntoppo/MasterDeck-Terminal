@@ -59,6 +59,7 @@ const api: DeckApi = {
   queueSendNext: (key) => ipcRenderer.invoke(CH.queueSendNext, key),
   getSettings: () => ipcRenderer.invoke(CH.getSettings),
   setSettings: (s) => ipcRenderer.invoke(CH.setSettings, s),
+  notifyTest: () => ipcRenderer.invoke(CH.notifyTest),
   onAutoOpen: (cb) => listen(CH.autoOpen, cb),
   onGhLogin: (cb) => listen(CH.ghLogin, cb),
   trust: (cwd, waitSeconds) => ipcRenderer.invoke(CH.trust, cwd, waitSeconds),

@@ -908,10 +908,6 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Schedules (#140): open points (2026-10-17)
 
-- **Notifications (#135)**: when its registry lands (or this branch lands second), add a
-  `schedule-run` type (System on, Needs you off) to `NOTIFY_TYPES` and send the Scheduler's
-  `notify` through the dispatcher, so Pause all and the per-type cells apply. Today the schedule's
-  own two switches decide alone.
 - Runs need MasterDeck open (no launchd / Task Scheduler job); a missed run is caught up later.
 - A fall-back DST hour repeats wall-clock minutes: a schedule inside it may run twice (`nextSlot`).
 - **Decide**: a web tab may give a schedule any existing folder on the Mac, as New Claude session
@@ -927,6 +923,17 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   web app over the bridge, a phone, Windows, a real wake from sleep (the resume path is the same
   tick as a restart, which was checked).
 
+## Notifications: open points (2026-10-17, issue #135)
+
+- **P3 · Notices never clear themselves.** A "Session finished" notice stays until Done or three
+  days, even once the session works again. `main/notices.ts` could drop a session's notices when it
+  goes back to working.
+- **P3 · Not checked live:** a real macOS notification for each type in the installed app (the
+  isolated app ran Send test and the settings round trip only), Windows, the web app over the
+  bridge, a monitor event and an update offer reaching the dispatcher.
+- **Later:** the mobile push channel (#134) is one sender in `index.ts` and `available: true` in
+  `CHANNELS`; email or Slack the same way.
+
 ## Recently done
 
 - **Schedules (#140)**: sessions started on a timer with a prompt and optionally a workflow, in
@@ -935,6 +942,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   runs once (or skipped) and never a burst; the Schedules view (on/off, Run now, next run, runs with
   status, cost and session) and a chip in the session list. Branch
   `worktree-MasterDeck-Terminal-140-schedules`.
+- **Settings → Notifications (#135)**: one registry of notification types × channels
+  (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`); a table with System
+  notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`
+  migrated; events can be routed to Needs you as notices. Branch `135-notification-settings`.
 - **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
   in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays
   put. Design and plan in `docs/plans/2026-10-17-resume-opens-terminal-*`. Open: the "Resuming …"
