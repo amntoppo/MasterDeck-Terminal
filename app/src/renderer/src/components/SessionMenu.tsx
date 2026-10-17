@@ -5,6 +5,7 @@ import type { AppState, Session } from '@shared/types'
 import { deck } from '../deck'
 import { can } from '../web'
 import type { SessionAction } from './Sidebar'
+import type { SessionGroup } from '@shared/sessionGroups'
 
 /**
  * Right-click on a session in the sidebar: the few things you reach for without opening it. Portalled
@@ -22,6 +23,9 @@ export function SessionMenu({
   onMove,
   starred,
   onStar,
+  groups,
+  group,
+  onGroup,
   flash,
 }: {
   s: Session
@@ -35,15 +39,21 @@ export function SessionMenu({
   onMove: (where: 'top') => void
   starred: boolean
   onStar: () => void
+  /** The session list's tabs, the one it is in (null: All only), and putting it in one. */
+  groups: SessionGroup[]
+  group: string | null
+  onGroup: (group: string | null) => void
   flash: (m: string) => void
 }) {
+  const [tabsOpen, setTabsOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
   useLayoutEffect(() => {
     const r = ref.current?.getBoundingClientRect()
     if (!r) return
     setPos({ left: Math.max(4, Math.min(x, window.innerWidth - r.width - 4)), top: Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) })
-  }, [x, y])
+    // Again when Move to tab opens: the menu grew.
+  }, [x, y, tabsOpen])
   useEffect(() => {
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose()
     const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -98,6 +108,26 @@ export function SessionMenu({
       )}
       <button onClick={run(onStar)}>{starred ? 'Unstar' : 'Star'}</button>
       <button onClick={run(() => onMove('top'))}>Move to top</button>
+      {groups.length > 0 && can('sessionGroupsAct') && (
+        <>
+          <button aria-expanded={tabsOpen} onClick={() => setTabsOpen(!tabsOpen)} title="Put it in one of the session list's tabs">
+            Move to tab {tabsOpen ? '▾' : '▸'}
+          </button>
+          {tabsOpen && (
+            <div className="session-menu-sub" role="group" aria-label="Tabs">
+              <button onClick={run(() => onGroup(null))} aria-checked={group === null} role="menuitemradio">
+                <span className="check">{group === null ? '✓' : ''}</span>No tab (All only)
+              </button>
+              {groups.map((g) => (
+                <button key={g.id} onClick={run(() => onGroup(g.id))} aria-checked={group === g.id} role="menuitemradio" title={g.name}>
+                  <span className="check">{group === g.id ? '✓' : ''}</span>
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
       {canStop && (
         <>
           <hr />

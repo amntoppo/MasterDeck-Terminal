@@ -8,6 +8,7 @@ import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { applyBtwEvent, type BtwEntry, type BtwEvent } from '@shared/btw'
 import { parseDiff } from '@shared/diff'
+import { applyGroupOp, emptyGroups } from '@shared/sessionGroups'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
@@ -312,6 +313,14 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
       state.modOff = { ...state.modOff, [key]: [...off].sort() }
       for (const cb of stateCbs) cb({ ...state })
       return ok
+    },
+    // The session list's tabs: the Mac's own rules, applied to the fixture.
+    sessionGroupsAct: (op: unknown) => {
+      const r = applyGroupOp(state.sessionGroups ?? emptyGroups(), op)
+      if (!r.ok) return r
+      state.sessionGroups = r.groups
+      for (const cb of stateCbs) cb({ ...state })
+      return { ok: true, message: 'saved', ...(r.id ? { id: r.id } : {}) }
     },
     // The Start dialog: a draft with no checkout found, so its folder line shows at phone width. A
     // chosen folder must be one of `repos`, as the Mac's guard (`chosenFolder`) answers a browser.
