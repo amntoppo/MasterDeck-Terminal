@@ -179,7 +179,7 @@ import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
-import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, writePrReviewContext, writePrReviewDir } from "./prReviewDirs";
+import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, writePrReviewContext, writePrReviewDir } from "./prReviewDirs";
 import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -2780,7 +2780,10 @@ function registerIpc(): void {
     const guard = prReviewGuard(paths.home, o.tabId as string);
     try {
       if (o.context === true && existsSync(join(dir, "CLAUDE.md"))) writePrReviewContext(dir, ctx, guard);
-      else writePrReviewDir(dir, ctx, prReviewBriefing(account ?? latest.me ?? null), guard);
+      else {
+        const post = prReviewPost(paths.home, o.tabId as string);
+        writePrReviewDir(dir, ctx, prReviewBriefing(account ?? latest.me ?? null, post), guard, post);
+      }
     } catch (err) {
       return { ok: false, message: (err as Error).message, canContinue: false };
     }

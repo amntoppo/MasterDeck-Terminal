@@ -958,16 +958,21 @@ here (needs `hooks.queue`).
   threads, issues; never facts from the caller), and, unless `context: true` (the view's 400 ms
   follow-up when the pick or the filters change), `CLAUDE.md` (`prReviewBriefing`), project
   settings (`PR_REVIEW_SETTINGS`: `gh pr view/diff/checks/list`, `gh run view/list`, `gh issue view`
-  allowed; `gh pr review/comment/merge/close/edit/ready`, `gh issue comment` denied) and
-  `post-review.sh` (`prReviewScript`), each atomically. The script is the session's only write: one
+  allowed; `gh pr review/comment/merge/close/edit/ready`, `gh issue comment` denied) and the post
+  script `<home>/pr-review-guard/post-review-<tabId>.sh` (`prReviewPost`, `prReviewScript`; the
+  briefing names it by that absolute path), each atomically. The script is the session's only write: one
   review (`POST repos/<o>/<r>/pulls/<n>/reviews`, body and inline comments from files inside the
   folder, JSON by `jq`), only to the selected PR (`--pr` must match), only when `gh api user` is the
   tab's account (when there is one), `--dry-run` posts nothing; both checks read the guard file
   `<home>/pr-review-guard/tab-<tabId>.json` (`prReviewGuard`, written with every prepare), outside
-  the folder, so the session's unasked edits (`acceptEdits`) cannot change them. The settings also
-  deny `Edit` of the script, `context.json`, `CLAUDE.md` and `.claude/**`, and a `.claude` that is a
-  link is refused. The script is not in the allow list, so Claude Code asks the user before each
-  run. A browser's prepare may not change the account a tab folder already names. The renderer keeps the sessions per
+  the folder. The script sits beside it for the same reason: in its own folder `acceptEdits` lets
+  the session rewrite files unasked (Edit, and filesystem commands such as `cp` or `sed -i`), and the
+  script is what the user approves; a copy left in the folder by an older version is removed. The
+  folder's account (`prReviewFolderAccount`, for the bridge's pane check and a browser's prepare)
+  is read from the guard too, never from `context.json`. The settings also deny `Edit` of
+  `context.json`, `CLAUDE.md` and `.claude/**`, and a `.claude` that is a link is refused. The
+  script is not in the allow list, so Claude Code asks the user before each run. A browser's prepare
+  may not change the account a tab folder already names. The renderer keeps the sessions per
   tab in a module map (`keptReviews` in `PrsView.tsx`); a tab's account change, its close, or a
   switch between one and several accounts closes its pane. The bridge refuses a remote `pr-review`
   open without a tab, with a bad one, an account not connected, or one other than the tab folder's
@@ -2196,8 +2201,8 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
 | `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
-| `pr-review-guard/tab-<tabId>.json` | the selected PR's URL and the account `post-review.sh` checks (outside the session's folder) |
-| `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `post-review.sh`, `.claude/settings.json`, and the review files the session writes |
+| `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them) |
+| `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `.claude/settings.json`, and the review files the session writes |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |

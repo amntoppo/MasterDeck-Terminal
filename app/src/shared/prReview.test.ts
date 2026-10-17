@@ -88,13 +88,17 @@ describe('prReviewContext', () => {
 
 describe('prReviewBriefing', () => {
   it('re-reads the context, reads with gh, and posts only after a yes, through the script', () => {
-    const b = prReviewBriefing('alice')
+    const b = prReviewBriefing('alice', "/h/pr-review-guard/post-review-t.sh")
     expect(b).toContain('`alice`')
+    // Run by its absolute path (outside the folder), quoted, never a copy of the session's own.
+    expect(b).toContain("'/h/pr-review-guard/post-review-t.sh' --pr <selected.url>")
+    expect(b).not.toContain('./post-review.sh')
+    expect(prReviewBriefing(null, "/it's/p.sh")).toContain("'/it'\\''s/p.sh' --pr")
     expect(b).toMatch(/Re-read `context.json` at the start of \*\*every\*\* answer/)
-    for (const c of ['gh pr diff', 'gh pr view', 'gh pr checks', '--log-failed', './post-review.sh', '--dry-run'])
+    for (const c of ['gh pr diff', 'gh pr view', 'gh pr checks', '--log-failed', '--dry-run', 'Never copy it'])
       expect(b).toContain(c)
     expect(b).toMatch(/Post only after a clear yes/)
-    expect(prReviewBriefing(null)).not.toContain('on GitHub` ')
+    expect(prReviewBriefing(null, '/p.sh')).not.toContain('on GitHub` ')
   })
 })
 

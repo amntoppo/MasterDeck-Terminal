@@ -73,8 +73,9 @@ a CI failure means); file:line references.
 
 ### Posting a review, only after the user agrees
 
-`./post-review.sh --pr <url> --event comment|approve|request-changes --body-file <f.md>
-[--comments-file <f.json>] [--dry-run]`, written into the folder. It:
+`<home>/pr-review-guard/post-review-<tabId>.sh --pr <url> --event comment|approve|request-changes
+--body-file <f.md> [--comments-file <f.json>] [--dry-run]`, written outside the folder (the
+briefing names it by its absolute path). It:
 
 - posts only to the PR `context.json` has selected (`--pr` must equal it), so a review drafted for
   one PR never lands on another the user clicked meanwhile;
@@ -85,9 +86,12 @@ a CI failure means); file:line references.
   payload and posts nothing.
 
 Both checks read a guard file MasterDeck writes outside the folder,
-`<home>/pr-review-guard/tab-<tabId>.json` (`{url, account}`), so the session (which edits files in
-its folder without asking) cannot move them; its settings also deny `Edit` of the script,
-`context.json`, `CLAUDE.md` and `.claude/**`, and a `.claude` that is a link is refused. A trailing
+`<home>/pr-review-guard/tab-<tabId>.json` (`{url, account}`), and the script itself sits beside it:
+the session runs with `acceptEdits`, which lets it change files in its folder without asking (with
+Edit, but also `cp` or `sed -i`), so neither the checks nor the script the user approves may live
+there. The folder's account for the bridge's pane check is read from the guard too. Its settings
+also deny `Edit` of `context.json`, `CLAUDE.md` and `.claude/**`, and a `.claude` that is a link is
+refused. A trailing
 option ends in the usage error. A browser's prepare may not change the account a tab folder names.
 
 The user's agreement is enforced twice: `CLAUDE.md` says to show the exact text (and event) and

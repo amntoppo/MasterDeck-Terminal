@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { PR_REVIEW_NAME, type PrReviewContext } from '@shared/prReview'
 import { TICKET_TAB } from '@shared/ticketBuilder'
@@ -6,8 +6,8 @@ import { TICKET_TAB } from '@shared/ticketBuilder'
 /**
  * The Pull requests view's review sessions (Review with Claude): one folder per PR tab,
  * `<home>/pr-review/tab-<tabId>/`, with CLAUDE.md (how to review), context.json (the tab, its
- * filters, the selected PR, the account), post-review.sh and project settings. With two or more
- * accounts its session runs as the tab's account.
+ * filters, the selected PR, the account) and project settings. With two or more accounts its
+ * session runs as the tab's account. Its post script and guard live outside it (prReviewGuard).
  */
 export function prReviewDir(home: string, tab: string | null | undefined): string {
   if (!tab || !TICKET_TAB.test(tab)) throw new Error(`refusing a PR review for tab ${JSON.stringify(tab)}`)
@@ -15,12 +15,21 @@ export function prReviewDir(home: string, tab: string | null | undefined): strin
 }
 
 /**
- * What post-review.sh checks against: the selected PR and the account, kept outside the review
+ * What the post script checks against: the selected PR and the account, kept outside the review
  * folder (`<home>/pr-review-guard/tab-<tabId>.json`), where the session's unasked edits don't reach.
  */
 export function prReviewGuard(home: string, tab: string): string {
   if (!TICKET_TAB.test(tab)) throw new Error(`refusing a PR review for tab ${JSON.stringify(tab)}`)
   return join(home, 'pr-review-guard', `tab-${tab}.json`)
+}
+
+/**
+ * The tab's post script, beside its guard. Never in the session's folder: there acceptEdits lets
+ * the session rewrite files without asking (cp, sed…), and the script is what the user approves.
+ */
+export function prReviewPost(home: string, tab: string): string {
+  if (!TICKET_TAB.test(tab)) throw new Error(`refusing a PR review for tab ${JSON.stringify(tab)}`)
+  return join(home, 'pr-review-guard', `post-review-${tab}.sh`)
 }
 
 /** A review folder MasterDeck may write: one not made yet, or a real (not symlinked) folder directly inside the real `<home>/pr-review`. */
@@ -37,10 +46,10 @@ export function prReviewDirOk(home: string, dir: string): boolean {
   }
 }
 
-/** The account a tab folder's context.json names; null if none or a bad tab. */
+/** The account a tab's session works as, from its guard (not context.json, which the session can edit); null if none or a bad tab. */
 export function prReviewFolderAccount(home: string, tab: string): string | null {
   try {
-    const a = JSON.parse(readFileSync(join(prReviewDir(home, tab), 'context.json'), 'utf8')).account
+    const a = JSON.parse(readFileSync(prReviewGuard(home, tab), 'utf8')).account
     return typeof a === 'string' ? a : null
   } catch {
     return null
@@ -105,10 +114,9 @@ export const PR_REVIEW_SETTINGS = {
       'Bash(gh run list:*)',
       'Bash(gh issue view:*)',
     ],
-    // ./post-review.sh is the one way to write, and is not allowed above: Claude Code asks the user
-    // before each run, after the session showed what it will post. Its own files stay MasterDeck's.
+    // The post script (outside this folder) is the one way to write, and is not allowed above:
+    // Claude Code asks the user before each run, after the session showed what it will post.
     deny: [
-      'Edit(./post-review.sh)',
       'Edit(./context.json)',
       'Edit(./CLAUDE.md)',
       'Edit(./.claude/**)',
@@ -134,8 +142,8 @@ function writeGuard(guard: string, ctx: PrReviewContext): void {
   atomic(guard, JSON.stringify({ url: ctx.selected?.url ?? null, account: ctx.account }) + '\n')
 }
 
-/** Write a tab's folder: briefing, context, script, settings, and its guard (each atomically). */
-export function writePrReviewDir(dir: string, ctx: PrReviewContext, briefing: string, guard: string): void {
+/** Write a tab's folder (briefing, context, settings), its guard and its post script `post` (each atomically). */
+export function writePrReviewDir(dir: string, ctx: PrReviewContext, briefing: string, guard: string, post: string): void {
   mkdirSync(dir, { recursive: true })
   // A `.claude` that is a link (to ~/.claude, say) would have MasterDeck overwrite the user's settings.
   try {
@@ -148,9 +156,14 @@ export function writePrReviewDir(dir: string, ctx: PrReviewContext, briefing: st
   atomic(join(dir, 'CLAUDE.md'), briefing)
   atomic(join(dir, 'context.json'), JSON.stringify(ctx, null, 2) + '\n')
   atomic(join(dir, '.claude', 'settings.json'), JSON.stringify(PR_REVIEW_SETTINGS, null, 2) + '\n')
-  const script = join(dir, 'post-review.sh')
-  atomic(script, prReviewScript(dir, guard))
-  chmodSync(script, 0o755)
+  atomic(post, prReviewScript(dir, guard))
+  chmodSync(post, 0o755)
+  // The script once lived in the folder, where the session could rewrite it: never leave that copy.
+  try {
+    unlinkSync(join(dir, 'post-review.sh'))
+  } catch {
+    /* none */
+  }
 }
 
 /** Only the context changed (another PR picked, the filters): the rest stays as written. */
@@ -162,8 +175,8 @@ export function writePrReviewContext(dir: string, ctx: PrReviewContext, guard: s
 
 /**
  * The review session's one write to GitHub: one review on the PR selected in MasterDeck (and no
- * other), as the tab's account, from files inside the folder. Both checks read `guard`, outside the
- * folder. Runs gh directly (the session's environment carries the tab's account). macOS bash 3.2;
+ * other), as the tab's account, from files inside the folder `dir`. It and both checks' `guard` sit
+ * outside that folder (prReviewPost). Runs gh directly (the session's environment carries the tab's account). macOS bash 3.2;
  * jq is one of MasterDeck's tools.
  */
 export function prReviewScript(dir: string, guard: string): string {
@@ -175,7 +188,7 @@ d='${d}'
 g='${g}'
 out() { printf '%s\\n' "$1"; }
 err() { jq -cn --arg e "$1" '{ok: false, error: $e}'; exit 1; }
-usage() { err 'usage: ./post-review.sh --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]'; }
+usage() { err 'usage: post-review.sh --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]'; }
 command -v jq >/dev/null 2>&1 || { out '{"ok":false,"error":"jq is not installed"}'; exit 1; }
 pr=''; event=''; body=''; comments=''; dry=''
 while [ $# -gt 0 ]; do
