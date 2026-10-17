@@ -41,7 +41,7 @@ function render(o: { config?: AppConfig; repos?: string[]; assignees?: string[];
   store.boardTabs = JSON.stringify([{ id: 't1', name: 'Tab', filters: { assignees: o.assignees ?? [], labels: [], milestone: null, hasPr: 'any', search: '', hiddenColumns: [], repos: o.repos ?? [], projects: [] } }])
   store.boardTab = JSON.stringify('t1')
   const noop = () => {}
-  return renderToStaticMarkup(createElement(BoardView, { state, onOpenSession: noop, onStart: noop, onPr: noop, onAssign: noop, onSummary: noop, onSetup: noop }))
+  return renderToStaticMarkup(createElement(BoardView, { state, onOpenSession: noop, onResumed: noop, onStart: noop, onPr: noop, onAssign: noop, onSummary: noop, onSetup: noop }))
 }
 const columns = (html: string) => [...html.matchAll(/board-col-head[^>]*>.*?<strong>([^<]*)<\/strong>/g)].map((m) => m[1])
 

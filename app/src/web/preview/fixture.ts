@@ -291,7 +291,10 @@ export function fixtureState(noBoard = false): AppState {
     stoppedByRestart: [],
     restoring: false,
     tokens: {},
-    pastSessions: {},
+    // A stopped session on #125: its card's Resume opens search-index's terminal (#133).
+    pastSessions: {
+      'acme/web#125': [{ sessionId: SESSIONS[4].sessionId, issue: 125, name: 'search-index', cwd: SESSIONS[4].cwd, lastActivity: now - 90 * min }],
+    },
     asks: {},
     menus: {},
     prStage: {},

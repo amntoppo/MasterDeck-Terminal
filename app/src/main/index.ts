@@ -63,6 +63,7 @@ import { MASTER_NAME, sessionForProposal, isMasterSession } from "@shared/derive
 import type {
   AppState,
   CliResult,
+  ResumeResult,
   NotifyEvent,
   PaneSpec,
   Session,
@@ -92,6 +93,7 @@ import {
 } from "@shared/accounts";
 import {
   bgIdFromOutput,
+  wokeFromOutput,
   resumeAs,
   SessionAccounts,
   sessionSettings,
@@ -1664,7 +1666,7 @@ async function resumeBg(
   account: string | null = null,
   key: string | null = null,
   grantMaster = false,
-): Promise<CliResult> {
+): Promise<ResumeResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: "bad session id" };
   // As listed before the resume (see grantMaster below).
@@ -1689,7 +1691,14 @@ async function resumeBg(
       deckHooks.addMasterSession(id);
     void sources.refreshAgents();
   }
-  return r.ok ? { ok: true, message: name } : r;
+  // The id it runs under, for the window to open it (#133): a copy's new one, else the woken one's.
+  return r.ok
+    ? {
+        ok: true,
+        message: name,
+        key: bgIdFromOutput(r.stdout) ?? wokeFromOutput(r.stdout)?.id ?? null,
+      }
+    : r;
 }
 
 /** What resumeAs needs: the account resolved as for any session, recorded in sessionAccounts. */
