@@ -541,6 +541,60 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
 - Schedules (CronCreate/CronDelete) are read from transcripts (`shared/schedules.ts`) into
   `AppState.schedules`; they make an idle session "Waiting".
 
+### Schedules (issue #140)
+
+Sessions MasterDeck starts on a timer. Not `shared/schedules.ts` (CronCreate jobs a session made):
+the code is `sched*`. Design and plan: `docs/plans/2026-10-17-schedules-{design,plan}.md`.
+
+- `shared/sched.ts` (pure): `Schedule` / `SchedRun` / `SchedView`; `normalizeSchedule` (every field
+  checked; an edit keeps `lastSlot` unless the cron or zone changed; a schedule turned on counts from
+  now); `whenCron` (daily / weekdays / weekly / every N hours / cron → a 5-field cron, read by
+  `cronField` of `shared/schedules.ts`), `whenText`; `zonedParts` / `nextSlot` (wall-clock minutes
+  in the schedule's IANA zone through `Intl.DateTimeFormat`; searches 5 years at most, and a schedule
+  with no slot there is refused; a midnight jump on a DST day is corrected; wall-clock minutes are
+  compared as such (`wallKey`): in a repeated hour nothing at or before `from`'s or `wallAfter`'s (the
+  last slot) matches again, and slots of a skipped hour run once at the first minute after it,
+  `inGap`); `dueSlots` (looks back 2 days at most)
+  and `planTick` (a slot at most 5 minutes old runs; older: one `missed` run, or one `skipped` row);
+  `runName` (`<slug>-<MMDD-HHmm>` in the zone, `-2` … when taken), `runPrompt`; `runSession` (by bg
+  id, else name), `runProgress` (working / needs-input / busy → running; idle after working (seen
+  working or a cost) and waiting on nothing → done; idle 3 minutes without working, or ended before
+  working → failed; never listed for 10 minutes → failed; still going after 12 hours → failed),
+  `runCost` (the cost book's entries with `key === bgId` plus the
+  live status line when the current id is not in the book yet), `withRun` (50 runs per schedule).
+- `main/sched.ts` `Scheduler`: `<home>/schedules.json` (`{version: 1, schedules, runs}`, temp file +
+  rename; an unreadable file is copied aside as `.unreadable-<ts>`). Everything goes through one
+  promise queue (`serial`), so a tick, Run now and an edit never interleave. `tick()` waits for the
+  first session list (`state()` null until `sessionsLoaded`), follows running runs (progress, cost,
+  the cost limit: `claude stop` through `stopBg`, status `stopped`; a failed stop keeps it running
+  and is tried again next tick), notifies on the end of a run and on the first of a stretch of
+  overlap skips,
+  then plans each schedule: `lastSlot` moves to the latest slot before anything starts, the file is
+  written before `claude --bg` runs, and at most one `missed` run starts per tick. A schedule that
+  skips overlaps records a `skipped` row while a run is `running`; Run now is refused instead.
+- Starting: `startSession()` in `main/index.ts`, the body of `CH.startClaude` (New Claude session)
+  moved into a function that also returns the bg id: name and folder checks, `settingsFor` (the
+  account, else the folder's `origin`'s), `WorkflowStore.setPending` for a workflow, `claude --bg -n
+  <name> [--model] [--permission-mode] <prompt>`, `SessionAccounts.set/expect`.
+- Wiring (`main/index.ts`): the `Scheduler` beside the notes store; `tick` every 30 s
+  (`SCHED_TICK_MS`), once when `sessionsLoaded` turns true, and on `powerMonitor` `resume` after
+  `sources.refreshAgents()` (none in SMOKE); `notify` builds a `NotifyEvent`
+  whose target is the run's session (`sessionKey`), else `schedules: true` (`reveal` emits
+  `CH.showSchedules`, the window opens the view); `onChange` emits `sched:changed` and
+  `sources.changed()`. The state callback sets `AppState.schedRuns` (`Scheduler.tags()`: bg id →
+  schedule, runs of 30 days), the session row's chip. Nothing in `toRemoteSnapshot`.
+- IPC: `sched:list`, `sched:save`, `sched:delete` (native dialog in the window; the web asked with
+  `webConfirm`), `sched:enable`, `sched:runNow`, event `sched:changed`: all `remote` (a schedule is
+  the start New Claude session already offers the web, later); `onShowSchedules` is `local`.
+- Renderer: `SchedulesView.tsx` (the list, a schedule's runs, `SchedEditor`), the rail's
+  `schedules` tool, `WEB_VIEWS` / `SCREEN_NEEDS` (`schedList`), the palette's `view:schedules`, the
+  `srow-sched` chip in `SessionRow`; phone cards in `web.css`. `SchedTrust` (`useTrust` +
+  `TrustNote`) in the editor (the folder known not trusted) and above a schedule's runs (also when a
+  run was refused: `isNotTrusted` on its reason, which the row then says in plain words).
+- Notifications: the schedule's own switches first, then the `schedule-run` type of the #135
+  registry (`shared/notifications.ts`; System on, Needs you off by default) through `notify()` →
+  `Notifier.dispatch`, so Pause all and its Settings → Notifications row apply.
+
 ### Workflows
 
 `main/workflow.ts` `WorkflowStore` under `<home>`: `workflow.json` (Default), `workflows/templates/`,
@@ -2098,6 +2152,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Transcripts | `activity.ts`, `ask.ts` (menus from screens), `prompt.ts`, `promptGuard.ts`, `prscan.ts`, `worktrees.ts`, `stats.ts`, `history.ts`, `summary.ts`, `tokens.ts` (also activity `spans`), `costs.ts`, `hours.ts` (working hours estimate), `schedules.ts`, `watches.ts` |
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
+| Schedules | `sched.ts` (schedules, slots in a time zone, a tick's plan, how a run is going) |
 | Workflows, hooks | `flow.ts`, `flowFrame.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
@@ -2178,6 +2233,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `stats`, `allStats`, `tails`, `git`, `tokens`, `costBook` | status line files (`stats/`), transcript tails, git, `TokenIndex` (`tokens.json`), `costs.json` |
 | `prLive`, `sessionPrs`, `sessionWorktrees`, `pastSessions` | `gh pr view` for followed PRs, `session-prs.json`, transcripts, `ticket-links.json` |
 | `watches`, `schedules` | `Watches.info()` + `PrWatch.info()` (`pr:<url>` rows), transcripts |
+| `schedRuns` | the state callback, `Scheduler.tags()` (`schedules.json`): bg id → the schedule that started it (runs of 30 days); not in `toRemoteSnapshot` |
 | `loops` | `LoopStore.views()` over `workflows/loops/<sid>.json` (3 per session, closed ones for 24 h, tail 1 KB) |
 | `sources`, `errors`, `missingBinaries`, `ghCache` | health of each poll, `readGhCacheStatus()` |
 | `settings`, `config`, `skills`, `hooks`, `statuslineInstalled`, `masterWorkspace` | `settings.json`, `~/.claude/master/config.json`, `syncSkills`, `hookStatus` |
@@ -2209,6 +2265,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `schedules.json` | Schedules (#140): `{version: 1, schedules, runs}` (50 runs per schedule), temp file + rename by `main/sched.ts`; an unreadable one is copied aside as `schedules.json.unreadable-<ts>` |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
 | `session-groups.json` | the session list's tabs: `{version: 1, groups: [{id, name}], of: {Session.key: id}}` (`main/sessionGroups.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |

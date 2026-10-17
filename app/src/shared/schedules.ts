@@ -108,7 +108,7 @@ export function liveSchedules(s: ScheduleScan, now: number): ScheduleInfo[] {
 }
 
 /** One cron field's allowed values (`*`, `n`, `a-b`, `* /n`, `a-b/n`, lists), or null if unreadable. */
-function field(f: string, lo: number, hi: number): Set<number> | null {
+export function cronField(f: string, lo: number, hi: number): Set<number> | null {
   const out = new Set<number>()
   for (const part of f.split(',')) {
     const m = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part.trim())
@@ -132,11 +132,11 @@ function field(f: string, lo: number, hi: number): Set<number> | null {
 export function nextRun(cron: string, from: number): number | null {
   const f = cron.trim().split(/\s+/)
   if (f.length !== 5) return null
-  const min = field(f[0], 0, 59)
-  const hour = field(f[1], 0, 23)
-  const dom = field(f[2], 1, 31)
-  const mon = field(f[3], 1, 12)
-  const dow = field(f[4].replace(/\b7\b/g, '0'), 0, 6)
+  const min = cronField(f[0], 0, 59)
+  const hour = cronField(f[1], 0, 23)
+  const dom = cronField(f[2], 1, 31)
+  const mon = cronField(f[3], 1, 12)
+  const dow = cronField(f[4].replace(/\b7\b/g, '0'), 0, 6)
   if (!min || !hour || !dom || !mon || !dow) return null
   const anyDom = f[2] === '*'
   const anyDow = f[4] === '*'

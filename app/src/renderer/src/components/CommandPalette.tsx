@@ -17,6 +17,7 @@ export type PaletteAction =
   | 'view:janitor'
   | 'view:history'
   | 'view:workflow'
+  | 'view:schedules'
   | 'view:meetings'
   | 'notes'
   | 'record-meeting'
@@ -55,6 +56,7 @@ const ACTIONS: [PaletteAction, string, string][] = [
   ['view:janitor', 'Go to Janitor', 'worktrees and parked sessions'],
   ['view:history', 'History: search every session', 'full-text over transcripts · ⌘⇧F'],
   ['view:workflow', 'Go to Workflow', 'issue to merged PR, hooks, your own steps'],
+  ['view:schedules', 'Go to Schedules', 'sessions that start on a timer: triage, nightly updates, audits'],
   ['notes', 'Notes', 'write something down, for you or for a ticket'],
   ['view:meetings', 'Go to Meetings', 'transcripts and audio of your recorded meetings'],
   ['record-meeting', 'Record meeting', 'your microphone and the Mac’s sound, on this Mac'],
