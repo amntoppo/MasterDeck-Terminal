@@ -354,7 +354,8 @@ function advance(t: AutoTrack, pr: AutoPr, x: ReconcileIn, notices: AutoNotice[]
   const mine = myReview(pr, x.viewer)
   if (t.status === 'reviewing' || t.status === 'stalled') {
     // The account's review of the sent commit (or posted after it was sent).
-    const posted = mine && t.sentAt !== null && (mine.commit === t.sentHead || Date.parse(mine.at) >= t.sentAt - 60_000)
+    // Posted after it was asked for (a minute of clock skew): an older review by the account is not it.
+    const posted = mine && t.sentAt !== null && Date.parse(mine.at) >= t.sentAt - 60_000
     if (!posted) {
       // Stalled, then new commits: asked again.
       if (t.status === 'stalled' && t.sentHead && pr.head !== t.sentHead) {

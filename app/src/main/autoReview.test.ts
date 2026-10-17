@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AutoReview, BUSY_STALE_MS, monitorId, paneReady, START_SETTLE_MS, type ReviewPanes } from './autoReview'
+import { AutoReview, BUSY_STALE_MS, monitorId, paneReady, SEND_LOST_MS, START_SETTLE_MS, type ReviewPanes } from './autoReview'
 import { POLL_MS, TYPING_MS } from '@shared/autoReview'
 import type { RunResult } from './run'
 
@@ -20,7 +20,7 @@ function world() {
   let now = 1_000_000
   const calls: string[][] = []
   // What GitHub says: the search's PRs and each tracked PR.
-  const gh = { search: [node()] as unknown[], pr: node() as Record<string, unknown> | null, merge: { code: 0, stdout: '', stderr: '' } as RunResult }
+  const gh = { search: [node()] as unknown[], pr: node() as Record<string, unknown> | null, merge: { code: 0, stdout: '', stderr: '' } as RunResult, hold: null as Promise<void> | null, fresh: null as Record<string, unknown> | null }
   const typed: [string, string][] = []
   const started: string[] = []
   const notices: { title: string; url: string }[] = []
@@ -41,11 +41,13 @@ function world() {
     {
       ghFor: () => async (args) => {
         calls.push(args)
+        if (gh.hold) await gh.hold
         if (args[0] === 'pr') return gh.merge
         const q = args.find((x) => x.startsWith('query=')) ?? ''
         const data: Record<string, unknown> = { viewer: { login: 'alice' } }
         if (q.includes('search(')) data.s = { nodes: gh.search }
-        if (q.includes('t0:')) data.t0 = { pullRequest: gh.pr }
+        // The read before a merge (no search): `fresh` when set, else the same PR.
+        if (q.includes('t0:')) data.t0 = { pullRequest: !q.includes('search(') && gh.fresh ? gh.fresh : gh.pr }
         return { code: 0, stdout: JSON.stringify({ data }), stderr: '' }
       },
       paused: () => false,
@@ -194,6 +196,100 @@ describe('AutoReview', () => {
   })
 })
 
+const approvedAfter = (at: number) =>
+  node({ reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(at).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 1 } }] } })
+
+describe('AutoReview: what the review found', () => {
+  /** A tab with a PR sent to its session, approved after the review, ready. */
+  const readyWorld = async (merge: boolean) => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.set('mine', { ...on, merge })
+    await w.a.poll()
+    w.a.deliver()
+    w.gh.search = []
+    w.gh.pr = approvedAfter(1_000_000)
+    w.tick(POLL_MS)
+    return w
+  }
+  it('switched off while GitHub answers: nothing is merged, nothing comes back', async () => {
+    const w = await readyWorld(true)
+    let release = () => {}
+    w.gh.hold = new Promise((r) => (release = r))
+    const p = w.a.poll()
+    w.a.set('mine', { ...on, merge: false })
+    w.gh.hold = null
+    release()
+    await p
+    expect(w.calls.some((c) => c[0] === 'pr')).toBe(false)
+  })
+  it('a review older than the request is not the automated one', async () => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.set('mine', { ...on, merge: true })
+    await w.a.poll()
+    w.a.deliver()
+    w.gh.search = []
+    w.gh.pr = approvedAfter(1_000) // long before it was sent
+    w.tick(POLL_MS)
+    await w.a.poll()
+    expect(w.notices).toEqual([])
+    expect(w.calls.some((c) => c[0] === 'pr')).toBe(false)
+    expect(w.a.view().prs[0].status).toBe('reviewing')
+  })
+  it('the PR is read again past the cache before merging, and not merged if it changed', async () => {
+    const w = await readyWorld(true)
+    w.gh.fresh = node({ ...approvedAfter(1_000_000), commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] } })
+    await w.a.poll()
+    expect(w.calls.some((c) => c[0] === 'pr')).toBe(false)
+    expect(w.calls.some((c) => !c.join(' ').includes('search('))).toBe(true)
+    expect(w.a.view().prs[0]).toMatchObject({ status: 'ready', note: 'checks are failing' })
+  })
+  it('switching off frees its PRs for another tab of the account, and empties the queue', async () => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.set('mine', on)
+    await w.a.poll()
+    w.a.deliver()
+    expect(w.queues.mine).toEqual([URL1])
+    w.a.set('mine', { review: false })
+    expect(w.queues.mine).toEqual([])
+    expect(w.a.view().prs).toEqual([])
+    w.a.set('other', { ...on, name: 'Other' })
+    await w.a.poll()
+    expect(w.a.view().prs[0].tabId).toBe('other')
+  })
+  it('a browser only flips switches: it keeps the window’s filters and account, and never forgets', () => {
+    const w = world()
+    w.a.set('mine', { ...on, filters: { repo: 'web' } })
+    w.a.set('mine', { ...on, name: 'Web', filters: { repo: '' } }, true)
+    expect(w.a.info()[0].command).toContain('repo:acme/web')
+    expect(w.a.info()[0].description).toBe('Automate Review · Mine')
+  })
+  it('follow keeps the switches main has (a flip in between is not undone)', () => {
+    const w = world()
+    w.a.set('mine', { ...on, merge: true })
+    w.a.set('mine', { ...on, merge: false })
+    w.a.set('mine', { review: true, merge: false, follow: true, name: 'Renamed' })
+    expect(w.a.view().tabs.mine.merge).toBe(false)
+    expect(w.a.info()[0].description).toBe('Automate Review · Renamed')
+    // Nor does it turn anything on.
+    w.a.set('x', { review: true, merge: true, follow: true, name: 'X' })
+    expect(w.a.view().tabs.x).toBeUndefined()
+  })
+  it('a review pane is not started again and again', async () => {
+    const w = world()
+    w.a.set('mine', on)
+    w.gh.search = [node(), node({ url: 'https://github.com/acme/web/pull/13', number: 13, headRefOid: 'ccc' })]
+    await w.a.poll()
+    w.a.deliver()
+    w.pane.id = null // it died at once
+    w.a.deliver()
+    w.a.deliver()
+    expect(w.started).toHaveLength(1)
+  })
+})
+
 describe('paneReady', () => {
   const now = 10_000_000
   it('idle after the last line, and the user not typing', () => {
@@ -209,5 +305,7 @@ describe('paneReady', () => {
     expect(paneReady({ value: 'busy', at: now - 1_000 }, 0, 0, '', now)).toBe(false)
     expect(paneReady({ value: 'busy', at: now - BUSY_STALE_MS - 1 }, 0, 0, 'esc to interrupt', now)).toBe(false)
     expect(paneReady({ value: 'busy', at: now - BUSY_STALE_MS - 1 }, 0, 0, '> ', now)).toBe(true)
+    // A line that was never taken: after a while the next one goes.
+    expect(paneReady({ value: 'idle', at: now - SEND_LOST_MS - 5_000 }, now - SEND_LOST_MS - 1, 0, '', now)).toBe(true)
   })
 })

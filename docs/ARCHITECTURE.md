@@ -946,8 +946,14 @@ here (needs `hooks.queue`).
   re-queues it, `readyToMerge` (open, not draft, MERGEABLE, APPROVED, checks SUCCESS or none, merge
   state CLEAN, head = the reviewed commit) makes it `ready` (a notice), and `mergeGuard` (the tab's
   switch, its own PR, not tried at this head, a known method) lets `gh pr merge <url>
-  --<viewerDefaultMergeMethod> --match-head-commit <oid>` run (never `--admin`/`--auto`); merged,
-  closed and failed merges are told. Nothing is decided without `viewer`. `deliver` types
+  --<viewerDefaultMergeMethod> --match-head-commit <oid>` run (never `--admin`/`--auto`) after the
+  switch is checked again and the PR is read again past the cache (`force`) and guarded again; merged,
+  closed and failed merges are told. Nothing is decided without `viewer`, nor on an answer whose
+  tab was switched or changed while GitHub answered. "Sent" means a review by the account dated
+  after MasterDeck typed the line. Switching off drops the tab's open PRs (another tab may take
+  them). A browser only flips switches (the window's name, filters and account stay; it never
+  forgets a tab); the window's name/filters follow-ups carry `follow: true`, so main keeps its
+  switches. A new review pane needs a fresh turn; a pane is started at most once per 5 minutes. `deliver` types
   `autoPrompt` (one line, `[MasterDeck auto-review] …`) into the tab's live `pr-review:<tab>:*`
   pane when `paneReady`: the folder's hooks (`prReviewSettings`: SessionStart → `start`, Stop →
   `idle`, prompt and tool use → `busy`) wrote the turn file `pr-review-guard/tab-<id>.turn`

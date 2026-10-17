@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
-  autoPrompt, autoQuery, autoSearch, label, mergeArgs, normalizeTab, parseAutoAnswer, parseTurn, POLL_MS, reconcile, TRACK_MAX, TYPING_MS,
+  autoPrompt, autoQuery, autoSearch, label, mergeArgs, mergeGuard, normalizeTab, parseAutoAnswer, parseTurn, POLL_MS, reconcile, TRACK_MAX, TYPING_MS,
   type AutoPr, type AutoReviewTab, type AutoReviewView, type AutoTrack,
 } from '@shared/autoReview'
 import { parsePrUrl } from '@shared/prSummary'
@@ -57,6 +57,8 @@ export class AutoReview {
   /** When a PR was last typed into each tab's session. */
   private sent: Record<string, number> = {}
   private panesSeen: Record<string, string | null> = {}
+  /** When MasterDeck last started a review pane for each tab (a pane that died at once is not restarted in a loop). */
+  private started: Record<string, number> = {}
   private polling = false
   private lastPoll = 0
 
@@ -78,6 +80,17 @@ export class AutoReview {
       .filter((t) => typeof t?.url === 'string' && parsePrUrl(t.url) && typeof t.key === 'string' && TICKET_TAB.test(t.tabId) && Array.isArray(t.told))
       // MasterDeck stopped during a merge: what happened is not known, so it is not tried again for that commit.
       .map((t) => (t.status === 'merging' ? { ...t, status: 'merge-failed' as const, note: 'MasterDeck stopped during the merge: check the PR' } : t))
+      // A tab switched off (or gone) follows nothing: its open PRs are free for another tab.
+      .filter((t) => this.tabs[t.tabId] || t.status === 'merged' || t.status === 'closed')
+  }
+
+  /** post-review.sh --auto's queue: only what this tab has queued or sent and not seen reviewed yet. */
+  private writeQueue(tabId: string): void {
+    this.deps.writeQueue(tabId, this.tabs[tabId] ? this.tracks.filter((t) => t.tabId === tabId && (t.status === 'queued' || t.status === 'reviewing' || t.status === 'stalled')).map((t) => t.url) : [])
+  }
+
+  private dropOpen(tabId: string): void {
+    this.tracks = this.tracks.filter((t) => t.tabId !== tabId || t.status === 'merged' || t.status === 'closed')
   }
 
   private save(): void {
@@ -97,25 +110,34 @@ export class AutoReview {
 
   /**
    * The switches of a tab (from the panel). `remote`: asked by a browser, which may switch either
-   * off and Automate Review on, never Merge automatically on (the Mac's window asks first).
+   * off and Automate Review on, never Merge automatically on (the Mac's window asks first), and
+   * never changes what a tab already on watches (its name, filters, account: the window's).
+   * `follow`: only the name, filters and account follow the tab; the switches stay as main has them.
    */
   set(tabId: unknown, raw: unknown, remote = false): CliResult {
     if (typeof tabId !== 'string' || !TICKET_TAB.test(tabId)) return { ok: false, message: 'refusing switches for a bad PR tab' }
     const prev = this.tabs[tabId]
-    const next = normalizeTab(raw, prev, this.now())
+    const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+    if (o.follow === true) {
+      if (!prev || remote) return { ok: true, message: prev ? 'on' : 'off' }
+      raw = { ...o, review: true, merge: prev.merge }
+    }
+    let next = normalizeTab(raw, prev, this.now())
     if (remote && next.merge && !prev?.merge) return { ok: false, message: 'Merge automatically can be turned on in the Mac’s window only' }
+    if (remote && prev && next.review) next = { ...prev, merge: next.merge }
     if (!next.review) {
       if (prev) this.event(tabId, 'Automate Review switched off', 'note')
       delete this.tabs[tabId]
-      this.deps.writeQueue(tabId, [])
+      this.dropOpen(tabId)
     } else {
       if (!prev) this.event(tabId, 'Automate Review switched on', 'note')
       if (next.merge !== !!prev?.merge) this.event(tabId, `Merge automatically switched ${next.merge ? 'on' : 'off'}`, 'note')
       // Another account: what the old one followed is not this tab's any more.
-      if (prev && (prev.account ?? '') !== (next.account ?? '')) this.tracks = this.tracks.filter((t) => t.tabId !== tabId || t.status === 'merged' || t.status === 'closed')
+      if (prev && (prev.account ?? '') !== (next.account ?? '')) this.dropOpen(tabId)
       this.tabs[tabId] = next
       if (!prev) this.lastPoll = 0
     }
+    this.writeQueue(tabId)
     this.save()
     this.deps.onChange()
     return { ok: true, message: next.review ? 'on' : 'off' }
@@ -140,7 +162,7 @@ export class AutoReview {
     this.polling = true
     this.lastPoll = this.now()
     try {
-      for (const [tabId, tab] of Object.entries(this.tabs)) await this.pollTab(tabId, tab)
+      for (const tabId of Object.keys(this.tabs)) if (this.tabs[tabId]) await this.pollTab(tabId, this.tabs[tabId])
       this.save()
       this.deps.onChange()
     } finally {
@@ -181,32 +203,68 @@ export class AutoReview {
       if (!error) this.checks[tabId].error = 'GitHub did not say who this account is'
       return
     }
+    // Switched off, or changed, while GitHub answered: this answer is for switches that are gone.
+    if (this.tabs[tabId] !== tab) return
     for (const p of [...(requested ?? []), ...[...tracked.values()].filter((p): p is AutoPr => !!p)]) this.prs.set(p.url, p)
     const out = reconcile({ tabId, tab, viewer, requested, tracked, tracks: this.tracks, now: this.now() })
     this.tracks = out.tracks
+    this.writeQueue(tabId)
     for (const e of out.events) this.event(tabId, e)
     for (const n of out.notices) this.deps.notify(n)
-    for (const m of out.merges) await this.merge(tabId, tab, m.track, m.pr)
+    for (const m of out.merges) await this.merge(tabId, m.track, viewer)
   }
 
-  /** The merge itself: mergeGuard passed in reconcile; gh decides with branch protection. */
-  private async merge(tabId: string, tab: AutoReviewTab, t: AutoTrack, pr: AutoPr): Promise<void> {
-    const r = await this.deps.ghFor(tab.account)(mergeArgs(pr), { timeoutMs: 60_000 })
-    const live = this.tracks.find((x) => x.key === t.key)
-    if (!live) return
+  /** A merge reconcile allowed is undone: back to waiting, the head not marked as tried. */
+  private holdMerge(t: AutoTrack | undefined, why: string): void {
+    if (!t || t.status !== 'merging') return
+    t.status = 'ready'
+    t.mergeTried = null
+    t.note = why
+    t.at = this.now()
+  }
+
+  /**
+   * The merge itself. mergeGuard passed in reconcile on a read that may be a minute old: the switch
+   * is checked again, the PR read again past the cache and guarded again, then gh decides with
+   * branch protection (`--match-head-commit`: nothing pushed since).
+   */
+  private async merge(tabId: string, t: AutoTrack, viewer: string): Promise<void> {
+    const live = () => this.tracks.find((x) => x.key === t.key)
+    const tab = this.tabs[tabId]
+    if (!tab?.merge) return this.holdMerge(live(), 'Merge automatically is off')
+    let r: { code: number; stdout: string; stderr: string }
+    let pr: AutoPr
+    try {
+      const ref = parsePrUrl(t.url)!
+      const fresh = await this.deps.ghFor(tab.account)(['api', 'graphql', '-f', `query=${autoQuery([ref], false)}`], { force: true, timeoutMs: 30_000 })
+      const a = ghHasData(fresh) ? parseAutoAnswer(fresh.stdout, 1) : null
+      const got = a?.tracked[0]
+      const cur = live()
+      if (!got || !cur || a?.viewer?.toLowerCase() !== viewer.toLowerCase()) return this.holdMerge(cur, 'could not read the PR again before merging')
+      // The head was marked tried when reconcile allowed it; the guard is asked as if it was not.
+      const why = this.tabs[tabId] === tab ? mergeGuard({ ...cur, mergeTried: null }, got, tab, tabId) : 'Merge automatically changed'
+      if (why) return this.holdMerge(cur, why)
+      pr = got
+      r = await this.deps.ghFor(tab.account)(mergeArgs(pr), { timeoutMs: 60_000 })
+    } catch (e) {
+      r = { code: 1, stdout: '', stderr: String(e) }
+      pr = this.prs.get(t.url) ?? ({ method: null } as AutoPr)
+    }
+    const done = live()
+    if (!done) return
     if (r.code === 0) {
-      live.status = 'merged'
-      live.note = null
-      live.at = this.now()
-      this.event(tabId, `merged ${label(live)}`, 'merged')
-      this.deps.notify({ title: `Merged ${label(live)}`, body: `Merge automatically merged it (${(pr.method ?? 'merge').toLowerCase()}) · ${live.title.slice(0, 120)}`, url: live.url })
+      done.status = 'merged'
+      done.note = null
+      done.at = this.now()
+      this.event(tabId, `merged ${label(done)}`, 'merged')
+      this.deps.notify({ title: `Merged ${label(done)}`, body: `Merge automatically merged it (${(pr.method ?? 'merge').toLowerCase()}) · ${done.title.slice(0, 120)}`, url: done.url })
     } else {
       const why = (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `gh exited ${r.code}`
-      live.status = 'merge-failed'
-      live.note = why
-      live.at = this.now()
-      this.event(tabId, `could not merge ${label(live)}: ${why}`, 'note')
-      this.deps.notify({ title: `Could not merge ${label(live)}`, body: why, url: live.url })
+      done.status = 'merge-failed'
+      done.note = why
+      done.at = this.now()
+      this.event(tabId, `could not merge ${label(done)}: ${why}`, 'note')
+      this.deps.notify({ title: `Could not merge ${label(done)}`, body: why, url: done.url })
     }
   }
 
@@ -217,6 +275,8 @@ export class AutoReview {
       const pane = this.deps.panes.live(tabId)
       if (pane !== (this.panesSeen[tabId] ?? null)) {
         this.panesSeen[tabId] = pane
+        // A new pane: only a turn its own hooks write after now counts (the file outlives panes).
+        if (pane) this.sent[tabId] = Math.max(this.sent[tabId] ?? 0, this.now())
         changed = true
       }
       const next = this.tracks
@@ -226,15 +286,20 @@ export class AutoReview {
       const pr = this.prs.get(next.url)!
       const sentAt = this.sent[tabId] ?? 0
       if (pane && !this.deps.panes.ready(tabId, pane, sentAt)) continue
+      // No pane: one start per RESTART_MS (a start that failed, or a pane that died at once, is not repeated every tick).
+      if (!pane && this.now() - (this.started[tabId] ?? 0) < RESTART_MS) continue
       // The queue first: the session may post as soon as it reads the line.
-      this.deps.writeQueue(tabId, this.tracks.filter((t) => t.tabId === tabId && (t.status === 'queued' || t.status === 'reviewing')).map((t) => t.url))
+      this.writeQueue(tabId)
       const line = autoPrompt(pr)
       if (pane) this.deps.panes.type(pane, line)
       else {
+        this.started[tabId] = this.now()
         const r = this.deps.panes.start(tabId, tab, line)
         if ('error' in r) {
-          this.checks[tabId] = { at: this.checks[tabId]?.at ?? null, error: r.error }
-          changed = true
+          if (this.checks[tabId]?.error !== r.error) {
+            this.checks[tabId] = { at: this.checks[tabId]?.at ?? null, error: r.error }
+            changed = true
+          }
           continue
         }
         this.panesSeen[tabId] = r.paneId
@@ -247,6 +312,7 @@ export class AutoReview {
       next.note = null
       next.at = now
       this.event(tabId, `sent ${label(next)} to the review session`)
+      this.writeQueue(tabId)
       changed = true
     }
     if (changed) {
@@ -296,6 +362,10 @@ export class AutoReview {
 
 /** A busy turn this old with no "esc to interrupt" on screen was interrupted (Esc fires no Stop hook). */
 export const BUSY_STALE_MS = 15 * 60_000
+/** A typed line with no busy turn after it this long was not taken. */
+export const SEND_LOST_MS = 10 * 60_000
+/** At most one review pane started per tab this often. */
+export const RESTART_MS = 5 * 60_000
 /** A start this old: its own first prompt, if it had one, would have made it busy by now. */
 export const START_SETTLE_MS = 20_000
 
@@ -307,7 +377,8 @@ export function paneReady(turn: { value: string | null; at: number } | null, sen
   if (now - inputAt < TYPING_MS) return false
   if (!turn) return false
   const v = parseTurn(turn.value)
-  if (v === 'idle') return turn.at > sentAt && now - turn.at >= 1_000
+  // A line that never turned the session busy (not submitted): after SEND_LOST_MS the next one goes.
+  if (v === 'idle') return (turn.at > sentAt && now - turn.at >= 1_000) || (sentAt > 0 && now - sentAt > SEND_LOST_MS)
   if (v === 'start') return turn.at > sentAt && now - turn.at >= START_SETTLE_MS
   // ponytail: Esc ends a turn without a Stop hook; after BUSY_STALE_MS the screen decides. A hook
   // on interrupts (if Claude Code adds one) would replace this.

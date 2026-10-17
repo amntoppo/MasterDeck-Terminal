@@ -130,7 +130,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     if (!rest.length) return
     // Its review session goes with it; the folder stays. Its automation stops.
     closeReviewOf(id)
-    if (state.autoReview?.tabs[id]) void deck().autoReviewSet(id, { review: false, merge: false, name: '', filters: tab.filters, forget: true })
+    void deck().autoReviewSet(id, { review: false, merge: false, name: '', filters: tab.filters, forget: true })
     setTabs(rest)
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
@@ -173,7 +173,8 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
       void deck().autoReviewSet(tab.id, { review: false, merge: false, name: tab.name, filters: tab.filters })
       return
     }
-    const t = setTimeout(() => void deck().autoReviewSet(tab.id, { review: true, merge: auto.merge, name: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters }), 600)
+    // `follow`: main keeps the switches as they are by then (a switch flipped meanwhile is not undone).
+    const t = setTimeout(() => void deck().autoReviewSet(tab.id, { review: true, merge: false, follow: true, name: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters }), 600)
     return () => clearTimeout(t)
   }, [tab.id, acct, tab.name, JSON.stringify(tab.filters), !!auto?.review]) // eslint-disable-line react-hooks/exhaustive-deps
   // A review session MasterDeck started for a request: the panel shows it (folded, until opened).

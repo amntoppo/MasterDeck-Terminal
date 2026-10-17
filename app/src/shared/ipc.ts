@@ -599,7 +599,7 @@ export interface DeckApi {
    */
   autoReviewSet(
     tabId: string,
-    sw: { review: boolean; merge: boolean; name: string; account?: string; filters: PrReviewRequest["filters"]; forget?: boolean },
+    sw: { review: boolean; merge: boolean; name: string; account?: string; filters: PrReviewRequest["filters"]; forget?: boolean; follow?: boolean },
   ): Promise<CliResult>;
   /** Tickets the Board's session created. */
   onTicketsCreated(

@@ -2776,7 +2776,9 @@ function registerIpc(): void {
   // connected; a browser never moves a tab to another account, nor turns Merge automatically on.
   reg.handle(CH.autoReviewSet, (e, tabId: unknown, raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;
+    // A browser's tabs are its own (same ids as the window's): only the window forgets a tab.
     if (o.forget === true && typeof tabId === "string") {
+      if (isRemote(e)) return { ok: true, message: "kept" };
       autoReview.forget(tabId);
       return { ok: true, message: "forgotten" };
     }
