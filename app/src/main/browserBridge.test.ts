@@ -47,6 +47,7 @@ async function world(impl?: (ch: string, a: unknown[]) => Promise<unknown>) {
     log: (l) => void w.logs.push(l),
     logins: () => ['alice', 'bob-work'],
     ticketAccount: (tab) => (tab === 'held' ? 'bob-work' : null),
+    prReviewAccount: (tab) => (tab === 'held' ? 'bob-work' : null),
   })
   return w
 }
@@ -334,7 +335,7 @@ describe('BrowserBridge channel', () => {
   it('ptyOpen for the screen kinds; unknown kinds refused', async () => {
     const w = await world()
     const c = await connected(w)
-    const specs = [{ kind: 'attach', bgId: 'x' }, { kind: 'shell', cwd: '/' }, { kind: 'ticket-builder', resume: false }, { kind: 'builder', resume: false }, { kind: 'installer', tools: [] }]
+    const specs = [{ kind: 'attach', bgId: 'x' }, { kind: 'shell', cwd: '/' }, { kind: 'ticket-builder', resume: false }, { kind: 'pr-review', resume: false, tab: 't1' }, { kind: 'builder', resume: false }, { kind: 'installer', tools: [] }]
     for (const spec of specs) expect(await c.call('ptyOpen', ['p', spec, 80, 24])).toMatchObject({ ok: true })
     expect(await c.call('ptyOpen', ['p9', { kind: 'bogus' }, 80, 24])).toMatchObject({ ok: false, e: 'Not available on the web yet' })
     // Claude Code's trust prompt, and gh's login, are answered on the Mac.
@@ -357,6 +358,18 @@ describe('BrowserBridge channel', () => {
     expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 'held', account: 'alice' }, 80, 24])).toMatchObject({ ok: false })
     expect(await c.call('ptyOpen', ['p', { kind: 'ticket-builder', resume: false, tab: 'held', account: 'Bob-Work' }, 80, 24])).toMatchObject({ ok: true })
     expect(w.call).toHaveBeenCalledTimes(3)
+  })
+
+  it('ptyOpen of a PR review without a tab, with a bad one, or as another account is refused', async () => {
+    const w = await world()
+    const c = await connected(w)
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false, tab: 't1', account: 'bob-work' }, 80, 24])).toMatchObject({ ok: true })
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false }, 80, 24])).toMatchObject({ ok: false, e: 'refusing a PR review without its tab' })
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false, tab: '../x' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false, tab: 't1', account: 'mallory' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false, tab: 'held', account: 'alice' }, 80, 24])).toMatchObject({ ok: false })
+    expect(await c.call('ptyOpen', ['p', { kind: 'pr-review', resume: false, tab: 'held', account: 'Bob-Work' }, 80, 24])).toMatchObject({ ok: true })
+    expect(w.call).toHaveBeenCalledTimes(2)
   })
 
   it('send-mode methods run without a ret', async () => {

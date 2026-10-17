@@ -76,7 +76,7 @@ answers.
 
 With two or more accounts `master snapshot`/`board`/`sprints` read each account with its own token (`collect.Live.for_account`: `gh auth token --user`) and merge (snapshot: `accounts[].sources`, each issue and PR tagged `account`, sessions read once with the primary; board: cards tagged `account`, `errors` when some failed); `keepLastGood` keeps only a failed account's last issues/PRs; team PRs are one search per account (`teamPrPages(owner, …, ownerType)`), tagged `account`, a failed account keeping its last pages (`mergeTeamPages`). A rate limit on one account: the shared cache pauses that account's calls, and the app's polling waits for any account's pause to lift (every account's refresh waits); `snapshot source missing: <k>` names the accounts. A session's branch head is read as its repo's account (`config.account_for_repo`), its failure tagged with that account; `master sprints` merges a title found on several accounts' boards (`board.merge_sprints`). Assignable users and `me` are the primary's. One account: the same single read as before.
 
-`build()` order: raw sessions (minus the workflow/ticket builder sessions: `isTicketBuilderSession`, named `md-ticket-builder[-<tab>]` or in `ticket-builder/` or a `ticket-builder/tab-*` folder) → `attachIssues` →
+`build()` order: raw sessions (minus the workflow/ticket builder sessions: `isTicketBuilderSession`, named `md-ticket-builder[-<tab>]` or in `ticket-builder/` or a `ticket-builder/tab-*` folder; and the PR view's review sessions, `isPrReviewSession`: `md-pr-review-<tab>` or a `pr-review/tab-*` folder) → `attachIssues` →
 `applyFreshness` → activity → hook state; asks and menus; deck hook permission requests become
 menus; `collectItems` (`shared/inbox.ts`) → `inbox.update()`; then the `AppState` object.
 The inbox is "primed" only once agents are healthy and the ledger was read, so nothing resolves or
@@ -927,7 +927,7 @@ here (needs `hooks.queue`).
 ### Sender and PTYs
 
 - `main/ptys.ts` `PtyManager`: one PTY per pane id (`PaneSpec` kinds `attach`, `shell`, `installer`,
-  `builder`, `ticket-builder`; command from `shared/paneCommand.ts`). Keeps a 200 KB replay buffer
+  `builder`, `ticket-builder`, `pr-review`; command from `shared/paneCommand.ts`). Keeps a 200 KB replay buffer
   and a cumulative `seq` (characters emitted) so a view that mounts later replays and then drops
   data already covered. Output goes out as `pty:data:<id>` / `pty:exit:<id>` through `emit`.
   Closing a pane kills only `claude attach`; the background session keeps running.
@@ -947,6 +947,38 @@ here (needs `hooks.queue`).
   prepared, opened or pumped when its real path is directly inside the real `ticket-builder/`
   (`ticketDirOk`). The New ticket dialog's Create with Claude is blocked while its Account differs
   from the tab's (`claudeHandoff`). Tab folders are never removed (see TODO).
+- The PR view's review session (Review with Claude, `pr-review` spec `{resume, tab, prompt?,
+  account?}`, #149): always one per PR tab, pane `pr-review:<tabId>:<gen>`, `-n md-pr-review-<tabId>`
+  in `<home>/pr-review/tab-<tabId>/` (`main/prReviewDirs.ts`: `prReviewDir`, `prReviewDirOk`,
+  `prReviewPane`); with two or more accounts as the tab's account (`--settings`), else gh's active
+  account, as the ticket builder. `prReviewPrepare` (`CH.prReviewPrepare`, remote) takes `{tabId,
+  tab, account?, filters, url?, context?}`, checks the tab id, the account (connected) and the
+  folder, and writes `context.json` from MasterDeck's own `state.teamPrs` (`prReviewContext` in
+  `shared/prReview.ts`: the selected PR's repo, number, title, author, branch, base, CI, reviews,
+  threads, issues; never facts from the caller), and, unless `context: true` (the view's 400 ms
+  follow-up when the pick or the filters change), `CLAUDE.md` (`prReviewBriefing`), project
+  settings (`PR_REVIEW_SETTINGS`: `gh pr view/diff/checks/list`, `gh run view/list`, `gh issue view`
+  allowed; `gh pr review/comment/merge/close/edit/ready`, `gh issue comment` denied) and the post
+  script `<home>/pr-review-guard/post-review-<tabId>.sh` (`prReviewPost`, `prReviewScript`; the
+  briefing names it by that absolute path), each atomically. The script is the session's only write: one
+  review (`POST repos/<o>/<r>/pulls/<n>/reviews`, body and inline comments from files inside the
+  folder, JSON by `jq`), only to the selected PR (`--pr` must match), only when `gh api user` is the
+  tab's account (when there is one), `--dry-run` posts nothing; both checks read the guard file
+  `<home>/pr-review-guard/tab-<tabId>.json` (`prReviewGuard`, written with every prepare), outside
+  the folder. The script sits beside it for the same reason: in its own folder `acceptEdits` lets
+  the session rewrite files unasked (Edit, and filesystem commands such as `cp` or `sed -i`), and the
+  script is what the user approves; a copy left in the folder by an older version is removed. The
+  folder's account (`prReviewFolderAccount`, for the bridge's pane check and a browser's prepare)
+  is read from the guard too, never from `context.json`. The settings also deny `Edit` of
+  `context.json`, `CLAUDE.md` and `.claude/**`, and a `.claude` that is a link is refused. The
+  script is not in the allow list, so Claude Code asks the user before each run. A browser's prepare
+  may not change the account a tab folder already names. The renderer keeps the sessions per
+  tab in a module map (`keptReviews` in `PrsView.tsx`); a tab's account change, its close, or a
+  switch between one and several accounts closes its pane. The bridge refuses a remote `pr-review`
+  open without a tab, with a bad one, an account not connected, or one other than the tab folder's
+  (`prReviewSpecError` → `ticketSpecError(…, "PR review")`). `isPrReviewSession` hides them from
+  the session list. The PR popup's **Review with Claude** is passed by `App.openPr` only when the
+  popup was opened from the PRs view.
 - The workflow builder (`builder` spec) runs as the primary account with two or more: the
   `builderSettings` callback of `PtyManager` gives `AccountEnv.settingsArgs(null)`'s `--settings`,
   and nothing while the primary needs to log in again (gh's active account then, as master).
@@ -2169,6 +2201,8 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
 | `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
+| `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them) |
+| `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `.claude/settings.json`, and the review files the session writes |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |
 | `native-hooks.json` | `{at, removed}`: the one-time removal of the old skill hooks ran (`migrateLegacyHooks`) |

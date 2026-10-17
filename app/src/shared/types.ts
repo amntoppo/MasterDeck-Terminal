@@ -545,6 +545,11 @@ export type PaneSpec =
    * accounts: one per Board tab (`tab`, its id), running as the tab's `account`; main ignores both with one.
    */
   | { kind: "ticket-builder"; resume: boolean; prompt?: string; tab?: string; account?: string }
+  /**
+   * The Pull requests view's review session (Review with Claude): one per PR tab (`tab`, its id), in
+   * that tab's folder; with two or more accounts as the tab's `account`. `prompt`: its first message.
+   */
+  | { kind: "pr-review"; resume: boolean; tab: string; prompt?: string; account?: string }
   /** Setup's "Add an account": gh's own browser login. */
   | { kind: "gh-login" }
   /** Plain `claude` in a folder Claude Code was never allowed to work in: the user answers its trust
