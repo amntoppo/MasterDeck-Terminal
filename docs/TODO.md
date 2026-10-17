@@ -526,6 +526,22 @@ fixes it, and move the item here to "Recently done".
 - **The phone API `session.start` has no `peers`.** A session started from a phone cannot be linked at
   start; it can be linked after, from its details.
 
+## Review with Claude: open points (2026-10-17, issue #149)
+
+- **Not run with a real Claude session or a real post.** Checked with a stand-in `claude` in the
+  isolated app (folder, briefing, context following the pick, the pane's command) and the script
+  with a stand-in `gh` and a `--dry-run` against a real context. The first real review and the
+  first real post are the user's.
+- **Tab folders are never removed** (as the ticket builder's): a closed PR tab leaves
+  `pr-review/tab-<id>/` behind. Sweep folders of tabs that no longer exist if they pile up.
+- **The briefing's account line** uses the tab's account with two or more accounts, else the
+  primary's login; with one account the script does not check who gh is (gh's active account, as
+  every other session).
+- **The Board's Tickets with Claude panel on a phone** has no phone rule (`bottom: 0`), so its last
+  rows may sit under the tab bar (not checked); the review panel stops above it (`web.css`). Give
+  the Board's the same if so.
+- **Inline comments, threads and "send to the PR's session"** are #142.
+
 ## Create with Claude settings bar: open points (2026-10-09, issue #68)
 
 - **Not run against GitHub.** A ticket created through the bar (assignees, labels, milestone,
@@ -964,6 +980,11 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   through the wizard's own path (`setupPatch`); success view, then the main screen. Branch
   `worktree-156-let-claude-setup`.
 
+
+- **Review with Claude in the Pull requests view (#149)**: a Claude panel per PR tab, the picked PR
+  in its `context.json`, a briefing on how to review, and `post-review.sh`, the one write, only
+  after the user's yes, only to the picked PR, as the tab's account. Branch
+  `worktree-MasterDeck-Terminal-149-pr-review-panel`.
 - **Clone a session (#136)**: right-click → **Clone…** starts `claude --bg --resume <id>
   --fork-session -n <name>` in the same folder, as the same account, with the model and permission
   mode carried when valid; the original is not superseded; the clone takes none of the original's

@@ -47,6 +47,10 @@ export class PtyManager {
     }),
     /** The workflow builder's account settings: the primary's with two or more accounts, else none. */
     private builderSettings: () => string[] = () => [],
+    /** The Pull requests view's review session: its tab's folder and account settings, or why not. */
+    private prReviewPane: (spec: { tab?: string; account?: string }) => { cwd: string; settings: string[] } | { error: string } = () => ({
+      error: "no PR review here",
+    }),
     /** Setup's "Let Claude do it" session folder (its CLAUDE.md and helper, written before it opens). */
     private setupDir: () => string = () => homedir(),
   ) {}
@@ -102,12 +106,15 @@ export class PtyManager {
     const ticket = spec.kind === "ticket-builder" ? this.ticketPane(spec) : null;
     if (ticket && "error" in ticket)
       return { ok: false, replay: "", seq: 0, exited: true, message: ticket.error };
+    const review = spec.kind === "pr-review" ? this.prReviewPane(spec) : null;
+    if (review && "error" in review)
+      return { ok: false, replay: "", seq: 0, exited: true, message: review.error };
     const cmd = paneCommand(
       ticket && spec.kind === "ticket-builder" ? { ...spec, tab: ticket.tab } : spec,
       process.platform,
       process.env.SHELL,
       this.claude(),
-      ticket?.settings ?? (spec.kind === "builder" ? this.builderSettings() : []),
+      ticket?.settings ?? review?.settings ?? (spec.kind === "builder" ? this.builderSettings() : []),
     );
     if (spec.kind === "installer") {
       cmd.cwd = this.installerDir();
@@ -123,6 +130,10 @@ export class PtyManager {
     }
     if (ticket) {
       cmd.cwd = ticket.cwd;
+      mkdirSync(cmd.cwd, { recursive: true });
+    }
+    if (review) {
+      cmd.cwd = review.cwd;
       mkdirSync(cmd.cwd, { recursive: true });
     }
     const pane: Pane = {

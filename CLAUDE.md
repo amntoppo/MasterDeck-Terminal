@@ -166,6 +166,7 @@ web tabs keep working.
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card; its board writes (status moves) as `forBoard` (the board's account); pass the card's `project` (`Ticket.project`, `knownProject` for input) where you have it |
 | A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
+| Review with Claude (Pull requests view, #149) | `shared/prReview.ts` (`prReviewContext`, `prReviewBriefing`, `prRef`, `reviewPrompt`, `prReviewSpecError`), `main/prReviewDirs.ts` (`prReviewDir`, `prReviewPane`, `writePrReviewDir`, `prReviewGuard` + `prReviewPost` (guard and post script, outside the session's folder), `prReviewScript`, `PR_REVIEW_SETTINGS`, `isPrReviewSession`), `CH.prReviewPrepare` in `main/index.ts`, the `pr-review` pane (`paneCommand`, `PtyManager`, `WEB_PANES`), `renderer/.../PrsView.tsx` (`keptReviews`, `openReview`, the panel), `PrPopup.tsx` (`onReviewWithClaude`, passed by `App.openPr`) |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
 | Setup with Claude (Setup → Let Claude do it, #156) | `shared/setupClaude.ts` (`readSetupDraft`, `draftSummary`, `setupBriefing`, `setupScript`), `main/setupClaude.ts` (`prepareSetupDir`, `SetupPump`), `CH.setupClaude*` in `main/index.ts` (`detectAllAs`), `setupPatch` / `selFromDraft` in `renderer/.../setupAccounts.ts` (the one save path of Setup), the panel in `SetupDialog.tsx`, `onHold` in `App.tsx`. Only the window's Save writes the config; never let the session write it |
@@ -434,6 +435,20 @@ buttons; it does not go through macOS window drag regions.
   view then the Skills popup, leaving early from Settings). Not checked: the real `claude`
   following the briefing, a real `gh auth login` from the chat, a mods install from Save, Windows
   (the helper is bash; Claude Code runs it in Git Bash). Open points: TODO ("Setup with Claude (#156)").
+
+- **Review with Claude in the Pull requests view (#149)** is built on branch
+  `worktree-MasterDeck-Terminal-149-pr-review-panel` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). A Claude panel on the right of the PRs view,
+  one session per PR tab (as the tab's account with two or more), the picked PR in its
+  `context.json` (taken from `state.teamPrs`), a briefing on how to review, and a post script kept outside the session's folder:
+  one review, only after the user's yes (not in the allow list, so Claude Code asks), only to the
+  picked PR, as the tab's account; gh's own PR writes are denied. Spec and plan in this repo's
+  `docs/superpowers/{specs,plans}/2026-10-17-pr-review-panel*`. Checked: typecheck, vitest, the
+  web preview at 1440 and 390 px, and the isolated app with a stand-in `claude` against the real
+  PR list (a read): the row button, the popup's button, the pick following into `context.json`,
+  the pane's command and folder, the session kept across views, the script's `--dry-run` and its
+  refusal of another PR. Not checked: a real Claude review, a real post, the real web app,
+  Windows. Open points: TODO ("Review with Claude").
 
 - **Clone a session (#136)** is built on branch `worktree-MasterDeck-Terminal-136-clone-session`
   (PR #148, not merged; **not installed**: the rebuild of the real app waits for the user's word).
