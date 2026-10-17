@@ -261,6 +261,61 @@ A session you start yourself (`claude` in a shell) is not linked to any ticket u
 updates the skill's own file, which MasterDeck no longer reads.) Being in a
 checkout whose branch was once linked to a ticket does not link it.
 
+## Schedules
+
+Some work should run without you starting it: triage new issues every morning, update
+dependencies every night, a security audit every Monday. **Schedules** (the clock in the rail,
+under **More** on a phone, or **Go to Schedules** in ⌘K) starts a background Claude session for it
+on a timer.
+
+**New schedule** asks for:
+- **Name**, and the **Prompt** each run gets as its first message. With a **Workflow** picked the
+  prompt may stay empty: the run is then told to follow that workflow. The workflow is attached as
+  in **New Claude session**, so its steps run in the session.
+- **Model**, **Folder** (the workspace, one of its repos, or any other folder), **Account** (two or
+  more GitHub accounts; by default the folder's) and **Permissions**.
+- **When**: every day at a time, weekdays, on chosen days, every 1, 2, 3, 4, 6, 8 or 12 hours (at a
+  minute), or a cron expression (minute hour day month weekday), in a **Time zone** (yours by
+  default). The next three runs are shown in your own time; a cron that never matches is refused.
+- **Skip a run while the previous one is still going** (on by default), **Notify when a run
+  finishes**, **Notify when a run fails or is stopped**, a **Cost limit per run** (a run that spends
+  more is stopped; its conversation is kept), and **Missed runs**: **Run once when back** or **Skip
+  them**.
+
+Each run is a real `claude --bg` session named after the schedule and its time
+(`morning-triage-1017-0900`), started in the schedule's folder as its account. It shows in the
+session list with a **⏱ schedule** chip, like any session you started yourself.
+
+Claude Code starts a background session only in a folder you have allowed it to work in (its own
+trust prompt). When a schedule's folder was never allowed, the editor says so before you save, and a
+run it refused says so in the history, with **Open Claude there…**: answer Claude Code's prompt there
+once and the next runs start.
+
+Times are wall-clock times in the schedule's zone. When the clock goes back an hour, a time in the
+repeated hour runs once; when it jumps forward, a time in the skipped hour runs at the first minute
+after it (a daily 02:30 runs at 03:00 that day).
+
+The list shows each schedule with an on/off switch, when it runs, its next run and its last run's
+status and cost, and **Run now**, **Edit** and **Delete**. Click a schedule for its last runs:
+when each started (on time, catch-up or Run now), its status (Running, Finished, Failed, Skipped,
+Stopped, with the reason), how long it took, its cost, and its session (click to open it). A run is
+finished when its session goes idle after working; one that waits on you (a permission prompt, a
+question) is still running, for up to 12 hours: after that it no longer counts as running, so it
+cannot hold the schedule back for ever. When a run is skipped because the previous one is still
+going, you are told once (with **Notify when a run fails**).
+
+Runs start while MasterDeck is open. When the Mac slept or MasterDeck was closed through one or more
+runs, the schedule runs **once** when MasterDeck is back (or records them as skipped, if you chose
+that), never one run per missed slot; and after a wake at most one such catch-up run starts every
+30 seconds across all schedules. Pausing a schedule and turning it on again starts counting from
+then: what it would have run while paused is not caught up. Deleting a schedule removes it and its
+history; sessions it started keep running.
+
+Schedules and their history are kept on this Mac (`schedules.json` in MasterDeck's folder). The web
+app shows and edits them too. A run's notification goes out when the schedule's own switch says so
+and **Settings → Notifications → Scheduled run** sends it somewhere (by default a system
+notification; a click opens the run's session).
+
 ## A session's tabs: files and diffs
 
 Each session's terminal has its own row of tabs above it. **Terminal** is always first; it cannot
@@ -1087,7 +1142,7 @@ Stored in `~/.claude/masterdeck/settings.json`.
   checkbox per cell. The kinds: Session finished, Session needs input (a permission prompt, a
   question, a menu), New item in Needs you (everything else there), PR ready for review, PR merged,
   CI failed, Monitor event (monitors MasterDeck runs, at most one a minute each), Update available,
-  Workflow notify step and Meetings. The places: **System notification** (macOS / Windows),
+  Workflow notify step, Meetings and Scheduled run. The places: **System notification** (macOS / Windows),
   **Needs you** (the list in MasterDeck) and **Mobile push** (shown greyed out: it comes with the
   mobile app). A change applies at once.
   - Needs you off for Session needs input or CI failed leaves those items out of the list (and the
