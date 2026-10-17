@@ -6,6 +6,7 @@ import type { AssignRequest, DeckApi, Template } from "@shared/ipc";
 import { defaultModelLabel, MODELS } from "@shared/models";
 import { composePrompt, earlierBlock, peersPromptBlock } from "@shared/prompt";
 import type { AppState, DraftAssign, Issue } from "@shared/types";
+import type { ResumeTarget } from "@shared/resumeOpen";
 import { formatAgo } from "@shared/format";
 import { startAccount, accountOverride, resumeAccount } from "@shared/accounts";
 import { isMulti } from "@shared/accounts";
@@ -30,6 +31,8 @@ interface Props {
   onStart: (req: AssignRequest) => void;
   /** Opens the Link dialog for this issue instead of starting a new session. */
   onLink: () => void;
+  /** An earlier session was resumed (the dialog closes): open its terminal. */
+  onResumed: (t: ResumeTarget) => void;
   /** Pre-filled first instructions (e.g. "fix CI" routed from My PRs). */
   initialInstructions?: string;
 }
@@ -42,6 +45,7 @@ export function AssignDialog({
   onClose,
   onStart,
   onLink,
+  onResumed,
   initialInstructions,
 }: Props) {
   const pending = pendingAssign(state.proposals, ticketOf(issue));
@@ -547,6 +551,7 @@ export function AssignDialog({
                   disabled={resuming !== null}
                   onClick={async () => {
                     setResuming(p.sessionId);
+                    const at = Date.now();
                     const r = await deck().resumeSession(
                       p.sessionId,
                       p.name,
@@ -554,8 +559,9 @@ export function AssignDialog({
                       resumeAccount(p.account, account, accountPicked, state.config),
                     );
                     setResuming(null);
-                    if (r.ok) onClose();
-                    else setError(r.message);
+                    if (!r.ok) return setError(r.message);
+                    onClose();
+                    onResumed({ key: r.key ?? null, sessionId: p.sessionId, name: p.name, at });
                   }}
                 >
                   {resuming === p.sessionId ? "Resuming…" : "Resume"}

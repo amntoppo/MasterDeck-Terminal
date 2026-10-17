@@ -510,6 +510,12 @@ diff too big to send says so.
   the copy keeps its ticket link and PRs, and master never proposes to resume the old one.
   Duplicates made before this fix are not cleaned up: remove the ones you don't need yourself
   (Session hygiene, or `claude rm <id>`; that also deletes the session's worktree).
+- **A resume opens the session.** After **Resume** on a card, in the Start dialog or in History
+  (**Resume a past session…**), MasterDeck closes the dialog, switches to Terminals and opens the
+  session's tab on its Terminal with the keyboard in it, so you can type at once. A tab it already
+  had is reused (a terminal that showed "Session ended" attaches again); until Claude Code lists the
+  session the tab says "Resuming …". A resume that fails leaves you where you were with the error.
+  **Resume all** after a restart opens nothing: it resumes many sessions and stays where you are.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
   MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
   ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers

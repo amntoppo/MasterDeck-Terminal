@@ -178,6 +178,8 @@ function previewDeck(noBoard: boolean): DeckApi {
   const repos = ['/Users/dev/acme', '/Users/dev/acme/web', '/Users/dev/acme/api', '/Users/dev/acme/clients/mobile-app-with-a-long-folder-name'].map((path) => ({ name: path.split('/').pop() ?? path, path }))
   const calls: Record<string, Fn> = {
     getState: () => state,
+    // As the Mac answers a resume: the background id it runs under (here search-index's).
+    resumeSession: (_id: never, name: never) => ({ ok: true, message: name, key: 'bg-5' }),
     getSettings: () => state.settings,
     setSettings: (s: never) => s,
     ptyOpen: (id: never) => ({ ok: true, replay: fakeScreen(String(id).replace(/^.*:/, '')), seq: 1, exited: false }),
