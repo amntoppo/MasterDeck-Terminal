@@ -67,6 +67,12 @@ describe('SetupPump', () => {
     expect(a.owners[0].projects[0].id).toBeUndefined()
     expect(p.poll().found).toEqual({ alice: detect })
     expect(p.poll(['alice']).found).toEqual({})
+    // Discovered again (say after gh auth refresh -s project): the window gets the new answer.
+    ask(dir, '1-1-2', 'discover', 'alice')
+    p.poll(['alice'])
+    await settle()
+    expect(p.poll(['alice']).found).toEqual({ alice: detect })
+    expect(p.poll(['alice']).found).toEqual({})
     p.reset()
     expect(p.poll().found).toEqual({})
   })

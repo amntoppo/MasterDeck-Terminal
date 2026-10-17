@@ -84,6 +84,8 @@ export interface SetupHandlers {
 export class SetupPump {
   /** discover's answers, raw, by login: the window fills its Repos & boards step from them. */
   private found = new Map<string, unknown>()
+  /** Logins discovered again since the last poll: the window must take the new answer, though it knows the login. */
+  private changed = new Set<string>()
   /** Claimed and not answered yet. */
   private open = new Set<string>()
 
@@ -95,6 +97,7 @@ export class SetupPump {
   /** A new conversation: nothing of the last one is kept. */
   reset(): void {
     this.found.clear()
+    this.changed.clear()
     this.open.clear()
   }
 
@@ -128,7 +131,10 @@ export class SetupPump {
       const r = this.claim(id, args)
       if (r) requests.push(r)
     }
-    const fresh = [...this.found].filter(([l]) => !known.includes(l))
+    // In the same answer as the requests claimed now, so a review always meets the latest discover
+    // (e.g. one read again after `gh auth refresh -s project`).
+    const fresh = [...this.found].filter(([l]) => !known.includes(l) || this.changed.has(l))
+    this.changed.clear()
     return { requests, found: Object.fromEntries(fresh) }
   }
 
@@ -166,6 +172,7 @@ export class SetupPump {
     const r = await this.h.discover(login)
     if (!r.ok) return { ok: false, error: r.message }
     this.found.set(login, r.data)
+    this.changed.add(login)
     // What the session needs to ask the user; the window keeps the rest (ids, statuses).
     const d = parseDetectAll(r.data)
     return {

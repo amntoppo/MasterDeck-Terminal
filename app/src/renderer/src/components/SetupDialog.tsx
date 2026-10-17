@@ -250,8 +250,8 @@ export function SetupDialog({
   const go = async (to: number) => {
     setMsg(null)
     if (to === 2 && accounts === null && ghHere) void loadAccounts()
-    // Leaving Account for the next step (not Skip): apply the Remote switch.
-    if (firstRun && step === 0 && to === 1 && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
+    // Leaving Account for a later step (Next, or back from Claude onto any step): apply the Remote switch.
+    if (firstRun && step === 0 && to >= 1 && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
     if (to === 3) {
       if (!editing && primaryLogin) switchTo(primaryLogin)
       else if (found === null && !finding) void loadFound(editing, onScreen())
@@ -368,8 +368,9 @@ export function SetupDialog({
         ? `The steps show what Claude filled in. Nothing is saved until you press ${firstRun ? 'Finish' : 'Save'}.`
         : 'Nothing was saved. Go on here, or press Let Claude do it again.',
     )
+    // Through `go`, so leaving from the Account step applies its Remote switch as Next does.
     if (to !== undefined) void go(to)
-    else if (firstRun && step === 0) setStep(1)
+    else if (firstRun && step === 0) void go(1)
   }
   const answer = (id: string, a: object) => void deck().setupClaudeAnswer(id, a)
 
