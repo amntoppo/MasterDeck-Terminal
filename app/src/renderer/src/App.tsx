@@ -269,6 +269,8 @@ export function App() {
   const [showFirstRun, setShowFirstRun] = useState(
     () => !load<boolean>("setupSkipped", false),
   );
+  // Setup with Claude saved and shows its success view: the first-run dialog stays up past `configured`.
+  const [firstRunHeld, setFirstRunHeld] = useState(false);
   const [startWith, setStartWith] = useState<string | undefined>(undefined);
   // Which column edge is being dragged: the Terminals panel's, or master's.
   const [dragging, setDragging] = useState<false | "panel" | "master">(false);
@@ -1753,16 +1755,18 @@ export function App() {
           onClose={() => setWorktreesFor(null)}
         />
       )}
-      {(dialog === "setup" || (showFirstRun && !state.config.configured && !isWeb())) && (
+      {(dialog === "setup" || (showFirstRun && (!state.config.configured || firstRunHeld) && !isWeb())) && (
         <SetupDialog
           state={state}
           firstRun={dialog !== "setup"}
+          onHold={setFirstRunHeld}
           onClose={() => {
             // After the first-run setup (finished or skipped), the skills come next, once.
             const first =
               dialog !== "setup" && !load<boolean>("skillsShown", false);
             setDialog(first ? "skills-first" : null);
             setShowFirstRun(false);
+            setFirstRunHeld(false);
             save("setupSkipped", true);
           }}
         />

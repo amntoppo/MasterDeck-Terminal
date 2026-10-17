@@ -79,7 +79,7 @@ import {
   accountsKeyOf,
   migrateLegacyConfig,
 } from "./accountEnv";
-import { parseGhAccounts, setupScopes, type GhAccount } from "@shared/ghAuth";
+import { hasProjectScope, parseGhAccounts, setupScopes, type GhAccount } from "@shared/ghAuth";
 import {
   defaultAccount,
   isMulti,
@@ -182,6 +182,7 @@ import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
+import { prepareSetupDir, SetupPump, setupClaudeDir } from "./setupClaude";
 import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
 import { AutoReview, paneReady, readTurn } from "./autoReview";
 import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
@@ -556,7 +557,39 @@ const ptys = new PtyManager(
     prReviewPane(paths.home, isMulti(getConfig()), spec, (l) =>
       accountEnv.settingsArgs(l),
     ),
+  () => setupClaudeDir(paths.home),
 );
+
+/** Setup's "Let Claude do it": its helper's requests, answered here or by the Setup window. */
+const setupPump = new SetupPump(() => setupClaudeDir(paths.home), {
+  tools: async () => {
+    const ids: SetupTool[] = ["claude", "gh", "python", "git", "jq"];
+    const got = await Promise.all(ids.map((t) => setupTool(t)));
+    return { ok: true, tools: Object.fromEntries(ids.map((t, i) => [t, got[i]])) };
+  },
+  accounts: async () => {
+    const r = await ghAccounts();
+    return {
+      ok: true,
+      accounts: r.accounts.map((a) => ({ login: a.login, active: a.active, ok: a.ok, projectScope: hasProjectScope(a) })),
+      ...(r.error ? { error: r.error } : {}),
+    };
+  },
+  // As the account's own token, read-only (as Setup's Repos & boards step); never gh's active account.
+  discover: async (login) => {
+    const r = await detectEnv(login, false, [], tokenEnv);
+    return "error" in r ? { ok: false, message: r.error } : detectAllAs(r.env);
+  },
+});
+
+/**
+ * What an account can reach (`master config detect --all` with its env), for Setup's Repos & boards
+ * and its Claude session. Test aid: MASTERDECK_DETECT_FIXTURE=<json> replaces the GitHub reads.
+ */
+async function detectAllAs(env: Record<string, string>): Promise<{ ok: true; data: unknown } | { ok: false; message: string }> {
+  const fx = process.env.MASTERDECK_DETECT_FIXTURE;
+  return fx ? { ok: true, data: JSON.parse(readFileSync(fx, "utf8")) } : cli.configDetectAll(env);
+}
 
 /**
  * A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
@@ -3308,6 +3341,25 @@ function registerIpc(): void {
   reg.handle(CH.setupCheck, () => setupCheck());
   reg.handle(CH.setupTool, (_e, tool: SetupTool) => setupTool(tool));
   reg.handle(CH.ghAccounts, () => ghAccounts());
+  // Setup's "Let Claude do it" (the Mac's window only: blocked in DECK_ACCESS, refused here too).
+  reg.handle(CH.setupClaudePrepare, (e) => {
+    if (isRemote(e)) return { ok: false, message: "set up with Claude on the Mac" };
+    try {
+      setupPump.reset();
+      prepareSetupDir(setupClaudeDir(paths.home), process.platform);
+      return { ok: true, message: "" };
+    } catch (err) {
+      return { ok: false, message: `could not prepare Claude's folder: ${(err as Error).message}` };
+    }
+  });
+  reg.handle(CH.setupClaudePoll, (e, known: unknown) =>
+    isRemote(e)
+      ? { requests: [], found: {} }
+      : setupPump.poll(Array.isArray(known) ? known.filter((k): k is string => typeof k === "string") : []),
+  );
+  reg.handle(CH.setupClaudeAnswer, (e, id: unknown, answer: unknown) =>
+    !isRemote(e) && typeof id === "string" && setupPump.answer(id, answer),
+  );
   // Setup: a newly connected account's commit identity (GitHub name, noreply email; editable there).
   reg.handle(CH.ghUser, async (_e, login: unknown) => {
     if (typeof login !== "string" || !GH_LOGIN.test(login))
@@ -3362,7 +3414,7 @@ function registerIpc(): void {
     );
     return "error" in r
       ? { ok: false as const, message: r.error }
-      : cli.configDetectAll(r.env);
+      : detectAllAs(r.env);
   });
   reg.handle(CH.configDetect, (_e, owner: unknown, project: unknown) =>
     typeof owner === "string"
@@ -4009,6 +4061,9 @@ function registerIpc(): void {
       // Claude Code's trust prompt is answered on the Mac.
       if (isRemote(e) && spec?.kind === "claude-here")
         return { ok: false, replay: "", seq: 0, exited: true, message: "open Claude in that folder on the Mac" };
+      // Setup's Claude session is the Mac window's (WEB_PANES leaves it out too).
+      if (isRemote(e) && spec?.kind === "setup-claude")
+        return { ok: false, replay: "", seq: 0, exited: true, message: "set up with Claude on the Mac" };
       // Spec §4: a browser's size never resizes a pane the Mac's window shows.
       if (!isRemote(e)) macPanes.local(id, cols);
       else [cols, rows] = macPanes.remoteSize(id, cols, rows) ?? [0, 0];
