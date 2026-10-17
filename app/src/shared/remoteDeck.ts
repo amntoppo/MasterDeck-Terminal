@@ -76,6 +76,12 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   notesSearch: invoke(CH.notesSearch),
   notesSave: invoke(CH.notesSave),
   notesDelete: invoke(CH.notesDelete),
+  // A schedule starts the same session New Claude session (startClaude, remote) starts, later.
+  schedList: invoke(CH.schedList),
+  schedSave: invoke(CH.schedSave),
+  schedDelete: invoke(CH.schedDelete),
+  schedEnable: invoke(CH.schedEnable),
+  schedRunNow: invoke(CH.schedRunNow),
   // Meetings are set up and recorded on the Mac only (issue #102): its microphone, its consent.
   meetingsSetup: blocked,
   meetingsConsent: blocked,
@@ -105,6 +111,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   meetingsNotNow: blocked,
   onMeetingsShowRecord: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
+  onSchedChanged: { kind: "event", ch: CH.schedChanged },
+  // A notification click on the Mac shows the window's view only.
+  onShowSchedules: local,
   // A session's files and diffs, read only, inside its own folder (sessionFileCall), cut to fit the bridge (webFit).
   filesList: invoke(CH.filesList),
   filesRead: invoke(CH.filesRead),
@@ -233,6 +242,7 @@ export const REMOTE_EVENTS: Record<string, string> = {
   onWorkflowDraft: CH.workflowDraft,
   onTicketsCreated: CH.ticketsCreated,
   onNotesChanged: CH.notesChanged,
+  onSchedChanged: CH.schedChanged,
   onBtwEvent: CH.btwEvent,
 };
 

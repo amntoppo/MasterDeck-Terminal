@@ -25,6 +25,7 @@ import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
+import type { SchedInput, SchedList } from "./sched";
 import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
 import type { DiffBase } from "./sessionTabs";
 import type { HookEntry } from "./workflow";
@@ -244,6 +245,13 @@ export const CH = {
   notesSearch: "notes:search",
   notesSave: "notes:save",
   notesDelete: "notes:delete",
+  schedList: "sched:list",
+  schedSave: "sched:save",
+  schedDelete: "sched:delete",
+  schedEnable: "sched:enable",
+  schedRunNow: "sched:runNow",
+  schedChanged: "sched:changed",
+  showSchedules: "app:showSchedules",
   meetingsSetup: "meetings:setup",
   meetingsConsent: "meetings:consent",
   meetingsPermission: "meetings:permission",
@@ -499,6 +507,20 @@ export interface DeckApi {
   /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
   notesSave(input: NoteInput): Promise<SaveResult>;
   notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** Schedules (#140): every schedule with its next run, and their last runs. */
+  schedList(): Promise<SchedList>;
+  /** Add (no id) or change a schedule; checked in main (`normalizeSchedule`). */
+  schedSave(input: SchedInput & { id?: string }): Promise<{ ok: true; id: string } | { ok: false; message: string }>;
+  /** The schedule and its history go; sessions it started go on. Callers ask first. */
+  schedDelete(id: string): Promise<{ ok: boolean; message: string }>;
+  /** Pause (false) or resume (true); resumed, it counts from now. */
+  schedEnable(id: string, on: boolean): Promise<{ ok: boolean; message: string }>;
+  /** Start a run now (refused while one runs when the schedule skips overlaps). */
+  schedRunNow(id: string): Promise<{ ok: boolean; message: string }>;
+  /** A schedule or run changed: list again. */
+  onSchedChanged(cb: () => void): () => void;
+  /** A schedule's notification without a session was clicked: show Schedules. */
+  onShowSchedules(cb: () => void): () => void;
   /**
    * Settings → Meetings' state (macOS, the window only). Reads macOS's grants without asking
    * anything (getMediaAccessStatus).

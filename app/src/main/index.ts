@@ -44,6 +44,7 @@ import {
   net,
   nativeTheme,
   Notification,
+  powerMonitor,
   protocol,
   safeStorage,
   session,
@@ -111,6 +112,8 @@ import {
 import { ModCatalog, ModOff } from "./modOff";
 import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
+import { Scheduler } from "./sched";
+import { SCHED_TICK_MS } from "@shared/sched";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
 import { MeetingNotices } from "./meetingNotices";
 import { Notices } from "./notices";
@@ -372,6 +375,36 @@ const notes = new NotesStore(join(paths.home, "notes"), {
 });
 // Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
 // terminal, read from Claude Code's prompt history. Their own channels; never in AppState.
+// Schedules (#140): sessions started on a timer, through startSession as New Claude session does.
+// Their own channels; AppState carries only the session keys a run started (the list's chip).
+const scheduler = new Scheduler(join(paths.home, "schedules.json"), {
+  now: Date.now,
+  // Nothing runs, ends or times out before the first session list.
+  state: () =>
+    sessionsLoaded && latest
+      ? { sessions: latest.sessions, costBook: latest.costBook, allStats: latest.allStats }
+      : null,
+  start: async (r) => {
+    const x = await startSession(r);
+    return x.ok ? { ok: true, bgId: x.bgId } : x;
+  },
+  stop: (bgId) => stopBg(bgId),
+  // The schedule's own switches first, then Settings → Notifications (its `schedule-run` row).
+  notify: (n) =>
+    notify([{ type: "schedule-run", title: n.title, body: n.body, target: n.sessionKey ? { sessionKey: n.sessionKey } : { schedules: true } }]),
+  templateName: (id) => workflows().templates().find((t) => t.id === id)?.name ?? null,
+  dirOk: (p) => {
+    try {
+      return statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  onChange: () => {
+    emit(CH.schedChanged);
+    sources.changed();
+  },
+});
 const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
 const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
 const btwTerminal = new BtwTerminal(
@@ -523,6 +556,95 @@ const ptys = new PtyManager(
       accountEnv.settingsArgs(l),
     ),
 );
+
+/**
+ * A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
+ * New Claude session (`CH.startClaude`) and Schedules (#140) start through it.
+ */
+async function startSession(raw: unknown): Promise<{ ok: true; message: string; bgId: string | null } | { ok: false; message: string }> {
+  const o = (raw ?? {}) as {
+    name?: unknown;
+    cwd?: unknown;
+    prompt?: unknown;
+    model?: unknown;
+    workflow?: unknown;
+    mode?: unknown;
+    account?: unknown;
+    peers?: unknown;
+  };
+  const mode =
+    typeof o.mode === "string" &&
+    ["plan", "acceptEdits", "auto", "manual"].includes(o.mode)
+      ? o.mode
+      : "";
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
+    return {
+      ok: false,
+      message: "name: letters, digits, dot, dash and underscore",
+    };
+  if (latest?.sessions.some((s) => s.name === name && s.state !== "done"))
+    return {
+      ok: false,
+      message: `a session named ${name} is already running`,
+    };
+  const cwd = typeof o.cwd === "string" ? o.cwd : "";
+  if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory())
+    return { ok: false, message: "pick a folder that exists" };
+  const prompt = typeof o.prompt === "string" ? o.prompt.trim() : "";
+  // A message starting with "-" would read as a flag.
+  if (prompt.startsWith("-"))
+    return { ok: false, message: "the first message can't start with -" };
+  const model =
+    typeof o.model === "string" && /^[\w.[\]-]{1,80}$/.test(o.model)
+      ? o.model
+      : "";
+  const as = await settingsFor(
+    typeof o.account === "string" ? o.account : null,
+    () =>
+      originNow(cwd).then((origin) =>
+        defaultAccount({ origin }, getConfig()),
+      ),
+  );
+  if (!as.ok) return { ok: false, message: as.message };
+  if (
+    typeof o.workflow === "string" &&
+    o.workflow &&
+    o.workflow !== DEFAULT_TEMPLATE
+  )
+    workflows().setPending(name, o.workflow);
+  const linked = livePeerKeys(o.peers);
+  if (linked.length) peerStore.expect(name, linked);
+  const r = await run(
+    claudeBin,
+    [
+      "--bg",
+      ...as.args,
+      "-n",
+      name,
+      ...(model ? ["--model", model] : []),
+      ...(mode ? ["--permission-mode", mode] : []),
+      ...(prompt ? [prompt] : []),
+    ],
+    {
+      cwd,
+      timeoutMs: 60_000,
+    },
+  );
+  if (r.code !== 0)
+    return {
+      ok: false,
+      message: (r.stderr || r.stdout).trim().slice(0, 300),
+    };
+  if (as.account) {
+    // On disk at once when claude printed the bg id (a quit before the first claim keeps it).
+    const bg = bgIdFromOutput(r.stdout);
+    if (bg) sessionAccounts.set([bg], as.account);
+    sessionAccounts.expect(name, as.account);
+  }
+  void sources.refreshAgents();
+  return { ok: true, message: name, bgId: bgIdFromOutput(r.stdout) };
+}
 
 /** Session transitions, workflow steps…: each through the notifier, as its type (Settings → Notifications). */
 function notify(events: NotifyEvent[]): void {
@@ -851,6 +973,7 @@ const sources = new Sources(
     state.modCatalog = catalog;
     // The rail's recording indicator (never in toRemoteSnapshot).
     state.meetingLive = meetings.live();
+    state.schedRuns = scheduler.tags();
     state.mods = modsNow();
     // Both catch their own errors; board moves run at most every 30 s.
     void boardFlow.tick(state);
@@ -872,7 +995,11 @@ const sources = new Sources(
     }
     emit(CH.state, state);
     // The session list is in: commands that waited while MasterDeck was closed can run now.
-    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
+    if (!sessionsLoaded && sources.isHealthy("agents")) {
+      sessionsLoaded = true;
+      // Schedules: what is due (or was missed while MasterDeck was closed) without waiting for the timer.
+      if (!SMOKE) void scheduler.tick();
+    }
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
       // Not before the session list: an empty one would wipe what the phone and web still show.
@@ -994,6 +1121,7 @@ function reveal(target: NotifyEvent["target"]): void {
   if (target.itemId) emit(CH.showInboxItem, target.itemId);
   else if (target.sessionKey)
     emit(CH.focusSession, target.sessionKey);
+  else if (target.schedules) emit(CH.showSchedules);
   else emit(CH.showNeedsYou);
 }
 
@@ -2568,6 +2696,29 @@ function registerIpc(): void {
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
     return notes.delete(id);
   });
+  // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
+  reg.handle(CH.schedList, () => scheduler.list());
+  reg.handle(CH.schedSave, (_e, input: unknown) => scheduler.save(input));
+  reg.handle(CH.schedEnable, (_e, id: unknown, on: unknown) =>
+    typeof id === "string" ? scheduler.enable(id, on === true) : { ok: false, message: "no schedule" },
+  );
+  reg.handle(CH.schedRunNow, (_e, id: unknown) =>
+    typeof id === "string" ? scheduler.runNow(id) : { ok: false, message: "no schedule" },
+  );
+  reg.handle(CH.schedDelete, async (e, id: unknown) => {
+    const s = typeof id === "string" ? scheduler.list().schedules.find((x) => x.id === id) : undefined;
+    if (!s) return { ok: false, message: "that schedule is gone" };
+    const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
+      type: "warning",
+      buttons: ["Cancel", "Delete schedule"],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Delete the schedule "${s.name.slice(0, 80)}"?`,
+      detail: "It stops starting sessions and its run history goes. Sessions it started keep running.",
+    });
+    if (choice.response !== 1) return { ok: false, message: "cancelled" };
+    return scheduler.delete(s.id);
+  });
   // Meetings: the window's only (blocked on the web; each refuses a browser and any OS but macOS).
   reg.handle(CH.meetingsSetup, (e) => meetings.setup(e));
   reg.handle(CH.meetingsConsent, (e, agree: unknown) => meetings.consent(e, agree));
@@ -2847,90 +2998,10 @@ function registerIpc(): void {
   reg.handle(CH.workspaceRepos, () =>
     workspaceFolders().map((p) => ({ name: basename(p), path: p })),
   );
-  // A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
+  // A Claude session without a ticket (startSession).
   reg.handle(CH.startClaude, async (_e, raw: unknown) => {
-    const o = (raw ?? {}) as {
-      name?: unknown;
-      cwd?: unknown;
-      prompt?: unknown;
-      model?: unknown;
-      workflow?: unknown;
-      mode?: unknown;
-      account?: unknown;
-      peers?: unknown;
-    };
-    const mode =
-      typeof o.mode === "string" &&
-      ["plan", "acceptEdits", "auto", "manual"].includes(o.mode)
-        ? o.mode
-        : "";
-    const name = typeof o.name === "string" ? o.name.trim() : "";
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
-      return {
-        ok: false,
-        message: "name: letters, digits, dot, dash and underscore",
-      };
-    if (latest?.sessions.some((s) => s.name === name && s.state !== "done"))
-      return {
-        ok: false,
-        message: `a session named ${name} is already running`,
-      };
-    const cwd = typeof o.cwd === "string" ? o.cwd : "";
-    if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory())
-      return { ok: false, message: "pick a folder that exists" };
-    const prompt = typeof o.prompt === "string" ? o.prompt.trim() : "";
-    // A message starting with "-" would read as a flag.
-    if (prompt.startsWith("-"))
-      return { ok: false, message: "the first message can't start with -" };
-    const model =
-      typeof o.model === "string" && /^[\w.[\]-]{1,80}$/.test(o.model)
-        ? o.model
-        : "";
-    const as = await settingsFor(
-      typeof o.account === "string" ? o.account : null,
-      () =>
-        originNow(cwd).then((origin) =>
-          defaultAccount({ origin }, getConfig()),
-        ),
-    );
-    if (!as.ok) return { ok: false, message: as.message };
-    if (
-      typeof o.workflow === "string" &&
-      o.workflow &&
-      o.workflow !== DEFAULT_TEMPLATE
-    )
-      workflows().setPending(name, o.workflow);
-    const linked = livePeerKeys(o.peers);
-    if (linked.length) peerStore.expect(name, linked);
-    const r = await run(
-      claudeBin,
-      [
-        "--bg",
-        ...as.args,
-        "-n",
-        name,
-        ...(model ? ["--model", model] : []),
-        ...(mode ? ["--permission-mode", mode] : []),
-        ...(prompt ? [prompt] : []),
-      ],
-      {
-        cwd,
-        timeoutMs: 60_000,
-      },
-    );
-    if (r.code !== 0)
-      return {
-        ok: false,
-        message: (r.stderr || r.stdout).trim().slice(0, 300),
-      };
-    if (as.account) {
-      // On disk at once when claude printed the bg id (a quit before the first claim keeps it).
-      const bg = bgIdFromOutput(r.stdout);
-      if (bg) sessionAccounts.set([bg], as.account);
-      sessionAccounts.expect(name, as.account);
-    }
-    void sources.refreshAgents();
-    return { ok: true, message: name };
+    const r = await startSession(raw);
+    return r.ok ? { ok: true, message: r.message } : r;
   });
   reg.handle(
     CH.resumeSession,
@@ -4520,6 +4591,14 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // Schedules: every 30 s, and at once when the Mac wakes (missed runs, as each schedule says).
+  if (!SMOKE) {
+    setInterval(() => void scheduler.tick(), SCHED_TICK_MS);
+    // A fresh session list first: the one from before the sleep would end runs as never seen.
+    powerMonitor.on("resume", () =>
+      void sources.refreshAgents().finally(() => void scheduler.tick()),
+    );
+  }
   // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
   if (!SMOKE) setInterval(pollBtw, 2_000);
   // The builder's drafts, and tickets the Board's session created: cheap checks each second.

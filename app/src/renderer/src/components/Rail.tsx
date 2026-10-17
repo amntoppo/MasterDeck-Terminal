@@ -19,6 +19,7 @@ const ICONS: Record<string, string> = {
   janitor: 'M14 3l7 7M9 8l7 7M4 21l6-6M10 15l-3-3 5-5 5 5-5 5z',
   notes: 'M4 20h4l10-10-4-4L4 16zM13 7l4 4M12 20h8',
   meetings: 'M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2',
+  schedules: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 3',
   workflow: 'M5 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 6h10M6 8l5 8M18 8l-5 8',
   broadcast: 'M3 11v2a2 2 0 0 0 2 2h1l5 4V5L6 9H5a2 2 0 0 0-2 2zM16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14',
   standup: 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 8h8M8 12h8M8 16h5',
@@ -130,6 +131,7 @@ const TOOLS: [View | 'notes', string][] = [
   ['notes', 'Notes'],
   ['meetings', 'Meetings'],
   ['workflow', 'Workflow'],
+  ['schedules', 'Schedules'],
 ]
 /** A tool shown here: Meetings is the Mac's window only (macOS, never the web). */
 const toolOk = (v: View | 'notes') => screenOk(v) && (v !== 'meetings' || meetingsHere())
