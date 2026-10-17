@@ -33,6 +33,16 @@ describe('paneCommand', () => {
       args: ['-n', 'md-ticket-builder-t1', '--settings', '/a/bob-work.settings.json', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits'],
     })
   })
+  it('PR review: its tab\'s name, its account settings, project settings only; a first message', () => {
+    expect(paneCommand({ kind: 'pr-review', resume: true, tab: 'prs-mine', prompt: 'Review the selected PR, acme/web#1.' }, 'darwin', '/bin/zsh')).toEqual({
+      file: 'claude',
+      args: ['--continue', '-n', 'md-pr-review-prs-mine', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits', 'Review the selected PR, acme/web#1.'],
+    })
+    expect(paneCommand({ kind: 'pr-review', resume: false, tab: 't1', account: 'bob-work', prompt: '--dangerously-skip-permissions' }, 'darwin', '/bin/zsh', 'claude', ['--settings', '/a/bob-work.settings.json'])).toEqual({
+      file: 'claude',
+      args: ['-n', 'md-pr-review-t1', '--settings', '/a/bob-work.settings.json', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits'],
+    })
+  })
   it("runs gh's own browser login", () => {
     expect(paneCommand({ kind: 'gh-login' }, 'darwin', '/bin/zsh')).toEqual({ file: 'gh', args: ['auth', 'login', '--hostname', 'github.com', '--web'] })
     expect(paneCommand({ kind: 'gh-login' }, 'win32', undefined).file).toBe('gh.exe')

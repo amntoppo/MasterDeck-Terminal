@@ -1,4 +1,5 @@
 import { installPrompt } from "./install";
+import { prReviewName } from "./prReview";
 import { ticketBuilderName } from "./ticketBuilder";
 import type { PaneSpec } from "./types";
 
@@ -10,7 +11,7 @@ export interface PaneCommand {
 
 /**
  * The process a pane runs. `shell` is $SHELL (unused on Windows); `claude` is the resolved binary;
- * `settings`: the account of a ticket builder (its tab's) or the workflow builder (the primary's)
+ * `settings`: the account of a ticket builder or a PR review (its tab's) or the workflow builder (the primary's)
  * (`--settings <file>`, two or more accounts only).
  */
 export function paneCommand(
@@ -36,6 +37,23 @@ export function paneCommand(
         ...(spec.resume ? ["--continue"] : []),
         "-n",
         ticketBuilderName(spec.tab),
+        ...settings,
+        "--setting-sources",
+        "project,local",
+        "--permission-mode",
+        "acceptEdits",
+        ...(spec.prompt && !spec.prompt.startsWith("-") ? [spec.prompt] : []),
+      ],
+    };
+  // The Pull requests view's review session: its tab's folder, whose project settings allow reading
+  // PRs and block every write but its post script (which Claude Code asks the user about).
+  if (spec.kind === "pr-review")
+    return {
+      file: claude,
+      args: [
+        ...(spec.resume ? ["--continue"] : []),
+        "-n",
+        prReviewName(spec.tab),
         ...settings,
         "--setting-sources",
         "project,local",

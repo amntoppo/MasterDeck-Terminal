@@ -172,7 +172,13 @@ export function App() {
   );
   const [assigning, setAssigning] = useState<Issue | null>(null);
   const [linking, setLinking] = useState<Issue | null>(null);
-  const [prCard, setPrCard] = useState<BoardCard | null>(null);
+  const [prCard, setPrCardRaw] = useState<BoardCard | null>(null);
+  // The PR popup's Review with Claude: the Pull requests view's panel, when it was opened from there.
+  const [prReview, setPrReview] = useState<{ run: () => void } | null>(null);
+  const setPrCard = (c: BoardCard | null) => {
+    setPrReview(null);
+    setPrCardRaw(c);
+  };
   // The card and "me" of the Board tab it was clicked in (the tab's account with two or more).
   const [assignCard, setAssignCard] = useState<{
     card: BoardCard;
@@ -1065,16 +1071,23 @@ export function App() {
     else setDialog(a as "broadcast" | "standup" | "sprint-summary" | "skills");
   };
   /** The PR popup for any PR URL (palette, PRs view): a card built from what we know. */
-  const openPr = (url: string, issue: Ticket | null, title: string) => {
+  const openPr = (
+    url: string,
+    issue: Ticket | null,
+    title: string,
+    review?: () => void,
+  ) => {
     // The PR popup needs GitHub on the Mac; the web opens the PR itself.
     if (isWeb()) return deck().openExternal(url);
+    // Its Review with Claude (opened from the Pull requests view only).
+    setPrReview(review ? { run: review } : null);
     const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url);
     if (!m) return;
     const known = issue
       ? state.board?.cards.find((c) => sameTicket(c, issue))
       : undefined;
     const snap = state.prs.find((p) => p.url === url);
-    setPrCard({
+    setPrCardRaw({
       number: issue?.number ?? 0,
       repo: issue?.repo ?? null,
       project: known?.project ?? null,
@@ -1629,6 +1642,7 @@ export function App() {
           onClose={() => setPrCard(null)}
           onStartReview={startSession}
           onStart={(card) => setAssigning(issueOf(card))}
+          onReviewWithClaude={prReview?.run}
         />
       )}
       {notesAt && (

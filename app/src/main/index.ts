@@ -179,6 +179,8 @@ import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
+import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, writePrReviewContext, writePrReviewDir } from "./prReviewDirs";
+import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -516,6 +518,10 @@ const ptys = new PtyManager(
     const s = accountEnv.settingsArgs(null);
     return s.ok ? s.args : [];
   },
+  (spec) =>
+    prReviewPane(paths.home, isMulti(getConfig()), spec, (l) =>
+      accountEnv.settingsArgs(l),
+    ),
 );
 
 /** Session transitions, workflow steps…: each through the notifier, as its type (Settings → Notifications). */
@@ -1273,6 +1279,7 @@ bridge = new BrowserBridge({
   log: (l) => console.log(l),
   logins: () => getConfig().accounts.map((a) => a.login),
   ticketAccount: (tab) => folderAccount(paths.home, tab),
+  prReviewAccount: (tab) => prReviewFolderAccount(paths.home, tab),
 });
 const remoteCommands = new RemoteCommands(
   {
@@ -2732,6 +2739,63 @@ function registerIpc(): void {
       /* first time */
     }
     return { ok: true, message: "ready", canContinue };
+  });
+  // Review with Claude (Pull requests): the tab's folder gets the briefing, and the selected PR as
+  // MasterDeck's own list has it (a browser names only the URL). `context: true`: only the context
+  // changed (another PR picked, the filters), so the rest is left as written.
+  reg.handle(CH.prReviewPrepare, (e, raw: unknown) => {
+    const o = (raw ?? {}) as Partial<Record<keyof PrReviewRequest, unknown>>;
+    const cfg = latest?.config;
+    if (!cfg || !latest)
+      return { ok: false, message: "the PRs are not loaded yet", canContinue: false };
+    let dir: string;
+    try {
+      dir = prReviewDir(paths.home, typeof o.tabId === "string" ? o.tabId : null);
+    } catch (err) {
+      return { ok: false, message: (err as Error).message, canContinue: false };
+    }
+    if (!prReviewDirOk(paths.home, dir))
+      return { ok: false, message: "refusing a PR review folder that is a link", canContinue: false };
+    // Two or more accounts: the tab's own, connected; one: none (gh's active account).
+    let account: string | undefined;
+    if (isMulti(cfg)) {
+      const want = typeof o.account === "string" ? o.account.toLowerCase() : "";
+      account = cfg.accounts.find((a) => a.login.toLowerCase() === want)?.login;
+      if (!account)
+        return { ok: false, message: "refusing a PR review as an account that is not connected", canContinue: false };
+      // A browser never moves a tab's session to another account (the window does, by the tab's picker).
+      const held = prReviewFolderAccount(paths.home, o.tabId as string);
+      if (isRemote(e) && held && held.toLowerCase() !== account.toLowerCase())
+        return { ok: false, message: `refusing a PR review as ${account}: that tab's session works as ${held}`, canContinue: false };
+    }
+    const ctx = prReviewContext(
+      {
+        tabId: o.tabId as string,
+        tab: typeof o.tab === "string" ? o.tab : "",
+        ...(account ? { account } : {}),
+        filters: o.filters as PrReviewRequest["filters"],
+        ...(typeof o.url === "string" ? { url: o.url } : {}),
+      },
+      latest.teamPrs,
+    );
+    const guard = prReviewGuard(paths.home, o.tabId as string);
+    try {
+      if (o.context === true && existsSync(join(dir, "CLAUDE.md"))) writePrReviewContext(dir, ctx, guard);
+      else {
+        const post = prReviewPost(paths.home, o.tabId as string);
+        writePrReviewDir(dir, ctx, prReviewBriefing(account ?? latest.me ?? null, post), guard, post);
+      }
+    } catch (err) {
+      return { ok: false, message: (err as Error).message, canContinue: false };
+    }
+    const proj = join(paths.projectsDir, dir.replace(/[^A-Za-z0-9]/g, "-"));
+    let canContinue = false;
+    try {
+      canContinue = readdirSync(proj).some((f) => f.endsWith(".jsonl"));
+    } catch {
+      /* first time */
+    }
+    return { ok: true, message: ctx.selected ? `reviewing ${ctx.selected.repo}#${ctx.selected.number}` : "ready", canContinue };
   });
   // Labels, milestones and people who can be assigned in a repo (the New ticket dialog), cached a while.
   reg.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {

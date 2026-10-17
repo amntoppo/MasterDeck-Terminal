@@ -6,6 +6,7 @@ import { ticketLabel } from '@shared/ticket'
 import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 import { PrIcon } from './BoardView'
+import { ClaudeMark } from './NewTicket'
 
 interface Props {
   card: BoardCard
@@ -15,11 +16,13 @@ interface Props {
   onStartReview: (req: AssignRequest) => void
   /** Start a session for the issue itself (the Start dialog), whoever it is assigned to. */
   onStart: (card: BoardCard) => void
+  /** Opened from the Pull requests view: its Review with Claude panel, on this PR. */
+  onReviewWithClaude?: () => void
 }
 
 const STATE_LABEL: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGED: 'Merged', CLOSED: 'Closed' }
 
-export function PrPopup({ card, state, onClose, onStartReview, onStart }: Props) {
+export function PrPopup({ card, state, onClose, onStartReview, onStart, onReviewWithClaude }: Props) {
   const [url, setUrl] = useState(() => pickPr(card.prs)?.url ?? card.prs[0]?.url ?? '')
   const [pr, setPr] = useState<PrSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -149,6 +152,18 @@ export function PrPopup({ card, state, onClose, onStartReview, onStart }: Props)
           <button className="btn" onClick={onClose}>
             {reviewing ? 'Cancel' : 'Close'}
           </button>
+          {!reviewing && onReviewWithClaude && (
+            <button
+              className="btn claude-btn"
+              title="Talk about this PR with Claude in the panel on the right"
+              onClick={() => {
+                onReviewWithClaude()
+                onClose()
+              }}
+            >
+              <ClaudeMark /> Review with Claude
+            </button>
+          )}
           {!reviewing && (
             <button
               className="btn"
