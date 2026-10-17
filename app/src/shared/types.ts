@@ -557,6 +557,8 @@ export type PaneSpec =
   | { kind: "pr-review"; resume: boolean; tab: string; prompt?: string; account?: string }
   /** Setup's "Add an account": gh's own browser login. */
   | { kind: "gh-login" }
+  /** Setup's "Let Claude do it": a Claude session in its own folder that sets MasterDeck up (shared/setupClaude.ts). */
+  | { kind: "setup-claude" }
   /** Plain `claude` in a folder Claude Code was never allowed to work in: the user answers its trust
    * prompt there (Open Claude there…). Never opened from a browser or a phone. */
   | { kind: "claude-here"; cwd: string };

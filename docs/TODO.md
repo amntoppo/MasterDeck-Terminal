@@ -973,7 +973,32 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **Later:** the mobile push channel (#134) is one sender in `index.ts` and `available: true` in
   `CHANNELS`; email or Slack the same way.
 
+## Setup with Claude (#156): open points (2026-10-17)
+
+- **P2 · A real run.** Checked with a stand-in `claude` and a fake `gh` only: a real Claude session
+  following the briefing (its questions, tool installs, the 300 s `discover` timeout, writing
+  `review.json`), a real `gh auth login` opened from the chat, and a mods install from Save are the
+  user's first runs.
+- **P2 · Windows.** The helper is a bash script; Claude Code runs its Bash tool in Git Bash, which
+  takes the forward-slash folder path. Not run on Windows. `ponytail:` a PowerShell twin of
+  `md-setup.sh` if Claude Code without Git Bash becomes common.
+- **P3 · The rest of the wizard.** Claude leaves "Issues whose code is in another repository" and
+  each board's status mapping as detected, and never touches the Account step; the user changes them
+  in the wizard. Add them to the draft if users ask Claude for them.
+- **P3 · Save does not tell the session.** After Save MasterDeck closes the session; a failed save
+  shows on the card only, and the user tells Claude. An answer file the session could read would let
+  it react by itself.
+
 ## Recently done
+
+- **Setup with Claude (#156)**: Setup's **Let Claude do it** opens a Claude terminal in Setup that
+  checks and installs tools, picks accounts, repositories and boards and preferences in
+  conversation; its draft is checked, fills the wizard and is saved only by the window's **Save**,
+  through the wizard's own path (`setupPatch`); success view, then the main screen. Branch
+  `worktree-156-let-claude-setup`.
+
+
+
 
 - **New Claude session: account first, last choices per account (#153)**: the account select is
   the dialog's first field; each account's folder, model, workflow and permissions are kept in

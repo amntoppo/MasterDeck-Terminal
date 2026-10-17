@@ -981,7 +981,7 @@ here (needs `hooks.queue`).
 ### Sender and PTYs
 
 - `main/ptys.ts` `PtyManager`: one PTY per pane id (`PaneSpec` kinds `attach`, `shell`, `installer`,
-  `builder`, `ticket-builder`, `pr-review`; command from `shared/paneCommand.ts`). Keeps a 200 KB replay buffer
+  `builder`, `ticket-builder`, `pr-review`, `gh-login`, `claude-here`, `setup-claude`; command from `shared/paneCommand.ts`). Keeps a 200 KB replay buffer
   and a cumulative `seq` (characters emitted) so a view that mounts later replays and then drops
   data already covered. Output goes out as `pty:data:<id>` / `pty:exit:<id>` through `emit`.
   Closing a pane kills only `claude attach`; the background session keeps running.
@@ -1036,6 +1036,29 @@ here (needs `hooks.queue`).
 - The workflow builder (`builder` spec) runs as the primary account with two or more: the
   `builderSettings` callback of `PtyManager` gives `AccountEnv.settingsArgs(null)`'s `--settings`,
   and nothing while the primary needs to log in again (gh's active account then, as master).
+- **Setup with Claude** (#156; `shared/setupClaude.ts`, `main/setupClaude.ts`, `SetupDialog.tsx`;
+  design `docs/plans/2026-10-17-setup-with-claude-design.md`): the `setup-claude` pane
+  (`setup:claude`) runs `claude -n md-setup --setting-sources project,local --permission-mode
+  acceptEdits "<first message>"` in `<home>/setup-claude/` (hidden from the session list by name
+  and folder in `Sources.build()`). `CH.setupClaudePrepare` writes the folder fresh
+  (`prepareSetupDir`: `setupBriefing(platform)` as `CLAUDE.md`, the helper `md-setup.sh`, the
+  helper and read-only checks allowed in `.claude/settings.json`) and resets the pump. The helper
+  uses the ticket builder's transport (`requests/<id>.req`, NUL-separated, `.taken`, `answers/<id>.json`);
+  `SetupPump.poll` runs only when the Setup window asks (`CH.setupClaudePoll`, every 700 ms while the
+  chat is open) and answers `tools` (`setupTool` ×5), `accounts` (`ghAccounts`, with `projectScope`)
+  and `discover <login>` (`detectEnv` + `master config detect --all` as that login's token; a short
+  list to the session, the full answer to the window once per login it does not know) itself;
+  `review <file>` (the parsed `review.json`, inside the folder only) and `gh-login` go to the window,
+  which answers with `CH.setupClaudeAnswer`. The window checks a draft with `readSetupDraft` (logins
+  gh has, discovered, one primary, repositories/boards from discover, one account each, `"all"` takes
+  what named picks left), fills the wizard (`selFromDraft`, `ghUser` for each identity) and shows
+  `draftSummary` on a card; only its **Save** writes, through `setupPatch` (the wizard's own checks and
+  patch, also used by Finish / Save) and `master config save`, then mods (`modsInstall`, when asked)
+  and Remote (first run). `onHold` keeps App's first-run dialog up past `configured` for the success
+  view, which calls the usual `onClose` after 5 s. All three channels are `blocked` for the web and
+  refuse `isRemote(e)`. Test aid: `MASTERDECK_DETECT_FIXTURE=<json>` replaces the GitHub reads of
+  `configDetectAll` and `discover` (`detectAllAs`). Helper waits: 60 s, `discover` 280 s; the
+  briefing tells the session to give that Bash call a 300 s timeout.
 - Create with Claude's settings bar (#68; `renderer/.../TicketSettingsBar.tsx`, `shared/ticketSettings.ts`):
   the panel holds `TicketSession.settings` (repo, board, status, assignees, labels, milestone, sprint
   and its field), started by `settingsFrom` (the dialog's draft, else `ticketDefaults` of the + column,
@@ -2273,6 +2296,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
 | `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
+| `setup-claude/` | Setup's "Let Claude do it" session: `CLAUDE.md`, `md-setup.sh`, `.claude/settings.json` (written fresh by `prepareSetupDir`), the session's `review.json`, `requests/` and `answers/` (see "Setup with Claude") |
 | `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them) |
 | `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `.claude/settings.json`, and the review files the session writes |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |

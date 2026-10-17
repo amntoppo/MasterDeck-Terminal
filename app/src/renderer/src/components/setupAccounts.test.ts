@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseConfig } from '@shared/appConfig'
 import type { DetectAll, DetectedBoard } from '@shared/detect'
-import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, switchSel, takenBy, swapPrimaryWorkspace, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
+import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, selFromDraft, setupPatch, switchSel, takenBy, swapPrimaryWorkspace, withFound, workspacesFromConfig, type AccountSel } from './setupAccounts'
 
 const board = parseConfig({ projects: [{ owner: 'globex', number: 7 }] }).projects[0]
 const sel: Record<string, AccountSel> = {
@@ -199,5 +199,45 @@ describe('codeReposToSave (issue #61)', () => {
     expect(codeReposToSave([{ issues: 'acme/tracker', code: 'acme/api' }, { issues: 'Acme/Tracker', code: 'acme/web' }])).toEqual({
       ok: false, message: 'Code lives in: Acme/Tracker has two rows; keep one.',
     })
+  })
+})
+
+describe('what Setup saves (the wizard and Claude alike)', () => {
+  const base = {
+    connected: [{ login: 'alice', name: 'Alice', email: 'a@acme.dev' }],
+    primaryLogin: 'alice',
+    sel: { alice: { repos: ['acme/api'], allRepos: false, primary: 'acme/api', boards: {}, allBoards: false } },
+    ownerType: () => 'organization' as const,
+    workspaces: {},
+    workspace: '~/code',
+    masterEnabled: true,
+    codeRepos: [],
+  }
+  it('the config patch: accounts, no board on the primary, workspace, master-agent', () => {
+    const r = setupPatch(base)
+    expect(r.ok && r.patch).toMatchObject({ project: 0, workspace: '~/code', masterEnabled: true, codeRepos: [] })
+    expect(r.ok && (r.patch.accounts as { login: string; issueRepo: string }[])[0]).toMatchObject({ login: 'alice', primary: true, issueRepo: 'api' })
+  })
+  it('says what is missing', () => {
+    expect(setupPatch({ ...base, connected: [] })).toEqual({ ok: false, message: 'Go back and connect a GitHub account.' })
+    expect(setupPatch({ ...base, sel: {} })).toEqual({ ok: false, message: 'Go back and pick at least one repository for alice.' })
+    expect(setupPatch({ ...base, connected: [{ login: 'alice', name: '', email: 'nope' }] }).ok).toBe(false)
+    expect(setupPatch({ ...base, codeRepos: [{ issues: 'acme/api', code: 'bad' }] })).toEqual({ ok: false, message: 'Code lives in: bad is not owner/name.' })
+  })
+})
+
+describe("Claude's draft as Setup's choices", () => {
+  it("takes the boards GitHub described, keeping a chosen board's statuses", () => {
+    const had: AccountSel = { ...EMPTY, boards: { 'globex/7': { ...det({ owner: 'globex', number: 7 }), statuses: { ...det({ owner: 'globex', number: 7 }).statuses, ready: 'Kept' } } } }
+    const s = selFromDraft(
+      { login: 'bob-work', primary: false, repos: ['globex/web', 'globex/app'], allRepos: false, primaryRepo: 'globex/web', boards: ['Globex/7', 'globex/99'], allBoards: false, workspace: '' },
+      globex,
+      had,
+    )
+    expect(s.repos).toEqual(['globex/web', 'globex/app'])
+    expect(s.primary).toBe('globex/web')
+    expect(Object.keys(s.boards)).toEqual(['globex/7'])
+    expect(s.boards['globex/7'].title).toBe('Roadmap')
+    expect(s.boards['globex/7'].statuses.ready).toBe('Kept')
   })
 })

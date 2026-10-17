@@ -5,6 +5,7 @@ import { projectKey, type AppConfig, type CodeRepo, type ProjectConfig, type Sta
 import { parseDetectAll, type DetectAll } from '@shared/detect'
 import { hasProjectScope, type GhAccount } from '@shared/ghAuth'
 import type { SetupTool } from '@shared/ipc'
+import { SETUP_CLAUDE_PANE, draftSummary, readSetupDraft, type SetupDraft, type SetupWindowRequest } from '@shared/setupClaude'
 import type { AppState } from '@shared/types'
 import { deck } from '../deck'
 import { can } from '../web'
@@ -14,7 +15,19 @@ import { TerminalView } from './TerminalView'
 import { AccountPanel } from './AccountPanel'
 import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { canAdvance } from './stepRules'
-import { accountsFromSetup, boardTakenBy, codeReposToSave, markMade, selFromConfig, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
+import { boardTakenBy, markMade, selFromConfig, selFromDraft, setupPatch, switchSel, swapPrimaryWorkspace, takenBy, withFound, workspacesFromConfig, type AccountSel, type Connected } from './setupAccounts'
+
+/** Setup's values as Claude's review set them (what its Save writes). */
+interface ClaudeValues {
+  connected: Connected[]
+  primaryLogin: string
+  sel: Record<string, AccountSel>
+  workspaces: Record<string, string>
+  workspace: string
+  masterEnabled: boolean
+  notify: boolean
+  mods: boolean
+}
 
 
 const STEPS = ['Account', 'Tools', 'GitHub accounts', 'Repos & boards', 'Mods', 'Preferences'] as const
@@ -47,7 +60,18 @@ const TOOLS: { id: SetupTool; name: string; hint: string }[] = [
  * their hooks have their own popup (it opens after a first-run setup).
  * Everything lands in ~/.claude/master/config.json, which master and MasterDeck share.
  */
-export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onClose: () => void; firstRun: boolean }) {
+export function SetupDialog({
+  state,
+  onClose,
+  firstRun,
+  onHold,
+}: {
+  state: AppState
+  onClose: () => void
+  firstRun: boolean
+  /** Setup with Claude is saving or shows its success view: keep the dialog up though the config is now set up. */
+  onHold?: (held: boolean) => void
+}) {
   const cfg = state.config
   const [step, setStep] = useState(0)
   const signedIn = state.account?.kind === 'signedIn'
@@ -89,6 +113,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     () => () => {
       deck().ptyClose(INSTALLER_PANE)
       deck().ptyClose(GH_LOGIN_PANE)
+      deck().ptyClose(SETUP_CLAUDE_PANE)
     },
     [],
   )
@@ -271,40 +296,220 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
   const setCodeRow = (i: number, row: Partial<CodeRepo>) => setCodeRepos((cur) => cur.map((r, j) => (j === i ? { ...r, ...row } : r)))
   const setStatuses = (k: string, st: StatusMap) => setBoards((b) => (b[k] ? { ...b, [k]: { ...b[k], statuses: st } } : b))
 
+  const foundByRef = useRef(foundBy)
+  foundByRef.current = foundBy
+  /** Each owner's kind, from what GitHub said for the account (`key`: the one on screen). */
+  const ownerTypeOf = (key: string) => (login: string, owner: string) =>
+    (foundByRef.current[login] ?? (login === key ? found : null))?.owners.find((o) => o.login === owner)?.type ??
+    cfg.accounts.find((a) => a.login === login)?.ownerType ??
+    (owner === cfg.owner ? cfg.ownerType : 'organization')
+  /** What the wizard's Finish / Save and Claude's Save both write: the notifications switch, then the config (validated by master). */
+  const persist = async (patch: Record<string, unknown>, notifyOn: boolean) => {
+    if (notifyOn !== needsYouSystemOn(state.settings.notifications)) {
+      const cur = await deck().getSettings()
+      await deck().setSettings({ ...cur, notifications: withNeedsYouSystem(cur.notifications, notifyOn) })
+    }
+    return deck().configSave(patch)
+  }
+
   const save = async () => {
     // The account on screen ('' before any was shown: the primary) keeps what the screen shows.
     const key = editing || primaryLogin
     const all = key ? { ...sel, [key]: onScreen() } : sel
-    const ownerType = (login: string, owner: string) =>
-      (foundBy[login] ?? (login === key ? found : null))?.owners.find((o) => o.login === owner)?.type ??
-      cfg.accounts.find((a) => a.login === login)?.ownerType ??
-      (owner === cfg.owner ? cfg.ownerType : 'organization')
-    const list = accountsFromSetup(connected, primaryLogin, all, ownerType, workspaces)
-    if (!list.length) return setMsg('Go back and connect a GitHub account.')
-    if (!list[0].issueRepo) return setMsg(`Go back and pick at least one repository for ${list[0].login}.`)
-    if (list.some((a) => !a.email.includes('@'))) return setMsg('Each connected account needs an email for its commits.')
-    const code = codeReposToSave(codeRepos)
-    if (!code.ok) return setMsg(code.message)
+    const p = setupPatch({ connected, primaryLogin, sel: all, ownerType: ownerTypeOf(key), workspaces, workspace, masterEnabled: useMaster, codeRepos })
+    if (!p.ok) return setMsg(p.message)
     if (!(await webConfirm('Save this setup to your Mac?', { confirmLabel: 'Save' }))) return
     setBusy(true)
     setMsg(null)
-    if (notify !== needsYouSystemOn(state.settings.notifications)) {
-      const cur = await deck().getSettings()
-      await deck().setSettings({ ...cur, notifications: withNeedsYouSystem(cur.notifications, notify) })
-    }
-    const patch: Record<string, unknown> = {
-      accounts: list,
-      // No board on the primary account: issues and PRs only (master config save mirrors the rest from it).
-      ...(list[0].projects.length ? {} : { project: 0 }),
-      ...(workspace ? { workspace } : {}),
-      masterEnabled: useMaster,
-      codeRepos: code.list,
-    }
-    const r = await deck().configSave(patch)
+    const r = await persist(p.patch, notify)
     setBusy(false)
     if (!r.ok) return setMsg(r.message)
     onClose()
   }
+
+  // "Let Claude do it" (#156): a Claude session on this screen sets MasterDeck up in conversation.
+  // Its review fills the wizard; only Save here writes the config, through `setupPatch` and `persist`.
+  const claudeHere = can('setupClaudePrepare')
+  const [claudeOpen, setClaudeOpen] = useState(false)
+  // A new conversation each time (the terminal view starts over).
+  const [claudeGen, setClaudeGen] = useState(0)
+  const [review, setReview] = useState<{ lines: string[]; values: ClaudeValues } | null>(null)
+  const [reviewErr, setReviewErr] = useState<string | null>(null)
+  const [claudeLogin, setClaudeLogin] = useState(false)
+  const [claudeNote, setClaudeNote] = useState<string | null>(null)
+  const [done, setDone] = useState<string[] | null>(null)
+  // Saved (the session is closed on purpose), and whether a review filled the wizard.
+  const savedRef = useRef(false)
+  const filledRef = useRef(false)
+
+  const startClaude = async () => {
+    setMsg(null)
+    setClaudeNote(null)
+    const r = await deck().setupClaudePrepare()
+    if (!r.ok) return setMsg(r.message)
+    deck().ptyClose(SETUP_CLAUDE_PANE)
+    closeInstaller()
+    savedRef.current = false
+    setReview(null)
+    setReviewErr(null)
+    setClaudeGen((g) => g + 1)
+    setClaudeOpen(true)
+  }
+  /** Back to the wizard, with whatever the review filled in (nothing is saved). */
+  const leaveClaude = (to?: number) => {
+    deck().ptyClose(SETUP_CLAUDE_PANE)
+    deck().ptyClose(GH_LOGIN_PANE)
+    setClaudeOpen(false)
+    setClaudeLogin(false)
+    setReview(null)
+    setReviewErr(null)
+    setClaudeNote(
+      filledRef.current
+        ? `The steps show what Claude filled in. Nothing is saved until you press ${firstRun ? 'Finish' : 'Save'}.`
+        : 'Nothing was saved. Go on here, or press Let Claude do it again.',
+    )
+    if (to !== undefined) void go(to)
+    else if (firstRun && step === 0) setStep(1)
+  }
+  const answer = (id: string, a: object) => void deck().setupClaudeAnswer(id, a)
+
+  /** A checked draft as Setup's values: each account's commit identity, repositories and boards. */
+  const valuesOf = async (d: SetupDraft): Promise<ClaudeValues> => {
+    const ids: Connected[] = []
+    for (const a of d.accounts) {
+      const had = connected.find((c) => c.login.toLowerCase() === a.login.toLowerCase())
+      ids.push(had?.email ? { ...had, login: a.login } : { login: a.login, ...(await deck().ghUser(a.login)) })
+    }
+    const now = editing ? { ...sel, [editing]: onScreen() } : sel
+    return {
+      connected: ids,
+      primaryLogin: d.accounts[0].login,
+      // discover's answer for the login in any case (readSetupDraft matches it so).
+      sel: Object.fromEntries(
+        d.accounts.map((a) => {
+          const f = Object.entries(foundByRef.current).find(([l]) => l.toLowerCase() === a.login.toLowerCase())?.[1]
+          return [a.login, selFromDraft(a, f ?? { user: null, owners: [] }, now[a.login])]
+        }),
+      ),
+      workspaces: Object.fromEntries(d.accounts.filter((a) => !a.primary && a.workspace).map((a) => [a.login, a.workspace])),
+      workspace: d.workspace ?? workspace,
+      masterEnabled: d.masterEnabled ?? useMaster,
+      notify: d.notifications ?? notify,
+      mods: d.mods ?? false,
+    }
+  }
+  /** The wizard shows Claude's values: every step can be checked or changed by hand. */
+  const fill = (v: ClaudeValues) => {
+    filledRef.current = true
+    setConnected(v.connected)
+    setPrimaryLogin(v.primaryLogin)
+    setSel(v.sel)
+    selRef.current = v.sel
+    setEditing(v.primaryLogin)
+    editingRef.current = v.primaryLogin
+    show(v.sel[v.primaryLogin])
+    setFound(foundByRef.current[v.primaryLogin] ?? null)
+    setWorkspace(v.workspace)
+    setWorkspaces(v.workspaces)
+    setUseMaster(v.masterEnabled)
+    setNotify(v.notify)
+  }
+  const onRequest = async (q: SetupWindowRequest) => {
+    if (q.cmd === 'gh-login') {
+      deck().ptyClose(GH_LOGIN_PANE)
+      setClaudeLogin(true)
+      return answer(q.id, {
+        ok: true,
+        message: "gh's GitHub login is open in MasterDeck above this chat. Tell the user to follow it; when they say they are done, run ./md-setup.sh accounts again.",
+      })
+    }
+    const gh = await deck().ghAccounts()
+    setAccounts(gh.accounts)
+    setAccountsErr(gh.error ?? null)
+    const r = readSetupDraft(q.draft, { logins: gh.accounts.map((a) => a.login), found: foundByRef.current })
+    if (!r.ok) return answer(q.id, { ok: false, errors: r.errors })
+    const values = await valuesOf(r.draft)
+    fill(values)
+    const lines = draftSummary(r.draft, foundByRef.current)
+    setReview({ lines, values })
+    setReviewErr(null)
+    answer(q.id, {
+      ok: true,
+      summary: lines,
+      message:
+        'MasterDeck filled its setup wizard with this and shows the summary above this chat with a Save button. Nothing is saved until the user presses Save there; MasterDeck then saves it, closes this session and shows the result. Show the user this summary and ask them to press Save, or to tell you what to change.',
+    })
+  }
+  // The handler of this render (it reads the current choices); the poll below calls it.
+  const onRequestRef = useRef(onRequest)
+  onRequestRef.current = onRequest
+  useEffect(() => {
+    if (!claudeOpen) return
+    let stopped = false
+    let polling = false
+    const tick = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const r = await deck().setupClaudePoll(Object.keys(foundByRef.current))
+        if (stopped) return
+        const fresh = Object.entries(r.found)
+        if (fresh.length) {
+          const add = Object.fromEntries(fresh.map(([l, raw]) => [l, markMade(parseDetectAll(raw), cfg.projects)]))
+          foundByRef.current = { ...foundByRef.current, ...add }
+          setFoundBy((cur) => ({ ...cur, ...add }))
+        }
+        for (const q of r.requests) await onRequestRef.current(q)
+      } finally {
+        polling = false
+      }
+    }
+    const t = setInterval(() => void tick(), 700)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claudeOpen])
+
+  const claudeSave = async () => {
+    if (!review) return
+    const v = review.values
+    const p = setupPatch({ ...v, ownerType: ownerTypeOf(v.primaryLogin), codeRepos })
+    if (!p.ok) return setReviewErr(p.message)
+    setBusy(true)
+    setReviewErr(null)
+    // A first run is set up once the config is saved: the dialog stays for the success view.
+    onHold?.(true)
+    const r = await persist(p.patch, v.notify)
+    if (!r.ok) {
+      setBusy(false)
+      onHold?.(false)
+      return setReviewErr(r.message)
+    }
+    const notes: string[] = []
+    if (v.mods && state.mods?.state !== 'installed') {
+      const m = await deck().modsInstall()
+      if (!m.ok) notes.push(`The mods were not installed (${m.message}): install them from Settings → Hooks, mods & skills.`)
+    }
+    // As leaving the Account step with Next does.
+    if (firstRun && signedIn && remoteOn) await deck().setSettings({ ...(await deck().getSettings()), remoteEnabled: true })
+    setBusy(false)
+    savedRef.current = true
+    deck().ptyClose(SETUP_CLAUDE_PANE)
+    deck().ptyClose(GH_LOGIN_PANE)
+    setClaudeOpen(false)
+    setClaudeLogin(false)
+    setReview(null)
+    setDone([...review.lines, ...notes])
+  }
+  // The success view, then the main screen (as Finish: a first run gets the Skills popup next).
+  useEffect(() => {
+    if (!done) return
+    const t = setTimeout(onClose, 5000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done])
 
   // Settings view: one line under each section's name.
   const bad = TOOLS.filter((t) => tools[t.id]?.ok === false).length
@@ -333,6 +538,106 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && !firstRun && onClose()}>
       <div className={`dialog setup ${firstRun ? '' : 'setup-page'}`} role="dialog" aria-label="Set up MasterDeck">
         <h3>{firstRun ? 'Welcome to MasterDeck' : 'Set up MasterDeck'}</h3>
+        {done ? (
+          <div className="setup-done" role="status">
+            <div className="setup-done-head">
+              <span className="tick">✓</span> <b>MasterDeck is set up</b>
+            </div>
+            <ul className="setup-lines">
+              {done.map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+            <div className="meta">Opening MasterDeck… You can change any of this later in Settings → Set up MasterDeck.</div>
+          </div>
+        ) : claudeOpen ? (
+          <div className="setup-claude">
+            <div className="installer-head">
+              <ClaudeMark /> <b>Setting up with Claude</b>
+              <span className="meta grow">Answer Claude here. When it shows the summary, check it and press Save.</span>
+              <button className="btn" disabled={busy} onClick={() => leaveClaude()}>
+                Back to the wizard
+              </button>
+            </div>
+            {review && (
+              <div className="setup-review" role="region" aria-label="Setup summary">
+                <b>Ready to save</b>
+                <ul className="setup-lines">
+                  {review.lines.map((l) => (
+                    <li key={l}>{l}</li>
+                  ))}
+                </ul>
+                {reviewErr && <div className="meta bad">{reviewErr}</div>}
+                <div className="setup-review-btns">
+                  <span className="meta grow">Nothing is saved until you press Save.</span>
+                  <button className="btn" disabled={busy} onClick={() => leaveClaude(2)}>
+                    Change in the wizard
+                  </button>
+                  <button className="btn primary" disabled={busy} onClick={() => void claudeSave()}>
+                    {busy ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {claudeLogin && (
+              <div className="installer">
+                <div className="installer-head">
+                  <b>Log in to GitHub</b>
+                  <span className="meta grow">gh opens GitHub in your browser: log in there, then tell Claude you are done.</span>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      deck().ptyClose(GH_LOGIN_PANE)
+                      setClaudeLogin(false)
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="installer-term">
+                  <TerminalView
+                    paneId={GH_LOGIN_PANE}
+                    spec={{ kind: 'gh-login' }}
+                    visible
+                    focusOnShow
+                    onExit={() => {
+                      deck().ptyClose(GH_LOGIN_PANE)
+                      setClaudeLogin(false)
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="setup-claude-term">
+              <TerminalView
+                key={claudeGen}
+                paneId={SETUP_CLAUDE_PANE}
+                spec={{ kind: 'setup-claude' }}
+                visible
+                focusOnShow={!claudeLogin}
+                onExit={() => !savedRef.current && leaveClaude()}
+              />
+            </div>
+          </div>
+        ) : (
+        <>
+        {claudeHere && (
+          <div className="install-row setup-claude-offer">
+            <button
+              className="btn primary install-now"
+              disabled={busy || claudeMissing}
+              onClick={() => void startClaude()}
+            >
+              <ClaudeMark /> Let Claude do it
+            </button>
+            <span className="meta">
+              {claudeMissing
+                ? 'Install Claude Code first (see Tools); then Claude can set up the rest with you.'
+                : 'Claude sets everything up with you in a chat here and fills in these steps. Nothing is saved until you press Save.'}
+            </span>
+          </div>
+        )}
+        {claudeNote && <div className="meta">{claudeNote}</div>}
         {firstRun ? (
           <ol className="steps">
             {STEPS.map((name, i) => (
@@ -796,8 +1101,16 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
 
         </div>
         </div>
+        </>
+        )}
         <div className="foot">
           <span className="grow meta">{msg && <span className="bad">{msg}</span>}</span>
+          {done ? (
+            <button className="btn primary" onClick={onClose}>
+              Continue
+            </button>
+          ) : claudeOpen ? null : (
+          <>
           {firstRun && step === 0 ? null : firstRun ? (
             <button className="btn" onClick={onClose} title="Sessions work without GitHub; connect it later from the Board, PRs or Settings">
               Skip for now
@@ -830,6 +1143,8 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
             <button className="btn primary" disabled={busy} onClick={save}>
               {busy ? 'Saving…' : 'Finish'}
             </button>
+          )}
+          </>
           )}
         </div>
       </div>
