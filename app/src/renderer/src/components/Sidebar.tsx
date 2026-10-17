@@ -28,6 +28,8 @@ import {
   type SessionFilter,
 } from "@shared/sessionFilter";
 import { SessionFilterBar } from "./SessionFilterBar";
+import { SessionGroupBar } from "./SessionGroupBar";
+import { ALL, emptyGroups, inGroup, shownTab } from "@shared/sessionGroups";
 import { canStop, cleanupDefaults } from "@shared/cleanup";
 import { formatAgo, formatGhCache, formatRefreshed } from "@shared/format";
 import type { InboxEntry, InboxKind } from "@shared/inbox";
@@ -103,8 +105,12 @@ export type SessionAction = "summary" | "close-tab";
 const ORDER_KEY = "sessionOrder";
 const FILTER_KEY = "sessionFilter";
 const FILTER_OPEN_KEY = "sessionFilterOpen";
+/** The session list's tab on screen (#146), per window or browser. */
+const GROUP_KEY = "sessionGroup";
 /** When each starred session was first missing from the list (see pruneStars). */
 const starsMissingSince = new Map<string, number>();
+
+const EMPTY_GROUPS = emptyGroups();
 
 const STATE_LABEL: Record<string, string> = {
   working: "working",
@@ -151,9 +157,21 @@ export function Sidebar({
       setOrder(trimOrder(next, new Set(shownSessions.map((s) => s.key))));
   }, [shownSessions, order]);
   useEffect(() => save(ORDER_KEY, order), [order]);
-  const sessions = useMemo(
+  const everySession = useMemo(
     () => inOrder(shownSessions, order),
     [shownSessions, order],
+  );
+  // The tab on screen: everything below (Starred, groups, filters, Parked, Cleanup) lists its sessions.
+  const groups = state.sessionGroups ?? EMPTY_GROUPS;
+  const [pickedTab, setPickedTab] = useState(() => load<string>(GROUP_KEY, ALL));
+  const tab = shownTab(groups, pickedTab);
+  const pickTab = (id: string) => {
+    setPickedTab(id);
+    save(GROUP_KEY, id);
+  };
+  const sessions = useMemo(
+    () => inGroup(everySession, groups, tab),
+    [everySession, groups, tab],
   );
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
@@ -163,6 +181,14 @@ export function Sidebar({
     null,
   );
   const [statusFor, setStatusFor] = useState<Session | null>(null);
+  const assignTab = async (key: string, group: string | null) => {
+    const s = everySession.find((x) => x.key === key);
+    if ((groups.of[key] ?? null) === group) return;
+    const r = await deck().sessionGroupsAct({ op: "assign", key, group });
+    const name = groups.groups.find((g) => g.id === group)?.name;
+    if (!r.ok) flash(r.message);
+    else if (s) flash(name ? `${s.name} is in ${name}.` : `${s.name} is out of its tab (in All only).`);
+  };
   const [note, setNote] = useState<string | null>(null);
   const flash = (m: string) => {
     setNote(m);
@@ -325,6 +351,22 @@ export function Sidebar({
   const hot = open.filter(
     (e) => e.item.kind !== "held" && e.item.kind !== "idle",
   ).length;
+  // Each tab's sessions and how many of them need you (held and idle items left out, as in `hot`).
+  const hotKeys = new Set(
+    open
+      .filter((e) => e.item.kind !== "held" && e.item.kind !== "idle")
+      .map((e) => e.item.sessionKey),
+  );
+  const tabCounts: Record<string, number> = { [ALL]: everySession.length };
+  const tabHot: Record<string, number> = { [ALL]: 0 };
+  for (const s of everySession) {
+    const g = groups.of[s.key];
+    const h = hotKeys.has(s.key) ? 1 : 0;
+    tabHot[ALL] += h;
+    if (!g) continue;
+    tabCounts[g] = (tabCounts[g] ?? 0) + 1;
+    tabHot[g] = (tabHot[g] ?? 0) + h;
+  }
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   // The Needs-you popup: which item, by id; it closes by itself when the item goes (answered, dismissed).
@@ -463,6 +505,27 @@ export function Sidebar({
             ))}
         </div>
 
+        <SessionGroupBar
+          groups={groups}
+          tab={tab}
+          onTab={pickTab}
+          counts={tabCounts}
+          hot={tabHot}
+          draggingSession={!!dragKey}
+          onAssign={(k, g) => {
+            // The row may leave this tab's list before its dragend arrives.
+            setDragKey(null);
+            setDropKey(null);
+            void assignTab(k, g);
+          }}
+          onDragOverBar={() => setDropKey(null)}
+          flash={flash}
+        />
+        {tab !== ALL && sessions.length === 0 && (
+          <div className="empty sgroup-empty">
+            No sessions in this tab. Drag one onto it, or right-click a session → Move to tab.
+          </div>
+        )}
         {sessions.length > 0 && (
           <SessionFilterBar
             filter={filter}
@@ -478,7 +541,7 @@ export function Sidebar({
             folders={folderChoices(sessions, filter.folders)}
           />
         )}
-        {allLive.length === 0 && !others?.length && (
+        {tab === ALL && allLive.length === 0 && !others?.length && (
           <div className="empty" style={{ padding: "10px 14px" }}>
             No live sessions. Start one from the board, or open a shell.
           </div>
@@ -596,6 +659,9 @@ export function Sidebar({
             }
             starred={stars.includes(menu.s.key)}
             onStar={() => toggleStar(menu.s.key)}
+            groups={groups.groups}
+            group={groups.of[menu.s.key] ?? null}
+            onGroup={(g) => void assignTab(menu.s.key, g)}
             flash={flash}
           />
         )}

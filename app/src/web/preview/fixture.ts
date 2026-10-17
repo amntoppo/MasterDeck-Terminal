@@ -196,6 +196,13 @@ export function fixtureState(noBoard = false): AppState {
       },
     },
     modOff: { [SESSIONS[0].key]: ['blast-radius', 'masterdeck-alerts'] },
+    sessionGroups: {
+      groups: [
+        { id: 'g00000001', name: 'Web' },
+        { id: 'g00000002', name: 'Billing' },
+      ],
+      of: { [SESSIONS[0].key]: 'g00000001', [SESSIONS[1].key]: 'g00000001', [SESSIONS[2].key]: 'g00000002' },
+    },
     modCatalog: [
       { name: 'blast-radius', provenance: 'blast-radius@claude-code-playground-mods', version: '0.2.0', tier: 'user' },
       { name: 'cc-plugin-diff', provenance: 'cc-plugin-diff@builtin', version: null, tier: 'builtin' },

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { resolvePaths } from './paths'
 
 const KEYS = ['MASTERDECK_HOME', 'MASTERDECK_CLAUDE_SETTINGS', 'MASTERDECK_SKILLS_DIR', 'MASTERDECK_ISOLATED', 'CLAUDE_CONFIG_DIR'] as const
@@ -47,7 +47,7 @@ describe('mods', () => {
   it('the folder is under MASTERDECK_HOME; the bundled mods sit beside the skills', () => {
     clear()
     process.env.MASTERDECK_HOME = '/tmp/iso'
-    expect(resolvePaths('/repo/app', '/r', false)).toMatchObject({ modsDir: join('/tmp/iso', 'mods'), bundledMods: join('/repo', 'mods') })
+    expect(resolvePaths('/repo/app', '/r', false)).toMatchObject({ modsDir: join('/tmp/iso', 'mods'), bundledMods: resolve('/repo', 'mods') })
     expect(resolvePaths('/a', '/r', true).bundledMods).toBe(join('/r', 'mods'))
   })
   it("claude plugin writes Claude Code's real settings: allowed only when MasterDeck uses those too, or CLAUDE_CONFIG_DIR moves both", () => {

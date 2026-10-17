@@ -923,6 +923,16 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   web app over the bridge, a phone, Windows, a real wake from sleep (the resume path is the same
   tick as a restart, which was checked).
 
+## Tabs in the session list (#146): open points (2026-10-17)
+
+- Not checked: the drag with a real mouse in the Electron window (the drops were driven with
+  synthetic drag events in the web preview), the light theme on screen, Windows, a real phone
+  (Move to tab is the only way there: touch has no drag).
+- A copy's carry was unit-tested only (no resume that makes a copy was run).
+- The bar is not sticky: dragging a session from far down the list relies on the column scrolling
+  up under the pointer. Make it stick with the Filters line if that turns out awkward.
+- No keyboard way to reorder tabs other than the menu's Move left / right; no ⌘1… shortcuts.
+
 ## Notifications: open points (2026-10-17, issue #135)
 
 - **P3 · Notices never clear themselves.** A "Session finished" notice stays until Done or three
@@ -942,6 +952,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   runs once (or skipped) and never a burst; the Schedules view (on/off, Run now, next run, runs with
   status, cost and session) and a chip in the session list. Branch
   `worktree-MasterDeck-Terminal-140-schedules`.
+- **Tabs in the session list (#146)**: All plus the user's tabs over the session list, drag a
+  session onto a tab (or right-click → Move to tab), counts and needs-you badges, rename, reorder,
+  delete; kept on the Mac in `session-groups.json` and carried to a resume's copy. Branch
+  `worktree-146-session-tabs-groups`.
 - **Settings → Notifications (#135)**: one registry of notification types × channels
   (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`); a table with System
   notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`

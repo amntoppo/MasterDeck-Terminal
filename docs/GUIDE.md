@@ -8,7 +8,7 @@ One window for all your Claude Code sessions, laid out as a command center:
   above the bottom buttons means a browser, phone or API client is connected right now (see
   *Remote connections* below).
 - **Terminals:**
-  - **Sessions column:** what needs you, then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
+  - **Sessions column:** what needs you, then the **tabs** (All and your own), then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and
     sessions starting, and Parked; a **Filters** line above the groups narrows the list. Click one to open its terminal. **Split** shows two terminals
     side by side; **+** opens the new-terminal / new-session menu. A row always shows the session's
@@ -583,6 +583,20 @@ diff too big to send says so.
   session in another terminal is stopped there.
 - **Session order:** within each group the column keeps your order. A session moves to another
   group only when what it needs changes. Drag a session to move it; right-click → Move to top.
+- **Tabs in the session list:** a line of tabs under Needs you groups your sessions by project or
+  topic. **All** is first and always there: every session, whatever tab it is in. **+** adds a tab
+  (type its name, Enter; Esc cancels). Drag a session from the list onto a tab to put it there (the
+  tab lights up under the pointer); drop it on another tab to move it, or on **All** to take it out
+  of its tab. Without dragging: right-click the session → **Move to tab ▸** (**No tab** takes it
+  out). A session is in one tab at most and always also in All. Each tab shows how many sessions it
+  holds and a red badge for those that need you. Inside a tab the column works as in All, on that
+  tab's sessions only: Starred, the groups, Parked, Filters and Cleanup (Needs you and the shells
+  stay the same in every tab). Double-click a tab to rename it, drag it to reorder it, right-click it
+  for **Rename**, **Move left / right** and **Delete tab** (its sessions stay, in All). Tabs scroll
+  sideways when they do not fit. The tabs and who is in which are kept on the Mac (the web app shows
+  the same ones) and follow a session when it is resumed, also as a copy; the tab on screen is
+  remembered per window or browser. A session that is gone from the list for ten minutes leaves its
+  tab.
 - **Starred sessions:** click the ☆ on a session's row (it shows on hover), right-click → Star, or
   **☆ Star** in the Details tab. A starred session sits in **Starred** at the top of the column and
   stays there whatever its status; its row still shows the status. Unstar it to send it back to its
