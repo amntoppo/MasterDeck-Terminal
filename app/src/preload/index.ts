@@ -131,6 +131,7 @@ const api: DeckApi = {
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),
   workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
   startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
+  cloneSession: (req) => ipcRenderer.invoke(CH.cloneSession, req),
   resumeSession: (id, name, cwd, account) =>
     ipcRenderer.invoke(CH.resumeSession, id, name, cwd, account),
   accountFor: (cwd) => ipcRenderer.invoke(CH.accountFor, cwd),

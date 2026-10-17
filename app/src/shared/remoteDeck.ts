@@ -131,6 +131,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   ticketRepoMeta: invoke(CH.ticketRepoMeta),
   workspaceRepos: invoke(CH.workspaceRepos),
   startClaude: invoke(CH.startClaude),
+  cloneSession: invoke(CH.cloneSession),
   resumeSession: invoke(CH.resumeSession),
   accountFor: invoke(CH.accountFor),
   resumeStopped: invoke(CH.resumeStopped),

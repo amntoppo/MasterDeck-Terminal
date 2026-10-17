@@ -100,7 +100,7 @@ export interface ColumnTab {
   onClose: () => void;
 }
 
-export type SessionAction = "summary" | "close-tab";
+export type SessionAction = "summary" | "close-tab" | "clone";
 
 const ORDER_KEY = "sessionOrder";
 const FILTER_KEY = "sessionFilter";
@@ -662,6 +662,7 @@ export function Sidebar({
             groups={groups.groups}
             group={groups.of[menu.s.key] ?? null}
             onGroup={(g) => void assignTab(menu.s.key, g)}
+            onClone={() => onSessionAction(menu.s, "clone")}
             flash={flash}
           />
         )}
