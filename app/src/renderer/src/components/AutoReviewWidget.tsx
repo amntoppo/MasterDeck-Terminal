@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { autoStatusLine, STATUS_TEXT } from '@shared/autoReview'
 import type { PrFilters } from '@shared/teamPrs'
 import type { AppState } from '@shared/types'
@@ -87,7 +88,8 @@ export function AutoReviewWidget({ state, tabId, tab, account, style, inline }: 
           )}
         </div>
       )}
-      {asking && (
+      {asking &&
+        createPortal(
         <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && setAsking(false)}>
           <div className="dialog" role="dialog" aria-modal="true" aria-label="Merge automatically" style={{ borderTopColor: 'var(--red)' }}>
             <h3>Merge automatically?</h3>
@@ -110,8 +112,10 @@ export function AutoReviewWidget({ state, tabId, tab, account, style, inline }: 
               </button>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          // Above the panel and its split line: the widget's own stacking would cut it off.
+          document.body,
+        )}
     </div>
   )
 }

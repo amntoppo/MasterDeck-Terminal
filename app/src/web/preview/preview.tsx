@@ -79,6 +79,20 @@ function previewDeck(noBoard: boolean): DeckApi {
     history: [round(1, false, false, failing(6)), round(2, false, true, failing(2)), round(3, false, false, `${failing(2)}\n\nTests  2 failed | 140 passed`)],
     progress: said.map((t, i) => `- round ${i + 1}: ${t}`).join('\n') + '\n',
   }
+  // Pull requests → Review with Claude → Automate Review (#157) on for Mine: two PRs it follows, one ready.
+  const t0 = Date.now()
+  state.autoReview = {
+    tabs: { 'prs-mine': { review: true, merge: false, lastCheck: t0 - 60_000, error: null, pane: null } },
+    prs: [
+      { url: 'https://github.com/acme/web/pull/140', repo: 'acme/web', number: 140, title: 'Cache the avatar URLs', author: 'riley', tabId: 'prs-mine', status: 'reviewing', at: t0 - 2 * 60_000, reviewUrl: null, comments: 0, note: null },
+      { url: 'https://github.com/acme/api/pull/77', repo: 'acme/api', number: 77, title: 'Rate limit the export endpoint', author: 'sam', tabId: 'prs-mine', status: 'ready', at: t0 - 25 * 60_000, reviewUrl: 'https://github.com/acme/api/pull/77#pullrequestreview-9', comments: 3, note: null },
+      { url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Drop the old billing page', author: 'alice', tabId: 'prs-mine', status: 'commented', at: t0 - 3 * 3600_000, reviewUrl: 'https://github.com/acme/web/pull/129#pullrequestreview-4', comments: 5, note: 'it is not approved' },
+    ],
+  }
+  state.watches = [
+    ...state.watches,
+    { id: 'review:prs-mine', sessionId: '', description: 'Automate Review · Mine', command: 'is:pr is:open review-requested:@me archived:false sort:updated-desc org:acme', startedAt: t0 - 5 * 3600_000, events: 9, lastEventAt: t0 - 2 * 60_000, queued: 0 },
+  ]
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
   let seq = 1
@@ -181,7 +195,19 @@ function previewDeck(noBoard: boolean): DeckApi {
     resumeSession: (_id: never, name: never) => ({ ok: true, message: name, key: 'bg-5' }),
     getSettings: () => state.settings,
     setSettings: (s: never) => s,
-    ptyOpen: (id: never) => ({ ok: true, replay: fakeScreen(String(id).replace(/^.*:/, '')), seq: 1, exited: false }),
+    // A review pane draws Claude Code's input box, so the automation widget can line up with it.
+    ptyOpen: (id: never) =>
+      String(id).startsWith('pr-review:')
+        ? { ok: true, replay: reviewScreen(), seq: 1, exited: false }
+        : { ok: true, replay: fakeScreen(String(id).replace(/^.*:/, '')), seq: 1, exited: false },
+    autoReviewSet: (tabId: string, sw: { review: boolean; merge: boolean }) => {
+      const tabs = { ...(state.autoReview?.tabs ?? {}) }
+      if (sw.review) tabs[tabId] = { review: true, merge: sw.merge, lastCheck: Date.now(), error: null, pane: null }
+      else delete tabs[tabId]
+      state.autoReview = { tabs, prs: state.autoReview?.prs ?? [] }
+      for (const cb of stateCbs) cb({ ...state })
+      return ok
+    },
     queueList: () => [],
     templates: () => [],
     ticketMemory: () => [],
@@ -405,4 +431,22 @@ export function mountPreview(root: Root, which: string): void {
       <button className="web-signout">Sign out</button>
     </>,
   )
+}
+
+/** A review session's screen: a short answer, then Claude Code's input box between two rules. */
+function reviewScreen(): string {
+  const rule = '\x1b[2m' + '─'.repeat(56) + '\x1b[0m'
+  return [
+    '✻ Welcome to Claude Code',
+    '',
+    '> [MasterDeck auto-review] Review acme/web#140 "Cache the avatar URLs" by riley',
+    '',
+    '● Posted a comment review on acme/web#140: 2 inline comments.',
+    '  https://github.com/acme/web/pull/140#pullrequestreview-11',
+    '',
+    rule,
+    '> ',
+    rule,
+    '  \x1b[2m? for shortcuts\x1b[0m',
+  ].join('\r\n')
 }
