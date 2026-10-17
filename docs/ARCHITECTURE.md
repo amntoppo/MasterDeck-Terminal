@@ -494,14 +494,20 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   without it, its watch ends with one line. Pending items that make no text (a stall past its
   nudges) are dropped. "Me" is the response's `viewer`; without it
   nothing is read into `seen`. "Me" is also the PR's author, so an item by "me" is the session's
-  own reply only when its text is in one of the session's tool calls (`deps.ownPost` →
-  `Sources.ownPost(key)`: reads what the session's transcript gained, then `isOwnPost` in
-  `shared/ownPosts.ts`, which keeps every tool call's input with backslashes and whitespace taken
-  out, the newest 1 MB per `Session.key`, and matches a comment's first 200 characters). Anything
-  else by "me" (the user reviewing their own PR, a review session posting as the user) is news
-  (#158). Items found to be the session's own go into `PrWatchEntry.own` (saved), so they stay
-  out after a restart; with no transcript every item by "me" is held back as before and counted in
-  `unchecked`. Every read sets `okAt` (good) or `error` / `errorAt` (gh's message, "no viewer", "an
+  own reply only when the session posted that text (`deps.ownPost` → `Sources.ownPost(key)`: reads
+  the session's transcript to its end, the first read from 16 MB before it (`readToEnd`), then
+  `isOwnPost` in `shared/ownPosts.ts`). It keeps, normalized (no backslashes or whitespace, lower
+  case): the whole texts the session could have posted (gh's `--body` / `-b` / `-f body=` values,
+  heredocs, any other tool's text arguments such as a body file it wrote; newest 2000), bodies the
+  shell fills in (`$(...)`, `$VAR`) as their literal pieces in order (at least 8 characters of
+  them), and every tool call's input joined (newest 1 MB). A comment is the session's when it equals
+  a whole text, fits a filled-in body, or, 40 characters or longer, its first 200 are in the joined
+  input; a short one ("typo", "nit") never matches by accident. Anything else by "me" (the user
+  reviewing their own PR, a review session posting as the user) is news (#158). Items found to be
+  the session's own go into `PrWatchEntry.own` (saved), so they stay out after a restart. A watch
+  saved before #158 has no `own`: its first full read takes every item by "me" for the session's
+  own (a baseline) and only later ones count. With no transcript every item by "me" is held back as
+  before and counted in `unchecked`. Every read sets `okAt` (good) or `error` / `errorAt` (gh's message, "no viewer", "an
   answer without this PR", a rate limit); a good read clears the error. All three reach Details
   through `WatchInfo` (only `info()`, never the remote snapshot). A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)

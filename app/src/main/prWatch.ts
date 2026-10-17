@@ -178,12 +178,15 @@ export class PrWatch {
    */
   private ownCheck(w: PrWatchEntry): OwnCheck | undefined {
     if (!this.deps.ownPost) return undefined
-    const wrote = this.deps.ownPost(w.sessionKey)
+    // A watch from before #158 never had items by its account in `seen` (they were all dropped):
+    // what is on the PR now is taken for the session's own, as a baseline, and only later ones count.
+    const legacy = w.own === undefined
+    const wrote = legacy ? null : this.deps.ownPost(w.sessionKey)
     const had = new Set(w.own ?? [])
     w.own = []
     w.unchecked = 0
     return (key, body) => {
-      if (had.has(key) || (wrote && wrote(body))) {
+      if (legacy || had.has(key) || (wrote && wrote(body))) {
         w.own!.push(key)
         return true
       }
@@ -233,7 +236,7 @@ export class PrWatch {
         this.list.push({
           url, ...ref, sessionKey: s.key, ...(s.account ? { account: s.account } : {}), startedAt: now,
           baseline: pr.createdAt === null || now - pr.createdAt > BASELINE_AGE_MS,
-          seen: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
+          seen: [], own: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
           ...(now < this.quietUntil ? { quiet: true } : {}),
         })
         changed = true

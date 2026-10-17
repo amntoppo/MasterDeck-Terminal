@@ -224,6 +224,31 @@ describe('PrWatch', () => {
     await tick()
     expect(again.sent).toEqual([])
   })
+  it('a watch saved before #158: what its account already has on the PR is not news, later items are', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json')
+    const old = {
+      url: url(1), owner: 'acme', repo: 'web', number: 1, sessionKey: 'k1', startedAt: NOW - 86_400_000, baseline: false,
+      seen: [], updatedAt: 'old', mergeable: 'MERGEABLE', heavyAt: NOW - 86_400_000, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
+    }
+    writeFileSync(file, JSON.stringify({ watches: [old], done: [] }))
+    const reply = (id: number, body: string) => ({ isResolved: false, comments: { nodes: [{ databaseId: id, updatedAt: 'u1', author: { login: 'me' }, body }] } })
+    // Replies built by the shell (never in the transcript as posted) and an old self-review.
+    let threads = [reply(1, 'Fixed in 1a2b3c4.')]
+    const comments = { nodes: [{ databaseId: 2, updatedAt: 'u', author: { login: 'me' }, body: 'Self-review: fine' }] }
+    const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(...threads), comments } : lightPr))
+    const { w, sent } = make(gh, file, false, { ownPost: () => () => false })
+    await w.poll(NOW)
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toEqual([])
+    // A new review by the same account after that is news.
+    threads = [reply(1, 'Fixed in 1a2b3c4.'), reply(3, 'typo')]
+    await w.poll(NOW + 11 * 60_000)
+    w.deliver([sess()], NOW + 11 * 60_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('1 new review thread: "typo"')
+  })
   it("without the session's transcript, items by its account are held back and counted for Details", async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(), comments: { nodes: [{ databaseId: 3, updatedAt: 'u', author: { login: 'me' }, body: 'Please add a test' }] } } : lightPr))
     const { w, sent } = make(gh, undefined, false, { ownPost: () => null })

@@ -127,3 +127,19 @@ export function readNewLines(st: FollowState, firstMax = 8 * 1024 * 1024, maxChu
     if (fd !== null) closeSync(fd)
   }
 }
+
+/** readNewLines to the end of the file (it gives at most `maxChunk` a call), each batch to `each`. */
+export function readToEnd(st: FollowState, firstMax: number, each: (lines: string[]) => void, maxChunk?: number): void {
+  let size: number
+  try {
+    size = statSync(st.path).size
+  } catch {
+    return
+  }
+  while (st.offset < size) {
+    const at = st.offset
+    each(readNewLines(st, firstMax, maxChunk))
+    // A file that shrank or failed to read: stop rather than spin.
+    if (st.offset <= at) break
+  }
+}

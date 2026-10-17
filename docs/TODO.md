@@ -1000,6 +1000,8 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   read, on a thread whose last comment it is, can be sent back to the session once.
 - **P3 · A tool call that quotes a reviewer** (the session writes the reviewer's words into a file
   or command) makes that review look like the session's own and holds it back.
+- **P3 · A filled-in body is a loose pattern.** `--body "Fixed in $(git rev-parse HEAD)."` takes
+  any comment by the session's account that starts "Fixed in" and ends with "." for its own.
 - **P3 · "Failed to fetch" not reproduced.** The string is not MasterDeck's (only the web app's
   sign-in uses `fetch`); the read of PR #147 succeeded when checked. Read failures now show in
   Details, so the next one can be seen with its message.

@@ -166,6 +166,7 @@ import {
   mtime,
   readHead,
   readNewLines,
+  readToEnd,
   readTail,
   TranscriptIndex,
   type FollowState,
@@ -230,6 +231,8 @@ const GH_BACKGROUND_MS = 600_000;
 /** Sessions with an open PR, open in a tab or not: their comments, for the Ready-for-Review timer. */
 const REVIEW_MS = 120_000;
 const RATE_LIMIT_PAUSE_MS = 600_000;
+/** How far back the first read of a transcript for the PR watch's own-post check starts (#158). */
+const OWN_READ_MAX = 16 * 1024 * 1024;
 /** gh's own words, and the repository view's note ("acme/api not read: RATE_LIMITED"). */
 export const RATE_LIMITED = /rate[ _-]?limit|secondary rate|abuse detection/i;
 
@@ -1952,7 +1955,10 @@ export class Sources {
     if (!tp) return null;
     const own = (this.ownScans[key] ??= { follows: {}, scan: newOwnPostScan() });
     const st = (own.follows[tp] ??= { path: tp, offset: 0, rest: "" });
-    scanOwnPosts(readNewLines(st, Infinity), own.scan);
+    // To the end of the file now (readNewLines alone gives 8 MB a call): a reply at the end of a long
+    // transcript must count at the first read after a launch. The newest OWN_READ_MAX bytes are
+    // enough, since the scan keeps only the newest text anyway.
+    readToEnd(st, OWN_READ_MAX, (lines) => scanOwnPosts(lines, own.scan));
     return (body) => isOwnPost(body, own.scan);
   }
 
