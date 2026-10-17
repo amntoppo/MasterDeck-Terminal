@@ -186,6 +186,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   peersSet: invoke(CH.peersSet),
   peersSync: invoke(CH.peersSync),
   modSet: invoke(CH.modSet),
+  sessionGroupsAct: invoke(CH.sessionGroupsAct),
   modsInstall: invoke(CH.modsInstall),
   modsUninstall: invoke(CH.modsUninstall),
   modsReload: invoke(CH.modsReload),
