@@ -22,6 +22,7 @@ import type { WorktreeClass, WorktreeInfo } from "./janitor";
 import type { TokensByDay } from "./tokens";
 import type { SessionActivity } from "./hours";
 import type { GhAccount } from "./ghAuth";
+import type { SetupWindowRequest } from "./setupClaude";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
 import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
@@ -153,6 +154,9 @@ export const CH = {
   setupCheck: "setup:check",
   setupTool: "setup:tool",
   ghAccounts: "setup:ghAccounts",
+  setupClaudePrepare: "setup:claudePrepare",
+  setupClaudePoll: "setup:claudePoll",
+  setupClaudeAnswer: "setup:claudeAnswer",
   ghUser: "setup:ghUser",
   ghOwners: "setup:ghOwners",
   configDetect: "config:detect",
@@ -665,6 +669,15 @@ export interface DeckApi {
   setupTool(tool: SetupTool): Promise<{ ok: boolean; detail: string }>;
   /** The github.com accounts gh is logged in to. */
   ghAccounts(): Promise<{ accounts: GhAccount[]; error?: string }>;
+  /** Setup's "Let Claude do it": a fresh folder (briefing, helper) for a new conversation. */
+  setupClaudePrepare(): Promise<CliResult>;
+  /**
+   * Setup's Claude session: claims its helper's requests (answering MasterDeck's own), and returns
+   * the ones the window answers plus discover's data for logins not in `known`.
+   */
+  setupClaudePoll(known: string[]): Promise<{ requests: SetupWindowRequest[]; found: Record<string, unknown> }>;
+  /** The window's answer to one of those requests. */
+  setupClaudeAnswer(id: string, answer: unknown): Promise<boolean>;
   /** Setup: the commit name and email a newly connected account starts with (its GitHub name, its noreply email). */
   ghUser(login: string): Promise<{ name: string; email: string }>;
   /** The active account's login and the organizations it belongs to. */

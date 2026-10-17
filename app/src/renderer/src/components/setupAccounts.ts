@@ -1,5 +1,6 @@
 import { parseCodeRepos, projectKey, type AccountConfig, type CodeRepo, type ProjectConfig } from '@shared/appConfig'
 import type { DetectAll } from '@shared/detect'
+import type { SetupDraftAccount } from '@shared/setupClaude'
 
 /** One account's choices on Setup's Repos & boards step. */
 export interface AccountSel {
@@ -192,4 +193,59 @@ export function withFound(s: AccountSel, d: DetectAll, login: string, sel: Recor
     }
   }
   return out
+}
+
+/**
+ * What Setup saves (the wizard's Finish / Save and Claude's Save): the config patch from Setup's
+ * values, or what is missing. `sel`: every account's choices, the one on screen included.
+ */
+export function setupPatch(v: {
+  connected: Connected[]
+  primaryLogin: string
+  sel: Record<string, AccountSel>
+  ownerType: (login: string, owner: string) => 'organization' | 'user'
+  workspaces: Record<string, string>
+  workspace: string
+  masterEnabled: boolean
+  codeRepos: CodeRepo[]
+}): { ok: true; patch: Record<string, unknown> } | { ok: false; message: string } {
+  const list = accountsFromSetup(v.connected, v.primaryLogin, v.sel, v.ownerType, v.workspaces)
+  if (!list.length) return { ok: false, message: 'Go back and connect a GitHub account.' }
+  if (!list[0].issueRepo) return { ok: false, message: `Go back and pick at least one repository for ${list[0].login}.` }
+  if (list.some((a) => !a.email.includes('@'))) return { ok: false, message: 'Each connected account needs an email for its commits.' }
+  const code = codeReposToSave(v.codeRepos)
+  if (!code.ok) return code
+  return {
+    ok: true,
+    patch: {
+      accounts: list,
+      // No board on the primary account: issues and PRs only (master config save mirrors the rest from it).
+      ...(list[0].projects.length ? {} : { project: 0 }),
+      ...(v.workspace ? { workspace: v.workspace } : {}),
+      masterEnabled: v.masterEnabled,
+      codeRepos: code.list,
+    },
+  }
+}
+
+/**
+ * One account of Claude's checked draft as Setup's choices: its boards as GitHub described them
+ * (`found`, what discover read), keeping what the statuses of a board already chosen mean.
+ */
+export function selFromDraft(a: SetupDraftAccount, found: DetectAll, had?: AccountSel): AccountSel {
+  const every = found.owners.flatMap((o) => o.projects)
+  return {
+    repos: a.repos,
+    allRepos: a.allRepos,
+    primary: a.primaryRepo,
+    boards: Object.fromEntries(
+      a.boards.flatMap((k) => {
+        const p = every.find((x) => projectKey(x).toLowerCase() === k.toLowerCase())
+        if (!p) return []
+        const kept = had?.boards[projectKey(p)]
+        return [[projectKey(p), kept ? { ...p, statuses: kept.statuses } : p] as const]
+      }),
+    ),
+    allBoards: a.allBoards,
+  }
 }

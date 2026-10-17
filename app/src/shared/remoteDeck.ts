@@ -148,6 +148,10 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   setupCheck: invoke(CH.setupCheck),
   setupTool: invoke(CH.setupTool),
   ghAccounts: blocked,
+  // Setup's Claude session runs on the Mac, from its window only (it reads gh's tokens there).
+  setupClaudePrepare: blocked,
+  setupClaudePoll: blocked,
+  setupClaudeAnswer: blocked,
   ghUser: blocked,
   ghOwners: blocked,
   configDetect: invoke(CH.configDetect),

@@ -47,6 +47,8 @@ export class PtyManager {
     }),
     /** The workflow builder's account settings: the primary's with two or more accounts, else none. */
     private builderSettings: () => string[] = () => [],
+    /** Setup's "Let Claude do it" session folder (its CLAUDE.md and helper, written before it opens). */
+    private setupDir: () => string = () => homedir(),
   ) {}
 
   /** `remote`: asked by a browser, which gets an existing pane only as the kind it really is. */
@@ -113,6 +115,10 @@ export class PtyManager {
     }
     if (spec.kind === "builder") {
       cmd.cwd = this.builderDir();
+      mkdirSync(cmd.cwd, { recursive: true });
+    }
+    if (spec.kind === "setup-claude") {
+      cmd.cwd = this.setupDir();
       mkdirSync(cmd.cwd, { recursive: true });
     }
     if (ticket) {

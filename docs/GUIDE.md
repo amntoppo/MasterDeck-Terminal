@@ -1027,6 +1027,30 @@ A place for what you would otherwise keep in another app: your own notes, and on
   **Reload**). A file in that folder that MasterDeck cannot read as a note is left alone.
 - **Limits:** 200 characters in a title, 50,000 in a note, 1000 notes.
 
+## Setting up with Claude
+
+Setup (the first-run wizard, and Settings → **Set up MasterDeck**) has a **Let Claude do it**
+button under its title. It opens a Claude terminal inside Setup that walks you through the same
+steps in conversation:
+
+1. **Tools**: checks `claude`, `gh`, Python, `git` and `jq`, and offers to install what is missing
+   (Homebrew on macOS, winget on Windows; you approve each install).
+2. **GitHub accounts**: with one `gh` login it says which it will use; with several it asks which
+   to use and which is the primary; with none it opens gh's browser login above the chat.
+3. **Repositories and boards**: for each account, what it can reach; you pick specific
+   repositories or all, the main one, and the boards (named with their columns), or none.
+4. **Preferences**: proposes the workspace folder, master-agent, notifications and MasterDeck's
+   mods, and asks only where it matters.
+5. **Summary**: Claude hands its choices to MasterDeck, which checks them, fills the wizard's steps
+   with them and shows a summary card above the chat. **Save** writes the setup the same way the
+   wizard's Finish does; **Change in the wizard** closes the chat and shows the steps to edit by hand.
+
+Nothing is saved before you press **Save**: Claude cannot write the setup itself. After Save the
+chat closes, Setup shows what was set up, and the main screen opens after a few seconds (with the
+Skills popup on a first run). **Back to the wizard**, or quitting Claude, returns to the wizard with
+whatever Claude had filled in. Pressing **Let Claude do it** again starts a new chat. The button is
+off while Claude Code is not installed (the Tools step says how), and is not in the web app.
+
 ## Settings (⚙)
 
 Nudge after N minutes, budget per ticket, context warning %, auto-open on prompts, dock badge.
@@ -1061,7 +1085,7 @@ Stored in `~/.claude/masterdeck/settings.json`.
     those three too.
 
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
-  hooks). Saved to `~/.claude/master/config.json`.
+  hooks). Saved to `~/.claude/master/config.json`. **Let Claude do it** works here too (see Setting up with Claude).
 - **Hooks, mods & skills:** status lines, not switches (but **Mods**, see MasterDeck's mods). **Queue** says who runs `/queue`: MasterDeck's
   hook, queue hooks you installed by hand (MasterDeck then leaves `/queue` to them), or nothing
   (Windows). **Self-review gate** says whether the gate before `gh pr create` is installed; it stops the

@@ -168,6 +168,7 @@ web tabs keep working.
 | A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
+| Setup with Claude (Setup → Let Claude do it, #156) | `shared/setupClaude.ts` (`readSetupDraft`, `draftSummary`, `setupBriefing`, `setupScript`), `main/setupClaude.ts` (`prepareSetupDir`, `SetupPump`), `CH.setupClaude*` in `main/index.ts` (`detectAllAs`), `setupPatch` / `selFromDraft` in `renderer/.../setupAccounts.ts` (the one save path of Setup), the panel in `SetupDialog.tsx`, `onHold` in `App.tsx`. Only the window's Save writes the config; never let the session write it |
 | Workflows | `main/workflow.ts` (`WorkflowStore`), `shared/flow*.ts`, `renderer/.../FlowEditor.tsx` |
 | Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`, `rawFlowHash`, `sameAsMark`: the one "edited" rule), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
@@ -230,7 +231,7 @@ there. Isolate with:
 | `MASTERDECK_REMOTE_URL` | backend address (https, or `http://localhost:<port>`; anything else silently falls back to dev.masterdeck.dev) |
 | `MASTERDECK_NO_SKILLS=1`, `MASTERDECK_NO_HOOK=1` | skip installing skills / the status line and deck hooks |
 | `MASTERDECK_SETUP_MISSING=jq,claude` | Setup's tools step reports these as missing (the install flow) |
-| `MASTERDECK_TEST_NO_ATTACH=1`, `MASTERDECK_BOARD_FIXTURE=<json>`, `MASTERDECK_REPO_FIXTURE=<json>` | refuse `claude attach`; use a fixture board; use a fixture answer for the Board's repository view |
+| `MASTERDECK_TEST_NO_ATTACH=1`, `MASTERDECK_BOARD_FIXTURE=<json>`, `MASTERDECK_REPO_FIXTURE=<json>`, `MASTERDECK_DETECT_FIXTURE=<json>` | refuse `claude attach`; use a fixture board; use a fixture answer for the Board's repository view; use a fixture `master config detect --all` answer (Setup's Repos & boards, Setup with Claude's `discover`) |
 | `MASTERDECK_MEETINGS_FIXTURE=<dir>` | isolated launches only (`MASTERDECK_ISOLATED=1` and `MASTERDECK_HOME`): copies a stored meeting, its audio and its note (`test/fixtures/meetings`) into the home before the notes are read (OPERATIONS § Meetings: the fixture) |
 | `MASTERDECK_WHISPER` | the `whisper-cli` Meetings run (before the app's own and one on the PATH): a stand-in for tests |
 | `MASTERDECK_MUTE` | the `md-mute` helper Meetings run (instead of the app's own): a stand-in for tests |
@@ -416,6 +417,21 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-17)
+
+- **Setup with Claude (#156)** is built on branch `worktree-156-let-claude-setup` (PR, not merged,
+  **not installed**: the rebuild of the real app waits for the user's word). Setup's **Let Claude
+  do it** opens a Claude terminal in Setup (`setup-claude` pane, `<home>/setup-claude/`) briefed to
+  check and install tools, pick GitHub accounts and the primary, repositories (or all) and boards,
+  and preferences; its `review.json` is checked (`readSetupDraft`), fills the wizard and shows a
+  summary card whose **Save** writes through the wizard's own path (`setupPatch` → `master config
+  save`); then a success view and the main screen. Design and plan:
+  `docs/plans/2026-10-17-setup-with-claude-{design,plan}.md`; ARCHITECTURE "Setup with Claude".
+  Checked: typecheck, vitest, and the isolated app with a stand-in `claude`, a fake `gh` and a
+  detect fixture (the offer, the chat, a refused draft's errors, the card, Change in the wizard
+  showing Claude's values, Save writing the config with both accounts and workspaces, the success
+  view then the Skills popup, leaving early from Settings). Not checked: the real `claude`
+  following the briefing, a real `gh auth login` from the chat, a mods install from Save, Windows
+  (the helper is bash; Claude Code runs it in Git Bash). Open points: TODO ("Setup with Claude (#156)").
 
 - **Settings → Notifications (#135)** is built on branch `135-notification-settings` (PR, not
   merged, **not installed**: the rebuild of the real app waits for the user's word). A table of ten

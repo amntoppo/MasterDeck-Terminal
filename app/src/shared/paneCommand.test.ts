@@ -19,6 +19,12 @@ describe('paneCommand', () => {
     expect(c.args[0]).toContain('brew install jq')
     expect(c.args[0]).not.toContain('nope')
   })
+  it("Setup's Claude: its own name, project settings only, and a first message", () => {
+    expect(paneCommand({ kind: 'setup-claude' }, 'darwin', '/bin/zsh', '/x/claude')).toEqual({
+      file: '/x/claude',
+      args: ['-n', 'md-setup', '--setting-sources', 'project,local', '--permission-mode', 'acceptEdits', 'Set up MasterDeck with me, following CLAUDE.md.'],
+    })
+  })
   it('isSafeBgId', () => {
     expect(isSafeBgId('ea39fd38')).toBe(true)
     expect(isSafeBgId('ea39fd38; rm -rf')).toBe(false)
