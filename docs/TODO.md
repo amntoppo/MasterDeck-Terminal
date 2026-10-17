@@ -924,6 +924,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`
   migrated; events can be routed to Needs you as notices. Branch `135-notification-settings`.
 
+- **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
+  in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays
+  put. Design and plan in `docs/plans/2026-10-17-resume-opens-terminal-*`. Open: the "Resuming …"
+  tab has no timeout when the session never appears (as the other "Starting…" tabs; `ponytail:` in
+  `openResumed`); the History dialog's Resume was checked by the suites only (the web preview has no
+  history hits).
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
   the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by
