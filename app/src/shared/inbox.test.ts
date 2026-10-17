@@ -363,3 +363,25 @@ describe('meeting items', () => {
     expect(RESOLVED_BECAUSE.meeting).toBeTruthy()
   })
 })
+
+describe('notices (Settings → Notifications → Needs you)', () => {
+  it('lists a notice with Open and Done, and never notifies it again as a new item', () => {
+    const s = { key: 'k1', sessionId: 'sid1', name: 'alpha', state: 'idle' } as never
+    const items = collectItems(
+      input({
+        sessions: [s],
+        notices: [
+          { id: 'event:pr-merged:1:0', type: 'pr-merged', title: 'alpha: PR merged', body: '#1 merged.', sessionKey: 'k1', at: 1 },
+          { id: 'event:update:2:1', type: 'update', title: 'MasterDeck 1.0 is available', body: '', sessionKey: null, at: 2 },
+          { id: 'event:pr-ready:3:2', type: 'pr-ready', title: 'gone', body: '', sessionKey: 'unknown', at: 3 },
+        ],
+      }),
+    ).filter((i) => i.kind === 'notice')
+    expect(items.map((i) => i.id)).toEqual(['event:pr-merged:1:0', 'event:update:2:1'])
+    expect(items[0]).toMatchObject({ detail: { type: 'notice', notify: 'pr-merged' }, priority: PRIORITY.notice })
+    expect(items[0].actions.map((a) => a.type)).toEqual(['open', 'dismiss'])
+    expect(items[1].actions.map((a) => a.type)).toEqual(['dismiss'])
+    expect(inboxNotice({ item: items[0], state: 'open', firstSeen: 0, lastSeen: 0 })).toBeNull()
+    expect(RESOLVED_BECAUSE.notice).toBeTruthy()
+  })
+})

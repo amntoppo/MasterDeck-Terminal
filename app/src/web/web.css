@@ -114,6 +114,9 @@ html.phone .setup-body { min-height: 0; }
 .app.phone .set-nav button { flex: none; white-space: nowrap; padding: 8px 12px; font-size: 14px; }
 .app.phone .set-body { padding: 4px 14px 80px; }
 .app.phone .set-field { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.app.phone .notify-table .set-hint { display: none; }
+.app.phone .notify-table td { width: 72px; padding: 10px 4px; }
+.app.phone .notify-table thead th { white-space: normal; }
 .app.phone .set-ctl { flex-wrap: wrap; min-width: 0; }
 .app.phone .set-ctl code { overflow-wrap: anywhere; }
 .app.phone > .master-slot { flex-direction: column; }
