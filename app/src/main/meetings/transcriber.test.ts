@@ -167,7 +167,7 @@ describe('Transcriber', () => {
     const failed = store.get(a.id)!
     expect(failed.state).toBe('failed')
     // One line, no control character, no home folder.
-    expect(failed.error).toBe('Transcription failed: whisper-cli failed (1): bad audio in ~/chunk')
+    expect(failed.error).toBe('Transcription failed: whisper-cli failed (1): bad audio in ' + join('~', 'chunk'))
     // The meeting's later chunk ran; only the failed one is still on disk.
     expect(w.calls).toEqual(['you-0', 'others-0', 'you-1', 'you-0'])
     expect([onDisk(a.id, 'you', 0), onDisk(a.id, 'others', 0), onDisk(a.id, 'you', 1)]).toEqual([false, true, false])
