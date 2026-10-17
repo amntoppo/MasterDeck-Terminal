@@ -797,6 +797,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
     ),
   onChange: () => sources.changed(),
   ended: (url) => void sources.prEnded(url).catch(() => {}),
+  ownPost: (key) => sources.ownPost(key),
 });
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(

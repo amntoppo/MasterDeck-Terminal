@@ -5,7 +5,7 @@ import { groupByAccount } from '@shared/accounts'
 import type { AppConfig } from '@shared/appConfig'
 import { parsePrUrl } from '@shared/prSummary'
 import {
-  BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
+  BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type OwnCheck, type PrItem, type PrRef,
 } from '@shared/prWatch'
 import { canDeliver, pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
@@ -40,6 +40,14 @@ export interface PrWatchEntry {
   account?: string
   /** What it found, for Session details (memory only: never saved). */
   log?: WatchEvent[]
+  /** Keys of items by the watch's account that the session posted itself: never news, also after a restart. */
+  own?: string[]
+  /** Items by the watch's account held back because the session's transcript could not be read. */
+  unchecked?: number
+  /** The last read that failed (cleared by the next good one), and the last good one. */
+  error?: string
+  errorAt?: number
+  okAt?: number
 }
 
 export interface PrWatchDeps {
@@ -51,6 +59,11 @@ export interface PrWatchDeps {
   onChange: () => void
   /** A watched PR was seen merged or closed (the session's lane follows it). */
   ended?: (url: string) => void
+  /**
+   * Whether the session wrote this text itself (its transcript's tool calls, read up to now); null
+   * when its transcript is not known. Absent: everything by the watch's account is the session's.
+   */
+  ownPost?: (sessionKey: string) => ((body: string) => boolean) | null
 }
 
 const DONE_MAX = 500
@@ -71,6 +84,16 @@ const POLL_TTL = 50
 const FIRST_RUN_MS = 10 * 60_000
 const chunks = <T>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const graphql = (q: string) => ['api', 'graphql', '-f', `query=${q}`]
+const ERROR_MAX = 300
+/** Why a read gave nothing to go on, in one line for Details. */
+function readError(r: CliLike, viewer: string | null): string {
+  const text = ghErrorText(r).trim().replace(/\s+/g, ' ')
+  if (text) return text.slice(0, ERROR_MAX)
+  if (!ghHasData(r)) return `gh exited ${r.code} without an answer`
+  return viewer ? 'GitHub answered without this PR' : 'GitHub did not say which account is signed in (no viewer)'
+}
+type CliLike = { code: number; stdout: string; stderr: string }
+const pauseError = (r: CliLike): string => ghErrorText(r).trim().replace(/\s+/g, ' ').slice(0, ERROR_MAX) || 'GitHub calls are paused (rate limit)'
 
 /**
  * MasterDeck watches each open PR a session made (Settings → Sessions → Watch new PRs; the
@@ -133,6 +156,43 @@ export class PrWatch {
       renameSync(`${this.file}.tmp`, this.file)
     } catch {
       // next change
+    }
+  }
+
+  private failed(ws: PrWatchEntry[], error: string, now: number): void {
+    for (const w of ws) {
+      w.error = error
+      w.errorAt = now
+    }
+  }
+
+  private ok(w: PrWatchEntry, now: number): void {
+    delete w.error
+    delete w.errorAt
+    w.okAt = now
+  }
+
+  /**
+   * Which items by the watch's account are the session's own posts: the ones recorded before, and
+   * those whose text is in its transcript. Rebuilds `own` and `unchecked` for this read.
+   */
+  private ownCheck(w: PrWatchEntry): OwnCheck | undefined {
+    if (!this.deps.ownPost) return undefined
+    const wrote = this.deps.ownPost(w.sessionKey)
+    const had = new Set(w.own ?? [])
+    w.own = []
+    w.unchecked = 0
+    return (key, body) => {
+      if (had.has(key) || (wrote && wrote(body))) {
+        w.own!.push(key)
+        return true
+      }
+      // No transcript to tell them apart: held back as before #158, and counted so Details can say so.
+      if (!wrote) {
+        w.unchecked!++
+        return true
+      }
+      return false
     }
   }
 
@@ -199,15 +259,22 @@ export class PrWatch {
         let me: string | null = null
         for (const group of chunks(ws, LIGHT_MAX)) {
           const r = await gh(graphql(lightQuery(group)), { ttl: POLL_TTL, timeoutMs: 30_000 })
-          if (this.deps.paused(ghErrorText(r))) continue accounts
+          if (this.deps.paused(ghErrorText(r))) {
+            this.failed(ws, pauseError(r), now)
+            continue accounts
+          }
           me = parseViewer(r.stdout) ?? me
           // No answer, or no "me" to tell own replies apart: touch nothing, try again next minute.
           // gh exits 1 on a partial error (one PR it cannot read) and still prints the others.
-          if (!ghHasData(r) || !me) continue
+          if (!ghHasData(r) || !me) {
+            this.failed(group, readError(r, me), now)
+            continue
+          }
           const viewer = me
           parseLight(r.stdout, group.length).forEach((l, i) => {
             const w = group[i]
             if (!l) {
+              this.failed([w], readError(r, viewer), now)
               w.misses = (w.misses ?? 0) + 1
               if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`)
               return
@@ -220,19 +287,29 @@ export class PrWatch {
               l.state !== 'OPEN' || (l.mergeable === 'CONFLICTING') !== conflictKnown
             // A due PR keeps its old updatedAt until its full read lands: a failed read is retried.
             if (due) heavy.push({ w, l })
-            else w.mergeable = l.mergeable
+            else {
+              w.mergeable = l.mergeable
+              this.ok(w, now)
+            }
           })
         }
         for (const group of chunks(heavy, HEAVY_MAX)) {
           const r = await gh(graphql(heavyQuery(group.map((g) => g.w))), { ttl: POLL_TTL, timeoutMs: 30_000 })
-          if (this.deps.paused(ghErrorText(r))) continue accounts
+          if (this.deps.paused(ghErrorText(r))) {
+            this.failed(heavy.map((h) => h.w), pauseError(r), now)
+            continue accounts
+          }
           const viewer = parseViewer(r.stdout) ?? me
           // A failed read (or no "me") leaves `seen` as it was: nothing replays, nothing is baselined away.
-          if (!ghHasData(r) || !viewer) continue
+          if (!ghHasData(r) || !viewer) {
+            this.failed(group.map((g) => g.w), readError(r, viewer), now)
+            continue
+          }
           parseHeavy(r.stdout, group.length).forEach((h, i) => {
             const { w, l } = group[i]
-            if (!h) return
-            const { items, stallAt } = prItems(h, viewer, now)
+            if (!h) return this.failed([w], readError(r, viewer), now)
+            this.ok(w, now)
+            const { items, stallAt } = prItems(h, viewer, now, this.ownCheck(w))
             const ending = h.state !== 'OPEN'
             const quiet = !!w.quiet
             // Older PR: counted once in a summary, its items never listed. First run: not even that.
@@ -344,6 +421,9 @@ export class PrWatch {
         events: w.events,
         lastEventAt: w.lastEventAt,
         queued: w.pending.length + w.notes.length,
+        ...(w.error ? { error: w.error, errorAt: w.errorAt ?? null } : {}),
+        ...(w.okAt ? { okAt: w.okAt } : {}),
+        ...(w.unchecked ? { unchecked: w.unchecked } : {}),
       }))
   }
 

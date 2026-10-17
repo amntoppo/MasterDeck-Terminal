@@ -973,7 +973,25 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **Later:** the mobile push channel (#134) is one sender in `index.ts` and `available: true` in
   `CHANNELS`; email or Slack the same way.
 
+## PR watch, same account (#158): open points (2026-10-17)
+
+- **P3 · Own replies after a resume and a restart.** The session's own posts are matched against
+  the transcripts MasterDeck read for its `Session.key` this launch (plus `own` keys saved in
+  `pr-watch.json`). A reply posted in an earlier transcript (before a resume) that MasterDeck never
+  read, on a thread whose last comment it is, can be sent back to the session once.
+- **P3 · A tool call that quotes a reviewer** (the session writes the reviewer's words into a file
+  or command) makes that review look like the session's own and holds it back.
+- **P3 · "Failed to fetch" not reproduced.** The string is not MasterDeck's (only the web app's
+  sign-in uses `fetch`); the read of PR #147 succeeded when checked. Read failures now show in
+  Details, so the next one can be seen with its message.
+- **Not checked:** a live PR with a same-account review reaching a session in the installed app.
+
 ## Recently done
+
+- **PR watch delivers same-account reviews and shows read failures (#158)**: an item by the
+  watch's own account is held back only when the session's transcript shows it posted that text
+  (`shared/ownPosts.ts`, `Sources.ownPost`); Details' PR watch shows the last good read, a failing
+  read's error and the comments it could not check. Branch `worktree-158-pr-watch-same-account`.
 
 - **New Claude session: account first, last choices per account (#153)**: the account select is
   the dialog's first field; each account's folder, model, workflow and permissions are kept in

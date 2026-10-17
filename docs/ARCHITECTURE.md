@@ -493,7 +493,17 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   (`ghHasData`): one inaccessible PR does not starve its batch; after 3 light reads in a row
   without it, its watch ends with one line. Pending items that make no text (a stall past its
   nudges) are dropped. "Me" is the response's `viewer`; without it
-  nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
+  nothing is read into `seen`. "Me" is also the PR's author, so an item by "me" is the session's
+  own reply only when its text is in one of the session's tool calls (`deps.ownPost` →
+  `Sources.ownPost(key)`: reads what the session's transcript gained, then `isOwnPost` in
+  `shared/ownPosts.ts`, which keeps every tool call's input with backslashes and whitespace taken
+  out, the newest 1 MB per `Session.key`, and matches a comment's first 200 characters). Anything
+  else by "me" (the user reviewing their own PR, a review session posting as the user) is news
+  (#158). Items found to be the session's own go into `PrWatchEntry.own` (saved), so they stay
+  out after a restart; with no transcript every item by "me" is held back as before and counted in
+  `unchecked`. Every read sets `okAt` (good) or `error` / `errorAt` (gh's message, "no viewer", "an
+  answer without this PR", a rate limit); a good read clears the error. All three reach Details
+  through `WatchInfo` (only `info()`, never the remote snapshot). A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
   and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told). On merge/close it also calls `deps.ended(url)` → `Sources.prEnded`, which reads that PR again past the gh cache so the session's lane (`prStage`) moves at once, not on the next review poll. Its messages, like `[MasterDeck monitor: …]` lines, are not the user writing (`isUserWords` in `shared/ask.ts`): the "merged" message arrives after the merge and would otherwise turn Merged into Rework.

@@ -422,6 +422,17 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-17)
 
+- **PR watch: same-account reviews and read failures (#158)** on branch
+  `worktree-158-pr-watch-same-account` (PR, not merged, **not installed**: the rebuild of the real
+  app waits for the user's word). The watch's account is also the PR's author, so a review posted
+  as the user (by the user or a review session) was dropped as the session's own reply; now an item
+  by that account is held back only when its text is in the session's tool calls
+  (`shared/ownPosts.ts`, `Sources.ownPost`, `PrWatchEntry.own`). Details' PR watch shows the last
+  good read, a failing read's error and what it could not check. Checked: typecheck, vitest
+  (225 files passed, 2 skipped; 2814 tests passed, 5 skipped), and the matcher against PR #147's real reviews and its
+  session's real transcript (the review and both inline comments news, both replies its own). Not
+  checked: a live delivery in the installed app. Open points: TODO ("PR watch, same account").
+
 - **New Claude session remembers per account (#153)** on branch
   `worktree-MasterDeck-Terminal-153-new-session-memory` (PR, not merged, **not installed**: the
   rebuild of the real app waits for the user's word). The account is the dialog's first field; each
