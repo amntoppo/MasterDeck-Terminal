@@ -104,10 +104,13 @@ import type { NewTicket } from "@shared/ipc";
 import type { TicketSettings } from "@shared/ticketSettings";
 import { TicketSettingsBar } from "./TicketSettingsBar";
 import { whileBusy } from "@shared/busy";
+import type { ResumeTarget } from "@shared/resumeOpen";
 
 interface Props {
   state: AppState;
   onOpenSession: (s: Session) => void;
+  /** A card's Resume succeeded: open the session's terminal. */
+  onResumed: (t: ResumeTarget) => void;
   /** My card without a session: the Start dialog. */
   onStart: (card: BoardCard) => void;
   /** Someone else's card with a PR. */
@@ -220,6 +223,7 @@ interface ColDrag {
 export function BoardView({
   state,
   onOpenSession,
+  onResumed,
   onStart,
   onPr,
   onAssign,
@@ -1260,6 +1264,7 @@ export function BoardView({
                         moving={!!moving[ticketKey(c.repo, c.number)]}
                         readOnly={!canMove(c, worked)}
                         onClick={() => onCard(c)}
+                        onResumed={onResumed}
                         note={ticketNote(notes ?? [], c.repo, c.number)}
                         onNote={
                           onNote && can("notesList")
@@ -1438,6 +1443,7 @@ function Card({
   moving,
   readOnly,
   onClick,
+  onResumed,
   note,
   onNote,
 }: {
@@ -1450,6 +1456,7 @@ function Card({
   /** An issue of an account with no board: it cannot be dragged to another column. */
   readOnly: boolean;
   onClick: () => void;
+  onResumed: (t: ResumeTarget) => void;
   /** The ticket's note (its plain one-line preview shows on hover). */
   note: NoteMeta | null;
   /** Open the ticket's note (absent: Notes is not available here). */
@@ -1583,7 +1590,7 @@ function Card({
               ⏸ {past[0].name}
             </span>
             <span>{formatAgo(now - past[0].lastActivity)}</span>
-            <ResumeButton p={past[0]} />
+            <ResumeButton p={past[0]} onResumed={onResumed} />
           </>
         ) : (
           <span className="label" />
@@ -1602,8 +1609,14 @@ function Card({
   );
 }
 
-/** Continue a stopped session in the background (same conversation and id); it shows up in the sidebar. */
-function ResumeButton({ p }: { p: PastSession }) {
+/** Continue a stopped session in the background (same conversation and id), then open its terminal. */
+function ResumeButton({
+  p,
+  onResumed,
+}: {
+  p: PastSession;
+  onResumed: (t: ResumeTarget) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   return (
@@ -1614,12 +1627,15 @@ function ResumeButton({ p }: { p: PastSession }) {
       onClick={async (e) => {
         e.stopPropagation();
         setBusy(true);
+        const at = Date.now();
         const r = await deck().resumeSession(p.sessionId, p.name, p.cwd);
         setBusy(false);
-        setMsg(r.ok ? "Resumed" : r.message);
+        if (!r.ok) return setMsg(r.message);
+        setMsg(null);
+        onResumed({ key: r.key ?? null, sessionId: p.sessionId, name: p.name, at });
       }}
     >
-      {busy ? "Resuming…" : msg === "Resumed" ? "Resumed" : "Resume"}
+      {busy ? "Resuming…" : "Resume"}
     </button>
   );
 }
