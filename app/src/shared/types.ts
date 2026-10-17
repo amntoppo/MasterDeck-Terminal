@@ -44,6 +44,10 @@ export interface Session {
   account?: string;
   /** Two or more accounts, and the session was started without one: it works as gh's active account (no `account` then). */
   ghActive?: boolean;
+  /** Started by Clone (#136) from this session (`session-clones.json`). */
+  clonedFrom?: { key: string; name: string };
+  /** No transcript yet: nothing to clone. */
+  noConversation?: true;
 }
 
 export interface Issue {

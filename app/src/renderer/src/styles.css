@@ -694,6 +694,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .menu.session-menu { position: fixed; right: auto; z-index: 60; min-width: 220px; max-height: 80vh; overflow-y: auto; }
 .session-menu-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 4px 10px 2px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-menu button:disabled { opacity: .45; cursor: default; }
+.session-menu-why { font-size: 11px; color: var(--muted); padding: 0 10px 4px; max-width: 240px; white-space: normal; }
 
 /* Needs-you card controls (snooze, dismiss), snoozed and done-today lists */
 .card-ctl { position: absolute; top: 3px; right: 4px; display: flex; gap: 2px; z-index: 2; }

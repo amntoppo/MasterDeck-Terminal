@@ -11,7 +11,8 @@ import { sessionForIssue, sessionTicket } from "@shared/derive";
 import { mergePresence } from "@shared/remotePresence";
 import { meetingsAgreed } from "@shared/meetings";
 import type { AppState, Issue, Session, BoardCard } from "@shared/types";
-import type { AssignRequest } from "@shared/ipc";
+import type { AssignRequest, CloneRequest } from "@shared/ipc";
+import { CloneDialog } from "./components/CloneDialog";
 import { AssignDialog } from "./components/AssignDialog";
 import { TrustNote, useTrust } from "./components/TrustFix";
 import { isNotTrusted, pendingPane, retryRequest } from "@shared/trust";
@@ -104,6 +105,8 @@ type Tab =
       here?: HereOpts;
       /** Or: a new Claude session without a ticket (the + menu). */
       claude?: NewSessionReq;
+      /** Or: a clone of a session (#136). */
+      clone?: CloneRequest;
       /** Or: a stopped session resumed (History, the Board, the Start dialog), until it runs. */
       resumed?: ResumeTarget;
       error?: string;
@@ -593,6 +596,39 @@ export function App() {
     },
     [activate],
   );
+  // Clone… (#136): a "Starting…" tab, as for New Claude session, until the clone is listed by name.
+  const cloneSession = useCallback(
+    (req: CloneRequest) => {
+      const id = `pending:${req.name}:${Date.now()}`;
+      setView("terminals");
+      setTabs((cur) => [
+        ...cur,
+        {
+          id,
+          kind: "pending",
+          name: req.name,
+          issue: 0,
+          startedAt: Date.now(),
+          clone: req,
+        },
+      ]);
+      activate(id);
+      void deck()
+        .cloneSession(req)
+        .then((r) => {
+          if (!r.ok)
+            setTabs((cur) =>
+              cur.map((t) =>
+                t.id === id && t.kind === "pending"
+                  ? { ...t, error: r.message }
+                  : t,
+              ),
+            );
+        });
+    },
+    [activate],
+  );
+  const [cloning, setCloning] = useState<Session | null>(null);
   const [newSession, setNewSession] = useState(false);
   const onNew = (a: NewAction) => {
     if (a.kind === "terminal") void openShell(a.cwd);
@@ -612,6 +648,21 @@ export function App() {
       );
       const t = tabs.find((x) => x.id === id);
       if (t?.kind !== "pending") return;
+      if (t.clone) {
+        void deck()
+          .cloneSession(t.clone)
+          .then((r) => {
+            if (!r.ok)
+              setTabs((cur) =>
+                cur.map((x) =>
+                  x.id === id && x.kind === "pending"
+                    ? { ...x, error: r.message }
+                    : x,
+                ),
+              );
+          });
+        return;
+      }
       if (t.claude) {
         void deck()
           .startClaude(t.claude)
@@ -1229,6 +1280,7 @@ export function App() {
         onOpenMeeting={(id) => openMeeting(id, null)}
         onSessionAction={(sess, a) => {
           if (a === "close-tab") closeTab(`tab:${sess.key}`);
+          else if (a === "clone") setCloning(sess);
           else {
             openSession(sess);
             showPanel("summary");
@@ -1652,6 +1704,14 @@ export function App() {
             onClose={() => setFindAt(null)}
           />
         </div>
+      )}
+      {cloning && (
+        <CloneDialog
+          session={cloning}
+          state={state}
+          onClone={cloneSession}
+          onClose={() => setCloning(null)}
+        />
       )}
       {newSession && (
         <NewSessionDialog
