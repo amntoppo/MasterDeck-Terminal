@@ -40,7 +40,8 @@ import {
   parsePrView,
   PR_VIEW_ARGS,
 } from "@shared/git";
-import { collectItems } from "@shared/inbox";
+import { collectItems, type Notice } from "@shared/inbox";
+import { showsInNeedsYou } from "@shared/notifications";
 import type { ExternalItem } from "@shared/remote";
 import { Inbox } from "./inbox";
 import {
@@ -376,6 +377,7 @@ export class Sources {
   private ghActiveOf: (s: Session) => boolean = () => false;
   private superseded: () => Set<string> = () => new Set();
   private meetingNotices: () => MeetingNotice[] = () => [];
+  private notices: () => Notice[] = () => [];
   private linker:
     | ((t: Ticket, sessionId: string, cwd: string | null) => Promise<CliResult>)
     | null = null;
@@ -758,6 +760,11 @@ export class Sources {
   /** Meetings' Needs-you items (main/meetingNotices.ts). */
   setMeetingNotices(f: () => MeetingNotice[]): void {
     this.meetingNotices = f;
+  }
+
+  /** Events routed to Needs you (main/notices.ts). */
+  setNotices(f: () => Notice[]): void {
+    this.notices = f;
   }
 
   private withAccounts(ss: Session[]): Session[] {
@@ -2450,6 +2457,7 @@ export class Sources {
       modsReload: this.modsReloadOf?.(sessions) ?? null,
       loops,
       meetings: this.meetingNotices(),
+      notices: this.notices(),
       now,
     });
     this.inbox.update(items, !this.inboxPrimed);
@@ -2467,7 +2475,8 @@ export class Sources {
       prs: this.snapshot.prs,
       proposals: this.proposals,
       master: deriveMaster(sessions),
-      inbox: this.inbox.view(),
+      // Settings → Notifications: a type whose Needs-you channel is off is left out of the list.
+      inbox: this.inbox.view((i) => showsInNeedsYou(this.settings, i)),
       remote:
         this.remote && this.browsers.warning
           ? { ...this.remote, warning: this.browsers.warning }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { needsYouSystemOn, withNeedsYouSystem } from '@shared/notifications'
 import { claudeInstall } from '@shared/install'
 import { projectKey, type AppConfig, type CodeRepo, type ProjectConfig, type StatusMap } from '@shared/appConfig'
 import { parseDetectAll, type DetectAll } from '@shared/detect'
@@ -209,7 +210,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     setWorkspaces(next.workspaces)
   }
   const [useMaster, setUseMaster] = useState(cfg.masterEnabled)
-  const [notify, setNotify] = useState(state.settings.notifyNeedsYou)
+  const [notify, setNotify] = useState(needsYouSystemOn(state.settings.notifications))
 
   useEffect(() => {
     checkTools()
@@ -287,7 +288,10 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
     if (!(await webConfirm('Save this setup to your Mac?', { confirmLabel: 'Save' }))) return
     setBusy(true)
     setMsg(null)
-    if (notify !== state.settings.notifyNeedsYou) await deck().setSettings({ ...(await deck().getSettings()), notifyNeedsYou: notify })
+    if (notify !== needsYouSystemOn(state.settings.notifications)) {
+      const cur = await deck().getSettings()
+      await deck().setSettings({ ...cur, notifications: withNeedsYouSystem(cur.notifications, notify) })
+    }
     const patch: Record<string, unknown> = {
       accounts: list,
       // No board on the primary account: issues and PRs only (master config save mirrors the rest from it).
@@ -780,7 +784,7 @@ export function SetupDialog({ state, onClose, firstRun }: { state: AppState; onC
               <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
               <span>
                 Notify me when something new needs me: a question, a session waiting on a prompt, a proposal, failing CI… (macOS asks
-                once for permission). Also in Settings.
+                once for permission). Each kind and where it goes: Settings → Notifications.
               </span>
             </label>
 

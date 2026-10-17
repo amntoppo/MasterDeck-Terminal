@@ -103,6 +103,9 @@ import { ModCatalog, ModOff } from "./modOff";
 import { NotesStore } from "./notes";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
 import { MeetingNotices } from "./meetingNotices";
+import { Notices } from "./notices";
+import { Notifier, type Note } from "./notifier";
+import { CHANNELS, itemTarget, typeOfKind } from "@shared/notifications";
 import { serveMeetingAudio } from "./meetingMedia";
 import { copyMeetingsFixture } from "./meetingsFixture";
 import { MEDIA_SCHEME } from "@shared/meetingsPage";
@@ -507,16 +510,10 @@ const ptys = new PtyManager(
     ),
 );
 
+/** Session transitions, workflow steps…: each through the notifier, as its type (Settings → Notifications). */
 function notify(events: NotifyEvent[]): void {
-  if (SMOKE || !Notification.isSupported()) return;
-  for (const e of events.slice(0, 4)) {
-    const n = new Notification({ title: e.title, body: e.body, silent: false });
-    n.on("click", () => reveal(e.target));
-    // Kept until it closes, so its click handler is not garbage-collected (`shown`, below).
-    n.on("close", () => shown.delete(n));
-    shown.add(n);
-    n.show();
-  }
+  for (const e of events.slice(0, 4))
+    notifier.dispatch(e.type, { title: e.title, body: e.body, target: e.target });
 }
 
 const gh = makeGhRunner(run, paths.libDir, paths.python);
@@ -678,6 +675,16 @@ const watches = new Watches(
       { from: "Monitor" },
     ),
   () => sources.changed(),
+  // Settings → Notifications → Monitor event: one per monitor a minute at most.
+  (w, lines) => {
+    const s = latest?.sessions.find((x) => x.sessionId === w.sessionId);
+    notifier.dispatch("monitor", {
+      title: `${s?.name ?? "A session"}: ${w.description}`,
+      body: lines[lines.length - 1].slice(0, 240),
+      target: s ? { sessionKey: s.key } : {},
+      coalesce: `monitor:${w.id}`,
+    });
+  },
 );
 function mtimeMs(p: string): number {
   try {
@@ -950,6 +957,15 @@ sources.setSuperseded(() => superseded.ids());
 const meetingNotices = new MeetingNotices(join(paths.home, "meeting-notices.json"), () => sources.changed());
 sources.setMeetingNotices(() => meetingNotices.list());
 
+/** Bring the window forward as it is (false when there is none). */
+function showWindow(): boolean {
+  if (!win) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return true;
+}
+
 /** Bring the window forward, showing a Needs-you item (or a session, or the list). */
 function reveal(target: NotifyEvent["target"]): void {
   if (!win) return;
@@ -964,8 +980,47 @@ function reveal(target: NotifyEvent["target"]): void {
 
 /** Notifications still showing, kept so they are not garbage-collected before a click (macOS). */
 const shown = new Set<Notification>();
-/** The meeting offer's notification, kept for the same reason. */
-let offerNote: Notification | null = null;
+
+/** The System notification channel: an Electron notification (on macOS with its button and reply field). */
+function showSystem(note: Note): void {
+  if (SMOKE || !Notification.isSupported()) return;
+  const mac = process.platform === "darwin";
+  const n = new Notification({
+    title: note.title,
+    body: note.body,
+    silent: false,
+    ...(mac && note.action
+      ? { actions: [{ type: "button" as const, text: note.action.label }] }
+      : {}),
+    ...(mac && note.reply ? { hasReply: true, replyPlaceholder: "Reply…" } : {}),
+  });
+  n.on("click", () => (note.click ? note.click() : reveal(note.target)));
+  n.on("action", () => note.action?.run());
+  n.on("reply", (_e, text) => note.reply?.(text));
+  // Kept until it closes, so its handlers are not garbage-collected before a click.
+  n.on("close", () => shown.delete(n));
+  shown.add(n);
+  n.show();
+}
+
+// Events routed to Needs you (Settings → Notifications): a small file, read on every build.
+const notices = new Notices(join(paths.home, "notices.json"), () => sources.changed());
+sources.setNotices(() => notices.list());
+
+/** Every notification goes through here (#135; shared/notifications.ts has the types and channels). */
+const notifier = new Notifier(() => sources.getSettings(), {
+  system: showSystem,
+  needsYou: (note, type) =>
+    void notices.add({
+      // The test shows as a plain item (its type always lists in Needs you).
+      type: type === "test" ? "needs-you" : type,
+      title: note.title,
+      body: note.body,
+      sessionKey: note.target.sessionKey ?? null,
+    }),
+  // ponytail: no mobile app yet (#134); the channel is listed but unavailable, so nothing reaches here.
+  mobile: () => {},
+});
 
 /**
  * A new Needs-you item's notification (Settings: "Notify me…"). Clicking it opens the item. On
@@ -973,46 +1028,38 @@ let offerNote: Notification | null = null;
  * field for a question; both go through the inbox like the cards do.
  */
 function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
-  if (SMOKE || !Notification.isSupported() || !latest?.settings.notifyNeedsYou)
-    return;
   const n = inboxNotice(entry);
   if (!n) return;
-  const mac = process.platform === "darwin";
-  const note = new Notification({
-    title: n.title,
-    body: n.body,
-    silent: false,
-    ...(mac && n.action
-      ? { actions: [{ type: "button" as const, text: n.action.label }] }
-      : {}),
-    ...(mac && n.reply ? { hasReply: true, replyPlaceholder: "Reply…" } : {}),
-  });
   const id = entry.item.id;
+  const type = typeOfKind(entry.item);
+  // Its type's Needs-you cell off: no card to show, so a click opens the session (or the list).
+  const target = itemTarget(sources.getSettings(), entry.item, n.target);
   const done = (r: CliResult) => {
     if (!r.ok)
-      notify([
-        { title: "Could not do that", body: r.message, target: n.target },
-      ]);
+      notifier.dispatch(type, { title: "Could not do that", body: r.message, target, itemId: id });
   };
-  note.on("click", () => reveal(n.target));
-  note.on(
-    "action",
-    () =>
-      n.action &&
-      void sources.inbox
-        .act(id, n.action.type, { by: "notification" }, runInboxAction)
-        .then((r) => (sources.changed(), done(r))),
-  );
-  note.on(
-    "reply",
-    (_e, text) =>
-      void sources.inbox
-        .act(id, "reply", { text, by: "notification" }, runInboxAction)
-        .then((r) => (sources.changed(), done(r))),
-  );
-  note.on("close", () => shown.delete(note));
-  shown.add(note);
-  note.show();
+  const act = n.action;
+  notifier.dispatch(type, {
+    title: n.title,
+    body: n.body,
+    target,
+    itemId: id,
+    action: act
+      ? {
+          label: act.label,
+          run: () =>
+            void sources.inbox
+              .act(id, act.type, { by: "notification" }, runInboxAction)
+              .then((r) => (sources.changed(), done(r))),
+        }
+      : undefined,
+    reply: n.reply
+      ? (text) =>
+          void sources.inbox
+            .act(id, "reply", { text, by: "notification" }, runInboxAction)
+            .then((r) => (sources.changed(), done(r)))
+      : undefined,
+  });
 }
 
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
@@ -2082,6 +2129,7 @@ function runFlowWatch(state: AppState): void {
     workflows().logRun(s.sessionId, a.trigger, [a.step]);
     notify(
       a.notify.map((body) => ({
+        type: "workflow" as const,
         title: `${s.name}: workflow`,
         body,
         target: { sessionKey: s.key },
@@ -2869,6 +2917,12 @@ function registerIpc(): void {
     // Another update channel checks again; automatic downloads switched on take a waiting offer.
     updater?.settingsChanged(cur, saved);
     return saved;
+  });
+  // Settings → Notifications: a browser may ask too (it only shows a notification on the Mac).
+  reg.handle(CH.notifyTest, () => {
+    const to = notifier.test();
+    const names = to.map((c) => CHANNELS.find((d) => d.id === c)?.label ?? c);
+    return { ok: true, message: `Sent to ${names.join(" and ")}` };
   });
   // In-app updates: the Mac's window only (DECK_ACCESS blocks them; refused here too: updateHandlers).
   const upd = updateHandlers(() => updater, restartToUpdate);
@@ -3764,6 +3818,7 @@ function makeUpdater(): Updater {
   u.on((s) => {
     win?.webContents.send(CH.updateChanged, s);
     setAppMenu(s);
+    announceUpdate(s);
   });
   return u;
 }
@@ -3774,6 +3829,24 @@ async function restartToUpdate(): Promise<{ ok: boolean; message?: string }> {
   if (meetings.recording && !quitConfirmed && !(await confirmStopRecording(win, "restart")))
     return { ok: false, message: "Kept recording" };
   return updater.restart();
+}
+
+/** The version an Update available notification went out for (once per offer). */
+let announcedUpdate: string | null = null;
+
+/** Settings → Notifications → Update available: the first time an offer is available or ready. */
+function announceUpdate(s: UpdateState): void {
+  if ((s.phase !== "available" && s.phase !== "ready") || !s.offer) return;
+  if (announcedUpdate === s.offer.version) return;
+  announcedUpdate = s.offer.version;
+  notifier.dispatch("update", {
+    title: `MasterDeck ${s.offer.version} is available`,
+    body: s.phase === "ready" ? "Restart to update (Settings → Updates)." : "Download it in Settings → Updates.",
+    target: {},
+    click: () => {
+      if (showWindow()) win?.webContents.send(CH.updateOpen);
+    },
+  });
 }
 
 /** The app menu's Check for Updates…: show Settings → Updates and check. */
@@ -3952,26 +4025,19 @@ const meetings = new MeetingsIpc({
     return r.canceled || !r.filePath ? null : r.filePath;
   },
   notice: (text) => {
-    if (Notification.isSupported()) new Notification({ title: "MasterDeck · Meetings", body: text }).show();
+    notifier.dispatch("meeting", { title: "MasterDeck · Meetings", body: text, target: {}, click: showWindow });
   },
   // The offer: a notification only; its click shows the window's Record popout. Nothing records
   // until the user presses Record there or on the rail's chip.
   offer: (app) => {
-    if (SMOKE || !Notification.isSupported()) return;
-    const n = new Notification({ title: "MasterDeck · Meetings", body: offerText(app) });
-    // Kept (one offer at a time) so its click handler is not garbage-collected before a click.
-    offerNote = n;
-    n.on("close", () => {
-      if (offerNote === n) offerNote = null;
+    notifier.dispatch("meeting", {
+      title: "MasterDeck · Meetings",
+      body: offerText(app),
+      target: {},
+      click: () => {
+        if (showWindow()) win?.webContents.send(CH.meetingsShowRecord);
+      },
     });
-    n.on("click", () => {
-      if (!win) return;
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-      win.webContents.send(CH.meetingsShowRecord);
-    });
-    n.show();
   },
   restart: async () => {
     if (!win) return false;

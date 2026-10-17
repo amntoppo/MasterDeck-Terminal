@@ -1,5 +1,6 @@
 import { DEFAULT_MEETINGS, normalizeMeetings, type MeetingsSettings } from './meetings'
 import { isThemePref, type ThemePref } from './themes'
+import { defaultRoutes, normalizeRoutes, type NotifyRoutes } from './notifications'
 
 export interface Settings {
   idleNudgeMinutes: number
@@ -7,8 +8,10 @@ export interface Settings {
   contextWarnPct: number
   autoOpenNeedsInput: boolean
   dockBadge: boolean
-  /** A desktop notification when something new lands in Needs you. */
-  notifyNeedsYou: boolean
+  /** Settings → Notifications: per notification type, per channel (shared/notifications.ts). Replaces `notifyNeedsYou`. */
+  notifications: NotifyRoutes
+  /** Pause all: no system notification (Needs you still lists everything), the choices above kept. */
+  notifyPaused: boolean
   /** After the Mac restarts: offer to resume the background sessions it stopped, resume them, or neither. */
   afterRestart: 'ask' | 'resume' | 'off'
   /** A session's open PR is Ready for Review once its automated review is done, or after this many minutes without new comments. */
@@ -37,7 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   contextWarnPct: 85,
   autoOpenNeedsInput: true,
   dockBadge: true,
-  notifyNeedsYou: true,
+  notifications: defaultRoutes(),
+  notifyPaused: false,
   afterRestart: 'ask',
   reviewQuietMinutes: 20,
   monitorsBy: 'claude',
@@ -63,7 +67,9 @@ export function normalizeSettings(raw: unknown): Settings {
     contextWarnPct: clamp(r.contextWarnPct, 10, 100, DEFAULT_SETTINGS.contextWarnPct),
     autoOpenNeedsInput: typeof r.autoOpenNeedsInput === 'boolean' ? r.autoOpenNeedsInput : DEFAULT_SETTINGS.autoOpenNeedsInput,
     dockBadge: typeof r.dockBadge === 'boolean' ? r.dockBadge : DEFAULT_SETTINGS.dockBadge,
-    notifyNeedsYou: typeof r.notifyNeedsYou === 'boolean' ? r.notifyNeedsYou : DEFAULT_SETTINGS.notifyNeedsYou,
+    // A file from before #135 has `notifyNeedsYou` and no `notifications`: it decides the inbox's notifications.
+    notifications: normalizeRoutes(r.notifications, r.notifyNeedsYou),
+    notifyPaused: r.notifyPaused === true,
     afterRestart: r.afterRestart === 'resume' || r.afterRestart === 'off' ? r.afterRestart : DEFAULT_SETTINGS.afterRestart,
     reviewQuietMinutes: clamp(r.reviewQuietMinutes, 1, 24 * 60, DEFAULT_SETTINGS.reviewQuietMinutes),
     monitorsBy: r.monitorsBy === 'masterdeck' ? 'masterdeck' : 'claude',
