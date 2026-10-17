@@ -2,6 +2,8 @@
  * The New Claude session dialog's memory (#153): per account, the folder, model, workflow and
  * permission mode of the last start, and which account that was. Name, first message and linked
  * sessions belong to one session and are never kept. Stored in localStorage by the renderer.
+ * ponytail: per browser (the Mac's window and each web tab's browser keep their own); a store on the
+ * Mac behind a `prefs:*` channel is the upgrade if one memory everywhere is wanted.
  */
 
 /** One account's last choices. '' model / mode = the default option. */
