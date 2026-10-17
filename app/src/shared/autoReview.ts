@@ -260,7 +260,7 @@ export function autoPrompt(pr: AutoPr): string {
   return clean(
     `[MasterDeck auto-review] Review ${label(pr)} "${clean(pr.title, 120)}" by ${clean(pr.author, 40)} ` +
       `(${clean(pr.base, 60)} ← ${clean(pr.branch, 60)}, ${size}, checks: ${checksText(pr.checks)}) ${pr.url} ` +
-      `as "Automated reviews" in CLAUDE.md says, and post it with ./post-review.sh --auto.`,
+      `as "Automated reviews" in CLAUDE.md says, and post it with the post script's --auto form.`,
     1000,
   )
 }

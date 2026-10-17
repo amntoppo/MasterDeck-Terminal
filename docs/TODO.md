@@ -541,6 +541,9 @@ fixes it, and move the item here to "Recently done".
 - **`mergeStateStatus`** must be readable without a preview header on the user's GitHub (it is on
   github.com); on GitHub Enterprise Server check it.
 - **The widget's status line** is cut at 350 px; the full text is in its title.
+- **A home path that needs shell quotes** (a space in it) makes the `--auto` form quoted in the
+  briefing, which the settings' prefix rule (`Bash(<post> --auto:*)`) may not match: each automated
+  post is then asked for. Fine for `~/.claude/masterdeck`; check if MASTERDECK_HOME moves.
 
 ## Review with Claude: open points (2026-10-17, issue #149)
 

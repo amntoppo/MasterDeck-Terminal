@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prReviewBriefing, type PrReviewContext } from '@shared/prReview'
 import { DEFAULT_PR_FILTERS } from '@shared/teamPrs'
-import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
+import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewPost, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
 
 const URL = 'https://github.com/acme/web/pull/123'
 const ctx = (o: Partial<PrReviewContext> = {}): PrReviewContext => ({
@@ -61,19 +61,28 @@ describe('writePrReviewDir', () => {
   it('briefing, context, settings and an executable script; a context write leaves the rest', () => {
     const home = mkdtempSync(join(tmpdir(), 'prr-'))
     const dir = prReviewDir(home, 'a')
-    writePrReviewDir(dir, ctx(), prReviewBriefing('alice'), prReviewGuard(home, 'a'))
-    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain('post-review.sh')
+    const post = prReviewPost(home, 'a')
+    // A copy from before (in the folder, where the session can rewrite it) is removed.
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'post-review.sh'), 'old')
+    writePrReviewDir(dir, ctx(), prReviewBriefing('alice', post), prReviewGuard(home, 'a'), post)
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain(post)
+    expect(existsSync(join(dir, 'post-review.sh'))).toBe(false)
+    expect(post.startsWith(dir)).toBe(false)
     expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected.url).toBe(URL)
     const s = JSON.parse(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'))
-    expect(s).toEqual(prReviewSettings(prReviewTurn(prReviewGuard(home, 'a'))))
+    expect(s).toEqual(prReviewSettings(prReviewTurn(prReviewGuard(home, 'a')), post))
     // The script is never allowed unasked but for Automate Review's form; gh's own writes are denied.
-    expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual(['Bash(./post-review.sh --auto:*)'])
+    expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual([`Bash(${post} --auto:*)`])
     // Its hooks say when the turn is over, in the guard folder (outside the session's folder).
     expect(s.hooks.Stop[0].hooks[0].command).toBe(`printf idle > '${prReviewTurn(prReviewGuard(home, 'a'))}'`)
     expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toContain('printf busy')
     expect(s.hooks.PreToolUse[0].matcher).toBe('*')
     expect(s.permissions.deny).toEqual(expect.arrayContaining(['Bash(gh pr review:*)', 'Bash(gh pr comment:*)', 'Bash(gh pr merge:*)']))
-    expect(statSync(join(dir, 'post-review.sh')).mode & 0o111).not.toBe(0)
+    expect(statSync(post).mode & 0o111).not.toBe(0)
+    expect(prReviewFolderAccount(home, 'a')).toBe('alice')
+    // The account comes from the guard: the session editing context.json changes nothing.
+    writeFileSync(join(dir, 'context.json'), JSON.stringify({ account: 'mallory' }))
     expect(prReviewFolderAccount(home, 'a')).toBe('alice')
     writeFileSync(join(dir, 'CLAUDE.md'), 'kept')
     writePrReviewContext(dir, ctx({ selected: null }), prReviewGuard(home, 'a'))
@@ -85,8 +94,8 @@ describe('writePrReviewDir', () => {
   it('writePrReviewFiles leaves the context and the guard as they are', () => {
     const home = mkdtempSync(join(tmpdir(), 'prr-'))
     const dir = prReviewDir(home, 'a')
-    writePrReviewDir(dir, ctx(), 'old', prReviewGuard(home, 'a'))
-    writePrReviewFiles(dir, 'new', prReviewGuard(home, 'a'))
+    writePrReviewDir(dir, ctx(), 'old', prReviewGuard(home, 'a'), prReviewPost(home, 'a'))
+    writePrReviewFiles(dir, 'new', prReviewGuard(home, 'a'), prReviewPost(home, 'a'))
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe('new')
     expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected.url).toBe(URL)
     expect(JSON.parse(readFileSync(prReviewGuard(home, 'a'), 'utf8')).url).toBe(URL)
@@ -96,7 +105,7 @@ describe('writePrReviewDir', () => {
     const dir = prReviewDir(home, 'a')
     mkdirSync(dir, { recursive: true })
     symlinkSync(mkdtempSync(join(tmpdir(), 'prr-c-')), join(dir, '.claude'))
-    expect(() => writePrReviewDir(dir, ctx(), 'x', prReviewGuard(home, 'a'))).toThrow(/link/)
+    expect(() => writePrReviewDir(dir, ctx(), 'x', prReviewGuard(home, 'a'), prReviewPost(home, 'a'))).toThrow(/link/)
   })
 })
 
@@ -105,7 +114,7 @@ describe('post-review.sh', { timeout: 20_000 }, () => {
   const world = (c: PrReviewContext = ctx()) => {
     const home = mkdtempSync(join(tmpdir(), 'prr-'))
     const dir = prReviewDir(home, 'a')
-    writePrReviewDir(dir, c, prReviewBriefing('alice'), prReviewGuard(home, 'a'))
+    writePrReviewDir(dir, c, prReviewBriefing('alice', prReviewPost(home, 'a')), prReviewGuard(home, 'a'), prReviewPost(home, 'a'))
     const bin = join(home, 'bin')
     mkdirSync(bin)
     writeFileSync(
@@ -121,7 +130,7 @@ exit 9
     writeFileSync(join(dir, 'review.md'), 'Looks good, one thing.\n')
     writeFileSync(join(dir, 'review.json'), JSON.stringify([{ path: 'src/a.ts', line: 4, body: 'Off by one?' }]))
     const run = (args: string[], login = 'Alice') => {
-      const r = spawnSync(join(dir, 'post-review.sh'), args, { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_LOGIN: login } })
+      const r = spawnSync(prReviewPost(home, 'a'), args, { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_LOGIN: login } })
       return { code: r.status, out: JSON.parse(r.stdout.trim().split('\n').pop() || '{}') }
     }
     return { home, dir, run }

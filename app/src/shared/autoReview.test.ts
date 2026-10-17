@@ -209,7 +209,7 @@ describe('autoPrompt', () => {
     expect(line).toContain(URL1)
     expect(line).toContain('+10 −2 in 3 files')
     expect(line).toContain('checks: passing')
-    expect(line).toContain('./post-review.sh --auto')
+    expect(line).toContain("the post script's --auto form")
   })
 })
 

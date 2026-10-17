@@ -903,7 +903,8 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
   **×** ends it, **New chat** starts over; opening it again later continues the last conversation.
   - **Posting:** it writes nothing to GitHub until you agree. It shows the exact review (comment,
     approve or request changes, with any inline comments), and posts it only after your yes, with
-    `./post-review.sh`, which Claude Code asks you to allow each time. The script posts only to the
+    MasterDeck's `post-review-<tab>.sh` (kept in `~/.claude/masterdeck/pr-review-guard/`, out of the
+    session's reach), which Claude Code asks you to allow each time. The script posts only to the
     PR picked in the list, and only as the tab's account; `gh pr review`, `gh pr comment`, `gh pr
     merge` and the like are blocked in that session.
   - Its folder is `~/.claude/masterdeck/pr-review/tab-<tab id>/` (`CLAUDE.md`, `context.json` with
@@ -918,7 +919,7 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
       when its Repo filter is set, else the account's owner). Each new request is typed into the
       tab's review session once Claude's turn is over and you have not typed there for 30 seconds
       (no session running: one is started, and the panel shows it). Claude reviews it and posts a
-      **comment** review at once with `./post-review.sh --auto`; it never approves or requests
+      **comment** review at once with the post script's `--auto` form; it never approves or requests
       changes. A PR is reviewed once, and again only after new commits. The card's status line
       says "Watching · 2 reviews in progress · last check 1 min ago"; ▴ lists each PR and where it
       is (waiting, reviewing, comments sent, approved, ready to merge, merged, could not merge).

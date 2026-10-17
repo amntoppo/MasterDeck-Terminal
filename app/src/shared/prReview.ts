@@ -2,7 +2,7 @@
  * The Pull requests view's Claude panel (Review with Claude): a Claude session per PR tab in its own
  * folder, which MasterDeck briefs (CLAUDE.md: how to review) and keeps current (context.json: the
  * tab, its filters, the selected PR, the account). It reads PRs with gh and posts a review only
- * through ./post-review.sh, after the user agreed (main/prReviewDirs.ts writes the folder).
+ * through its post script (outside the folder), after the user agreed (main/prReviewDirs.ts writes it).
  */
 import { normalizePrFilters, type PrFilters, type TeamPr } from "./teamPrs";
 import { ticketRef } from "./ticket";
@@ -124,8 +124,14 @@ export const prLabel = (url: string): string => {
 /** What the row's and the popup's Review with Claude types into the session. */
 export const reviewPrompt = (url: string): string => `Review the selected PR, ${prLabel(url)}.`;
 
-/** The review folder's CLAUDE.md. `me`: who the user is on GitHub (the tab's account), if known. */
-export function prReviewBriefing(me: string | null): string {
+/**
+ * The review folder's CLAUDE.md. `me`: who the user is on GitHub (the tab's account), if known;
+ * `post`: the absolute path of the tab's post script (outside the folder).
+ */
+export function prReviewBriefing(me: string | null, post: string): string {
+  const run = `'${post.replace(/'/g, `'\\''`)}'`;
+  // Automate Review's form is allowed by a prefix rule on the bare path: given bare whenever it needs no quotes.
+  const auto = /^[A-Za-z0-9._/-]+$/.test(post) ? post : run;
   return `# MasterDeck: review pull requests with the user
 
 You help the user review GitHub pull requests. The user sees this conversation next to MasterDeck's
@@ -188,9 +194,11 @@ Nothing you write reaches GitHub unless the user says so. To post:
 3. Post it:
 
 \`\`\`bash
-./post-review.sh --pr <selected.url> --event comment|approve|request-changes --body-file review-<number>.md [--comments-file review-<number>.json]
+${run} --pr <selected.url> --event comment|approve|request-changes --body-file review-<number>.md [--comments-file review-<number>.json]
 \`\`\`
 
+- Run it by that path, as it is: MasterDeck keeps it outside this folder. Never copy it, change it
+  or write a script of your own to post.
 - Add \`--dry-run\` to check the payload without posting.
 - It posts one review to the PR selected in MasterDeck only (\`--pr\` must be \`selected.url\`), as
   \`account\`, and prints \`{"ok": true, "url": …}\` or why not. Give the user the URL.
@@ -210,9 +218,10 @@ standing request: review the PR it names (its URL, not \`selected\`), without as
 3. Post it at once, no question to the user:
 
 \`\`\`bash
-./post-review.sh --auto --pr <its url> --body-file auto-<number>.md [--comments-file auto-<number>.json]
+${auto} --auto --pr <its url> --body-file auto-<number>.md [--comments-file auto-<number>.json]
 \`\`\`
 
+- Run it exactly so, by that path, with \`--auto\` first: that form runs without asking.
 - It is always a comment review: never approve, never request changes, never merge. MasterDeck
   follows the PR from there (new commits come back to you as a new message).
 - It posts only to a PR MasterDeck queued. If it refuses, say why in one line and stop.

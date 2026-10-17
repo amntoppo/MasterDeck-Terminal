@@ -29,7 +29,7 @@ export interface AutoReviewDeps {
   /** Where the tab's account's PRs are: its owner (null: unknown, no scope). */
   scope: (account: string | null) => { owner: string | null; ownerType: 'organization' | 'user' }
   panes: ReviewPanes
-  /** Automate Review's queue for a tab, for post-review.sh --auto (outside the review folder). */
+  /** Automate Review's queue for a tab, for the post script's --auto (outside the review folder). */
   writeQueue: (tabId: string, urls: string[]) => void
   notify: (n: { title: string; body: string; url: string }) => void
   onChange: () => void
@@ -84,7 +84,7 @@ export class AutoReview {
       .filter((t) => this.tabs[t.tabId] || t.status === 'merged' || t.status === 'closed')
   }
 
-  /** post-review.sh --auto's queue: only what this tab has queued or sent and not seen reviewed yet. */
+  /** The post script's --auto queue: only what this tab has queued or sent and not seen reviewed yet. */
   private writeQueue(tabId: string): void {
     this.deps.writeQueue(tabId, this.tabs[tabId] ? this.tracks.filter((t) => t.tabId === tabId && (t.status === 'queued' || t.status === 'reviewing' || t.status === 'stalled')).map((t) => t.url) : [])
   }

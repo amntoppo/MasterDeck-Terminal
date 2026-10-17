@@ -179,7 +179,7 @@ import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
-import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
+import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
 import { AutoReview, paneReady, readTurn } from "./autoReview";
 import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
 import { branchKey, LinkStore } from "./ticketLinks";
@@ -738,16 +738,18 @@ const autoReview = new AutoReview(join(paths.home, "auto-review.json"), {
       const multi = isMulti(getConfig());
       if (multi && !tab.account) return { error: "the tab has no account" };
       const guard = prReviewGuard(paths.home, tabId);
-      const briefing = prReviewBriefing(tab.account ?? latest?.me ?? null);
+      const post = prReviewPost(paths.home, tabId);
+      const briefing = prReviewBriefing(tab.account ?? latest?.me ?? null, post);
       try {
         // The window's context (the picked PR) stays; a folder never set up gets one from the tab.
-        if (existsSync(join(dir, "CLAUDE.md"))) writePrReviewFiles(dir, briefing, guard);
+        if (existsSync(join(dir, "CLAUDE.md"))) writePrReviewFiles(dir, briefing, guard, post);
         else
           writePrReviewDir(
             dir,
             prReviewContext({ tabId, tab: tab.name, ...(multi && tab.account ? { account: tab.account } : {}), filters: tab.filters }, latest?.teamPrs ?? []),
             briefing,
             guard,
+            post,
           );
       } catch (e) {
         return { error: (e as Error).message };
@@ -2860,7 +2862,10 @@ function registerIpc(): void {
     const guard = prReviewGuard(paths.home, o.tabId as string);
     try {
       if (o.context === true && existsSync(join(dir, "CLAUDE.md"))) writePrReviewContext(dir, ctx, guard);
-      else writePrReviewDir(dir, ctx, prReviewBriefing(account ?? latest.me ?? null), guard);
+      else {
+        const post = prReviewPost(paths.home, o.tabId as string);
+        writePrReviewDir(dir, ctx, prReviewBriefing(account ?? latest.me ?? null, post), guard, post);
+      }
     } catch (err) {
       return { ok: false, message: (err as Error).message, canContinue: false };
     }

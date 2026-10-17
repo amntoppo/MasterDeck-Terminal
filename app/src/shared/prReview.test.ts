@@ -88,19 +88,27 @@ describe('prReviewContext', () => {
 
 describe('prReviewBriefing', () => {
   it('re-reads the context, reads with gh, and posts only after a yes, through the script', () => {
-    const b = prReviewBriefing('alice')
+    const b = prReviewBriefing('alice', "/h/pr-review-guard/post-review-t.sh")
     expect(b).toContain('`alice`')
+    // Run by its absolute path (outside the folder), quoted, never a copy of the session's own.
+    expect(b).toContain("'/h/pr-review-guard/post-review-t.sh' --pr <selected.url>")
+    expect(b).not.toContain('./post-review.sh')
+    expect(prReviewBriefing(null, "/it's/p.sh")).toContain("'/it'\\''s/p.sh' --pr")
     expect(b).toMatch(/Re-read `context.json` at the start of \*\*every\*\* answer/)
-    for (const c of ['gh pr diff', 'gh pr view', 'gh pr checks', '--log-failed', './post-review.sh', '--dry-run'])
+    for (const c of ['gh pr diff', 'gh pr view', 'gh pr checks', '--log-failed', '--dry-run', 'Never copy it'])
       expect(b).toContain(c)
     expect(b).toMatch(/Post only after a clear yes/)
-    expect(prReviewBriefing(null)).not.toContain('on GitHub` ')
+    expect(prReviewBriefing(null, '/p.sh')).not.toContain('on GitHub` ')
   })
   it('automated reviews: the marked message, posted as a comment with --auto, never approve', () => {
-    const b = prReviewBriefing('alice')
+    const post = '/h/pr-review-guard/post-review-a.sh'
+    const b = prReviewBriefing('alice', post)
     expect(b).toContain('[MasterDeck auto-review]')
-    expect(b).toContain('./post-review.sh --auto --pr')
+    // Bare, so the settings' prefix rule (`Bash(<post> --auto:*)`) matches it as typed.
+    expect(b).toContain(`\n${post} --auto --pr`)
     expect(b).toMatch(/always a comment review: never approve, never request changes, never merge/)
+    // A path that needs quotes is given quoted (it is then asked for, as any other run).
+    expect(prReviewBriefing('alice', "/h o/post-review-a.sh")).toContain("\n'/h o/post-review-a.sh' --auto --pr")
   })
 })
 

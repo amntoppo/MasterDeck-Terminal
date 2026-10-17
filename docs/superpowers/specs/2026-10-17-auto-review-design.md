@@ -28,7 +28,8 @@ GitHub, and a PR that got its approvals and green checks waits for someone to pr
    UserPromptSubmit / PreToolUse / PostToolUse → busy, a permission prompt → asking), written to
    `<home>/pr-review-guard/tab-<id>.turn`. No pane running: MasterDeck starts one with the line as
    its first message, and the panel adopts it (`autoReview.tabs[id].pane`).
-5. **Posting without asking, but only what MasterDeck queued.** `post-review.sh --auto` is allowed
+5. **Posting without asking, but only what MasterDeck queued.** The post script's `--auto` form
+   (by its absolute path, `pr-review-guard/post-review-<tab>.sh`: #149 moved it out of the folder) is allowed
    in the folder's settings; the script accepts it only for a URL in
    `<home>/pr-review-guard/tab-<id>.auto.json` (written by main only, outside the folder), and only
    as a **comment** review. An automated review never approves or requests changes: approval stays
