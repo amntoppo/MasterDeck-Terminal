@@ -510,6 +510,9 @@ export interface CliResult {
   message: string;
 }
 
+/** A resume's answer: `key` is the background id the session runs under (null: claude printed none; absent: an older Mac). */
+export type ResumeResult = CliResult & { key?: string | null };
+
 /** A browser asking to control this Mac, shown once it revealed its key (three words to compare). */
 export interface BrowserRequestView {
   id: string;

@@ -106,6 +106,7 @@ export interface Template {
 import type {
   AppState,
   CliResult,
+  ResumeResult,
   DraftAssign,
   PaneSpec,
   SetupCheck,
@@ -580,7 +581,6 @@ export interface DeckApi {
   btwStop(key: string, id: string): Promise<boolean>;
   btwRemove(key: string, id: string): Promise<boolean>;
   onBtwEvent(cb: (e: BtwEvent) => void): () => void;
-  /** Resume an ended session's conversation in the background (history search). */
   /** Create an issue on a board (tt.sh create); `dryRun` checks it without creating anything. */
   ticketCreate(
     req: NewTicket & { dryRun?: boolean },
@@ -614,12 +614,13 @@ export interface DeckApi {
   }): Promise<CliResult>;
   /** Clone (#136): a new background session from a copy of this session's conversation. */
   cloneSession(req: CloneRequest): Promise<CliResult>;
+  /** Resume an ended session's conversation in the background (History, the Board, the Start dialog). */
   resumeSession(
     sessionId: string,
     name: string,
     cwd: string | null,
     account?: string,
-  ): Promise<CliResult>;
+  ): Promise<ResumeResult>;
   /** A new session's default GitHub account for this folder; null with one account. */
   accountFor(cwd: string): Promise<string | null>;
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
