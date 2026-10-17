@@ -906,7 +906,23 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
 - Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
 
+## Notifications: open points (2026-10-17, issue #135)
+
+- **P3 · Notices never clear themselves.** A "Session finished" notice stays until Done or three
+  days, even once the session works again. `main/notices.ts` could drop a session's notices when it
+  goes back to working.
+- **P3 · Not checked live:** a real macOS notification for each type in the installed app (the
+  isolated app ran Send test and the settings round trip only), Windows, the web app over the
+  bridge, a monitor event and an update offer reaching the dispatcher.
+- **Later:** the mobile push channel (#134) is one sender in `index.ts` and `available: true` in
+  `CHANNELS`; email or Slack the same way.
+
 ## Recently done
+
+- **Settings → Notifications (#135)**: one registry of notification types × channels
+  (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`); a table with System
+  notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`
+  migrated; events can be routed to Needs you as notices. Branch `135-notification-settings`.
 
 - **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
   in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays

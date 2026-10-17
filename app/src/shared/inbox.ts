@@ -20,6 +20,7 @@ import { modsReloadText, type ModsReloadOffer } from "./mods";
 import { MOD_VERSION } from "./modBand";
 import type { LoopView } from "./loops";
 import type { MeetingNotice } from "./meetings";
+import type { NotifyTypeId } from "./notifications";
 
 /**
  * Needs you, as one inbox: every item the user may act on, built in one place (the main process)
@@ -46,7 +47,8 @@ export type InboxKind =
   | "error" // its turn ended on an API error (rate limit, overload…)
   | "loop" // a workflow loop ended at a limit
   | "loop-paused" // a workflow loop still open on a session that went quiet
-  | "meeting"; // a meeting's notes were added, or it could not be matched or transcribed
+  | "meeting" // a meeting's notes were added, or it could not be matched or transcribed
+  | "notice"; // an event the user asked to see in Needs you (Settings → Notifications)
 
 export type InboxActionType =
   | "reply" // text typed into the session
@@ -87,7 +89,8 @@ export type InboxDetail =
   | { type: "account"; login: string }
   | { type: "mods"; keys: string[]; idle: string[] }
   | { type: "loop"; loopId: string; reason: string | null }
-  | { type: "meeting"; meetingId: string; notice: MeetingNotice["kind"] };
+  | { type: "meeting"; meetingId: string; notice: MeetingNotice["kind"] }
+  | { type: "notice"; notify: NotifyTypeId };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -153,6 +156,7 @@ export const PRIORITY: Record<InboxKind, number> = {
   account: 75,
   meeting: 35,
   mods: 15,
+  notice: 12,
 };
 
 /** What happened when an item goes away without anyone acting on it. */
@@ -176,7 +180,18 @@ export const RESOLVED_BECAUSE: Record<InboxKind, string> = {
   loop: "the loop is running again",
   "loop-paused": "the loop went on or ended",
   meeting: "opened, or the meeting changed",
+  notice: "cleared",
 };
+
+/** An event routed to Needs you (Settings → Notifications), kept by main/notices.ts. */
+export interface Notice {
+  id: string;
+  type: NotifyTypeId;
+  title: string;
+  body: string;
+  sessionKey: string | null;
+  at: number;
+}
 
 /** An open loop's session quiet this long is a "loop paused" item. */
 export const LOOP_PAUSED_MS = 5 * 60_000;
@@ -230,6 +245,8 @@ export interface InboxInput {
   loops?: Record<string, LoopView[]>;
   /** Meetings' items (main/meetingNotices.ts). */
   meetings?: MeetingNotice[];
+  /** Events routed to Needs you (main/notices.ts). */
+  notices?: Notice[];
   now: number;
 }
 
@@ -551,6 +568,23 @@ export function collectItems(x: InboxInput): InboxItem[] {
 
   for (const n of x.meetings ?? []) out.push(meetingItem(n));
 
+  // Events the user routed to Needs you (session finished, PR merged…): Open, or Done.
+  for (const n of x.notices ?? [])
+    out.push({
+      id: n.id,
+      kind: "notice",
+      priority: PRIORITY.notice,
+      sessionKey: n.sessionKey,
+      ticket: null,
+      title: n.title,
+      body: n.body,
+      actions: [
+        ...(n.sessionKey ? [{ type: "open" as const, label: "Open", primary: true }] : []),
+        { type: "dismiss", label: "Done" },
+      ],
+      detail: { type: "notice", notify: n.type },
+    });
+
   // MasterDeck's mods were updated (or installed): running sessions take them at a reload. One item
   // per mods version, so a dismissed one stays dismissed until the next update.
   if (x.modsReload)
@@ -664,7 +698,8 @@ const RUNS_IN_MAIN = new Set<InboxActionType>([
 
 export function inboxNotice(e: InboxEntry): InboxNotice | null {
   const i = e.item;
-  if (i.kind === "held") return null;
+  // A notice's system notification went out with it (the dispatcher), not as a new item.
+  if (i.kind === "held" || i.kind === "notice") return null;
   const target = {
     ...(i.sessionKey
       ? { sessionKey: i.sessionKey }

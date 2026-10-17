@@ -2,6 +2,7 @@ import type { WatchInfo } from "./watches";
 import type { ScheduleInfo } from "./schedules";
 import type { ScreenMenu, SessionAsk } from "./ask";
 import type { InboxView } from "./inbox";
+import type { NotifyTypeId } from "./notifications";
 import type { PrStage, StatusKey } from "./review";
 import type { PastSession } from "./pastSessions";
 import type { Tokens } from "./tokens";
@@ -519,6 +520,8 @@ export interface BrowserRequestView {
 }
 
 export interface NotifyEvent {
+  /** Its notification type (Settings → Notifications routes it). */
+  type: NotifyTypeId;
   title: string;
   body: string;
   target: { sessionKey?: string; needsYou?: true; itemId?: string };

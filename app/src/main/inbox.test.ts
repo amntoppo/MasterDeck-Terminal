@@ -128,3 +128,15 @@ describe('Inbox', () => {
     expect(log[1]).toMatchObject({ id: 'b', how: 'dismissed' })
   })
 })
+
+describe('Inbox.view(shows)', () => {
+  it('leaves out hidden items without resolving them, and shows them again as they were', () => {
+    const { box } = setup()
+    box.update([item('q'), item('c', { kind: 'ci' })])
+    const noCi = (i: InboxItem) => i.kind !== 'ci'
+    expect(box.view(noCi).open.map((e) => e.item.id)).toEqual(['q'])
+    box.update([item('q'), item('c', { kind: 'ci' })])
+    expect(box.get('c')?.state).toBe('open')
+    expect(box.view().open.map((e) => e.item.id).sort()).toEqual(['c', 'q'])
+  })
+})
