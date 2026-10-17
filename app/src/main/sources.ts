@@ -70,6 +70,7 @@ import { BUILDER_NAME } from "@shared/flowBuilder";
 import { SETUP_CLAUDE_NAME } from "@shared/setupClaude";
 import { isTicketBuilderSession } from "./ticketDirs";
 import { isPrReviewSession } from "./prReviewDirs";
+import type { AutoReviewView } from "@shared/autoReview";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -1072,6 +1073,10 @@ export class Sources {
   private watchedPrs: () => Set<string> = () => new Set();
   setWatchedPrs(f: () => Set<string>): void {
     this.watchedPrs = f;
+  }
+  private autoReview: () => AutoReviewView | undefined = () => undefined;
+  setAutoReview(f: () => AutoReviewView): void {
+    this.autoReview = f;
   }
   setWatchInfo(f: () => WatchInfo[]): void {
     this.watchInfo = f;
@@ -2554,6 +2559,7 @@ export class Sources {
       sessionPrs,
       peers: this.peerStore ? adjacency(this.peerStore.data()) : {},
       watches: this.watchInfo(),
+      autoReview: this.autoReview(),
       schedules: Object.fromEntries(
         sessions
           .filter((s) => s.state !== "done")

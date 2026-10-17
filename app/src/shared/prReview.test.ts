@@ -100,6 +100,16 @@ describe('prReviewBriefing', () => {
     expect(b).toMatch(/Post only after a clear yes/)
     expect(prReviewBriefing(null, '/p.sh')).not.toContain('on GitHub` ')
   })
+  it('automated reviews: the marked message, posted as a comment with --auto, never approve', () => {
+    const post = '/h/pr-review-guard/post-review-a.sh'
+    const b = prReviewBriefing('alice', post)
+    expect(b).toContain('[MasterDeck auto-review]')
+    // Bare, so the settings' prefix rule (`Bash(<post> --auto:*)`) matches it as typed.
+    expect(b).toContain(`\n${post} --auto --pr`)
+    expect(b).toMatch(/always a comment review: never approve, never request changes, never merge/)
+    // A path that needs quotes is given quoted (it is then asked for, as any other run).
+    expect(prReviewBriefing('alice', "/h o/post-review-a.sh")).toContain("\n'/h o/post-review-a.sh' --auto --pr")
+  })
 })
 
 describe('prReviewSpecError', () => {

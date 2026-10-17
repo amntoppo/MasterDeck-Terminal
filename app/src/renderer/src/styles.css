@@ -1880,6 +1880,34 @@ details.sd-more > summary:hover { color: var(--text); }
 .update-notes { width: 100%; max-height: 260px; overflow: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .update-prompt { position: fixed; right: 16px; bottom: 16px; z-index: 48; width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; background: var(--bg-2); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 10px; padding: 12px 14px; font-size: 13px; box-shadow: 0 12px 40px var(--shadow); -webkit-app-region: no-drag; }
 .update-prompt .muted, .update-prompt .bad { font-size: 12px; }
+/* Review with Claude's automation (#157): a card on the panel's left, lined up with Claude's input box. */
+.review-panel .wf-builder-term { position: relative; }
+.auto-widget { position: absolute; right: calc(100% + 1px); width: 350px; z-index: 23; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 9px; background: var(--bg-2); border: 1px solid var(--line); border-right: none; border-radius: 8px 0 0 8px; box-shadow: -6px 2px 18px var(--shadow); }
+.auto-widget.inline { position: static; width: auto; border: none; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 6px 10px; }
+.auto-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.auto-sw { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; white-space: nowrap; cursor: default; }
+.auto-sw .switch { width: 26px; height: 15px; }
+.auto-sw .switch::after { top: 2px; left: 2px; width: 11px; height: 11px; }
+.auto-sw .switch.on::after { left: 13px; }
+.auto-more-btn { margin-left: auto; padding: 0 2px; }
+.auto-status { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-status.bad { color: var(--red); }
+.auto-more { position: absolute; right: -1px; bottom: calc(100% + 4px); width: 100%; box-sizing: border-box; max-height: 50vh; overflow: auto; padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 -6px 18px var(--shadow); }
+.auto-widget.inline .auto-more { position: static; width: auto; max-height: 40vh; margin-top: 6px; box-shadow: none; }
+.auto-mon-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; min-width: 0; }
+.auto-mon-head .mon-dot { margin-top: 0; }
+.auto-mon-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-event { padding: 2px 0 2px 15px; overflow-wrap: anywhere; }
+.auto-prs { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); font-size: 11.5px; }
+.auto-prs li { padding: 2px 0; overflow-wrap: anywhere; }
+.auto-st { font-weight: 600; }
+.auto-st.st-ready, .auto-st.st-merged { color: var(--green); }
+.auto-st.st-stalled, .auto-st.st-merge-failed { color: var(--red); }
+.auto-st.st-queued, .auto-st.st-reviewing, .auto-st.st-merging { color: var(--amber); }
+.auto-badge { margin-left: 2px; padding: 0 5px; border-radius: 6px; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; background: var(--claude); color: var(--bg); }
+.review-tip { display: flex; align-items: baseline; gap: 8px; }
+.auto-toggle { flex: none; font-size: 11.5px; }
+.auto-toggle.on { color: var(--green); }
 
 /* Schedules (#140) */
 .sched-view .panel-body { overflow: auto; }

@@ -295,6 +295,7 @@ export const CH = {
   ticketCreate: "ticket:create",
   ticketBuilderPrepare: "ticket:builderPrepare",
   prReviewPrepare: "pr:reviewPrepare",
+  autoReviewSet: "pr:autoReviewSet",
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
@@ -630,6 +631,15 @@ export interface DeckApi {
   prReviewPrepare(
     req: PrReviewRequest,
   ): Promise<CliResult & { canContinue: boolean }>;
+  /**
+   * A PR tab's Automate Review and Merge automatically switches (#157), with what main needs to act
+   * for the tab (its name, account, filters); `forget`: the tab was closed. A browser may not turn
+   * Merge automatically on.
+   */
+  autoReviewSet(
+    tabId: string,
+    sw: { review: boolean; merge: boolean; name: string; account?: string; filters: PrReviewRequest["filters"]; forget?: boolean; follow?: boolean },
+  ): Promise<CliResult>;
   /** Tickets the Board's session created. */
   onTicketsCreated(
     cb: (t: { url: string; number: number }[]) => void,

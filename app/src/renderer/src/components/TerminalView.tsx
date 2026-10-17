@@ -1,3 +1,4 @@
+import { inputBoxRows } from '@shared/autoReview'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal, type ILink } from '@xterm/xterm'
@@ -46,11 +47,15 @@ interface Props {
   onExit?: (code: number) => void
   /** ⌘-click (Ctrl-click elsewhere) on a file path in the output: a session opens it as a tab. Web links open in the browser. */
   onOpenPath?: (path: string) => void
+  /** Where Claude Code's input box is on screen (viewport pixels, top and bottom), or null: told when it moves. */
+  onInputBox?: (box: { top: number; bottom: number } | null) => void
 }
 
-export function TerminalView({ paneId, spec, visible, focusOnShow, focusAt = 0, generation = 0, onExit, onOpenPath }: Props) {
+export function TerminalView({ paneId, spec, visible, focusOnShow, focusAt = 0, generation = 0, onExit, onOpenPath, onInputBox }: Props) {
   const onPathRef = useRef(onOpenPath)
   onPathRef.current = onOpenPath
+  const onBoxRef = useRef(onInputBox)
+  onBoxRef.current = onInputBox
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
@@ -230,8 +235,30 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, focusAt = 0, 
       else refit()
     })
     ro.observe(host.current)
+    // The input box's place, a little after the screen settles (only for a view that asks).
+    let boxTimer: ReturnType<typeof setTimeout> | null = null
+    let lastBox = ''
+    const measure = () => {
+      boxTimer = null
+      const cb = onBoxRef.current
+      if (!cb || disposed) return
+      const b = t.buffer.active
+      const rows = inputBoxRows(Array.from({ length: t.rows }, (_, i) => b.getLine(b.viewportY + i)?.translateToString(true) ?? ''))
+      const r = (t.element?.querySelector('.xterm-screen') as HTMLElement | null)?.getBoundingClientRect()
+      const row = r && t.rows ? r.height / t.rows : 0
+      const box = rows && r && row ? { top: Math.round(r.top + rows.top * row), bottom: Math.round(r.top + (rows.bottom + 1) * row) } : null
+      const key = JSON.stringify(box)
+      if (key === lastBox) return
+      lastBox = key
+      cb(box)
+    }
+    const rendered = t.onRender(() => {
+      if (onBoxRef.current && !boxTimer) boxTimer = setTimeout(measure, 250)
+    })
     return () => {
       disposed = true
+      rendered.dispose()
+      if (boxTimer) clearTimeout(boxTimer)
       ro.disconnect()
       input.dispose()
       resize.dispose()

@@ -974,6 +974,31 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
   - Its folder is `~/.claude/masterdeck/pr-review/tab-<tab id>/` (`CLAUDE.md`, `context.json` with
     the tab's filters and the picked PR, kept current by MasterDeck). The session is not listed with
     your sessions. On a phone the panel covers the list; **›** goes back to it.
+  - **Automate Review and Merge automatically (#157):** **◂ Auto** at the panel's bottom left shows
+    or hides a small card beside the chat's input box (remembered); on a phone it sits above the
+    tip line. Its two switches are per PR tab and kept across restarts.
+    - **Automate Review** adds a MasterDeck monitor (**Automate Review · <tab>**, by MasterDeck; ▴
+      on the card shows its events and **Stop**) that checks GitHub every 2 minutes, as the tab's
+      account, for open PRs whose review is asked of you or one of your teams (the tab's repository
+      when its Repo filter is set, else the account's owner). Each new request is typed into the
+      tab's review session once Claude's turn is over and you have not typed there for 30 seconds
+      (no session running: one is started, and the panel shows it). Claude reviews it and posts a
+      **comment** review at once with the post script's `--auto` form; it never approves or requests
+      changes. A PR is reviewed once, and again only after new commits. The card's status line
+      says "Watching · 2 reviews in progress · last check 1 min ago"; ▴ lists each PR and where it
+      is (waiting, reviewing, comments sent, approved, ready to merge, merged, could not merge).
+    - **Needs you** (Settings → Notifications → **Automated review**, on by default): "Review
+      comments sent on owner/repo#123" (with the number of comments), "owner/repo#123 is ready to
+      merge" (approved, every check green, no conflicts), "Merged owner/repo#123", "Could not merge
+      owner/repo#123", each with **View on GitHub**.
+    - **Merge automatically** is off by default and needs Automate Review. Turning it on shows a
+      warning first. Then a PR the tab reviewed is merged with `gh pr merge` as the tab's account,
+      with the repository's default method, once it is ready: open, not a draft, approved, every
+      check green, no conflicts, GitHub's merge state clean (branch protection satisfied) and no
+      commits since the review. Nothing failing, pending or blocked is merged, branch protection is
+      never bypassed, and a failed merge is not tried again for the same commit. A browser can turn
+      it off, not on.
+    - Closing the tab or changing its account switches both off.
 - **Fix CI / Address comments:** sent to the owning session in master's wording. With no session, the
   Start dialog opens with that instruction filled in.
 - **Auto-babysit:** failing CI or review feedback on my PRs appear as offers, in Needs you and at

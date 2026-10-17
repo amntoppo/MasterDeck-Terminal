@@ -90,7 +90,7 @@ export type InboxDetail =
   | { type: "mods"; keys: string[]; idle: string[] }
   | { type: "loop"; loopId: string; reason: string | null }
   | { type: "meeting"; meetingId: string; notice: MeetingNotice["kind"] }
-  | { type: "notice"; notify: NotifyTypeId };
+  | { type: "notice"; notify: NotifyTypeId; url?: string };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -191,6 +191,8 @@ export interface Notice {
   body: string;
   sessionKey: string | null;
   at: number;
+  /** A GitHub page it is about (View on GitHub). */
+  url?: string;
 }
 
 /** An open loop's session quiet this long is a "loop paused" item. */
@@ -582,7 +584,7 @@ export function collectItems(x: InboxInput): InboxItem[] {
         ...(n.sessionKey ? [{ type: "open" as const, label: "Open", primary: true }] : []),
         { type: "dismiss", label: "Done" },
       ],
-      detail: { type: "notice", notify: n.type },
+      detail: { type: "notice", notify: n.type, ...(n.url ? { url: n.url } : {}) },
     });
 
   // MasterDeck's mods were updated (or installed): running sessions take them at a reload. One item
