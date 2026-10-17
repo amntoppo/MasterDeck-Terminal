@@ -300,6 +300,7 @@ export const CH = {
   startClaude: "session:startClaude",
   cloneSession: "session:clone",
   accountFor: "accounts:for",
+  folderExists: "fs:folderExists",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
   updateState: "update:state",
@@ -663,6 +664,8 @@ export interface DeckApi {
   ): Promise<ResumeResult>;
   /** A new session's default GitHub account for this folder; null with one account. */
   accountFor(cwd: string): Promise<string | null>;
+  /** Whether this absolute path is a folder that exists (the New Claude session dialog's remembered folder). */
+  folderExists(path: string): Promise<boolean>;
   /** Resume every background session the last restart stopped (AppState.stoppedByRestart). */
   resumeStopped(): Promise<CliResult>;
   /** Tokens per day for these sessions, from their transcripts (the Costs view). */

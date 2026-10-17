@@ -999,6 +999,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 
 
+
+- **New Claude session: account first, last choices per account (#153)**: the account select is
+  the dialog's first field; each account's folder, model, workflow and permissions are kept in
+  localStorage (`shared/newSessionPrefs.ts`) and filled in on open and on an account pick
+  (untouched fields only); gone values fall back with a note (`folderExists`). Branch
+  `worktree-MasterDeck-Terminal-153-new-session-memory`. Open: the memory is per browser, not
+  shared between the Mac's window and the web app (a store on the Mac would share it); the Start
+  dialog (Assign) still remembers per repository, not per account.
 - **Schedules (#140)**: sessions started on a timer with a prompt and optionally a workflow, in
   a folder, as an account, with a model and permissions; daily / weekdays / days / every N hours /
   cron in a time zone; skip while running, a cost limit per run, notify on finish / failure, missed

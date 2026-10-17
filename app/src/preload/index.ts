@@ -136,6 +136,7 @@ const api: DeckApi = {
   resumeSession: (id, name, cwd, account) =>
     ipcRenderer.invoke(CH.resumeSession, id, name, cwd, account),
   accountFor: (cwd) => ipcRenderer.invoke(CH.accountFor, cwd),
+  folderExists: (path) => ipcRenderer.invoke(CH.folderExists, path),
   resumeStopped: () => ipcRenderer.invoke(CH.resumeStopped),
   tokensByDay: (ids) => ipcRenderer.invoke(CH.tokensByDay, ids),
   updateState: () => ipcRenderer.invoke(CH.updateState),

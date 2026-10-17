@@ -4,9 +4,20 @@ import { defaultModelLabel, MODELS } from "@shared/models";
 import type { WorkflowTemplate } from "@shared/flow";
 import { actionCount, DEFAULT_TEMPLATE } from "@shared/flow";
 import type { AppState } from "@shared/types";
-import { isMulti } from "@shared/accounts";
+import { accountChoices, isMulti } from "@shared/accounts";
+import {
+  choiceFor,
+  initialAccount,
+  NEW_SESSION_PREFS_KEY,
+  parseNewSessionPrefs,
+  rememberChoice,
+  resolveChoice,
+  type ChoiceNotes,
+  type NewSessionChoice,
+  type NewSessionPrefs,
+} from "@shared/newSessionPrefs";
 import { AccountSelect } from "./AccountBits";
-import { deck } from "../deck";
+import { deck, load, save } from "../deck";
 import { can, keyPlatform } from "../web";
 import { RepoPicker } from "./RepoPicker";
 import { PeerPicker } from "./PeerPicker";
@@ -240,10 +251,58 @@ export function NewSessionDialog({
   const [workflow, setWorkflow] = useState(DEFAULT_TEMPLATE);
   const [mode, setMode] = useState("");
   const [picking, setPicking] = useState(false);
-  // The account follows the folder (its origin remote's account) until one is picked.
+  // Each account's last choices (#153): read once per dialog, written on Start.
   const multi = isMulti(state.config);
-  const [account, setAccount] = useState<string | null>(null);
-  const [accountPicked, setAccountPicked] = useState(false);
+  const prefs = useRef<NewSessionPrefs | null>(null);
+  prefs.current ??= parseNewSessionPrefs(load<unknown>(NEW_SESSION_PREFS_KEY, null));
+  // The account opens on the last one started; without one it follows the folder (its origin
+  // remote's account) until one is picked.
+  const [account, setAccount] = useState<string | null>(() =>
+    initialAccount(prefs.current!, multi, accountChoices(state.config, state.ghAccounts)),
+  );
+  const [accountPicked, setAccountPicked] = useState(account !== null);
+  // Only a pick made in this dialog outlasts a folder change: a remembered account goes back to
+  // the folder's once the user picks another folder, so a session never runs as the wrong account.
+  const pickedHere = useRef(false);
+  // Fields the user changed in this dialog: an account switch leaves them as they are.
+  const touched = useRef(new Set<keyof NewSessionChoice>());
+  const touch = (f: keyof NewSessionChoice) => {
+    touched.current.add(f);
+    setNotes(({ [f]: _gone, ...rest }) => rest);
+    if (f === "cwd" && !pickedHere.current) setAccountPicked(false);
+  };
+  const [notes, setNotes] = useState<ChoiceNotes>({});
+  const [ready, setReady] = useState(false);
+  // Whose choices to put in the fields: the opening account, then each account the user picks.
+  const [fillFor, setFillFor] = useState<{ login: string | null }>({ login: account });
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    const c = choiceFor(prefs.current!, multi, fillFor.login);
+    const known = !!c?.cwd && repos.some((r) => r.path === c.cwd);
+    void (c?.cwd && !known ? deck().folderExists(c.cwd).catch(() => false) : Promise.resolve(known)).then((cwdExists) => {
+      if (!alive) return;
+      const r = resolveChoice(c, {
+        defaultCwd: repos[0]?.path ?? "",
+        cwdExists,
+        models: MODELS.map((m) => m.value),
+        configured,
+        workflows: templates.map((t) => t.id),
+        defaultWorkflow: DEFAULT_TEMPLATE,
+        modes: MODES.map(([v]) => v),
+      });
+      const t = touched.current;
+      if (!t.has("cwd")) setCwd(r.choice.cwd);
+      if (!t.has("model")) setModel(r.choice.model);
+      if (!t.has("workflow")) setWorkflow(r.choice.workflow);
+      if (!t.has("mode")) setMode(r.choice.mode);
+      setNotes(Object.fromEntries(Object.entries(r.notes).filter(([f]) => !t.has(f as keyof NewSessionChoice))));
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, fillFor]);
   useEffect(() => {
     if (!multi || accountPicked) return;
     setAccount(null);
@@ -256,18 +315,28 @@ export function NewSessionDialog({
       alive = false;
     };
   }, [multi, accountPicked, cwd]);
+  // The lists a remembered choice is checked against; the fields are filled once all are in.
   useEffect(() => {
-    void deck()
-      .workspaceRepos()
-      .then((r) => {
-        setRepos(r);
-        if (r[0]) setCwd((c) => c || r[0].path);
-      });
-    void deck().defaultModel().then(setConfigured);
-    if (can("workflowGet"))
-      void deck()
-        .workflowGet()
-        .then((w) => setTemplates(w.templates));
+    let alive = true;
+    void Promise.all([
+      deck().workspaceRepos().catch(() => [] as Repo[]),
+      deck().defaultModel().catch(() => null),
+      can("workflowGet")
+        ? deck()
+            .workflowGet()
+            .then((w) => w.templates)
+            .catch(() => [] as WorkflowTemplate[])
+        : Promise.resolve([] as WorkflowTemplate[]),
+    ]).then(([r, m, t]) => {
+      if (!alive) return;
+      setRepos(r);
+      setConfigured(m);
+      setTemplates(t);
+      setReady(true);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -304,6 +373,8 @@ export function NewSessionDialog({
       ...(account ? { account } : {}),
       ...(peers.length ? { peers } : {}),
     });
+    // These become the account's last choices; name, message and peers are this session's only.
+    save(NEW_SESSION_PREFS_KEY, rememberChoice(prefs.current!, multi, account, { cwd, model, workflow, mode }));
     onClose();
   };
 
@@ -318,16 +389,33 @@ export function NewSessionDialog({
         aria-label="New Claude session"
       >
         <h3>New Claude session</h3>
+        <AccountSelect
+          state={state}
+          value={account}
+          onChange={(l) => {
+            setAccount(l);
+            setAccountPicked(true);
+            pickedHere.current = true;
+            setFillFor({ login: l });
+          }}
+        />
+        {Object.keys(notes).length > 0 && (
+          <div className="meta">
+            {Object.values(notes).map((n) => (
+              <div key={n}>{n}</div>
+            ))}
+          </div>
+        )}
         <label>Workspace</label>
         <div className="ns-row">
           <select
             className="fsel full"
             value={other ? "__other" : cwd}
-            onChange={(e) =>
-              e.target.value === "__other"
-                ? void pickOther()
-                : setCwd(e.target.value)
-            }
+            onChange={(e) => {
+              if (e.target.value === "__other") return void pickOther();
+              touch("cwd");
+              setCwd(e.target.value);
+            }}
           >
             {repos.map((r) => (
               <option key={r.path} value={r.path}>
@@ -356,14 +444,6 @@ export function NewSessionDialog({
           </div>
         )}
         <PeerPicker state={state} value={peers} onChange={setPeers} />
-        <AccountSelect
-          state={state}
-          value={account}
-          onChange={(l) => {
-            setAccount(l);
-            setAccountPicked(true);
-          }}
-        />
         <label>First message (optional)</label>
         <textarea
           value={prompt}
@@ -385,7 +465,10 @@ export function NewSessionDialog({
             <select
               className="fsel full"
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                touch("model");
+                setModel(e.target.value);
+              }}
             >
               <option value="">{defaultModelLabel(configured)}</option>
               {MODELS.filter((m) => m.value !== configured).map((m) => (
@@ -400,7 +483,10 @@ export function NewSessionDialog({
             <select
               className="fsel full"
               value={workflow}
-              onChange={(e) => setWorkflow(e.target.value)}
+              onChange={(e) => {
+                touch("workflow");
+                setWorkflow(e.target.value);
+              }}
             >
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -414,7 +500,10 @@ export function NewSessionDialog({
         <select
           className="fsel full"
           value={mode}
-          onChange={(e) => setMode(e.target.value)}
+          onChange={(e) => {
+            touch("mode");
+            setMode(e.target.value);
+          }}
         >
           {MODES.map(([v, l]) => (
             <option key={v} value={v}>
@@ -445,7 +534,9 @@ export function NewSessionDialog({
           start={cwd}
           onDone={(p) => {
             setPicking(false);
-            if (p) setCwd(p);
+            if (!p) return;
+            touch("cwd");
+            setCwd(p);
           }}
         />
       )}
@@ -457,6 +548,8 @@ export function NewSessionDialog({
     // The web cannot open the Mac's folder window: pick from the repos or type a path.
     if (!can("pickFolder")) return setPicking(true);
     const p = await deck().pickFolder(cwd || undefined);
-    if (p) setCwd(p);
+    if (!p) return;
+    touch("cwd");
+    setCwd(p);
   }
 }
