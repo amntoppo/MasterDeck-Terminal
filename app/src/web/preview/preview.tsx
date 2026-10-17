@@ -59,8 +59,17 @@ const loopFlow = (): Flow =>
   })
 
 /** `window.deck` with fixture answers: same blocked/local split as the real RemoteDeck, nothing leaves the page. */
-function previewDeck(noBoard: boolean): DeckApi {
+function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
   const state: AppState = fixtureState(noBoard)
+  // `?preview=accounts`: two connected accounts, so the account pickers show.
+  if (twoAccounts) {
+    const acct = (login: string, primary: boolean) => ({ login, name: login, email: `${login}@example.com`, ...(primary ? { primary: true as const } : {}), owner: 'acme', ownerType: 'organization' as const, issueRepo: 'web', repos: ['acme/web'], projects: [] })
+    state.config = { ...state.config, accounts: [acct('acme-dev', true), acct('acme-ops', false)] }
+    state.ghAccounts = [
+      { login: 'acme-dev', primary: true, healthy: true },
+      { login: 'acme-ops', primary: false, healthy: true },
+    ]
+  }
   // The first session is in round 3 of its loop, so its workflow's frame shows where it is.
   state.loops = {
     [SESSIONS[0].sessionId]: [
@@ -235,6 +244,10 @@ function previewDeck(noBoard: boolean): DeckApi {
     },
     procsOutput: () => ({ ok: true, text: '  VITE v5.4.2  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n10:41:02 [vite] hmr update /src/App.tsx' }),
     workspaceRepos: () => repos,
+    // The api repository is acme-ops's, so a folder change can move the account.
+    accountFor: (cwd: string) => (twoAccounts ? (cwd.endsWith('/api') ? 'acme-ops' : 'acme-dev') : null),
+    // Any folder under the fixture's home exists; anything else (a remembered folder) is gone.
+    folderExists: (p: string) => p.startsWith('/Users/dev/acme'),
     summaryGet: () => ({ summary: null, stale: false }),
     workflowStatus: () => null,
     workflowLoopHistory: () => loopHistory,
@@ -502,7 +515,7 @@ export function mountPreview(root: Root, which: string): void {
     )
     return
   }
-  window.deck = previewDeck(which === 'noboard')
+  window.deck = previewDeck(which === 'noboard', which === 'accounts')
   root.render(
     <>
       <App />
