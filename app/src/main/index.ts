@@ -105,7 +105,7 @@ import { guardSessions, MeetingsIpc } from "./meetingsIpc";
 import { MeetingNotices } from "./meetingNotices";
 import { Notices } from "./notices";
 import { Notifier, type Note } from "./notifier";
-import { CHANNELS, typeOfKind } from "@shared/notifications";
+import { CHANNELS, itemTarget, typeOfKind } from "@shared/notifications";
 import { serveMeetingAudio } from "./meetingMedia";
 import { copyMeetingsFixture } from "./meetingsFixture";
 import { MEDIA_SCHEME } from "@shared/meetingsPage";
@@ -1026,15 +1026,17 @@ function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
   if (!n) return;
   const id = entry.item.id;
   const type = typeOfKind(entry.item);
+  // Its type's Needs-you cell off: no card to show, so a click opens the session (or the list).
+  const target = itemTarget(sources.getSettings(), entry.item, n.target);
   const done = (r: CliResult) => {
     if (!r.ok)
-      notifier.dispatch(type, { title: "Could not do that", body: r.message, target: n.target, itemId: id });
+      notifier.dispatch(type, { title: "Could not do that", body: r.message, target, itemId: id });
   };
   const act = n.action;
   notifier.dispatch(type, {
     title: n.title,
     body: n.body,
-    target: n.target,
+    target,
     itemId: id,
     action: act
       ? {

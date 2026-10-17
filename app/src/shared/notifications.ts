@@ -134,6 +134,24 @@ export function showsInNeedsYou(p: NotifyPrefs, item: Pick<InboxItem, 'kind' | '
   return routes(p, typeOfKind(item), 'needsYou')
 }
 
+/**
+ * Where a Needs-you item's notification leads: the item, unless its type's Needs-you cell is off
+ * (the list has no card for it then), when it leads to its session, else the list.
+ */
+export function itemTarget<T extends { sessionKey?: string; needsYou?: true; itemId: string }>(
+  p: NotifyPrefs,
+  item: Pick<InboxItem, 'kind' | 'detail'>,
+  target: T,
+): T | { sessionKey: string } | { needsYou: true } {
+  if (showsInNeedsYou(p, item)) return target
+  return target.sessionKey ? { sessionKey: target.sessionKey } : { needsYou: true }
+}
+
+/** A meetings notice (the call offer, a recording's notice): like a meeting's items, its text stays on the Mac. */
+export function isMeetingNotice(item: Pick<InboxItem, 'kind' | 'detail'>): boolean {
+  return item.kind === 'notice' && item.detail.type === 'notice' && item.detail.notify === 'meeting'
+}
+
 /** One cell of Settings → Notifications: its value, and whether (and why) it cannot be changed. */
 export function cellOf(p: NotifyPrefs, type: NotifyTypeId, channel: ChannelId): { checked: boolean; disabled: boolean; why: string | null } {
   const c = channelDef(channel)

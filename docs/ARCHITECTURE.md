@@ -223,7 +223,10 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
   `Sources.build()`; items stay stored and unresolved); for `event` types the sender adds a
   **notice** (`main/notices.ts` → `<home>/notices.json`, atomic, 50 at most, three days), which
   `collectItems` turns into an inbox item of kind `notice` (Open, Done; `inboxNotice` returns null
-  for it so it never notifies twice).
+  for it so it never notifies twice). An item hidden from the list notifies with a target of its
+  session, else the list (`itemTarget`: there is no card to show). A `meeting` notice stays on the
+  Mac like the meeting items: `toRemoteSnapshot` and `webState` (web tabs) leave it out
+  (`isMeetingNotice`; the offer names the call app).
 - `CH.notifyTest` (`remote`): the Settings button. The web app can change these settings too.
 - Every action goes through `inboxAct(id, type, payload, remote)` → `sources.inbox.act(…,
   runInboxAction)`. `runInboxAction` re-checks the session, then uses the normal paths: `sender.send`

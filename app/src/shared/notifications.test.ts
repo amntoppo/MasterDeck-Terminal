@@ -3,6 +3,8 @@ import {
   CHANNELS,
   NOTIFY_TYPES,
   cellOf,
+  isMeetingNotice,
+  itemTarget,
   defaultRoutes,
   needsYouSystemOn,
   normalizeRoutes,
@@ -114,6 +116,23 @@ describe('Needs you as a channel', () => {
     expect(showsInNeedsYou(p, kind('input'))).toBe(true)
     expect(showsInNeedsYou(prefs({ notifyPaused: true }), kind('ci'))).toBe(true)
     expect(showsInNeedsYou(prefs(), kind('notice', { type: 'notice', notify: 'pr-merged' }))).toBe(false)
+  })
+})
+
+describe('a notification\'s click', () => {
+  it('leads to the item, or to its session (else the list) when Needs you hides it', () => {
+    const t = { sessionKey: 'k', itemId: 'wait:k:1' }
+    expect(itemTarget(prefs(), kind('input'), t)).toBe(t)
+    const off = prefs({ notifications: withCell(defaultRoutes(), 'session-input', 'needsYou', false) })
+    expect(itemTarget(off, kind('input'), t)).toEqual({ sessionKey: 'k' })
+    const ci = prefs({ notifications: withCell(defaultRoutes(), 'ci-failed', 'needsYou', false) })
+    expect(itemTarget(ci, kind('ci'), { needsYou: true as const, itemId: 'offer:x' })).toEqual({ needsYou: true })
+  })
+
+  it('knows a meetings notice', () => {
+    expect(isMeetingNotice(kind('notice', { type: 'notice', notify: 'meeting' }))).toBe(true)
+    expect(isMeetingNotice(kind('notice', { type: 'notice', notify: 'pr-merged' }))).toBe(false)
+    expect(isMeetingNotice(kind('meeting'))).toBe(false)
   })
 })
 
