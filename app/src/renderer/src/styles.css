@@ -647,6 +647,21 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .installer-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .installer-head .grow { flex: 1; margin: 0; }
 .installer-term { height: 320px; display: flex; flex-direction: column; }
+/* Setup's "Let Claude do it": the offer under the title, the chat, its summary card, the success view. */
+.setup-claude-offer { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.setup-claude-offer .meta { margin: 0; }
+.setup-claude-offer .btn { flex: none; white-space: nowrap; }
+.setup-claude { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; background: var(--bg); }
+.setup-claude-term { height: min(460px, 56vh); display: flex; flex-direction: column; }
+.setup-claude .installer { margin: 8px; }
+.setup-review { margin: 8px; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 8px; font-size: 12px; }
+.setup-lines { margin: 6px 0; padding-left: 18px; }
+.setup-lines li { margin: 2px 0; overflow-wrap: anywhere; }
+.setup-review-btns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.setup-review-btns .grow { flex: 1; margin: 0; }
+.setup-done { padding: 12px 4px; }
+.setup-done-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.setup-done-head .tick { color: var(--green); font-weight: 700; }
 .claude-install { margin-top: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--claude) 50%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--claude) 6%, transparent); font-size: 12px; }
 .claude-install .cmd-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .claude-install .cmd { flex: 1; font: 12px/1.4 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; user-select: all; overflow-x: auto; white-space: nowrap; }

@@ -290,6 +290,15 @@ npx electron . --remote-debugging-port=9333
   (`"repos": ["acme/tracker"], "project": 0, "projects": []`): the hint, the four columns, no drag.
   Never press **Create a GitHub board** in such a run: its read and its native dialog use the
   machine's real gh account, and the dialog is the last stop before a real write.
+- **Setup with Claude** without GitHub (#156, checked 2026-10-17): a fresh `MASTER_HOME`, a
+  stand-in `claude` in `$E2E/bin` that, called with `-n md-setup`, runs `./md-setup.sh tools`,
+  `accounts`, `discover <login>`, then writes `review.json` and runs `review` (with `read` between
+  steps, driven by `window.deck.ptyWrite("setup:claude", "\r")`), a fake `gh` there that answers
+  `auth status` (two fictional logins), `auth token` and `api user`, and
+  `MASTERDECK_DETECT_FIXTURE=<json>` (a `master config detect --all` answer) for the reads. The
+  login shell of the recipe must not read a profile (macOS `/etc/profile` puts the real `gh` ahead
+  of the stand-ins): set PATH and `exec /bin/sh -c "<last argument>"`. Keep `"mods": false` in the
+  draft unless `CLAUDE_CONFIG_DIR` is set (Save would install them with `claude plugin`).
 - The Board's repository view without GitHub: add `MASTERDECK_REPO_FIXTURE=<json>`
   (`app/test/fixtures/repo-issues.json`: issues of `acme/tracker` and `acme/api`) to a run whose
   config has a board and both repositories (`"repos": ["acme/tracker", "acme/api"]`). Pick a

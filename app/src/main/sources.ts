@@ -67,6 +67,7 @@ import {
   type PrScanState,
 } from "@shared/prscan";
 import { BUILDER_NAME } from "@shared/flowBuilder";
+import { SETUP_CLAUDE_NAME } from "@shared/setupClaude";
 import { isTicketBuilderSession } from "./ticketDirs";
 import { isPrReviewSession } from "./prReviewDirs";
 import type { AutoReviewView } from "@shared/autoReview";
@@ -2436,14 +2437,17 @@ export class Sources {
       this.withActivity(
         applyFreshness(
           attachIssues(
-            // The Workflow window's builder is MasterDeck's own, not the user's work.
+            // The Workflow window's builder and Setup's Claude are MasterDeck's own, not the user's work.
             hideSuperseded(this.rawSessions, this.superseded()).filter(
               (s) =>
                 s.name !== BUILDER_NAME &&
+                s.name !== SETUP_CLAUDE_NAME &&
                 !isTicketBuilderSession(s, this.paths.home) &&
                 !isPrReviewSession(s, this.paths.home) &&
                 resolve(s.cwd || "/") !==
-                  resolve(join(this.paths.home, "workflow-builder")),
+                  resolve(join(this.paths.home, "workflow-builder")) &&
+                resolve(s.cwd || "/") !==
+                  resolve(join(this.paths.home, "setup-claude")),
             ),
             this.issueOf(),
           ),

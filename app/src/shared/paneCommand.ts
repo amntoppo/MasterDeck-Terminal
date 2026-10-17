@@ -1,5 +1,6 @@
 import { installPrompt } from "./install";
 import { prReviewName } from "./prReview";
+import { SETUP_CLAUDE_NAME } from "./setupClaude";
 import { ticketBuilderName } from "./ticketBuilder";
 import type { PaneSpec } from "./types";
 
@@ -60,6 +61,21 @@ export function paneCommand(
         "--permission-mode",
         "acceptEdits",
         ...(spec.prompt && !spec.prompt.startsWith("-") ? [spec.prompt] : []),
+      ],
+    };
+  // Setup's own session: its folder (set by the pane manager), its project settings only, and a
+  // first message so the user does not have to type one.
+  if (spec.kind === "setup-claude")
+    return {
+      file: claude,
+      args: [
+        "-n",
+        SETUP_CLAUDE_NAME,
+        "--setting-sources",
+        "project,local",
+        "--permission-mode",
+        "acceptEdits",
+        "Set up MasterDeck with me, following CLAUDE.md.",
       ],
     };
   if (spec.kind === "builder")

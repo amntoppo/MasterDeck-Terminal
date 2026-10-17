@@ -117,7 +117,9 @@ It installs the latest release in `/Applications` and opens it. On Windows, down
 `MasterDeck Setup <version>.exe` from [Releases](https://github.com/amntoppo/MasterDeck-Terminal/releases/latest).
 
 **4. Follow Setup.** It opens by itself: check the tools, connect your GitHub accounts, tick the
-repositories and boards you work on, and choose the folder your repositories are in.
+repositories and boards you work on, and choose the folder your repositories are in. Or press
+**Let Claude do it**: Claude does the same with you in a chat inside Setup, and you press **Save**
+on the summary it shows.
 
 **5. Start a session.** Open the Board, click one of your tickets and press **Start** in the dialog
 that opens, or press **Start master**
