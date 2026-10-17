@@ -922,6 +922,23 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
 - Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
 
+## Schedules (#140): open points (2026-10-17)
+
+- Runs need MasterDeck open (no launchd / Task Scheduler job); a missed run is caught up later.
+- A zone whose DST change skips midnight itself (rare) loses that day's 00:xx slots (`nextSlot`).
+- **Decide**: a web tab may give a schedule any existing folder on the Mac, as New Claude session
+  (`startClaude`) already allows; the Start dialog's `chosenFolder` is stricter (workspace
+  repositories only). A schedule makes that a recurring start, so consider `chosenFolder` for both.
+- A workflow's `session-start` steps may be missed on a run's first start: the session's copy is made
+  when the poll first lists it (`WorkflowStore.snapshot`), as for New Claude session. The built-in
+  workflows do their work from `linked` on, so with no ticket they mostly add their turn-end and PR
+  steps.
+- No per-run worktree option; no schedule from a board filter; the cost limit relies on the status
+  line (a run without one is never stopped for cost).
+- Not checked: a real `claude --bg` run (the isolated check used a stand-in `claude`), the real
+  web app over the bridge, a phone, Windows, a real wake from sleep (the resume path is the same
+  tick as a restart, which was checked).
+
 ## Clone a session: open points (2026-10-17, issue #136)
 
 - A clone of a session whose last turn ran in plan mode carries the plan turn's model (Claude Code
@@ -965,6 +982,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   `worktree-MasterDeck-Terminal-153-new-session-memory`. Open: the memory is per browser, not
   shared between the Mac's window and the web app (a store on the Mac would share it); the Start
   dialog (Assign) still remembers per repository, not per account.
+- **Schedules (#140)**: sessions started on a timer with a prompt and optionally a workflow, in
+  a folder, as an account, with a model and permissions; daily / weekdays / days / every N hours /
+  cron in a time zone; skip while running, a cost limit per run, notify on finish / failure, missed
+  runs once (or skipped) and never a burst; the Schedules view (on/off, Run now, next run, runs with
+  status, cost and session) and a chip in the session list. Branch
+  `worktree-MasterDeck-Terminal-140-schedules`.
 - **Review with Claude in the Pull requests view (#149)**: a Claude panel per PR tab, the picked PR
   in its `context.json`, a briefing on how to review, and `post-review.sh`, the one write, only
   after the user's yes, only to the picked PR, as the tab's account. Branch
@@ -975,17 +998,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   PRs, worktrees or workflow steps (copied transcript lines skipped by timestamp) nor its branch's
   PR; Keep ticket link; "Cloned from" in Details; the clone's terminal opens. Branch
   `worktree-MasterDeck-Terminal-136-clone-session`.
-
 - **Tabs in the session list (#146)**: All plus the user's tabs over the session list, drag a
   session onto a tab (or right-click → Move to tab), counts and needs-you badges, rename, reorder,
   delete; kept on the Mac in `session-groups.json` and carried to a resume's copy. Branch
   `worktree-146-session-tabs-groups`.
-
 - **Settings → Notifications (#135)**: one registry of notification types × channels
   (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`); a table with System
   notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`
   migrated; events can be routed to Needs you as notices. Branch `135-notification-settings`.
-
 - **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
   in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays
   put. Design and plan in `docs/plans/2026-10-17-resume-opens-terminal-*`. Open: the "Resuming …"
