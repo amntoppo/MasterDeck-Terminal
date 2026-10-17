@@ -211,6 +211,7 @@ export const CH = {
   queueSendNext: "queue:sendNext",
   getSettings: "settings:get",
   setSettings: "settings:set",
+  notifyTest: "notify:test",
   ghLogin: "accounts:login",
   trust: "claude:trust",
   openClaudeIn: "claude:openIn",
@@ -439,6 +440,8 @@ export interface DeckApi {
   queueSendNext(sessionKey: string): Promise<CliResult>;
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
+  /** Settings → Notifications: one test notification through every available channel. */
+  notifyTest(): Promise<CliResult>;
   onAutoOpen(cb: (sessionKey: string) => void): () => void;
   /** Needs you → Log in: open a terminal tab running gh auth login for this account. */
   onGhLogin(cb: (login: string) => void): () => void;

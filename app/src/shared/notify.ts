@@ -11,7 +11,7 @@ export function diffEvents(prev: AppState | null, next: AppState, focusedSession
     if (!p) continue
     // Needs input, questions, proposals, budgets and context warnings come from the inbox's events.
     if (s.state === 'idle' && p.state === 'working' && s.sessionId !== focusedSessionId) {
-      out.push({ title: `${s.name} finished`, body: 'The session went idle.', target: { sessionKey: s.key } })
+      out.push({ type: 'session-finished', title: `${s.name} finished`, body: 'The session went idle.', target: { sessionKey: s.key } })
     }
   }
   // A session's PR moving to Ready for Review or Merged (not one first seen there, e.g. at startup).
@@ -19,8 +19,8 @@ export function diffEvents(prev: AppState | null, next: AppState, focusedSession
     const was = prev.prStage[s.key]
     const now = next.prStage[s.key]
     if (!was || !now || was.kind === now.kind) continue
-    if (now.kind === 'ready') out.push({ title: `${s.name} is ready for review`, body: `PR ${now.prs.map((n) => `#${n}`).join(', ')}: ${now.why}.`, target: { sessionKey: s.key } })
-    if (now.kind === 'merged') out.push({ title: `${s.name}: PR merged`, body: `${now.prs.map((n) => `#${n}`).join(', ')} merged.`, target: { sessionKey: s.key } })
+    if (now.kind === 'ready') out.push({ type: 'pr-ready', title: `${s.name} is ready for review`, body: `PR ${now.prs.map((n) => `#${n}`).join(', ')}: ${now.why}.`, target: { sessionKey: s.key } })
+    if (now.kind === 'merged') out.push({ type: 'pr-merged', title: `${s.name}: PR merged`, body: `${now.prs.map((n) => `#${n}`).join(', ')} merged.`, target: { sessionKey: s.key } })
   }
   return out
 }

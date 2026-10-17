@@ -112,6 +112,16 @@ describe('webState', () => {
     // The Mac's own state is untouched.
     expect(s.meetingLive.offer).toBe('Zoom')
   })
+  it('leaves meetings notices out of a web tab\'s Needs you, and the other notices in', () => {
+    const item = (id: string, notify: 'meeting' | 'pr-merged') => ({ item: { id, kind: 'notice' as const, detail: { type: 'notice' as const, notify } } })
+    const inbox = { open: [item('a', 'meeting'), item('b', 'pr-merged')], snoozed: [item('c', 'meeting')], history: [] }
+    const w = webState({ meetingLive: null, inbox } as never) as { inbox: typeof inbox }
+    expect(w.inbox.open.map((e) => e.item.id)).toEqual(['b'])
+    expect(w.inbox.snoozed).toEqual([])
+    expect(inbox.open).toHaveLength(2)
+    const plain = { meetingLive: null, inbox: { open: [item('b', 'pr-merged')], snoozed: [], history: [] } }
+    expect(webState(plain as never)).toBe(plain)
+  })
   it('passes a state with no offer through as it is', () => {
     const s = { meetingLive: { ...live, offer: null } }
     expect(webState(s)).toBe(s)
