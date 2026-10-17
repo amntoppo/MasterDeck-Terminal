@@ -59,7 +59,7 @@ import { diffEvents, newlyNeedsInput } from "@shared/notify";
 import { inboxNotice, type InboxItem } from "@shared/inbox";
 import { isSafeBgId } from "@shared/paneCommand";
 import { isClaudeCommand, tasklistImage } from "@shared/procs";
-import { MASTER_NAME, sessionForProposal, isMasterSession } from "@shared/derive";
+import { MASTER_NAME, sessionForProposal, isMasterSession, sessionTicket } from "@shared/derive";
 import type {
   AppState,
   CliResult,
@@ -99,6 +99,15 @@ import {
   sessionSettings,
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
+import { CloneStore } from "./clones";
+import { readTail } from "./files";
+import {
+  checkFirstMessage,
+  cloneArgs,
+  cloneBlock,
+  cloneNameError,
+  cloneOptions,
+} from "@shared/clone";
 import { ModCatalog, ModOff } from "./modOff";
 import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
@@ -296,6 +305,8 @@ const sessionAccounts = new SessionAccounts(
 );
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
+// The sessions Clone started (#136): never superseding their original.
+const clones = new CloneStore(join(paths.home, "session-clones.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
 /** The session list's tabs (#146). */
 const sessionGroups = new SessionGroupStore(join(paths.home, "session-groups.json"));
@@ -987,6 +998,7 @@ sources.setSessionAccount(
   (s) => sessionAccounts.ghActive(s),
 );
 sources.setSuperseded(() => superseded.ids());
+sources.setClones(clones);
 // Meetings' Needs-you items: a small file of their own, read here (it asks macOS nothing).
 const meetingNotices = new MeetingNotices(join(paths.home, "meeting-notices.json"), () => sources.changed());
 sources.setMeetingNotices(() => meetingNotices.list());
@@ -1786,6 +1798,80 @@ async function resumeBg(
         key: bgIdFromOutput(r.stdout) ?? wokeFromOutput(r.stdout)?.id ?? null,
       }
     : r;
+}
+
+/**
+ * Clone (#136): `claude --bg --resume <id> --fork-session -n <name>` in the session's folder, as its
+ * account, with its model and permission mode when they can be validated. Not a copy: the original
+ * keeps running and is never superseded. Ids and folder come from the session list, never the request.
+ */
+async function cloneSession(raw: unknown, remote: boolean): Promise<CliResult> {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const s =
+    typeof o.key === "string"
+      ? latest?.sessions.find((x) => x.key === o.key)
+      : undefined;
+  if (!s) return { ok: false, message: "that session is not listed" };
+  const blocked = cloneBlock(s, !!latest?.menus[s.key]);
+  if (blocked) return { ok: false, message: blocked };
+  const transcript = sources.transcriptOf(s.sessionId);
+  if (!transcript) return { ok: false, message: "It has no conversation yet." };
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  const bad = cloneNameError(name);
+  if (bad) return { ok: false, message: bad };
+  if (sources.sessionsNow()?.some((x) => x.name === name && x.state !== "done"))
+    return { ok: false, message: `a session named ${name} is already running` };
+  const first = checkFirstMessage(o.prompt, remote);
+  if (!first.ok) return first;
+  if (!s.cwd || !existsSync(s.cwd))
+    return { ok: false, message: `its folder is gone: ${s.cwd || "(none)"}` };
+  const as = await settingsFor(s.account ?? null, async () =>
+    accountOfSession(s, await originNow(s.cwd)),
+  );
+  if (!as.ok) return { ok: false, message: as.message };
+  const tail = readTail(transcript, 512 * 1024);
+  const opts = tail
+    ? cloneOptions(tail.text, tail.fromStart)
+    : { model: null, permissionMode: null };
+  // The folder's branch now: the clone takes that branch's PR only once it moved off it.
+  const head = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: s.cwd,
+    timeoutMs: 10_000,
+  });
+  const branch =
+    head.code === 0 && head.stdout.trim() && head.stdout.trim() !== "HEAD"
+      ? head.stdout.trim()
+      : null;
+  const ticket = o.keepTicket === true ? sessionTicket(s) : null;
+  const rec = {
+    from: { key: s.key, name: s.name },
+    at: Date.now(),
+    branch,
+    ...(ticket ? { ticket: { repo: ticket.repo, number: ticket.number } } : {}),
+  };
+  const r = await run(
+    claudeBin,
+    cloneArgs({
+      sessionId: s.sessionId,
+      name,
+      settings: as.args,
+      model: opts.model,
+      permissionMode: opts.permissionMode,
+      prompt: first.text,
+    }),
+    { cwd: s.cwd, timeoutMs: 60_000 },
+  );
+  if (r.code !== 0)
+    return { ok: false, message: (r.stderr || r.stdout).trim().slice(0, 300) };
+  const bg = bgIdFromOutput(r.stdout);
+  if (bg) clones.add(bg, rec);
+  else clones.expect(name, rec);
+  if (as.account) {
+    if (bg) sessionAccounts.set([bg], as.account);
+    sessionAccounts.expect(name, as.account);
+  }
+  void sources.refreshAgents();
+  return { ok: true, message: name };
 }
 
 /** What resumeAs needs: the account resolved as for any session, recorded in sessionAccounts. */
@@ -2827,6 +2913,7 @@ function registerIpc(): void {
         !isRemote(e),
       ),
   );
+  reg.handle(CH.cloneSession, (e, raw: unknown) => cloneSession(raw, isRemote(e)));
   // A new session's account for a folder (its origin remote's account, else the primary).
   reg.handle(CH.accountFor, async (_e, cwd: unknown) =>
     typeof cwd === "string" && cwd && isMulti(getConfig())

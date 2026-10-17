@@ -293,6 +293,20 @@ function previewDeck(noBoard: boolean): DeckApi {
         comments: [{ author: 'riley', at: Date.now() - 2.5 * 3600_000, text: 'Deployed to staging for a look.', url: 'https://github.com/acme/web/pull/131#issuecomment-1' }],
       },
     }),
+    // Clone…: the clone shows up a moment later, with its "Cloned from" line.
+    cloneSession: (req: { key: string; name: string }) => {
+      const from = state.sessions.find((s) => s.key === req.key)
+      if (!from) return { ok: false, message: 'that session is not listed' }
+      const bg = Math.random().toString(16).slice(2, 10).padEnd(8, '0')
+      setTimeout(() => {
+        state.sessions = [
+          ...state.sessions,
+          { ...from, key: bg, bgId: bg, sessionId: `${bg}-0000-4000-8000-000000000000`, name: req.name, state: 'working', rawState: 'working', startedAt: Date.now(), issue: null, issueRepo: null, clonedFrom: { key: from.key, name: from.name } },
+        ]
+        for (const cb of stateCbs) cb({ ...state })
+      }, 1200)
+      return { ok: true, message: req.name }
+    },
     // Tools → Mods: switch in the fixture, as the Mac would after its next state.
     modSet: (key: string, mod: string, on: boolean) => {
       const off = new Set(state.modOff?.[key] ?? [])
