@@ -10,6 +10,8 @@ import { deck, useNow } from '../deck'
 import { can } from '../web'
 import { webConfirm } from '../webConfirm'
 import { RepoPicker } from './RepoPicker'
+import { TrustNote, useTrust } from './TrustFix'
+import { isNotTrusted } from '@shared/trust'
 
 /** The list, kept fresh by `sched:changed` (subscribed before the first read, so nothing is missed). */
 function useSchedules(): [SchedList | null, () => void] {
@@ -194,6 +196,7 @@ export function SchedulesView({ state, onOpenSession }: { state: AppState; onOpe
         {shown && (
           <>
             <h3 className="sec">Runs of {shown.name}</h3>
+            <SchedTrust cwd={shown.cwd} refused={runs.some((r) => r.status === 'failed' && isNotTrusted(r.reason))} />
             <table className="tbl sched-runs">
               <thead>
                 <tr>
@@ -222,7 +225,11 @@ export function SchedulesView({ state, onOpenSession }: { state: AppState; onOpe
                       </td>
                       <td>
                         <RunStatus r={r} />
-                        {r.reason && <div className="muted small sched-reason">{r.reason}</div>}
+                        {r.reason && (
+                          <div className="muted small sched-reason" title={r.reason}>
+                            {isNotTrusted(r.reason) ? 'Claude Code was not allowed to work in its folder (see above).' : r.reason}
+                          </div>
+                        )}
                       </td>
                       <td>{r.status === 'skipped' ? '—' : formatAgo((r.endedAt ?? now) - r.startedAt)}</td>
                       <td className="r">{r.status === 'skipped' ? '—' : formatCost(r.costUsd)}</td>
@@ -245,6 +252,23 @@ export function SchedulesView({ state, onOpenSession }: { state: AppState; onOpe
       </div>
       {editing && list && <SchedEditor state={state} sched={editing === 'new' ? null : editing} tz={list.tz} onClose={() => setEditing(null)} />}
     </section>
+  )
+}
+
+/**
+ * Claude Code's trust prompt for a schedule's folder: every run there is refused until the user
+ * answers it (**Open Claude there…**; MasterDeck never does). Said when the folder is known not to
+ * be trusted, or a run was refused for it; nothing for a trusted folder or one nothing is known about.
+ */
+function SchedTrust({ cwd, refused }: { cwd: string | null; refused: boolean }) {
+  const trust = useTrust(cwd, undefined)
+  // After Open Claude there… it stays to say the folder is now allowed.
+  const show = !!cwd && (trust.opened || (trust.trusted !== true && (trust.trusted === false || refused)))
+  if (!show) return null
+  return (
+    <div className="sched-trust">
+      <TrustNote trust={trust} />
+    </div>
   )
 }
 
@@ -445,6 +469,7 @@ function SchedEditor({ state, sched, tz, onClose }: { state: AppState; sched: Sc
           <option value="__other">Other folder…</option>
         </select>
         {d.cwd && <div className="meta mono">{d.cwd}</div>}
+        <SchedTrust cwd={d.cwd || null} refused={false} />
         <div className="ns-grid">
           {multi && (
             <div>

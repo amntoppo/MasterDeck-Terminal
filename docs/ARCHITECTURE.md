@@ -551,7 +551,10 @@ the code is `sched*`. Design and plan: `docs/plans/2026-10-17-schedules-{design,
   now); `whenCron` (daily / weekdays / weekly / every N hours / cron → a 5-field cron, read by
   `cronField` of `shared/schedules.ts`), `whenText`; `zonedParts` / `nextSlot` (wall-clock minutes
   in the schedule's IANA zone through `Intl.DateTimeFormat`; searches 5 years at most, and a schedule
-  with no slot there is refused; a midnight jump on a DST day is corrected); `dueSlots` (looks back 2 days at most)
+  with no slot there is refused; a midnight jump on a DST day is corrected; wall-clock minutes are
+  compared as such (`wallKey`): in a repeated hour nothing at or before `from`'s or `wallAfter`'s (the
+  last slot) matches again, and slots of a skipped hour run once at the first minute after it,
+  `inGap`); `dueSlots` (looks back 2 days at most)
   and `planTick` (a slot at most 5 minutes old runs; older: one `missed` run, or one `skipped` row);
   `runName` (`<slug>-<MMDD-HHmm>` in the zone, `-2` … when taken), `runPrompt`; `runSession` (by bg
   id, else name), `runProgress` (working / needs-input / busy → running; idle after working (seen
@@ -585,7 +588,9 @@ the code is `sched*`. Design and plan: `docs/plans/2026-10-17-schedules-{design,
   the start New Claude session already offers the web, later); `onShowSchedules` is `local`.
 - Renderer: `SchedulesView.tsx` (the list, a schedule's runs, `SchedEditor`), the rail's
   `schedules` tool, `WEB_VIEWS` / `SCREEN_NEEDS` (`schedList`), the palette's `view:schedules`, the
-  `srow-sched` chip in `SessionRow`; phone cards in `web.css`.
+  `srow-sched` chip in `SessionRow`; phone cards in `web.css`. `SchedTrust` (`useTrust` +
+  `TrustNote`) in the editor (the folder known not trusted) and above a schedule's runs (also when a
+  run was refused: `isNotTrusted` on its reason, which the row then says in plain words).
 - Notifications: the schedule's own switches first, then the `schedule-run` type of the #135
   registry (`shared/notifications.ts`; System on, Needs you off by default) through `notify()` →
   `Notifier.dispatch`, so Pause all and its Settings → Notifications row apply.

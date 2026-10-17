@@ -1914,3 +1914,4 @@ details.sd-more > summary:hover { color: var(--text); }
 .sgroup-empty { padding: 10px 6px; }
 .session-menu-sub { padding-left: 8px; border-left: 2px solid var(--line); margin: 2px 0 2px 10px; }
 .session-menu-sub .check { display: inline-block; width: 14px; color: var(--accent); }
+.sched-trust { margin: 6px 0; }

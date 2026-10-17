@@ -70,7 +70,10 @@ made itself (Details → Scheduled). The new feature is **Schedules** in the UI 
   … when taken). The session list shows a **⏱ <schedule>** chip on it (`AppState.schedRuns`:
   session key → schedule id and name, for runs of the last 30 days).
 - **Start**: `startSession` as above. A refusal (folder gone, account not connected, trust, claude
-  failing) is a `failed` run with Claude Code's message.
+  failing) is a `failed` run with Claude Code's message. Claude Code's trust refusal (`isNotTrusted`)
+  is said in plain words, and the schedule's folder gets `TrustNote` (**Open Claude there…** in the
+  window); the editor shows the same note before the first run when `master trust` says the folder
+  is not trusted. Nothing retries a start past the prompt (from the PR review).
 - **Progress** (every tick, from `latest.sessions`, matched by bg id, else by name):
   `working` / `needs-input` → running (`seenWorking`); `idle` with nothing busy or waited on, after
   it worked (seen working, or it spent something) → `done`; idle 3 minutes without ever working →
@@ -110,9 +113,11 @@ ahead of the clock (it was set back) counts from 5 minutes ago:
 The store is written (temp + rename) before a session is started, so a crash between the two never
 starts it again. Two MasterDeck instances are not a case (single-instance lock).
 
-DST: the jump to the next midnight is corrected on a 23- or 25-hour day. A fall-back hour repeats
-its wall-clock minutes; a schedule inside it may run twice (ponytail: compare wall-clock slots
-instead of instants if it matters).
+DST (from the PR review): slots are wall-clock minutes, compared as such, as cron does. When the
+clock goes back, a wall-clock minute at or before the last one handled is not matched again in the
+repeated hour (01:30 runs once on that day). When it jumps forward, the slots of the skipped hour
+run once, at the first minute after the gap (a daily 02:30 runs at 03:00 that day). The jump to
+the next midnight is corrected on a 23- or 25-hour day.
 
 ## Notifications
 

@@ -130,6 +130,27 @@ describe('nextSlot in a time zone', () => {
     ])
     expect(nextSlots('30 0 * * 1-5', utc('2026-03-27T12:00:00'), 'Europe/Berlin', 2)).toEqual([utc('2026-03-29T22:30:00'), utc('2026-03-30T22:30:00')])
   })
+  it('the repeated hour when DST ends does not match a wall-clock minute twice (New York, 1 November 2026)', () => {
+    // 01:30 EDT is 05:30Z; 01:30 EST (06:30Z) is the same wall-clock minute: the next is the 2nd.
+    expect(nextSlot('30 1 * * *', utc('2026-11-01T05:00:00'), 'America/New_York')).toBe(utc('2026-11-01T05:30:00'))
+    expect(nextSlot('30 1 * * *', utc('2026-11-01T05:30:00'), 'America/New_York')).toBe(utc('2026-11-02T06:30:00'))
+    // Every 15 minutes: the minutes of the repeated hour run once, then 02:00 EST.
+    expect(nextSlots('*/15 * * * *', utc('2026-11-01T05:40:00'), 'America/New_York', 3)).toEqual([utc('2026-11-01T05:45:00'), utc('2026-11-01T07:00:00'), utc('2026-11-01T07:15:00')])
+    // A tick between the two 01:30s, with 01:30 EDT handled: nothing due until the next day.
+    const s = sched({ tz: 'America/New_York', when: { kind: 'daily', time: '01:30' }, lastSlot: utc('2026-11-01T05:30:00') })
+    expect(planTick(s, utc('2026-11-01T06:31:00'))).toEqual({ kind: 'none' })
+    expect(schedView(s, [], utc('2026-11-01T06:10:00')).nextAt).toBe(utc('2026-11-02T06:30:00'))
+  })
+  it('a slot in the hour skipped when DST starts runs at the first minute after it, once (New York, 14 March 2027)', () => {
+    // 02:30 does not exist that day: it runs at 03:00 EDT (07:00Z), then 02:30 EST the next day.
+    expect(nextSlots('30 2 * * *', utc('2027-03-13T12:00:00'), 'America/New_York', 3)).toEqual([
+      utc('2027-03-14T07:00:00'),
+      utc('2027-03-15T06:30:00'),
+      utc('2027-03-16T06:30:00'),
+    ])
+    // Two slots in the gap still make one run; the next is the slot after it.
+    expect(nextSlots('0,30 2 * * *', utc('2027-03-14T05:00:00'), 'America/New_York', 2)).toEqual([utc('2027-03-14T07:00:00'), utc('2027-03-15T06:00:00')])
+  })
   it('a cron that never matches returns null quickly', () => {
     const t0 = Date.now()
     expect(nextSlot('0 0 31 2 *', utc('2026-10-17T00:00:00'), 'UTC')).toBeNull()

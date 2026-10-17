@@ -215,20 +215,32 @@ export function zonedParts(t: number, tz: string): { year: number; month: number
   return { year: Number(o.year), month: Number(o.month), day: Number(o.day), hour: Number(o.hour) % 24, minute: Number(o.minute), dow: WD[o.weekday] ?? 0 }
 }
 
+type Parts = ReturnType<typeof zonedParts>
+
+/** A wall-clock minute as one comparable number (year, month, day, hour, minute). */
+const wallKey = (p: Parts): number => (((p.year * 13 + p.month) * 32 + p.day) * 24 + p.hour) * 60 + p.minute
+
 /**
  * The first minute after `from` that `cron` matches in wall-clock time of `tz`; null when the cron
  * is unreadable or matches nothing within SCHED_HORIZON_MS (a cron like Feb 31 never does). Whole
  * days and hours that cannot match are skipped; the jump to the next midnight is corrected when a
  * DST change made the day shorter or longer than 24 hours.
+ *
+ * Wall-clock minutes, not instants, are what a schedule names, so across DST changes (as cron
+ * does): when the clock goes back, a wall-clock minute already passed (at or before `from`'s, or
+ * `wallAfter`'s: the last slot handled) is not matched again in the repeated hour; when it jumps
+ * forward, slots in the skipped hour run at the first minute after the gap, once.
  */
-export function nextSlot(cron: string, from: number, tz: string): number | null {
+export function nextSlot(cron: string, from: number, tz: string, wallAfter: number = from): number | null {
   const c = parseCron(cron)
   if (!c || !validZone(tz)) return null
   let t = Math.floor(from / 60_000) * 60_000 + 60_000
   const end = from + SCHED_HORIZON_MS
+  const floor = Math.max(wallKey(zonedParts(from, tz)), wallKey(zonedParts(wallAfter, tz)))
   while (t <= end) {
     const p = zonedParts(t, tz)
     const dayOk = c.anyDom && c.anyDow ? true : c.anyDom ? c.dow.has(p.dow) : c.anyDow ? c.dom.has(p.day) : c.dom.has(p.day) || c.dow.has(p.dow)
+    if (c.mon.has(p.month) && dayOk && inGap(c, t, p, tz, floor)) return t
     if (!c.mon.has(p.month) || !dayOk) {
       t += ((24 - p.hour) * 60 - p.minute) * 60_000
       // A 23-hour day lands at 01:00: step back to the day's midnight (if that day has one).
@@ -243,13 +255,26 @@ export function nextSlot(cron: string, from: number, tz: string): number | null 
       t += (60 - p.minute) * 60_000
       continue
     }
-    if (!c.min.has(p.minute)) {
+    // The repeated hour after the clock went back: this wall-clock minute was matched already.
+    if (!c.min.has(p.minute) || wallKey(p) <= floor) {
       t += 60_000
       continue
     }
     return t
   }
   return null
+}
+
+/** Whether the clock jumped forward just before `t` (a DST gap) over a minute the cron matches. */
+function inGap(c: Cron, t: number, p: Parts, tz: string, floor: number): boolean {
+  const q = zonedParts(t - 60_000, tz)
+  if (q.year !== p.year || q.month !== p.month || q.day !== p.day) return false
+  const a = q.hour * 60 + q.minute
+  const b = p.hour * 60 + p.minute
+  if (b - a <= 1) return false
+  for (let m = a + 1; m < b; m++)
+    if (c.hour.has(Math.floor(m / 60)) && c.min.has(m % 60) && wallKey({ ...p, hour: Math.floor(m / 60), minute: m % 60 }) > floor) return true
+  return false
 }
 
 /** The next `n` slots after `from` (the editor's preview). */
@@ -403,7 +428,7 @@ export function schedView(s: Schedule, runs: SchedRun[], now: number): SchedView
     ...s,
     cron,
     whenText: whenText(s.when),
-    nextAt: s.enabled && cron ? nextSlot(cron, Math.max(now, s.lastSlot), s.tz) : null,
+    nextAt: s.enabled && cron ? nextSlot(cron, Math.max(now, s.lastSlot), s.tz, s.lastSlot) : null,
     running: mine.some((r) => r.status === 'running'),
     lastRun: mine.filter((r) => r.status !== 'skipped').at(-1) ?? mine.at(-1) ?? null,
   }

@@ -286,6 +286,15 @@ Each run is a real `claude --bg` session named after the schedule and its time
 (`morning-triage-1017-0900`), started in the schedule's folder as its account. It shows in the
 session list with a **⏱ schedule** chip, like any session you started yourself.
 
+Claude Code starts a background session only in a folder you have allowed it to work in (its own
+trust prompt). When a schedule's folder was never allowed, the editor says so before you save, and a
+run it refused says so in the history, with **Open Claude there…**: answer Claude Code's prompt there
+once and the next runs start.
+
+Times are wall-clock times in the schedule's zone. When the clock goes back an hour, a time in the
+repeated hour runs once; when it jumps forward, a time in the skipped hour runs at the first minute
+after it (a daily 02:30 runs at 03:00 that day).
+
 The list shows each schedule with an on/off switch, when it runs, its next run and its last run's
 status and cost, and **Run now**, **Edit** and **Delete**. Click a schedule for its last runs:
 when each started (on time, catch-up or Run now), its status (Running, Finished, Failed, Skipped,
