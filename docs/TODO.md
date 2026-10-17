@@ -928,7 +928,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   in its `context.json`, a briefing on how to review, and `post-review.sh`, the one write, only
   after the user's yes, only to the picked PR, as the tab's account. Branch
   `worktree-MasterDeck-Terminal-149-pr-review-panel`.
-
+- **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
+  in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays
+  put. Design and plan in `docs/plans/2026-10-17-resume-opens-terminal-*`. Open: the "Resuming …"
+  tab has no timeout when the session never appears (as the other "Starting…" tabs; `ponytail:` in
+  `openResumed`); the History dialog's Resume was checked by the suites only (the web preview has no
+  history hits).
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
   the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by

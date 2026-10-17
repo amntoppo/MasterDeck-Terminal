@@ -72,6 +72,7 @@ import { HeldBar } from "./components/HeldBar";
 import { QuickOpen } from "./components/QuickOpen";
 import { sessionTabs, useSessionTabs } from "./sessionTabsStore";
 import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
+import { resumedSession, type ResumeTarget } from "@shared/resumeOpen";
 import { relativeTo } from "@shared/filePath";
 import { deck, load, save, useAppState } from "./deck";
 import { savedPref, useTheme, useWebThemePref } from "./theme";
@@ -103,6 +104,8 @@ type Tab =
       here?: HereOpts;
       /** Or: a new Claude session without a ticket (the + menu). */
       claude?: NewSessionReq;
+      /** Or: a stopped session resumed (History, the Board, the Start dialog), until it runs. */
+      resumed?: ResumeTarget;
       error?: string;
       proposalId?: number;
     };
@@ -399,6 +402,34 @@ export function App() {
     [activate],
   );
 
+  // A resumed session's tab was just asked for: its pane reattaches if it had exited and focuses its terminal.
+  const [wake, setWake] = useState<{ id: string; at: number } | null>(null);
+  const wakeTab = useCallback((key: string, id: string) => {
+    sessionTabs.activate(key, TERMINAL_ID);
+    setWake({ id, at: Date.now() });
+  }, []);
+
+  /** A resume succeeded: show its terminal, at once when it is listed, else after a "Resuming…" tab (#133). */
+  const openResumed = useCallback(
+    (t: ResumeTarget) => {
+      const s = state ? resumedSession(state.sessions, t) : null;
+      if (s) {
+        openSession(s);
+        wakeTab(s.key, `tab:${s.key}`);
+        return;
+      }
+      // ponytail: like the other "Starting…" tabs it waits for ever if the session never shows up; a timeout with a Retry is the upgrade.
+      const id = `pending:${t.name}:${Date.now()}`;
+      setView("terminals");
+      setTabs((cur) => [
+        ...cur,
+        { id, kind: "pending", name: t.name, issue: 0, startedAt: t.at, resumed: t },
+      ]);
+      activate(id);
+    },
+    [state, openSession, activate, wakeTab],
+  );
+
   // A new shell starts in the workspace chosen in Setup (home until there is one).
   const workspace = state?.config.workspace || "";
   // In the workspace, + Shell first puts the checkout on its default branch (main or dev),
@@ -639,20 +670,29 @@ export function App() {
     const found = tabs.flatMap((t) => {
       if (t.kind !== "pending") return [];
       // A resumed session must resolve to the new background copy, not the terminal one of the same name.
-      const s = state.sessions.find(
-        (x) =>
-          x.name === t.name &&
-          x.state !== "done" &&
-          x.startedAt >= t.startedAt - 10_000 &&
-          (!t.here || x.kind === "background"),
-      );
+      const s = t.resumed
+        ? resumedSession(state.sessions, t.resumed)
+        : state.sessions.find(
+            (x) =>
+              x.name === t.name &&
+              x.state !== "done" &&
+              x.startedAt >= t.startedAt - 10_000 &&
+              (!t.here || x.kind === "background"),
+          );
       return s
-        ? [{ pendingId: t.id, s, linkIssue: t.here?.linkIssue ?? null }]
+        ? [
+            {
+              pendingId: t.id,
+              s,
+              linkIssue: t.here?.linkIssue ?? null,
+              resumed: !!t.resumed,
+            },
+          ]
         : [];
     });
     if (found.length === 0) return;
     let next = tabs;
-    for (const { pendingId, s, linkIssue } of found) {
+    for (const { pendingId, s, linkIssue, resumed } of found) {
       // The resumed conversation has a new session id: keep its ticket link.
       if (linkIssue && !sameTicket(sessionTicket(s), linkIssue))
         void deck().linkSession(linkIssue, s.sessionId, s.cwd);
@@ -664,9 +704,10 @@ export function App() {
           );
       arm(tabId);
       if (active === pendingId) setActive(tabId);
+      if (resumed) wakeTab(s.key, tabId);
     }
     setTabs(next);
-  }, [state, tabs, active, arm]);
+  }, [state, tabs, active, arm, wakeTab]);
 
   useEffect(() => {
     // A session that just blocked on a prompt: add its tab (attached, so the prompt shows) without
@@ -1238,6 +1279,7 @@ export function App() {
         <BoardView
           state={state}
           onOpenSession={openSession}
+          onResumed={openResumed}
           onStart={(card) => setAssigning(issueOf(card))}
           onPr={setPrCard}
           onAssign={(card, me) => setAssignCard({ card, me })}
@@ -1424,7 +1466,9 @@ export function App() {
                       <div>
                         {t.here
                           ? `Resuming the conversation from the other terminal${t.here.stopOther ? " (stopping it first)" : ""}. The terminal attaches as soon as it is up.`
-                          : `#${t.issue} · the terminal attaches as soon as Claude has started the session.`}
+                          : t.resumed
+                            ? "Resuming the conversation. The terminal attaches as soon as the session is up."
+                            : `#${t.issue} · the terminal attaches as soon as Claude has started the session.`}
                       </div>
                     </>
                   )}
@@ -1443,6 +1487,7 @@ export function App() {
                   state={state}
                   visible={shown.has(t.id)}
                   focus={t.id === active}
+                  wakeAt={wake?.id === t.id ? wake.at : 0}
                   onClose={() => closeTab(t.id)}
                   onAskMaster={askMaster}
                   masterAttached={masterAttached}
@@ -1530,6 +1575,7 @@ export function App() {
             setStartWith(undefined);
           }}
           onStart={startSession}
+          onResumed={openResumed}
           initialInstructions={startWith}
           onLink={() => {
             setLinking(assigning);
@@ -1621,6 +1667,7 @@ export function App() {
         <HistoryDialog
           state={state}
           onOpenSession={openSession}
+          onResumed={openResumed}
           onClose={() => setHistoryOpen(false)}
         />
       )}
@@ -1791,6 +1838,8 @@ function SessionPane(p: {
   state: AppState;
   visible: boolean;
   focus: boolean;
+  /** When a resume last asked for this tab (0: never): reattach an exited terminal and focus it. */
+  wakeAt: number;
   onClose: () => void;
   onAskMaster: (s: Session) => void;
   onStartHere: (s: Session, stopOther: boolean) => void;
@@ -1808,6 +1857,15 @@ function SessionPane(p: {
   const own = useSessionTabs(p.tab.key);
   const onTerminal = own.active === TERMINAL_ID;
   const openTab = own.tabs.find((t) => tabId(t) === own.active);
+  // A resume woke this session: the "Session ended" / "Detached" terminal attaches again.
+  const exitedNow = useRef(exited);
+  exitedNow.current = exited;
+  useEffect(() => {
+    if (!p.wakeAt || !exitedNow.current) return;
+    deck().ptyClose(paneId);
+    setExited(false);
+    setGen((g) => g + 1);
+  }, [p.wakeAt, paneId]);
 
   if (!s) {
     return (
@@ -1872,6 +1930,7 @@ function SessionPane(p: {
             spec={{ kind: "attach", bgId: s.bgId }}
             visible={p.visible && onTerminal}
             focusOnShow={p.focus}
+            focusAt={p.wakeAt}
             generation={gen}
             onExit={() => setExited(true)}
             onOpenPath={(path) => {

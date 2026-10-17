@@ -39,6 +39,8 @@ interface Props {
   /** Visible panes fit themselves; hidden ones keep running and refit when shown. */
   visible: boolean
   focusOnShow?: boolean
+  /** A new value takes the keyboard focus once, as soon as the pane is visible (a resumed session's tab, #133). */
+  focusAt?: number
   /** Bumped by the parent to force a fresh PTY (Reattach). */
   generation?: number
   onExit?: (code: number) => void
@@ -46,7 +48,7 @@ interface Props {
   onOpenPath?: (path: string) => void
 }
 
-export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 0, onExit, onOpenPath }: Props) {
+export function TerminalView({ paneId, spec, visible, focusOnShow, focusAt = 0, generation = 0, onExit, onOpenPath }: Props) {
   const onPathRef = useRef(onOpenPath)
   onPathRef.current = onOpenPath
   const host = useRef<HTMLDivElement>(null)
@@ -290,6 +292,17 @@ export function TerminalView({ paneId, spec, visible, focusOnShow, generation = 
       deck().ptyResize(paneId, 0, 0)
     }
   }, [visible, focusOnShow, paneId])
+
+  // Once per focusAt: the tab may already have been the shown one, so the effect above does not run again.
+  const focused = useRef(0)
+  useEffect(() => {
+    if (!focusAt || focusAt === focused.current || !visible) return
+    const id = requestAnimationFrame(() => {
+      focused.current = focusAt
+      term.current?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [focusAt, visible])
 
   return (
     <div className="term-wrap" onClick={() => term.current?.focus()}>

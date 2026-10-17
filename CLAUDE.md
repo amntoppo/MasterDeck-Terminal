@@ -113,8 +113,11 @@ It never opens the Keychain (a new ad-hoc build would put a dialog up that block
 
 ## Operating rules (from the user; follow exactly)
 
-- **Never push** MasterDeck (or the backend) unless the user asks. `main` is ahead of `origin/main`
-  (21 commits as of 2026-10-03). Never deploy the web app or the backend unless asked.
+- **Always open a PR once a change is done**: commit on the feature branch, push that branch and
+  open a draft PR against `main` (description ends with the session's attribution line), then
+  report its link. Never push `main` (or the backend's `master`) directly, never force-push, never
+  merge a PR yourself. `main` is ahead of `origin/main` (21 commits as of 2026-10-03). Never deploy
+  the web app or the backend unless asked.
 - **After every change: rebuild, reinstall and relaunch** the local app (recipe above).
 - **No real GitHub writes in tests** (issues, comments, board moves, PRs): dry runs only.
 - **Never type into the user's real Claude sessions**, and never answer their Needs-you items. For
@@ -427,6 +430,16 @@ buttons; it does not go through macOS window drag regions.
   the pane's command and folder, the session kept across views, the script's `--dry-run` and its
   refusal of another PR. Not checked: a real Claude review, a real post, the real web app,
   Windows. Open points: TODO ("Review with Claude").
+
+- **Resuming a session opens its terminal (#133)** on branch
+  `worktree-MasterDeck-Terminal-133-resume-opens-terminal` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). A resume's answer carries the background id
+  (`ResumeResult.key`); Board cards, the Start dialog and History close and open the session's
+  Terminal tab with focus (`openResumed`, `shared/resumeOpen.ts`); Resume all is unchanged. Checked:
+  typecheck, vitest, the web preview over CDP (card Resume and the Start dialog's Resume: Terminals
+  view, `tab:bg-5` active, focus in the xterm, dialog closed), and the isolated app with a stand-in
+  `claude` (`resumeSession` answered `key: "4f2a9c1e"`, the session listed under it). Not checked: a
+  real `claude --bg --resume` in the installed app, History's Resume on screen, a phone, Windows.
 
 - **Several accounts' accepted simplifications (#37)** on branch
   `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not
