@@ -1,5 +1,7 @@
 import type { WatchInfo } from "@shared/watches";
 import { hideSuperseded } from "@shared/superseded";
+import { clonedLine, cloneOwnsBranch } from "@shared/clone";
+import type { CloneStore } from "./clones";
 import type { MeetingNotice } from "@shared/meetings";
 import { accountNotices, isMulti, keepLastGood, primaryLogin, type GhAccountStatus } from "@shared/accounts";
 import type { ModsReloadOffer } from "@shared/mods";
@@ -376,6 +378,9 @@ export class Sources {
   private accountOf: ((s: Session) => string | null) | null = null;
   private ghActiveOf: (s: Session) => boolean = () => false;
   private superseded: () => Set<string> = () => new Set();
+  private clones: CloneStore | null = null;
+  /** Session ids with no transcript at the last agents poll (nothing to clone). */
+  private noTranscript = new Set<string>();
   private meetingNotices: () => MeetingNotice[] = () => [];
   private notices: () => Notice[] = () => [];
   private linker:
@@ -729,6 +734,9 @@ export class Sources {
     s: ParkedKey | null,
     branch: string | null | undefined,
   ): string | undefined {
+    // A clone shares its original's folder: not its branch PR until it moved off that branch.
+    const c = this.clones?.get(s?.key);
+    if (c && !cloneOwnsBranch(c, branch)) return undefined;
     return dir && this.ownsBranch(dir, s, branch) ? dir : undefined;
   }
 
@@ -750,6 +758,30 @@ export class Sources {
   ): void {
     this.accountOf = f;
     this.ghActiveOf = ghActive;
+  }
+
+  /** The sessions Clone started (main/clones.ts): their origin, what they do not take over, a kept ticket link. */
+  setClones(store: CloneStore): void {
+    this.clones = store;
+  }
+
+  /** A session's transcript file, if it has one. */
+  transcriptOf(sessionId: string): string | null {
+    return this.transcripts.find(sessionId);
+  }
+
+  private withClones(ss: Session[]): Session[] {
+    return ss.map((s) => {
+      const c = this.clones?.get(s.bgId);
+      const none = this.noTranscript.has(s.sessionId);
+      return c || none
+        ? {
+            ...s,
+            ...(c ? { clonedFrom: { key: c.from.key, name: c.from.name } } : {}),
+            ...(none ? { noConversation: true as const } : {}),
+          }
+        : s;
+    });
   }
 
   /** Ids of sessions a copy replaced (shared/superseded.ts): hidden while they do not run. */
@@ -994,6 +1026,25 @@ export class Sources {
         else
           this.errors[`carry:${c.bgId}`] =
             `could not keep ${ticketLabel(c.repo, c.issue)} linked after a resume: ${r.message}`;
+        this.reloadLinks();
+      });
+    }
+    // Clones started with Keep ticket link: linked once they are listed (their ids are new).
+    for (const [bg, rec] of this.clones?.toLink() ?? []) {
+      const s = this.rawSessions.find(
+        (x) => x.bgId === bg && x.state !== "done" && /^[0-9a-f-]{36}$/i.test(x.sessionId),
+      );
+      if (!s) continue;
+      const key = `${s.sessionId}:${ticketKey(rec.ticket.repo, rec.ticket.number)}`;
+      if (now - (this.carryTried[key] ?? 0) < 600_000) continue;
+      this.carryTried[key] = now;
+      void this.linker(rec.ticket, s.sessionId, s.cwd || null).then((r) => {
+        if (r.ok) {
+          this.clones?.markLinked(bg);
+          delete this.errors[`clone:${bg}`];
+        } else
+          this.errors[`clone:${bg}`] =
+            `could not link the clone ${s.name} to ${ticketLabel(rec.ticket.repo, rec.ticket.number)}: ${r.message}`;
         this.reloadLinks();
       });
     }
@@ -1595,8 +1646,11 @@ export class Sources {
       claimed = this.peerStore.claim(this.rawSessions);
     }
     const now = Date.now();
+    this.clones?.claim(this.rawSessions, now);
+    this.noTranscript.clear();
     for (const s of this.rawSessions) {
       const p = this.transcripts.find(s.sessionId, now);
+      if (!p) this.noTranscript.add(s.sessionId);
       const m = p ? mtime(p) : null;
       if (m !== null) this.lastWrite[s.sessionId] = m;
     }
@@ -1849,7 +1903,10 @@ export class Sources {
       sched: newScheduleScan(),
     });
     // From the start of the transcript: a PR opened early in a long session counts too.
-    const lines = readNewLines(f.st, Infinity);
+    const read = readNewLines(f.st, Infinity);
+    // A clone's transcript starts with a copy of its original's: those lines are not its work.
+    const c = this.clones?.get(key);
+    const lines = c ? read.filter((l) => clonedLine(l, c.at)) : read;
     const found = scanLines(lines, f.scan);
     scanWorktreeLines(lines, f.wt, homedir());
     // Where it is in its workflow: a resumed session's transcripts add up under one key.
@@ -2370,7 +2427,7 @@ export class Sources {
 
   build(): AppState {
     const now = Date.now();
-    const sessions = this.withAccounts(this.withHookState(
+    const sessions = this.withClones(this.withAccounts(this.withHookState(
       this.withActivity(
         applyFreshness(
           attachIssues(
@@ -2390,7 +2447,7 @@ export class Sources {
         ),
         now,
       ),
-    ));
+    )));
     const { asks, answered } = this.collectAsks(sessions);
     const menus = Object.fromEntries(
       sessions

@@ -922,6 +922,19 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
 - Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
 
+## Clone a session: open points (2026-10-17, issue #136)
+
+- A clone of a session whose last turn ran in plan mode carries the plan turn's model (Claude Code
+  records the model it switched to for planning as `requestedModel`). Carrying the session's
+  configured model would need a source Claude Code does not write today.
+- A session that runs as gh's active account (`ghActive`, woken without `--settings`) is cloned as
+  its folder's account with two or more accounts, not as gh's active one.
+- The first message goes as `claude`'s positional prompt, so a browser's text follows the
+  `noEscape` rule (no leading `/` or `!`, no newlines). The window may send anything but a leading
+  `-`.
+- Not checked: Windows, a real phone, a clone of an interactive session running in another
+  terminal (Claude Code forks the transcript on disk; the original is not touched).
+
 ## Tabs in the session list (#146): open points (2026-10-17)
 
 - Not checked: the drag with a real mouse in the Electron window (the drops were driven with
@@ -949,6 +962,13 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   in its `context.json`, a briefing on how to review, and `post-review.sh`, the one write, only
   after the user's yes, only to the picked PR, as the tab's account. Branch
   `worktree-MasterDeck-Terminal-149-pr-review-panel`.
+- **Clone a session (#136)**: right-click → **Clone…** starts `claude --bg --resume <id>
+  --fork-session -n <name>` in the same folder, as the same account, with the model and permission
+  mode carried when valid; the original is not superseded; the clone takes none of the original's
+  PRs, worktrees or workflow steps (copied transcript lines skipped by timestamp) nor its branch's
+  PR; Keep ticket link; "Cloned from" in Details; the clone's terminal opens. Branch
+  `worktree-MasterDeck-Terminal-136-clone-session`.
+
 - **Tabs in the session list (#146)**: All plus the user's tabs over the session list, drag a
   session onto a tab (or right-click → Move to tab), counts and needs-you badges, rename, reorder,
   delete; kept on the Mac in `session-groups.json` and carried to a resume's copy. Branch

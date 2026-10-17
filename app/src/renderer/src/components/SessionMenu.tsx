@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { cloneBlock } from '@shared/clone'
 import { ticketLabel, ticketUrl } from '@shared/ticket'
 import type { AppState, Session } from '@shared/types'
 import { deck } from '../deck'
@@ -26,6 +27,7 @@ export function SessionMenu({
   groups,
   group,
   onGroup,
+  onClone,
   flash,
 }: {
   s: Session
@@ -43,6 +45,8 @@ export function SessionMenu({
   groups: SessionGroup[]
   group: string | null
   onGroup: (group: string | null) => void
+  /** Clone… (#136); absent: not offered here. */
+  onClone?: () => void
   flash: (m: string) => void
 }) {
   const [tabsOpen, setTabsOpen] = useState(false)
@@ -75,6 +79,7 @@ export function SessionMenu({
   const pr = (state.sessionPrs[s.sessionId] ?? []).at(-1) ?? null
   const dir = state.stats[s.sessionId]?.currentDir ?? state.tails[s.sessionId]?.cwd ?? s.cwd
   const canStop = (s.kind === 'background' && !!s.bgId) || s.pid !== null
+  const cloneWhy = cloneBlock(s, !!state.menus[s.key])
 
   return createPortal(
     <div className="menu session-menu" ref={ref} style={{ left: pos.left, top: pos.top }} role="menu" aria-label={`${s.name} actions`}>
@@ -126,6 +131,19 @@ export function SessionMenu({
               ))}
             </div>
           )}
+        </>
+      )}
+      {onClone && can('cloneSession') && (
+        <>
+          <hr />
+          <button
+            onClick={run(onClone)}
+            disabled={!!cloneWhy}
+            title={cloneWhy ?? 'A new session that goes on from a copy of this conversation; this one keeps running'}
+          >
+            Clone…
+          </button>
+          {cloneWhy && <div className="session-menu-why">{cloneWhy}</div>}
         </>
       )}
       {canStop && (
