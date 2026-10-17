@@ -229,6 +229,8 @@ export interface AppState {
   held?: import("./heldMessages").HeldView[];
   /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
   modOff?: Record<string, string[]>;
+  /** The session list's tabs and which session is in which (`session-groups.json`, #146); set in the state callback. */
+  sessionGroups?: import("./sessionGroups").SessionGroups;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
   modCatalog?: import("./modBand").ModEntry[];
   /**

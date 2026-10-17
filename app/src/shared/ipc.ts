@@ -197,6 +197,7 @@ export const CH = {
   peersSet: "peers:set",
   peersSync: "peers:sync",
   modSet: "mod:set",
+  sessionGroupsAct: "sessionGroups:act",
   modsInstall: "mods:install",
   modsUninstall: "mods:uninstall",
   modsReload: "mods:reload",
@@ -797,6 +798,8 @@ export interface DeckApi {
   peersSync(sessionKey: string): Promise<CliResult>;
   /** Tools → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
+  /** The session list's tabs: add, rename, move or remove one, or put a session in one (shared/sessionGroups GroupOp). */
+  sessionGroupsAct(op: import("./sessionGroups").GroupOp): Promise<CliResult & { id?: string }>;
   /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
   modsInstall(): Promise<CliResult>;
   /** Take them out again (every mod, the marketplace, prependPlugins). */
