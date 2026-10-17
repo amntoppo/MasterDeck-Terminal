@@ -512,6 +512,15 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .prs-tbl td, .prs-tbl th { white-space: nowrap; padding-left: 6px; padding-right: 6px; }
 .prs-tbl .author { display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .prs-tbl .label-chip { margin-left: 4px; font-size: 10px; padding: 0 6px; }
+/* The PR picked for Review with Claude. */
+.prs-tbl tbody tr { cursor: default; }
+.prs-tbl tr.sel td { background: var(--bg-3); }
+.prs-tbl tr.sel td:first-child { box-shadow: inset 3px 0 var(--claude); }
+.prs-tbl .review-claude { display: inline-flex; vertical-align: middle; padding: 2px 3px; }
+.claude-btn { display: inline-flex; align-items: center; gap: 6px; }
+.review-panel .review-on { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-panel .wf-builder-head b, .review-panel .wf-builder-head .btn { white-space: nowrap; flex: none; }
+.ticket-toast.bad-toast { border-color: var(--red); }
 .link-btn.muted-link { color: var(--muted); }
 .link-btn.muted-link:hover { color: var(--accent); }
 .st-open { color: var(--green); } .st-merged { color: var(--purple); } .st-closed { color: var(--red); }

@@ -939,6 +939,23 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
   - Clicking an author or a repository in a row filters by it. **Review** opens the PR popup (it is
     highlighted when my review is requested); ↗ opens GitHub.
   - Closed PRs come without CI and threads: the full query times out on 100 closed PRs.
+- **Review with Claude:** a Claude session on the right of the PRs view, one per PR tab (as the
+  tab's account with two or more accounts). Click a row to pick a PR (it is highlighted, and the
+  pick is remembered per tab); the panel's head says **Reviewing owner/repo#123**. Ask "review this
+  PR", "summarise what changed", "is it safe to merge?", "what does the CI failure mean?": it reads
+  the PR's diff, checks and comments with `gh`. Open it with **Review with Claude** in the header,
+  the Claude mark on a row (picks the PR and asks for a review), or **Review with Claude** in the
+  PR popup. Drag its edge to resize (double-click resets), **›** hides it (the session goes on),
+  **×** ends it, **New chat** starts over; opening it again later continues the last conversation.
+  - **Posting:** it writes nothing to GitHub until you agree. It shows the exact review (comment,
+    approve or request changes, with any inline comments), and posts it only after your yes, with
+    MasterDeck's `post-review-<tab>.sh` (kept in `~/.claude/masterdeck/pr-review-guard/`, out of the
+    session's reach), which Claude Code asks you to allow each time. The script posts only to the
+    PR picked in the list, and only as the tab's account; `gh pr review`, `gh pr comment`, `gh pr
+    merge` and the like are blocked in that session.
+  - Its folder is `~/.claude/masterdeck/pr-review/tab-<tab id>/` (`CLAUDE.md`, `context.json` with
+    the tab's filters and the picked PR, kept current by MasterDeck). The session is not listed with
+    your sessions. On a phone the panel covers the list; **›** goes back to it.
 - **Fix CI / Address comments:** sent to the owning session in master's wording. With no session, the
   Start dialog opens with that instruction filled in.
 - **Auto-babysit:** failing CI or review feedback on my PRs appear as offers, in Needs you and at
