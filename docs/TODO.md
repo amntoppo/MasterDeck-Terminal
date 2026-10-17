@@ -916,6 +916,17 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   up under the pointer. Make it stick with the Filters line if that turns out awkward.
 - No keyboard way to reorder tabs other than the menu's Move left / right; no ⌘1… shortcuts.
 
+## Notifications: open points (2026-10-17, issue #135)
+
+- **P3 · Notices never clear themselves.** A "Session finished" notice stays until Done or three
+  days, even once the session works again. `main/notices.ts` could drop a session's notices when it
+  goes back to working.
+- **P3 · Not checked live:** a real macOS notification for each type in the installed app (the
+  isolated app ran Send test and the settings round trip only), Windows, the web app over the
+  bridge, a monitor event and an update offer reaching the dispatcher.
+- **Later:** the mobile push channel (#134) is one sender in `index.ts` and `available: true` in
+  `CHANNELS`; email or Slack the same way.
+
 ## Recently done
 
 - **Tabs in the session list (#146)**: All plus the user's tabs over the session list, drag a
@@ -923,6 +934,17 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   delete; kept on the Mac in `session-groups.json` and carried to a resume's copy. Branch
   `worktree-146-session-tabs-groups`.
 
+- **Settings → Notifications (#135)**: one registry of notification types × channels
+  (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`); a table with System
+  notification, Needs you and a disabled Mobile push column, Pause all, Send test; `notifyNeedsYou`
+  migrated; events can be routed to Needs you as notices. Branch `135-notification-settings`.
+
+- **Resuming a session opens its terminal (#133)**: Resume on a Board card, in the Start dialog or
+  in History closes the dialog and opens the session's Terminal tab with focus; Resume all stays
+  put. Design and plan in `docs/plans/2026-10-17-resume-opens-terminal-*`. Open: the "Resuming …"
+  tab has no timeout when the session never appears (as the other "Starting…" tabs; `ponytail:` in
+  `openResumed`); the History dialog's Resume was checked by the suites only (the web preview has no
+  history hits).
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
   the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by

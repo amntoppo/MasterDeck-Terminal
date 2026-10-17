@@ -113,8 +113,11 @@ It never opens the Keychain (a new ad-hoc build would put a dialog up that block
 
 ## Operating rules (from the user; follow exactly)
 
-- **Never push** MasterDeck (or the backend) unless the user asks. `main` is ahead of `origin/main`
-  (21 commits as of 2026-10-03). Never deploy the web app or the backend unless asked.
+- **Always open a PR once a change is done**: commit on the feature branch, push that branch and
+  open a draft PR against `main` (description ends with the session's attribution line), then
+  report its link. Never push `main` (or the backend's `master`) directly, never force-push, never
+  merge a PR yourself. `main` is ahead of `origin/main` (21 commits as of 2026-10-03). Never deploy
+  the web app or the backend unless asked.
 - **After every change: rebuild, reinstall and relaunch** the local app (recipe above).
 - **No real GitHub writes in tests** (issues, comments, board moves, PRs): dry runs only.
 - **Never type into the user's real Claude sessions**, and never answer their Needs-you items. For
@@ -184,6 +187,7 @@ web tabs keep working.
 | Notes | `shared/notes.ts` (types, limits, checks, `notePreview`, `sessionNotes`; a note's `link` (the session and/or ticket an `n-` note is about) and `meeting` (set by `NotesStore.addMeetingNote` alone)), `shared/noteEditor.ts` (`NoteEditor`: the editor's saves, switches, conflicts), `shared/noteFilter.ts` (the panel's All · Mine · Tickets · Sessions · Meetings, the Notes tab's meeting dot), `main/notes.ts` (`NotesStore`), `renderer/src/notes.ts` (`useNotes`, `ticketNote`, `noteView`), `renderer/.../NotesPanel.tsx` (the one editor: Write / Preview / Side by side, `MarkdownView` with `html={false}`); Session details → **Notes n**: `renderer/.../SessionNotes.tsx` (read only; Edit and New note open the panel); entry points in `Rail.tsx`, `GitHubDetails.tsx` (Details → GitHub), `SessionDetails.tsx`, `BoardView.tsx` (`Card`); sessions adding to notes: `skills/masterdeck-notes` (`note.sh`), `shared/noteRequest.ts`, `main/noteRequests.ts` (`pumpNoteRequests`, in `pumpWatches`), `NotesStore.append` |
 | Meetings (macOS; record, transcribe on the Mac, match to sessions; issue #102) | IPC and lazy loading: `main/meetingsIpc.ts` (`MeetingsIpc`; the only importer of `main/meetings/`, by dynamic `import()`); `main/meetings/gate.ts` (consent, permissions), `recorder.ts` (capture window, chunks, `audio.webm`), `store.ts` (`MASTERDECK_HOME/meetings`), `transcriber.ts` (queue, crash recovery), `matcher.ts` (the one `claude -p`, meeting notes), `models.ts` + `whisper.ts` (speech models, `whisper-cli`), `apps.ts` (the offer's process check), `muteHelper.ts` (`findMute`, `spawnMute`: the `md-mute` helper, `native/mute/main.swift`, `scripts/mute.sh`; its rules and protocol in `shared/meetingMute.ts`), `mute.ts` (`MuteWatch`: the mic follows the meeting app's mute, `meetingLive.mic`, `meetings:micOff`); `main/meetingMedia.ts` (`masterdeck-media://` audio), `main/meetingNotices.ts` (Needs you), `main/meetingsFixture.ts`, `main/claudeOnce.ts` (`claude -p` from an empty temp folder); `shared/meetings.ts` (types, settings, consent, `systemAudioPath`), `meetingAudio.ts`, `meetingModels.ts`, `meetingMatch.ts` (candidates, answer check, `MATCH_FAILED`), `meetingsPage.ts`, `meetingJanitor.ts`, `meetingApps.ts` (Zoom, Webex); capture window: `renderer/capture.html`, `renderer/src/capture.ts`, `renderer/src/pcmWorklet.ts`, `preload/capture.ts`; UI: `renderer/.../MeetingsSetup.tsx` (Settings → Meetings), `RecordMeeting.tsx`, `MeetingsView.tsx` (the page), Janitor's section in `HygieneViews.tsx`; `scripts/whisper.sh`, `scripts/meeting-fixture.cjs`; ARCHITECTURE "Meetings: …", OPERATIONS "Meetings: …" |
 | Side questions (right panel → Tools → BTW, `/btw`) | `shared/btw.ts` (prompt, `parseStreamLine`, `parseHistoryLine`, `parseBtwScreen`), `main/btw.ts` (`BtwStore` → `btw/<key>.json`, `BtwAsker`: a forked tool-less `claude -p`, `BtwTerminal`: `history.jsonl` + `claude logs`), `pollBtw` and the `btw:*` handlers in `main/index.ts`, `renderer/.../SessionBtw.tsx` (a sub-tab of `SessionTools.tsx`, the panel's Tools tab, which also holds the Queue); never in `AppState` |
+| Notifications (Settings → Notifications, #135) | `shared/notifications.ts` (`CHANNELS`, `NOTIFY_TYPES`, `normalizeRoutes`, `routeOf`, `typeOfKind`, `showsInNeedsYou`, `cellOf`), `main/notifier.ts` (`Notifier`: the one dispatcher, a sender per channel), `main/notices.ts` (events routed to Needs you, inbox kind `notice`), `showSystem` / `notifyItem` / `announceUpdate` in `main/index.ts`, `Inbox.view(shows)`, `renderer/.../NotificationsPanel.tsx`. Every notification goes through `notifier.dispatch(type, note)`: never `new Notification` directly |
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Tools → Mods, a sub-tab of `SessionTools.tsx`); the mod refuses switched-off mods in its `plugin.register` hook |
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
@@ -422,6 +426,27 @@ buttons; it does not go through macOS window drag regions.
   Checked: typecheck, vitest, `build:web`, the web preview at 1400 and 390 px (every action driven
   over CDP), and the isolated app with a stand-in `claude` listing three fake sessions (tabs and the
   tab on screen kept after a restart). Open points: TODO ("Tabs in the session list (#146)").
+
+- **Settings → Notifications (#135)** is built on branch `135-notification-settings` (PR, not
+  merged, **not installed**: the rebuild of the real app waits for the user's word). A table of ten
+  notification types × System notification / Needs you / Mobile push (disabled, #134), Pause all,
+  Send test; one registry (`shared/notifications.ts`) and one dispatcher (`main/notifier.ts`) that
+  every notification goes through; `notifyNeedsYou` migrated, defaults as before. Spec and plan:
+  `docs/superpowers/{specs,plans}/2026-10-17-notification-settings*`. Checked: typecheck, vitest,
+  the web preview at 1400 and 390 px (toggling a cell, Send test), and the isolated app (an old
+  `notifyNeedsYou: false` file migrated, Send test adding a Needs-you notice and `notices.json`,
+  Pause and a cell saved from the page and kept after a restart). Not checked: real notifications
+  on screen per type, Windows, the real web app. Open points: TODO ("Notifications: open points").
+
+- **Resuming a session opens its terminal (#133)** on branch
+  `worktree-MasterDeck-Terminal-133-resume-opens-terminal` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). A resume's answer carries the background id
+  (`ResumeResult.key`); Board cards, the Start dialog and History close and open the session's
+  Terminal tab with focus (`openResumed`, `shared/resumeOpen.ts`); Resume all is unchanged. Checked:
+  typecheck, vitest, the web preview over CDP (card Resume and the Start dialog's Resume: Terminals
+  view, `tab:bg-5` active, focus in the xterm, dialog closed), and the isolated app with a stand-in
+  `claude` (`resumeSession` answered `key: "4f2a9c1e"`, the session listed under it). Not checked: a
+  real `claude --bg --resume` in the installed app, History's Resume on screen, a phone, Windows.
 
 - **Several accounts' accepted simplifications (#37)** on branch
   `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not

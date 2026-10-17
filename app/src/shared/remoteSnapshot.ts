@@ -1,4 +1,5 @@
 import type { InboxEntry } from './inbox'
+import { isMeetingNotice } from './notifications'
 import type { RemoteCard, RemoteInboxEntry, RemoteSession, RemoteSnapshot } from './remote'
 import { jobName } from './schedules'
 import { columnsWithDerived } from './derivedBoard'
@@ -40,7 +41,8 @@ function inboxEntry(e: InboxEntry): RemoteInboxEntry {
   }
 }
 
-const notMeeting = (e: InboxEntry): boolean => e.item.kind !== 'meeting'
+// A meetings notice (Settings → Notifications → Meetings: Needs you) stays on the Mac too.
+const notMeeting = (e: InboxEntry): boolean => e.item.kind !== 'meeting' && !isMeetingNotice(e.item)
 
 export function toRemoteSnapshot(s: AppState, appVersion: string, now = Date.now()): RemoteSnapshot {
   const live = s.sessions.filter((x) => x.state !== 'done')

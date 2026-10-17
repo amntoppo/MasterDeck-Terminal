@@ -465,6 +465,12 @@ diff too big to send says so.
   the copy keeps its ticket link and PRs, and master never proposes to resume the old one.
   Duplicates made before this fix are not cleaned up: remove the ones you don't need yourself
   (Session hygiene, or `claude rm <id>`; that also deletes the session's worktree).
+- **A resume opens the session.** After **Resume** on a card, in the Start dialog or in History
+  (**Resume a past session…**), MasterDeck closes the dialog, switches to Terminals and opens the
+  session's tab on its Terminal with the keyboard in it, so you can type at once. A tab it already
+  had is reused (a terminal that showed "Session ended" attaches again); until Claude Code lists the
+  session the tab says "Resuming …". A resume that fails leaves you where you were with the error.
+  **Resume all** after a restart opens nothing: it resumes many sessions and stays where you are.
 - **After a restart:** background sessions run under Claude Code's daemon, so closing a terminal or
   MasterDeck doesn't stop them, but a restart or crash of the Mac does. MasterDeck keeps a list of the
   ones running (`~/.claude/masterdeck/running-sessions.json`); on the next boot a banner offers
@@ -582,7 +588,7 @@ diff too big to send says so.
   status for why. Notifications when a session becomes Ready for Review or its PR is merged. The PRs
   of every session are checked every two minutes while open.
 - **Notifications:** every new Needs-you item (except held ones) shows a macOS / Windows
-  notification; Settings → "Notify me when something new needs me" turns them off. Clicking one
+  notification; Settings → **Notifications** chooses which kinds notify you and where. Clicking one
   opens the item. On macOS a notification can also act: a button for the item's main action
   (Approve, Continue, Compact now, Send) and a reply field for a question; both go through the inbox
   like the cards. The first notification asks macOS for permission (System Settings → Notifications
@@ -1046,6 +1052,27 @@ Stored in `~/.claude/masterdeck/settings.json`.
   can be light while the Mac stays dark. In the light theme, terminal text is darkened
   automatically where a program picked colours for a dark background. If Claude Code's own colours
   still look wrong, run `/theme` in the session and pick a light theme there.
+
+- **Notifications:** a table of what MasterDeck tells you about (rows) and where (columns), with a
+  checkbox per cell. The kinds: Session finished, Session needs input (a permission prompt, a
+  question, a menu), New item in Needs you (everything else there), PR ready for review, PR merged,
+  CI failed, Monitor event (monitors MasterDeck runs, at most one a minute each), Update available,
+  Workflow notify step and Meetings. The places: **System notification** (macOS / Windows),
+  **Needs you** (the list in MasterDeck) and **Mobile push** (shown greyed out: it comes with the
+  mobile app). A change applies at once.
+  - Needs you off for Session needs input or CI failed leaves those items out of the list (and the
+    dock badge, and the web app) without closing them: switched on again, they are back as they
+    were. New item in Needs you is always listed. Needs you on for an event (Session finished, PR
+    merged, Update available…) adds it to the list as a **NOTICE** with **Open** (when it has a
+    session) and **Done**; notices go after three days.
+  - **Pause all notifications** stops every system notification and keeps your choices; Needs you
+    still lists everything.
+  - **Send test** sends one test notification through every place that works now (System
+    notification and Needs you), whatever is ticked or paused, and says where it went.
+  - The defaults are what MasterDeck did before: system notifications for everything it notified
+    about, nothing new. An older "Notify me when something new needs me" switched off carries over
+    (the three Needs-you kinds start with System notification off). Setup's Notifications box sets
+    those three too.
 
 - **Set up MasterDeck:** opens Setup as one page (tools, GitHub accounts, repos and boards, status mapping, workspace,
   hooks). Saved to `~/.claude/master/config.json`.

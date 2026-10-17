@@ -1,1 +1,3 @@
 skills/master/tests/prompts/*.txt text eol=lf
+# A #! line followed by CRLF does not parse when vitest imports the script (Windows CI).
+*.mjs text eol=lf

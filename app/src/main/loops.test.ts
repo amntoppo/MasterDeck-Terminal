@@ -26,11 +26,20 @@ const entry = (over: Record<string, unknown> = {}) => ({
   id: 'lp', step: 's', state: 'open', iteration: 2, startedAt: NOW - 60_000, history: [{ n: 1, at: NOW - 30_000, ms: 5, passed: false, said: false, exit: 1, tail: 'FAIL', hash: 'h' }], reason: null, lastCheck: null, ...over,
 })
 
+let stamp = 0
+
 function setup(defs: CompiledLoop[] = [def()]) {
   const home = mkdtempSync(join(tmpdir(), 'loops-home-'))
   const dir = join(home, 'workflows', 'loops')
   mkdirSync(dir, { recursive: true })
-  const put = (sid: string, loops: object[]) => writeFileSync(join(dir, `${sid}.json`), JSON.stringify({ loops }))
+  // Each write gets its own mtime: the store caches by mtime, and two writes in the same tick (as on
+  // Windows) would otherwise read as one.
+  const put = (sid: string, loops: object[]) => {
+    const f = join(dir, `${sid}.json`)
+    writeFileSync(f, JSON.stringify({ loops }))
+    const t = new Date(NOW - 1_000_000_000 + ++stamp * 1000)
+    utimesSync(f, t, t)
+  }
   const get = (sid = SID) => JSON.parse(readFileSync(join(dir, `${sid}.json`), 'utf8')).loops
   const store = new LoopStore(home, () => defs)
   return { home, dir, put, get, store }
