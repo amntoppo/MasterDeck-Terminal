@@ -1,6 +1,6 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MEETINGS, MEETINGS_CONSENT_VERSION, MEETINGS_MAC_ONLY, type MeetingsSettings } from '@shared/meetings'
 
@@ -107,7 +107,7 @@ describe('the startup rule', () => {
     const files = [...mainSources(), ...mainSources(preload)]
     expect(files.some((f) => f.startsWith(preload))).toBe(true)
     for (const f of files) {
-      const rel = relative(__dirname, f)
+      const rel = relative(__dirname, f).split(sep).join('/')
       if (rel.startsWith('meetings/')) continue
       const src = readFileSync(f, 'utf8')
       for (const api of MEDIA_APIS) expect(src.includes(api), `${rel} names ${api}`).toBe(false)
