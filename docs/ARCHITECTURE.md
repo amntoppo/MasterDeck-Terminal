@@ -98,7 +98,7 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 5. `cloud?.push(toRemoteSnapshot(state, version))` — the backend snapshot (see REMOTE.md).
 6. First state with healthy agents → `remoteReady = true; syncRemote()`; a `remoteEnabled` flip →
    `syncRemote()`.
-7. Notifications (`diffEvents`), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
+7. Notifications (`diffEvents` → `notify` → the notifier), dock badge (Needs-you count), auto-open (`newlyNeedsInput` →
    `CH.autoOpen`, dock bounce), and the SMOKE exit.
 
 ### Sessions and agents
@@ -216,6 +216,38 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
 - `main/inbox.ts` `Inbox` (an `EventEmitter`) keeps state in `inbox.json` and appends every
   addition, action and resolution to `inbox-events.jsonl` (last 2000 lines kept). Its `added`
   events drive notifications (`notifyItem` in `index.ts`, with macOS action buttons and replies).
+  `view(shows)` leaves out the items whose type's Needs-you channel is off (see "Notifications").
+
+### Notifications (#135)
+
+- One registry, `shared/notifications.ts`: `CHANNELS` (`system`, `needsYou`, `mobile`, the last
+  `available: false` until #134) and `NOTIFY_TYPES` (id, label, hint, `source: inbox | event`,
+  `defaults` per channel, `fixed` cells). `Settings.notifications` is `{ [type]: { [channel]:
+  boolean } }` and `Settings.notifyPaused` the Pause all switch; `normalizeRoutes` fills them from
+  the defaults and, for a file from before #135, from the old `notifyNeedsYou` (the system cell of
+  `session-input`, `needs-you`, `ci-failed`). `routeOf(settings, type)` is the one routing rule
+  (unavailable channels never, pausable ones not while paused, fixed cells as fixed).
+- One dispatcher, `main/notifier.ts` `Notifier`: `dispatch(type, note)` sends a `Note` to each
+  routed channel's sender (a `Record<ChannelId, Sender>`: a new channel cannot lack one), skips
+  Needs you for a note that is an inbox item already (`itemId`), and drops a note whose `coalesce`
+  key went out in the last minute. `test()` goes to every available channel. The senders in
+  `index.ts`: `showSystem` (Electron `Notification`, macOS button and reply, kept in `shown` until
+  closed) and `notices.add`.
+- What dispatches: `diffEvents` (`session-finished`, `pr-ready`, `pr-merged`, via `notify`), the
+  inbox's `added` events (`notifyItem`, typed by `typeOfKind`: input/menu/question/blocked/waiting
+  → `session-input`, `ci` → `ci-failed`, the rest `needs-you`), workflow notify blocks
+  (`workflow`), the meetings notice and offer (`meeting`), `Watches`' `onLines` (`monitor`,
+  coalesced per monitor) and the updater's first `available` / `ready` per version (`update`,
+  `announceUpdate`). A failed action from a notification goes out as the item's type.
+- Needs you as a channel: for `inbox` types it is a view filter (`Inbox.view(showsInNeedsYou)` in
+  `Sources.build()`; items stay stored and unresolved); for `event` types the sender adds a
+  **notice** (`main/notices.ts` → `<home>/notices.json`, atomic, 50 at most, three days), which
+  `collectItems` turns into an inbox item of kind `notice` (Open, Done; `inboxNotice` returns null
+  for it so it never notifies twice). An item hidden from the list notifies with a target of its
+  session, else the list (`itemTarget`: there is no card to show). A `meeting` notice stays on the
+  Mac like the meeting items: `toRemoteSnapshot` and `webState` (web tabs) leave it out
+  (`isMeetingNotice`; the offer names the call app).
+- `CH.notifyTest` (`remote`): the Settings button. The web app can change these settings too.
 - Every action goes through `inboxAct(id, type, payload, remote)` → `sources.inbox.act(…,
   runInboxAction)`. `runInboxAction` re-checks the session, then uses the normal paths: `sender.send`
   (reply/option/continue/compact/send), `answerMenuFor` (menus, hook-held questions and
@@ -1696,8 +1728,8 @@ waits, and writes nothing if accounts appeared meanwhile.
   call `stopOffers()`. `live().offer` is the offered app (null while
   recording). `start()` (the chip's Record, the popout's) notes the offered app in the meeting's
   `apps` and dismisses the chip; `notNow(e)` (`meetings:notNow`, `blocked`) dismisses it.
-  `deps.offer(app)` (`index.ts`) shows a macOS notification (kept in `offerNote` so its click
-  handler is not garbage-collected) whose click shows the window and sends `meetings:showRecord`
+  `deps.offer(app)` (`index.ts`) dispatches a `meeting` notification (Settings → Notifications)
+  whose click shows the window and sends `meetings:showRecord`
   (event, `blocked`): `App.tsx` opens the Record popout. Web tabs never learn the call app: the
   state the bridge sends (`emit`'s state event and a remote `getState`) goes through `webState`
   (`shared/meetings.ts`), which sets `meetingLive.offer` to null.

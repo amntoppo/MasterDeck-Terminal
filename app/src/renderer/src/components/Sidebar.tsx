@@ -788,6 +788,7 @@ const KIND_TAG: Record<InboxKind, string> = {
   loop: "LOOP",
   "loop-paused": "LOOP",
   meeting: "MEETING",
+  notice: "NOTICE",
 };
 
 /** Minutes from now until 9:00 tomorrow. */

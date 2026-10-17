@@ -1,4 +1,6 @@
 import type { MuteState } from './meetingMute'
+import type { InboxView } from './inbox'
+import { isMeetingNotice } from './notifications'
 
 /** A meeting's id, and so the name of its folder under MASTERDECK_HOME/meetings: never anything else is used as a path. */
 export const MEETING_ID = /^m-[0-9a-f]{32}$/
@@ -534,10 +536,19 @@ export const MIC_UNKNOWNS: readonly MicUnknown[] = ['not-trusted', 'no-helper', 
  * The state as web tabs get it: the offered call app and the app the mic follows (which app the
  * user is in a call with) stay on the Mac.
  */
-export function webState<T extends { meetingLive?: MeetingLive | null }>(state: T): T {
+export function webState<T extends { meetingLive?: MeetingLive | null; inbox?: InboxView }>(state: T): T {
   const live = state?.meetingLive
-  if (!live || (live.offer === null && (live.mic?.app ?? null) === null)) return state
-  return { ...state, meetingLive: { ...live, offer: null, mic: live.mic ? { ...live.mic, app: null } : null } }
+  const inbox = state?.inbox
+  // A meetings notice in Needs you names the call app in its text ("Zoom call: record it?").
+  const notices = !!inbox && [inbox.open, inbox.snoozed, inbox.history].some((l) => l.some((e) => isMeetingNotice(e.item)))
+  const offer = !!live && (live.offer !== null || (live.mic?.app ?? null) !== null)
+  if (!offer && !notices) return state
+  const keep = (l: InboxView['open']) => l.filter((e) => !isMeetingNotice(e.item))
+  return {
+    ...state,
+    ...(offer && live ? { meetingLive: { ...live, offer: null, mic: live.mic ? { ...live.mic, app: null } : null } } : {}),
+    ...(notices && inbox ? { inbox: { open: keep(inbox.open), snoozed: keep(inbox.snoozed), history: keep(inbox.history) } } : {}),
+  }
 }
 
 /**

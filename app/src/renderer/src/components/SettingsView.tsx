@@ -8,6 +8,7 @@ import { webConfirm } from '../webConfirm'
 import { can, isWeb, keyPlatform } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
 import { MeetingsSetup } from './MeetingsSetup'
+import { NotificationsPanel } from './NotificationsPanel'
 import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { setWebThemePref, useWebThemePref } from '../theme'
 import { THEME_PREFS, THEMES, type ThemePref } from '@shared/themes'
@@ -15,11 +16,12 @@ import type { UpdateState } from '@shared/updates'
 import { UpdatesPanel } from './Updates'
 
 export type SettingsSection = Section
-type Section = 'account' | 'general' | 'alerts' | 'sessions' | 'meetings' | 'hooks' | 'remote' | 'keys' | 'updates' | 'about'
+type Section = 'account' | 'general' | 'notifications' | 'alerts' | 'sessions' | 'meetings' | 'hooks' | 'remote' | 'keys' | 'updates' | 'about'
 
 const SECTIONS: [Section, string][] = [
   ['account', 'Account'],
   ['general', 'General'],
+  ['notifications', 'Notifications'],
   ['alerts', 'Needs you & alerts'],
   ['sessions', 'Sessions'],
   ['meetings', 'Meetings'],
@@ -142,11 +144,9 @@ export function SettingsView({
         </Field>
       </>
     ),
+    notifications: <NotificationsPanel settings={s} save={put} />,
     alerts: (
       <>
-        <Field label="Notifications" hint="A notification for each new Needs-you item: a question, a permission, a session waiting, a proposal, failing CI.">
-          {toggle('notifyNeedsYou', 'Notifications')}
-        </Field>
         <Field label="Dock badge" hint="The Needs-you count on the dock icon.">
           {toggle('dockBadge', 'Dock badge')}
         </Field>

@@ -167,8 +167,9 @@ export class Inbox extends EventEmitter {
     return r
   }
 
-  view(): InboxView {
-    const all = [...this.entries.values()]
+  /** What Needs you lists; `shows` leaves out the items whose type the user routed elsewhere (they stay stored, as they are). */
+  view(shows: (item: InboxItem) => boolean = () => true): InboxView {
+    const all = [...this.entries.values()].filter((e) => shows(e.item))
     const byPriority = (a: InboxEntry, b: InboxEntry) => b.item.priority - a.item.priority || b.firstSeen - a.firstSeen
     const since = this.now() - 86_400_000
     return {

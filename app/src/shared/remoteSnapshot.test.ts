@@ -94,6 +94,14 @@ describe('toRemoteSnapshot', () => {
     expect(r.inbox.history).toEqual([])
   })
 
+  it('leaves out a meetings notice too (Settings → Notifications → Meetings: Needs you)', () => {
+    const offer = { ...entry('event:meeting:1:0', 'notice', null), item: { ...entry('event:meeting:1:0', 'notice', null).item, detail: { type: 'notice' as const, notify: 'meeting' as const } } }
+    const merged = { ...entry('event:pr-merged:2:1', 'notice', null), item: { ...entry('event:pr-merged:2:1', 'notice', null).item, detail: { type: 'notice' as const, notify: 'pr-merged' as const } } }
+    const r = toRemoteSnapshot(state({ inbox: { open: [offer, merged], snoozed: [offer], history: [] } }), 'v')
+    expect(r.inbox.open.map((e) => e.id)).toEqual(['event:pr-merged:2:1'])
+    expect(r.inbox.snoozed).toEqual([])
+  })
+
   it('keeps the last 20 history entries', () => {
     const history = Array.from({ length: 30 }, (_, i) => ({ ...entry(`h${i}`, 'idle', null), state: 'resolved' as const }))
     expect(toRemoteSnapshot(state({ inbox: { open: [], snoozed: [], history } }), 'v').inbox.history).toHaveLength(20)
