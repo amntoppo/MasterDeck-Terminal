@@ -194,6 +194,7 @@ const api: DeckApi = {
   peersSet: (a, b, on) => ipcRenderer.invoke(CH.peersSet, a, b, on),
   peersSync: (key) => ipcRenderer.invoke(CH.peersSync, key),
   modSet: (key, mod, on) => ipcRenderer.invoke(CH.modSet, key, mod, on),
+  sessionGroupsAct: (op) => ipcRenderer.invoke(CH.sessionGroupsAct, op),
   modsInstall: () => ipcRenderer.invoke(CH.modsInstall),
   modsUninstall: () => ipcRenderer.invoke(CH.modsUninstall),
   modsReload: () => ipcRenderer.invoke(CH.modsReload),

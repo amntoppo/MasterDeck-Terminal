@@ -906,7 +906,22 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
 - Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
 
+## Tabs in the session list (#146): open points (2026-10-17)
+
+- Not checked: the drag with a real mouse in the Electron window (the drops were driven with
+  synthetic drag events in the web preview), the light theme on screen, Windows, a real phone
+  (Move to tab is the only way there: touch has no drag).
+- A copy's carry was unit-tested only (no resume that makes a copy was run).
+- The bar is not sticky: dragging a session from far down the list relies on the column scrolling
+  up under the pointer. Make it stick with the Filters line if that turns out awkward.
+- No keyboard way to reorder tabs other than the menu's Move left / right; no ⌘1… shortcuts.
+
 ## Recently done
+
+- **Tabs in the session list (#146)**: All plus the user's tabs over the session list, drag a
+  session onto a tab (or right-click → Move to tab), counts and needs-you badges, rename, reorder,
+  delete; kept on the Mac in `session-groups.json` and carried to a resume's copy. Branch
+  `worktree-146-session-tabs-groups`.
 
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from

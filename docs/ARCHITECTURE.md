@@ -778,6 +778,26 @@ Renderer: `PeersDialog.tsx` and `PeerPicker.tsx` (`peersView.ts`), the "Linked s
 `SessionDetails.tsx`, and a "Link to sessions" field in `AssignDialog` and `NewSessionDialog`.
 Unlinking stops further sharing but retracts nothing already in a transcript.
 
+### Tabs in the session list (issue #146)
+
+Named groups of sessions in the Sessions column; internally "session groups", so they never share
+a name with a session's own tabs below. The model is `shared/sessionGroups.ts`: `applyGroupOp` (add,
+rename, move, remove, assign; every check: names 1-40 characters, unique ignoring case, never
+"All"; at most 30 tabs; ids `g` + 8 hex), `carryGroup`, `pruneGroups`, `parseGroups`, `inGroup`,
+`shownTab`. `main/sessionGroups.ts` (`SessionGroupStore`) keeps `<home>/session-groups.json`
+(atomic write, a corrupt file moved aside); the state callback in `main/index.ts` prunes it against
+a healthy, non-empty agents list (a session missing for 10 minutes leaves its tab; done sessions
+are still listed, so a stopped one keeps it) and sets `state.sessionGroups`. One channel,
+`sessionGroups:act` (`DeckApi.sessionGroupsAct`, `DECK_ACCESS` remote), takes one op. A copy made by
+a resume (`resumeDeps().copied`) calls `carry(old.bgId, copy)` next to `noteCopy`. Not in
+`toRemoteSnapshot`.
+
+The renderer: `SessionGroupBar.tsx` (All, the tabs with count and needs-you badge, +, inline naming,
+drag to reorder with `text/masterdeck-group`, a session row's `text/masterdeck-session` dropped on a
+tab assigns it, the tab's right-click menu), and `Sidebar.tsx` narrows its ordered list to the tab
+(`inGroup`) before the filters, Starred, groups, Parked and Cleanup. The tab on screen is
+`localStorage` `sessionGroup`, All when it is gone. `SessionMenu.tsx` has **Move to tab ▸**.
+
 ### Session tabs, files and diffs (issue #113)
 
 Each session pane has its own tab row (`renderer/.../SessionTabs.tsx`): the terminal, then file
@@ -2053,6 +2073,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
+| `sessionGroups` | the state callback, from `SessionGroupStore` (`session-groups.json`, #146): the session list's tabs and `Session.key` → tab id; pruned there (10 minutes missing from a real agents list) |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
 | `meetingLive` | the state callback, from `MeetingsIpc.live()` (`Recorder.live()`): `{ recording, since, paused, elapsed, offer }` (`elapsed` as of the last change, so it does not tick; the rail counts from `since`), idle until a recorder was loaded, null off macOS; never in `toRemoteSnapshot` |
 | `mods` | the state callback, `modsNow()` over `ModsInstaller.status()`: whether MasterDeck's mods are installed in Claude Code, Claude Code's version, the mods' version, `prependNote`, `unavailable` |
@@ -2075,6 +2096,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `watches.json` | monitors MasterDeck runs |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
+| `session-groups.json` | the session list's tabs: `{version: 1, groups: [{id, name}], of: {Session.key: id}}` (`main/sessionGroups.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `btw/` | Side questions (Tools → BTW): `<session key>.json` per session (`{version, entries}`), `history-offset.json` (how far `history.jsonl` was read). `main/btw.ts` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
