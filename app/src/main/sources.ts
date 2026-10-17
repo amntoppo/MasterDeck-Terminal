@@ -99,6 +99,7 @@ import {
   type CostEntry,
 } from "@shared/costs";
 import { hourOf } from "@shared/timeline";
+import { isOwnPost, newOwnPostScan, scanOwnPosts, type OwnPostScan } from "@shared/ownPosts";
 import { addBurnPoint, summarize, type BurnPoint } from "@shared/sprintSummary";
 import {
   DEFAULT_SETTINGS,
@@ -166,6 +167,7 @@ import {
   mtime,
   readHead,
   readNewLines,
+  readToEnd,
   readTail,
   TranscriptIndex,
   type FollowState,
@@ -230,6 +232,8 @@ const GH_BACKGROUND_MS = 600_000;
 /** Sessions with an open PR, open in a tab or not: their comments, for the Ready-for-Review timer. */
 const REVIEW_MS = 120_000;
 const RATE_LIMIT_PAUSE_MS = 600_000;
+/** How far back the first read of a transcript for the PR watch's own-post check starts (#158). */
+const OWN_READ_MAX = 16 * 1024 * 1024;
 /** gh's own words, and the repository view's note ("acme/api not read: RATE_LIMITED"). */
 export const RATE_LIMITED = /rate[ _-]?limit|secondary rate|abuse detection/i;
 
@@ -1935,6 +1939,28 @@ export class Sources {
     this.notePrs(key, f.scan.urls);
     addPrUrls((this.openedPrs[key] ??= []), f.scan.urls);
     return found;
+  }
+
+  /** What each session wrote in its tool calls, by Session.key, over every transcript read (see shared/ownPosts). */
+  private ownScans: Record<
+    string,
+    { follows: Record<string, FollowState>; scan: OwnPostScan }
+  > = {};
+  /**
+   * Whether a PR comment's text is one the session posted itself (the PR watch, #158). Reads what
+   * its transcript gained first, so a reply posted a moment ago counts; null without a transcript.
+   */
+  ownPost(key: string): ((body: string) => boolean) | null {
+    const s = this.rawSessions.find((x) => x.key === key);
+    const tp = s ? this.transcripts.find(s.sessionId) : null;
+    if (!tp) return null;
+    const own = (this.ownScans[key] ??= { follows: {}, scan: newOwnPostScan() });
+    const st = (own.follows[tp] ??= { path: tp, offset: 0, rest: "" });
+    // To the end of the file now (readNewLines alone gives 8 MB a call): a reply at the end of a long
+    // transcript must count at the first read after a launch. The newest OWN_READ_MAX bytes are
+    // enough, since the scan keeps only the newest text anyway.
+    readToEnd(st, OWN_READ_MAX, (lines) => scanOwnPosts(lines, own.scan));
+    return (body) => isOwnPost(body, own.scan);
   }
 
   /** Scheduled jobs the session's current transcript shows (see shared/schedules). */

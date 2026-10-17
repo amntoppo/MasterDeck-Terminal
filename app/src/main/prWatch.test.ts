@@ -193,6 +193,103 @@ describe('PrWatch', () => {
     expect(old.sent[0]).toContain('already has 1 unresolved review thread')
     expect(old.sent[0]).not.toContain('new review thread')
   })
+  it("same account (#158): a review by the watch's account reaches the session, its own reply does not", async () => {
+    const mine = (id: number, body: string, at = 'u1') => ({ isResolved: false, comments: { nodes: [{ databaseId: id, updatedAt: at, author: { login: 'me' }, body }] } })
+    let threads = [mine(1, 'Bug: target drops itemId')]
+    let reviews: object[] = [{ databaseId: 7, state: 'COMMENTED', submittedAt: 's', author: { login: 'me' }, body: 'Two findings' }]
+    const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(...threads), reviews: { nodes: reviews } } : lightPr))
+    const wrote = new Set<string>()
+    const asked: string[] = []
+    const { w, sent, file } = make(gh, undefined, false, { ownPost: (key) => (asked.push(key), (body) => wrote.has(body)) })
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    await w.poll(NOW)
+    expect(asked).toEqual(['k1'])
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('1 new review thread: "Bug: target drops itemId"')
+    expect(sent[0]).toContain('me: "Two findings"')
+    // The session replies on the thread: the reply is its own, so nothing goes back to it.
+    wrote.add('Fixed in abc.')
+    threads = [mine(2, 'Fixed in abc.')]
+    await w.poll(NOW + 11 * 60_000)
+    w.deliver([sess()], NOW + 11 * 60_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    // Recorded as its own: after a restart, with the transcript no help, it is still not news.
+    const again = make(gh, file, false, { ownPost: () => (body) => body === 'never' })
+    reviews = []
+    await again.w.poll(NOW + 22 * 60_000)
+    again.w.deliver([sess()], NOW + 22 * 60_000)
+    await tick()
+    expect(again.sent).toEqual([])
+  })
+  it('a watch saved before #158: what its account already has on the PR is not news, later items are', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'pw-')), 'pr-watch.json')
+    const old = {
+      url: url(1), owner: 'acme', repo: 'web', number: 1, sessionKey: 'k1', startedAt: NOW - 86_400_000, baseline: false,
+      seen: [], updatedAt: 'old', mergeable: 'MERGEABLE', heavyAt: NOW - 86_400_000, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
+    }
+    writeFileSync(file, JSON.stringify({ watches: [old], done: [] }))
+    const reply = (id: number, body: string) => ({ isResolved: false, comments: { nodes: [{ databaseId: id, updatedAt: 'u1', author: { login: 'me' }, body }] } })
+    // Replies built by the shell (never in the transcript as posted) and an old self-review.
+    let threads = [reply(1, 'Fixed in 1a2b3c4.')]
+    const comments = { nodes: [{ databaseId: 2, updatedAt: 'u', author: { login: 'me' }, body: 'Self-review: fine' }] }
+    const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(...threads), comments } : lightPr))
+    const { w, sent } = make(gh, file, false, { ownPost: () => () => false })
+    await w.poll(NOW)
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toEqual([])
+    // A new review by the same account after that is news.
+    threads = [reply(1, 'Fixed in 1a2b3c4.'), reply(3, 'typo')]
+    await w.poll(NOW + 11 * 60_000)
+    w.deliver([sess()], NOW + 11 * 60_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('1 new review thread: "typo"')
+  })
+  it("without the session's transcript, items by its account are held back and counted for Details", async () => {
+    const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(), comments: { nodes: [{ databaseId: 3, updatedAt: 'u', author: { login: 'me' }, body: 'Please add a test' }] } } : lightPr))
+    const { w, sent } = make(gh, undefined, false, { ownPost: () => null })
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    await w.poll(NOW)
+    w.deliver([sess()], NOW)
+    await tick()
+    expect(sent).toEqual([])
+    expect(w.info([sess()])[0]).toMatchObject({ unchecked: 1, okAt: NOW })
+  })
+  it('a failing read shows its error and when, and clears itself on the next good read', async () => {
+    let down = true
+    const ok = fakeGh((_i, heavy) => (heavy ? withThread('rename x') : lightPr))
+    const gh: GhRunner = async (args, opts) => (down ? { code: 1, stdout: '', stderr: 'error connecting to api.github.com' } : ok.gh(args, opts))
+    const { w, sent } = make(gh)
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    await w.poll(NOW)
+    expect(w.info([sess()])[0]).toMatchObject({ error: 'error connecting to api.github.com', errorAt: NOW })
+    expect(w.info([sess()])[0].okAt).toBeUndefined()
+    down = false
+    await w.poll(NOW + 60_000)
+    const info = w.info([sess()])[0]
+    expect(info.error).toBeUndefined()
+    expect(info.okAt).toBe(NOW + 60_000)
+    w.deliver([sess()], NOW + 60_000)
+    await tick()
+    expect(sent[0]).toContain('"rename x"')
+  })
+  it('an answer without a viewer, or without the PR, is a visible failure too', async () => {
+    let viewer: string | null = null
+    let pr: object | null = lightPr
+    const { gh } = fakeGh((_i, heavy) => (pr && heavy ? withThreads() : pr), () => viewer)
+    const { w } = make(gh)
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    await w.poll(NOW)
+    expect(w.info([sess()])[0].error).toMatch(/no viewer/)
+    viewer = 'me'
+    pr = null
+    await w.poll(NOW + 60_000)
+    expect(w.info([sess()])[0].error).toBe('GitHub answered without this PR')
+  })
   it('keeps its seen set across a restart: only the new item reaches the session', async () => {
     let threads = [thread(1, 'old thread')]
     const { gh } = fakeGh((_i, heavy) => (heavy ? withThreads(...threads) : lightPr))

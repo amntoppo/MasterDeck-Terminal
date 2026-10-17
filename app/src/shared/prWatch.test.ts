@@ -80,6 +80,22 @@ describe('fix round 1', () => {
     expect(prItems(pr, null, NOW).items).toEqual([])
     expect(prItems({ ...pr, state: 'MERGED' }, null, NOW).items.map((i) => i.kind)).toEqual(['merged'])
   })
+  it('same account as the watch (#158): only what the session posted itself is held back', () => {
+    const pr = {
+      ...base,
+      threads: [{ isResolved: false, last: note(1, 'me', 'review: rename this') }, { isResolved: false, last: note(2, 'me', 'Fixed in abc.') }],
+      comments: [note(3, 'me', 'Self-review: fine'), note(4, 'me', 'Please add a test')],
+      reviews: [{ ...note(5, 'me', 'Two bugs, see threads'), state: 'COMMENTED' }, { ...note(6, 'me', ''), state: 'COMMENTED' }],
+    }
+    const wrote = new Set(['Fixed in abc.', 'Self-review: fine'])
+    const asked: string[] = []
+    const own = (key: string, body: string) => (asked.push(key), wrote.has(body))
+    expect(prItems(pr, 'me', NOW, own).items.map((i) => i.key)).toEqual(['T:1:2026-10-03T10:00:00Z', 'C:4:2026-10-03T10:00:00Z', 'R:5'])
+    // A review with no text is never news, so it is not even asked about.
+    expect(asked).not.toContain('R:6')
+    // Without the check (no transcript wiring): everything by me stays out, as before.
+    expect(prItems(pr, 'me', NOW).items).toEqual([])
+  })
   it('other bots key by id only; Claude and humans keep updatedAt', () => {
     const k = (a: string, at: string) => prItems({ ...base, comments: [note(5, a, 'cov', at)] }, 'me', NOW).items[0].key
     expect(k('codecov[bot]', 't1')).toBe(k('codecov[bot]', 't2'))

@@ -591,6 +591,11 @@ function WatchRow({ watch: w, title, now, ...row }: RowProps & { watch: WatchInf
             </Badge>
           )}
           {w.lastEventAt && <Badge tone="off">{formatAgo(now - w.lastEventAt)} ago</Badge>}
+          {w.error && (
+            <Badge tone="bad" title={w.error}>
+              read failing
+            </Badge>
+          )}
         </>
       }
       actions={
@@ -601,7 +606,18 @@ function WatchRow({ watch: w, title, now, ...row }: RowProps & { watch: WatchInf
     >
       <div className="gh-meta muted">
         On for {formatAgo(now - w.startedAt)} · runs in MasterDeck, with no time limit
+        {w.okAt ? ` · last read from GitHub ${formatAgo(now - w.okAt)} ago` : ""}
       </div>
+      {w.error && (
+        <div className="gh-meta error">
+          Could not read the PR{w.errorAt ? ` (${formatAgo(now - w.errorAt)} ago)` : ""}: {w.error}. It tries again every minute.
+        </div>
+      )}
+      {!!w.unchecked && (
+        <div className="gh-meta error">
+          {w.unchecked} comment{w.unchecked === 1 ? "" : "s"} by the session's account not sent: MasterDeck could not read the session's transcript to tell them from its own replies.
+        </div>
+      )}
       <WatchEvents watch={w} now={now} />
     </GhRow>
   );

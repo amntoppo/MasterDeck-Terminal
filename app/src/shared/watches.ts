@@ -28,6 +28,13 @@ export interface WatchInfo {
   lastEventAt: number | null
   /** Lines waiting for the session's turn to end. */
   queued: number
+  /** PR watch: why its last read failed (gone once one succeeds), and when. */
+  error?: string
+  errorAt?: number | null
+  /** PR watch: its last good read. */
+  okAt?: number
+  /** PR watch: items by the session's account held back because its transcript could not be read. */
+  unchecked?: number
 }
 
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '')

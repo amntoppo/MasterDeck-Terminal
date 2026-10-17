@@ -1243,7 +1243,9 @@ Stored in `~/.claude/masterdeck/settings.json`.
   (its threads and comments are not listed); after that only new ones are sent, never twice, also
   across restarts. The very first time (no watch file yet, e.g. right after upgrading from the
   babysit-pr skill), PRs picked up in the first 10 minutes say nothing about what they already
-  have: only what comes after. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
+  have: only what comes after. Reviews and comments posted from your own GitHub account count
+  too (you reviewing your own PR, or a review session posting as you); only the replies the
+  session posted itself are left out. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
   force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
   has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
   tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its
@@ -1265,7 +1267,10 @@ Stored in `~/.claude/masterdeck/settings.json`.
   - **Details → Monitor:** a blinking line for each monitor MasterDeck runs for the session, with
     its events and a Stop button. With several, they open as a list. A PR watch shows as
     "PR watch · repo#12"; its Stop ends the watch and tells the session. A PR stopped this way is
-    not watched again.
+    not watched again. The PR watch says when it last read the PR from GitHub; when reads fail it
+    shows **read failing** and the error (it tries again every minute and clears itself), and if
+    it could not read the session's transcript it says how many comments by the session's account
+    it held back.
 - **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
   Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
   it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the
