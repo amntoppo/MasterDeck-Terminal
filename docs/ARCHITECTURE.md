@@ -1043,6 +1043,40 @@ here (needs `hooks.queue`).
   (`prReviewSpecError` → `ticketSpecError(…, "PR review")`). `isPrReviewSession` hides them from
   the session list. The PR popup's **Review with Claude** is passed by `App.openPr` only when the
   popup was opened from the PRs view.
+- Automate Review and Merge automatically (#157; `shared/autoReview.ts` pure, `main/autoReview.ts`
+  `AutoReview`): switches per PR tab through `CH.autoReviewSet` (remote; main refuses Merge
+  automatically on from a browser, an account not connected, and from a browser an account other
+  than the tab folder's; `forget: true` on a tab close), kept with the PRs it follows in
+  `<home>/auto-review.json`. Every 2 s main asks `due()` (2 minutes per round, at once when switched
+  on) and `deliver()`. A round is one GraphQL read per tab as its account (`autoQuery`: `viewer`,
+  `search(review-requested:@me …, autoSearch's scope)` and each followed PR by reference, 30 per
+  read), then `reconcile`: new requests are `queued` once per account and URL (`trackKey`), a
+  review by the account at or after the sent commit makes it `commented` (a notice), a new head
+  re-queues it, `readyToMerge` (open, not draft, MERGEABLE, APPROVED with an approval by someone other
+  than the account, so one the session posted itself never counts, checks SUCCESS or none, merge
+  state CLEAN, head = the reviewed commit) makes it `ready` (a notice), and `mergeGuard` (the tab's
+  switch, its own PR, not tried at this head, a known method) lets `gh pr merge <url>
+  --<viewerDefaultMergeMethod> --match-head-commit <oid>` run (never `--admin`/`--auto`) after the
+  switch is checked again and the PR is read again past the cache (`force`) and guarded again; merged,
+  closed and failed merges are told. Nothing is decided without `viewer`, nor on an answer whose
+  tab was switched or changed while GitHub answered. "Sent" means a review by the account dated
+  after MasterDeck typed the line. Switching off drops the tab's open PRs (another tab may take
+  them). A browser only flips switches (the window's name, filters and account stay; it never
+  forgets a tab); the window's name/filters follow-ups carry `follow: true`, so main keeps its
+  switches. A new review pane needs a fresh turn; a pane is started at most once per 5 minutes. `deliver` types
+  `autoPrompt` (one line, `[MasterDeck auto-review] …`) into the tab's live `pr-review:<tab>:*`
+  pane when `paneReady`: the folder's hooks (`prReviewSettings`: SessionStart → `start`, Stop →
+  `idle`, prompt and tool use → `busy`) wrote the turn file `pr-review-guard/tab-<id>.turn`
+  after MasterDeck's last line, and the user has not typed for 30 s (a `busy` older than 15 min
+  with no "esc to interrupt" on screen counts as idle: Esc fires no Stop). With no live pane it
+  starts one (`pr-review:<tab>:auto<ts>`, the line as its first message), which the panel adopts
+  through `state.autoReview.tabs[id].pane`. Before typing it marks the PR sent and writes `pr-review-guard/tab-<id>.auto.json`
+  (`writePrReviewAuto`) with that PR alone, until its review is seen: the only PR the post script's `--auto` (allowed by its absolute path in the settings without
+  asking) posts to, always as a COMMENT. Notices go through the notifier as `auto-review`
+  (`Notice.url` → **View on GitHub**). The monitor is listed in `state.watches` as `review:<tab>`
+  (`watchStop` switches it off, `watchEvents` its log); `state.autoReview` (`AutoReviewView`) feeds
+  `AutoReviewWidget.tsx`, placed by `TerminalView`'s `onInputBox` (`inputBoxRows` finds the rules
+  around Claude's prompt).
 - The workflow builder (`builder` spec) runs as the primary account with two or more: the
   `builderSettings` callback of `PtyManager` gives `AccountEnv.settingsArgs(null)`'s `--settings`,
   and nothing while the primary needs to log in again (gh's active account then, as master).
@@ -2283,7 +2317,8 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `linked-steps.json` | sessions linked by MasterDeck whose `linked` workflow steps are still to be sent |
 | `deck/` | `hook.sh`, `pending/`, `answers/`, `context/`, `watch-requests/`, `watch-answers/`, `queue-requests/`, `queue-answers/`, `queue-off`, `legacy-sids`, `peers/` (`<sid>.delta.json`: the delta the session's next prompt prints once), `events.jsonl`, `alive`, `monitors-by`, `band/` (`<sid>.json`: what the MasterDeck mod draws in that session), `mods/` (`<sid>.json`: the mod's heartbeat), `note-requests/`, `note-answers/` |
 | `workflow.json`, `workflows/` | workflows, the loop hook `workflows/loop.sh` and the loop files `workflows/loops/` (see above) |
-| `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them) |
+| `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them), `tab-<tabId>.auto.json` (the PRs Automate Review queued, for `--auto`) and `tab-<tabId>.turn` (the session's turn, written by its hooks) |
+| `auto-review.json` | Automate Review's switches per PR tab and the PRs it follows (#157) |
 | `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `.claude/settings.json`, and the review files the session writes |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |

@@ -6,6 +6,8 @@ export interface Note {
   title: string
   body: string
   target: NotifyEvent['target']
+  /** A GitHub page it is about: Needs you shows View on GitHub. */
+  url?: string
   /** It is a Needs-you item already (the inbox's own): Needs you has it, whatever the channel says. */
   itemId?: string
   /** Done on click instead of revealing the target (the meetings offer). */

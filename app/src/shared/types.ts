@@ -243,6 +243,8 @@ export interface AppState {
   mods?: import("./mods").ModsStatus;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
+  /** Automate Review per PR tab and the PRs it follows (#157; main/autoReview.ts). */
+  autoReview?: import("./autoReview").AutoReviewView;
   /**
    * Sessions a schedule started (#140), by session key (the bg id): the session list's chip. Set in
    * the state callback from the Scheduler; runs of the last 30 days. Not in toRemoteSnapshot.
