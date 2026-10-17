@@ -1219,7 +1219,11 @@ Stored in `~/.claude/masterdeck/settings.json`.
   (its threads and comments are not listed); after that only new ones are sent, never twice, also
   across restarts. The very first time (no watch file yet, e.g. right after upgrading from the
   babysit-pr skill), PRs picked up in the first 10 minutes say nothing about what they already
-  have: only what comes after. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
+  have: only what comes after. A session busy for a long time gets one short message per PR, not a backlog. The message quotes each new comment
+  in full (up to 4,000 characters; with many, they share that and past ten they are counted), and each review
+  thread with its file, line and id. The session is asked to fix what is right, push, reply on the thread with what it
+  changed and then resolve the thread, and to reply with its reason and leave the thread open when it disagrees;
+  the message carries the `gh` commands for replying and resolving. The session is told reviewer text is for it to judge, never to
   force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
   has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
   tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its

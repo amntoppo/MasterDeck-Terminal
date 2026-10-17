@@ -495,7 +495,14 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   nudges) are dropped. "Me" is the response's `viewer`; without it
   nothing is read into `seen`. A failed heavy read keeps `seen` and the old `updatedAt` (retried
   next poll). New items wait per PR (newest 30); at delivery (1 s timer, once the turn is over)
-  one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
+  one `[MasterDeck PR watch]` message per PR is built from them: up to 10 items quoted (threads first; `quote`
+  keeps line breaks, drops control and direction characters, prefixes `> `), their text sharing 4,000
+  characters (`BODY_BUDGET`, at least 300 each, one alone up to `BODY_MAX` 4,000, also the cap on a pending
+  item's text), the rest counted ("(N more threads)"). The heavy query reads each thread's node `id`, `path` and
+  `line`, so a thread is quoted with its file, line and id, and the message gives the session the `gh api graphql`
+  calls to reply (`addPullRequestReviewThreadReply`), resolve (`resolveReviewThread`) and list every thread; it
+  asks for fix, push, reply, resolve (a wrong comment: reply why, leave it open). The baseline line gives the same calls. Items saved before
+  ids were read say "(id: see the list below)";
   and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told). On merge/close it also calls `deps.ended(url)` → `Sources.prEnded`, which reads that PR again past the gh cache so the session's lane (`prStage`) moves at once, not on the next review poll. Its messages, like `[MasterDeck monitor: …]` lines, are not the user writing (`isUserWords` in `shared/ask.ts`): the "merged" message arrives after the merge and would otherwise turn Merged into Rework.
   With two or more accounts each watched PR keeps its session's account (`PrWatchEntry.account`) and `poll` reads each account's PRs with that account's runner, so "me" (`viewer`) is that account.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for

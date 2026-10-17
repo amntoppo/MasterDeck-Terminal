@@ -110,7 +110,8 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('web#1: 1 new review thread: "rename x"')
+    expect(sent[0]).toContain('web#1: 1 new review thread.')
+    expect(sent[0]).toContain('\n> rename x\n')
     await w.poll(NOW + 60_000)
     w.deliver([sess()], NOW + 60_000)
     await tick()
@@ -130,8 +131,8 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW + 60_000)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('"new"')
-    expect(sent[0]).not.toContain('"old"')
+    expect(sent[0]).toContain('> new')
+    expect(sent[0]).not.toContain('> old')
     // Past the first run's window a new PR is watched as usual.
     w.sync({ sessions: [sess()], sessionPrs: { [SID]: [url(3)] }, prLive: { [url(3)]: live(NOW + 59 * 60_000) } }, () => true, NOW + 60 * 60_000)
     body = 'newer'
@@ -179,7 +180,7 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('"rename x"')
+    expect(sent[0]).toContain('> rename x')
     // An old PR read without a viewer is not baselined to nothing (which would flood it later).
     viewer = null
     const old = make(gh)
@@ -209,7 +210,8 @@ describe('PrWatch', () => {
     b.w.deliver([sess()], NOW)
     await tick()
     expect(b.sent).toHaveLength(1)
-    expect(b.sent[0]).toContain('1 new review thread: "new thread"')
+    expect(b.sent[0]).toContain('1 new review thread.')
+    expect(b.sent[0]).toContain('> new thread')
     expect(b.sent[0]).not.toContain('old thread')
   })
   it('batches: one light query per 50 PRs, heavy only for changed ones, nothing while paused', async () => {
@@ -263,7 +265,7 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('"late"')
+    expect(sent[0]).toContain('> late')
   })
   it('ends on merge (after telling the session), and never restarts on a stale OPEN', async () => {
     const { gh } = fakeGh(() => ({ ...lightPr, state: 'MERGED' }))
@@ -320,7 +322,7 @@ describe('PrWatch hardening', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('"we hit the rate limit here"')
+    expect(sent[0]).toContain('> we hit the rate limit here')
   })
   it('a rate-limited answer (stderr or GraphQL RATE_LIMITED) does pause', async () => {
     let paused = false

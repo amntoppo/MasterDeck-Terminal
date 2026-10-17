@@ -421,7 +421,16 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-17)
+## Current state and next steps (2026-10-18)
+
+- **PR watch messages quote the comments and ask for thread resolution** (branch
+  `worktree-pr-watch-full-comments`, PR, not merged, **not installed**: the rebuild waits for the user's
+  word). Each new thread and comment is quoted in full (4,000 characters shared per message), threads with
+  file, line and node id, and the session is told to fix, push, reply on the thread and resolve it, with the
+  reply / resolve / list calls (ARCHITECTURE "PR watch"). Touches the same lines of `prItems` as #162
+  (same-account reviews): whichever merges second resolves that. Checked: typecheck, vitest, the thread
+  query against a real PR and the two mutations' inputs by introspection (read only). Not checked: a session
+  actually resolving a thread (a real GitHub write), the installed app.
 
 - **Automate Review and Merge automatically (#157)** are built on branch
   `worktree-MasterDeck-Terminal-157-auto-review` (PR #159, on top of #149, now merged). Not

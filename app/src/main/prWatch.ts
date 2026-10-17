@@ -5,7 +5,7 @@ import { groupByAccount } from '@shared/accounts'
 import type { AppConfig } from '@shared/appConfig'
 import { parsePrUrl } from '@shared/prSummary'
 import {
-  BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
+  BASELINE_AGE_MS, baselineMessage, BODY_MAX, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type PrItem, type PrRef,
 } from '@shared/prWatch'
 import { canDeliver, pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
@@ -56,7 +56,6 @@ export interface PrWatchDeps {
 const DONE_MAX = 500
 /** Items kept per PR while the session is busy (the message lists 10 per kind and "and N more"). */
 const ITEM_MAX = 30
-const TEXT_MAX = 300
 /** Light reads in a row without the PR before its watch ends. */
 const MISS_MAX = 3
 /** Longest paste: PRs past it wait for the next delivery. */
@@ -251,7 +250,7 @@ export class PrWatch {
               ...news.map((x) => ({ at: now, kind: x.kind, ...(x.by ? { by: x.by } : {}), text: x.text || (x.kind === 'conflict' ? `merge conflict with ${x.base}` : '') })),
             ])
             const keys = new Set(news.map((x) => x.key))
-            w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
+            w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, BODY_MAX) }))].slice(-ITEM_MAX)
             if (news.length || summary || ending) {
               w.events += news.length + (summary || ending ? 1 : 0)
               w.lastEventAt = now

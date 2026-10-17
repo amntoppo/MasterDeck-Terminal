@@ -994,6 +994,11 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **PR watch messages carry the comments and say to resolve threads**: each new review thread and PR
+  comment is quoted in full (4,000 characters shared per message, ten quoted), threads with file, line
+  and id, and the session is asked to fix, push, reply and resolve the thread, with the `gh api graphql`
+  calls for it. Before, it got a 180-character clip and no way to find or resolve a thread. Branch
+  `worktree-pr-watch-full-comments`.
 - **Automate Review and Merge automatically (#157)**: a card beside the Review with Claude chat,
   a MasterDeck monitor per PR tab that sends review requests to the tab's review session, follows
   each PR to merged, notices in Needs you, and an opt-in merge guarded by `readyToMerge` /
