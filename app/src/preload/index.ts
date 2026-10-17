@@ -118,6 +118,7 @@ const api: DeckApi = {
   onBtwEvent: (cb) => listen(CH.btwEvent, cb),
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),
+  prReviewPrepare: (req) => ipcRenderer.invoke(CH.prReviewPrepare, req),
   onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),
   ticketCreate: (req) => ipcRenderer.invoke(CH.ticketCreate, req),
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),

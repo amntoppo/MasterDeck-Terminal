@@ -93,6 +93,10 @@ html.phone .setup-body { min-height: 0; }
 .app.phone .tv-bar { width: 100px; }
 .app.phone .tv-side { min-width: 0; }
 .app.phone .prs-tbl .pr-title, .app.phone .prs-tbl td.pr-cell { max-width: 60vw; }
+/* Review with Claude on a phone: over the list, full width, under the tab bar (47). */
+.app.phone .review-panel { left: 0; right: 0; width: auto; top: env(safe-area-inset-top); bottom: var(--tabbar-h); z-index: 45; }
+.app.phone .review-panel .wf-builder-head { padding-right: 8px; height: auto; flex-wrap: wrap; row-gap: 2px; }
+.app.phone .review-panel .review-on { order: 10; flex-basis: 100%; }
 
 /* Sign out lives on the Settings screen, above the tab bar. */
 .app.phone ~ .web-signout { display: none; }

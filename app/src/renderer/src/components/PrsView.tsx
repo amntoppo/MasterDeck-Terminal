@@ -1,6 +1,6 @@
 import { sameTicket, ticketLabel, ticketUrl, type Ticket } from '@shared/ticket'
 import { nextTabName, ViewTabs } from './ViewTabs'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ciMessage, ownerOf, reviewMessage, type PrOffer } from '@shared/offers'
 import { isMulti, primaryLogin } from '@shared/accounts'
 import { tabAccount, withAccountTabs } from '@shared/boardFilter'
@@ -11,12 +11,16 @@ import { deck, load, save, useNow } from '../deck'
 import { PrIcon } from './BoardView'
 import { PhoneFilters } from './PhoneFilters'
 import { usePhone } from '../web'
+import { prLabel, reviewPrompt } from '@shared/prReview'
+import { ClaudeMark } from './NewTicket'
+import { SessionAccount } from './AccountBits'
+import { TerminalView } from './TerminalView'
 
 interface Props {
   state: AppState
   onOpenSession: (s: Session) => void
-  /** Open the PR popup (summary + Review PR). */
-  onPr: (url: string, issue: Ticket | null, title: string) => void
+  /** Open the PR popup (summary + Review PR); `review`: its Review with Claude, here in the panel. */
+  onPr: (url: string, issue: Ticket | null, title: string, review?: () => void) => void
   /** No owning session: start one for the issue, instruction pre-filled. */
   onStartWith: (issue: Issue, instructions: string) => void
 }
@@ -32,7 +36,23 @@ interface PrTab {
   filters: PrFilters
   /** The GitHub account it shows; absent: the primary. */
   account?: string
+  /** The PR picked in the list (its URL): what the tab's Review with Claude session talks about. */
+  selected?: string
 }
+
+/** A PR tab's Review with Claude session. */
+type ReviewSession = {
+  gen: number
+  resume: boolean
+  prompt?: string
+  /** The tab's account it runs as (two or more accounts). */
+  account?: string
+  /** Hidden (›): the session goes on, the panel is folded away. */
+  hidden?: boolean
+}
+/** The review sessions by PR tab id, kept while another view shows (their terminals keep running). */
+let keptReviews: Record<string, ReviewSession> = {}
+const reviewPaneId = (tab: string, gen: number) => `pr-review:${tab}:${gen}`
 
 /** The saved tabs; before any are saved, Mine (my open PRs, selected) and Everyone. */
 function loadTabs(): PrTab[] {
@@ -104,12 +124,94 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const closeTab = (id: string) => {
     const rest = tabs.filter((t) => t.id !== id)
     if (!rest.length) return
+    // Its review session goes with it; the folder stays.
+    closeReviewOf(id)
     setTabs(rest)
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
   const renameTab = (id: string, name: string) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, name } : t)))
   const me = acct ?? state.me
   const isMe = (login: string) => !!me && login.toLowerCase() === me.toLowerCase()
+
+  // Review with Claude: one session per tab, in its own folder, as the tab's account (two or more).
+  const [reviews, setReviewsRaw] = useState<Record<string, ReviewSession>>(() => keptReviews)
+  const setReviewOf = (key: string, r: ReviewSession | null) => {
+    const next = { ...keptReviews }
+    if (r) next[key] = r
+    else delete next[key]
+    keptReviews = next
+    setReviewsRaw(next)
+  }
+  const closeReviewOf = (key: string) => {
+    const r = keptReviews[key]
+    if (r) deck().ptyClose(reviewPaneId(key, r.gen))
+    setReviewOf(key, null)
+  }
+  const review = reviews[tab.id] ?? null
+  const shownReview = review && !review.hidden ? review : null
+  const [panelW, setPanelW] = useState<number>(() => load<number>('prReviewPanelW', 520))
+  useEffect(() => save('prReviewPanelW', panelW), [panelW])
+  const [reviewMsg, setReviewMsg] = useState<string | null>(null)
+  // A tab whose account changed (picked, or disconnected): its session ran as the old one.
+  useEffect(() => {
+    if (multi && review && review.account !== acct) closeReviewOf(tab.id)
+  }, [multi, tab.id, acct]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A second account connected or the last one removed: the sessions ran as the other mode's.
+  const wasMulti = useRef(multi)
+  useEffect(() => {
+    if (wasMulti.current !== multi) for (const k of Object.keys(keptReviews)) closeReviewOf(k)
+    wasMulti.current = multi
+  }, [multi]) // eslint-disable-line react-hooks/exhaustive-deps
+  const select = (url: string) => setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, selected: url } : t)))
+  const prepare = (url: string | undefined, contextOnly: boolean) =>
+    deck().prReviewPrepare({ tabId: tab.id, tab: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters, ...(url ? { url } : {}), ...(contextOnly ? { context: true } : {}) })
+  /**
+   * Open the tab's panel; `url`: pick that PR first; `ask`: and ask Claude to review it (typed into
+   * a running session, or the first message of a new one).
+   */
+  const openReview = async (url?: string, ask = false, restart = false) => {
+    if (url) select(url)
+    const pick = url ?? tab.selected
+    const r = await prepare(pick, false)
+    if (!r.ok) {
+      setReviewMsg(r.message)
+      setTimeout(() => setReviewMsg((m) => (m === r.message ? null : m)), 6000)
+      return
+    }
+    const prompt = ask && pick ? reviewPrompt(pick) : undefined
+    const cur = keptReviews[tab.id]
+    if (cur && !restart) {
+      setReviewOf(tab.id, { ...cur, hidden: false })
+      if (prompt) {
+        const id = reviewPaneId(tab.id, cur.gen)
+        deck().ptyWrite(id, prompt)
+        setTimeout(() => deck().ptyWrite(id, '\r'), 150)
+      }
+      return
+    }
+    if (cur) deck().ptyClose(reviewPaneId(tab.id, cur.gen))
+    setReviewOf(tab.id, { gen: (cur?.gen ?? 0) + 1, resume: !restart && r.canContinue, prompt, ...(acct ? { account: acct } : {}) })
+  }
+  // The session's context follows the list: another PR picked, or the filters changed.
+  const filtersKey = JSON.stringify(tab.filters)
+  useEffect(() => {
+    if (!review) return
+    const t = setTimeout(() => void prepare(tab.selected, true), 400)
+    return () => clearTimeout(t)
+  }, [review?.gen, tab.id, tab.selected, filtersKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dragPanel = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const right = (e.currentTarget.parentElement?.getBoundingClientRect().right ?? window.innerWidth) as number
+    const move = (ev: MouseEvent) => setPanelW(Math.round(Math.min(Math.max(right - ev.clientX, 340), window.innerWidth * 0.6)))
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.classList.remove('resizing')
+    }
+    document.body.classList.add('resizing')
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   // Fetch on open when the list is older than 10 minutes (the shared cache absorbs repeats).
   useEffect(() => {
@@ -231,7 +333,8 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   )
   const filterSearch = <input className="filter search" placeholder="Search title, #number, branch, ticket" value={f.search} onChange={(e) => set({ search: e.target.value })} />
   return (
-    <section className="board-view panel">
+    <>
+    <section className="board-view panel" style={shownReview && !phone ? { right: `calc(var(--right-w, 0px) + ${panelW + 6}px)` } : undefined}>
       <header className="board-head">
         <h2>Pull requests</h2>
         <div className="seg">
@@ -248,6 +351,11 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
         <button className="btn" onClick={() => void deck().refreshTeamPrs()} disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
+        {!shownReview && (
+          <button className="btn claude-btn" onClick={() => void openReview()} title={tab.selected ? `Talk about ${prLabel(tab.selected)} with Claude` : 'A Claude session for this tab: pick a PR, then ask'}>
+            <ClaudeMark /> Review with Claude
+          </button>
+        )}
       </header>
       <ViewTabs tabs={multi ? tabs.map((t) => ({ ...t, badge: tabAccount(t, logins) ?? primary ?? undefined })) : tabs} activeId={tab.id} onSelect={setTabId} onAdd={addTab} onClose={closeTab} onRename={renameTab} addTitle="Another PR tab, with its own filters" />
 
@@ -305,12 +413,70 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
               </tr>
             )}
             {shown.map((p) => (
-              <PrRow key={p.url} p={p} pr={asPr(p, state.prs)} mine={isMe(p.author)} now={now} state={state} onPr={onPr} onOpenSession={onOpenSession} onStartWith={onStartWith} onAuthor={(a) => set({ author: isMe(a) ? '@me' : a })} onRepo={(r) => set({ repo: r })} />
+              <PrRow
+                key={p.url}
+                p={p}
+                pr={asPr(p, state.prs)}
+                mine={isMe(p.author)}
+                now={now}
+                state={state}
+                selected={p.url === tab.selected}
+                onSelect={() => select(p.url)}
+                onReview={() => void openReview(p.url, true)}
+                onPr={(url, issue, title) => {
+                  select(url)
+                  onPr(url, issue, title, () => void openReview(url, true))
+                }}
+                onOpenSession={onOpenSession}
+                onStartWith={onStartWith}
+                onAuthor={(a) => set({ author: isMe(a) ? '@me' : a })}
+                onRepo={(r) => set({ repo: r })}
+              />
             ))}
           </tbody>
         </table>
       </div>
+      {reviewMsg && <div className="ticket-toast bad-toast">{reviewMsg}</div>}
     </section>
+    {shownReview && (
+      <>
+        {!phone && <div className="ticket-split" style={{ right: `calc(var(--right-w, 0px) + ${panelW}px)` }} onMouseDown={dragPanel} onDoubleClick={() => setPanelW(520)} title="Drag to resize · double-click to reset" />}
+        <aside className="ticket-panel review-panel" style={phone ? undefined : { width: panelW }} aria-label="Review with Claude">
+          <div className="wf-builder-head">
+            <b>
+              <ClaudeMark /> Review with Claude
+            </b>
+            <SessionAccount login={multi ? (shownReview.account ?? null) : null} />
+            <span className="muted small review-on" title={tab.selected ?? ''}>
+              {tab.selected ? `Reviewing ${prLabel(tab.selected)}` : 'No PR selected'}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button className="btn" onClick={() => void openReview(undefined, false, true)} title="Start a new conversation">
+              New chat
+            </button>
+            <button className="insp-hide" onClick={() => setReviewOf(tab.id, { ...shownReview, hidden: true })} aria-label="Hide" title="Hide (the session goes on)">
+              ›
+            </button>
+            <button className="insp-hide" onClick={() => closeReviewOf(tab.id)} aria-label="Close" title="Close (ends the session)">
+              ×
+            </button>
+          </div>
+          <div className="wf-builder-term">
+            <TerminalView
+              key={`${tab.id}:${shownReview.gen}`}
+              paneId={reviewPaneId(tab.id, shownReview.gen)}
+              spec={{ kind: 'pr-review', resume: shownReview.resume, tab: tab.id, ...(shownReview.prompt ? { prompt: shownReview.prompt } : {}), ...(multi && shownReview.account ? { account: shownReview.account } : {}) }}
+              visible
+              focusOnShow
+            />
+          </div>
+          <div className="wf-builder-tip muted">
+            Click a PR in the list to pick it, then ask: “review this PR”, “summarise what changed”, “is it safe to merge?”, “what does the CI failure mean?”. Nothing is posted to GitHub until you say yes to it.
+          </div>
+        </aside>
+      </>
+    )}
+    </>
   )
 }
 
@@ -341,7 +507,24 @@ function PrRow({
   onStartWith,
   onAuthor,
   onRepo,
-}: { p: TeamPr; pr: Pr; mine: boolean; now: number; state: AppState; onAuthor: (a: string) => void; onRepo: (r: string) => void } & Pick<Props, 'onPr' | 'onOpenSession' | 'onStartWith'>) {
+  selected,
+  onSelect,
+  onReview,
+}: {
+  p: TeamPr
+  pr: Pr
+  mine: boolean
+  now: number
+  state: AppState
+  onAuthor: (a: string) => void
+  onRepo: (r: string) => void
+  /** Picked for Review with Claude. */
+  selected: boolean
+  onSelect: () => void
+  /** Pick it, open the panel and ask Claude to review it. */
+  onReview: () => void
+  onPr: (url: string, issue: Ticket | null, title: string) => void
+} & Pick<Props, 'onOpenSession' | 'onStartWith'>) {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const owner = mine ? ownerOf(pr, state.sessions, state.sessionPrs) : null
@@ -359,7 +542,7 @@ function PrRow({
   const review = reviewLabel(p)
   const when = p.state === 'merged' ? p.mergedAt : p.state === 'closed' ? p.closedAt : p.createdAt
   return (
-    <tr>
+    <tr className={selected ? 'sel' : ''} onClick={onSelect} aria-selected={selected}>
       <td className="pr-cell">
         <button className="link-btn" onClick={() => onPr(p.url, pr.refsIssue ? { repo: pr.refsRepo ?? null, number: pr.refsIssue } : null, p.title)} title="Summary and Review PR">
           <PrIcon /> #{p.number}
@@ -415,6 +598,9 @@ function PrRow({
             Review
           </button>
         )}{' '}
+        <button className="link-btn review-claude" onClick={onReview} title="Review with Claude" aria-label={`Review #${p.number} with Claude`}>
+          <ClaudeMark />
+        </button>{' '}
         <button className="link-btn" onClick={() => deck().openExternal(p.url)} title="Open on GitHub">
           ↗
         </button>

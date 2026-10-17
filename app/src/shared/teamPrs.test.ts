@@ -121,6 +121,9 @@ describe('PRs tabs per account', () => {
   it('saved tabs round-trip their account; a tab saved without one has none (the primary)', () => {
     const t = parseSavedPrTabs([{ id: 'a', name: 'Mine', filters: DEFAULT_PR_FILTERS, account: 'bob-work' }, { id: 'b', name: 'Old', filters: DEFAULT_PR_FILTERS }, { nope: 1 }])
     expect(t?.map((x) => [x.id, x.account])).toEqual([['a', 'bob-work'], ['b', undefined]])
+    // The PR picked for Review with Claude is kept; anything but a GitHub URL is dropped.
+    const s = parseSavedPrTabs([{ id: 'a', filters: DEFAULT_PR_FILTERS, selected: 'https://github.com/O/app/pull/1' }, { id: 'b', filters: DEFAULT_PR_FILTERS, selected: 'javascript:x' }])
+    expect(s?.map((x) => x.selected)).toEqual(['https://github.com/O/app/pull/1', undefined])
     expect(parseSavedPrTabs([])).toBeNull()
     expect(parseSavedPrTabs('x')).toBeNull()
   })

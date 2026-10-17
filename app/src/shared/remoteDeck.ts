@@ -117,6 +117,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   onBtwEvent: { kind: "event", ch: CH.btwEvent },
   ticketCreate: invoke(CH.ticketCreate),
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),
+  // The PR view's review session: main checks the tab, the account and the folder, and takes the PR's facts from its own list.
+  prReviewPrepare: invoke(CH.prReviewPrepare),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
   ticketRepoMeta: invoke(CH.ticketRepoMeta),
   workspaceRepos: invoke(CH.workspaceRepos),

@@ -6,6 +6,7 @@ import { MAX_FRAME, PROTOCOL_VERSION, type DesktopMsg, type ServerToDesktop } fr
 import type { MacToWeb, WebToMac } from '@shared/bridgeWire'
 import type { BrowserRequestView } from '@shared/types'
 import { ticketSpecError } from '@shared/ticketBuilder'
+import { prReviewSpecError } from '@shared/prReview'
 import type { ApprovedBrowser, BrowserStore } from './browserStore'
 
 export type { MacToWeb, WebToMac } from '@shared/bridgeWire'
@@ -35,6 +36,8 @@ export interface BridgeDeps {
   logins?: () => string[]
   /** The account a Board tab's ticket folder already names (its context.json); null if none. */
   ticketAccount?: (tab: string) => string | null
+  /** The account a PR tab's review folder already names (its context.json); null if none. */
+  prReviewAccount?: (tab: string) => string | null
 }
 
 const BLOCKED = 'Not available on the web yet'
@@ -43,8 +46,8 @@ const MAX_UNREVEALED = 3
 const MAX_NONCES_PER_HOUR = 10
 const MAX_CALLS_PER_SEC = 200
 const REQUEST_TTL = 5 * 60_000
-/** PaneSpec kinds the web screens open: session/master panes, shell tabs, and the ticket/workflow builders and tool installer. */
-const WEB_PANES = new Set(['attach', 'shell', 'ticket-builder', 'builder', 'installer'])
+/** PaneSpec kinds the web screens open: session/master panes, shell tabs, the ticket/workflow builders, the PR review and the tool installer. */
+const WEB_PANES = new Set(['attach', 'shell', 'ticket-builder', 'pr-review', 'builder', 'installer'])
 const PER_ID = [CH.ptyData, CH.ptyExit]
 /** PTY data per frame: even all-escaped JSON (6x) stays under MAX_FRAME after GCM + base64. */
 const PTY_CHUNK = 128 * 1024
@@ -399,6 +402,10 @@ export class BrowserBridge {
       return this.ret(c, m.id, false, BLOCKED)
     if (m.m === 'ptyOpen' && (args[1] as { kind?: unknown }).kind === 'ticket-builder') {
       const bad = ticketSpecError(args[1] as { tab?: unknown; account?: unknown }, this.d.logins?.() ?? [], this.d.ticketAccount)
+      if (bad) return this.ret(c, m.id, false, bad)
+    }
+    if (m.m === 'ptyOpen' && (args[1] as { kind?: unknown }).kind === 'pr-review') {
+      const bad = prReviewSpecError(args[1] as { tab?: unknown; account?: unknown }, this.d.logins?.() ?? [], this.d.prReviewAccount)
       if (bad) return this.ret(c, m.id, false, bad)
     }
     args = ARG_FIX[m.m as keyof typeof ARG_FIX]?.(args) ?? args

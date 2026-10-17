@@ -327,10 +327,17 @@ export function prsForAccount(prs: TeamPr[], login: string | null, primary: stri
 }
 
 /** Saved PRs tabs, tolerant of old shapes (no account: the primary's); null when nothing usable is saved. */
-export function parseSavedPrTabs(saved: unknown): { id: string; name: string; filters: PrFilters; account?: string }[] | null {
+export function parseSavedPrTabs(saved: unknown): { id: string; name: string; filters: PrFilters; account?: string; selected?: string }[] | null {
   if (!Array.isArray(saved) || !saved.length) return null
   const tabs = saved
     .filter((t) => t && typeof t.id === 'string')
-    .map((t) => ({ id: t.id as string, name: typeof t.name === 'string' && t.name ? (t.name as string) : 'PRs', filters: normalizePrFilters(t.filters), ...(typeof t.account === 'string' ? { account: t.account as string } : {}) }))
+    .map((t) => ({
+      id: t.id as string,
+      name: typeof t.name === 'string' && t.name ? (t.name as string) : 'PRs',
+      filters: normalizePrFilters(t.filters),
+      ...(typeof t.account === 'string' ? { account: t.account as string } : {}),
+      // The PR picked for Review with Claude.
+      ...(typeof t.selected === 'string' && t.selected.startsWith('https://github.com/') ? { selected: t.selected as string } : {}),
+    }))
   return tabs.length ? tabs : null
 }
