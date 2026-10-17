@@ -158,7 +158,8 @@ function run(pid: number, relaunch: boolean, extra: Record<string, string> = {},
 
 const prevOf = () => join(apps, '.MasterDeck.app.previous')
 
-describe('update helper', () => {
+// The helper is macOS only (ditto, /bin/ps, .app bundles).
+describe.skipIf(process.platform !== 'darwin')('update helper', () => {
   it('is bash 3.2 syntax', () => {
     setup()
     expect(spawnSync('/bin/bash', ['-n', script]).status).toBe(0)

@@ -1864,3 +1864,25 @@ details.sd-more > summary:hover { color: var(--text); }
 .update-notes { width: 100%; max-height: 260px; overflow: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .update-prompt { position: fixed; right: 16px; bottom: 16px; z-index: 48; width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; background: var(--bg-2); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 10px; padding: 12px 14px; font-size: 13px; box-shadow: 0 12px 40px var(--shadow); -webkit-app-region: no-drag; }
 .update-prompt .muted, .update-prompt .bad { font-size: 12px; }
+
+/* The session list's tabs (#146): All, the user's tabs, +. One line that scrolls sideways. */
+.sgroups { display: flex; align-items: center; gap: 4px; margin: 2px -8px 4px; padding: 4px 14px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; border-bottom: 1px solid var(--line); }
+.sgroups::-webkit-scrollbar { height: 4px; }
+.sgroups::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+.sgroup { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 160px; height: 24px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.sgroup:hover { color: var(--text); background: var(--bg-3); }
+.sgroup.on { color: var(--text); background: var(--bg-3); border-color: var(--line); font-weight: 600; }
+.sgroup.drop { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.sgroup.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.sgroup.dragging { opacity: .45; }
+.sgroup-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sgroup-count { flex: none; font-size: 10px; color: var(--faint); font-weight: 400; }
+.sgroup.on .sgroup-count { color: var(--muted); }
+.sgroup-hot { flex: none; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px; background: var(--red); color: var(--on-accent); font-size: 9.5px; font-weight: 600; line-height: 14px; text-align: center; }
+.sgroup-add { flex: none; width: 24px; height: 24px; border: 1px dashed var(--line); border-radius: 6px; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }
+.sgroup-add:hover { color: var(--text); border-color: var(--accent); }
+.sgroup-add.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.sgroup-input { flex: none; width: 120px; height: 24px; padding: 0 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; outline: none; }
+.sgroup-empty { padding: 10px 6px; }
+.session-menu-sub { padding-left: 8px; border-left: 2px solid var(--line); margin: 2px 0 2px 10px; }
+.session-menu-sub .check { display: inline-block; width: 14px; color: var(--accent); }
