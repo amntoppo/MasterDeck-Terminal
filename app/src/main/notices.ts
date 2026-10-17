@@ -17,7 +17,9 @@ function asNotice(v: unknown): Notice | null {
   if (!text(o.title, 300) || !text(o.body, 2000)) return null
   if (o.sessionKey !== null && !text(o.sessionKey, 200)) return null
   if (typeof o.at !== 'number' || !Number.isFinite(o.at) || o.at <= 0) return null
-  return { id: o.id, type: o.type as Notice['type'], title: o.title, body: o.body, sessionKey: o.sessionKey, at: o.at }
+  // Only a GitHub page: the card opens it in the browser.
+  const url = text(o.url, 500) && /^https:\/\/github\.com\//.test(o.url) ? o.url : undefined
+  return { id: o.id, type: o.type as Notice['type'], title: o.title, body: o.body, sessionKey: o.sessionKey, at: o.at, ...(url ? { url } : {}) }
 }
 
 /**
