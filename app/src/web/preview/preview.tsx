@@ -217,7 +217,8 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     },
     procsOutput: () => ({ ok: true, text: '  VITE v5.4.2  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n10:41:02 [vite] hmr update /src/App.tsx' }),
     workspaceRepos: () => repos,
-    accountFor: () => (twoAccounts ? 'acme-dev' : null),
+    // The api repository is acme-ops's, so a folder change can move the account.
+    accountFor: (cwd: string) => (twoAccounts ? (cwd.endsWith('/api') ? 'acme-ops' : 'acme-dev') : null),
     // Any folder under the fixture's home exists; anything else (a remembered folder) is gone.
     folderExists: (p: string) => p.startsWith('/Users/dev/acme'),
     summaryGet: () => ({ summary: null, stale: false }),

@@ -261,11 +261,15 @@ export function NewSessionDialog({
     initialAccount(prefs.current!, multi, accountChoices(state.config, state.ghAccounts)),
   );
   const [accountPicked, setAccountPicked] = useState(account !== null);
+  // Only a pick made in this dialog outlasts a folder change: a remembered account goes back to
+  // the folder's once the user picks another folder, so a session never runs as the wrong account.
+  const pickedHere = useRef(false);
   // Fields the user changed in this dialog: an account switch leaves them as they are.
   const touched = useRef(new Set<keyof NewSessionChoice>());
   const touch = (f: keyof NewSessionChoice) => {
     touched.current.add(f);
     setNotes(({ [f]: _gone, ...rest }) => rest);
+    if (f === "cwd" && !pickedHere.current) setAccountPicked(false);
   };
   const [notes, setNotes] = useState<ChoiceNotes>({});
   const [ready, setReady] = useState(false);
@@ -391,6 +395,7 @@ export function NewSessionDialog({
           onChange={(l) => {
             setAccount(l);
             setAccountPicked(true);
+            pickedHere.current = true;
             setFillFor({ login: l });
           }}
         />

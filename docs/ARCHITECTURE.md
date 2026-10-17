@@ -1163,7 +1163,8 @@ logic in `shared/newSessionPrefs.ts`): the account comes first, and each account
 model, workflow and permission mode are kept in localStorage under `newSessionPrefs`
 (`{ last, by: { [login]: choice } }`; one account keeps one set under `""`; at most 20 accounts;
 `parseNewSessionPrefs` drops anything that is not ours). The dialog opens on `last` while it is a
-healthy connected account (`initialAccount`; it then no longer follows the folder's account), waits
+healthy connected account (`initialAccount`; it holds until the user picks another folder, then the
+account follows the folder again, while an account picked in the dialog, `pickedHere`, stays), waits
 for the workspace repos, the configured model and the templates, and fills the fields from
 `resolveChoice`: a folder that is not one of the repos is checked with `folderExists`
 (`CH.folderExists`, open to the web, since `startClaude` already says whether a folder exists), and

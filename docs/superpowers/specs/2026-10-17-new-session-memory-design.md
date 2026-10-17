@@ -21,9 +21,12 @@ defaults every time, so a user with several accounts picks the same things again
    account the choices are kept under the key `""` (one set); with two or more, under the login.
    `last` is the account of the last start. Everything read back is checked (`parseNewSessionPrefs`):
    anything not ours is dropped, at most 20 accounts are kept.
-5. **Opening**: the account is `last` when it is still a healthy connected account (counts as
-   picked: it no longer follows the folder); otherwise today's rule (the folder's account). The
-   other fields come from that account's choices, falling back to today's defaults.
+5. **Opening**: the account is `last` when it is still a healthy connected account; otherwise
+   today's rule (the folder's account). The other fields come from that account's choices,
+   falling back to today's defaults. A remembered account holds only until the user picks another
+   folder: then the account follows the folder again (`accountFor`), so a session never runs as the
+   remembered account in another account's repository (review on PR #155). An account picked in
+   this dialog stays whatever folder is chosen after it, as before.
 6. **Switching account** (the user picks another): the fields the user has not touched in this
    dialog take the new account's choices (or the defaults when it has none). A field the user
    changed stays. The account the dialog derives from the folder (no `last`) does not reload
