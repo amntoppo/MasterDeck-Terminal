@@ -14,6 +14,7 @@ import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
 import { BUILTIN_WORKFLOWS } from '@shared/builtinWorkflows'
 import { fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
+import { localZone, normalizeSchedule, schedView, type Schedule, type SchedRun } from '@shared/sched'
 
 type Fn = (...a: never[]) => unknown
 
@@ -81,18 +82,18 @@ function previewDeck(noBoard: boolean): DeckApi {
     progress: said.map((t, i) => `- round ${i + 1}: ${t}`).join('\n') + '\n',
   }
   // Pull requests → Review with Claude → Automate Review (#157) on for Mine: two PRs it follows, one ready.
-  const t0 = Date.now()
+  const ar0 = Date.now()
   state.autoReview = {
-    tabs: { 'prs-mine': { review: true, merge: false, lastCheck: t0 - 60_000, error: null, pane: null } },
+    tabs: { 'prs-mine': { review: true, merge: false, lastCheck: ar0 - 60_000, error: null, pane: null } },
     prs: [
-      { url: 'https://github.com/acme/web/pull/140', repo: 'acme/web', number: 140, title: 'Cache the avatar URLs', author: 'riley', tabId: 'prs-mine', status: 'reviewing', at: t0 - 2 * 60_000, reviewUrl: null, comments: 0, note: null },
-      { url: 'https://github.com/acme/api/pull/77', repo: 'acme/api', number: 77, title: 'Rate limit the export endpoint', author: 'sam', tabId: 'prs-mine', status: 'ready', at: t0 - 25 * 60_000, reviewUrl: 'https://github.com/acme/api/pull/77#pullrequestreview-9', comments: 3, note: null },
-      { url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Drop the old billing page', author: 'alice', tabId: 'prs-mine', status: 'commented', at: t0 - 3 * 3600_000, reviewUrl: 'https://github.com/acme/web/pull/129#pullrequestreview-4', comments: 5, note: 'it is not approved' },
+      { url: 'https://github.com/acme/web/pull/140', repo: 'acme/web', number: 140, title: 'Cache the avatar URLs', author: 'riley', tabId: 'prs-mine', status: 'reviewing', at: ar0 - 2 * 60_000, reviewUrl: null, comments: 0, note: null },
+      { url: 'https://github.com/acme/api/pull/77', repo: 'acme/api', number: 77, title: 'Rate limit the export endpoint', author: 'sam', tabId: 'prs-mine', status: 'ready', at: ar0 - 25 * 60_000, reviewUrl: 'https://github.com/acme/api/pull/77#pullrequestreview-9', comments: 3, note: null },
+      { url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Drop the old billing page', author: 'alice', tabId: 'prs-mine', status: 'commented', at: ar0 - 3 * 3600_000, reviewUrl: 'https://github.com/acme/web/pull/129#pullrequestreview-4', comments: 5, note: 'it is not approved' },
     ],
   }
   state.watches = [
     ...state.watches,
-    { id: 'review:prs-mine', sessionId: '', description: 'Automate Review · Mine', command: 'is:pr is:open review-requested:@me archived:false sort:updated-desc org:acme', startedAt: t0 - 5 * 3600_000, events: 9, lastEventAt: t0 - 2 * 60_000, queued: 0 },
+    { id: 'review:prs-mine', sessionId: '', description: 'Automate Review · Mine', command: 'is:pr is:open review-requested:@me archived:false sort:updated-desc org:acme', startedAt: ar0 - 5 * 3600_000, events: 9, lastEventAt: ar0 - 2 * 60_000, queued: 0 },
   ]
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
@@ -360,7 +361,61 @@ function previewDeck(noBoard: boolean): DeckApi {
             draft: { issue: t.number, repo: t.repo, name: `${t.number}-preview`, cwd: cwd ?? '/Users/dev/acme', prompt: `You own #${t.number} (${title ?? ''}). ${url ?? ''}`, summary: '', title: title ?? '', url: url ?? '', proposalId: null, workspace: '/Users/dev/acme', found: cwd ? cwd.endsWith('/web') : false, checkoutOf: t.repo ?? 'acme/web' },
           },
   }
+  // Schedules: two, one with a running run (bg-4) and a history.
+  const H = 3_600_000
+  const t0 = Date.now()
+  const sched = (o: Partial<Schedule>): Schedule => ({
+    id: 'p1', name: 'Morning triage', enabled: true, prompt: 'Triage the issues opened since yesterday: label them and ask for what is missing.', workflow: null,
+    cwd: '/Users/dev/acme/web', account: null, model: null, mode: 'plan', when: { kind: 'weekdays', time: '09:00' }, tz: localZone(),
+    skipIfRunning: true, maxCostUsd: 2, notify: { finish: true, failure: true }, missed: 'once', createdAt: t0 - 30 * 24 * H, updatedAt: t0, lastSlot: t0 - H, ...o,
+  })
+  let schedules: Schedule[] = [
+    sched({}),
+    sched({ id: 'p2', name: 'Nightly docs', prompt: '', workflow: 'md-ci-doctor', cwd: '/Users/dev/acme/api', when: { kind: 'daily', time: '02:00' }, maxCostUsd: null }),
+    sched({ id: 'p3', name: 'Weekly security audit', enabled: false, prompt: 'Run npm audit and gh api dependabot alerts; open one issue per real finding.', when: { kind: 'cron', expr: '0 7 * * 1' } }),
+  ]
+  const run = (o: Partial<SchedRun>): SchedRun => ({
+    id: String(Math.random()), scheduleId: 'p1', scheduleName: 'Morning triage', slot: null, trigger: 'schedule', status: 'done', startedAt: t0 - 24 * H, endedAt: t0 - 23.6 * H,
+    sessionName: 'morning-triage-1016-0900', bgId: null, sessionId: null, seenWorking: true, seen: true, costUsd: 0.62, ...o,
+  })
+  let schedRuns: SchedRun[] = [
+    run({}),
+    run({ startedAt: t0 - 48 * H, endedAt: t0 - 47.9 * H, status: 'stopped', costUsd: 2.04, reason: 'over its cost limit ($2.00); the session was stopped', sessionName: 'morning-triage-1015-0900' }),
+    run({ startedAt: t0 - 72 * H, endedAt: t0 - 72 * H, status: 'skipped', trigger: 'missed', costUsd: 0, reason: 'a run was missed while the Mac slept or MasterDeck was closed', sessionName: '' }),
+    run({ scheduleId: 'p2', scheduleName: 'Nightly docs', status: 'running', startedAt: t0 - 0.5 * H, endedAt: null, sessionName: 'docs-refresh', bgId: 'bg-4', costUsd: 0.31 }),
+    run({ scheduleId: 'p2', scheduleName: 'Nightly docs', status: 'failed', startedAt: t0 - 24.5 * H, endedAt: t0 - 24.5 * H, reason: 'Workspace not trusted', sessionName: 'nightly-docs-1016-0200', costUsd: 0 }),
+  ]
+  const schedCbs = new Set<() => void>()
+  const schedChanged = () => schedCbs.forEach((cb) => cb())
   const local: Record<string, unknown> = {
+    schedList: async () => ({ schedules: schedules.map((s) => schedView(s, schedRuns, Date.now())), runs: [...schedRuns].sort((a, b) => b.startedAt - a.startedAt), tz: localZone() }),
+    schedSave: async (input: { id?: string }) => {
+      const prev = schedules.find((s) => s.id === input.id) ?? null
+      const r = normalizeSchedule(input, prev, Date.now(), () => true, () => `p${schedules.length + 1}`)
+      if (!r.ok) return r
+      schedules = prev ? schedules.map((s) => (s.id === prev.id ? r.schedule : s)) : [...schedules, r.schedule]
+      schedChanged()
+      return { ok: true, id: r.schedule.id }
+    },
+    schedDelete: async (id: string) => {
+      schedules = schedules.filter((s) => s.id !== id)
+      schedRuns = schedRuns.filter((r) => r.scheduleId !== id)
+      schedChanged()
+      return { ok: true, message: 'deleted' }
+    },
+    schedEnable: async (id: string, on: boolean) => {
+      schedules = schedules.map((s) => (s.id === id ? { ...s, enabled: on, lastSlot: on ? Date.now() : s.lastSlot } : s))
+      schedChanged()
+      return { ok: true, message: on ? 'on' : 'paused' }
+    },
+    schedRunNow: async (id: string) => {
+      const s = schedules.find((x) => x.id === id)
+      if (!s) return { ok: false, message: 'that schedule is gone' }
+      schedRuns = [...schedRuns, run({ scheduleId: s.id, scheduleName: s.name, trigger: 'manual', status: 'running', startedAt: Date.now(), endedAt: null, sessionName: `${s.name.toLowerCase().replace(/\W+/g, '-')}-now`, costUsd: 0 })]
+      schedChanged()
+      return { ok: true, message: 'started' }
+    },
+    onSchedChanged: (cb: () => void) => (schedCbs.add(cb), () => schedCbs.delete(cb)),
     notesList: async () => sortNotes([...notes.values()].map(noteMeta)),
     notesGet: async (id: string) => notes.get(id) ?? null,
     notesSearch: async (q: string) => [...notes.values()].filter((n) => matches(n, q)).map((n) => n.id),

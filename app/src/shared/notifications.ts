@@ -37,6 +37,7 @@ export type NotifyTypeId =
   | 'workflow'
   | 'meeting'
   | 'auto-review'
+  | 'schedule-run'
 
 export interface NotifyTypeDef {
   id: NotifyTypeId
@@ -76,6 +77,13 @@ export const NOTIFY_TYPES: readonly NotifyTypeDef[] = [
     hint: 'Automate Review sent comments on a PR, a PR it reviewed is ready to merge, or Merge automatically merged one.',
     source: 'event',
     defaults: on(true, true),
+  },
+  {
+    id: 'schedule-run',
+    label: 'Scheduled run',
+    hint: "A schedule's run finished, failed, was stopped or was skipped (each schedule's own switches also apply).",
+    source: 'event',
+    defaults: on(true, false),
   },
 ]
 

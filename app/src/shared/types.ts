@@ -245,6 +245,11 @@ export interface AppState {
   watches: WatchInfo[];
   /** Automate Review per PR tab and the PRs it follows (#157; main/autoReview.ts). */
   autoReview?: import("./autoReview").AutoReviewView;
+  /**
+   * Sessions a schedule started (#140), by session key (the bg id): the session list's chip. Set in
+   * the state callback from the Scheduler; runs of the last 30 days. Not in toRemoteSnapshot.
+   */
+  schedRuns?: Record<string, { scheduleId: string; name: string }>;
   /** Scheduled jobs (CronCreate) by session id. */
   schedules: Record<string, ScheduleInfo[]>;
   /** Workflow loops by session id (shared/loops: at most 3 each, closed ones for a day). */
@@ -532,7 +537,7 @@ export interface NotifyEvent {
   type: NotifyTypeId;
   title: string;
   body: string;
-  target: { sessionKey?: string; needsYou?: true; itemId?: string };
+  target: { sessionKey?: string; needsYou?: true; itemId?: string; schedules?: true };
 }
 
 export type PaneSpec =
