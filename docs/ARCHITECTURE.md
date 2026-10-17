@@ -1046,6 +1046,20 @@ must be an absolute, existing folder; from a browser it must be one of `workspac
 keeps its folder and shows it). An `assign` request's own `cwd` and `cwdRepo` are passed on from a
 browser exactly as from the window, as `cwd` always was.
 
+**The New Claude session dialog's memory** (#153; `NewSessionDialog` in `renderer/.../NewMenu.tsx`,
+logic in `shared/newSessionPrefs.ts`): the account comes first, and each account's last folder,
+model, workflow and permission mode are kept in localStorage under `newSessionPrefs`
+(`{ last, by: { [login]: choice } }`; one account keeps one set under `""`; at most 20 accounts;
+`parseNewSessionPrefs` drops anything that is not ours). The dialog opens on `last` while it is a
+healthy connected account (`initialAccount`; it then no longer follows the folder's account), waits
+for the workspace repos, the configured model and the templates, and fills the fields from
+`resolveChoice`: a folder that is not one of the repos is checked with `folderExists`
+(`CH.folderExists`, open to the web, since `startClaude` already says whether a folder exists), and
+a gone folder, model, workflow or mode falls back to its default with a note per field. A pick of
+another account fills only the fields not changed in this dialog (`touched`). **Start session**
+saves the choice with `rememberChoice`; Cancel saves nothing. The window and each browser keep their
+own memory (ponytail: per browser; a store on the Mac is the upgrade).
+
 **Whether Claude Code may work in that folder** (`claude --bg` refuses a folder whose trust prompt
 was never accepted: "Workspace not trusted. Run `claude` in <folder> once and accept the trust
 prompt, then retry.") is read in one place, `skills/master/lib/master/trust.py`: `trusted(folder)`

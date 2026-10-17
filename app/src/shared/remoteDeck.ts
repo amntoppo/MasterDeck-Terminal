@@ -123,6 +123,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   startClaude: invoke(CH.startClaude),
   resumeSession: invoke(CH.resumeSession),
   accountFor: invoke(CH.accountFor),
+  folderExists: invoke(CH.folderExists),
   resumeStopped: invoke(CH.resumeStopped),
   tokensByDay: invoke(CH.tokensByDay),
   // A browser never updates the Mac: updates are the window's only.

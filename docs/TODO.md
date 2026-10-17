@@ -908,6 +908,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **New Claude session: account first, last choices per account (#153)**: the account select is
+  the dialog's first field; each account's folder, model, workflow and permissions are kept in
+  localStorage (`shared/newSessionPrefs.ts`) and filled in on open and on an account pick
+  (untouched fields only); gone values fall back with a note (`folderExists`). Branch
+  `worktree-MasterDeck-Terminal-153-new-session-memory`. Open: the memory is per browser, not
+  shared between the Mac's window and the web app (a store on the Mac would share it); the Start
+  dialog (Assign) still remembers per repository, not per account.
+
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
   the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by

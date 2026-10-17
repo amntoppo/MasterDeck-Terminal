@@ -246,6 +246,13 @@ real prompt.
   `<folder>-<n>`), an optional **first message** (without one it starts idle, waiting in its
   terminal), the **model**, the **workflow** template it starts with, and its **permissions**
   (as in your settings, plan first, accept edits, auto, or ask for everything). It opens in a tab.
+  With two or more GitHub accounts the **account** comes first. The dialog remembers, per account,
+  the workspace, model, workflow and permissions you last started with, and opens on the account
+  you last used with its choices filled in; picking another account fills in that account's
+  choices, except for fields you already changed. Name and first message are never remembered. A
+  remembered folder that is gone, or a model or workflow no longer offered, falls back to the
+  default with a short note. The memory is kept per browser (the Mac's window and each browser
+  have their own) and survives restarts.
 - **Terminal in a repo ›**: a shell in any repo of the workspace.
 - **Start from an issue…** (⌘K) and **Resume a past session…** (⌘⇧F).
 
