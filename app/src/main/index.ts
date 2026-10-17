@@ -33,7 +33,7 @@ import { modsReloadOffer, MODS_OFF, type ModsStatus } from "@shared/mods";
 import { readFile, writeFile } from "node:fs/promises";
 import { hoursAccount, type SessionActivity } from "@shared/hours";
 import { homedir, hostname, release, tmpdir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   app,
   BrowserWindow,
@@ -3022,6 +3022,15 @@ function registerIpc(): void {
       ? defaultAccount({ origin: await originNow(cwd) }, getConfig())
       : null,
   );
+  // Open to the web: startClaude already tells a browser whether a folder exists.
+  reg.handle(CH.folderExists, (_e, p: unknown) => {
+    if (typeof p !== "string" || p.length > 4096 || !isAbsolute(p)) return false;
+    try {
+      return statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  });
   reg.handle(CH.resumeStopped, () => sources.resumeStopped());
   reg.handle(CH.tokensByDay, (_e, ids: unknown) =>
     sources.tokensByDay(Array.isArray(ids) ? ids : []),

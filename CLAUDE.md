@@ -174,6 +174,7 @@ web tabs keep working.
 | Built-in workflows (#104) | `shared/builtinWorkflows.ts` (`BUILTIN_WORKFLOWS`, `flowHash`, `rawFlowHash`, `sameAsMark`: the one "edited" rule), `shared/builtin-workflows/md-*.json`, `WorkflowStore.seedBuiltins` / `restoreBuiltin` / `builtinsRemoved` in `main/workflow.ts` (`workflows/builtins.json`), `CH.workflowBuiltinRestore` in `main/index.ts`, the chip and buttons in `renderer/.../WorkflowView.tsx` |
 | Queue | `main/queue.ts`, `main/deckHooks.ts` (hook.sh `/queue` + Stop handshake) |
 | master-agent | `main/masterCli.ts`, `main/assign.ts`, `skills/master`; sessions started on demand from master's chat: `skills/master/lib/master/start.py` + `cli.cmd_start` (`master start`), `assignMe` in `main/boardFlow.ts` |
+| The New Claude session dialog (account first, each account's last choices, #153) | `renderer/.../NewMenu.tsx` (`NewSessionDialog`), `shared/newSessionPrefs.ts` (`parseNewSessionPrefs`, `initialAccount`, `resolveChoice`, `rememberChoice`; localStorage `newSessionPrefs`), `CH.folderExists` in `main/index.ts` |
 | The Start dialog's options (worktree made before the start, permission mode, remembered choices) and its Markdown preview | `shared/startOptions.ts`, `main/startWorktree.ts` (`worktreeInfo`, `createWorktree`), `worktreeFolder` in `main/remoteGuards.ts`, `AssignRequest.permissionMode` → `master add --permission-mode` → `spawn.command`, `shared/markdown.ts` + `renderer/.../MarkdownView.tsx` (reuse for any Markdown view), `renderer/.../AssignDialog.tsx` |
 | Where a ticket's session starts (per-account workspace, the repository's checkout) | `skills/master/lib/master/checkout.py` (`resolve`, `scan`: the one implementation), `config.workspace_for`, `rules._assign`, `cli.cmd_draft_assign` / `cmd_checkout`; the app only shows it: `shared/startFolder.ts`, `renderer/.../AssignDialog.tsx` (`StartFolderLine`), `inRepoFolder` in `main/assign.ts` (PR review), `chosenFolder` in `main/remoteGuards.ts`; every account's repos on disk: `main/checkouts.ts` (`workspaceRepos`, behind `Ops.repos()`); whether a folder's branch is the session's: `ownsFolderBranch` in `shared/parked.ts`, `main/parked.ts` (`parked-sessions.json`, written by `master spawn`: `checkout.parked`), `Sources.ownsBranch`; Setup: `workspacesFromConfig` / `accountsFromSetup` / `swapPrimaryWorkspace` in `setupAccounts.ts` |
 | Whether Claude Code may work in a folder (its trust prompt), and a start it refused | `skills/master/lib/master/trust.py` (the one reader of Claude Code's `.claude.json`, read only: `trusted`, `wait`, `not_trusted`; `master trust`, `trusted` in `draft-assign` / `checkout`), `MasterCli.trust`, `shared/trust.ts` (`isNotTrusted`, `trustView`, `startBlocked`, `heldForTrust`, `trustHeldAssign`, `startFlags`, `retryRequest`, `waitForTrust`), `renderer/.../TrustFix.tsx` (`useTrust`, `TrustNote`: Start dialog, `StartRefused` in `App.tsx`, the held `ProposalCard`), **Open Claude there…**: `openClaude` in `main/index.ts`, `claudeFolder` in `main/remoteGuards.ts`, the `claude-here` pane; Try again: `AssignRequest.retry` / `retryHeld` in `main/assign.ts` → `MasterCli.spawnHeld` (`master spawn --held-for-trust`, `held_for` in the ledger); who asked an inbox action: `inboxActCall` in `main/remoteGuards.ts` |
@@ -420,6 +421,18 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-17)
+
+- **New Claude session remembers per account (#153)** on branch
+  `worktree-MasterDeck-Terminal-153-new-session-memory` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). The account is the dialog's first field; each
+  account's folder, model, workflow and permissions are kept in localStorage
+  (`shared/newSessionPrefs.ts`, key `newSessionPrefs`) and filled in on open (the last account) and
+  on an account pick (untouched fields only); a gone folder (`folderExists`, a new read open to the
+  web), model, workflow or mode falls back with a note. Spec and plan in this repo's
+  `docs/superpowers/{specs,plans}/2026-10-17-new-session-memory*`. Checked: typecheck, vitest, and
+  the web preview with two accounts (`/?preview=accounts`) at 1400 and 390 px: account first, a
+  start saved and filled in again after a reload, a switch keeping a touched model, the gone-value
+  notes. Not checked: the Electron window, the real web app over the bridge, Windows.
 
 - **Schedules (#140)** are built on branch `worktree-MasterDeck-Terminal-140-schedules` (PR, not
   merged, **not installed**: the rebuild of the real app waits for the user's word). A rail view
