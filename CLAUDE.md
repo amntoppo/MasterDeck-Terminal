@@ -167,6 +167,7 @@ web tabs keep working.
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
 | Who can be assigned (Assign popup, Assignee filter) | `main/assignUsers.ts` (`AssignableUsers`: per repository, as its account, an hour), `GitHub.assignableUsers(force, repo)`, `shared/boardFilter.ts` (`assignChoices`, `assignSeed`, `tabFilterUsers`), `renderer/.../AssignPopup.tsx`; `state.users` is the primary issue repo's only. A card's GitHub calls go out as `accountClients.forCard` (its repository's account, else the account with that owner, else the account whose board holds it, else the primary; `cardBoardless` is the matching gate): use it, not `forRepo`, for anything done for a card; its board writes (status moves) as `forBoard` (the board's account); pass the card's `project` (`Ticket.project`, `knownProject` for input) where you have it |
 | A ticket's description and sub-issues in the Board's popups | `shared/subIssues.ts` (`parseSubIssues`, `subIssueRows`, `subIssueProgress`), `GitHub.subIssues` / `issueBody` in `main/github.ts` (`issue:subIssues`, `issue:body`), `renderer/.../SubIssues.tsx`, `AssignPopup.tsx`, `AssignDialog.tsx` |
+| Automate Review / Merge automatically (#157) | `shared/autoReview.ts` (`autoSearch`, `autoQuery`, `parseAutoAnswer`, `reconcile`, `readyToMerge`, `mergeGuard`, `mergeArgs`, `autoPrompt`, `inputBoxRows`, `autoStatusLine`), `main/autoReview.ts` (`AutoReview`, `paneReady`, `readTurn`; `auto-review.json`), the folder's turn hooks and `post-review.sh --auto` in `main/prReviewDirs.ts` (`prReviewSettings`, `prReviewTurn`, `prReviewAuto`, `writePrReviewAuto`, `writePrReviewFiles`), `CH.autoReviewSet` and the `review:` monitor in `main/index.ts`, `state.autoReview`, the `auto-review` notification type (`Notice.url`), `renderer/.../AutoReviewWidget.tsx`, `TerminalView` `onInputBox`, `PrsView.tsx` (`widgetPlace`, pane adoption) |
 | Review with Claude (Pull requests view, #149) | `shared/prReview.ts` (`prReviewContext`, `prReviewBriefing`, `prRef`, `reviewPrompt`, `prReviewSpecError`), `main/prReviewDirs.ts` (`prReviewDir`, `prReviewPane`, `writePrReviewDir`, `prReviewGuard` + `prReviewPost` (guard and post script, outside the session's folder), `prReviewScript`, `PR_REVIEW_SETTINGS`, `isPrReviewSession`), `CH.prReviewPrepare` in `main/index.ts`, the `pr-review` pane (`paneCommand`, `PtyManager`, `WEB_PANES`), `renderer/.../PrsView.tsx` (`keptReviews`, `openReview`, the panel), `PrPopup.tsx` (`onReviewWithClaude`, passed by `App.openPr`) |
 | Create a GitHub board | `main/boardCreate.ts` (`BoardCreator`, `accountGh`, `columnsOf`), `shared/boardCreate.ts`, `renderer/.../CreateBoardDialog.tsx` |
 | Create with Claude (Board ticket builder) | `main/ticketDirs.ts` (folders, one per tab with two or more accounts; request pump), `shared/ticketBuilder.ts`, `renderer/.../BoardView.tsx`; its settings bar (#68): `shared/ticketSettings.ts` (`readSettings`, `enforceSettings`: the pump puts the bar's values in place of the session's flags), `renderer/.../TicketSettingsBar.tsx`, `settingsFrom` / `changeSettings` / `boardSprints` in `NewTicket.tsx` |
@@ -421,6 +422,22 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
 ## Current state and next steps (2026-10-17)
+
+- **Automate Review and Merge automatically (#157)** are built on branch
+  `worktree-MasterDeck-Terminal-157-auto-review` (PR #159, on top of #149, now merged). Not
+  merged, **not installed**. A card at the Review with
+  Claude chat's bottom left (lined up with Claude's input box, ◂ Auto hides it) with two switches
+  per PR tab: Automate Review (a MasterDeck monitor `review:<tab>` reads review requests every 2
+  minutes as the tab's account, types each into the tab's review session when its turn is over,
+  the post script's `--auto` form (allowed in the folder's settings by its absolute path) posts a
+  comment review only to what MasterDeck queued, re-review only on
+  new commits) and Merge automatically (off by default, a warning first, the Mac's window only;
+  merges only what `readyToMerge` / `mergeGuard` pass, `--match-head-commit`, never `--admin`).
+  Needs you: an Automated review type with View on GitHub. Spec and plan in this repo's
+  `docs/superpowers/{specs,plans}/2026-10-17-auto-review*`. Checked: typecheck, vitest, the web
+  preview at 1440 and 390 px (the card on the input box's rules, the warning, the toggle, the
+  phone's inline card). Not checked: a real GitHub read, a real automated review, post or merge,
+  the installed app, Windows. Open points: TODO ("Automate Review").
 
 - **New Claude session remembers per account (#153)** on branch
   `worktree-MasterDeck-Terminal-153-new-session-memory` (PR, not merged, **not installed**: the

@@ -185,6 +185,11 @@ export class PtyManager {
     return this.panes.get(id)?.buffer.slice(-chars) ?? "";
   }
 
+  /** The panes whose id starts with `prefix`. */
+  ids(prefix: string): string[] {
+    return [...this.panes.keys()].filter((id) => id.startsWith(prefix));
+  }
+
   /** A pane whose process is still running. */
   isAlive(id: string): boolean {
     const p = this.panes.get(id);

@@ -182,7 +182,8 @@ import { BoardOps, linkTicket, ticketBuilderScript } from "./boardOps";
 import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
-import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, writePrReviewContext, writePrReviewDir } from "./prReviewDirs";
+import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
+import { AutoReview, paneReady, readTurn } from "./autoReview";
 import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
@@ -822,6 +823,86 @@ const watches = new Watches(
     });
   },
 );
+/** Whether a review folder has a conversation to continue (`claude --continue`). */
+function prReviewCanContinue(dir: string): boolean {
+  try {
+    return readdirSync(join(paths.projectsDir, dir.replace(/[^A-Za-z0-9]/g, "-"))).some((f) => f.endsWith(".jsonl"));
+  } catch {
+    return false;
+  }
+}
+// Automate Review and Merge automatically (#157): the PR tabs' review sessions, fed by MasterDeck.
+const autoReview = new AutoReview(join(paths.home, "auto-review.json"), {
+  ghFor: (account) => forAccount(account).gh,
+  paused: (o) => sources.isGithubPaused(o),
+  scope: (account) => {
+    const cfg = getConfig();
+    const a = cfg.accounts.find((x) => x.login === account) ?? cfg.accounts.find((x) => x.primary);
+    return { owner: a?.owner || cfg.owner || null, ownerType: a?.ownerType ?? cfg.ownerType };
+  },
+  panes: {
+    live: (tab) => ptys.ids(`pr-review:${tab}:`).find((id) => ptys.isAlive(id)) ?? null,
+    ready: (tab, id, sentAt) =>
+      paneReady(readTurn(prReviewTurn(prReviewGuard(paths.home, tab))), sentAt, ptys.inputAt(id), ptys.tail(id, 3000), Date.now()),
+    type: (id, text) => {
+      ptys.write(id, text);
+      setTimeout(() => ptys.write(id, "\r"), 150);
+    },
+    start: (tabId, tab, prompt) => {
+      // The window's panel adopts it (state.autoReview.tabs[id].pane).
+      let dir: string;
+      try {
+        dir = prReviewDir(paths.home, tabId);
+      } catch (e) {
+        return { error: (e as Error).message };
+      }
+      if (!prReviewDirOk(paths.home, dir)) return { error: "refusing a PR review folder that is a link" };
+      const multi = isMulti(getConfig());
+      if (multi && !tab.account) return { error: "the tab has no account" };
+      const guard = prReviewGuard(paths.home, tabId);
+      const post = prReviewPost(paths.home, tabId);
+      const briefing = prReviewBriefing(tab.account ?? latest?.me ?? null, post);
+      try {
+        // The window's context (the picked PR) stays; a folder never set up gets one from the tab.
+        if (existsSync(join(dir, "CLAUDE.md"))) writePrReviewFiles(dir, briefing, guard, post);
+        else
+          writePrReviewDir(
+            dir,
+            prReviewContext({ tabId, tab: tab.name, ...(multi && tab.account ? { account: tab.account } : {}), filters: tab.filters }, latest?.teamPrs ?? []),
+            briefing,
+            guard,
+            post,
+          );
+      } catch (e) {
+        return { error: (e as Error).message };
+      }
+      const id = `pr-review:${tabId}:auto${Date.now()}`;
+      const r = ptys.open(
+        id,
+        { kind: "pr-review", resume: prReviewCanContinue(dir), tab: tabId, prompt, ...(multi && tab.account ? { account: tab.account } : {}) },
+        0,
+        0,
+      );
+      return r.ok ? { paneId: id } : { error: r.message ?? "could not start the review session" };
+    },
+  },
+  writeQueue: (tabId, urls) => {
+    try {
+      writePrReviewAuto(prReviewGuard(paths.home, tabId), urls);
+    } catch (e) {
+      console.error(`auto review: ${String(e)}`);
+    }
+  },
+  notify: (n) =>
+    notifier.dispatch("auto-review", {
+      title: n.title,
+      body: n.body,
+      url: n.url,
+      target: { needsYou: true },
+      click: () => void shell.openExternal(n.url),
+    }),
+  onChange: () => sources.changed(),
+});
 function mtimeMs(p: string): number {
   try {
     return statSync(p).mtimeMs;
@@ -1164,6 +1245,7 @@ const notifier = new Notifier(() => sources.getSettings(), {
       title: note.title,
       body: note.body,
       sessionKey: note.target.sessionKey ?? null,
+      ...(note.url ? { url: note.url } : {}),
     }),
   // ponytail: no mobile app yet (#134); the channel is listed but unavailable, so nothing reaches here.
   mobile: () => {},
@@ -2938,14 +3020,30 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, message: (err as Error).message, canContinue: false };
     }
-    const proj = join(paths.projectsDir, dir.replace(/[^A-Za-z0-9]/g, "-"));
-    let canContinue = false;
-    try {
-      canContinue = readdirSync(proj).some((f) => f.endsWith(".jsonl"));
-    } catch {
-      /* first time */
-    }
+    const canContinue = prReviewCanContinue(dir);
     return { ok: true, message: ctx.selected ? `reviewing ${ctx.selected.repo}#${ctx.selected.number}` : "ready", canContinue };
+  });
+  // Automate Review / Merge automatically for a PR tab (#157). Two or more accounts: the tab's own,
+  // connected; a browser never moves a tab to another account, nor turns Merge automatically on.
+  reg.handle(CH.autoReviewSet, (e, tabId: unknown, raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    // A browser's tabs are its own (same ids as the window's): only the window forgets a tab.
+    if (o.forget === true && typeof tabId === "string") {
+      if (isRemote(e)) return { ok: true, message: "kept" };
+      autoReview.forget(tabId);
+      return { ok: true, message: "forgotten" };
+    }
+    const cfg = getConfig();
+    let account: string | null = null;
+    if (isMulti(cfg)) {
+      const want = typeof o.account === "string" ? o.account.toLowerCase() : "";
+      account = cfg.accounts.find((a) => a.login.toLowerCase() === want)?.login ?? null;
+      if (!account) return { ok: false, message: "refusing Automate Review as an account that is not connected" };
+      const held = typeof tabId === "string" ? prReviewFolderAccount(paths.home, tabId) : null;
+      if (isRemote(e) && held && held.toLowerCase() !== account.toLowerCase())
+        return { ok: false, message: `refusing Automate Review as ${account}: that tab's session works as ${held}` };
+    }
+    return autoReview.set(tabId, { ...o, account }, isRemote(e));
   });
   // Labels, milestones and people who can be assigned in a repo (the New ticket dialog), cached a while.
   reg.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {
@@ -3114,14 +3212,18 @@ function registerIpc(): void {
     typeof id === "string"
       ? id.startsWith("pr:")
         ? prWatch.stop(id)
-        : watches.stop(id)
+        : id.startsWith("review:")
+          ? autoReview.stop(id)
+          : watches.stop(id)
       : false,
   );
   reg.handle(CH.watchEvents, (_e, id: unknown) =>
     typeof id === "string" && id.length <= 300
       ? id.startsWith("pr:")
         ? prWatch.events(id)
-        : watches.events(id)
+        : id.startsWith("review:")
+          ? autoReview.events(id)
+          : watches.events(id)
       : [],
   );
   reg.handle(CH.startHere, (_e, o: Parameters<typeof startHere>[0]) =>
@@ -4584,8 +4686,11 @@ app.whenReady().then(async () => {
   sources.setWatchInfo(() => [
     ...watches.info(),
     ...prWatch.info(latest?.sessions ?? []),
+    ...autoReview.info(),
   ]);
   prWatch.load();
+  autoReview.load();
+  sources.setAutoReview(() => autoReview.view());
   // Only PRs whose session can take a message now: a parked session's offer stays in Needs you.
   sources.setWatchedPrs(() =>
     prWatch.watched(
@@ -4600,6 +4705,17 @@ app.whenReady().then(async () => {
     ),
   );
   setInterval(() => void prWatch.poll(), 60_000);
+  // Automate Review: a read every 2 minutes per tab that has it on (at once when switched on), and
+  // the next PR typed into a review session as soon as its turn is over.
+  if (!SMOKE)
+    setInterval(() => {
+      try {
+        if (autoReview.due()) void autoReview.poll().catch((e) => console.error(`auto review: ${String(e)}`));
+        autoReview.deliver();
+      } catch (e) {
+        console.error(`auto review: ${String(e)}`);
+      }
+    }, 2_000);
   // Schedules: every 30 s, and at once when the Mac wakes (missed runs, as each schedule says).
   if (!SMOKE) {
     setInterval(() => void scheduler.tick(), SCHED_TICK_MS);

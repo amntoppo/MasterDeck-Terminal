@@ -1562,6 +1562,8 @@ function ExtraCard({
       ? "LOOP PAUSED"
       : i.kind === "error"
       ? "API ERROR"
+      : i.kind === "notice"
+      ? "NOTICE"
       : i.detail.type === "nudge"
         ? `${i.kind === "idle" ? "IDLE" : "WAITING"} ${i.detail.minutes}M`
         : i.detail.type === "context"
@@ -1615,6 +1617,11 @@ function ExtraCard({
           >
             {msg}
           </span>
+        )}
+        {i.detail.type === "notice" && i.detail.url && (
+          <button className="btn" onClick={() => deck().openExternal((i.detail as { url: string }).url)}>
+            View on GitHub
+          </button>
         )}
         {owner && (
           <button className="btn" onClick={() => onOpenSession(owner)}>

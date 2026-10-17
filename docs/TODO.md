@@ -526,6 +526,25 @@ fixes it, and move the item here to "Recently done".
 - **The phone API `session.start` has no `peers`.** A session started from a phone cannot be linked at
   start; it can be linked after, from its details.
 
+## Automate Review: open points (2026-10-17, issue #157)
+
+- **Not run against GitHub or a real Claude session.** The poller ran with a fake gh and fake
+  panes, the script's `--auto` with a stand-in gh, the widget in the web preview. The first real
+  automated review, notice and merge are the user's (turn Merge automatically on only after a few
+  reviews looked right).
+- **Turn detection rests on hooks.** Esc ends a turn without a Stop hook: after 15 minutes the
+  screen decides (`paneReady`, `ponytail:`). If Claude Code adds an interrupt hook, use it.
+- **A typed line can meet a half-typed draft** when the user typed into the panel more than 30 s
+  ago and left it. Clear the input first (Ctrl-U) if that bites.
+- **One query per tab.** Two tabs of one account with the switch on read GitHub twice per round.
+  Group them by account and scope if rate limits show.
+- **`mergeStateStatus`** must be readable without a preview header on the user's GitHub (it is on
+  github.com); on GitHub Enterprise Server check it.
+- **The widget's status line** is cut at 350 px; the full text is in its title.
+- **A home path that needs shell quotes** (a space in it) makes the `--auto` form quoted in the
+  briefing, which the settings' prefix rule (`Bash(<post> --auto:*)`) may not match: each automated
+  post is then asked for. Fine for `~/.claude/masterdeck`; check if MASTERDECK_HOME moves.
+
 ## Review with Claude: open points (2026-10-17, issue #149)
 
 - **Not run with a real Claude session or a real post.** Checked with a stand-in `claude` in the
@@ -975,6 +994,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Automate Review and Merge automatically (#157)**: a card beside the Review with Claude chat,
+  a MasterDeck monitor per PR tab that sends review requests to the tab's review session, follows
+  each PR to merged, notices in Needs you, and an opt-in merge guarded by `readyToMerge` /
+  `mergeGuard`. Branch `worktree-MasterDeck-Terminal-157-auto-review` (stacked on #149).
 - **New Claude session: account first, last choices per account (#153)**: the account select is
   the dialog's first field; each account's folder, model, workflow and permissions are kept in
   localStorage (`shared/newSessionPrefs.ts`) and filled in on open and on an account pick
@@ -992,6 +1015,7 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   in its `context.json`, a briefing on how to review, and `post-review.sh`, the one write, only
   after the user's yes, only to the picked PR, as the tab's account. Branch
   `worktree-MasterDeck-Terminal-149-pr-review-panel`.
+
 - **Clone a session (#136)**: right-click → **Clone…** starts `claude --bg --resume <id>
   --fork-session -n <name>` in the same folder, as the same account, with the model and permission
   mode carried when valid; the original is not superseded; the clone takes none of the original's
