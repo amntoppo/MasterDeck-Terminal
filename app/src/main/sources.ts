@@ -68,6 +68,7 @@ import {
 } from "@shared/prscan";
 import { BUILDER_NAME } from "@shared/flowBuilder";
 import { isTicketBuilderSession } from "./ticketDirs";
+import { isPrReviewSession } from "./prReviewDirs";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -2435,6 +2436,7 @@ export class Sources {
               (s) =>
                 s.name !== BUILDER_NAME &&
                 !isTicketBuilderSession(s, this.paths.home) &&
+                !isPrReviewSession(s, this.paths.home) &&
                 resolve(s.cwd || "/") !==
                   resolve(join(this.paths.home, "workflow-builder")),
             ),

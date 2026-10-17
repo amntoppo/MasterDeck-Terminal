@@ -9,6 +9,7 @@ import type { PrSummary } from "./prSummary";
 import type { SubIssue } from "./subIssues";
 import type { WatchEvent } from "./watches";
 import type { PrDetail } from "./prDetail";
+import type { PrReviewRequest } from "./prReview";
 import type { Settings } from "./settings";
 import type { UpdateState } from "./updates";
 import type { MeetingsAnswer, MeetingsGrant, RecordAnswer } from "./meetings";
@@ -281,6 +282,7 @@ export const CH = {
   workspaceRepos: "app:workspaceRepos",
   ticketCreate: "ticket:create",
   ticketBuilderPrepare: "ticket:builderPrepare",
+  prReviewPrepare: "pr:reviewPrepare",
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
@@ -593,6 +595,14 @@ export interface DeckApi {
   /** Set up the Board's ticket session: its briefing and where the + was clicked. */
   ticketBuilderPrepare(
     ctx: unknown,
+  ): Promise<CliResult & { canContinue: boolean }>;
+  /**
+   * Set up a PR tab's review session (Pull requests → Review with Claude): its briefing, and its
+   * context (the tab's filters, the selected PR, looked up in MasterDeck's own list). Called again
+   * when the selection or the filters change; `canContinue`: the folder has a conversation to continue.
+   */
+  prReviewPrepare(
+    req: PrReviewRequest,
   ): Promise<CliResult & { canContinue: boolean }>;
   /** Tickets the Board's session created. */
   onTicketsCreated(
