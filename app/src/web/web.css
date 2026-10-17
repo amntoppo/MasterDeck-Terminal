@@ -141,3 +141,13 @@ html.phone .filters-sheet-body .mpick-row { padding: 9px 10px; font-size: 14px; 
 .app.phone .bcard-note:not(.has) { opacity: .55; }
 html.phone .repo-picker .mpick-row { padding: 10px; font-size: 14px; }
 html.phone .repo-picker .wt-list { max-height: calc(var(--vvh, 100dvh) - 240px) !important; }
+
+/* Schedules (#140): each schedule a stacked card on a phone. */
+.app.phone .sched-tbl thead { display: none; }
+.app.phone .sched-tbl tr { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.app.phone .sched-tbl td { grid-column: 2; border: none; padding: 2px 0; }
+.app.phone .sched-tbl td:first-child { grid-column: 1; grid-row: 1 / span 5; }
+.app.phone .sched-tbl td.sched-actions { text-align: left; padding-top: 6px; }
+.app.phone .sched-tbl .sched-actions .btn:first-child { margin-left: 0; }
+.app.phone .sched-what { max-width: none; }
+.app.phone .sched-runs th:nth-child(3), .app.phone .sched-runs td:nth-child(3) { display: none; }

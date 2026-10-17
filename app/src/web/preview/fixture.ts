@@ -210,6 +210,7 @@ export function fixtureState(noBoard = false): AppState {
       { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
     ],
     schedules: {},
+    schedRuns: { 'bg-4': { scheduleId: 'p2', name: 'Nightly docs' } },
     loops: {},
     sources: { agents: 'ok', github: 'ok' },
     errors: [],

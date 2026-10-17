@@ -157,6 +157,7 @@ web tabs keep working.
 | Terminals | `main/ptys.ts` (`PtyManager`), `shared/paneCommand.ts`, `renderer/.../TerminalView.tsx` |
 | Hooks | `main/hooks.ts` (settings.json installs, `hookStatus`, one-time `migrateLegacyHooks` of the old skill hooks), `main/deckHooks.ts` (MasterDeck's hook script, incl. the master reports guard on `SendMessage`), `shared/deckHooks.ts` |
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
+| Schedules (#140: sessions started on a timer) | `shared/sched.ts` (pure: `normalizeSchedule`, `whenCron`, `nextSlot` in a time zone, `planTick`, `runProgress`, `runCost`), `main/sched.ts` (`Scheduler`: `schedules.json`, `tick`, `runNow`), `startSession` in `main/index.ts` (also `CH.startClaude`), `CH.sched*`, `renderer/.../SchedulesView.tsx`, `AppState.schedRuns` (the session row's chip). Not `shared/schedules.ts` (a session's own CronCreate jobs) |
 | PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
@@ -411,7 +412,19 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
 
-## Current state and next steps (2026-10-16)
+## Current state and next steps (2026-10-17)
+
+- **Schedules (#140)** are built on branch `worktree-MasterDeck-Terminal-140-schedules` (PR, not
+  merged, **not installed**: the rebuild of the real app waits for the user's word). A rail view
+  where a schedule starts a `claude --bg` session on a timer (prompt and/or workflow, folder,
+  account, model, permissions; daily / weekdays / days / every N hours / cron in a time zone), with
+  skip-while-running, a cost limit, notifications, missed runs once (never a burst), and the run
+  history (ARCHITECTURE "Schedules"). Design and plan in `docs/plans/2026-10-17-schedules-*`.
+  Checked: typecheck, vitest, the web preview at 1400 and 390 px, and the isolated app with a
+  stand-in `claude` (a slot started on time with the Berlin wall-clock name, the next slot skipped
+  while it ran, done when it went idle, Run now refused then allowed, a restart with two missed
+  slots: one catch-up run and one skipped row, no burst). Not checked: a real session, a real wake,
+  the web app over the bridge, Windows. Open points: TODO ("Schedules (#140)").
 
 - **Several accounts' accepted simplifications (#37)** on branch
   `worktree-MasterDeck-Terminal-37-accounts-simplifications` (draft PR #132, not merged, **not

@@ -906,8 +906,33 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - The desktop's `platform` / `osVersion` reach the dashboard only from the next release; older Macs show Unknown.
 - Our own download counts (#122 update feed, #89 site) are not written yet (`download_counts.source`).
 
+## Schedules (#140): open points (2026-10-17)
+
+- **Notifications (#135)**: when its registry lands (or this branch lands second), add a
+  `schedule-run` type (System on, Needs you off) to `NOTIFY_TYPES` and send the Scheduler's
+  `notify` through the dispatcher, so Pause all and the per-type cells apply. Today the schedule's
+  own two switches decide alone.
+- Runs need MasterDeck open (no launchd / Task Scheduler job); a missed run is caught up later.
+- A fall-back DST hour repeats wall-clock minutes: a schedule inside it may run twice; on DST days
+  the jump to the next midnight can skip 00:xx slots (`nextSlot`).
+- A workflow's `session-start` steps may be missed on a run's first start: the session's copy is made
+  when the poll first lists it (`WorkflowStore.snapshot`), as for New Claude session. The built-in
+  workflows do their work from `linked` on, so with no ticket they mostly add their turn-end and PR
+  steps.
+- No per-run worktree option; no schedule from a board filter; the cost limit relies on the status
+  line (a run without one is never stopped for cost).
+- Not checked: a real `claude --bg` run (the isolated check used a stand-in `claude`), the real
+  web app over the bridge, a phone, Windows, a real wake from sleep (the resume path is the same
+  tick as a restart, which was checked).
+
 ## Recently done
 
+- **Schedules (#140)**: sessions started on a timer with a prompt and optionally a workflow, in
+  a folder, as an account, with a model and permissions; daily / weekdays / days / every N hours /
+  cron in a time zone; skip while running, a cost limit per run, notify on finish / failure, missed
+  runs once (or skipped) and never a burst; the Schedules view (on/off, Run now, next run, runs with
+  status, cost and session) and a chip in the session list. Branch
+  `worktree-MasterDeck-Terminal-140-schedules`.
 - **Several accounts' accepted simplifications (#37)**: the list left TODO. The workflow builder
   now runs as the primary account (its `--settings`, as master); SSH aliases were already read from
   the files `~/.ssh/config` `Include`s; the other eight (a per-account rate-limit pause, skills by

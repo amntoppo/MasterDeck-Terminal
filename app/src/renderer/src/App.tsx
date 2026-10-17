@@ -48,6 +48,7 @@ import { useUpdate } from "./updates";
 import { badge } from "@shared/updates";
 import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
+import { SchedulesView } from "./components/SchedulesView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
 import { accountLabel, isMulti } from "@shared/accounts";
@@ -206,6 +207,7 @@ export function App() {
         "costs",
         "janitor",
         "workflow",
+        "schedules",
         "settings",
         ...(meetingsHere() ? (["meetings"] as View[]) : []),
       ] as View[]
@@ -719,6 +721,10 @@ export function App() {
     const offItem = deck().onShowInboxItem((id) =>
       setShowItem({ id, at: Date.now() }),
     );
+    // A schedule's notification without a session (a run that never started).
+    const offSched = !isWeb()
+      ? deck().onShowSchedules(() => setView("schedules"))
+      : () => {};
     return () => {
       offAuto();
       offLogin();
@@ -726,6 +732,7 @@ export function App() {
       offFocus();
       offNeeds();
       offItem();
+      offSched();
     };
   }, [state, openSession, arm]);
 
@@ -1270,6 +1277,9 @@ export function App() {
       )}
       {view === "janitor" && <JanitorView state={state} />}
       {view === "workflow" && <WorkflowView state={state} />}
+      {view === "schedules" && (
+        <SchedulesView state={state} onOpenSession={openSession} />
+      )}
       {view === "meetings" && meetingsHere() && (
         <MeetingsView
           agreed={meetingsAgreed(state.settings)}

@@ -56,6 +56,7 @@ export type View =
   | "janitor"
   | "history"
   | "workflow"
+  | "schedules"
   | "meetings";
 
 interface Props {
@@ -303,6 +304,7 @@ export function Sidebar({
         starred={stars.includes(s.key)}
         onStar={() => toggleStar(s.key)}
         loop={rowLoop(state.loops?.[s.sessionId], now)}
+        sched={state.schedRuns?.[s.key]?.name ?? null}
         held={(state.held ?? []).filter((m) => m.sessionKey === s.key).length}
         onClick={() => onOpenSession(s)}
         {...rowProps(s)}
@@ -946,6 +948,7 @@ export function SessionRow({
   starred,
   onStar,
   loop,
+  sched,
   held,
   dragging,
   dropBefore,
@@ -963,6 +966,8 @@ export function SessionRow({
   onStar?: () => void;
   /** Its workflow loop's badge and line (`rowLoop`); none without a loop to show. */
   loop?: { badge: string; line: string } | null;
+  /** The schedule that started it (#140), if one did. */
+  sched?: string | null;
   /** MasterDeck messages waiting for its prompt to be empty (#123). */
   held?: number;
   dragging?: boolean;
@@ -1004,6 +1009,11 @@ export function SessionRow({
             <span className="num">{ticketLabel(s.issueRepo, s.issue)}</span>
           )}
           <AccountBadge login={s.account} ghActive={s.ghActive} />
+          {sched && (
+            <span className="srow-sched" title={`Started by the schedule "${sched}" (Schedules)`}>
+              ⏱ {sched}
+            </span>
+          )}
         </span>
         {loop && (
           <span
