@@ -283,6 +283,18 @@ export function SessionDetails({
         {s.kind === "interactive" && (
           <div className="d-text muted">pid {s.pid} · runs outside the app</div>
         )}
+        {s.clonedFrom && (
+          <div
+            className="d-text muted"
+            title={
+              state.sessions.some((x) => x.key === s.clonedFrom!.key)
+                ? `Started by Clone from ${s.clonedFrom.name}, which keeps running on its own`
+                : `Started by Clone from ${s.clonedFrom.name} (no longer listed)`
+            }
+          >
+            Cloned from {s.clonedFrom.name}
+          </div>
+        )}
       </section>
 
       <WorkflowWidget session={s} state={state} />
