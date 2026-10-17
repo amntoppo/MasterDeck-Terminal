@@ -490,18 +490,22 @@ the code is `sched*`. Design and plan: `docs/plans/2026-10-17-schedules-{design,
   checked; an edit keeps `lastSlot` unless the cron or zone changed; a schedule turned on counts from
   now); `whenCron` (daily / weekdays / weekly / every N hours / cron → a 5-field cron, read by
   `cronField` of `shared/schedules.ts`), `whenText`; `zonedParts` / `nextSlot` (wall-clock minutes
-  in the schedule's IANA zone through `Intl.DateTimeFormat`); `dueSlots` (looks back 2 days at most)
+  in the schedule's IANA zone through `Intl.DateTimeFormat`; searches 5 years at most, and a schedule
+  with no slot there is refused; a midnight jump on a DST day is corrected); `dueSlots` (looks back 2 days at most)
   and `planTick` (a slot at most 5 minutes old runs; older: one `missed` run, or one `skipped` row);
   `runName` (`<slug>-<MMDD-HHmm>` in the zone, `-2` … when taken), `runPrompt`; `runSession` (by bg
-  id, else name), `runProgress` (working / needs-input / busy → running; idle after working, or 3
-  minutes after the start, and waiting on nothing → done; ended before working → failed; never
-  listed for 10 minutes → failed), `runCost` (the cost book's entries with `key === bgId` plus the
+  id, else name), `runProgress` (working / needs-input / busy → running; idle after working (seen
+  working or a cost) and waiting on nothing → done; idle 3 minutes without working, or ended before
+  working → failed; never listed for 10 minutes → failed; still going after 12 hours → failed),
+  `runCost` (the cost book's entries with `key === bgId` plus the
   live status line when the current id is not in the book yet), `withRun` (50 runs per schedule).
 - `main/sched.ts` `Scheduler`: `<home>/schedules.json` (`{version: 1, schedules, runs}`, temp file +
   rename; an unreadable file is copied aside as `.unreadable-<ts>`). Everything goes through one
   promise queue (`serial`), so a tick, Run now and an edit never interleave. `tick()` waits for the
   first session list (`state()` null until `sessionsLoaded`), follows running runs (progress, cost,
-  the cost limit: `claude stop` through `stopBg`, status `stopped`), notifies on the end of a run,
+  the cost limit: `claude stop` through `stopBg`, status `stopped`; a failed stop keeps it running
+  and is tried again next tick), notifies on the end of a run and on the first of a stretch of
+  overlap skips,
   then plans each schedule: `lastSlot` moves to the latest slot before anything starts, the file is
   written before `claude --bg` runs, and at most one `missed` run starts per tick. A schedule that
   skips overlaps records a `skipped` row while a run is `running`; Run now is refused instead.
@@ -510,7 +514,8 @@ the code is `sched*`. Design and plan: `docs/plans/2026-10-17-schedules-{design,
   account, else the folder's `origin`'s), `WorkflowStore.setPending` for a workflow, `claude --bg -n
   <name> [--model] [--permission-mode] <prompt>`, `SessionAccounts.set/expect`.
 - Wiring (`main/index.ts`): the `Scheduler` beside the notes store; `tick` every 30 s
-  (`SCHED_TICK_MS`) and on `powerMonitor` `resume` (not in SMOKE); `notify` builds a `NotifyEvent`
+  (`SCHED_TICK_MS`), once when `sessionsLoaded` turns true, and on `powerMonitor` `resume` after
+  `sources.refreshAgents()` (none in SMOKE); `notify` builds a `NotifyEvent`
   whose target is the run's session (`sessionKey`), else `schedules: true` (`reveal` emits
   `CH.showSchedules`, the window opens the view); `onChange` emits `sched:changed` and
   `sources.changed()`. The state callback sets `AppState.schedRuns` (`Scheduler.tags()`: bg id →

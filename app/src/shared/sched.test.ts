@@ -122,6 +122,22 @@ describe('nextSlot in a time zone', () => {
       utc('2026-10-17T18:15:00'),
     ])
   })
+  it('a weekly midnight slot survives the spring DST change (New York, 8 March 2026)', () => {
+    expect(nextSlots('0 0 * * 1', utc('2026-03-01T12:00:00'), 'America/New_York', 3)).toEqual([
+      utc('2026-03-02T05:00:00'),
+      utc('2026-03-09T04:00:00'),
+      utc('2026-03-16T04:00:00'),
+    ])
+    expect(nextSlots('30 0 * * 1-5', utc('2026-03-27T12:00:00'), 'Europe/Berlin', 2)).toEqual([utc('2026-03-29T22:30:00'), utc('2026-03-30T22:30:00')])
+  })
+  it('a cron that never matches returns null quickly', () => {
+    const t0 = Date.now()
+    expect(nextSlot('0 0 31 2 *', utc('2026-10-17T00:00:00'), 'UTC')).toBeNull()
+    expect(Date.now() - t0).toBeLessThan(250)
+  })
+  it('weekday 7 is Sunday, also in ranges', () => {
+    expect(nextSlot('0 9 * * 6-7', utc('2026-10-17T10:00:00'), 'UTC')).toBe(utc('2026-10-18T09:00:00'))
+  })
   it('null for a bad cron or zone', () => {
     expect(nextSlot('x', 0, 'UTC')).toBeNull()
     expect(nextSlot('0 9 * * *', 0, 'Mars/Base')).toBeNull()
@@ -149,6 +165,9 @@ describe('dueSlots / planTick', () => {
   it('missed slots are skipped when the schedule says so', () => {
     const p = planTick(sched({ missed: 'skip' }), utc('2026-10-17T12:00:00'))
     expect(p).toMatchObject({ kind: 'skip', slot: utc('2026-10-17T09:00:00') })
+  })
+  it('a clock that jumped back does not strand a schedule', () => {
+    expect(planTick(sched({ lastSlot: utc('2026-10-20T00:00:00') }), utc('2026-10-17T09:00:20'))).toMatchObject({ kind: 'run', slot: utc('2026-10-17T09:00:00') })
   })
   it('a paused schedule does nothing', () => {
     expect(planTick(sched({ enabled: false }), utc('2026-10-17T09:00:20'))).toEqual({ kind: 'none' })
@@ -186,10 +205,17 @@ describe('runProgress', () => {
   it('idle after working is done', () => {
     expect(runProgress(run({ seen: true, seenWorking: true, sessionId: session().sessionId }), session({ state: 'idle' }), now)).toEqual({ status: 'done', endedAt: now })
   })
-  it('idle before working waits a little, then is done', () => {
+  it('idle before working waits a little, then failed (it never started)', () => {
     const r = run({ seen: true, sessionId: session().sessionId })
     expect(runProgress(r, session({ state: 'idle' }), now)).toBeNull()
-    expect(runProgress(r, session({ state: 'idle' }), 1_000_000 + 4 * M)).toMatchObject({ status: 'done' })
+    expect(runProgress(r, session({ state: 'idle' }), 1_000_000 + 4 * M)).toMatchObject({ status: 'failed', reason: 'it never started working' })
+  })
+  it('a cost counts as having worked (a run faster than a poll)', () => {
+    expect(runProgress(run({ seen: true, costUsd: 0.02 }), session({ state: 'idle' }), now)).toMatchObject({ status: 'done' })
+  })
+  it('a run with no end after 12 hours stops counting as running', () => {
+    const r = run({ seen: true, seenWorking: true })
+    expect(runProgress(r, session({ state: 'needs-input' }), 1_000_000 + 13 * H)).toMatchObject({ status: 'failed', reason: expect.stringMatching(/12 hours/) })
   })
   it('waiting on the user or on a monitor is still running', () => {
     const r = run({ seen: true, seenWorking: true, sessionId: session().sessionId })
@@ -203,7 +229,8 @@ describe('runProgress', () => {
   it('never listed fails after the timeout; gone after being seen is done', () => {
     expect(runProgress(run(), null, now)).toBeNull()
     expect(runProgress(run(), null, 1_000_000 + 11 * M)).toMatchObject({ status: 'failed' })
-    expect(runProgress(run({ seen: true }), null, now)).toMatchObject({ status: 'done' })
+    expect(runProgress(run({ seen: true, seenWorking: true }), null, now)).toMatchObject({ status: 'done' })
+    expect(runProgress(run({ seen: true }), null, now)).toMatchObject({ status: 'failed' })
   })
   it('finished runs do not change', () => {
     expect(runProgress(run({ status: 'done' }), session(), now)).toBeNull()
@@ -269,6 +296,8 @@ describe('normalizeSchedule', () => {
     expect(msg({ maxCostUsd: -1 })).toMatch(/cost/)
     expect(msg({ account: '-x' })).toMatch(/login/)
     expect(msg({ workflow: '../x' })).toMatch(/workflow/)
+    expect(msg({ when: { kind: 'cron', expr: '0 0 31 2 *' } })).toMatch(/never runs/)
+    expect(msg({ when: { kind: 'hours', every: 5, minute: 0 } })).toMatch(/divide a day/)
     expect(normalizeSchedule(base, null, 0, () => false, () => 'x')).toEqual({ ok: false, message: 'pick a folder that exists' })
   })
   it('a workflow alone is enough', () => {
@@ -280,8 +309,10 @@ describe('normalizeSchedule', () => {
     expect(same).toMatchObject({ ok: true, schedule: { id: 'keep', createdAt: 7, lastSlot: 42, updatedAt: 9000 } })
     const moved = normalizeSchedule({ ...base, when: { kind: 'daily', time: '03:00' } }, prev, 9000, ok, () => 'x')
     expect(moved).toMatchObject({ ok: true, schedule: { lastSlot: 9000 } })
-    const resumed = normalizeSchedule(base, { ...prev, enabled: false }, 9000, ok, () => 'x')
-    expect(resumed).toMatchObject({ ok: true, schedule: { lastSlot: 9000 } })
+    const resumed = normalizeSchedule({ ...base, enabled: true }, { ...prev, enabled: false }, 9000, ok, () => 'x')
+    expect(resumed).toMatchObject({ ok: true, schedule: { lastSlot: 9000, enabled: true } })
+    // The editor sends no on/off: a pause made meanwhile stays.
+    expect(normalizeSchedule(base, { ...prev, enabled: false }, 9000, ok, () => 'x')).toMatchObject({ ok: true, schedule: { enabled: false } })
   })
 })
 

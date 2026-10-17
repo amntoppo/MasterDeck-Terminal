@@ -56,6 +56,8 @@ export interface SchedDeps {
 /** Session keys of runs this recent carry the schedule's chip in the session list. */
 const TAG_MS = 30 * 86_400_000
 
+const OVERLAP = 'the previous run is still going'
+
 const money = (n: number) => `$${n < 10 ? n.toFixed(2) : n.toFixed(0)}`
 
 /**
@@ -151,7 +153,7 @@ export class Scheduler {
       if (!s) return { ok: false, message: 'that schedule is gone' }
       const st = this.d.state()
       if (!st) return { ok: false, message: 'the session list is still loading; try again in a moment' }
-      if (s.skipIfRunning && this.running(s.id)) return { ok: false, message: 'the previous run is still going' }
+      if (s.skipIfRunning && this.running(s.id)) return { ok: false, message: OVERLAP }
       const r = await this.startRun(s, null, 'manual', undefined, st)
       return r.status === 'failed' ? { ok: false, message: r.reason ?? 'it did not start' } : { ok: true, message: `started ${r.sessionName}` }
     })
@@ -184,8 +186,14 @@ export class Scheduler {
       if (p.trigger === 'missed' && caughtUp) continue
       this.patch(s.id, { lastSlot: p.slot })
       if (s.skipIfRunning && this.running(s.id)) {
-        this.addRun(this.skipped(s, p.slot, p.trigger, 'the previous run is still going'))
+        const mine = this.data.runs.filter((r) => r.scheduleId === s.id)
+        const first = mine.at(-1)?.reason !== OVERLAP
+        const skip = this.skipped(s, p.slot, p.trigger, OVERLAP)
+        this.addRun(skip)
         this.write()
+        // Once per stretch of skips (with the failure switch): a run that never ends would otherwise
+        // stop the schedule without a word.
+        if (first) this.tell(skip, s)
         continue
       }
       if (p.trigger === 'missed') caughtUp = true
@@ -208,11 +216,9 @@ export class Scheduler {
       const sched = this.data.schedules.find((x) => x.id === r.scheduleId)
       if (live && next.status === 'running' && sched?.maxCostUsd && cost > sched.maxCostUsd && next.bgId) {
         const stop = await this.d.stop(next.bgId)
-        Object.assign(upd, {
-          status: 'stopped',
-          endedAt: now,
-          reason: stop.ok ? `over its cost limit (${money(sched.maxCostUsd)}); the session was stopped` : `over its cost limit (${money(sched.maxCostUsd)}); stopping it failed: ${stop.message.slice(0, 200)}`,
-        })
+        // A stop that failed leaves it running: the next tick tries again.
+        if (stop.ok) Object.assign(upd, { status: 'stopped', endedAt: now, reason: `over its cost limit (${money(sched.maxCostUsd)}); the session was stopped` })
+        else upd.reason = `over its cost limit (${money(sched.maxCostUsd)}); stopping it failed, trying again: ${stop.message.slice(0, 200)}`
       }
       if (!Object.keys(upd).length) continue
       Object.assign(r, upd)
@@ -276,11 +282,13 @@ export class Scheduler {
     if (!s) return
     const ok = r.status === 'done'
     if (ok ? !s.notify.finish : !s.notify.failure) return
-    const word = ok ? 'finished' : r.status === 'stopped' ? 'stopped' : 'failed'
+    const word = ok ? 'finished' : r.status === 'stopped' ? 'stopped' : r.status === 'skipped' ? 'skipped' : 'failed'
     const took = r.endedAt ? Math.max(1, Math.round((r.endedAt - r.startedAt) / 60_000)) : null
     const body = ok ? [r.sessionName, r.costUsd ? money(r.costUsd) : null, took ? `${took} min` : null].filter(Boolean).join(' · ') : (r.reason ?? r.sessionName)
+    // A skip points at the run that is still going.
+    const key = r.status === 'skipped' ? (this.data.runs.find((x) => x.scheduleId === r.scheduleId && x.status === 'running')?.bgId ?? null) : r.bgId
     try {
-      this.d.notify({ title: `${s.name}: ${word}`, body, sessionKey: r.bgId })
+      this.d.notify({ title: `${s.name}: ${word}`, body, sessionKey: key })
     } catch (e) {
       console.error('schedules: notify failed', e)
     }

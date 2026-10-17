@@ -105,6 +105,12 @@ export const SCHED_IDLE_DONE_MS = 3 * 60_000
 export const SCHED_COST_TAIL_MS = 10 * 60_000
 /** Slots are looked for this far back at most (a long sleep with a minute cron stays cheap). */
 const LOOKBACK_MS = 2 * 24 * 3_600_000
+/** A cron with no slot this far ahead never runs. */
+export const SCHED_HORIZON_MS = 5 * 366 * 24 * 3_600_000
+/** A run with no end seen this long after its start is no longer counted as running. */
+export const SCHED_RUN_MAX_MS = 12 * 3_600_000
+/** Every N hours: N divides a day, so the runs stay evenly spaced across midnight. */
+export const SCHED_EVERY = [1, 2, 3, 4, 6, 8, 12]
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const MODEL_RE = /^[\w.[\]-]{1,80}$/
@@ -187,8 +193,10 @@ export function parseCron(expr: string): Cron | null {
   const hour = cronField(f[1], 0, 23)
   const dom = cronField(f[2], 1, 31)
   const mon = cronField(f[3], 1, 12)
-  const dow = cronField(f[4].replace(/\b7\b/g, '0'), 0, 6)
+  // 0 and 7 are both Sunday; read 0-7 so ranges like 5-7 work, then fold 7 into 0.
+  const dow = cronField(f[4], 0, 7)
   if (!min || !hour || !dom || !mon || !dow) return null
+  if (dow.delete(7)) dow.add(0)
   return { min, hour, dom, mon, dow, anyDom: f[2] === '*', anyDow: f[4] === '*' }
 }
 
@@ -209,19 +217,26 @@ export function zonedParts(t: number, tz: string): { year: number; month: number
 
 /**
  * The first minute after `from` that `cron` matches in wall-clock time of `tz`; null when the cron
- * is unreadable or matches nothing within about a year. Whole days and hours that cannot match are
- * skipped. ponytail: on a DST change the jump to "next midnight" can land an hour off and skip that
- * day's 00:xx slots; a schedule at those minutes on those two days is rare.
+ * is unreadable or matches nothing within SCHED_HORIZON_MS (a cron like Feb 31 never does). Whole
+ * days and hours that cannot match are skipped; the jump to the next midnight is corrected when a
+ * DST change made the day shorter or longer than 24 hours.
  */
 export function nextSlot(cron: string, from: number, tz: string): number | null {
   const c = parseCron(cron)
   if (!c || !validZone(tz)) return null
   let t = Math.floor(from / 60_000) * 60_000 + 60_000
-  for (let i = 0; i < 200_000; i++) {
+  const end = from + SCHED_HORIZON_MS
+  while (t <= end) {
     const p = zonedParts(t, tz)
     const dayOk = c.anyDom && c.anyDow ? true : c.anyDom ? c.dow.has(p.dow) : c.anyDow ? c.dom.has(p.day) : c.dom.has(p.day) || c.dow.has(p.dow)
     if (!c.mon.has(p.month) || !dayOk) {
       t += ((24 - p.hour) * 60 - p.minute) * 60_000
+      // A 23-hour day lands at 01:00: step back to the day's midnight (if that day has one).
+      const q = zonedParts(t, tz)
+      if (q.hour > 0 && q.hour < 12) {
+        const back = t - q.hour * 3_600_000
+        if (zonedParts(back, tz).day === q.day) t = back
+      }
       continue
     }
     if (!c.hour.has(p.hour)) {
@@ -280,7 +295,8 @@ export function planTick(s: Schedule, now: number): TickPlan {
   if (!s.enabled) return { kind: 'none' }
   const cron = whenCron(s.when)
   if (!cron) return { kind: 'none' }
-  const { latest, count } = dueSlots(cron, s.tz, s.lastSlot, now)
+  // A clock that jumped back leaves lastSlot ahead of now: count from now, not from the future.
+  const { latest, count } = dueSlots(cron, s.tz, s.lastSlot > now ? now - SCHED_GRACE_MS : s.lastSlot, now)
   if (latest === null) return { kind: 'none' }
   if (now - latest <= SCHED_GRACE_MS) return { kind: 'run', slot: latest, trigger: 'schedule' }
   const n = count === 1 ? 'a run was' : `${count} runs were`
@@ -321,8 +337,11 @@ export function runPrompt(s: Pick<Schedule, 'name' | 'prompt'>, workflowName: st
  */
 export function runProgress(r: SchedRun, s: Session | null, now: number): Partial<SchedRun> | null {
   if (r.status !== 'running') return null
+  const worked = r.seenWorking || r.costUsd > 0
+  if (now - r.startedAt > SCHED_RUN_MAX_MS)
+    return { status: 'failed', endedAt: now, reason: 'no end seen after 12 hours (waiting on you, or on something it set up); no longer counted as running' }
   if (!s) {
-    if (r.seen) return { status: 'done', endedAt: now, reason: 'the session is no longer listed' }
+    if (r.seen) return worked ? { status: 'done', endedAt: now, reason: 'the session is no longer listed' } : { status: 'failed', endedAt: now, reason: 'the session ended before it did any work' }
     if (now - r.startedAt > SCHED_START_TIMEOUT_MS) return { status: 'failed', endedAt: now, reason: 'the session never showed up in the session list' }
     return null
   }
@@ -336,9 +355,11 @@ export function runProgress(r: SchedRun, s: Session | null, now: number): Partia
     return Object.keys(ids).length ? ids : null
   }
   if (s.state === 'done' || s.state === 'suspended')
-    return r.seenWorking ? { ...ids, status: 'done', endedAt: now } : { ...ids, status: 'failed', endedAt: now, reason: 'the session ended before it did any work' }
-  // idle: finished once it worked (and waits on nothing it set up), or when it never starts.
-  if (!s.waitingOn && (r.seenWorking || now - r.startedAt > SCHED_IDLE_DONE_MS)) return { ...ids, status: 'done', endedAt: now }
+    return worked ? { ...ids, status: 'done', endedAt: now } : { ...ids, status: 'failed', endedAt: now, reason: 'the session ended before it did any work' }
+  // idle: finished once it worked (seen working, or it spent something) and waits on nothing it set up.
+  if (!s.waitingOn && worked) return { ...ids, status: 'done', endedAt: now }
+  // Idle a while without ever working: it never started (an API error, a bad model name).
+  if (!s.waitingOn && now - r.startedAt > SCHED_IDLE_DONE_MS) return { ...ids, status: 'failed', endedAt: now, reason: 'it never started working' }
   return Object.keys(ids).length ? ids : null
 }
 
@@ -407,7 +428,7 @@ function normWhen(raw: unknown): SchedWhen | string {
     case 'hours': {
       const every = Number(w.every)
       const minute = Number(w.minute ?? 0)
-      if (!Number.isInteger(every) || every < 1 || every > 23) return 'every 1 to 23 hours'
+      if (!SCHED_EVERY.includes(every)) return `every ${SCHED_EVERY.join(', ')} hours (they divide a day)`
       if (!Number.isInteger(minute) || minute < 0 || minute > 59) return 'the minute is 0 to 59'
       return { kind: 'hours', every, minute }
     }
@@ -445,10 +466,12 @@ export function normalizeSchedule(raw: unknown, prev: Schedule | null, now: numb
   if (typeof when === 'string') return { ok: false, message: when }
   const tz = o.tz === undefined || o.tz === '' ? localZone() : o.tz
   if (!validZone(tz)) return { ok: false, message: 'unknown time zone' }
+  if (nextSlot(whenCron(when) ?? '', now, tz) === null) return { ok: false, message: 'it never runs: no day matches that cron' }
   const cap = o.maxCostUsd === null || o.maxCostUsd === undefined || o.maxCostUsd === '' ? null : Number(o.maxCostUsd)
   if (cap !== null && !(Number.isFinite(cap) && cap > 0 && cap <= 10_000)) return { ok: false, message: 'the cost limit is a dollar amount above 0' }
   const n = (o.notify && typeof o.notify === 'object' ? o.notify : {}) as Record<string, unknown>
-  const enabled = o.enabled !== false
+  // Not sent (the editor of an existing schedule): as it is now, so an edit never undoes a pause made meanwhile.
+  const enabled = typeof o.enabled === 'boolean' ? o.enabled : (prev?.enabled ?? true)
   const restart = !prev || !prev.enabled || whenCron(prev.when) !== whenCron(when) || prev.tz !== tz
   return {
     ok: true,

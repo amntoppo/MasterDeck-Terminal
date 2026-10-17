@@ -134,6 +134,10 @@ describe('Scheduler', () => {
     expect(h.starts).toHaveLength(1)
     expect(a.list().runs[0]).toMatchObject({ status: 'skipped', reason: 'the previous run is still going' })
     expect(await a.runNow(a.list().schedules[0].id)).toEqual({ ok: false, message: 'the previous run is still going' })
+    // Told once per stretch of skips, pointing at the run still going.
+    h.now = utc('2026-10-17T11:00:10')
+    await a.tick()
+    expect(h.notes.filter((n) => n.title === 'Morning triage: skipped')).toEqual([{ title: 'Morning triage: skipped', body: 'the previous run is still going', sessionKey: 'bg000001' }])
     await a.save({ ...input({ when: { kind: 'hours', every: 1, minute: 0 }, skipIfRunning: false }), id: a.list().schedules[0].id })
     expect((await a.runNow(a.list().schedules[0].id)).ok).toBe(true)
     expect(h.starts).toHaveLength(2)
@@ -193,6 +197,22 @@ describe('Scheduler', () => {
     expect(h.stops).toEqual(['bg000001'])
     expect(a.list().runs[0]).toMatchObject({ status: 'stopped', costUsd: 1.5, reason: expect.stringMatching(/cost limit \(\$1\.00\)/) })
     expect(h.notes[0].title).toBe('Morning triage: stopped')
+  })
+
+  it('a failed stop keeps the run running and tries again', async () => {
+    let fail = true
+    const stops: string[] = []
+    const { h, s } = harness({ stop: async (bg) => (stops.push(bg), fail ? { ok: false, message: 'timed out' } : { ok: true, message: 'stopped' }) })
+    const a = s()
+    await a.save(input({ maxCostUsd: 1 }))
+    await a.runNow(a.list().schedules[0].id)
+    h.state = { sessions: [session({ key: 'bg000001', bgId: 'bg000001', sessionId: 'sid-1', startedAt: h.now })], costBook: {}, allStats: { 'sid-1': { costUsd: 1.5 } } }
+    await a.tick()
+    expect(a.list().runs[0]).toMatchObject({ status: 'running', reason: expect.stringMatching(/trying again: timed out/) })
+    fail = false
+    await a.tick()
+    expect(stops).toEqual(['bg000001', 'bg000001'])
+    expect(a.list().runs[0].status).toBe('stopped')
   })
 
   it('pause and resume: nothing missed while paused', async () => {

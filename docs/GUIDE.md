@@ -274,9 +274,9 @@ on a timer.
   in **New Claude session**, so its steps run in the session.
 - **Model**, **Folder** (the workspace, one of its repos, or any other folder), **Account** (two or
   more GitHub accounts; by default the folder's) and **Permissions**.
-- **When**: every day at a time, weekdays, on chosen days, every N hours (at a minute), or a cron
-  expression (minute hour day month weekday), in a **Time zone** (yours by default). The next three
-  runs are shown in your own time.
+- **When**: every day at a time, weekdays, on chosen days, every 1, 2, 3, 4, 6, 8 or 12 hours (at a
+  minute), or a cron expression (minute hour day month weekday), in a **Time zone** (yours by
+  default). The next three runs are shown in your own time; a cron that never matches is refused.
 - **Skip a run while the previous one is still going** (on by default), **Notify when a run
   finishes**, **Notify when a run fails or is stopped**, a **Cost limit per run** (a run that spends
   more is stopped; its conversation is kept), and **Missed runs**: **Run once when back** or **Skip
@@ -291,7 +291,9 @@ status and cost, and **Run now**, **Edit** and **Delete**. Click a schedule for 
 when each started (on time, catch-up or Run now), its status (Running, Finished, Failed, Skipped,
 Stopped, with the reason), how long it took, its cost, and its session (click to open it). A run is
 finished when its session goes idle after working; one that waits on you (a permission prompt, a
-question) is still running.
+question) is still running, for up to 12 hours: after that it no longer counts as running, so it
+cannot hold the schedule back for ever. When a run is skipped because the previous one is still
+going, you are told once (with **Notify when a run fails**).
 
 Runs start while MasterDeck is open. When the Mac slept or MasterDeck was closed through one or more
 runs, the schedule runs **once** when MasterDeck is back (or records them as skipped, if you chose

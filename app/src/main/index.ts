@@ -963,7 +963,11 @@ const sources = new Sources(
     }
     emit(CH.state, state);
     // The session list is in: commands that waited while MasterDeck was closed can run now.
-    if (!sessionsLoaded && sources.isHealthy("agents")) sessionsLoaded = true;
+    if (!sessionsLoaded && sources.isHealthy("agents")) {
+      sessionsLoaded = true;
+      // Schedules: what is due (or was missed while MasterDeck was closed) without waiting for the timer.
+      if (!SMOKE) void scheduler.tick();
+    }
     // The remote line must never break the state callback (notifications, badge, auto-open below).
     try {
       // Not before the session list: an empty one would wipe what the phone and web still show.
@@ -4347,7 +4351,10 @@ app.whenReady().then(async () => {
   // Schedules: every 30 s, and at once when the Mac wakes (missed runs, as each schedule says).
   if (!SMOKE) {
     setInterval(() => void scheduler.tick(), SCHED_TICK_MS);
-    powerMonitor.on("resume", () => void scheduler.tick());
+    // A fresh session list first: the one from before the sleep would end runs as never seen.
+    powerMonitor.on("resume", () =>
+      void sources.refreshAgents().finally(() => void scheduler.tick()),
+    );
   }
   // `/btw` typed in a terminal: a stat of history.jsonl every 2 s, a read only when it grew.
   if (!SMOKE) setInterval(pollBtw, 2_000);

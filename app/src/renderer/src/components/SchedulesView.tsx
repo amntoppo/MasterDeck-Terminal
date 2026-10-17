@@ -4,7 +4,7 @@ import { accountChoices, isMulti } from '@shared/accounts'
 import { actionCount, DEFAULT_TEMPLATE, type WorkflowTemplate } from '@shared/flow'
 import { formatAgo, formatCost } from '@shared/format'
 import { defaultModelLabel, MODELS } from '@shared/models'
-import { nextSlots, validZone, whenCron, type SchedInput, type SchedList, type SchedRun, type SchedView, type SchedWhen } from '@shared/sched'
+import { nextSlots, SCHED_EVERY, validZone, whenCron, type SchedInput, type SchedList, type SchedRun, type SchedView, type SchedWhen } from '@shared/sched'
 import type { AppState, Session } from '@shared/types'
 import { deck, useNow } from '../deck'
 import { can } from '../web'
@@ -75,6 +75,8 @@ export function SchedulesView({ state, onOpenSession }: { state: AppState; onOpe
     try {
       const r = await fn()
       setMsg(r.ok ? null : r.message)
+    } catch (e) {
+      setMsg(String((e as Error)?.message ?? e))
     } finally {
       setBusy(null)
     }
@@ -269,7 +271,6 @@ interface Draft {
   finish: boolean
   failure: boolean
   missed: 'once' | 'skip'
-  enabled: boolean
 }
 
 function draftOf(s: SchedView | null, tz: string): Draft {
@@ -294,7 +295,6 @@ function draftOf(s: SchedView | null, tz: string): Draft {
     finish: s?.notify.finish ?? true,
     failure: s?.notify.failure ?? true,
     missed: s?.missed ?? 'once',
-    enabled: s?.enabled ?? true,
   }
 }
 
@@ -369,9 +369,9 @@ function SchedEditor({ state, sched, tz, onClose }: { state: AppState; sched: Sc
   const save = async () => {
     if (!ready || saving) return
     const input: SchedInput & { id?: string } = {
-      ...(sched ? { id: sched.id } : {}),
+      // An edit leaves on/off alone (a pause made meanwhile stays).
+      ...(sched ? { id: sched.id } : { enabled: true }),
       name: d.name,
-      enabled: d.enabled,
       prompt: d.prompt,
       workflow: wf ? d.workflow : null,
       cwd: d.cwd,
@@ -489,7 +489,13 @@ function SchedEditor({ state, sched, tz, onClose }: { state: AppState; sched: Sc
           {d.kind === 'hours' && (
             <>
               <span className="muted">every</span>
-              <input className="sched-num" inputMode="numeric" value={d.every} onChange={(e) => set('every', e.target.value)} aria-label="Hours" />
+              <select className="fsel" value={d.every} onChange={(e) => set('every', e.target.value)} aria-label="Hours">
+                {SCHED_EVERY.map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n}
+                  </option>
+                ))}
+              </select>
               <span className="muted">hours at minute</span>
               <input className="sched-num" inputMode="numeric" value={d.minute} onChange={(e) => set('minute', e.target.value)} aria-label="Minute" />
             </>

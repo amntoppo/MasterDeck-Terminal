@@ -913,8 +913,10 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   `notify` through the dispatcher, so Pause all and the per-type cells apply. Today the schedule's
   own two switches decide alone.
 - Runs need MasterDeck open (no launchd / Task Scheduler job); a missed run is caught up later.
-- A fall-back DST hour repeats wall-clock minutes: a schedule inside it may run twice; on DST days
-  the jump to the next midnight can skip 00:xx slots (`nextSlot`).
+- A fall-back DST hour repeats wall-clock minutes: a schedule inside it may run twice (`nextSlot`).
+- **Decide**: a web tab may give a schedule any existing folder on the Mac, as New Claude session
+  (`startClaude`) already allows; the Start dialog's `chosenFolder` is stricter (workspace
+  repositories only). A schedule makes that a recurring start, so consider `chosenFolder` for both.
 - A workflow's `session-start` steps may be missed on a run's first start: the session's copy is made
   when the poll first lists it (`WorkflowStore.snapshot`), as for New Claude session. The built-in
   workflows do their work from `linked` on, so with no ticket they mostly add their turn-end and PR

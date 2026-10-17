@@ -35,7 +35,7 @@ made itself (Details → Scheduled). The new feature is **Schedules** in the UI 
   what: { prompt, workflow: template id | null },   // workflow null = the default workflow
   cwd, account: login | null, model: string | null, mode: permission mode | null,
   when: { kind: 'daily', time } | { kind: 'weekdays', time } | { kind: 'weekly', days, time }
-      | { kind: 'hours', every: 1..23, minute } | { kind: 'cron', expr },
+      | { kind: 'hours', every: 1|2|3|4|6|8|12, minute } | { kind: 'cron', expr },
   tz: IANA zone (default the Mac's),
   skipIfRunning: true, maxCostUsd: number | null,
   notify: { finish: true, failure: true },
@@ -49,8 +49,10 @@ made itself (Details → Scheduled). The new feature is **Schedules** in the UI 
   as the + menu does it (`WorkflowStore.setPending`), so its hooks drive the session.
 - Every `when` compiles to a 5-field cron (`daily 09:00` → `0 9 * * *`, `weekdays` → `… 1-5`,
   `weekly` → `… 1,3`, `hours` every N → `m */N * * *`, `cron` as typed, checked with the same field
-  reader). Slots are minutes of wall-clock time **in the schedule's zone** (`Intl.DateTimeFormat`),
-  so "09:00 Europe/Berlin" stays 09:00 there across DST and Mac zone changes.
+  reader; a cron with no slot in five years is refused: "it never runs"). Every N hours takes only N
+  that divide a day, so runs stay evenly spaced across midnight. Slots are minutes of wall-clock
+  time **in the schedule's zone** (`Intl.DateTimeFormat`), so "09:00 Europe/Berlin" stays 09:00
+  there across DST and Mac zone changes.
 - A schedule made or re-enabled starts counting from that moment (`lastSlot = now`): nothing in the
   past is "missed".
 
@@ -71,20 +73,26 @@ made itself (Details → Scheduled). The new feature is **Schedules** in the UI 
   failing) is a `failed` run with Claude Code's message.
 - **Progress** (every tick, from `latest.sessions`, matched by bg id, else by name):
   `working` / `needs-input` → running (`seenWorking`); `idle` with nothing busy or waited on, after
-  it worked (or 3 minutes after the start) → `done`; `done` (process ended) → `done` if it worked,
-  else `failed`; never listed 10 minutes after the start → `failed`. A run that waits on the user
-  (`needs-input`) stays running: it is not finished.
+  it worked (seen working, or it spent something) → `done`; idle 3 minutes without ever working →
+  `failed` ("it never started working"); `done` (process ended) → `done` if it worked, else
+  `failed`; never listed 10 minutes after the start → `failed`. A run that waits on the user
+  (`needs-input`) stays running, but no run counts as running more than 12 hours: then it is
+  `failed` ("no end seen"), so a run nobody answers never stops its schedule for good.
 - **Cost**: the run's session's cost book entries (`key === bgId`, all ids after resumes) and its
   live status-line cost, the larger. Updated while running and for 10 minutes after the end.
 - **Max cost**: a running run above `maxCostUsd` is stopped (`claude stop <bg>`), status `stopped`,
-  reason "over the run's cost limit". Its conversation is kept, as with any Stop.
+  reason "over its cost limit". Its conversation is kept, as with any Stop. A stop that fails leaves
+  the run running, and the next tick tries again.
 - **Overlap**: with `skipIfRunning`, a slot or Run now while a run of the schedule is `running` is
-  recorded as `skipped` ("the previous run is still going"). Without it a second session starts.
+  recorded as `skipped` ("the previous run is still going"); the first of a stretch of such skips
+  notifies (with the failure switch). Run now is refused instead. Without it a second session starts.
 - **History**: the last 50 runs per schedule; a schedule's delete removes its runs.
 
 ## When runs start
 
-A tick every 30 s (and at once at launch and on `powerMonitor` `resume`):
+A tick every 30 s, once the first session list is in, and on `powerMonitor` `resume` (after a fresh
+`claude agents` read, so runs are not ended against the list from before the sleep). A `lastSlot`
+ahead of the clock (it was set back) counts from 5 minutes ago:
 
 1. Update running runs (progress, cost, max cost, notifications).
 2. For each enabled schedule, the slots after `lastSlot` up to now (at most 10 000 looked at):
@@ -102,8 +110,9 @@ A tick every 30 s (and at once at launch and on `powerMonitor` `resume`):
 The store is written (temp + rename) before a session is started, so a crash between the two never
 starts it again. Two MasterDeck instances are not a case (single-instance lock).
 
-DST: a fall-back hour repeats its wall-clock minutes; a schedule inside it may run twice
-(ponytail: compare wall-clock slots instead of instants if it matters).
+DST: the jump to the next midnight is corrected on a 23- or 25-hour day. A fall-back hour repeats
+its wall-clock minutes; a schedule inside it may run twice (ponytail: compare wall-clock slots
+instead of instants if it matters).
 
 ## Notifications
 
