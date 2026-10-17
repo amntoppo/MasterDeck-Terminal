@@ -237,6 +237,8 @@ export interface AppState {
   mods?: import("./mods").ModsStatus;
   /** Monitors MasterDeck runs for sessions (Settings → Monitors run by). */
   watches: WatchInfo[];
+  /** Automate Review per PR tab and the PRs it follows (#157; main/autoReview.ts). */
+  autoReview?: import("./autoReview").AutoReviewView;
   /** Scheduled jobs (CronCreate) by session id. */
   schedules: Record<string, ScheduleInfo[]>;
   /** Workflow loops by session id (shared/loops: at most 3 each, closed ones for a day). */

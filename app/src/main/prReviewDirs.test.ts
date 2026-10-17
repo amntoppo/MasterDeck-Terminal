@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prReviewBriefing, type PrReviewContext } from '@shared/prReview'
 import { DEFAULT_PR_FILTERS } from '@shared/teamPrs'
-import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewDirOk, prReviewFolderAccount, prReviewPane, PR_REVIEW_SETTINGS, writePrReviewContext, writePrReviewDir } from './prReviewDirs'
+import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
 
 const URL = 'https://github.com/acme/web/pull/123'
 const ctx = (o: Partial<PrReviewContext> = {}): PrReviewContext => ({
@@ -65,9 +65,13 @@ describe('writePrReviewDir', () => {
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain('post-review.sh')
     expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected.url).toBe(URL)
     const s = JSON.parse(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'))
-    expect(s).toEqual(PR_REVIEW_SETTINGS)
-    // The script is never allowed unasked; gh's own writes are denied.
-    expect(JSON.stringify(s.permissions.allow)).not.toContain('post-review')
+    expect(s).toEqual(prReviewSettings(prReviewTurn(prReviewGuard(home, 'a'))))
+    // The script is never allowed unasked but for Automate Review's form; gh's own writes are denied.
+    expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual(['Bash(./post-review.sh --auto:*)'])
+    // Its hooks say when the turn is over, in the guard folder (outside the session's folder).
+    expect(s.hooks.Stop[0].hooks[0].command).toBe(`printf idle > '${prReviewTurn(prReviewGuard(home, 'a'))}'`)
+    expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toContain('printf busy')
+    expect(s.hooks.PreToolUse[0].matcher).toBe('*')
     expect(s.permissions.deny).toEqual(expect.arrayContaining(['Bash(gh pr review:*)', 'Bash(gh pr comment:*)', 'Bash(gh pr merge:*)']))
     expect(statSync(join(dir, 'post-review.sh')).mode & 0o111).not.toBe(0)
     expect(prReviewFolderAccount(home, 'a')).toBe('alice')
@@ -77,6 +81,15 @@ describe('writePrReviewDir', () => {
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe('kept')
     expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected).toBeNull()
     expect(existsSync(join(dir, 'context.json.tmp'))).toBe(false)
+  })
+  it('writePrReviewFiles leaves the context and the guard as they are', () => {
+    const home = mkdtempSync(join(tmpdir(), 'prr-'))
+    const dir = prReviewDir(home, 'a')
+    writePrReviewDir(dir, ctx(), 'old', prReviewGuard(home, 'a'))
+    writePrReviewFiles(dir, 'new', prReviewGuard(home, 'a'))
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe('new')
+    expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected.url).toBe(URL)
+    expect(JSON.parse(readFileSync(prReviewGuard(home, 'a'), 'utf8')).url).toBe(URL)
   })
   it('refuses a .claude that is a link', () => {
     const home = mkdtempSync(join(tmpdir(), 'prr-'))
@@ -163,6 +176,25 @@ exit 9
     const none = world(ctx({ selected: null }))
     const r = none.run(args)
     expect(r.out.error).toMatch(/no PR is selected/)
+  })
+  it('--auto posts a comment to a PR Automate Review queued, and nothing else', () => {
+    const w = world(ctx({ selected: null }))
+    const other = 'https://github.com/acme/api/pull/7'
+    const auto = ['--auto', '--pr', other, '--body-file', 'review.md']
+    // Nothing queued yet: refused (whatever is selected).
+    expect(w.run(auto).out.error).toMatch(/not a PR Automate Review queued/)
+    writePrReviewAuto(prReviewGuard(w.home, 'a'), [other])
+    const r = w.run([...auto, '--comments-file', 'review.json'])
+    expect(r.out.ok).toBe(true)
+    expect(readFileSync(join(w.home, 'posted-path'), 'utf8').trim()).toBe('repos/acme/api/pulls/7/reviews')
+    expect(JSON.parse(readFileSync(join(w.home, 'posted.json'), 'utf8')).event).toBe('COMMENT')
+    // Never another event, another PR, or as another account.
+    expect(w.run([...auto, '--event', 'approve']).out.error).toMatch(/comment/)
+    expect(w.run([...auto, '--event', 'request-changes']).out.error).toMatch(/comment/)
+    expect(w.run(['--auto', '--pr', URL, '--body-file', 'review.md']).out.error).toMatch(/not a PR Automate Review queued/)
+    expect(w.run(auto, 'mallory').out.error).toMatch(/this session is mallory/)
+    // The plain form still wants the selected PR.
+    expect(w.run(['--pr', other, '--event', 'comment', '--body-file', 'review.md']).out.error).toMatch(/no PR is selected/)
   })
   it('one account (none in the context): no account check', () => {
     const w = world(ctx({ account: null }))

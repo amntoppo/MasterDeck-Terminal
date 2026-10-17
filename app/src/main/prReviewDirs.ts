@@ -23,6 +23,15 @@ export function prReviewGuard(home: string, tab: string): string {
   return join(home, 'pr-review-guard', `tab-${tab}.json`)
 }
 
+/** Where the review session's hooks say whether its turn is over (idle, busy): next to its guard. */
+export const prReviewTurn = (guard: string): string => guard.replace(/\.json$/, '.turn')
+
+/**
+ * The PRs Automate Review queued for this tab (#157), written by main only, outside the folder:
+ * `post-review.sh --auto` posts a comment review to these and nothing else.
+ */
+export const prReviewAuto = (guard: string): string => guard.replace(/\.json$/, '.auto.json')
+
 /** A review folder MasterDeck may write: one not made yet, or a real (not symlinked) folder directly inside the real `<home>/pr-review`. */
 export function prReviewDirOk(home: string, dir: string): boolean {
   try {
@@ -93,10 +102,14 @@ export function prReviewDirs(home: string): string[] {
   }
 }
 
-/** The project settings: reading PRs without asking; the post script is asked for each time; other writes blocked. */
+/**
+ * The project settings: reading PRs without asking; the post script is asked for each time, but for
+ * `--auto` (Automate Review's PRs only, checked by the script); other writes blocked.
+ */
 export const PR_REVIEW_SETTINGS = {
   permissions: {
     allow: [
+      'Bash(./post-review.sh --auto:*)',
       'Bash(gh pr view:*)',
       'Bash(gh pr diff:*)',
       'Bash(gh pr checks:*)',
@@ -105,8 +118,9 @@ export const PR_REVIEW_SETTINGS = {
       'Bash(gh run list:*)',
       'Bash(gh issue view:*)',
     ],
-    // ./post-review.sh is the one way to write, and is not allowed above: Claude Code asks the user
-    // before each run, after the session showed what it will post. Its own files stay MasterDeck's.
+    // ./post-review.sh is the one way to write, and only its --auto form is allowed above (Automate
+    // Review's queue, checked by the script): Claude Code asks the user before every other run, after
+    // the session showed what it will post. Its own files stay MasterDeck's.
     deny: [
       'Edit(./post-review.sh)',
       'Edit(./context.json)',
@@ -123,6 +137,21 @@ export const PR_REVIEW_SETTINGS = {
   },
 }
 
+const quote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`
+
+/**
+ * The settings with hooks that tell MasterDeck when the session's turn is over (`turn`): Automate
+ * Review types its next PR only then. A prompt or a tool call is busy, a stop idle, a start start.
+ */
+export function prReviewSettings(turn: string): object {
+  const put = (v: string) => [{ hooks: [{ type: 'command', command: `printf ${v} > ${quote(turn)}` }] }]
+  const any = (v: string) => [{ matcher: '*', hooks: put(v)[0].hooks }]
+  return {
+    ...PR_REVIEW_SETTINGS,
+    hooks: { SessionStart: put('start'), Stop: put('idle'), UserPromptSubmit: put('busy'), PreToolUse: any('busy'), PostToolUse: any('busy') },
+  }
+}
+
 const atomic = (file: string, text: string) => {
   writeFileSync(`${file}.tmp`, text)
   renameSync(`${file}.tmp`, file)
@@ -136,6 +165,12 @@ function writeGuard(guard: string, ctx: PrReviewContext): void {
 
 /** Write a tab's folder: briefing, context, script, settings, and its guard (each atomically). */
 export function writePrReviewDir(dir: string, ctx: PrReviewContext, briefing: string, guard: string): void {
+  writePrReviewFiles(dir, briefing, guard)
+  writePrReviewContext(dir, ctx, guard)
+}
+
+/** Everything but the context: briefing, script, settings (Automate Review starting a session keeps the window's context). */
+export function writePrReviewFiles(dir: string, briefing: string, guard: string): void {
   mkdirSync(dir, { recursive: true })
   // A `.claude` that is a link (to ~/.claude, say) would have MasterDeck overwrite the user's settings.
   try {
@@ -144,13 +179,18 @@ export function writePrReviewDir(dir: string, ctx: PrReviewContext, briefing: st
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
   }
   mkdirSync(join(dir, '.claude'), { recursive: true })
-  writeGuard(guard, ctx)
+  mkdirSync(dirname(guard), { recursive: true })
   atomic(join(dir, 'CLAUDE.md'), briefing)
-  atomic(join(dir, 'context.json'), JSON.stringify(ctx, null, 2) + '\n')
-  atomic(join(dir, '.claude', 'settings.json'), JSON.stringify(PR_REVIEW_SETTINGS, null, 2) + '\n')
+  atomic(join(dir, '.claude', 'settings.json'), JSON.stringify(prReviewSettings(prReviewTurn(guard)), null, 2) + '\n')
   const script = join(dir, 'post-review.sh')
   atomic(script, prReviewScript(dir, guard))
   chmodSync(script, 0o755)
+}
+
+/** Automate Review's queue for a tab (see prReviewAuto). */
+export function writePrReviewAuto(guard: string, urls: string[]): void {
+  mkdirSync(dirname(guard), { recursive: true })
+  atomic(prReviewAuto(guard), JSON.stringify(urls) + '\n')
 }
 
 /** Only the context changed (another PR picked, the filters): the rest stays as written. */
@@ -169,15 +209,17 @@ export function writePrReviewContext(dir: string, ctx: PrReviewContext, guard: s
 export function prReviewScript(dir: string, guard: string): string {
   const d = dir.replace(/'/g, `'\\''`)
   const g = guard.replace(/'/g, `'\\''`)
+  const q = prReviewAuto(guard).replace(/'/g, `'\\''`)
   return `#!/usr/bin/env bash
 # Written by MasterDeck: post one review on the PR selected in the Pull requests view.
 d='${d}'
 g='${g}'
+q='${q}'
 out() { printf '%s\\n' "$1"; }
 err() { jq -cn --arg e "$1" '{ok: false, error: $e}'; exit 1; }
-usage() { err 'usage: ./post-review.sh --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]'; }
+usage() { err 'usage: ./post-review.sh [--auto] --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]'; }
 command -v jq >/dev/null 2>&1 || { out '{"ok":false,"error":"jq is not installed"}'; exit 1; }
-pr=''; event=''; body=''; comments=''; dry=''
+pr=''; event=''; body=''; comments=''; dry=''; auto=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) pr="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
@@ -185,9 +227,15 @@ while [ $# -gt 0 ]; do
     --body-file) body="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
     --comments-file) comments="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
     --dry-run) dry=1; shift ;;
+    --auto) auto=1; shift ;;
     *) usage ;;
   esac
 done
+# Automate Review: a comment review, only on a PR MasterDeck queued for it.
+if [ -n "$auto" ]; then
+  [ -z "$event" ] || [ "$event" = comment ] || err 'an automated review is a comment: it never approves or requests changes'
+  event=comment
+fi
 [ -n "$pr" ] && [ -n "$event" ] && [ -n "$body" ] || usage
 case "$event" in
   comment) ev=COMMENT ;;
@@ -195,9 +243,15 @@ case "$event" in
   request-changes) ev=REQUEST_CHANGES ;;
   *) usage ;;
 esac
-sel="$(jq -r '.url // empty' "$g" 2>/dev/null)"
-[ -n "$sel" ] || err 'no PR is selected in MasterDeck: ask the user to click one'
-[ "$pr" = "$sel" ] || err "refusing: $pr is not the PR selected in MasterDeck ($sel); ask the user"
+if [ -n "$auto" ]; then
+  jq -e --arg pr "$pr" 'type == "array" and any(.[]; . == $pr)' "$q" >/dev/null 2>&1 \\
+    || err "refusing: $pr is not a PR Automate Review queued; ask the user"
+  sel="$pr"
+else
+  sel="$(jq -r '.url // empty' "$g" 2>/dev/null)"
+  [ -n "$sel" ] || err 'no PR is selected in MasterDeck: ask the user to click one'
+  [ "$pr" = "$sel" ] || err "refusing: $pr is not the PR selected in MasterDeck ($sel); ask the user"
+fi
 root="$(cd "$d" && pwd -P)" || err 'the review folder is gone'
 # A file this review reads: a regular file really inside the folder (links resolved).
 inside() {

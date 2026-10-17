@@ -198,6 +198,26 @@ Nothing you write reaches GitHub unless the user says so. To post:
 - This is the only way to write to GitHub here: \`gh pr review\`, \`gh pr comment\`, \`gh pr merge\` and the
   like are blocked. Never merge, close or edit a PR.
 
+## Automated reviews
+
+When the user switched **Automate Review** on, MasterDeck types a message starting
+\`[MasterDeck auto-review]\` for each PR whose review is asked of them. That message is the user's
+standing request: review the PR it names (its URL, not \`selected\`), without asking.
+
+1. Read it as above (\`gh pr view\`, \`gh pr diff\`, \`gh pr checks\`) and review it the same way.
+2. Write the review to \`auto-<number>.md\`: a short summary, then the points that matter. Put
+   comments on lines in \`auto-<number>.json\` (as above). Nothing important found: say so in a line.
+3. Post it at once, no question to the user:
+
+\`\`\`bash
+./post-review.sh --auto --pr <its url> --body-file auto-<number>.md [--comments-file auto-<number>.json]
+\`\`\`
+
+- It is always a comment review: never approve, never request changes, never merge. MasterDeck
+  follows the PR from there (new commits come back to you as a new message).
+- It posts only to a PR MasterDeck queued. If it refuses, say why in one line and stop.
+- Then answer with one line: the PR, how many comments, the review's URL.
+
 Only write files in this folder. Don't touch \`~/.claude\` or MasterDeck's own files.
 `;
 }

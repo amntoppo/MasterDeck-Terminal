@@ -120,6 +120,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   ticketBuilderPrepare: invoke(CH.ticketBuilderPrepare),
   // The PR view's review session: main checks the tab, the account and the folder, and takes the PR's facts from its own list.
   prReviewPrepare: invoke(CH.prReviewPrepare),
+  autoReviewSet: invoke(CH.autoReviewSet),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
   ticketRepoMeta: invoke(CH.ticketRepoMeta),
   workspaceRepos: invoke(CH.workspaceRepos),

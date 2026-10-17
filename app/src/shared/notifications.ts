@@ -36,6 +36,7 @@ export type NotifyTypeId =
   | 'update'
   | 'workflow'
   | 'meeting'
+  | 'auto-review'
 
 export interface NotifyTypeDef {
   id: NotifyTypeId
@@ -69,6 +70,13 @@ export const NOTIFY_TYPES: readonly NotifyTypeDef[] = [
   { id: 'update', label: 'Update available', hint: 'A new version of MasterDeck is offered.', source: 'event', defaults: on(false, false) },
   { id: 'workflow', label: 'Workflow notify step', hint: "A workflow's notify block ran.", source: 'event', defaults: on(true, false) },
   { id: 'meeting', label: 'Meetings', hint: 'A meeting to record, and what happened to a recording.', source: 'event', defaults: on(true, false) },
+  {
+    id: 'auto-review',
+    label: 'Automated review',
+    hint: 'Automate Review sent comments on a PR, a PR it reviewed is ready to merge, or Merge automatically merged one.',
+    source: 'event',
+    defaults: on(true, true),
+  },
 ]
 
 export type NotifyRoutes = Record<NotifyTypeId, Record<ChannelId, boolean>>

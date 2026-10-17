@@ -120,6 +120,7 @@ const api: DeckApi = {
   ticketBuilderPrepare: (ctx) =>
     ipcRenderer.invoke(CH.ticketBuilderPrepare, ctx),
   prReviewPrepare: (req) => ipcRenderer.invoke(CH.prReviewPrepare, req),
+  autoReviewSet: (tabId, sw) => ipcRenderer.invoke(CH.autoReviewSet, tabId, sw),
   onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),
   ticketCreate: (req) => ipcRenderer.invoke(CH.ticketCreate, req),
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),

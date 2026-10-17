@@ -96,6 +96,12 @@ describe('prReviewBriefing', () => {
     expect(b).toMatch(/Post only after a clear yes/)
     expect(prReviewBriefing(null)).not.toContain('on GitHub` ')
   })
+  it('automated reviews: the marked message, posted as a comment with --auto, never approve', () => {
+    const b = prReviewBriefing('alice')
+    expect(b).toContain('[MasterDeck auto-review]')
+    expect(b).toContain('./post-review.sh --auto --pr')
+    expect(b).toMatch(/always a comment review: never approve, never request changes, never merge/)
+  })
 })
 
 describe('prReviewSpecError', () => {

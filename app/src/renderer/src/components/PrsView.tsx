@@ -15,6 +15,7 @@ import { prLabel, reviewPrompt } from '@shared/prReview'
 import { ClaudeMark } from './NewTicket'
 import { SessionAccount } from './AccountBits'
 import { TerminalView } from './TerminalView'
+import { AutoReviewWidget } from './AutoReviewWidget'
 
 interface Props {
   state: AppState
@@ -49,10 +50,13 @@ type ReviewSession = {
   account?: string
   /** Hidden (›): the session goes on, the panel is folded away. */
   hidden?: boolean
+  /** A pane MasterDeck started for Automate Review (#157), adopted by the panel. */
+  paneId?: string
 }
 /** The review sessions by PR tab id, kept while another view shows (their terminals keep running). */
 let keptReviews: Record<string, ReviewSession> = {}
 const reviewPaneId = (tab: string, gen: number) => `pr-review:${tab}:${gen}`
+const paneOf = (tab: string, r: ReviewSession) => r.paneId ?? reviewPaneId(tab, r.gen)
 
 /** The saved tabs; before any are saved, Mine (my open PRs, selected) and Everyone. */
 function loadTabs(): PrTab[] {
@@ -124,8 +128,9 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const closeTab = (id: string) => {
     const rest = tabs.filter((t) => t.id !== id)
     if (!rest.length) return
-    // Its review session goes with it; the folder stays.
+    // Its review session goes with it; the folder stays. Its automation stops.
     closeReviewOf(id)
+    if (state.autoReview?.tabs[id]) void deck().autoReviewSet(id, { review: false, merge: false, name: '', filters: tab.filters, forget: true })
     setTabs(rest)
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
@@ -144,7 +149,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   }
   const closeReviewOf = (key: string) => {
     const r = keptReviews[key]
-    if (r) deck().ptyClose(reviewPaneId(key, r.gen))
+    if (r) deck().ptyClose(paneOf(key, r))
     setReviewOf(key, null)
   }
   const review = reviews[tab.id] ?? null
@@ -156,6 +161,34 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   useEffect(() => {
     if (multi && review && review.account !== acct) closeReviewOf(tab.id)
   }, [multi, tab.id, acct]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Automate Review (#157): main runs it per tab. The tab's account changing switches it off; its
+  // name and filters (the repo it watches) follow while it is on.
+  const auto = state.autoReview?.tabs[tab.id]
+  const autoAcct = useRef<Record<string, string | null>>({})
+  useEffect(() => {
+    if (!auto?.review) return
+    const was = autoAcct.current[tab.id]
+    autoAcct.current[tab.id] = acct
+    if (was !== undefined && was !== acct) {
+      void deck().autoReviewSet(tab.id, { review: false, merge: false, name: tab.name, filters: tab.filters })
+      return
+    }
+    const t = setTimeout(() => void deck().autoReviewSet(tab.id, { review: true, merge: auto.merge, name: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters }), 600)
+    return () => clearTimeout(t)
+  }, [tab.id, acct, tab.name, JSON.stringify(tab.filters), !!auto?.review]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A review session MasterDeck started for a request: the panel shows it (folded, until opened).
+  const autoPane = auto?.pane ?? null
+  useEffect(() => {
+    if (!autoPane) return
+    const cur = keptReviews[tab.id]
+    if (cur && paneOf(tab.id, cur) === autoPane) return
+    setReviewOf(tab.id, { gen: (cur?.gen ?? 0) + 1, resume: false, paneId: autoPane, ...(acct ? { account: acct } : {}), hidden: cur ? cur.hidden : true })
+  }, [autoPane, tab.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The automation widget: shown or hidden (remembered), lined up with the chat's input box.
+  const [widgetOn, setWidgetOn] = useState<boolean>(() => load<boolean>('prReviewWidget', true))
+  useEffect(() => save('prReviewWidget', widgetOn), [widgetOn])
+  const [inputBox, setInputBox] = useState<{ top: number; bottom: number } | null>(null)
+  const termWrap = useRef<HTMLDivElement>(null)
   // A second account connected or the last one removed: the sessions ran as the other mode's.
   const wasMulti = useRef(multi)
   useEffect(() => {
@@ -183,13 +216,13 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     if (cur && !restart) {
       setReviewOf(tab.id, { ...cur, hidden: false })
       if (prompt) {
-        const id = reviewPaneId(tab.id, cur.gen)
+        const id = paneOf(tab.id, cur)
         deck().ptyWrite(id, prompt)
         setTimeout(() => deck().ptyWrite(id, '\r'), 150)
       }
       return
     }
-    if (cur) deck().ptyClose(reviewPaneId(tab.id, cur.gen))
+    if (cur) deck().ptyClose(paneOf(tab.id, cur))
     setReviewOf(tab.id, { gen: (cur?.gen ?? 0) + 1, resume: !restart && r.canContinue, prompt, ...(acct ? { account: acct } : {}) })
   }
   // The session's context follows the list: another PR picked, or the filters changed.
@@ -353,7 +386,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
         </button>
         {!shownReview && (
           <button className="btn claude-btn" onClick={() => void openReview()} title={tab.selected ? `Talk about ${prLabel(tab.selected)} with Claude` : 'A Claude session for this tab: pick a PR, then ask'}>
-            <ClaudeMark /> Review with Claude
+            <ClaudeMark /> Review with Claude{auto?.review ? <span className="auto-badge">auto</span> : null}
           </button>
         )}
       </header>
@@ -461,16 +494,30 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
               ×
             </button>
           </div>
-          <div className="wf-builder-term">
+          <div className="wf-builder-term" ref={termWrap}>
             <TerminalView
-              key={`${tab.id}:${shownReview.gen}`}
-              paneId={reviewPaneId(tab.id, shownReview.gen)}
+              key={paneOf(tab.id, shownReview)}
+              paneId={paneOf(tab.id, shownReview)}
+              onInputBox={setInputBox}
               spec={{ kind: 'pr-review', resume: shownReview.resume, tab: tab.id, ...(shownReview.prompt ? { prompt: shownReview.prompt } : {}), ...(multi && shownReview.account ? { account: shownReview.account } : {}) }}
               visible
               focusOnShow
             />
+            {widgetOn && !phone && (
+              <AutoReviewWidget
+                state={state}
+                tabId={tab.id}
+                tab={tab}
+                {...(acct ? { account: acct } : {})}
+                style={widgetPlace(inputBox, termWrap.current)}
+              />
+            )}
           </div>
-          <div className="wf-builder-tip muted">
+          {widgetOn && phone && <AutoReviewWidget state={state} tabId={tab.id} tab={tab} {...(acct ? { account: acct } : {})} inline />}
+          <div className="wf-builder-tip muted review-tip">
+            <button className={`link-btn auto-toggle${auto?.review ? ' on' : ''}`} onClick={() => setWidgetOn(!widgetOn)} aria-pressed={widgetOn} title={widgetOn ? 'Hide Automate Review' : 'Show Automate Review'}>
+              {widgetOn ? '◂' : '▸'} Auto
+            </button>
             Click a PR in the list to pick it, then ask: “review this PR”, “summarise what changed”, “is it safe to merge?”, “what does the CI failure mean?”. Nothing is posted to GitHub until you say yes to it.
           </div>
         </aside>
@@ -648,4 +695,14 @@ export function OfferRow({ o, itemId, state, onDismiss, onStartWith, onOpenSessi
       </button>
     </div>
   )
+}
+
+/**
+ * The widget's place: on the left of the panel, its top and bottom on the input box's (viewport
+ * pixels from TerminalView, made relative to the terminal's box); the terminal's bottom rows when no box is found.
+ */
+function widgetPlace(box: { top: number; bottom: number } | null, wrap: HTMLElement | null): React.CSSProperties {
+  const r = wrap?.getBoundingClientRect()
+  if (!box || !r || box.bottom <= box.top) return { bottom: 0, minHeight: 52 }
+  return { top: Math.max(0, box.top - r.top), height: box.bottom - box.top }
 }
