@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prReviewBriefing, type PrReviewContext } from '@shared/prReview'
@@ -74,6 +74,11 @@ describe('writePrReviewDir', () => {
     expect(s).toEqual(prReviewSettings(prReviewTurn(prReviewGuard(home, 'a')), post))
     // The script is never allowed unasked but for Automate Review's form; gh's own writes are denied.
     expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual([`Bash(${post} --auto:*)`])
+    // What runs unasked is outside the folder acceptEdits lets the session rewrite (cp, sed…), and no
+    // script of that name is left in the folder for a `./post-review.sh` to find.
+    expect(post.startsWith(`${dir}/`)).toBe(false)
+    expect(post.startsWith(join(home, 'pr-review-guard') + '/')).toBe(true)
+    expect(readdirSync(dir).filter((f) => f.includes('post-review'))).toEqual([])
     // Its hooks say when the turn is over, in the guard folder (outside the session's folder).
     expect(s.hooks.Stop[0].hooks[0].command).toBe(`printf idle > '${prReviewTurn(prReviewGuard(home, 'a'))}'`)
     expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toContain('printf busy')

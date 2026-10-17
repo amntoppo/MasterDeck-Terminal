@@ -31,7 +31,7 @@ GitHub, and a PR that got its approvals and green checks waits for someone to pr
 5. **Posting without asking, but only what MasterDeck queued.** The post script's `--auto` form
    (by its absolute path, `pr-review-guard/post-review-<tab>.sh`: #149 moved it out of the folder) is allowed
    in the folder's settings; the script accepts it only for a URL in
-   `<home>/pr-review-guard/tab-<id>.auto.json` (written by main only, outside the folder), and only
+   `<home>/pr-review-guard/tab-<id>.auto.json` (written by main only, outside the folder; it holds only the PR last typed into the session, until its review is seen), and only
    as a **comment** review. An automated review never approves or requests changes: approval stays
    a person's. The user's own reviews still go through the asked path.
 6. **States.** `queued` → `reviewing` (sent) → `commented` (a review by the account at or after
@@ -40,7 +40,8 @@ GitHub, and a PR that got its approvals and green checks waits for someone to pr
    `<home>/auto-review.json` (atomic), merged/closed tracks for a day.
 7. **Ready to merge** (`readyToMerge`, pure): open, not a draft, `mergeable: MERGEABLE`,
    `mergeStateStatus: CLEAN` (GitHub's own answer for required checks, approvals and branch
-   protection), review decision APPROVED, the checks rollup SUCCESS (or no checks), and the head
+   protection), review decision APPROVED with an approval by someone other than the account (one the
+   review session posted itself never counts), the checks rollup SUCCESS (or no checks), and the head
    is the commit MasterDeck's review was sent for. Anything failing, pending, blocked, behind,
    unknown or unstable is not ready.
 8. **The merge guard** (`mergeGuard`, pure): Merge automatically on for the tab, the PR ready (7),

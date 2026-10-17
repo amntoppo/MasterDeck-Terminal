@@ -194,15 +194,18 @@ export const myReview = (pr: AutoPr, viewer: string): AutoPr['reviews'][number] 
 
 /**
  * Why a PR is not ready to merge, or null when it is: open, not a draft, no conflicts, GitHub's
- * merge state CLEAN (required checks, approvals and branch protection all met), approved, every
- * check green (or none), and its head the commit MasterDeck's review was asked for.
+ * merge state CLEAN (required checks, approvals and branch protection all met), approved by
+ * someone other than `viewer` (the account the review session posts as: an approval it posted
+ * itself, by a prompt injection say, is never a person's), every check green (or none), and its
+ * head the commit MasterDeck's review was asked for.
  */
-export function readyToMerge(pr: AutoPr, reviewedHead: string | null): string | null {
+export function readyToMerge(pr: AutoPr, reviewedHead: string | null, viewer: string): string | null {
   if (pr.state !== 'OPEN') return `it is ${pr.state.toLowerCase()}`
   if (pr.draft) return 'it is a draft'
   if (pr.mergeable === 'CONFLICTING') return 'it has conflicts'
   if (pr.mergeable !== 'MERGEABLE') return 'GitHub has not worked out whether it can merge'
   if (pr.decision !== 'APPROVED') return pr.decision === 'CHANGES_REQUESTED' ? 'changes are requested' : 'it is not approved'
+  if (!pr.reviews.some((r) => r.state === 'APPROVED' && r.login.toLowerCase() !== viewer.toLowerCase())) return 'no one but this account approved it'
   if (pr.checks && pr.checks !== 'SUCCESS') return pr.checks === 'PENDING' || pr.checks === 'EXPECTED' ? 'checks are still running' : 'checks are failing'
   if (pr.mergeState !== 'CLEAN') return MERGE_STATE[pr.mergeState] ?? `GitHub says ${pr.mergeState.toLowerCase()}`
   if (!pr.head || pr.head !== reviewedHead) return 'its latest commits were not reviewed yet'
@@ -223,12 +226,12 @@ const MERGE_STATE: Record<string, string> = {
  * Why MasterDeck must not merge this PR now, or null: Merge automatically is on for the tab that
  * tracks it, the PR is ready (readyToMerge), and no merge was tried at this head.
  */
-export function mergeGuard(t: AutoTrack, pr: AutoPr, tab: AutoReviewTab | undefined, tabId: string): string | null {
+export function mergeGuard(t: AutoTrack, pr: AutoPr, tab: AutoReviewTab | undefined, tabId: string, viewer: string): string | null {
   if (!tab || t.tabId !== tabId) return 'not this tab’s PR'
   if (!tab.review || !tab.merge) return 'Merge automatically is off'
   if (t.mergeTried === pr.head) return 'a merge was already tried at this commit'
   if (!pr.method || !['MERGE', 'SQUASH', 'REBASE'].includes(pr.method)) return 'the repository’s merge method is unknown'
-  return readyToMerge(pr, t.sentHead)
+  return readyToMerge(pr, t.sentHead, viewer)
 }
 
 /** The merge: as the account, the repository's default method, only if the head is still the checked one. Never --admin or --auto. */
@@ -388,7 +391,7 @@ function advance(t: AutoTrack, pr: AutoPr, x: ReconcileIn, notices: AutoNotice[]
     events.push(`changes pushed to ${name}: reviewing again`)
     return move(t, 'queued', x.now, 'changes pushed')
   }
-  const why = readyToMerge(pr, t.sentHead)
+  const why = readyToMerge(pr, t.sentHead, x.viewer)
   if (why) {
     if (t.status === 'merge-failed') return
     return move(t, pr.decision === 'APPROVED' ? 'approved' : 'commented', x.now, why)
@@ -400,7 +403,7 @@ function advance(t: AutoTrack, pr: AutoPr, x: ReconcileIn, notices: AutoNotice[]
     events.push(`${name} is ready to merge`)
     notices.push({ kind: 'ready', title: `${name} is ready to merge`, body: `Approved, checks green, no conflicts · ${clean(pr.title, 120)}`, url: t.url })
   }
-  if (!mergeGuard(t, pr, x.tab, x.tabId)) {
+  if (!mergeGuard(t, pr, x.tab, x.tabId, x.viewer)) {
     move(t, 'merging', x.now)
     t.mergeTried = pr.head
     merges.push({ track: t, pr })

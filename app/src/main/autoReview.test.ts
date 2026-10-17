@@ -126,7 +126,7 @@ describe('AutoReview', () => {
     w.a.deliver()
     // The review lands, then the PR gets approved.
     w.gh.search = []
-    const reviewed = { latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: `${URL1}#r1`, author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 2 } }] } }
+    const reviewed = { latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: `${URL1}#r1`, author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 2 } }, { state: 'APPROVED', submittedAt: new Date(1_000_000).toISOString(), url: 'c', author: { login: 'carol' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] } }
     w.gh.pr = node(reviewed)
     w.tick(POLL_MS)
     await w.a.poll()
@@ -152,7 +152,7 @@ describe('AutoReview', () => {
     await w.a.poll()
     w.a.deliver()
     w.gh.search = []
-    w.gh.pr = node({ reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] } })
+    w.gh.pr = node({ reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }, { state: 'APPROVED', submittedAt: new Date(1_000_000).toISOString(), url: 'c', author: { login: 'carol' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] } })
     w.gh.merge = { code: 1, stdout: '', stderr: 'GraphQL: Head branch was modified' }
     w.tick(POLL_MS)
     await w.a.poll()
@@ -197,7 +197,7 @@ describe('AutoReview', () => {
 })
 
 const approvedAfter = (at: number) =>
-  node({ reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(at).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 1 } }] } })
+  node({ reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(at).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 1 } }, { state: 'APPROVED', submittedAt: new Date(1_000_000).toISOString(), url: 'c', author: { login: 'carol' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] } })
 
 describe('AutoReview: what the review found', () => {
   /** A tab with a PR sent to its session, approved after the review, ready. */
@@ -244,6 +244,25 @@ describe('AutoReview: what the review found', () => {
     expect(w.calls.some((c) => c[0] === 'pr')).toBe(false)
     expect(w.calls.some((c) => !c.join(' ').includes('search('))).toBe(true)
     expect(w.a.view().prs[0]).toMatchObject({ status: 'ready', note: 'checks are failing' })
+  })
+  it('the --auto queue holds only the PR typed into the session, until its review is seen', async () => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.set('mine', on)
+    const URL2 = 'https://github.com/acme/web/pull/13'
+    w.gh.search = [node(), node({ url: URL2, number: 13, headRefOid: 'ccc' })]
+    await w.a.poll()
+    // Queued, not sent: nothing may be posted yet.
+    expect(w.queues.mine ?? []).toEqual([])
+    w.a.deliver()
+    expect(w.queues.mine).toHaveLength(1)
+    const first = w.queues.mine[0]
+    // Its review lands: the queue empties, the other PR is still not postable until it is sent.
+    w.gh.search = [node({ url: URL2, number: 13, headRefOid: 'ccc' })].filter((p) => p.url !== first)
+    w.gh.pr = node({ url: first, latestReviews: { nodes: [{ state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: 'r', author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] } })
+    w.tick(POLL_MS)
+    await w.a.poll()
+    expect(w.queues.mine).toEqual([])
   })
   it('switching off frees its PRs for another tab of the account, and empties the queue', async () => {
     const w = world()

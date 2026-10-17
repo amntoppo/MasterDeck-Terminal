@@ -8,9 +8,11 @@ import { DEFAULT_PR_FILTERS } from './teamPrs'
 const URL1 = 'https://github.com/acme/web/pull/12'
 const URL2 = 'https://github.com/acme/api/pull/7'
 
+// A teammate's approval: the one that counts (the account's own never does).
+const CAROL = { login: 'carol', state: 'APPROVED', at: '2026-10-17T10:00:00Z', url: 'c', commit: 'aaa', comments: 0 }
 const pr = (over: Partial<AutoPr> = {}): AutoPr => ({
   url: URL1, repo: 'acme/web', number: 12, title: 'Fix login', author: 'bob', draft: false, state: 'OPEN', head: 'aaa', base: 'main', branch: 'fix-login',
-  mergeable: 'MERGEABLE', mergeState: 'CLEAN', decision: 'APPROVED', checks: 'SUCCESS', additions: 10, deletions: 2, files: 3, method: 'SQUASH', reviews: [],
+  mergeable: 'MERGEABLE', mergeState: 'CLEAN', decision: 'APPROVED', checks: 'SUCCESS', additions: 10, deletions: 2, files: 3, method: 'SQUASH', reviews: [CAROL],
   ...over,
 })
 
@@ -102,7 +104,7 @@ describe('reconcile: request detection and de-duplication', () => {
 
 describe('reconcile: following a review', () => {
   it('comments sent: once, with the count and a link', () => {
-    const p = pr({ decision: 'REVIEW_REQUIRED', reviews: [review()] })
+    const p = pr({ decision: 'REVIEW_REQUIRED', reviews: [review(), CAROL] })
     const a = run({ tracked: new Map([[URL1, p]]), tracks: [track()] })
     expect(a.tracks[0]).toMatchObject({ status: 'commented', comments: 3, reviewUrl: review().url })
     expect(a.notices).toEqual([expect.objectContaining({ kind: 'sent', title: 'Review comments sent on acme/web#12', url: review().url })])
@@ -110,7 +112,7 @@ describe('reconcile: following a review', () => {
     expect(run({ tracked: new Map([[URL1, p]]), tracks: a.tracks }).notices).toEqual([])
   })
   it('someone else’s review does not count', () => {
-    const a = run({ tracked: new Map([[URL1, pr({ reviews: [review({ login: 'dave' })] })]]), tracks: [track()] })
+    const a = run({ tracked: new Map([[URL1, pr({ reviews: [review({ login: 'dave' }), CAROL] })]]), tracks: [track()] })
     expect(a.tracks[0].status).toBe('reviewing')
   })
   it('no review after an hour is stalled, and not sent again', () => {
@@ -118,16 +120,16 @@ describe('reconcile: following a review', () => {
     expect(a.tracks[0].status).toBe('stalled')
   })
   it('reviewed again only when new commits arrive', () => {
-    const same = run({ requested: [pr()], tracked: new Map([[URL1, pr({ decision: null, reviews: [review()] })]]), tracks: [track({ status: 'commented' })] })
+    const same = run({ requested: [pr()], tracked: new Map([[URL1, pr({ decision: null, reviews: [review(), CAROL] })]]), tracks: [track({ status: 'commented' })] })
     expect(same.tracks[0].status).not.toBe('queued')
-    const pushed = run({ tracked: new Map([[URL1, pr({ head: 'bbb', decision: null, reviews: [review()] })]]), tracks: [track({ status: 'commented' })] })
+    const pushed = run({ tracked: new Map([[URL1, pr({ head: 'bbb', decision: null, reviews: [review(), CAROL] })]]), tracks: [track({ status: 'commented' })] })
     expect(pushed.tracks[0]).toMatchObject({ status: 'queued', head: 'bbb', note: 'changes pushed' })
     expect(pushed.events.join()).toContain('changes pushed')
     const stalled = run({ tracked: new Map([[URL1, pr({ head: 'bbb' })]]), tracks: [track({ status: 'stalled' })] })
     expect(stalled.tracks[0].status).toBe('queued')
   })
   it('ready to merge: told once per head, merged only with the switch on', () => {
-    const p = pr({ reviews: [review()] })
+    const p = pr({ reviews: [review(), CAROL] })
     const off = run({ tracked: new Map([[URL1, p]]), tracks: [track({ status: 'commented' })] })
     expect(off.tracks[0].status).toBe('ready')
     expect(off.notices.map((n) => n.title)).toEqual(['acme/web#12 is ready to merge'])
@@ -152,8 +154,8 @@ describe('reconcile: following a review', () => {
 
 describe('readyToMerge', () => {
   it('ready only when everything is green and reviewed at this head', () => {
-    expect(readyToMerge(pr(), 'aaa')).toBeNull()
-    expect(readyToMerge(pr({ checks: null }), 'aaa')).toBeNull()
+    expect(readyToMerge(pr(), 'aaa', 'alice')).toBeNull()
+    expect(readyToMerge(pr({ checks: null }), 'aaa', 'alice')).toBeNull()
   })
   it.each([
     [{ state: 'CLOSED' as const }, 'closed'],
@@ -171,27 +173,33 @@ describe('readyToMerge', () => {
     [{ mergeState: 'UNSTABLE' }, 'failing'],
     [{ mergeState: 'UNKNOWN' }, 'not worked out'],
   ])('%o is not ready', (over, why) => {
-    expect(readyToMerge(pr(over), 'aaa')).toContain(why)
+    expect(readyToMerge(pr(over), 'aaa', 'alice')).toContain(why)
+  })
+  it('an approval by the account itself never counts (only its own: it is the session’s)', () => {
+    const own = { ...CAROL, login: 'Alice' }
+    expect(readyToMerge(pr({ reviews: [own] }), 'aaa', 'alice')).toContain('no one but this account')
+    expect(readyToMerge(pr({ reviews: [own, CAROL] }), 'aaa', 'alice')).toBeNull()
+    expect(mergeGuard(track({ status: 'ready' }), pr({ reviews: [own] }), tab({ merge: true }), 't1', 'alice')).toContain('no one but this account')
   })
   it('unreviewed commits are not ready', () => {
-    expect(readyToMerge(pr({ head: 'bbb' }), 'aaa')).toContain('not reviewed')
-    expect(readyToMerge(pr(), null)).toContain('not reviewed')
+    expect(readyToMerge(pr({ head: 'bbb' }), 'aaa', 'alice')).toContain('not reviewed')
+    expect(readyToMerge(pr(), null, 'alice')).toContain('not reviewed')
   })
 })
 
 describe('mergeGuard', () => {
   const t = track({ status: 'ready' })
   it('lets a ready PR through with the switch on', () => {
-    expect(mergeGuard(t, pr(), tab({ merge: true }), 't1')).toBeNull()
+    expect(mergeGuard(t, pr(), tab({ merge: true }), 't1', 'alice')).toBeNull()
   })
   it('refuses when off, not this tab, tried at this head, method unknown, or not ready', () => {
-    expect(mergeGuard(t, pr(), tab(), 't1')).toContain('off')
-    expect(mergeGuard(t, pr(), tab({ merge: true, review: false }), 't1')).toContain('off')
-    expect(mergeGuard(t, pr(), undefined, 't1')).toContain('not this tab')
-    expect(mergeGuard(t, pr(), tab({ merge: true }), 't2')).toContain('not this tab')
-    expect(mergeGuard({ ...t, mergeTried: 'aaa' }, pr(), tab({ merge: true }), 't1')).toContain('already tried')
-    expect(mergeGuard(t, pr({ method: null }), tab({ merge: true }), 't1')).toContain('merge method')
-    expect(mergeGuard(t, pr({ checks: 'PENDING' }), tab({ merge: true }), 't1')).toContain('running')
+    expect(mergeGuard(t, pr(), tab(), 't1', 'alice')).toContain('off')
+    expect(mergeGuard(t, pr(), tab({ merge: true, review: false }), 't1', 'alice')).toContain('off')
+    expect(mergeGuard(t, pr(), undefined, 't1', 'alice')).toContain('not this tab')
+    expect(mergeGuard(t, pr(), tab({ merge: true }), 't2', 'alice')).toContain('not this tab')
+    expect(mergeGuard({ ...t, mergeTried: 'aaa' }, pr(), tab({ merge: true }), 't1', 'alice')).toContain('already tried')
+    expect(mergeGuard(t, pr({ method: null }), tab({ merge: true }), 't1', 'alice')).toContain('merge method')
+    expect(mergeGuard(t, pr({ checks: 'PENDING' }), tab({ merge: true }), 't1', 'alice')).toContain('running')
   })
   it('merges with the default method at the checked head, never bypassing protection', () => {
     const a = mergeArgs(pr())

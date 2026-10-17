@@ -84,9 +84,15 @@ export class AutoReview {
       .filter((t) => this.tabs[t.tabId] || t.status === 'merged' || t.status === 'closed')
   }
 
-  /** The post script's --auto queue: only what this tab has queued or sent and not seen reviewed yet. */
+  /**
+   * The post script's --auto queue: only the PR last typed into the session, until its review is
+   * seen. Never a PR not sent yet: a prompt injection in one PR can't post on the others.
+   */
   private writeQueue(tabId: string): void {
-    this.deps.writeQueue(tabId, this.tabs[tabId] ? this.tracks.filter((t) => t.tabId === tabId && (t.status === 'queued' || t.status === 'reviewing' || t.status === 'stalled')).map((t) => t.url) : [])
+    const sent = this.tabs[tabId]
+      ? this.tracks.filter((t) => t.tabId === tabId && t.status === 'reviewing' && t.sentAt !== null).sort((a, b) => b.sentAt! - a.sentAt!)[0]
+      : undefined
+    this.deps.writeQueue(tabId, sent ? [sent.url] : [])
   }
 
   private dropOpen(tabId: string): void {
@@ -242,7 +248,7 @@ export class AutoReview {
       const cur = live()
       if (!got || !cur || a?.viewer?.toLowerCase() !== viewer.toLowerCase()) return this.holdMerge(cur, 'could not read the PR again before merging')
       // The head was marked tried when reconcile allowed it; the guard is asked as if it was not.
-      const why = this.tabs[tabId] === tab ? mergeGuard({ ...cur, mergeTried: null }, got, tab, tabId) : 'Merge automatically changed'
+      const why = this.tabs[tabId] === tab ? mergeGuard({ ...cur, mergeTried: null }, got, tab, tabId, viewer) : 'Merge automatically changed'
       if (why) return this.holdMerge(cur, why)
       pr = got
       r = await this.deps.ghFor(tab.account)(mergeArgs(pr), { timeoutMs: 60_000 })
@@ -288,14 +294,23 @@ export class AutoReview {
       if (pane && !this.deps.panes.ready(tabId, pane, sentAt)) continue
       // No pane: one start per RESTART_MS (a start that failed, or a pane that died at once, is not repeated every tick).
       if (!pane && this.now() - (this.started[tabId] ?? 0) < RESTART_MS) continue
-      // The queue first: the session may post as soon as it reads the line.
+      // Marked sent and queued first (it alone): the session may post as soon as it reads the line.
+      const before = { status: next.status, sentHead: next.sentHead, sentAt: next.sentAt, note: next.note, at: next.at }
+      const now = this.now()
+      next.status = 'reviewing'
+      next.sentHead = pr.head
+      next.sentAt = now
+      next.note = null
+      next.at = now
       this.writeQueue(tabId)
       const line = autoPrompt(pr)
       if (pane) this.deps.panes.type(pane, line)
       else {
-        this.started[tabId] = this.now()
+        this.started[tabId] = now
         const r = this.deps.panes.start(tabId, tab, line)
         if ('error' in r) {
+          Object.assign(next, before)
+          this.writeQueue(tabId)
           if (this.checks[tabId]?.error !== r.error) {
             this.checks[tabId] = { at: this.checks[tabId]?.at ?? null, error: r.error }
             changed = true
@@ -304,15 +319,8 @@ export class AutoReview {
         }
         this.panesSeen[tabId] = r.paneId
       }
-      const now = this.now()
       this.sent[tabId] = now
-      next.status = 'reviewing'
-      next.sentHead = pr.head
-      next.sentAt = now
-      next.note = null
-      next.at = now
       this.event(tabId, `sent ${label(next)} to the review session`)
-      this.writeQueue(tabId)
       changed = true
     }
     if (changed) {

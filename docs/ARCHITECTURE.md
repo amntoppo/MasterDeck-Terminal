@@ -1042,7 +1042,8 @@ here (needs `hooks.queue`).
   `search(review-requested:@me …, autoSearch's scope)` and each followed PR by reference, 30 per
   read), then `reconcile`: new requests are `queued` once per account and URL (`trackKey`), a
   review by the account at or after the sent commit makes it `commented` (a notice), a new head
-  re-queues it, `readyToMerge` (open, not draft, MERGEABLE, APPROVED, checks SUCCESS or none, merge
+  re-queues it, `readyToMerge` (open, not draft, MERGEABLE, APPROVED with an approval by someone other
+  than the account, so one the session posted itself never counts, checks SUCCESS or none, merge
   state CLEAN, head = the reviewed commit) makes it `ready` (a notice), and `mergeGuard` (the tab's
   switch, its own PR, not tried at this head, a known method) lets `gh pr merge <url>
   --<viewerDefaultMergeMethod> --match-head-commit <oid>` run (never `--admin`/`--auto`) after the
@@ -1059,8 +1060,8 @@ here (needs `hooks.queue`).
   after MasterDeck's last line, and the user has not typed for 30 s (a `busy` older than 15 min
   with no "esc to interrupt" on screen counts as idle: Esc fires no Stop). With no live pane it
   starts one (`pr-review:<tab>:auto<ts>`, the line as its first message), which the panel adopts
-  through `state.autoReview.tabs[id].pane`. Before typing it writes `pr-review-guard/tab-<id>.auto.json`
-  (`writePrReviewAuto`), the only PRs the post script's `--auto` (allowed by its absolute path in the settings without
+  through `state.autoReview.tabs[id].pane`. Before typing it marks the PR sent and writes `pr-review-guard/tab-<id>.auto.json`
+  (`writePrReviewAuto`) with that PR alone, until its review is seen: the only PR the post script's `--auto` (allowed by its absolute path in the settings without
   asking) posts to, always as a COMMENT. Notices go through the notifier as `auto-review`
   (`Notice.url` → **View on GitHub**). The monitor is listed in `state.watches` as `review:<tab>`
   (`watchStop` switches it off, `watchEvents` its log); `state.autoReview` (`AutoReviewView`) feeds
