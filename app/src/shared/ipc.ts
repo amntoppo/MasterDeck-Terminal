@@ -39,6 +39,16 @@ import type { DraftCheck, DraftMonitor, DraftSkill } from "./flowBuilder";
 
 /** A workflow the builder session wrote, as MasterDeck read and checked it. */
 /** A ticket to create from the Board. */
+/** Clone (#136): what the dialog sends. Main finds the session by key and takes its ids and folder from its own list. */
+export interface CloneRequest {
+  key: string;
+  name: string;
+  /** What the clone should do next; empty: none. */
+  prompt?: string;
+  /** Link the clone to the original's ticket (off: board flow and PR watch stay with the original). */
+  keepTicket?: boolean;
+}
+
 export interface NewTicket {
   repo: string;
   title: string;
@@ -187,6 +197,7 @@ export const CH = {
   peersSet: "peers:set",
   peersSync: "peers:sync",
   modSet: "mod:set",
+  sessionGroupsAct: "sessionGroups:act",
   modsInstall: "mods:install",
   modsUninstall: "mods:uninstall",
   modsReload: "mods:reload",
@@ -273,6 +284,7 @@ export const CH = {
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
+  cloneSession: "session:clone",
   accountFor: "accounts:for",
   resumeStopped: "session:resumeStopped",
   tokensByDay: "costs:tokensByDay",
@@ -604,6 +616,8 @@ export interface DeckApi {
     /** Session keys to link the new session to (two-way). */
     peers?: string[];
   }): Promise<CliResult>;
+  /** Clone (#136): a new background session from a copy of this session's conversation. */
+  cloneSession(req: CloneRequest): Promise<CliResult>;
   /** Resume an ended session's conversation in the background (History, the Board, the Start dialog). */
   resumeSession(
     sessionId: string,
@@ -784,6 +798,8 @@ export interface DeckApi {
   peersSync(sessionKey: string): Promise<CliResult>;
   /** Tools → Mods: switch one mod (plugin name) on or off in this session (Session.key). */
   modSet(sessionKey: string, mod: string, on: boolean): Promise<CliResult>;
+  /** The session list's tabs: add, rename, move or remove one, or put a session in one (shared/sessionGroups GroupOp). */
+  sessionGroupsAct(op: import("./sessionGroups").GroupOp): Promise<CliResult & { id?: string }>;
   /** Settings / Setup → Mods: install MasterDeck's mods in Claude Code (marketplace, every mod, prependPlugins). */
   modsInstall(): Promise<CliResult>;
   /** Take them out again (every mod, the marketplace, prependPlugins). */

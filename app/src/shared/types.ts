@@ -44,6 +44,10 @@ export interface Session {
   account?: string;
   /** Two or more accounts, and the session was started without one: it works as gh's active account (no `account` then). */
   ghActive?: boolean;
+  /** Started by Clone (#136) from this session (`session-clones.json`). */
+  clonedFrom?: { key: string; name: string };
+  /** No transcript yet: nothing to clone. */
+  noConversation?: true;
 }
 
 export interface Issue {
@@ -225,6 +229,8 @@ export interface AppState {
   held?: import("./heldMessages").HeldView[];
   /** The mods switched off per session (Session.key → plugin names), from Tools → Mods (`mod-off.json`). */
   modOff?: Record<string, string[]>;
+  /** The session list's tabs and which session is in which (`session-groups.json`, #146); set in the state callback. */
+  sessionGroups?: import("./sessionGroups").SessionGroups;
   /** Every mod the MasterDeck mod has reported in any session (`mod-catalog.json`). */
   modCatalog?: import("./modBand").ModEntry[];
   /**

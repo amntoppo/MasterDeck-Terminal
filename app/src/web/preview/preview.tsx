@@ -8,6 +8,7 @@ import type { AppState } from '@shared/types'
 import { matches, noteMeta, sortNotes, ticketNoteId, type Note, type NoteChange, type NoteInput } from '@shared/notes'
 import { applyBtwEvent, type BtwEntry, type BtwEvent } from '@shared/btw'
 import { parseDiff } from '@shared/diff'
+import { applyGroupOp, emptyGroups } from '@shared/sessionGroups'
 import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
@@ -292,6 +293,20 @@ function previewDeck(noBoard: boolean): DeckApi {
         comments: [{ author: 'riley', at: Date.now() - 2.5 * 3600_000, text: 'Deployed to staging for a look.', url: 'https://github.com/acme/web/pull/131#issuecomment-1' }],
       },
     }),
+    // Clone…: the clone shows up a moment later, with its "Cloned from" line.
+    cloneSession: (req: { key: string; name: string }) => {
+      const from = state.sessions.find((s) => s.key === req.key)
+      if (!from) return { ok: false, message: 'that session is not listed' }
+      const bg = Math.random().toString(16).slice(2, 10).padEnd(8, '0')
+      setTimeout(() => {
+        state.sessions = [
+          ...state.sessions,
+          { ...from, key: bg, bgId: bg, sessionId: `${bg}-0000-4000-8000-000000000000`, name: req.name, state: 'working', rawState: 'working', startedAt: Date.now(), issue: null, issueRepo: null, clonedFrom: { key: from.key, name: from.name } },
+        ]
+        for (const cb of stateCbs) cb({ ...state })
+      }, 1200)
+      return { ok: true, message: req.name }
+    },
     // Tools → Mods: switch in the fixture, as the Mac would after its next state.
     modSet: (key: string, mod: string, on: boolean) => {
       const off = new Set(state.modOff?.[key] ?? [])
@@ -300,6 +315,14 @@ function previewDeck(noBoard: boolean): DeckApi {
       state.modOff = { ...state.modOff, [key]: [...off].sort() }
       for (const cb of stateCbs) cb({ ...state })
       return ok
+    },
+    // The session list's tabs: the Mac's own rules, applied to the fixture.
+    sessionGroupsAct: (op: unknown) => {
+      const r = applyGroupOp(state.sessionGroups ?? emptyGroups(), op)
+      if (!r.ok) return r
+      state.sessionGroups = r.groups
+      for (const cb of stateCbs) cb({ ...state })
+      return { ok: true, message: 'saved', ...(r.id ? { id: r.id } : {}) }
     },
     // The Start dialog: a draft with no checkout found, so its folder line shows at phone width. A
     // chosen folder must be one of `repos`, as the Mac's guard (`chosenFolder`) answers a browser.

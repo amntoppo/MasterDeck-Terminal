@@ -124,6 +124,7 @@ const api: DeckApi = {
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),
   workspaceRepos: () => ipcRenderer.invoke(CH.workspaceRepos),
   startClaude: (req) => ipcRenderer.invoke(CH.startClaude, req),
+  cloneSession: (req) => ipcRenderer.invoke(CH.cloneSession, req),
   resumeSession: (id, name, cwd, account) =>
     ipcRenderer.invoke(CH.resumeSession, id, name, cwd, account),
   accountFor: (cwd) => ipcRenderer.invoke(CH.accountFor, cwd),
@@ -195,6 +196,7 @@ const api: DeckApi = {
   peersSet: (a, b, on) => ipcRenderer.invoke(CH.peersSet, a, b, on),
   peersSync: (key) => ipcRenderer.invoke(CH.peersSync, key),
   modSet: (key, mod, on) => ipcRenderer.invoke(CH.modSet, key, mod, on),
+  sessionGroupsAct: (op) => ipcRenderer.invoke(CH.sessionGroupsAct, op),
   modsInstall: () => ipcRenderer.invoke(CH.modsInstall),
   modsUninstall: () => ipcRenderer.invoke(CH.modsUninstall),
   modsReload: () => ipcRenderer.invoke(CH.modsReload),

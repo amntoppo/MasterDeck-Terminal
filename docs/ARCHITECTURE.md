@@ -167,6 +167,26 @@ Setters other modules call: `setExternalItems` (API items from the backend), `se
     session that does not run is left out of the snapshot, so it owns no issue and gets no
     ORPHAN proposal beside its copy. The copy does not carry
     the old session's `--model` / `--permission-mode` (not known reliably; see TODO).
+  - **Clone (#136) is not a copy.** Right-click → Clone… (`SessionMenu`, `CloneDialog`) →
+    `CH.cloneSession` (`DECK_ACCESS` remote) → `cloneSession` in `main/index.ts`: the session is
+    found by key in the last state (ids and folder never come from the request), refused by
+    `cloneBlock` (no transcript: `Session.noConversation`, set from the transcript index each
+    agents poll; needs input or a menu on screen), and started as `claude --bg [--settings]
+    --resume <id> --fork-session -n <name> [--model] [--permission-mode] [<first message>]` in its
+    `cwd` (`cloneArgs`). The account is the session's (`settingsFor` with `accountOfSession`);
+    model and mode come from the end of its transcript (`cloneOptions`: newest assistant
+    `requestedModel`, else `message.model`; newest `permission-mode` only when `plan`,
+    `acceptEdits` or `auto`). Nothing is superseded and `noteCopy` is not called. The clone is
+    recorded in `session-clones.json` (`main/clones.ts` `CloneStore`, by bg id, by name until
+    listed when no bg id was printed): `from` (key, name), `at`, the folder's `branch`, and the
+    ticket for Keep ticket link. `Sources` uses it to (1) skip the copied transcript lines in
+    `followPrs` (`clonedLine`: they keep the original's timestamps), so the clone takes none of
+    the original's PRs, worktrees or workflow progress; (2) give a clone its folder branch's PR
+    only once the branch differs from the recorded one (`cloneOwnsBranch` in `branchDir`); (3)
+    link a kept ticket once the clone is listed (`carryLinks`, the resume linker, once,
+    `linked: true`); (4) set `Session.clonedFrom` (Details: "Cloned from"). The renderer opens a
+    "Starting…" tab (`clone` on the pending tab, Try again) that becomes the clone's terminal.
+    Design and plan: `docs/plans/2026-10-17-clone-session-{design,plan}.md`.
   - Not a listed background session (History, an interactive session for Start here): there are no
     saved options and nothing to copy, so `--settings` and `-n` as for a new start.
   - The session list not loaded (`Sources.sessionsNow()` null): read once more; still unknown,
@@ -827,6 +847,26 @@ IPC: `CH.peersSet` (add or remove one link) and `CH.peersSync`, both open to rem
 Renderer: `PeersDialog.tsx` and `PeerPicker.tsx` (`peersView.ts`), the "Linked sessions" section of
 `SessionDetails.tsx`, and a "Link to sessions" field in `AssignDialog` and `NewSessionDialog`.
 Unlinking stops further sharing but retracts nothing already in a transcript.
+
+### Tabs in the session list (issue #146)
+
+Named groups of sessions in the Sessions column; internally "session groups", so they never share
+a name with a session's own tabs below. The model is `shared/sessionGroups.ts`: `applyGroupOp` (add,
+rename, move, remove, assign; every check: names 1-40 characters, unique ignoring case, never
+"All"; at most 30 tabs; ids `g` + 8 hex), `carryGroup`, `pruneGroups`, `parseGroups`, `inGroup`,
+`shownTab`. `main/sessionGroups.ts` (`SessionGroupStore`) keeps `<home>/session-groups.json`
+(atomic write, a corrupt file moved aside); the state callback in `main/index.ts` prunes it against
+a healthy, non-empty agents list (a session missing for 10 minutes leaves its tab; done sessions
+are still listed, so a stopped one keeps it) and sets `state.sessionGroups`. One channel,
+`sessionGroups:act` (`DeckApi.sessionGroupsAct`, `DECK_ACCESS` remote), takes one op. A copy made by
+a resume (`resumeDeps().copied`) calls `carry(old.bgId, copy)` next to `noteCopy`. Not in
+`toRemoteSnapshot`.
+
+The renderer: `SessionGroupBar.tsx` (All, the tabs with count and needs-you badge, +, inline naming,
+drag to reorder with `text/masterdeck-group`, a session row's `text/masterdeck-session` dropped on a
+tab assigns it, the tab's right-click menu), and `Sidebar.tsx` narrows its ordered list to the tab
+(`inGroup`) before the filters, Starred, groups, Parked and Cleanup. The tab on screen is
+`localStorage` `sessionGroup`, All when it is gone. `SessionMenu.tsx` has **Move to tab ▸**.
 
 ### Session tabs, files and diffs (issue #113)
 
@@ -2103,6 +2143,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | `peers` | `PeerStore` (`session-peers.json`) through `of(key)`: symmetric links between sessions by `Session.key`, pruned on each agents poll |
 | `modLive` | the state callback in `main/index.ts`, from `DeckHooks.modBeats()`: sessions MasterDeck's core mod runs in (fresh heartbeat), by `Session.key`, `{version, claude, mods}` (the mods it saw load in that session) |
 | `modOff` | the state callback, from `ModOff` (`mod-off.json`): the mods switched off per session, `Session.key` → plugin names |
+| `sessionGroups` | the state callback, from `SessionGroupStore` (`session-groups.json`, #146): the session list's tabs and `Session.key` → tab id; pruned there (10 minutes missing from a real agents list) |
 | `modCatalog` | the state callback, from `ModCatalog` (`mod-catalog.json`): every mod the MasterDeck mod reported in any session |
 | `meetingLive` | the state callback, from `MeetingsIpc.live()` (`Recorder.live()`): `{ recording, since, paused, elapsed, offer }` (`elapsed` as of the last change, so it does not tick; the rail counts from `since`), idle until a recorder was loaded, null off macOS; never in `toRemoteSnapshot` |
 | `mods` | the state callback, `modsNow()` over `ModsInstaller.status()`: whether MasterDeck's mods are installed in Claude Code, Claude Code's version, the mods' version, `prependNote`, `unavailable` |
@@ -2125,6 +2166,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `watches.json` | monitors MasterDeck runs |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |
+| `session-groups.json` | the session list's tabs: `{version: 1, groups: [{id, name}], of: {Session.key: id}}` (`main/sessionGroups.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `session-peers.json` | linked sessions: `{version: 1, edges, seen}` by `Session.key` (`main/peers.ts`); a file that cannot be read is moved aside as `.corrupt-<ts>` |
 | `btw/` | Side questions (Tools → BTW): `<session key>.json` per session (`{version, entries}`), `history-offset.json` (how far `history.jsonl` was read). `main/btw.ts` |
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
