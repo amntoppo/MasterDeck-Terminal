@@ -94,6 +94,7 @@ import {
   type CostEntry,
 } from "@shared/costs";
 import { hourOf } from "@shared/timeline";
+import { isOwnPost, newOwnPostScan, scanOwnPosts, type OwnPostScan } from "@shared/ownPosts";
 import { addBurnPoint, summarize, type BurnPoint } from "@shared/sprintSummary";
 import {
   DEFAULT_SETTINGS,
@@ -1871,6 +1872,25 @@ export class Sources {
     this.notePrs(key, f.scan.urls);
     addPrUrls((this.openedPrs[key] ??= []), f.scan.urls);
     return found;
+  }
+
+  /** What each session wrote in its tool calls, by Session.key, over every transcript read (see shared/ownPosts). */
+  private ownScans: Record<
+    string,
+    { follows: Record<string, FollowState>; scan: OwnPostScan }
+  > = {};
+  /**
+   * Whether a PR comment's text is one the session posted itself (the PR watch, #158). Reads what
+   * its transcript gained first, so a reply posted a moment ago counts; null without a transcript.
+   */
+  ownPost(key: string): ((body: string) => boolean) | null {
+    const s = this.rawSessions.find((x) => x.key === key);
+    const tp = s ? this.transcripts.find(s.sessionId) : null;
+    if (!tp) return null;
+    const own = (this.ownScans[key] ??= { follows: {}, scan: newOwnPostScan() });
+    const st = (own.follows[tp] ??= { path: tp, offset: 0, rest: "" });
+    scanOwnPosts(readNewLines(st, Infinity), own.scan);
+    return (body) => isOwnPost(body, own.scan);
   }
 
   /** Scheduled jobs the session's current transcript shows (see shared/schedules). */

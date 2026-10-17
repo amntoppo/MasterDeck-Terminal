@@ -2,7 +2,8 @@
  * MasterDeck's PR watch (replaces babysit-pr's Monitor phase): which PR events reach a session and
  * what it is told. main/prWatch.ts polls GitHub; this file builds the queries, reads the answers,
  * turns a PR into items (each with a stable key; the seen set is a list of keys) and writes the
- * messages. Others' activity only: comments by `me` (the session posts as the user) never count.
+ * messages. Others' activity only: what the session posted itself (as `me`, the user) never counts;
+ * other text by `me` (the user's own review, a review session posting as the user) does (#158).
  */
 
 export interface PrRef {
@@ -122,28 +123,37 @@ const OTHER_BOT = /\[bot\]$/i
 /** The Claude reviewer's status comment while it works (it edits the same comment until "finished"). */
 const inProgress = (body: string): boolean => !/claude finished|finished the review/i.test(body) && (/(^|\n)\s*- \[ \]/.test(body) || /is reviewing/i.test(body))
 
-export function prItems(pr: HeavyPr, me: string | null, now: number): { items: PrItem[]; stallAt: number | null } {
+/**
+ * Whether an item by `me` is the session's own post (its key, its text). Without one, everything
+ * by `me` is taken for the session's own, as before #158.
+ */
+export type OwnCheck = (key: string, body: string) => boolean
+
+export function prItems(pr: HeavyPr, me: string | null, now: number, own?: OwnCheck): { items: PrItem[]; stallAt: number | null } {
   if (pr.state === 'MERGED') return { items: [{ key: 'merged', kind: 'merged', text: '' }], stallAt: null }
   if (pr.state === 'CLOSED') return { items: [{ key: 'closed', kind: 'closed', text: '' }], stallAt: null }
   // Without knowing who "me" is, own replies cannot be told apart: deliver nothing (baseline only).
   if (!me) return { items: [], stallAt: null }
-  const mine = (who: string) => who.toLowerCase() === me.toLowerCase()
+  const mine = (who: string, key: string, body: string) => who.toLowerCase() === me.toLowerCase() && (!own || own(key, body))
   const items: PrItem[] = []
   let stallAt: number | null = null
-  for (const t of pr.threads)
-    if (!t.isResolved && t.last && !mine(t.last.author)) items.push({ key: `T:${t.last.id}:${t.last.updatedAt}`, kind: 'thread', text: t.last.body, by: t.last.author })
+  for (const t of pr.threads) {
+    const key = t.last ? `T:${t.last.id}:${t.last.updatedAt}` : ''
+    if (!t.isResolved && t.last && !mine(t.last.author, key, t.last.body)) items.push({ key, kind: 'thread', text: t.last.body, by: t.last.author })
+  }
   for (const c of pr.comments) {
-    if (mine(c.author)) continue
+    const key = OTHER_BOT.test(c.author) && !BOT.test(c.author) ? `C:${c.id}` : `C:${c.id}:${c.updatedAt}`
+    if (mine(c.author, key, c.body)) continue
     if (BOT.test(c.author) && inProgress(c.body)) {
       const due = Date.parse(c.updatedAt) + STALL_MS
       if (Number.isFinite(due) && now >= due) items.push({ key: `S:${c.id}`, kind: 'stall', text: c.body, by: c.author })
       else if (Number.isFinite(due)) stallAt = Math.min(stallAt ?? due, due)
       continue
     }
-    items.push({ key: OTHER_BOT.test(c.author) && !BOT.test(c.author) ? `C:${c.id}` : `C:${c.id}:${c.updatedAt}`, kind: 'comment', text: c.body, by: c.author })
+    items.push({ key, kind: 'comment', text: c.body, by: c.author })
   }
   for (const r of pr.reviews)
-    if (!mine(r.author) && (r.state === 'CHANGES_REQUESTED' || r.body.trim())) items.push({ key: `R:${r.id}`, kind: 'review', text: r.body, by: r.author, state: r.state })
+    if ((r.state === 'CHANGES_REQUESTED' || r.body.trim()) && !mine(r.author, `R:${r.id}`, r.body)) items.push({ key: `R:${r.id}`, kind: 'review', text: r.body, by: r.author, state: r.state })
   // Only CONFLICTING counts: UNKNOWN means GitHub has not computed it yet.
   if (pr.mergeable === 'CONFLICTING') items.push({ key: `X:${pr.baseRefName}`, kind: 'conflict', text: '', base: pr.baseRefName })
   return { items, stallAt }
