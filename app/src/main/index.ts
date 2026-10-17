@@ -100,6 +100,7 @@ import {
 } from "./sessionAccounts";
 import { Superseded } from "./superseded";
 import { ModCatalog, ModOff } from "./modOff";
+import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
 import { MeetingNotices } from "./meetingNotices";
@@ -295,6 +296,8 @@ const sessionAccounts = new SessionAccounts(
 // The old side of a copy (a resume as another account): hidden while it does not run.
 const superseded = new Superseded(join(paths.home, "superseded-sessions.json"));
 const modOff = new ModOff(join(paths.home, "mod-off.json"));
+/** The session list's tabs (#146). */
+const sessionGroups = new SessionGroupStore(join(paths.home, "session-groups.json"));
 const modCatalog = new ModCatalog(join(paths.home, "mod-catalog.json"));
 // Test aid: MASTERDECK_MEETINGS_FIXTURE=<dir> (isolated launches only) puts a meeting and its note
 // on disk, before the notes are read.
@@ -810,6 +813,10 @@ const sources = new Sources(
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
     state.modOff = modOff.all();
+    // Done sessions are still listed, so a stopped one keeps its tab until it is removed.
+    if (sources.isHealthy("agents") && state.sessions.length)
+      sessionGroups.prune(new Set(state.sessions.map((s) => s.key)));
+    state.sessionGroups = sessionGroups.all();
     state.held = heldViews(heldStore.list());
     const beats = deckHooks.modBeats();
     state.modLive = Object.fromEntries(
@@ -1762,6 +1769,8 @@ function resumeDeps(dir: string): Parameters<typeof resumeAs>[0] {
     copied: (old, copy) => {
       superseded.add([old.bgId, old.sessionId]);
       sources.noteCopy(old, copy);
+      sessionGroups.carry(old.bgId, copy);
+      sources.changed();
     },
   };
 }
@@ -3450,6 +3459,15 @@ function registerIpc(): void {
     if (!modOff.set(key, mod, on)) return { ok: false, message: "Could not save the choice." };
     sources.changed();
     return { ok: true, message: `${mod} is ${on ? "on" : "off"} in this session.` };
+  });
+  // The session list's tabs (#146); the op is checked by applyGroupOp. Shown with the next state.
+  reg.handle(CH.sessionGroupsAct, (_e, op: unknown) => {
+    const o = op as { op?: unknown; key?: unknown; group?: unknown } | null;
+    if (o?.op === "assign" && o.group !== null && !(latest?.sessions ?? []).some((s) => s.key === o.key))
+      return { ok: false, message: "That session is not listed." };
+    const r = sessionGroups.act(op);
+    if (r.ok) sources.changed();
+    return r;
   });
   // Setup / Settings → Mods. Fixed claude commands only (the web asked with webConfirm first).
   const modsChanged = (r: CliResult): CliResult => {
