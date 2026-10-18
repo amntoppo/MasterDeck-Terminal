@@ -2120,7 +2120,7 @@ div.dash-ev { cursor: default; }
 button.dash-kpi { cursor: pointer; }
 button.dash-kpi:hover { background: var(--bg-4); }
 .dash-kv { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.dash-kl { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-kl { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
 .dash-spark-box { position: relative; height: 46px; }
 .dash-spark { width: 100%; height: 46px; display: block; }
 .dash-spark-dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 99px; background: var(--accent); }

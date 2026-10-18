@@ -13,6 +13,7 @@ import type { TokensByDay } from '@shared/tokens'
 import type { AppState, Issue, Session } from '@shared/types'
 import type { UpdateState } from '@shared/updates'
 import { deck, load, save, useNow } from '../deck'
+import { useStable } from '../useStable'
 import { can, isWeb, usePhone } from '../web'
 import { AttentionCard } from './dashboard/AttentionCard'
 import { DeliveryCard } from './dashboard/DeliveryCard'
@@ -36,6 +37,9 @@ const SINCE_KEY = 'md.dashboard.since'
  */
 let procsCache: ProcsAll | null = null
 let janitorCache: JanitorRow[] | null = null
+/** When the last procs:all read started (this window's clock, not the Mac's `at`), and whether one is on its way. */
+let procsTried = 0
+let procsInFlight = false
 
 function readDismissed(): Dismissal[] {
   const raw = load<unknown>(DISMISSED_KEY, [])
@@ -136,23 +140,34 @@ export function DashboardView(props: DashboardProps) {
   const windows = deck().platform === 'win32'
   const [procs, setProcs] = useState<ProcsAll | null>(procsCache)
   const [procsBusy, setProcsBusy] = useState(false)
-  const procsSeq = useRef(0)
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+  // The minute counts from each attempt, failed ones too, and a read on its way is never doubled.
   const readProcs = useCallback(() => {
-    if (windows || !can('procsAll')) return
-    const seq = ++procsSeq.current
+    if (windows || !can('procsAll') || procsInFlight) return
+    procsInFlight = true
+    procsTried = Date.now()
     setProcsBusy(true)
     void deck()
       .procsAll()
       .then((p) => {
         procsCache = p
-        if (seq === procsSeq.current) setProcs(p)
+        if (alive.current) setProcs(p)
       })
       .catch(() => {})
-      .finally(() => seq === procsSeq.current && setProcsBusy(false))
+      .finally(() => {
+        procsInFlight = false
+        if (alive.current) setProcsBusy(false)
+      })
   }, [windows])
   const working = useMemo(() => state.sessions.filter(atWork).map((s) => s.key).sort().join(','), [state.sessions])
   useEffect(() => {
-    const age = procsCache ? Date.now() - procsCache.at : Infinity
+    const age = Date.now() - procsTried
     if (age >= MIN) {
       readProcs()
       return
@@ -208,9 +223,14 @@ export function DashboardView(props: DashboardProps) {
   const until = filters.range === 'yesterday' ? today : midnight(now, 1)
   const [events, setEvents] = useState<{ key: string; list: ActivityEvent[] } | null>(null)
   const [changed, setChanged] = useState(0)
+  // Only a range that is still open can gain events: Yesterday is not read again.
+  const untilRef = useRef(until)
+  untilRef.current = until
   useEffect(() => {
     if (!can('onActivityChanged')) return
-    return deck().onActivityChanged(() => setChanged((n) => n + 1))
+    return deck().onActivityChanged(() => {
+      if (untilRef.current > Date.now()) setChanged((n) => n + 1)
+    })
   }, [])
   const rangeKey = `${from}-${until}`
   useEffect(() => {
@@ -232,7 +252,7 @@ export function DashboardView(props: DashboardProps) {
   const [dismissed, setDismissed] = useState<Dismissal[]>(readDismissed)
   const logins = useMemo(() => (state.ghAccounts ?? []).map((a) => a.login), [state.ghAccounts])
   const prWatches = state.prWatches
-  const attention = useMemo(
+  const attention = useStable(useMemo(
     () =>
       attentionItems(
         {
@@ -253,8 +273,10 @@ export function DashboardView(props: DashboardProps) {
         now,
       ),
     [state.inbox, state.sessions, state.prs, state.teamPrs, state.sessionPrs, state.me, logins, state.watches, prWatches, sched, update, dismissed, phone, now],
-  )
+  ))
   const subjects = attention.subjects
+  const subjectsRef = useRef(subjects)
+  subjectsRef.current = subjects
   const dismissedHere = useMemo(() => {
     const here = new Set(subjects)
     return dismissed.filter((d) => here.has(d.id)).length
@@ -263,12 +285,12 @@ export function DashboardView(props: DashboardProps) {
     (item: AttentionItem) => {
       setDismissed((cur) => {
         // Pruned of subjects no longer present, when written (a list still loading is not "gone").
-        const next = pruneDismissed([...cur.filter((d) => d.id !== item.id), { id: item.id, fingerprint: item.fingerprint }], subjects)
+        const next = pruneDismissed([...cur.filter((d) => d.id !== item.id), { id: item.id, fingerprint: item.fingerprint }], subjectsRef.current)
         save(DISMISSED_KEY, next)
         return next
       })
     },
-    [subjects],
+    [],
   )
   const undismiss = useCallback(() => {
     setDismissed([])
@@ -277,26 +299,37 @@ export function DashboardView(props: DashboardProps) {
 
   // Reply…: the real Needs-you card under its row. It needs the whole state, so it is drawn here.
   const [replyId, setReplyId] = useState<string | null>(null)
-  const replyEntry = replyId ? state.inbox.open.find((e) => e.item.id === replyId) : undefined
+  const replyEntry = useStable(replyId ? state.inbox.open.find((e) => e.item.id === replyId) : undefined)
   useEffect(() => {
     if (replyId && !replyEntry) setReplyId(null)
   }, [replyId, replyEntry])
-  const reply = replyEntry ? (
-    <InboxCard
-      entry={replyEntry}
-      state={state}
-      onOpenSession={props.onOpenSession}
-      onIssue={props.onIssue}
-      onStartWith={props.onStartWith}
-      onOpenMeeting={props.onOpenMeeting}
-      full={false}
-    />
-  ) : null
+  // Drawn again when its item or what the Needs-you cards read (sessions, issues, board, menus)
+  // changes, not on every push. ponytail: a card reading another slice sees it as of that draw;
+  // passing the whole state each time is the upgrade, at the cost of AttentionCard's memo.
+  const replySessions = useStable(replyEntry ? state.sessions : null)
+  const replyIssues = useStable(replyEntry ? state.issues : null)
+  const replyBoard = useStable(replyEntry ? state.board : null)
+  const replyMenus = useStable(replyEntry ? [state.menus, state.asks, state.proposals] : null)
+  const reply = useMemo(
+    () =>
+      replyEntry ? (
+        <InboxCard
+          entry={replyEntry}
+          state={latestState.current}
+          onOpenSession={(s) => latest.current.props.onOpenSession(s)}
+          onIssue={(i) => latest.current.props.onIssue(i)}
+          onStartWith={(i, t) => latest.current.props.onStartWith(i, t)}
+          onOpenMeeting={(id) => latest.current.props.onOpenMeeting(id)}
+          full={false}
+        />
+      ) : null,
+    [replyEntry, replySessions, replyIssues, replyBoard, replyMenus], // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
   // ---- The other cards' slices
 
   const multi = logins.length >= 2
-  const nowV = useMemo(
+  const nowV = useStable(useMemo(
     () =>
       nowView(
         {
@@ -314,18 +347,18 @@ export function DashboardView(props: DashboardProps) {
         now,
       ),
     [state.sessions, state.tails, state.issues, state.board, multi, procs, state.watches, prWatches, state.autoReview, sched, now],
-  )
-  const delivery = useMemo(
+  ))
+  const delivery = useStable(useMemo(
     () => deliveryView({ board: state.board, boardHistory: state.boardHistory, sprints: state.sprints, teamPrs: state.teamPrs, prs: state.prs, me: state.me, logins }, now),
     [state.board, state.boardHistory, state.sprints, state.teamPrs, state.prs, state.me, logins, now],
-  )
+  ))
   const budget = state.settings.budgetPerTicketUsd
-  const usage = useMemo(
+  const usage = useStable(useMemo(
     () => usageView({ costBook: state.costBook, sessions: state.sessions, hookInfo: state.hookInfo, ghCache: state.ghCache, budgetPerTicketUsd: budget, logins, tokensByDay: tokens }, now),
     [state.costBook, state.sessions, state.hookInfo, state.ghCache, budget, logins, tokens, now],
-  )
+  ))
   const remoteEnabled = state.settings.remoteEnabled
-  const health = useMemo(
+  const health = useStable(useMemo(
     () =>
       healthView({
         now,
@@ -347,7 +380,7 @@ export function DashboardView(props: DashboardProps) {
         update: isWeb() ? null : update,
       }),
     [now, remoteEnabled, state.remote, state.browsers, state.ghAccounts, state.ghCache, state.boardError, state.teamPrsError, state.sources, state.errors, state.missingBinaries, state.hooks, state.statuslineInstalled, procs, janitor, windows, update],
-  )
+  ))
 
   const agentsLoading = state.sources.agents === 'pending' || state.sources.agents === undefined
   const portLinks = can('openPort')

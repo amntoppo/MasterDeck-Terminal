@@ -165,7 +165,7 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
 |---|---|
 | Needs-you item | Its primary action (`inboxAct`), **Open** (the session) and **Reply…**, which expands the real Needs-you card (`InboxCard`, moved unchanged from `Sidebar.tsx` into `InboxCard.tsx`) under the row, so every kind (menu answers, options, proposals, trust…) acts exactly as in the Needs-you list, through `inboxAct` → `runInboxAction`. |
 | My PR (CI, changes, threads) | **Open PR** (`openPr`), and **Open session** when a session owns it (`ownerOf`, shared/offers.ts) |
-| Review request | **Review** (`openPr(url, …, review = true)`) |
+| Review request | **Review**: the PR popup (`openPr`), which has **Review with Claude**; the web app opens the PR on GitHub |
 | Ready to merge | **Merge…** (`openPr`; the web app opens GitHub) |
 | Failed run | **Retry** (`schedRunNow(id)`), and **Open** (Schedules) |
 | Monitor / PR watch error | **Open** (the session's Details → GitHub, or Pull requests' Watched PRs) |

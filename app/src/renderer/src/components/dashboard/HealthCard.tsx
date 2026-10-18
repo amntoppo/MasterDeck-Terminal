@@ -110,7 +110,11 @@ export const HealthCard = memo(function HealthCard({
           )}
         </>
       ) : compact ? (
-        view.rows.filter((r) => r.status === 'warn' || r.status === 'bad').map(row)
+        problems ? (
+          view.rows.filter((r) => r.status === 'warn' || r.status === 'bad').map(row)
+        ) : (
+          <div className="dash-empty">Nothing is wrong. Some things are not checked yet.</div>
+        )
       ) : (
         view.rows.map(row)
       )}
