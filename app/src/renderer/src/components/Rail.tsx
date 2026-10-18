@@ -156,8 +156,8 @@ interface Drag {
   id: string
   /** How far the pointer moved since the press: the dragged icon follows it. */
   dy: number
-  /** Where it lands: an index in the order (dropBefore). */
-  at: number
+  /** Where it lands: before this id (null: the end), so an order synced in mid-drag still holds. */
+  before: string | null
   /** The drop line's top, in the rail's box. */
   line: number
 }
@@ -195,6 +195,9 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
   const savedKey = saved.join(' ')
   const [local, setLocal] = useState<{ key: string; order: string[] } | null>(null)
   const order = useMemo(() => (local && local.key === savedKey ? local.order : railOrder(saved)), [local, savedKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Once the saved order moved on, the picked one is done: kept, it would come back when the saved
+  // order returns to the same value (a reset to [] after a move saved from []).
+  useEffect(() => setLocal((l) => (l && l.key !== savedKey ? null : l)), [savedKey])
   const [drag, setDrag] = useState<Drag | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
@@ -213,15 +216,26 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
     if (actionOf.has(id)) return id === 'palette' || screenOk(id as Exclude<RailAction, 'palette'>)
     return screenOk(id as View)
   }
+  const hasIcon = (ids: string[]) => ids.some((x) => !isRailMark(x) && shown(x))
+  // As before: a line only between two groups that both have an icon here.
+  const sepDrawn = () => {
+    const i = order.indexOf(RAIL_SEP)
+    return hasIcon(order.slice(0, i)) && hasIcon(order.slice(i + 1, order.indexOf(RAIL_SPACER)))
+  }
+  /** What ⌥↑ / ⌥↓ steps over: a drawn icon, the spacer, the separator only where it is drawn. */
+  const stepShown = (id: string) => (id === RAIL_SEP ? sepDrawn() : shown(id))
   const commit = (next: string[]) => {
-    if (next.join(' ') === order.join(' ')) return
+    if (next.join(' ') === order.join(' ')) return false
     setLocal({ key: savedKey, order: next })
-    onOrder(toSaved(next))
+    onOrder(toSaved(next, saved))
+    return true
   }
   const end = () => {
     press.current = null
     live.current = null
     setDrag(null)
+    // The click a release makes (if any) comes in this same task; a later one (Enter) is real.
+    if (swallow.current) setTimeout(() => (swallow.current = false), 0)
   }
   const dragging = !!drag
   useEffect(() => {
@@ -278,18 +292,17 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
     const next = entries.find((x) => x.mid > y)
     const last = entries.at(-1)
     // The line sits in the 4 px gap above the entry it lands before (the spacer's top: the middle group's end).
-    const d = { id: p.id, dy: e.clientY - p.y, at: dropBefore(order, entries, y), line: next ? next.top - 2 : last ? last.bottom + 2 : 0 }
+    const d = { id: p.id, dy: e.clientY - p.y, before: order[dropBefore(order, entries, y)] ?? null, line: next ? next.top - 2 : last ? last.bottom + 2 : 0 }
     live.current = d
     setDrag(d)
   }
   const onPointerUp = (e: React.PointerEvent) => {
     const d = live.current
     end()
-    // The click this release makes (if any) comes in this same task; a later one (Enter) is real.
-    if (swallow.current) setTimeout(() => (swallow.current = false), 0)
     if (!d) return
     if (nav.current?.hasPointerCapture(e.pointerId)) nav.current.releasePointerCapture(e.pointerId)
-    commit(moveTo(order, d.id, d.at))
+    const at = d.before === null ? order.length : order.indexOf(d.before)
+    if (at >= 0) commit(moveTo(order, d.id, at))
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
@@ -297,8 +310,7 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
     const id = t.closest<HTMLElement>('[data-rail]')?.dataset.rail
     if (!id || t.closest('.rec-pop')) return
     e.preventDefault()
-    focusAfter.current = id
-    commit(moveStep(order, id, e.key === 'ArrowUp' ? -1 : 1, shown))
+    if (commit(moveStep(order, id, e.key === 'ArrowUp' ? -1 : 1, stepShown))) focusAfter.current = id
   }
 
   /** What every icon carries: its id for the drag, and the lift while it is the one dragged. */
@@ -318,11 +330,8 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
       </button>
     )
   }
-  const hasIcon = (ids: string[]) => ids.some((x) => !isRailMark(x) && shown(x))
-  const entry = (id: string, i: number): ReactNode => {
-    if (id === RAIL_SEP)
-      // As before: a line only between two groups that both have an icon here.
-      return hasIcon(order.slice(0, i)) && hasIcon(order.slice(i + 1, order.indexOf(RAIL_SPACER))) ? <div key={id} className="rail-sep" data-rail-mark={id} /> : null
+  const entry = (id: string): ReactNode => {
+    if (id === RAIL_SEP) return sepDrawn() ? <div key={id} className="rail-sep" data-rail-mark={id} /> : null
     if (id === RAIL_SPACER)
       return (
         <Fragment key={id}>

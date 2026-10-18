@@ -76,8 +76,29 @@ export const isDefaultOrder = (order: readonly string[]) => {
   return o.length === RAIL_DEFAULT.length && o.every((id, i) => id === RAIL_DEFAULT[i])
 }
 
-/** What Settings stores for a drawn order: `[]` for the default, so later defaults apply in full. */
-export const toSaved = (order: readonly string[]): string[] => (isDefaultOrder(order) ? [] : [...order])
+/**
+ * What Settings stores for a drawn order: `[]` for the default, so later defaults apply in full.
+ * Ids of `saved` this version does not know go back in after the id they followed there (else
+ * first), so a newer version's icons keep their place through a reorder made after a downgrade.
+ */
+export function toSaved(order: readonly string[], saved: readonly string[] = []): string[] {
+  if (isDefaultOrder(order)) return []
+  const out = [...order]
+  const prev = cleanRailOrder(saved)
+  prev.forEach((id, i) => {
+    if (RAIL_DEFAULT.includes(id) || out.includes(id)) return
+    let at = 0
+    for (let j = i - 1; j >= 0; j--) {
+      const k = out.indexOf(prev[j])
+      if (k >= 0) {
+        at = k + 1
+        break
+      }
+    }
+    out.splice(at, 0, id)
+  })
+  return out
+}
 
 /** `order` with `id` moved to just before index `before` (`order.length`: the end). Marks never move. */
 export function moveTo(order: readonly string[], id: string, before: number): string[] {
@@ -91,13 +112,14 @@ export function moveTo(order: readonly string[], id: string, before: number): st
 
 /**
  * ⌥↑ / ⌥↓: `id` moved one step past the next drawn entry above or below it, an icon or a mark (so a
- * step at a group's edge crosses into the next group). Hidden icons are passed over.
+ * step at a group's edge crosses into the next group). What `shown` says is not drawn, an icon or
+ * a mark (the separator when a group has no icon here), is passed over.
  */
 export function moveStep(order: readonly string[], id: string, dir: -1 | 1, shown: (id: string) => boolean): string[] {
   const from = order.indexOf(id)
   if (from < 0 || isRailMark(id)) return [...order]
   for (let j = from + dir; j >= 0 && j < order.length; j += dir) {
-    if (isRailMark(order[j]) || shown(order[j])) return moveTo(order, id, dir > 0 ? j + 1 : j)
+    if (shown(order[j])) return moveTo(order, id, dir > 0 ? j + 1 : j)
   }
   return [...order]
 }

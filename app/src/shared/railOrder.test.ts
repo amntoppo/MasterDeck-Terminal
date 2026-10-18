@@ -108,6 +108,13 @@ describe('moveStep', () => {
     expect(o.slice(o.indexOf(RAIL_SEP) + 1, o.indexOf(RAIL_SEP) + 4)).toEqual(['janitor', 'notes', 'costs'])
   })
 
+  it('passes over a separator that is not drawn', () => {
+    // The middle group empty on this screen: Tasks ↓ goes past the hidden line and the spacer.
+    const middle = D.slice(D.indexOf(RAIL_SEP) + 1, D.indexOf(RAIL_SPACER))
+    const o = moveStep(D, 'tasks', 1, (id) => id !== RAIL_SEP && !middle.includes(id))
+    expect(o.indexOf('tasks')).toBe(o.indexOf(RAIL_SPACER) + 1)
+  })
+
   it('stops at the ends', () => {
     expect(moveStep(D, 'terminals', -1, all)).toEqual(D)
     expect(moveStep(D, 'settings', 1, all)).toEqual(D)
@@ -141,6 +148,16 @@ describe('dropBefore', () => {
 })
 
 describe('toSaved / isDefaultOrder', () => {
+  it('keeps ids this version does not know where they were', () => {
+    const saved = ['settings', 'future', ...D.filter((id) => id !== 'settings'), 'later']
+    const moved = moveTo(railOrder(saved), 'board', 0)
+    const out = toSaved(moved, saved)
+    expect(out.indexOf('future')).toBe(out.indexOf('settings') + 1)
+    expect(out.at(-1)).toBe('later')
+    expect(out[0]).toBe('board')
+    expect(railOrder(out)).toEqual(moved)
+  })
+
   it('the default is saved as nothing, so a reset follows later defaults', () => {
     expect(toSaved(D)).toEqual([])
     expect(isDefaultOrder([])).toBe(true)

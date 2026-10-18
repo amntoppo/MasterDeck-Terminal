@@ -2251,9 +2251,10 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   each icon carries `data-rail`, the marks `data-rail-mark`; a pointer drag starts after 4 px, the
   rail captures the pointer, the drop target is `dropBefore` (the first drawn entry whose middle is
   below the pointer), the click that ends a drag is swallowed, Esc / blur / a lost capture cancel;
-  ⌥↑ / ⌥↓ is `moveStep` and gives the focus back. The new order is drawn at once (local state keyed
-  by the saved one) and saved with `setSettings`; a browser may change it (`remoteSettings` passes
-  it). `PhoneBar` does not read it.
+  ⌥↑ / ⌥↓ is `moveStep` (an undrawn separator is passed over) and gives the focus back. The new
+  order is drawn at once (local state keyed by the saved one) and saved over a fresh `getSettings`
+  with the unknown ids put back (`toSaved(order, saved)`); a browser may change it (`remoteSettings`
+  passes it). `PhoneBar` does not read it.
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
   (`TasksView`), `costs` (`CostsView`; its Hours choice is `HoursView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).

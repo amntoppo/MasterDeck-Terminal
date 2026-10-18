@@ -28,13 +28,16 @@
    Icons are `-webkit-app-region: no-drag` already, so a drag that starts on an icon never moves
    the window; tooltips are hidden while dragging.
 6. **Keyboard**: ⌥/Alt+↑/↓ on a focused icon moves it one step past the next drawn icon or mark
-   (`moveStep`), so a press at a group's edge moves it into the next group. Focus stays on the icon.
+   (`moveStep`), so a press at a group's edge moves it into the next group; a separator that is not
+   drawn is passed over. Focus stays on the icon.
 7. **Reset**: right-click on the rail (not inside the Record popout or the remote card) opens a menu
    with **Reset icon order**; Settings → General has a **Rail icons** row with the same button
    (disabled while the order is the default).
 8. **Saving**: the rail draws the new order at once (local state) and writes it with
-   `setSettings`; the next state replaces the local one. An order equal to the default is saved as
-   `[]`.
+   `setSettings` over a fresh `getSettings` (never a stale snapshot); the next state replaces the
+   local one. An order equal to the default is saved as `[]`; otherwise ids this version does not
+   know go back in after the id they followed (`toSaved(order, saved)`). A drag's target is kept as
+   "before id X", so an order synced in mid-drag still lands it in the right place.
 9. **The web app** shares the Mac's order (a browser may change it: `remoteSettings` passes it on,
    like the other settings). The phone's bottom bar is out of scope and unchanged.
 10. Badges, dots and tooltips are children of the icon's button, so they move with it. Record is
