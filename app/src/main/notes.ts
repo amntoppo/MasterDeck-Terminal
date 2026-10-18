@@ -262,10 +262,13 @@ export class NotesStore {
     return this.save({ ...('ticket' in to ? { ticket: to.ticket } : { id }), title: old?.title ?? '', body, base: old?.updated ?? null })
   }
 
-  delete(id: unknown): { ok: boolean; message?: string; retry?: true } {
+  /** `base` (optional): the version the caller saw; a note saved since is not deleted (`conflict`). */
+  delete(id: unknown, base?: unknown): { ok: boolean; message?: string; retry?: true; conflict?: true } {
     if (typeof id !== 'string' || !NOTE_ID.test(id)) return { ok: false, message: 'Not a note.' }
     if (this.blocked(id)) return { ok: false, message: this.foreignMessage(id) }
-    return this.notes.has(id) ? this.remove(id) : { ok: true }
+    const old = this.notes.get(id)
+    if (typeof base === 'number' && old && old.updated !== base) return { ok: false, message: 'Changed elsewhere.', conflict: true }
+    return old ? this.remove(id) : { ok: true }
   }
 
   private remove(id: string): { ok: boolean; message?: string; retry?: true } {

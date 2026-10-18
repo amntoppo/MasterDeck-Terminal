@@ -1,6 +1,6 @@
 import { markdownText } from './markdown'
 import { MEETING_ID, MEETING_TITLE_MAX } from './meetings'
-import { asTicket, sameTicket, type Ticket } from './ticket'
+import { asTicket, fullRepo, sameTicket, type Ticket } from './ticket'
 
 type Titled = { repo?: string | null; number: number; title: string }
 
@@ -281,6 +281,22 @@ export function sessionNotes(metas: NoteMeta[], s: { key: string }, ticket: Tick
     (!!ticket && !!m.link?.ticket && m.link.ticket.number === ticket.number && m.link.ticket.repo.toLowerCase() === repo)
   const rest = sortNotes(metas.filter((m) => m.id !== tid && about(m)))
   return own ? [own, ...rest] : rest
+}
+
+/** A ticket's own note (`t-…`) in the list; a note that is only linked to the ticket is not it. `repo` null: the primary. */
+export function ticketNote(metas: NoteMeta[], repo: string | null | undefined, number: number): NoteMeta | null {
+  const full = fullRepo(repo).toLowerCase()
+  return metas.find((m) => m.ticket && m.ticket.number === number && m.ticket.repo.toLowerCase() === full) ?? null
+}
+
+/**
+ * A change this window made, applied when its answer comes: never over a newer version the list already has (the
+ * event for a later edit elsewhere can come first). `deletedAt`: the version a delete removed.
+ */
+export function applyOwnChange(metas: NoteMeta[], c: NoteChange, deletedAt?: number | null): NoteMeta[] {
+  const listed = metas.find((m) => m.id === c.id)
+  const older = 'meta' in c ? c.meta.updated : (deletedAt ?? Infinity)
+  return listed && listed.updated > older ? metas : applyChange(metas, c)
 }
 
 export function applyChange(metas: NoteMeta[], c: NoteChange): NoteMeta[] {

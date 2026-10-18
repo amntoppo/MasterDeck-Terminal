@@ -519,8 +519,16 @@ fixes it, and move the item here to "Recently done".
 - **P2 · Not checked.** The native **Delete** confirmation (a native dialog blocks CDP: only the
   user can press it); the real web app over the real bridge (needs a web deploy after the desktop
   release that has Notes); a real phone (iOS zoom on focusing the editor: the CSS sets 16 px); the
-  Master tab closing the phone sheet; the session Details entry (**Add note** / **Edit note**) on
-  screen (no listed session had a ticket in the isolated run); Windows.
+  Master tab closing the phone sheet; Windows.
+
+## Ticket note in Details (#164): open points (2026-10-18)
+
+- **P3 · Not checked:** the Electron window (its native Delete dialog), the real web app over the
+  bridge, a phone on screen (the preview's phone layout was not driven to Details), Windows.
+- **P3 · Only the ticket's note is written in place.** Notes about the session, and the Details →
+  Notes tab, still open the Notes panel; a session without a ticket shows no note block.
+- **P3 · A draft lives in memory only** (per ticket, while the window lives): a reload of the window
+  or the browser tab drops text never saved.
 
 ## Linked sessions: open points (2026-10-07, issue #67)
 
@@ -1070,6 +1078,13 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 - **Rail icon order (#170)** (09c3650): drag or ⌥↑ / ⌥↓ to reorder the rail's icons, kept in
   `Settings.railOrder`; Reset icon order on the rail's menu and in Settings → General.
+- **The ticket's note in Session details (#164)**: Details → GitHub → Ticket shows the ticket's one
+  note rendered (Show more for long ones, when it changed, a **Note** badge on the row), written in
+  place (Write a note… with none; click or Edit with one; Save / ⌘⌃Enter, Cancel / Esc, Delete),
+  saves carry `base` (Changed / Deleted elsewhere with Reload / Keep mine, Discard / Keep), live
+  updates, **Open in Notes**. Design and plan: `docs/plans/2026-10-18-ticket-note-inline-*`. Branch
+  `worktree-MasterDeck-Terminal-164-session-notes`.
+
 - **A new session goes into the selected session-list tab (#171)**: New Claude session and the
   Start dialog (also from the Board) have a **Session list tab** field when a named tab exists,
   defaulting to the tab on screen; main puts the session in it when it is first listed (a pending
