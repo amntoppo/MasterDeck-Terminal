@@ -1,7 +1,10 @@
 name: Auto release
 
 # Every merge to main that changes the app reaches users as an in-app update, with no manual step
-# (MasterDeck-Terminal#166). Once CI passed on the merge commit:
+# (MasterDeck-Terminal#166). It runs on the push to main itself: ci.yml runs only on PRs, so the
+# merged code passed CI on its PR, and release.yml runs the tests again before anything is
+# published. Pushes that touch only docs, tests or CI start nothing (paths-ignore, the same list as
+# auto-release.mjs's isAppFile, which also decides for the whole range since the last release):
 #
 # 1. prepare: is there anything to release (OTA_MAIN not off, the commit not in a release yet, an
 #    app file changed since the last release: app/scripts/auto-release.mjs `changed`)? The next
@@ -18,10 +21,21 @@ name: Auto release
 # A re-run is safe: a tag already made for the merge commit is released again (or left alone when
 # its update is published). docs/OPERATIONS.md § Release.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
+    # Keep in step with isAppFile in app/scripts/auto-release.mjs.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/**'
+      - '.claude/**'
+      - '**/*.test.ts'
+      - '**/*.test.tsx'
+      - 'skills/master/tests/**'
+      - 'app/web/**'
+      - 'install.sh'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       channel:
@@ -38,20 +52,19 @@ permissions:
   contents: read
 
 # One release at a time, in order. GitHub keeps one pending run and cancels older pending ones; the
-# one left releases the newest commit, which holds every merge before it. Runs that release nothing
-# (CI failed, a PR's CI) get a group of their own so they never cancel a pending release.
+# one left releases the newest commit, which holds every merge before it.
 concurrency:
-  group: ${{ ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) && 'ota-main' || format('ota-main-ignored-{0}', github.run_id) }}
+  group: ota-main-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  SHA: ${{ github.sha }}
   MD_RELEASE_API: https://dev.masterdeck.dev
   GH_TOKEN: ${{ github.token }}
 
 jobs:
   prepare:
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write # the tag

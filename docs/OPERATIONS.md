@@ -75,9 +75,10 @@ git push origin main && git push origin vX.Y.Z
 A version with a `-` (`0.10.0-beta.1`) is the **beta** channel and a GitHub prerelease (so
 `install.sh`, which takes the latest release, stays on stable); anything else is **stable**.
 
-**CI.** `.github/workflows/ci.yml` (push to `main`, PRs) runs the Python tests, typecheck and
-vitest and builds the DMGs and zips (macos-latest) and the NSIS EXE (windows-latest); it no longer
-runs on tags. `.github/workflows/release.yml` runs on a tag `v*` (or by hand, **Run workflow** with
+**CI.** `.github/workflows/ci.yml` runs on **pull requests only** (and by hand): the Python
+tests, typecheck and vitest, and the DMGs and zips (macos-latest) and the NSIS EXE (windows-latest),
+unpublished. A merge to `main` is built and tested by the automatic release below, a tag by
+`release.yml`. `.github/workflows/release.yml` runs on a tag `v*` (or by hand, **Run workflow** with
 an existing tag):
 
 1. **build** (mac and win, the same steps as `ci.yml`, `--publish never`) uploads the DMGs, the mac
@@ -95,14 +96,16 @@ workflow.
 
 ### Automatic release on every merge
 
-`.github/workflows/ota-main.yml` (**Auto release** in the Actions tab; it calls **Release**, which calls **OTA release**) runs when **CI** completes on a push to `main` (`workflow_run`),
-and only when CI succeeded (a PR's CI, or CI on a fork, never counts). Spec:
+`.github/workflows/ota-main.yml` (**Auto release** in the Actions tab; it calls **Release**, which calls **OTA release**) runs on every push to `main`. The merged code passed CI on its pull request, and `release.yml`
+runs the Python tests, typecheck and vitest again on both builds before anything is published. A
+push that touches only docs, tests or CI starts nothing (`paths-ignore`, the same list as
+`IGNORED_PATHS` / `isAppFile` in `app/scripts/auto-release.mjs`; a test keeps them equal). Spec:
 `docs/superpowers/specs/2026-10-18-ota-on-merge-design.md`.
 
 1. **prepare** sets a commit status **Auto release** (pending) on the merge commit, then decides
    (`app/scripts/auto-release.mjs`, tested in `auto-release.test.ts`):
    - nothing when the repository variable `OTA_MAIN` is `off`, when the commit is already in a
-     release (CI runs finished out of order), or when nothing but docs, tests or CI changed since
+     release (a run of an older push left pending), or when nothing but docs, tests or CI changed since
      the last release (`isAppFile`: `*.md`, `docs/`, `.github/`, `*.test.ts(x)`,
      `skills/master/tests/`, `app/web/`, `install.sh`, `LICENSE`, `.gitignore`). Measured from the
      last release, not the merge's own diff: a docs merge after a failed app merge still ships it;
@@ -125,10 +128,9 @@ and only when CI succeeded (a PR's CI, or CI on a fork, never counts). Spec:
 3. **report** sets the status to success (the version, channel and rollout, or why nothing was
    released) or failure, and on failure comments on the merged PR with the run's link.
 
-**Order.** One concurrency group, `ota-main`, never cancelled in progress. GitHub keeps one pending
+**Order.** One concurrency group, `ota-main-refs/heads/main`, never cancelled in progress. GitHub keeps one pending
 run and cancels older pending ones: the run left releases the newest commit, which holds every
-merge before it (its notes list them all). Runs that release nothing (CI failed) get a group of
-their own, so they never cancel a pending release.
+merge before it (its notes list them all).
 
 **Channel and rollout** (repository → Settings → Secrets and variables → Actions → Variables):
 

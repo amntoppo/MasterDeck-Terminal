@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { appChanged, compareVersions, isAppFile, nextVersion, parseVersion, releaseNotes, releaseTags } from './auto-release.mjs'
+import { IGNORED_PATHS, appChanged, compareVersions, isAppFile, nextVersion, parseVersion, releaseNotes, releaseTags } from './auto-release.mjs'
 
 const SCRIPT = join(__dirname, 'auto-release.mjs')
 
@@ -84,6 +84,16 @@ describe('appChanged', () => {
     for (const f of ['app/src/main/index.ts', 'app/package.json', 'app/package-lock.json', 'skills/master/lib/master/cli.py',
       'mods/masterdeck/hooks/core.ts', 'app/electron-builder.yml', 'app/build/icon.icns'])
       expect(isAppFile(f), f).toBe(true)
+  })
+
+  it("matches ota-main.yml's paths-ignore", () => {
+    const yml = readFileSync(join(__dirname, '..', '..', '.github', 'workflows', 'ota-main.yml'), 'utf8')
+    const block = /paths-ignore:\n((?:\s+- .+\n)+)/.exec(yml)?.[1] ?? ''
+    const globs = block.split('\n').map((l) => l.trim().replace(/^- '(.*)'$/, '$1')).filter(Boolean)
+    expect(globs).toEqual(IGNORED_PATHS)
+    // One sample per glob is not an app file.
+    const sample = (g: string) => g.replace('**/', 'app/src/x/').replace('/**', '/a/b.ts').replace('*', 'name')
+    for (const g of IGNORED_PATHS) expect(isAppFile(sample(g)), g).toBe(false)
   })
 
   it('needs one app file in the range', () => {
