@@ -445,6 +445,18 @@ buttons; it does not go through macOS window drag regions.
   skipped, the summary, a plain click still picking one PR). Not checked: a real Claude session
   running the subagents, a real post, the Electron window. Open points: TODO ("Review selected").
 
+- **A new session goes into the selected session-list tab (#171)** on branch
+  `worktree-MasterDeck-Terminal-171-new-session-tab` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). New Claude session and the Start dialog (the
+  Board's too) have a **Session list tab** field when a named tab exists (default: the tab on
+  screen); main keeps a pending target by name (`SessionGroupStore.expect` / `claim`,
+  `claimWaits`) and the list switches to the tab on Start. Design and plan:
+  `docs/plans/2026-10-18-new-session-tab-{design,plan}.md`. Checked: typecheck, vitest (241 files
+  passed, 2 skipped; 3077 tests passed, 5 skipped), the web preview (both dialogs at 1400 and 390
+  px), and the isolated app with a stand-in `claude` listing a new session only from its third
+  poll (claimed into its tab in the first state that listed it; a deleted tab and All left it in
+  All; the dialog's default, a start into the tab on screen selected there, All picked switching
+  the list to All). Open points: TODO ("A new session goes into the selected tab (#171)").
 - **The web app's "Loading sessions…" for ever (#168)** is fixed on branch
   `worktree-168-web-loading-sessions` (PR, not merged, **not installed**). Root cause: the Mac's
   state (1.21 MB of JSON, mostly finished master proposals with their prompts) was over the bridge

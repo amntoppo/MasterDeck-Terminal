@@ -77,6 +77,7 @@ import { TERMINAL_ID, tabId } from "@shared/sessionTabs";
 import { resumedSession, type ResumeTarget } from "@shared/resumeOpen";
 import { relativeTo } from "@shared/filePath";
 import { deck, load, save, useAppState } from "./deck";
+import { pickGroup } from "./sessionGroupPick";
 import { savedPref, useTheme, useWebThemePref } from "./theme";
 
 type Tab =
@@ -496,6 +497,8 @@ export function App() {
   const startSession = useCallback(
     (req: AssignRequest) => {
       const id = `pending:${req.name}:${Date.now()}`;
+      // The list shows the tab the session goes into (#171), so it is the selected row there.
+      if (req.group) pickGroup(req.group);
       setView("terminals");
       setTabs((cur) => [
         ...cur,
@@ -572,6 +575,7 @@ export function App() {
   const startClaude = useCallback(
     (req: NewSessionReq) => {
       const id = `pending:${req.name}:${Date.now()}`;
+      if (req.group) pickGroup(req.group);
       setView("terminals");
       setTabs((cur) => [
         ...cur,

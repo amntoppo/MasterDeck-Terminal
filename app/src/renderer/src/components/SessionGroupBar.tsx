@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ALL, type GroupOp, type SessionGroups } from "@shared/sessionGroups";
+import { ALL, shownTab, type GroupOp, type SessionGroups } from "@shared/sessionGroups";
 import { deck } from "../deck";
 import { can } from "../web";
 
@@ -304,5 +304,42 @@ function GroupMenu({
       </button>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Which session-list tab a new session goes into (#171), in the start dialogs. Shown only when the
+ * user has a tab of their own; the session is in All either way.
+ */
+export function SessionTabSelect({
+  groups,
+  value,
+  onChange,
+  id,
+}: {
+  groups: SessionGroups | undefined;
+  value: string;
+  onChange: (id: string) => void;
+  id: string;
+}) {
+  if (!groups?.groups.length) return null;
+  return (
+    <>
+      <label htmlFor={id}>Session list tab</label>
+      <select
+        id={id}
+        className="fsel full"
+        value={shownTab(groups, value)}
+        onChange={(e) => onChange(e.target.value)}
+        title="The tab of the session list the new session is put in (it is in All too)"
+      >
+        <option value={ALL}>All (no tab)</option>
+        {groups.groups.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name}
+          </option>
+        ))}
+      </select>
+    </>
   );
 }
