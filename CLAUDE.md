@@ -210,6 +210,8 @@ web tabs keep working.
 | A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
 | In-app updates (#122: check, download, verify, install; Settings → Updates; the app menu) | `shared/updates.ts` (model, `compareVersions`, `signedMessage`, `statusLine`, `shouldPrompt`, `badge`), `shared/releaseKey.ts` (the public key; `releaseKey` / `updateBase`: `MASTERDECK_UPDATE_PUBKEY` and `MASTERDECK_UPDATE_URL` only in an update-test build, `MASTERDECK_UPDATE_TEST_BUILD=1` → define `__MD_UPDATE_TEST__`), `shared/updateHelper.ts` (the macOS helper script, bash 3.2), `main/updater.ts` (`Updater`, `updatesOffReason`), `main/updateMac.ts` (`MacInstaller`), `main/updateWin.ts` (`WinInstaller`, `electron-updater` on win32 only), `main/updateVerify.ts` (hash + Ed25519), `main/appMenu.ts`, `makeUpdater` / `restartToUpdate` / `setAppMenu` and the `update:*` handlers in `main/index.ts`; files in `<userData>/updates/`. Never in `AppState`; every `update:*` is `blocked` for the web. Off unless packaged; `MASTERDECK_UPDATES=0` turns it off; the `update:*` handlers are `updateHandlers` in `main/remoteGuards.ts`; MasterDeck's own Restart (`relaunching`) never installs on quit |
 | Working hours (Costs → Hours) | `shared/hours.ts` (`estimateHours`, `hoursAccount`, `hoursCsv`), activity spans in `shared/tokens.ts` / `main/tokens.ts` (`TokenIndex.activity`, `tokens.json` v2), `Sources.hoursActivity`, `CH.hoursActivity` / `CH.hoursExport` in `main/index.ts` (blocked on the web), `renderer/.../HoursView.tsx` |
+| Dashboard (#183: Needs attention, Now, Timeline, Delivery, Usage and cost, Health; Customise; Open MasterDeck on) | `shared/dashboard.ts` (`attentionItems`, `nowView`, `deliveryView`, `usageView`, `healthView`, `pruneDismissed`, `relTime`: every card's figures, pure), `shared/dashboardLayout.ts` (Customise's order, `md.dashboard.layout`), `renderer/.../DashboardView.tsx` (slices, pulls, module caches for `procs:all` and the janitor; no timers), `renderer/.../dashboard/*` (`Card`, `AttentionCard`, `NowCard`, `TimelineCard`, `DeliveryCard`, `UsageCard`, `HealthCard`, `Sparkline`, `nav.ts` `DashNav`, `customise.ts` `useCustomise`), `renderer/.../InboxCard.tsx` (the Needs-you card, also under Reply…), `renderer/src/useStable.ts` (keep a derived value's reference while its JSON is the same), `Settings.startView` (`shared/settings.ts`; the web's `md.startView` in `renderer/src/web.ts`; `remoteSettings` keeps the Mac's), `CostEntry.account` (`shared/costs.ts`), `procs:all`: `SessionProcs.listAll` / `strayFolders` (`main/sessionProcs.ts`), `ProcsAll` / `findStrays` / `commandName` (`shared/sessionProcs.ts`); preview `src/web/preview/dashboardFixture.ts` |
+| The activity log (the Dashboard's Timeline) | `shared/activityLog.ts` (`diffActivity` from two states, the stores' mappers `runEvent` / `meetingEvent` / `noteEvent` / `releaseEvents` / `inboxEvent`, `coalesce`, `filterActivity`, `mergeActivity`, `cleanEvent`, `forRemote`), `main/activityLog.ts` (`ActivityLog` → `activity.jsonl`: 14 days, 5000 events, coalesced per 15 minutes, atomic rewrites), `logActivity` / `processStart` and the `CH.activityList` handler in `main/index.ts`, the stores' hooks (`Scheduler` `onRun`, `MeetingStore` `onEnded`, `NotesStore` `created`); never in `AppState` |
 
 ## Adding a feature
 
@@ -410,6 +412,16 @@ buttons; it does not go through macOS window drag regions.
   session's key and name, a ticket) and `meeting` (the meeting's id, title and time): anything new
   in `Note` reaches the web unless `noteMeta` leaves it out.
 
+- **The activity log is not state, and what it keeps is chosen.** It lives in `activity.jsonl` and
+  its own channels (`activity:list`, `activity:changed`), never in `AppState` or
+  `toRemoteSnapshot`. A note's entry carries only the note's id and a ticket's number and repo ("A
+  note was added to #42"): never its title, preview or text (`noteEvent`, asserted by a test). A
+  meeting's entry carries its title on the Mac, but a web tab gets it without title or target
+  (`forRemote` in the `activity:list` handler), since meetings are the Mac's only. A new event type
+  must keep to that: nothing private in `title` / `detail`, and anything the web may not see
+  stripped in `forRemote`. Events are recorded from state diffs and store hooks through
+  `logActivity` (try/catch), and anything read from a cache before `processStart` is not news.
+
 - **Meetings ask macOS nothing before consent.** No startup path may call `askForMediaAccess`,
   `getUserMedia`, `getDisplayMedia` or `desktopCapturer`; `main/meetings/` is loaded only by
   dynamic `import()` in `main/meetingsIpc.ts` (no static import anywhere), and
@@ -431,6 +443,19 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release). A merge to `main` that changes the app is released to users automatically (`ota-main.yml`); a release by hand only when the user asks.
 
 ## Current state and next steps (2026-10-18)
+
+- **The Dashboard (#183)** is built on branch `worktree-MasterDeck-Terminal-183-dashboard` (PR
+  pending, not merged, **not installed**: the rebuild of the real app waits for the user's word).
+  A view first on the rail: Needs attention (Needs-you items and what MasterDeck sees itself, in
+  tiers, with Reply… opening the real Needs-you card, dismiss per device), Now, a Timeline from a
+  new activity log (`activity.jsonl`; recording starts with this version, no backfill), Delivery,
+  Usage and cost per account, Health (strays from the new `procs:all`, worktrees on demand);
+  Customise per device; Settings → General → **Open MasterDeck on**; the web app and the phone. No
+  timers: reads on open, on a click or on an existing event. Spec and plan:
+  `docs/superpowers/{specs,plans}/2026-10-18-dashboard*`; ARCHITECTURE "The Dashboard and the
+  activity log", GUIDE "Dashboard".
+  CHECKS: <filled in by the session>
+  Open points: TODO ("Dashboard (#183): open points").
 
 - **Watch any PR (#182)** on branch `worktree-182-watch-any-pr` (PR, not merged, **not
   installed**: the rebuild of the real app waits for the user's word). The eye on every open PR

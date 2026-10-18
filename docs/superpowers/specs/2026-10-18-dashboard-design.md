@@ -491,16 +491,23 @@ and the row is hidden.
 
 ## Files
 
+As built.
+
 New:
 
-- `shared/activityLog.ts` (+ test)
-- `shared/dashboard.ts` (+ test): `attentionItems`, `nowView`, `deliveryView`, `usageView`,
-  `healthView`
+- `shared/activityLog.ts` (+ test): `diffActivity`, the stores' mappers (`runEvent`,
+  `meetingEvent`, `noteEvent`, `releaseEvents`, `inboxEvent`), `coalesce`, `filterActivity`,
+  `mergeActivity`, `activityRows`, `cleanEvent`, `forRemote`
+- `main/activityLog.ts` (+ test): `ActivityLog`
+- `shared/dashboard.ts` (+ test): `attentionItems`, `pruneDismissed`, `nowView`, `deliveryView`,
+  `usageView`, `healthView`, `relTime`
 - `shared/dashboardLayout.ts` (+ test)
-- `main/activityLog.ts` (+ test)
 - `renderer/src/components/DashboardView.tsx`
 - `renderer/src/components/dashboard/{Card,AttentionCard,NowCard,TimelineCard,DeliveryCard,UsageCard,HealthCard,Sparkline}.tsx`
+- `renderer/src/components/dashboard/nav.ts` (`DashNav`, `go`) and `customise.ts` (`useCustomise`)
 - `renderer/src/components/InboxCard.tsx` (moved from `Sidebar.tsx`, unchanged)
+- `renderer/src/useStable.ts` (+ test): keeps a derived value's reference while its JSON is the same
+- `web/preview/dashboardFixture.ts`
 
 Changed:
 
@@ -508,30 +515,33 @@ Changed:
   - `Sidebar.tsx` (`View`)
   - `shared/railOrder.ts` (+ test)
   - `Rail.tsx`
-  - `web.ts` (+ test)
+  - `web.ts` (+ test; `webStartView`, `setWebStartView`)
   - `CommandPalette.tsx`
   - `App.tsx`
+  - `HygieneViews.tsx` (`liveDirs` exported)
 - Settings:
   - `shared/settings.ts` (+ test, `startView`)
   - `SettingsView.tsx`
-  - `remoteSettings` (drops `startView`)
+  - `main/remoteGuards.ts` (+ test; `remoteSettings` keeps the Mac's `startView`)
 - Channels and wiring:
   - `shared/ipc.ts` (`activityList`, `activityChanged`, `procsAll`)
   - `preload/index.ts`
   - `shared/remoteDeck.ts` (+ test)
-  - `main/index.ts` (handlers, `diffActivity` beside `diffEvents`, the store hooks)
+  - `main/index.ts` (handlers, `diffActivity` beside `diffEvents`, `logActivity`, `processStart`,
+    the store hooks)
 - Stores:
-  - `main/sched.ts` (`onRun`)
-  - `main/meetings/store.ts` (`onSaved`)
-  - `main/notes.ts` (`created`)
-  - `main/sessionProcs.ts` (`listAll`, strays)
-  - `shared/costs.ts` + `main/sources.ts` (`account`)
+  - `main/sched.ts` (+ test, `onRun`)
+  - `main/meetings/store.ts` (+ test, `onEnded`) and `main/meetingsIpc.ts` (`onMeetingEnded`)
+  - `main/notes.ts` (+ test) and `shared/notes.ts` (`created` on `NoteChange`)
+  - `main/sessionProcs.ts` (+ test; `listAll`, `strayFolders`) and `shared/sessionProcs.ts` (+ test;
+    `ProcsAll`, `StrayProc`, `findStrays`, `insideFolder`, `commandName`)
+  - `shared/costs.ts` (+ test) + `main/sources.ts` (`account`)
 - Sidebar:
   - `Sidebar.tsx` (imports `InboxCard`)
 - Styles and preview:
   - `styles.css`
   - `web/web.css`
-  - `web/preview/*`
+  - `web/preview/fixture.ts`, `web/preview/preview.tsx`
 
 No `AppState` field is added, so `shared/notify.test.ts`'s fixture and `toRemoteSnapshot` are
 unchanged.
