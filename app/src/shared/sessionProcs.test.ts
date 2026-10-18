@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanOutput,
+  commandName,
   descendants,
   findStrays,
   insideFolder,
@@ -181,6 +182,14 @@ describe('findStrays', () => {
     expect(insideFolder('/a/bc', '/a/b')).toBe(false)
     expect(insideFolder('/a', '/a/b')).toBe(false)
     expect(insideFolder('/a', '')).toBe(false)
+  })
+  it('leaves out a listener a session already claims (a detached leftover in its group)', () => {
+    expect(findStrays(rows, info, folders, [100], 0, new Set([500])).map((s) => s.pid)).toEqual([200])
+  })
+  it('gives a command line’s executable name', () => {
+    expect(commandName('/usr/bin/python3 -m http.server 8000')).toBe('python3')
+    expect(commandName('vite')).toBe('vite')
+    expect(commandName('')).toBe('')
   })
   it('finds nothing without folders', () => {
     expect(findStrays(rows, info, [], [100], 0)).toEqual([])

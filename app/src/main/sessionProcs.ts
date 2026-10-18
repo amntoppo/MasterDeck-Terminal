@@ -1,10 +1,12 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import type { Runner } from './run'
 import { readTail } from './files'
 import {
   cleanOutput,
   EXITED_KEEP_MS,
   findStrays,
+  insideFolder,
   parseLsof,
   parsePs,
   PS_ARGS,
@@ -54,6 +56,34 @@ const LSOF = existsSync('/usr/sbin/lsof') ? '/usr/sbin/lsof' : 'lsof'
 /** A session no one asked about for this long is forgotten. */
 const FORGET_MS = 60 * 60 * 1000
 
+/** "ps failed (exit 1)", "lsof timed out": no output, so no paths reach the screen or the web. */
+const failed = (what: string, code: number): string => (code === -2 ? `${what} timed out` : `${what} failed (exit ${code})`)
+
+const real = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+/**
+ * The folders strays are looked for in: each as given and as its real path (lsof reports
+ * `/private/tmp` for `/tmp`), without `/`, the home folder or a parent of it.
+ * ponytail: a session started in ~ (or /) finds no strays, since nearly every listener on the
+ * machine sits below it and would send its command line to the web; a list of folders that hold
+ * no project (Library, Applications…) would let such a session's own servers through.
+ */
+export function strayFolders(folders: (string | null)[], home: string): string[] {
+  const homes = [home, real(home)]
+  const out = new Set<string>()
+  for (const f of folders) {
+    if (!f) continue
+    for (const p of [f, real(f)]) if (p !== '/' && !homes.some((h) => insideFolder(h, p))) out.add(p)
+  }
+  return [...out]
+}
+
 /**
  * A session's running processes, read when the Details panel asks (`procs:list`): one `ps` for the
  * process table, two `lsof` calls for the folders, stdouts and listening sockets of its processes.
@@ -68,6 +98,7 @@ export class SessionProcs {
     private run: Runner,
     private platform: NodeJS.Platform = process.platform,
     private now: () => number = Date.now,
+    private home: string = homedir(),
   ) {}
 
   async list(s: ProcsSession): Promise<ProcsAnswer> {
@@ -145,15 +176,23 @@ export class SessionProcs {
       this.run(PS, PS_ARGS, { timeoutMs: 5000 }),
       this.run(LSOF, ['-nP', '-w', '-iTCP', '-sTCP:LISTEN', '-Fpcfn'], { timeoutMs: 5000 }),
     ])
-    const rows = ps.code === 0 ? parsePs(ps.stdout) : []
+    // Without the table nothing can be said: not "nothing running".
+    if (ps.code !== 0) return { at, sessions: {}, strays: [], error: failed('ps', ps.code) }
+    const rows = parsePs(ps.stdout)
     const listens = parseLsof(socks.stdout)
-    const live = rows.length ? sessions.filter((s) => s.pid !== null) : []
+    const live = sessions.filter((s) => s.pid !== null)
     const groups = new Map(live.map((s) => [s.key, sessionGroups(rows, s.pid!, new Set(this.seen.get(s.key)?.groups), at)]))
-    const pids = new Set([...groups.values()].flatMap((gs) => gs.flatMap((g) => g.pids)))
+    const claimed = new Set([...groups.values()].flatMap((gs) => gs.flatMap((g) => g.pids)))
+    const pids = new Set(claimed)
     for (const [pid, i] of listens) if (i.listens.length) pids.add(pid)
-    const files = pids.size
-      ? parseLsof((await this.run(LSOF, ['-nP', '-w', '-a', '-d', 'cwd,1', '-p', [...pids].sort((a, b) => a - b).join(','), '-Fpftn'], { timeoutMs: 5000 })).stdout)
-      : new Map<number, LsofInfo>()
+    let error: string | undefined
+    let files = new Map<number, LsofInfo>()
+    if (pids.size) {
+      // lsof exits 1 when one of the pids has nothing to list; its output still counts.
+      const r = await this.run(LSOF, ['-nP', '-w', '-a', '-d', 'cwd,1', '-p', [...pids].sort((a, b) => a - b).join(','), '-Fpftn'], { timeoutMs: 5000 })
+      files = parseLsof(r.stdout)
+      if (r.code !== 0 && !files.size) error = failed('lsof', r.code)
+    }
     for (const [pid, i] of listens) {
       const had = files.get(pid)
       if (had) had.listens.push(...i.listens)
@@ -182,8 +221,9 @@ export class SessionProcs {
           }
         })
         .sort((a, b) => a.startedAt - b.startedAt)
-    const folders = [...new Set(sessions.flatMap((s) => [s.cwd, ...s.worktrees]).filter((f): f is string => !!f))]
-    return { at, sessions: out, strays: findStrays(rows, files, folders, live.map((s) => s.pid!), at) }
+    if (error) return { at, sessions: out, strays: [], error }
+    const folders = strayFolders(sessions.flatMap((s) => [s.cwd, ...s.worktrees]), this.home)
+    return { at, sessions: out, strays: findStrays(rows, files, folders, live.map((s) => s.pid!), at, claimed) }
   }
 
   /** The last few KB a process of this session wrote, when its stdout is a file (only one the last list found). */

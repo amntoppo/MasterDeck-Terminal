@@ -371,6 +371,14 @@ export interface ProcsAll {
   at: number
   sessions: Record<string, SessionProc[]>
   strays: StrayProc[]
+  /** Why the read is incomplete ("ps failed (exit 1)"): the lists are then not "nothing running". */
+  error?: string
+}
+
+/** A command line's executable, base name only (`/usr/bin/python3 -m http.server` → `python3`): what a web tab gets of a stray. */
+export function commandName(command: string): string {
+  const exe = command.trim().split(/\s+/)[0] ?? ''
+  return exe.slice(exe.lastIndexOf('/') + 1)
 }
 
 /** Is `path` the folder or inside it, on whole path segments (`/a/b` holds `/a/b/c`, not `/a/bc`)? */
@@ -382,8 +390,9 @@ export function insideFolder(path: string, folder: string): boolean {
 
 /**
  * The strays among the listening processes in `info` (lsof's answer, by pid): its cwd inside one of
- * `folders`, and neither a session pid nor below one. A listener below another stray is folded into
- * the topmost one (its ports added), so a server with workers shows once.
+ * `folders`, neither a session pid nor below one, and not `claimed` (in a session's process group,
+ * listed under that session already). A listener below another stray is folded into the topmost
+ * one (its ports added), so a server with workers shows once.
  */
 export function findStrays(
   rows: ProcRow[],
@@ -391,6 +400,7 @@ export function findStrays(
   folders: readonly string[],
   sessionPids: readonly number[],
   now: number,
+  claimed: ReadonlySet<number> = new Set(),
 ): StrayProc[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]))
   const sessions = new Set(sessionPids)
@@ -414,7 +424,7 @@ export function findStrays(
   const found = new Map<number, StrayProc>()
   for (const [pid, i] of [...info].sort((a, b) => a[0] - b[0])) {
     const row = byPid.get(pid)
-    if (!i.listens.length || !row || !i.cwd || sessions.has(pid)) continue
+    if (!i.listens.length || !row || !i.cwd || sessions.has(pid) || claimed.has(pid)) continue
     const folder = deepest(i.cwd)
     if (folder === null || ancestors(pid).some((a) => sessions.has(a))) continue
     found.set(pid, { pid, command: row.command, cwd: i.cwd, ports: i.listens, startedAt: now - row.elapsed * 1000, folderOf: folder })

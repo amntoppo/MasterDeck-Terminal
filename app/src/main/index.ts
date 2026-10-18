@@ -258,7 +258,7 @@ import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import { SessionProcs } from "./sessionProcs";
-import { isPortUrl } from "@shared/sessionProcs";
+import { commandName, isPortUrl } from "@shared/sessionProcs";
 import { isWebLink } from "@shared/termLinks";
 import {
   installStatusline,
@@ -4065,16 +4065,18 @@ function registerIpc(): void {
       ? sessionProcs.output(key, pid as number)
       : { ok: false, message: "bad request" },
   );
-  reg.handle(CH.procsAll, () =>
-    sessionProcs.listAll(
+  reg.handle(CH.procsAll, async (e) => {
+    const all = await sessionProcs.listAll(
       (latest?.sessions ?? []).map((s) => ({
         key: s.key,
         pid: s.state === "done" ? null : s.pid,
         cwd: s.cwd || null,
         worktrees: (latest?.sessionWorktrees[s.key] ?? []).map((w) => w.path),
       })),
-    ),
-  );
+    );
+    // A stray was started by anyone, not a session: a web tab gets its executable's name, not its argv.
+    return isRemote(e) ? { ...all, strays: all.strays.map((s) => ({ ...s, command: commandName(s.command) })) } : all;
+  });
   reg.on(CH.openPort, (e, url: unknown) => {
     if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
   });
