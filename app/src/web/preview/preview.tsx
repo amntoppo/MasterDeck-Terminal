@@ -473,7 +473,9 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     notesGet: async (id: string) => notes.get(id) ?? null,
     notesSearch: async (q: string) => [...notes.values()].filter((n) => matches(n, q)).map((n) => n.id),
     notesSave: async (i: NoteInput) => noteSave(i),
-    notesDelete: async (id: string) => {
+    notesDelete: async (id: string, base?: number) => {
+      const old = notes.get(id)
+      if (typeof base === 'number' && old && old.updated !== base) return { ok: false, message: 'Changed elsewhere.', conflict: true as const }
       const had = notes.delete(id)
       if (had) for (const cb of noteCbs) cb({ id, deleted: true })
       return { ok: true }

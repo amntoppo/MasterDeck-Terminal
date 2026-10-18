@@ -136,6 +136,17 @@ describe('NotesStore', () => {
     expect(changes).toEqual([{ id: a.id, deleted: true }])
   })
 
+  it('a delete with a version deletes only that version', () => {
+    const s = open()
+    const a = saved(s.save({ title: 't', body: 'b', base: null }))
+    const b = saved(s.save({ id: a.id, title: 't', body: 'newer', base: a.updated }))
+    changes = []
+    expect(s.delete(a.id, a.updated)).toEqual({ ok: false, message: 'Changed elsewhere.', conflict: true })
+    expect(changes).toEqual([])
+    expect(s.delete(a.id, b.updated)).toEqual({ ok: true })
+    expect(changes).toEqual([{ id: a.id, deleted: true }])
+  })
+
   it('tells every write to onChange', () => {
     const s = open()
     const a = saved(s.save({ title: 't', body: 'b', base: null }))

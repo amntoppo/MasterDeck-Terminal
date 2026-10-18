@@ -1692,6 +1692,21 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 /* A ticket's note: in Details, and a mark on its Board card's top row (faint until hovered when there is no note yet). */
 .d-note { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
 .d-note-text { font-size: 12.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+/* Session details → GitHub → Ticket: the ticket's note, rendered, and written in place (#164). */
+.tn { align-items: stretch; color: var(--text); font-size: 13px; }
+.tn-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; }
+.tn-head .d-link { font-size: 12px; font-weight: 500; color: var(--accent); }
+.tn-head .d-link:disabled { color: var(--faint); cursor: default; }
+.tn-body { line-height: 1.5; overflow-wrap: anywhere; cursor: text; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; }
+.tn-body:hover { background: var(--bg-3); }
+.tn-body.clamped { max-height: 18em; overflow: hidden; }
+.tn > .d-link { align-self: flex-start; font-size: 12px; font-weight: 500; color: var(--accent); }
+.tn-input { width: 100%; box-sizing: border-box; resize: vertical; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; outline: none; }
+.tn-input:focus { border-color: var(--accent); }
+.tn .notes-clash { flex-wrap: wrap; border: 1px solid var(--amber); border-radius: 6px; padding: 5px 8px; }
+.tn .notes-clash .btn { white-space: nowrap; }
+.tn-error { color: var(--red); font-size: 12.5px; }
+.tn-actions { display: flex; align-items: center; gap: 6px; }
 .bcard-note { flex: none; width: 20px; height: 20px; margin: -3px 0; padding: 0; border: none; border-radius: 5px; background: none; color: var(--faint); display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; }
 .bcard:hover .bcard-note, .bcard-note:focus-visible { opacity: 1; }
 .bcard-note.has { opacity: 1; color: var(--amber); }
