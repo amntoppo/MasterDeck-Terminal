@@ -13,8 +13,10 @@ name: Auto release
 #    with that version in app/package.json + lock and the update's notes (the merged PRs) in
 #    .github/releases/vX.Y.Z.md, held only by the tag vX.Y.Z: main never gets a bot commit.
 # 2. release: release.yml (the same build, tests and attach as a hand-pushed tag), which calls
-#    ota-release.yml (sign and publish).
-# 3. report: a commit status "Auto release" on the merge commit; on failure a comment on its PR.
+#    ota-release.yml (sign, publish and the smoke check).
+# 3. announce (published only): the release's link on every PR it ships; the tickets they close
+#    moved to Done on the board (secret BOARD_TOKEN, variable BOARD_PROJECT `owner/number`).
+# 4. report: a commit status "Auto release" on the merge commit; on failure a comment on its PR.
 #
 # Repository variables: OTA_MAIN_CHANNEL (stable | beta, default stable), OTA_MAIN_ROLLOUT (0-100,
 # default 100), OTA_MAIN (off pauses it). Run workflow (from main) releases the current main by hand.
@@ -206,6 +208,75 @@ jobs:
     secrets:
       RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
       RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+
+  # A published release: its link on every PR it ships (those its notes list, and the merge
+  # commit's own), then the tickets those PRs close moved to Done on the board.
+  announce:
+    needs: [prepare, release]
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write # the comment on the merged PR
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      ROLLOUT: ${{ needs.prepare.outputs.rollout }}
+      # Secrets cannot be read in a step's `if`.
+      HAS_BOARD: ${{ secrets.BOARD_TOKEN != '' && vars.BOARD_PROJECT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ needs.prepare.outputs.version }}
+          sparse-checkout: .github/releases
+      - name: Release link on the merged PRs
+        id: prs
+        run: |
+          set -euo pipefail
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+          notes=".github/releases/v$VERSION.md"
+          prs="$( { [ -f "$notes" ] && grep -oE "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/[0-9]+" "$notes" | sed 's#.*/##' || true
+                    gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] | select(.merged_at != null) | .number' || true; } | sort -nu)"
+          printf 'prs=%s\n' "$(paste -sd' ' - <<< "$prs")" >> "$GITHUB_OUTPUT"
+          mark="<!-- masterdeck-release:v$VERSION -->"
+          body="$mark
+          Released in **[v$VERSION]($url)** as an in-app update ($CHANNEL, $ROLLOUT %): MasterDeck offers it in Settings → Updates."
+          for pr in $prs; do
+            if gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --jq '.[].body' | grep -qF "$mark"; then
+              echo "#$pr has the link already"; continue
+            fi
+            gh pr comment "$pr" -R "$GITHUB_REPOSITORY" --body "$body"
+          done
+      - name: No board
+        if: env.HAS_BOARD != 'true'
+        run: echo "::notice::Tickets are not moved to Done (set the secret BOARD_TOKEN and the variable BOARD_PROJECT). docs/OPERATIONS.md § Release."
+      # A user's or an organization's project needs a token with the project scope (GITHUB_TOKEN has none).
+      - name: Tickets to Done
+        if: env.HAS_BOARD == 'true' && steps.prs.outputs.prs != ''
+        run: |
+          set -euo pipefail
+          owner="${BOARD_PROJECT%/*}"; number="${BOARD_PROJECT#*/}"
+          fields="$(gh project field-list "$number" --owner "$owner" --format json)"
+          field="$(jq -r '.fields[] | select(.name == "Status") | .id' <<< "$fields")"
+          done_id="$(jq -r --arg d "$DONE" '.fields[] | select(.name == "Status") | .options[] | select(.name == $d) | .id' <<< "$fields")"
+          project="$(gh project view "$number" --owner "$owner" --format json --jq .id)"
+          if [ -z "$field" ] || [ -z "$done_id" ]; then echo "::error::$BOARD_PROJECT has no Status option \"$DONE\""; exit 1; fi
+          for pr in $PRS; do
+            # shellcheck disable=SC2016 # GraphQL's $id, not the shell's
+            for issue in $(gh pr view "$pr" -R "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].id'); do
+              item="$(gh api graphql -f id="$issue" -f query='query($id: ID!) { node(id: $id) { ... on Issue { number projectItems(first: 20) { nodes { id project { id } } } } } }' \
+                --jq ".data.node.projectItems.nodes[] | select(.project.id == \"$project\") | .id")"
+              if [ -z "$item" ]; then echo "PR #$pr: issue $issue is not on $BOARD_PROJECT"; continue; fi
+              gh project item-edit --id "$item" --project-id "$project" --field-id "$field" --single-select-option-id "$done_id" > /dev/null
+              echo "PR #$pr: its issue moved to $DONE"
+            done
+          done
+        env:
+          GH_TOKEN: ${{ secrets.BOARD_TOKEN }}
+          BOARD_PROJECT: ${{ vars.BOARD_PROJECT }}
+          DONE: ${{ vars.BOARD_DONE || 'Done' }}
+          PRS: ${{ steps.prs.outputs.prs }}
 
   report:
     needs: [prepare, release]

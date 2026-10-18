@@ -3,7 +3,8 @@ name: OTA release
 # Publishes a GitHub release as an in-app update (OTA): takes the update files attached to the
 # release (the mac zips, the Windows EXE and its blockmap), signs them with the release key and
 # registers them with the MasterDeck update service (app/scripts/release-publish.mjs). From then on
-# every MasterDeck finds it (Settings → Updates). docs/OPERATIONS.md § Release.
+# every MasterDeck finds it (Settings → Updates), which the smoke check then confirms
+# (app/scripts/release-smoke.mjs). docs/OPERATIONS.md § Release.
 #
 # It runs:
 # - when a release is published on GitHub (by hand, or by anything using a token other than
@@ -138,3 +139,13 @@ jobs:
           MIN_SUPPORTED: ${{ inputs.min_supported }}
           RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      # As an install would: the check offers it (inside the rollout), the feed names it, each file
+      # downloads with the offered size and sha512 and its signature verifies against the app's key.
+      - name: Smoke check
+        if: steps.meta.outputs.skip != '1'
+        run: |
+          args=(--version "${TAG#v}")
+          if [ -n "$ROLLOUT" ]; then args+=(--rollout "$ROLLOUT"); fi
+          node src/app/scripts/release-smoke.mjs "${args[@]}"
+        env:
+          ROLLOUT: ${{ inputs.rollout }}
