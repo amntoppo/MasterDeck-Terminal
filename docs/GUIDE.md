@@ -612,7 +612,11 @@ diff too big to send says so.
   (type its name, Enter; Esc cancels). Drag a session from the list onto a tab to put it there (the
   tab lights up under the pointer); drop it on another tab to move it, or on **All** to take it out
   of its tab. Without dragging: right-click the session → **Move to tab ▸** (**No tab** takes it
-  out). A session is in one tab at most and always also in All. Each tab shows how many sessions it
+  out). A session started from **+** → **New Claude session…**, or from the **Start** dialog (the
+  Board, ⌘K), goes into a tab by itself: once you have a tab of your own, both dialogs have a
+  **Session list tab** field, set to the tab on screen; pick another or **All (no tab)**. On Start
+  the list shows that tab and the new session appears there as soon as Claude Code lists it (if the
+  tab is deleted first, it stays in All). A session is in one tab at most and always also in All. Each tab shows how many sessions it
   holds and a red badge for those that need you. Inside a tab the column works as in All, on that
   tab's sessions only: Starred, the groups, Parked, Filters and Cleanup (Needs you and the shells
   stay the same in every tab). Double-click a tab to rename it, drag it to reorder it, right-click it
