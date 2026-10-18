@@ -44,9 +44,9 @@ function state(p: Partial<AppState> = {}): AppState {
 }
 let n = 0
 const ids = () => `id${++n}`
-const diff = (a: AppState | null, b: AppState) => diffActivity(a, b, NOW, ids)
+const diff = (a: AppState | null, b: AppState, since?: number) => diffActivity(a, b, NOW, since, ids)
 const types = (es: ActivityEvent[]) => es.map((e) => e.type)
-const board = (cards: BoardCard[]) => ({ takenAt: null, sprint: null, columns: [], cards, projects: [{ key: 'acme/1', title: 'acme board', columns: [] }] })
+const board = (cards: BoardCard[], takenAt: string | null = new Date(NOW - 60_000).toISOString(), sprint: string | null = null) => ({ takenAt, sprint, columns: [], cards, projects: [{ key: 'acme/1', title: 'acme board', columns: [] }] })
 
 describe('diffActivity: sessions', () => {
   it('is silent on first load', () => {
@@ -131,9 +131,34 @@ describe('diffActivity: PRs', () => {
     expect(diff(loaded([pr(5)]), loaded([pr(5, { mergedAt: 'x', closedAt: 'x', state: 'merged' })]))[0]).toMatchObject({ type: 'pr-merged', title: 'Merged api#5 PR 5' })
     expect(diff(loaded([pr(5)]), loaded([pr(5, { closedAt: 'x', state: 'closed' })]))[0]).toMatchObject({ type: 'pr-closed', title: 'Closed api#5 PR 5' })
   })
-  it('nothing for PRs before the first read', () => {
+  it('nothing for PRs before the first read, or when the next read is missing', () => {
     expect(diff(state({ teamPrs: [] }), loaded([pr(5)]))).toEqual([])
     expect(diff(state({ teamPrs: [pr(5)] }), loaded([pr(5, { mergedAt: 'x' })]))).toEqual([])
+    expect(diff(loaded([]), state({ teamPrs: [pr(5)], teamPrsAt: null }))).toEqual([])
+  })
+  it('an unparsable createdAt is not news', () => {
+    expect(diff(loaded([]), loaded([pr(5, { createdAt: 'soon' })]))).toEqual([])
+  })
+  it('a review from someone who had reviewed already', () => {
+    const prev = loaded([pr(5, { reviews: [{ login: 'ann', state: 'COMMENTED' }] })])
+    const next = loaded([pr(5, { reviews: [{ login: 'ann', state: 'COMMENTED' }, { login: 'ann', state: 'APPROVED' }] })])
+    expect(diff(prev, next)[0].title).toBe('api#5 PR 5 got a review')
+  })
+  it('a merge or close takes its own time, and one older than an hour is not news', () => {
+    const t = NOW - 20 * 60_000
+    const iso = new Date(t).toISOString()
+    expect(diff(loaded([pr(5)]), loaded([pr(5, { mergedAt: iso, closedAt: iso, state: 'merged' })]))[0]).toMatchObject({ type: 'pr-merged', at: t })
+    expect(diff(loaded([pr(5)]), loaded([pr(5, { closedAt: iso, state: 'closed' })]))[0]).toMatchObject({ type: 'pr-closed', at: t })
+    const old = new Date(NOW - 2 * HOUR).toISOString()
+    expect(diff(loaded([pr(5)]), loaded([pr(5, { mergedAt: old, closedAt: old, state: 'merged' })]))).toEqual([])
+    expect(diff(loaded([pr(5)]), loaded([pr(5, { closedAt: old, state: 'closed' })]))).toEqual([])
+  })
+  it('a PR list read before this process started (the gh cache) is silent', () => {
+    const since = NOW - 5 * 60_000
+    const prev = state({ teamPrs: [pr(5)], teamPrsAt: since - 1 })
+    expect(diff(prev, loaded([pr(5, { mergedAt: 'x', state: 'merged' })], { teamPrsAt: NOW }), since)).toEqual([])
+    const fresh = state({ teamPrs: [pr(5)], teamPrsAt: since })
+    expect(types(diff(fresh, loaded([pr(5, { mergedAt: 'x', state: 'merged' })], { teamPrsAt: NOW }), since))).toEqual(['pr-merged'])
   })
 })
 
@@ -151,8 +176,27 @@ describe('diffActivity: board and git', () => {
     expect(diff(state({ board: board([]) }), state({ board: board([card(1, 'A')]) }))).toEqual([])
     expect(diff(state({ board: board([card(1, 'A')]) }), state({ board: board([]) }))).toEqual([])
     expect(diff(state({ board: null }), state({ board: board([card(1, 'A')]) }))).toEqual([])
+    expect(diff(state({ board: board([card(1, 'A')]) }), state({ board: null }))).toEqual([])
     // Another board's card with the same number is another card.
     expect(diff(state({ board: board([card(1, 'A')]) }), state({ board: board([card(1, 'B', { project: 'acme/2' })]) }))).toEqual([])
+  })
+  it('a sprint switch is no move', () => {
+    expect(diff(state({ board: board([card(1, 'A')]) }), state({ selectedSprint: 'Sprint 9', board: board([card(1, 'B')]) }))).toEqual([])
+    expect(diff(state({ board: board([card(1, 'A')], undefined, 'Sprint 8') }), state({ board: board([card(1, 'B')], undefined, 'Sprint 9') }))).toEqual([])
+  })
+  it('a board read before this process started, or with no time, is silent', () => {
+    const since = NOW - 5 * 60_000
+    const next = state({ board: board([card(1, 'B')]) })
+    expect(diff(state({ board: board([card(1, 'A')], new Date(since - 1).toISOString()) }), next, since)).toEqual([])
+    expect(diff(state({ board: board([card(1, 'A')], null) }), next, since)).toEqual([])
+    expect(diff(state({ board: board([card(1, 'A')], 'garbage') }), next, since)).toEqual([])
+    expect(types(diff(state({ board: board([card(1, 'A')], new Date(since).toISOString()) }), next, since))).toEqual(['ticket-moved'])
+  })
+  it('no push without the session list', () => {
+    const s = sess('a', 'working')
+    const prev = state({ sessions: [s], git: { [s.sessionId]: gitInfo(3) } })
+    expect(diff(prev, state({ sources: { agents: 'error' }, sessions: [s], git: { [s.sessionId]: gitInfo(0) } }))).toEqual([])
+    expect(types(diff(prev, state({ git: { [s.sessionId]: gitInfo(0) } })))).toEqual(['session-ended'])
   })
   it('ahead going to 0 on the same branch and folder is commit-pushed', () => {
     const s = sess('a', 'working', { account: 'acme-bot' })

@@ -117,12 +117,15 @@ function prRepo(url: string): string | undefined {
  * What happened between two states, as log events. A restart is not news (`prev` null), and a
  * slice that was still loading, or failed, in either state says nothing: a list that comes back
  * empty is not every session ending.
+ *
+ * `since` is when this process started: PRs and the board load from the gh cache at launch, so a
+ * slice whose `prev` was read before it is stale, and its first fresh read is not news.
  */
-export function diffActivity(prev: AppState | null, next: AppState, now: number, ids: () => string = newId(now)): ActivityEvent[] {
+export function diffActivity(prev: AppState | null, next: AppState, now: number, since?: number, ids: () => string = newId(now)): ActivityEvent[] {
   if (!prev) return []
   const out: ActivityEvent[] = []
-  const add = (e: Omit<ActivityEvent, 'id' | 'at'>) => {
-    const ev: ActivityEvent = { id: ids(), at: now, ...e }
+  const add = (e: Omit<ActivityEvent, 'id' | 'at'>, at = now) => {
+    const ev: ActivityEvent = { id: ids(), at, ...e }
     for (const k of ['detail', 'account', 'repo', 'target'] as const) if (ev[k] === undefined) delete ev[k]
     out.push(ev)
   }
@@ -151,8 +154,16 @@ export function diffActivity(prev: AppState | null, next: AppState, now: number,
     }
   }
 
-  if (prev.teamPrsAt !== null && next.teamPrsAt !== null) {
+  const fresh = (t: number | null) => t !== null && Number.isFinite(t) && (since === undefined || t >= since)
+  // An event that happened more than an hour ago, first seen now, is a late read, not news.
+  const recent = (iso: string | null) => {
+    const t = iso ? Date.parse(iso) : NaN
+    return Number.isFinite(t) ? (now - t <= HOUR ? t : null) : undefined
+  }
+
+  if (fresh(prev.teamPrsAt) && next.teamPrsAt !== null) {
     const logins = new Set([next.me, ...(next.ghAccounts ?? []).map((a) => a.login)].filter((l): l is string => !!l).map((l) => l.toLowerCase()))
+    // A session's PRs count as the user's work, a teammate's PR a review session follows included.
     const sessionUrls = new Set(next.sessions.flatMap((s) => next.sessionPrs[s.sessionId] ?? []))
     const mine = (p: TeamPr) => logins.has(p.author.toLowerCase()) || sessionUrls.has(p.url)
     const before = new Map(prev.teamPrs.map((p) => [p.url, p]))
@@ -167,8 +178,13 @@ export function diffActivity(prev: AppState | null, next: AppState, now: number,
         if (Number.isFinite(created) && now - created <= HOUR) add({ type: 'pr-opened', title: `Opened ${name}`, ...base })
         continue
       }
-      if (p.mergedAt && !old.mergedAt) add({ type: 'pr-merged', title: `Merged ${name}`, ...base })
-      else if (p.closedAt && !p.mergedAt && !old.closedAt) add({ type: 'pr-closed', title: `Closed ${name}`, ...base })
+      if (p.mergedAt && !old.mergedAt) {
+        const at = recent(p.mergedAt)
+        if (at !== null) add({ type: 'pr-merged', title: `Merged ${name}`, ...base }, at)
+      } else if (p.closedAt && !p.mergedAt && !old.closedAt) {
+        const at = recent(p.closedAt)
+        if (at !== null) add({ type: 'pr-closed', title: `Closed ${name}`, ...base }, at)
+      }
       if (p.reviewDecision !== old.reviewDecision && p.reviewDecision === 'APPROVED') add({ type: 'pr-reviewed', title: `${name} was approved`, ...base })
       else if (p.reviewDecision !== old.reviewDecision && p.reviewDecision === 'CHANGES_REQUESTED') add({ type: 'pr-reviewed', title: `Changes were requested on ${name}`, ...base })
       else if (p.reviews.length > old.reviews.length) {
@@ -178,7 +194,9 @@ export function diffActivity(prev: AppState | null, next: AppState, now: number,
     }
   }
 
-  if (prev.board && next.board) {
+  // state.board is the selected sprint's board (cached per sprint): a switch of sprint is no move.
+  const sameSprint = prev.selectedSprint === next.selectedSprint && prev.board?.sprint === next.board?.sprint
+  if (prev.board && next.board && sameSprint && fresh(prev.board.takenAt ? Date.parse(prev.board.takenAt) : null)) {
     const cardKey = (c: { repo?: string | null; number: number; project?: string | null }) => `${ticketKey(c.repo, c.number)}@${c.project ?? ''}`
     const before = new Map(prev.board.cards.filter((c) => !c.derived).map((c) => [cardKey(c), c]))
     for (const c of next.board.cards) {
@@ -197,19 +215,21 @@ export function diffActivity(prev: AppState | null, next: AppState, now: number,
     }
   }
 
-  // git is keyed by session id; the subject and target use the session's key, which survives a resume.
-  for (const [id, g] of Object.entries(next.git)) {
+  // git is keyed by session id; the subject and target use the session's key, which survives a
+  // resume, so nothing is recorded without the session list. Known limits: a branch with no
+  // upstream has ahead 0 (a first `git push -u` is not seen), and git is read for visible sessions only.
+  for (const [id, g] of agentsOk ? Object.entries(next.git) : []) {
     const old = prev.git[id]
     if (!old || old.ahead <= 0 || g.ahead !== 0 || !g.branch || old.branch !== g.branch || old.dir !== g.dir) continue
     const s = next.sessions.find((x) => x.sessionId === id)
-    const key = s?.key ?? id
+    if (!s) continue
     add({
       type: 'commit-pushed',
       title: `Pushed ${old.ahead} ${old.ahead === 1 ? 'commit' : 'commits'} to ${g.branch}`,
-      detail: s?.name,
-      account: s?.account,
-      subject: `push:${key}:${g.branch}`,
-      target: { session: key },
+      detail: s.name,
+      account: s.account,
+      subject: `push:${s.key}:${g.branch}`,
+      target: { session: s.key },
     })
   }
   return out
@@ -245,7 +265,6 @@ export function coalesce(list: ActivityEvent[], e: ActivityEvent): ActivityEvent
   let rest = list
   if (i >= 0 && Math.abs(e.at - list[i].at) <= ACTIVITY_COALESCE_MS) {
     item = { ...e, id: list[i].id }
-    if (item.detail === undefined) delete item.detail
     rest = list.filter((_, j) => j !== i)
   }
   const at = rest.findIndex((x) => x.at <= item.at)
