@@ -33,7 +33,7 @@ function service(o: { privateKey: ReturnType<typeof keys>['privateKey']; version
       const names = targets(version).filter((t) => t.feed === file).map((t) => `  - url: '${API}/v1/updates/files/${version}/${t.name}'`)
       return new Response(`version: '${version}'\nfiles:\n${names.join('\n')}\n`)
     }
-    if (u.pathname.startsWith('/v1/updates/files/')) return new Response(o.tamper && url.endsWith(o.tamper) ? Buffer.from('other bytes!') : body)
+    if (u.pathname.startsWith('/v1/updates/files/')) return new Response(new Uint8Array(o.tamper && url.endsWith(o.tamper) ? Buffer.from('other bytes!') : body))
     return new Response('not found', { status: 404 })
   }
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
@@ -99,9 +99,23 @@ describe('smoke', () => {
 
   it('fails on an older version, a changed file or another key', async () => {
     const { privateKey, raw } = keys()
-    await expect(smoke({ api: API, version: V, publicKey: raw, fetch: service({ privateKey, version: '0.9.1' }).fetch, sleep })).rejects.toThrow(/offered 0\.9\.1/)
+    await expect(smoke({ api: API, version: V, rollout: 100, publicKey: raw, fetch: service({ privateKey, version: '0.9.1' }).fetch, sleep })).rejects.toThrow(/offered 0\.9\.1/)
     await expect(smoke({ api: API, version: V, publicKey: raw, fetch: service({ privateKey, tamper: '.exe' }).fetch, sleep })).rejects.toThrow(/win32\/x64: the download.s sha512 is not the offer.s/)
     await expect(smoke({ api: API, version: V, publicKey: keys().raw, fetch: service({ privateKey }).fetch, sleep })).rejects.toThrow(/signature/)
+  })
+
+  it('notes, without failing, a newer release offered instead', async () => {
+    const { privateKey, raw } = keys()
+    const res = await smoke({ api: API, version: V, rollout: 100, publicKey: raw, fetch: service({ privateKey, version: '0.9.3' }).fetch, sleep })
+    expect(res.checked).toEqual([])
+    expect(res.notes[0]).toContain('0.9.3 is newer and offered instead')
+  })
+
+  it('notes, without failing, a version not offered when the rollout is not known', async () => {
+    const { privateKey, raw } = keys()
+    const res = await smoke({ api: API, version: V, publicKey: raw, fetch: service({ privateKey, rollout: 0 }).fetch, sleep })
+    expect(res.notes).toHaveLength(3)
+    await expect(smoke({ api: API, version: V, rollout: 100, publicKey: raw, fetch: service({ privateKey, rollout: 0 }).fetch, sleep })).rejects.toThrow(/no offer/)
   })
 
   it('tries a failing call again before giving up', async () => {
@@ -117,8 +131,8 @@ describe('smoke', () => {
 
 describe('parseArgs', () => {
   it('reads the version and rollout', () => {
-    expect(parseArgs(['--version', V])).toEqual({ version: V, rollout: 100 })
-    expect(parseArgs(['--version', V, '--rollout', ''])).toEqual({ version: V, rollout: 100 })
+    expect(parseArgs(['--version', V])).toEqual({ version: V })
+    expect(parseArgs(['--version', V, '--rollout', ''])).toEqual({ version: V })
     expect(parseArgs(['--version', V, '--rollout', '25'])).toEqual({ version: V, rollout: 25 })
     expect(() => parseArgs(['--version', 'v1'])).toThrow(/--version/)
     expect(() => parseArgs(['--version', V, '--rollout', '101'])).toThrow(/0-100/)

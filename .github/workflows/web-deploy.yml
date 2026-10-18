@@ -78,10 +78,11 @@ jobs:
         if: env.HAS_CLOUDFLARE == 'true'
         run: |
           set -euo pipefail
-          want="$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' app/out/web/index.html | head -1)"
+          want="$(grep -oE -m1 '/assets/index-[A-Za-z0-9_-]+\.js' app/out/web/index.html || true)"
           [ -n "$want" ] || { echo "::error::no bundle named in out/web/index.html"; exit 1; }
+          page="$RUNNER_TEMP/index.html"
           for _ in 1 2 3 4 5 6; do
-            if curl -fsS "$SITE/?smoke=$SHA" | grep -qF "$want" && curl -fsS -o /dev/null "$SITE$want"; then
+            if curl -fsS -o "$page" "$SITE/?smoke=$SHA" && grep -qF "$want" "$page" && curl -fsS -o /dev/null "$SITE$want"; then
               echo "$SITE serves $want"; exit 0
             fi
             sleep 10

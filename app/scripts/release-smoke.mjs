@@ -4,12 +4,15 @@
 // check (/v1/updates/check) offers this version to an install inside the rollout, the per-install
 // feed names it, the file downloads with the offered size and sha512, and its signature verifies
 // against the app's release key. Reads only; a rollout of 0 offers it to nobody and checks nothing.
+// Not failures, but notices: a newer version offered instead (a re-publish of an older release),
+// and, without --rollout (a re-publish keeps the stored one), the version not offered at all.
 //
 //   node scripts/release-smoke.mjs --version 0.9.2 [--rollout 0-100] [--expect-key <b64>]
 //
 // Env: MD_RELEASE_API (default https://dev.masterdeck.dev). Node 22, no dependencies.
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { compareVersions } from './auto-release.mjs'
 import { DEFAULT_API, appReleaseKey, channelOf, signedMessage } from './release-publish.mjs'
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
@@ -88,16 +91,17 @@ async function tries(fn, { times = 3, sleep = (ms) => new Promise((r) => setTime
 /**
  * Runs every check; throws one error listing every problem found.
  * @param {{api: string, version: string, rollout?: number, publicKey: string, fetch?: typeof fetch,
- *   sleep?: (ms: number) => Promise<void>, log?: (s: string) => void}} o
- * @returns {Promise<{checked: string[], skipped?: string}>}
+ *   sleep?: (ms: number) => Promise<void>, log?: (s: string) => void}} o `rollout` undefined: not known
+ * @returns {Promise<{checked: string[], notes: string[], skipped?: string}>}
  */
-export async function smoke({ api, version, rollout = 100, publicKey, fetch: doFetch = fetch, sleep, log = () => {} }) {
-  // Bucket 0 is inside every rollout above 0, also one changed since (PATCH) or not known here.
-  const id = idInside(Math.min(rollout, 1))
-  if (!id) return { checked: [], skipped: `the rollout is 0 %: ${version} is offered to nobody yet` }
+export async function smoke({ api, version, rollout, publicKey, fetch: doFetch = fetch, sleep, log = () => {} }) {
+  if (rollout === 0) return { checked: [], notes: [], skipped: `the rollout is 0 %: ${version} is offered to nobody yet` }
+  // Bucket 0 is inside every rollout above 0, also one changed since (PATCH).
+  const id = idInside(1)
   const channel = channelOf(version)
   const problems = []
   const checked = []
+  const notes = []
   for (const t of targets(version)) {
     const where = `${t.platform}/${t.arch}`
     try {
@@ -108,6 +112,14 @@ export async function smoke({ api, version, rollout = 100, publicKey, fetch: doF
         if (!res.ok) throw new Error(`the check answered ${res.status}`)
         return res.json()
       }, { sleep })
+      if (offer && typeof offer.version === 'string' && /^\d+\.\d+\.\d+/.test(offer.version) && compareVersions(offer.version, version) > 0) {
+        notes.push(`${where}: ${offer.version} is newer and offered instead, so ${version} was not checked`)
+        continue
+      }
+      if (rollout == null && (!offer || offer.version !== version)) {
+        notes.push(`${where}: ${version} is not offered (its stored rollout may be 0), so it was not checked`)
+        continue
+      }
       const bad = offerProblems(offer, t, version, publicKey)
       if (bad.length) {
         problems.push(...bad)
@@ -132,7 +144,7 @@ export async function smoke({ api, version, rollout = 100, publicKey, fetch: doF
     }
   }
   if (problems.length) throw new Error(`${version} is not served as it should be:\n- ${problems.join('\n- ')}`)
-  return { checked }
+  return { checked, notes }
 }
 
 export function parseArgs(argv) {
@@ -150,9 +162,12 @@ export function parseArgs(argv) {
     else throw new Error(`unknown argument ${a}`)
   }
   if (!o.version || !SEMVER.test(o.version)) throw new Error(`--version must be a version like 0.10.0, got ${o.version ?? 'nothing'}`)
-  if (o.rollout == null || o.rollout === '') o.rollout = 100
-  else if (!/^\d+$/.test(o.rollout) || Number(o.rollout) > 100) throw new Error('--rollout must be 0-100')
-  else o.rollout = Number(o.rollout)
+  // Empty (a re-publish without one) is not known, as is none.
+  if (o.rollout === '') delete o.rollout
+  if (o.rollout != null) {
+    if (!/^\d+$/.test(o.rollout) || Number(o.rollout) > 100) throw new Error('--rollout must be 0-100')
+    o.rollout = Number(o.rollout)
+  }
   if (o.expectKey != null && !RAW_KEY.test(o.expectKey)) throw new Error('--expect-key must be a raw Ed25519 public key (base64, 32 bytes)')
   return o
 }
@@ -161,8 +176,9 @@ async function main() {
   const o = parseArgs(process.argv.slice(2))
   const api = (process.env.MD_RELEASE_API || DEFAULT_API).replace(/\/+$/, '')
   const res = await smoke({ api, version: o.version, rollout: o.rollout, publicKey: o.expectKey ?? (await appReleaseKey()), log: (s) => console.log(s) })
+  for (const n of res.notes ?? []) console.log(`::notice::${n}`)
   if (res.skipped) console.log(`::notice::Smoke check skipped: ${res.skipped}.`)
-  else console.log(`${o.version}: every update file is offered, downloads and verifies (${api}).`)
+  else console.log(`${o.version}: ${res.checked.length} of 3 update files offered, downloaded and verified (${api}).`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

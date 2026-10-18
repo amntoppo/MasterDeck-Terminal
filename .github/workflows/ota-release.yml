@@ -144,6 +144,9 @@ jobs:
       - name: Smoke check
         if: steps.meta.outputs.skip != '1'
         run: |
+          if [ ! -f src/app/scripts/release-smoke.mjs ]; then
+            echo "::notice::$TAG is older than the smoke check (#178): not checked."; exit 0
+          fi
           args=(--version "${TAG#v}")
           if [ -n "$ROLLOUT" ]; then args+=(--rollout "$ROLLOUT"); fi
           node src/app/scripts/release-smoke.mjs "${args[@]}"
