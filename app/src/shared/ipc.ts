@@ -514,7 +514,8 @@ export interface DeckApi {
   notesSearch(query: string): Promise<string[]>;
   /** Refused as a conflict when the stored note is not the version `base` names, unless `force` (the user's Keep mine). */
   notesSave(input: NoteInput): Promise<SaveResult>;
-  notesDelete(id: string): Promise<{ ok: boolean; message?: string }>;
+  /** `base`: only if the note is still that version (else `conflict`). */
+  notesDelete(id: string, base?: number): Promise<{ ok: boolean; message?: string; conflict?: true }>;
   /** Schedules (#140): every schedule with its next run, and their last runs. */
   schedList(): Promise<SchedList>;
   /** Add (no id) or change a schedule; checked in main (`normalizeSchedule`). */

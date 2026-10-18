@@ -20,6 +20,7 @@ import { deck, useNow } from "../deck";
 import { ticketNote } from "../notes";
 import { can } from "../web";
 import { SubIssueDetail, useOpenSubs, useSubIssues } from "./SubIssues";
+import { TicketNote } from "./TicketNote";
 
 interface Props {
   session: Session;
@@ -237,6 +238,11 @@ function TicketRow({
             {step.at + 1}/5 {STEPS[step.at]}
           </span>
           {issue?.status && <Badge tone="info">{issue.status}</Badge>}
+          {tn && (
+            <Badge tone="off" title="This ticket has a note">
+              Note
+            </Badge>
+          )}
         </>
       }
     >
@@ -249,14 +255,7 @@ function TicketRow({
         {step.at + 1}/5 {STEPS[step.at]}
         {step.note ? <span className="muted"> · {step.note}</span> : null}
       </div>
-      {onNote && can("notesList") && (
-        <div className="d-note">
-          {tn && <div className="d-note-text">{tn.preview}</div>}
-          <button className="d-link" onClick={() => onNote({ ticket: t })}>
-            {tn ? "Edit note" : "Add note"}
-          </button>
-        </div>
-      )}
+      {onNote && can("notesList") && <TicketNote key={ticketKey(t.repo, t.number)} ticket={t} meta={tn} onNote={onNote} />}
       <SubIssuesRow ticket={t} state={state} {...row} />
     </GhRow>
   );
