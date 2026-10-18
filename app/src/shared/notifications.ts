@@ -74,7 +74,7 @@ export const NOTIFY_TYPES: readonly NotifyTypeDef[] = [
   {
     id: 'auto-review',
     label: 'Automated review',
-    hint: 'Automate Review sent comments on a PR, a PR it reviewed is ready to merge, or Merge automatically merged one.',
+    hint: 'Automate Review sent comments on a PR, a PR it reviewed is ready to merge, or Merge automatically merged one; a PR you watch with no session is ready, merged or closed.',
     source: 'event',
     defaults: on(true, true),
   },

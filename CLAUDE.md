@@ -168,7 +168,7 @@ web tabs keep working.
 | Hooks | `main/hooks.ts` (settings.json installs, `hookStatus`, one-time `migrateLegacyHooks` of the old skill hooks), `main/deckHooks.ts` (MasterDeck's hook script, incl. the master reports guard on `SendMessage`), `shared/deckHooks.ts` |
 | Monitors / schedules | `main/watches.ts`, `shared/watches.ts`, `shared/schedules.ts` |
 | Schedules (#140: sessions started on a timer) | `shared/sched.ts` (pure: `normalizeSchedule`, `whenCron`, `nextSlot` in a time zone, `planTick`, `runProgress`, `runCost`), `main/sched.ts` (`Scheduler`: `schedules.json`, `tick`, `runNow`), `startSession` in `main/index.ts` (also `CH.startClaude`), `CH.sched*`, `renderer/.../SchedulesView.tsx`, `AppState.schedRuns` (the session row's chip). Not `shared/schedules.ts` (a session's own CronCreate jobs) |
-| PR watch | `main/prWatch.ts`, `shared/prWatch.ts` |
+| PR watch (also the user's own, #182: the eye, Watched PRs) | `main/prWatch.ts`, `shared/prWatch.ts`, `shared/watchPr.ts` (input, rows, the review-session line), `AutoReview.say` / `rereview` / `watchNotice` in `main/autoReview.ts`, `renderer/.../WatchEye.tsx`, `WatchedPrs` in `AutoReviewWidget.tsx` |
 | Board moves | `main/boardOps.ts`, `main/boardFlow.ts`, `main/ticketLinks.ts`, `shared/ticketLinks.ts` |
 | Board without a GitHub project | `shared/derivedBoard.ts` (`boardless`, `deriveBoard`, `tabBoard`, `boardEmpty`, `unreadRepos`, `awaitingRead`, `canMove`, `boardWanted`), `Sources.build()` / `refreshBoard`, `renderer/.../BoardView.tsx`, `skills/master` (`config.boardless`, `collect.Live.repo_issues`, `board.derived_status`, `normalize.repo_issues`) |
 | Board repository view | `shared/repoView.ts` (`repoViewOn`, `askPlan` / `cleanRepos`, `repoPickable`, `repoRefusal`, `admitRepo`, `offBoardOk`, `reposFilterPick`, `applyRead`, `viewOf`, `repoViewDeriver`, `repoViewBoard`, `repoViewStatus`, `boardChips`), `main/repoIssues.ts` (`RepoIssues`: ask, refresh, cache), `Sources.askRepos` / `build()` / `refreshGithub(force, repoForce)`, `renderer/.../BoardView.tsx` (`repoMode`, `worked`, `boardTicketContext`), `skills/master` (`cli.cmd_repo_issues`, `collect.Live.repo_issues(only=, boards=)`) |
@@ -431,6 +431,16 @@ buttons; it does not go through macOS window drag regions.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release). A merge to `main` that changes the app is released to users automatically (`ota-main.yml`); a release by hand only when the user asks.
 
 ## Current state and next steps (2026-10-18)
+
+- **Watch any PR (#182)** on branch `worktree-182-watch-any-pr` (PR, not merged, **not
+  installed**: the rebuild of the real app waits for the user's word). The eye on every open PR
+  (Pull requests rows and popup) and **Watched PRs** with **Add** in the Review with Claude card;
+  `prWatch:set` → `PrWatch.start` / `stop`; a manual watch goes to the session that owns the PR,
+  else to the tab's review session through `AutoReview` (`say`, `rereview`, `watchNotice`). Spec
+  and plan: `docs/superpowers/{specs,plans}/2026-10-18-watch-any-pr*`. Checked: typecheck, vitest,
+  and the web preview at 1440 and 390 px (eyes, tooltips, Add with good, watched and bad input, the
+  card's details opening below when the input box sits high). Not checked: GitHub, a real review
+  session, the Electron window's native stop dialog, Windows. Open points: TODO ("Watch any PR").
 
 - **The rail's icons can be reordered (#170)** on branch `worktree-MasterDeck-Terminal-170-rail-reorder`
   (PR, not merged, **not installed**): drag an icon (4 px threshold, drop line, Esc cancels) or ⌥↑ /

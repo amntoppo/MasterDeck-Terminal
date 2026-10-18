@@ -7,6 +7,7 @@ import type { AppState, BoardCard } from '@shared/types'
 import { deck } from '../deck'
 import { PrIcon } from './BoardView'
 import { ClaudeMark } from './NewTicket'
+import { WatchEye, type WatchTabRef } from './WatchEye'
 
 interface Props {
   card: BoardCard
@@ -18,12 +19,16 @@ interface Props {
   onStart: (card: BoardCard) => void
   /** Opened from the Pull requests view: its Review with Claude panel, on this PR. */
   onReviewWithClaude?: () => void
+  /** Opened from the Pull requests view: the tab its eye watches the PR for (#182). */
+  watchTab?: WatchTabRef
 }
 
 const STATE_LABEL: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGED: 'Merged', CLOSED: 'Closed' }
 
-export function PrPopup({ card, state, onClose, onStartReview, onStart, onReviewWithClaude }: Props) {
+export function PrPopup({ card, state, onClose, onStartReview, onStart, onReviewWithClaude, watchTab }: Props) {
   const [url, setUrl] = useState(() => pickPr(card.prs)?.url ?? card.prs[0]?.url ?? '')
+  const watchRow = state.prWatches?.find((r) => r.url === url)
+  const [watchMsg, setWatchMsg] = useState<string | null>(null)
   const [pr, setPr] = useState<PrSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState(false)
@@ -102,7 +107,9 @@ export function PrPopup({ card, state, onClose, onStartReview, onStart, onReview
               <span className="muted">
                 {pr.owner}/{pr.repo}#{pr.number}
               </span>
+              {watchTab && (pr.state === 'OPEN' || pr.state === 'DRAFT' || watchRow) && <WatchEye url={url} row={watchRow} tab={watchTab} onError={setWatchMsg} />}
             </div>
+            {watchMsg && <p className="bad small">{watchMsg}</p>}
             <div className="pr-facts">
               <span>by @{pr.author}</span>
               <span className="mono">
