@@ -776,7 +776,17 @@ ticket, repoOf)` is a session's notes: its ticket's note first, then the notes w
 is the session's or whose `link.ticket` is its ticket, newest first, each once. Session details →
 Notes (`renderer/.../SessionNotes.tsx`) lists them and renders the picked one read only
 (`notesGet`, `MarkdownView html={false}`); **Edit** and **New note** set the panel's `NoteTarget`
-(App's `setNotesAt`), so the window's one `NoteEditor` is the only editor. `shared/noteFilter.ts`
+(App's `setNotesAt`), so the window's one `NoteEditor` is the only autosaving editor. The one other
+writer is the ticket's own note in Details → GitHub → Ticket (`renderer/.../TicketNote.tsx`, #164):
+explicit Save / Cancel, each Save one `notes:save` carrying the `base` the text started from
+(`shared/ticketNoteInline.ts`: `saveTicketNote` → saved / clash / refused / failed, `shownTicketNote`
+picks its own last save or the newest read, `saveStep` decides close / delete / send). Its Delete, and
+a stored note saved empty, go through `notes:delete` with the draft's `base` (`NotesStore.delete(id,
+base)`, checked after the Mac's dialog): a version saved since is answered `conflict`, never deleted. Two editors on one note are kept apart by `base` alone:
+the later save gets the conflict, and the panel's `NoteEditor.seen` reloads or asks. Its writes reach
+the list at once through `noteApplied` (`applyOwnChange`: never over a newer version the list already has) (`renderer/src/notes.ts`, which `useNotes` listens to); the
+text is read by `useNoteBody` (shared with `SessionNotes`), again 1.5 s after a version change.
+Drafts survive tab and session switches (`TicketNoteDrafts`, per ticket, in memory). `shared/noteFilter.ts`
 holds the panel's filters (`noteIn`, `filterNotes`), the tab's meeting dot (`meetingDot` against
 `md.sessionNotesSeen.<key>`, the newest meeting note's `created` when the tab was last open: the
 Mac's clock, never the browser's) and `sessionLink` (a new note's link, the key checked as the store
@@ -2266,7 +2276,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   `components/NotesPanel.tsx` draws the list, search and editor; the editor's rules live in
   `shared/noteEditor.ts` (`NoteEditor`, one per window, outside the panel: 500 ms debounce, `base`,
   `incoming`, see "Notes" above). The panel is mounted after the headers (like the ★ Master button) so
-  it gets its clicks. The entry points are `GitHubDetails.tsx` (Details → GitHub: **Add note** / **Edit note**), `SessionNotes.tsx` (Details → Notes) and the
+  it gets its clicks. The entry points are `GitHubDetails.tsx` (Details → GitHub → Ticket: the note in place, `TicketNote.tsx`, and **Open in Notes**), `SessionNotes.tsx` (Details → Notes) and the
   mark in the top row of a `BoardView` `Card` (`bcard-note`; always visible on a phone). A ticket's
   title in the panel comes from `ticketTitle` over the issues, the board and the repository view.
   On a phone the panel is a full-screen sheet (`web.css`, `.app.phone > .notes-panel`) and `App.tsx`
