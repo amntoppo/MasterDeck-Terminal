@@ -478,7 +478,10 @@ buttons; it does not go through macOS window drag regions.
   web app over the bridge, a real phone, Windows, real sessions and GitHub data in the installed app.
   Open points: TODO ("Dashboard (#183): open points").
 
-- **CI/CD for a fast cycle (#178)** on branch `worktree-178-ci-cd-fast-cycle` (PR, not merged).
+- **CI/CD for a fast cycle (#178)** is merged to `main` (PR #185, 0ae7f36; its nine review comments
+  are answered on branch `worktree-185-review-followups`: the release tests on macOS and Windows
+  too, the base's `ci-changes.mjs`, the deploy key not kept, web deploy tests first and a pinned
+  wrangler, a report that says when the update is live).
   PR CI is checks only on ubuntu (Python, typecheck + vitest, actionlint) behind one required job
   **CI**, cancels older runs, and skips docs-only PRs (`app/scripts/ci-changes.mjs`); installers are
   built by `build.yml` only at release and in `package.yml` (packaging files or the `build` label),
