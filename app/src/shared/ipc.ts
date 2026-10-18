@@ -356,6 +356,8 @@ export interface AssignRequest {
   retry?: boolean;
   /** Session keys to link the new session to (two-way). */
   peers?: string[];
+  /** The session list's tab (#171) the new session goes into once listed; "all" or absent: none. */
+  group?: string;
 }
 
 export interface PtyOpenResult {

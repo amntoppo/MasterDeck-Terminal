@@ -936,7 +936,20 @@ The renderer: `SessionGroupBar.tsx` (All, the tabs with count and needs-you badg
 drag to reorder with `text/masterdeck-group`, a session row's `text/masterdeck-session` dropped on a
 tab assigns it, the tab's right-click menu), and `Sidebar.tsx` narrows its ordered list to the tab
 (`inGroup`) before the filters, Starred, groups, Parked and Cleanup. The tab on screen is
-`localStorage` `sessionGroup`, All when it is gone. `SessionMenu.tsx` has **Move to tab ▸**.
+`localStorage` `sessionGroup`, All when it is gone (`renderer/src/sessionGroupPick.ts`: `pickedGroup`,
+`pickGroup`, `usePickedGroup`, one store for the Sidebar and App). `SessionMenu.tsx` has **Move to tab ▸**.
+
+A new session goes into a tab (#171). New Claude session and the Start dialog (`AssignDialog`) show
+`SessionTabSelect` (`SessionGroupBar.tsx`) when there is a named tab, defaulting to the tab on
+screen; the request carries `group` (`NewSessionReq.group`, `AssignRequest.group`: a tab id, or
+`"all"`), and App switches the list to it on Start. Main records a pending target before the
+start (`SessionGroupStore.expect(name, group, skip)`, in memory; `skip` = `keysNamed(name)`, the
+sessions of that name already listed, done ones too) in `startSession` and the `CH.assign` handler,
+drops it when the start fails or throws (`unexpect`), and the state callback calls `claim(state.sessions)` before
+`prune`, so the first state that lists the session has it in its tab. `claimWaits` (shared) matches
+by name (a new session done by its first poll too), never moves a session already in a tab, and drops a wait whose tab is gone or that is
+older than `GROUP_GRACE_MS`. Not for New terminal, Resume a past session…, the PR popup's review,
+master's spawns or schedules.
 
 ### Session tabs, files and diffs (issue #113)
 
