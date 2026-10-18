@@ -368,18 +368,37 @@ describe('AutoReview: watched PRs no session owns (#182)', () => {
     w.pane.id = null
     expect(w.a.say(tab, 'again').ok).toBe(false)
   })
-  it('a notice is left to a track that tells it itself', async () => {
+  it('ready is told once per head, by the watch or the track, never twice; merged is left out only after its own merge', async () => {
     const w = world()
-    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' })
+    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' }, 'aaa')
     expect(w.notices).toHaveLength(1)
     w.pane.id = 'p'
     w.a.rereview(tab, URL1)
     await w.a.poll()
     w.a.deliver()
-    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' })
-    expect(w.notices).toHaveLength(1)
-    w.a.watchNotice(tab, URL1, { kind: 'closed', title: 'closed', body: '' })
+    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' }, 'aaa')
+    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' }, 'aaa')
     expect(w.notices).toHaveLength(2)
+    // Someone else merged it: the track only logs that, so the watch's notice goes.
+    w.gh.pr = node({ state: 'MERGED' })
+    w.tick(POLL_MS)
+    await w.a.poll()
+    w.a.watchNotice(tab, URL1, { kind: 'merged', title: 'merged', body: '' })
+    expect(w.notices.map((n) => n.title)).toEqual(['ready', 'ready', 'merged'])
+  })
+  it('a watch line waits while a PR can still be posted to, and rereview waits for a fresh read', async () => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.set('mine', on)
+    await w.a.poll()
+    w.a.deliver()
+    expect(w.queues.mine).toEqual([URL1])
+    expect(w.a.say(tab, 'watch line')).toMatchObject({ ok: false })
+    const prs = (w.a as unknown as { prs: Map<string, unknown> }).prs
+    w.a.rereview(tab, 'https://github.com/acme/web/pull/13')
+    prs.set('https://github.com/acme/web/pull/13', {})
+    w.a.rereview({ ...tab, account: 'other' }, 'https://github.com/acme/web/pull/13')
+    expect(prs.has('https://github.com/acme/web/pull/13')).toBe(false)
   })
   it('watched tracks are kept across a restart', async () => {
     const w = world()

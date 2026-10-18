@@ -851,7 +851,7 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
   review: {
     say: (w, text) => autoReview.say(watchTab(w), text),
     rereview: (w) => autoReview.rereview(watchTab(w), w.url),
-    notify: (w, kind) => autoReview.watchNotice(watchTab(w), w.url, watchNoticeText(w, w.title ?? "", kind)),
+    notify: (w, kind, head) => autoReview.watchNotice(watchTab(w), w.url, watchNoticeText(w, w.title ?? "", kind), head),
     stopped: (w) => autoReview.unwatch(w.account ?? null, w.url),
   },
 });

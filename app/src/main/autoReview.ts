@@ -42,6 +42,8 @@ type Saved = { tabs?: Record<string, AutoReviewTab>; tracks?: AutoTrack[] }
 export const monitorId = (tabId: string): string => `review:${tabId}`
 
 const DONE = (t: AutoTrack): boolean => t.status === 'merged' || t.status === 'closed'
+/** In a track's `told`: Merge automatically merged it (and said so). */
+const MERGED_HERE = 'merged-here'
 
 /** A PR tab, as a watch no session owns knows it (#182): its id, name and account. */
 export interface WatchTab {
@@ -128,6 +130,8 @@ export class AutoReview {
       watched: true, tabName: tab.name.slice(0, 100),
     }
     this.tracks = [...this.tracks.filter((x) => x.key !== key), t]
+    // An older read would send the old head: the line waits for the next read.
+    this.prs.delete(url)
     this.event(tab.tabId, `new commits on watched ${label(t)}: queued for review`)
     // Read soon: the line typed into the session needs the PR's details.
     this.lastPoll = 0
@@ -154,6 +158,8 @@ export class AutoReview {
   say(tab: WatchTab, text: string): CliResult {
     if (!TICKET_TAB.test(tab.tabId)) return { ok: false, message: 'bad PR tab' }
     const tabId = tab.tabId
+    // Never while a PR can still be posted to (--auto queue): text read from another PR could post on it.
+    if (this.tracks.some((t) => t.tabId === tabId && t.status === 'reviewing')) return { ok: false, message: 'a review is in progress' }
     const pane = this.paneNow(tabId)
     const now = this.now()
     if (pane && !this.deps.panes.ready(tabId, pane, this.sent[tabId] ?? 0)) return { ok: false, message: 'busy' }
@@ -171,13 +177,18 @@ export class AutoReview {
   }
 
   /**
-   * A watched PR's Needs-you notice (#182), unless a track of this account tells it itself: a
-   * "ready" its reconcile says, a merge Merge automatically made.
+   * A watched PR's Needs-you notice (#182), unless a track of this account told it already: a
+   * "ready" at this head, a merge Merge automatically made. A ready told here is marked on the
+   * track, so its reconcile does not tell it again.
    */
-  watchNotice(tab: WatchTab, url: string, n: { kind: 'ready' | 'merged' | 'closed' | 'gone'; title: string; body: string }): void {
+  watchNotice(tab: WatchTab, url: string, n: { kind: 'ready' | 'merged' | 'closed' | 'gone'; title: string; body: string }, head?: string): void {
     const t = this.tracks.find((x) => x.key === trackKey(tab.account, url))
-    if (n.kind === 'ready' && t && !DONE(t) && t.sentHead) return
-    if (n.kind === 'merged' && t?.status === 'merged') return
+    if (n.kind === 'ready' && head && t) {
+      if (t.told.includes(`ready:${head}`)) return
+      t.told.push(`ready:${head}`)
+      this.save()
+    }
+    if (n.kind === 'merged' && t?.told.includes(MERGED_HERE)) return
     this.deps.notify({ title: n.title, body: n.body, url })
   }
 
@@ -372,6 +383,8 @@ export class AutoReview {
     if (!done) return
     if (r.code === 0) {
       done.status = 'merged'
+      // Told here ("Merged …"): a watch of the PR says nothing more.
+      done.told.push(MERGED_HERE)
       done.note = null
       done.at = this.now()
       this.event(tabId, `merged ${label(done)}`, 'merged')

@@ -317,6 +317,11 @@ export class PrWatch {
       const s = owner?.(w.url)
       if (s && s.state !== 'done' && s.name !== MASTER_NAME) {
         w.sessionKey = s.key
+        // The review session's posts were its own; the session's are told apart from now on, so what
+        // the account has on the PR now is taken for its own once (the baseline path of ownCheck).
+        delete w.own
+        // The session works on the PR now: the tab's review session stops reviewing its pushes.
+        this.deps.review?.stopped(w)
         changed = true
       }
     }

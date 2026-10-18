@@ -705,6 +705,8 @@ describe('PrWatch: watches the user asked for (#182)', () => {
     w.start(ask(), null, NOW)
     w.sync({ sessions: [sess()], sessionPrs: {}, prLive: {} }, () => false, NOW, (u) => (u === url(7) ? sess() : null))
     expect(w.rows([sess()])[0].target).toEqual({ session: { key: 'k1', name: 's' } })
+    // The tab's review session stops reviewing the PR's pushes once a session owns it.
+    expect(rv.stopped).toEqual([url(7)])
     // The session's own switch being off does not drop the user's watch.
     expect(w.rows([sess()])).toHaveLength(1)
     await w.poll(NOW)

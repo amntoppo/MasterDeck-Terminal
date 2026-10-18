@@ -566,6 +566,10 @@ fixes it, and move the item here to "Recently done".
   review session instead" switch per watch if wanted.
 - **A watched track keeps the account it was queued with** when the tab later moves to another
   account (Automate Review's own tracks are dropped then).
+- **Re-watching a PR at once after stopping it** replaces the ended watch, dropping a last line not
+  yet typed into its session ("stopped from MasterDeck"). Harmless today.
+- **A tab's account is taken from the caller** and only checked to be connected (as
+  `autoReviewSet` does), not to be the tab's own.
 - **On a phone** the eye is in the row's actions, past the table's sideways scroll, like the other
   row buttons.
 
