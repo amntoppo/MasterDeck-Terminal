@@ -890,6 +890,16 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
   later links it to a ticket, the proposal stays issue 0.
 
+## Rail icon order (#170): open points (2026-10-18)
+
+- **P3 · Windows not checked.** The drag uses pointer capture on icons that are `no-drag`; check
+  that a drag over the rail's `rail-drag` strip never moves the window there.
+- **P3 · The others do not slide apart:** a drop line marks the landing place and the dragged icon
+  follows the pointer. Upgrade path: shift the icons between the start and the target by the
+  dragged icon's height (FLIP) if the line proves unclear.
+- **P3 · The web app shares the Mac's order.** A browser that wants its own (like the theme) would
+  keep it in localStorage, as `useWebThemePref` does.
+
 ## OTA on every merge (#166): open points (2026-10-18)
 
 - **P1 · The first real run.** Nothing of `ota-main.yml` ran on GitHub yet: the first app merge

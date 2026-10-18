@@ -2242,6 +2242,18 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   panel on Terminals (Details = `SessionDetails`, Tools = `SessionTools` with sub-tabs Queue = `QueuePanel` and BTW = `SessionBtw`, kept in `md.toolsTab`; a saved `inspTab` of `"queue"` opens Tools; Summary = `SummaryPanel`),
   and **`MasterPane`** (master-agent's terminal; ★ Master / ⌘⇧M). Dialogs and popups mount at the
   end (`BrowserApproval` only where `can('browserDecide')`, i.e. desktop).
+- The rail's order (#170): `shared/railOrder.ts` holds one list of ids (`RAIL_DEFAULT`) with two
+  fixed marks, `separator` and `spacer` (the Remote indicator is drawn right after the spacer).
+  `Settings.railOrder` stores it (`[]` = the default, so Reset follows later defaults; unknown ids
+  are kept in the file and skipped when drawing); `railOrder(saved)` adds a missing id after the id
+  before it in the default. Hidden icons stay in the list and are skipped when drawn, and the
+  separator is drawn only between two groups that both have an icon. `Rail.tsx` draws from it:
+  each icon carries `data-rail`, the marks `data-rail-mark`; a pointer drag starts after 4 px, the
+  rail captures the pointer, the drop target is `dropBefore` (the first drawn entry whose middle is
+  below the pointer), the click that ends a drag is swallowed, Esc / blur / a lost capture cancel;
+  ⌥↑ / ⌥↓ is `moveStep` and gives the focus back. The new order is drawn at once (local state keyed
+  by the saved one) and saved with `setSettings`; a browser may change it (`remoteSettings` passes
+  it). `PhoneBar` does not read it.
 - Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
   (`TasksView`), `costs` (`CostsView`; its Hours choice is `HoursView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).

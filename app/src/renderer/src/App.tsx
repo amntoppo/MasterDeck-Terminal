@@ -1266,6 +1266,8 @@ export function App() {
         }}
         onAction={(a) => (a === "palette" ? setPalette(true) : setDialog(a))}
         update={update ? badge(update) : null}
+        order={state.settings.railOrder}
+        onOrder={(railOrder) => void deck().setSettings({ ...state.settings, railOrder })}
         needs={state.inbox.open.filter((e) => e.item.kind !== "held").length}
         prAttention={
           state.inbox.open.filter((e) => e.item.detail.type === "offer")

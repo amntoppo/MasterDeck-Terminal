@@ -11,6 +11,7 @@ import { MeetingsSetup } from './MeetingsSetup'
 import { NotificationsPanel } from './NotificationsPanel'
 import { MODS_ABOUT, ModsPanel } from './ModsPanel'
 import { setWebThemePref, useWebThemePref } from '../theme'
+import { isDefaultOrder } from '@shared/railOrder'
 import { THEME_PREFS, THEMES, type ThemePref } from '@shared/themes'
 import type { UpdateState } from '@shared/updates'
 import { UpdatesPanel } from './Updates'
@@ -108,6 +109,13 @@ export function SettingsView({
                 {t === 'system' ? 'System' : THEMES[t].label}
               </button>
             ))}
+          </div>
+        </Field>
+        <Field label="Rail icons" hint={`Drag an icon on the left rail to move it, or press ${deck().platform === 'darwin' ? '⌥' : 'Alt+'}↑ / ↓ on it.`}>
+          <div className="f-row">
+            <button className="btn" disabled={isDefaultOrder(s.railOrder)} onClick={() => set('railOrder', [])}>
+              Reset icon order
+            </button>
           </div>
         </Field>
         <Field label="GitHub and boards" hint="Your account, repositories and boards (Setup).">
