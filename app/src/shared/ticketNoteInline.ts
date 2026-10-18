@@ -75,6 +75,17 @@ export const recreateDraft = (d: TicketNoteDraft): TicketNoteDraft => ({ ...d, b
 export const nothingToSave = (d: TicketNoteDraft): boolean => d.base === null && !d.body.trim()
 
 /**
+ * What Save does with the draft: nothing (no text for a ticket without a note, or the stored text unchanged), a
+ * delete (a stored note emptied: asked first, as Delete is, and only of the version the text started from), or a save.
+ */
+export function saveStep(d: TicketNoteDraft, shown: { updated: number; body: string } | null): 'close' | 'delete' | 'send' {
+  if (nothingToSave(d)) return 'close'
+  if (d.base !== null && !d.body.trim()) return 'delete'
+  if (shown && d.base === shown.updated && d.body === shown.body) return 'close'
+  return 'send'
+}
+
+/**
  * Drafts kept while the window lives, per ticket, so switching Details tabs or sessions does not drop typed text.
  * Save and Cancel clear them.
  */

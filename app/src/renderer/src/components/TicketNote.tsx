@@ -3,9 +3,9 @@ import { NOTE_BODY_MAX, type Note, type NoteMeta } from '@shared/notes'
 import type { NoteTarget } from '@shared/noteEditor'
 import {
   TicketNoteDrafts,
-  nothingToSave,
   recreateDraft,
   reloadDraft,
+  saveStep,
   saveTicketNote,
   shownTicketNote,
   startDraft,
@@ -60,17 +60,20 @@ export function TicketNote({ ticket, meta, onNote }: Props) {
     setError('')
   }
 
+  // The box is read only while a save or delete is out (`busy`), so the draft an answer puts back is what is shown.
   const save = async (d: TicketNoteDraft | null = editing, force = false) => {
     if (!d || busy) return
-    if (nothingToSave(d)) return close()
-    // Unchanged: nothing to write (a version that moved meanwhile is no reason to write it again).
-    if (!force && shown && d.base === shown.updated && d.body === shown.body) return close()
+    if (!force) {
+      const step = saveStep(d, shown)
+      if (step === 'close') return close()
+      if (step === 'delete') return remove(d)
+    }
     setBusy(true)
     setError('')
     const out = await saveTicketNote((i) => deck().notesSave(i), d, force)
     setBusy(false)
     if (out.kind === 'saved') {
-      noteApplied(out.change)
+      noteApplied(out.change, d.base)
       setSaved(out.note)
       close()
     } else if (out.kind === 'clash') {
@@ -82,20 +85,33 @@ export function TicketNote({ ticket, meta, onNote }: Props) {
     }
   }
 
-  const remove = async () => {
-    if (!meta || busy) return
+  // Only the version the draft started from is deleted: one saved elsewhere since is a clash, as a save's is.
+  const remove = async (d: TicketNoteDraft | null = editing) => {
+    if (!meta || !d || d.base === null || busy) return
     if (!(await webConfirm('Delete the note for this ticket? This cannot be undone.', { confirmLabel: 'Delete', danger: true }))) return
     setBusy(true)
-    // The window asks again with the Mac's own dialog; a browser asked above.
+    setError('')
+    // The window asks with the Mac's own dialog (webConfirm passes there); a browser asked above.
     const r = await deck()
-      .notesDelete(meta.id)
-      .catch(() => ({ ok: false, message: 'Not deleted' }))
+      .notesDelete(meta.id, d.base)
+      .catch(() => ({ ok: false, message: 'Not deleted', conflict: undefined }))
+    if (r.conflict) {
+      const n = await deck()
+        .notesGet(meta.id)
+        .catch(() => null)
+      setBusy(false)
+      setDraft(d)
+      return setClash({ note: n })
+    }
     setBusy(false)
     if (r.ok) {
-      noteApplied({ id: meta.id, deleted: true })
+      noteApplied({ id: meta.id, deleted: true }, d.base)
       setSaved(null)
       close()
-    } else if (r.message !== 'cancelled') setError(r.message || 'Not deleted')
+    } else if (r.message !== 'cancelled') {
+      setDraft(d)
+      setError(r.message || 'Not deleted')
+    }
   }
 
   // A long note is cut to a few lines until Show more.
@@ -142,6 +158,7 @@ export function TicketNote({ ticket, meta, onNote }: Props) {
           placeholder={meta ? 'Markdown works' : 'Write a note…'}
           value={editing.body}
           maxLength={NOTE_BODY_MAX}
+          readOnly={busy}
           rows={Math.min(14, Math.max(meta || editing.body ? 5 : 2, editing.body.split('\n').length + 1))}
           autoFocus={!!draft && !!meta}
           onChange={(e) => {
@@ -151,7 +168,8 @@ export function TicketNote({ ticket, meta, onNote }: Props) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault()
-              void save()
+              // As the disabled Save button: a clash is answered with Reload or Keep mine first.
+              if (!clash) void save()
             } else if (e.key === 'Escape') {
               e.stopPropagation()
               close()
@@ -197,7 +215,7 @@ export function TicketNote({ ticket, meta, onNote }: Props) {
             </button>
             <span style={{ flex: 1 }} />
             {editing.base !== null && meta && (
-              <button className="btn danger" disabled={busy} onClick={() => void remove()}>
+              <button className="btn danger" disabled={busy || !!clash} onClick={() => void remove()}>
                 Delete
               </button>
             )}

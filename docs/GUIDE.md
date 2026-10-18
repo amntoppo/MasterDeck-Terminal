@@ -1128,10 +1128,10 @@ A place for what you would otherwise keep in another app: your own notes, and on
   (a **Note** badge on it says the ticket has one) shows the note rendered, with when it was last
   changed; a long one is cut to a few lines with **Show more**. Click the text (or **Edit**) to
   change it in place: **Save** or ⌘/Ctrl+Enter saves, **Cancel** or Esc drops the change, and
-  **Delete** asks first. With no note yet, a **Write a note…** box is ready: type and Save. If the
+  **Delete** (or saving it empty) asks first and deletes only the version you started from. With no note yet, a **Write a note…** box is ready: type and Save. If the
   note was changed elsewhere since you started (the Notes panel, the Board, a browser), Save says
   **Changed elsewhere.** with **Reload** (take that text and go on) or **Keep mine**; nothing is
-  overwritten without asking. A change made elsewhere shows up here by itself. **Open in Notes**
+  overwritten or deleted without asking. A change made elsewhere shows up here by itself. **Open in Notes**
   opens it in the Notes panel, as does the small mark on a ticket's card on the Board (always
   visible, dimmed, on a phone). Such a note has no title: the panel shows the ticket and its
   title. It is listed under **Tickets**. Emptying it removes it.

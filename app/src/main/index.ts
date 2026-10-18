@@ -2795,9 +2795,9 @@ function registerIpc(): void {
   reg.handle(CH.notesGet, (_e, id: unknown) => notes.get(id));
   reg.handle(CH.notesSearch, (_e, query: unknown) => notes.search(query));
   reg.handle(CH.notesSave, (_e, input: unknown) => notes.save(input));
-  reg.handle(CH.notesDelete, async (e, id: unknown) => {
+  reg.handle(CH.notesDelete, async (e, id: unknown, base?: unknown) => {
     const note = notes.get(id);
-    if (!note) return notes.delete(id);
+    if (!note) return notes.delete(id, base);
     // From a browser: the web UI asked first; no native dialog on the Mac.
     const choice = isRemote(e) ? { response: 1 } : await dialog.showMessageBox(win!, {
       type: "warning",
@@ -2810,7 +2810,8 @@ function registerIpc(): void {
       detail: "The note is removed from this Mac. This cannot be undone.",
     });
     if (choice.response !== 1) return { ok: false, message: "cancelled" };
-    return notes.delete(id);
+    // `base` is checked after the dialog: an edit made while it was open is not deleted.
+    return notes.delete(id, base);
   });
   // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
   reg.handle(CH.schedList, () => scheduler.list());

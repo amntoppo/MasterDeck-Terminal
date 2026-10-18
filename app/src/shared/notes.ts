@@ -289,6 +289,16 @@ export function ticketNote(metas: NoteMeta[], repo: string | null | undefined, n
   return metas.find((m) => m.ticket && m.ticket.number === number && m.ticket.repo.toLowerCase() === full) ?? null
 }
 
+/**
+ * A change this window made, applied when its answer comes: never over a newer version the list already has (the
+ * event for a later edit elsewhere can come first). `deletedAt`: the version a delete removed.
+ */
+export function applyOwnChange(metas: NoteMeta[], c: NoteChange, deletedAt?: number | null): NoteMeta[] {
+  const listed = metas.find((m) => m.id === c.id)
+  const older = 'meta' in c ? c.meta.updated : (deletedAt ?? Infinity)
+  return listed && listed.updated > older ? metas : applyChange(metas, c)
+}
+
 export function applyChange(metas: NoteMeta[], c: NoteChange): NoteMeta[] {
   const rest = metas.filter((m) => m.id !== c.id)
   return sortNotes('meta' in c ? [...rest, c.meta] : rest)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { applyChange, sortNotes, type Note, type NoteChange, type NoteMeta } from '@shared/notes'
+import { applyChange, applyOwnChange, sortNotes, type Note, type NoteChange, type NoteMeta } from '@shared/notes'
 import { NOTE_REREAD_MS } from '@shared/noteFilter'
 import { deck } from './deck'
 import { can } from './web'
@@ -12,10 +12,13 @@ export interface NotesList {
   apply(c: NoteChange): void
 }
 
-const ownChanges = new Set<(c: NoteChange) => void>()
-/** A write this window made outside the Notes panel (Details' ticket note): the list takes it without waiting for its event. */
-export function noteApplied(c: NoteChange): void {
-  ownChanges.forEach((f) => f(c))
+const ownChanges = new Set<(c: NoteChange, deletedAt?: number | null) => void>()
+/**
+ * A write this window made outside the Notes panel (Details' ticket note): the list takes it without waiting for its
+ * event, unless it already lists a newer version (`applyOwnChange`). `deletedAt`: the version a delete removed.
+ */
+export function noteApplied(c: NoteChange, deletedAt?: number | null): void {
+  ownChanges.forEach((f) => f(c, deletedAt))
 }
 
 /** The notes list (titles and previews; never a body), kept current by the store's change event. */
@@ -24,9 +27,10 @@ export function useNotes(ready: boolean): NotesList {
   const [loaded, setLoaded] = useState(false)
   const apply = useCallback((c: NoteChange) => setMetas((m) => applyChange(m, c)), [])
   useEffect(() => {
-    ownChanges.add(apply)
-    return () => void ownChanges.delete(apply)
-  }, [apply])
+    const own = (c: NoteChange, deletedAt?: number | null) => setMetas((m) => applyOwnChange(m, c, deletedAt))
+    ownChanges.add(own)
+    return () => void ownChanges.delete(own)
+  }, [])
   useEffect(() => {
     if (!ready || !can('notesList')) return
     let live = true

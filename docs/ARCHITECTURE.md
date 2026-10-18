@@ -780,9 +780,11 @@ Notes (`renderer/.../SessionNotes.tsx`) lists them and renders the picked one re
 writer is the ticket's own note in Details → GitHub → Ticket (`renderer/.../TicketNote.tsx`, #164):
 explicit Save / Cancel, each Save one `notes:save` carrying the `base` the text started from
 (`shared/ticketNoteInline.ts`: `saveTicketNote` → saved / clash / refused / failed, `shownTicketNote`
-picks its own last save or the newest read). Two editors on one note are kept apart by `base` alone:
+picks its own last save or the newest read, `saveStep` decides close / delete / send). Its Delete, and
+a stored note saved empty, go through `notes:delete` with the draft's `base` (`NotesStore.delete(id,
+base)`, checked after the Mac's dialog): a version saved since is answered `conflict`, never deleted. Two editors on one note are kept apart by `base` alone:
 the later save gets the conflict, and the panel's `NoteEditor.seen` reloads or asks. Its writes reach
-the list at once through `noteApplied` (`renderer/src/notes.ts`, which `useNotes` listens to); the
+the list at once through `noteApplied` (`applyOwnChange`: never over a newer version the list already has) (`renderer/src/notes.ts`, which `useNotes` listens to); the
 text is read by `useNoteBody` (shared with `SessionNotes`), again 1.5 s after a version change.
 Drafts survive tab and session switches (`TicketNoteDrafts`, per ticket, in memory). `shared/noteFilter.ts`
 holds the panel's filters (`noteIn`, `filterNotes`), the tab's meeting dot (`meetingDot` against
