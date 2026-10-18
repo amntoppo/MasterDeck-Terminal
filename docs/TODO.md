@@ -1049,6 +1049,8 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Rail icon order (#170)** (09c3650): drag or ⌥↑ / ⌥↓ to reorder the rail's icons, kept in
+  `Settings.railOrder`; Reset icon order on the rail's menu and in Settings → General.
 - **Every merge to `main` publishes an OTA update (#166)**: `.github/workflows/ota-main.yml` after
   CI, patch + 1 (or `package.json`'s minor/major), a release commit held only by the tag, notes from
   the merged PRs, `release.yml` called, channel/rollout from repository variables, a commit status
