@@ -1,0 +1,237 @@
+name: OTA on main
+
+# Every merge to main that changes the app reaches users as an in-app update, with no manual step
+# (MasterDeck-Terminal#166). Once CI passed on the merge commit:
+#
+# 1. prepare: is there anything to release (OTA_MAIN not off, the commit not in a release yet, an
+#    app file changed since the last release: app/scripts/auto-release.mjs `changed`)? The next
+#    version (`next`: latest stable tag + 1 patch, or app/package.json's when a minor/major was
+#    bumped by hand; `-beta.N` on the beta channel). A release commit on top of the merge commit
+#    with that version in app/package.json + lock and the update's notes (the merged PRs) in
+#    .github/releases/vX.Y.Z.md, held only by the tag vX.Y.Z: main never gets a bot commit.
+# 2. release: release.yml (the same build, tests and attach as a hand-pushed tag), which calls
+#    ota-release.yml (sign and publish).
+# 3. report: a commit status "OTA release" on the merge commit; on failure a comment on its PR.
+#
+# Repository variables: OTA_MAIN_CHANNEL (stable | beta, default stable), OTA_MAIN_ROLLOUT (0-100,
+# default 100), OTA_MAIN (off pauses it). Run workflow (from main) releases the current main by hand.
+# A re-run is safe: a tag already made for the merge commit is released again (or left alone when
+# its update is published). docs/OPERATIONS.md § Release.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel (variable: the OTA_MAIN_CHANNEL variable, else stable)'
+        type: choice
+        options: [variable, stable, beta]
+        default: variable
+      rollout:
+        description: 'Percent of installs that get it at first (empty: OTA_MAIN_ROLLOUT, else 100)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# One release at a time, in order. GitHub keeps one pending run and cancels older pending ones; the
+# one left releases the newest commit, which holds every merge before it. Runs that release nothing
+# (CI failed, a PR's CI) get a group of their own so they never cancel a pending release.
+concurrency:
+  group: ${{ ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) && 'ota-main' || format('ota-main-ignored-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  MD_RELEASE_API: https://dev.masterdeck.dev
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the tag
+      statuses: write
+      pull-requests: read
+      issues: read # the tickets a PR closes
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      reason: ${{ steps.plan.outputs.reason }}
+      version: ${{ steps.plan.outputs.version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      rollout: ${{ steps.plan.outputs.rollout }}
+    steps:
+      - name: Status pending
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context='OTA release' \
+            -f description='Preparing the update' -f target_url="$RUN_URL" > /dev/null
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Plan
+        id: plan
+        run: |
+          set -euo pipefail
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+          skip() { echo "::notice::$1"; out release no; out reason "$1"; exit 0; }
+          tool=app/scripts/auto-release.mjs
+
+          if [ "${OTA_MAIN:-}" = off ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            skip "Automatic releases are off (repository variable OTA_MAIN=off)."
+          fi
+          [ "${IN_CHANNEL:-}" = variable ] && IN_CHANNEL=""
+          channel="${IN_CHANNEL:-${OTA_MAIN_CHANNEL:-stable}}"
+          rollout="${IN_ROLLOUT:-${OTA_MAIN_ROLLOUT:-100}}"
+          case "$channel" in stable|beta) ;; *) echo "::error::channel must be stable or beta, not $channel"; exit 1 ;; esac
+          if ! [[ "$rollout" =~ ^[0-9]+$ ]] || [ "$rollout" -gt 100 ]; then
+            echo "::error::rollout must be 0-100, not $rollout"; exit 1
+          fi
+          out channel "$channel"
+          out rollout "$rollout"
+          tags="$(git tag -l 'v*')"
+
+          # A re-run: the tag of a release commit this workflow made on this merge commit before (a
+          # tag pushed by hand is never released again from here).
+          for t in $tags; do
+            if [ "$(git rev-parse -q --verify "$t^{commit}^1" 2>/dev/null || true)" = "$SHA" ] &&
+               grep -q 'made by .github/workflows/ota-main.yml' <<< "$(git log -1 --format=%B "$t^{commit}")"; then
+              v="${t#v}"
+              head="$(curl -sI "$MD_RELEASE_API/v1/updates/files/$v/MasterDeck-$v-mac.zip" || true)"
+              if grep -qi '^cache-control:.*immutable' <<< "$head"; then
+                skip "$t is already published for this commit."
+              fi
+              echo "::notice::$t was made for this commit before; releasing it again."
+              out release yes; out version "$v"; out reuse yes
+              exit 0
+            fi
+          done
+
+          latest="$(printf '%s\n' "$tags" | node "$tool" latest)"
+          base=""
+          if [ -n "$latest" ]; then
+            base="$(git merge-base "$latest" "$SHA")"
+            if git merge-base --is-ancestor "$SHA" "$base"; then
+              skip "This commit is already in $latest."
+            fi
+            if [ "$(git diff --name-only "$base" "$SHA" | node "$tool" changed)" = no ]; then
+              skip "Nothing in the app changed since $latest (docs, tests or CI only)."
+            fi
+          fi
+          pkg="$(node -p "require('./app/package.json').version")"
+          version="$(printf '%s\n' "$tags" | node "$tool" next --pkg "$pkg" --channel "$channel")"
+          if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+            echo "::error::tag v$version exists already"; exit 1
+          fi
+
+          # The merged PRs since the last release that changed the app, for the notes.
+          entries="$RUNNER_TEMP/entries.json"
+          echo '[]' > "$entries"
+          range="$SHA"; [ -n "$base" ] && range="$base..$SHA"
+          for c in $(git rev-list --first-parent --reverse "$range" | tail -n 200); do
+            parent="$(git rev-parse -q --verify "$c^1" 2>/dev/null || true)"
+            if [ -n "$parent" ] && [ "$(git diff --name-only "$parent" "$c" | node "$tool" changed)" = no ]; then continue; fi
+            subject="$(git log -1 --format=%s "$c")"
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$c/pulls" --jq '[.[] | select(.merged_at != null)][0].number // empty' || true)"
+            if [ -n "$pr" ]; then
+              info="$(gh pr view "$pr" -R "$GITHUB_REPOSITORY" --json number,title,url,closingIssuesReferences \
+                --jq '{number, title, url, issues: [.closingIssuesReferences[]? | {number, url}]}')"
+            else
+              info=null
+            fi
+            jq --arg sha "$c" --arg subject "$subject" --argjson pr "$info" \
+              '. + [{sha: $sha, subject: $subject} + (if $pr then {pr: $pr} else {} end)]' "$entries" > "$entries.new"
+            mv "$entries.new" "$entries"
+          done
+          cp "$entries" "$RUNNER_TEMP/entries-$version.json"
+          echo "Next version: $version ($channel, $rollout %), since ${latest:-the start}"
+          out release yes; out version "$version"; out reuse no
+        env:
+          OTA_MAIN: ${{ vars.OTA_MAIN }}
+          OTA_MAIN_CHANNEL: ${{ vars.OTA_MAIN_CHANNEL }}
+          OTA_MAIN_ROLLOUT: ${{ vars.OTA_MAIN_ROLLOUT }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_ROLLOUT: ${{ inputs.rollout }}
+      - name: Release commit and tag
+        if: steps.plan.outputs.release == 'yes' && steps.plan.outputs.reuse != 'yes'
+        run: |
+          set -euo pipefail
+          v="${{ steps.plan.outputs.version }}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          (cd app && npm version "$v" --no-git-tag-version --allow-same-version > /dev/null)
+          notes=".github/releases/v$v.md"
+          # Notes written by hand for this version on main win.
+          if [ ! -f "$notes" ]; then
+            node app/scripts/auto-release.mjs notes --version "$v" --entries "$RUNNER_TEMP/entries-$v.json" > "$notes"
+          fi
+          cat "$notes"
+          git add app/package.json app/package-lock.json "$notes"
+          git commit -q -m "MasterDeck $v" -m "The release of $SHA, a merge to main, made by .github/workflows/ota-main.yml. Only the tag v$v holds this commit: main keeps its own version."
+          git tag -a "v$v" -m "MasterDeck $v"
+          git push origin "refs/tags/v$v"
+
+  release:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'yes'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: v${{ needs.prepare.outputs.version }}
+      rollout: ${{ needs.prepare.outputs.rollout }}
+    secrets:
+      RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+
+  report:
+    needs: [prepare, release]
+    if: always() && needs.prepare.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: write
+      issues: write # the comment on the merged PR
+    steps:
+      - name: Status and PR comment
+        run: |
+          set -euo pipefail
+          status() {
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$1" -f context='OTA release' \
+              -f description="${2:0:140}" -f target_url="$RUN_URL" > /dev/null
+          }
+          if [ "$PREPARE" = success ] && [ "$RELEASED" = no ]; then
+            status success "No release: $REASON"
+          elif [ "$PREPARE" = success ] && [ "$RELEASE" = success ]; then
+            status success "Published v$VERSION ($CHANNEL, $ROLLOUT %)"
+          else
+            what="v${VERSION:-?}"
+            [ -n "$VERSION" ] || what="the update"
+            status failure "Publishing $what failed: nothing was offered to users"
+            msg="The automatic release of this merge failed, so **$what** was not offered as an in-app update. Run: $RUN_URL
+
+          Nothing reaches users until the last step (ota-release.yml) succeeds. After a fix, **Re-run failed jobs** on that run is safe (a tag already made is released again), or merge the fix and the next release includes this change. See docs/OPERATIONS.md § Release."
+            for pr in $(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] | select(.merged_at != null) | .number' || true); do
+              gh pr comment "$pr" -R "$GITHUB_REPOSITORY" --body "$msg" || true
+            done
+            exit 1
+          fi
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREPARE: ${{ needs.prepare.result }}
+          RELEASE: ${{ needs.release.result }}
+          RELEASED: ${{ needs.prepare.outputs.release }}
+          REASON: ${{ needs.prepare.outputs.reason }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          ROLLOUT: ${{ needs.prepare.outputs.rollout }}

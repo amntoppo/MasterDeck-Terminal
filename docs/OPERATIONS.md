@@ -53,8 +53,16 @@ open /Applications/MasterDeck.app
 
 ## Release
 
-Only when the user asks. Last release: v0.9.1 (2026-10-18). Before it: v0.9.0 (2026-10-10), v0.8.2 (2026-10-06; v0.8.0
-and v0.8.1 had no Windows build).
+**Every merge to `main` that changes the app is released automatically** (issue #166, below:
+"Automatic release on every merge"): a patch version, a GitHub release and the in-app update, with
+no manual step. A release by hand is for a minor or major version, a beta, or a release of a
+commit the automatic one skipped. Only when the user asks. Last release by hand: v0.9.1
+(2026-10-18). Before it: v0.9.0 (2026-10-10), v0.8.2 (2026-10-06; v0.8.0 and v0.8.1 had no
+Windows build).
+
+A minor or major version needs no tag of its own: set it in `app/package.json` (`npm version
+0.10.0 --no-git-tag-version`, with an optional `.github/releases/v0.10.0.md`) in a PR, and the
+merge releases it. A tag by hand:
 
 ```bash
 cd app && npm version X.Y.Z --no-git-tag-version   # package.json + lock
@@ -76,9 +84,84 @@ an existing tag):
    zips, the EXE, the blockmaps and `latest*.yml` as artifacts.
 2. **release** (ubuntu) checks the tag against `app/package.json`'s version and attaches the DMGs
    and EXE (new installs) and the update files (the two mac zips, the EXE's `.blockmap`) to the
-   GitHub release, with `.github/release-notes.md` as the body.
+   GitHub release, with the tag's `.github/releases/<tag>.md` (when there is one) on top of
+   `.github/release-notes.md` as the body.
 3. **ota** calls `.github/workflows/ota-release.yml` (below), last, so a live update always has its
    installers on GitHub.
+
+`release.yml` is also callable (`workflow_call` with `tag`, an optional `rollout` and the two
+secrets): that is how `ota-main.yml` runs it, since a tag pushed with `GITHUB_TOKEN` starts no
+workflow.
+
+### Automatic release on every merge
+
+`.github/workflows/ota-main.yml` runs when **CI** completes on a push to `main` (`workflow_run`),
+and only when CI succeeded (a PR's CI, or CI on a fork, never counts). Spec:
+`docs/superpowers/specs/2026-10-18-ota-on-merge-design.md`.
+
+1. **prepare** sets a commit status **OTA release** (pending) on the merge commit, then decides
+   (`app/scripts/auto-release.mjs`, tested in `auto-release.test.ts`):
+   - nothing when the repository variable `OTA_MAIN` is `off`, when the commit is already in a
+     release (CI runs finished out of order), or when nothing but docs, tests or CI changed since
+     the last release (`isAppFile`: `*.md`, `docs/`, `.github/`, `*.test.ts(x)`,
+     `skills/master/tests/`, `app/web/`, `install.sh`, `LICENSE`, `.gitignore`). Measured from the
+     last release, not the merge's own diff: a docs merge after a failed app merge still ships it;
+   - the version (`next`): the highest stable `vX.Y.Z` tag plus one patch, or `app/package.json`'s
+     version without its `-suffix` when that is higher (a minor or major bump made by hand). On the
+     beta channel `X.Y.Z-beta.N`, N one above the highest beta of that version (the backend ties
+     the channel to the version: `-` is beta);
+   - the notes (`notes`): one line per merged PR since the last release that changed the app
+     (title, link, the tickets it closes; a commit pushed without a PR by its subject).
+
+   It then makes a **release commit** on top of the merge commit: `app/package.json` and the lock
+   set to the version and the notes in `.github/releases/vX.Y.Z.md` (a file already on `main` for
+   that version is kept as written). The annotated tag `vX.Y.Z` points at it and only the tag is
+   pushed: **`main` never gets the commit**, so there is no bot commit loop and `main`'s
+   `package.json` keeps the last version set by hand. The tag is self-describing, so
+   `release.yml`'s and `ota-release.yml`'s version checks and notes work unchanged, and every way
+   of publishing it again gives the same notes (the backend refuses a re-publish with others).
+2. **release** calls `release.yml` with the tag and the rollout (build mac and win with the tests,
+   attach, `ota-release.yml`). Nothing is published unless both builds and their tests pass.
+3. **report** sets the status to success (the version, channel and rollout, or why nothing was
+   released) or failure, and on failure comments on the merged PR with the run's link.
+
+**Order.** One concurrency group, `ota-main`, never cancelled in progress. GitHub keeps one pending
+run and cancels older pending ones: the run left releases the newest commit, which holds every
+merge before it (its notes list them all). Runs that release nothing (CI failed) get a group of
+their own, so they never cancel a pending release.
+
+**Channel and rollout** (repository → Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Default | What |
+|---|---|---|
+| `OTA_MAIN_CHANNEL` | `stable` | `beta` sends merges to the beta channel (`X.Y.Z-beta.N`, a GitHub prerelease) |
+| `OTA_MAIN_ROLLOUT` | `100` | The first rollout percent; raise it later with `PATCH` (below) |
+| `OTA_MAIN` | on | `off` pauses automatic releases (Run workflow still works) |
+
+`min_supported` is never set automatically. **Run workflow** on *OTA on main* releases the current
+`main` with a channel and rollout picked for that run.
+
+**A failed run.** Nothing reaches users until `ota-release.yml`'s last call. A failure before the
+tag leaves nothing; after it, the tag stays. **Re-run failed jobs** (or the whole run) is safe: the
+run finds the tag it made for that merge commit (its release commit's parent and message) and
+releases it again (files already uploaded are skipped), or stops when that version is already
+published. Or merge the fix: the next release includes the change. A tag made by hand is never
+released from here.
+
+**Yank a bad update** (automatic or not):
+
+```bash
+T=$(cat ~/.config/masterdeck-remote/RELEASE_ADMIN_TOKEN); API=https://dev.masterdeck.dev
+curl -s -X PATCH -H "authorization: Bearer $T" -H 'content-type: application/json' -d '{"yanked":true}' $API/v1/admin/releases/X.Y.Z
+```
+
+From then on no install is offered X.Y.Z (installs that have it keep it). Set `OTA_MAIN=off` if
+more merges are coming before the fix, merge the fix (it ships as the next patch, which also
+reaches the installs on X.Y.Z), then remove `OTA_MAIN`. Optionally mark the GitHub release a
+prerelease (so `install.sh` skips it) or delete it; keep the tag: a version is never reused. To
+force installs off X.Y.Z, set `minSupportedVersion` on the fixed release with the same `PATCH`.
+
+### Publishing the update (ota-release.yml)
 
 **OTA release** (`.github/workflows/ota-release.yml`) publishes a GitHub release as an in-app
 update. It runs when a release is **published** on GitHub, when `release.yml` calls it, and by hand

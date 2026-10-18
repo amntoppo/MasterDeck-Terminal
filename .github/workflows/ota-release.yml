@@ -10,7 +10,8 @@ name: OTA release
 #   GITHUB_TOKEN). A release still without its files (release.yml is building them) is skipped:
 #   release.yml calls this workflow itself once they are attached;
 # - from release.yml, after it attached the files (a release made with GITHUB_TOKEN starts no
-#   other workflow, so the event above never fires for it);
+#   other workflow, so the event above never fires for it), for a hand-pushed tag or a merge to
+#   main (ota-main.yml, which passes its rollout);
 # - by hand (Run workflow), for an existing release: to publish again, or with a staged rollout.
 # Running twice is safe: files already stored are skipped and an identical publish changes nothing.
 on:
@@ -21,6 +22,10 @@ on:
       tag:
         type: string
         required: true
+      rollout:
+        type: string
+        required: false
+        default: ''
     secrets:
       RELEASE_ADMIN_TOKEN:
         required: true
