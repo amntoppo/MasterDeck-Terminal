@@ -1,6 +1,6 @@
 # Dashboard (#183): plan
 
-Design: [2026-10-18-dashboard-design.md](2026-10-18-dashboard-design.md). One branch, one PR.
+Spec: [../specs/2026-10-18-dashboard-design.md](../specs/2026-10-18-dashboard-design.md). To be rewritten against the spec before building. One branch, one PR.
 
 The work is done subagent by subagent. Each task is reviewed before the next one starts, and the
 whole branch gets a final review. Pure logic is written test first.
