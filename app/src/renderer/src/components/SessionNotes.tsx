@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Note, NoteMeta } from '@shared/notes'
+import { useEffect, useState } from 'react'
+import type { NoteMeta } from '@shared/notes'
 import type { NoteTarget } from '@shared/noteEditor'
-import { meetingDay, NOTE_REREAD_MS, sessionLink, shownNote } from '@shared/noteFilter'
+import { meetingDay, sessionLink, shownNote } from '@shared/noteFilter'
 import { formatAgo } from '@shared/format'
 import type { Ticket } from '@shared/ticket'
 import type { Session } from '@shared/types'
-import { deck, useNow } from '../deck'
+import { useNow } from '../deck'
+import { useNoteBody } from '../notes'
 import { MarkdownView } from './MarkdownView'
 
 interface Props {
@@ -20,50 +21,20 @@ interface Props {
  * Session details → Notes: the session's notes, and the picked one rendered below the list.
  * ponytail: read only here. Edit and New note open the Notes panel, whose one NoteEditor is the only editor in the
  * window, so a note is never open in two editors at once; editing in place would need that editor to serve two views.
+ * (The ticket's own note is written in place under GitHub → Ticket, #164: explicit saves with `base`, `TicketNote`.)
  */
 export function SessionNotes({ session: s, ticket, list, onNote }: Props) {
   const now = useNow()
   const [picked, setPicked] = useState<string | null>(null)
   const meta = shownNote(list, picked)
-  const [note, setNote] = useState<Note | null>(null)
-  const [failed, setFailed] = useState(false)
-  const lastRead = useRef<string | null>(null)
-
-  // The full text is read when picked, and again when it changes (`updated` names a version). A change comes with
-  // every autosave while the note is edited, so that re-read waits until the edits pause; the first read does not.
   const id = meta?.id ?? null
-  const version = meta?.updated ?? 0
+  const { note: shown, failed } = useNoteBody(id, meta?.updated ?? 0)
+  // Once read, a note is the picked one: one that arrives later never takes its place.
   useEffect(() => {
-    if (!id) {
-      lastRead.current = null
-      return setNote(null)
-    }
-    let live = true
-    const read = () =>
-      void deck()
-        .notesGet(id)
-        .then((n) => {
-          if (!live) return
-          // null: the note is gone or unreadable; say so rather than load for ever.
-          if (!n) return setFailed(true)
-          lastRead.current = n.id
-          setFailed(false)
-          setNote(n)
-          setPicked(n.id)
-        })
-        .catch(() => live && setFailed(true))
-    const again = lastRead.current === id
-    if (!again) setFailed(false)
-    const timer = again ? setTimeout(read, NOTE_REREAD_MS) : null
-    if (!timer) read()
-    return () => {
-      live = false
-      if (timer) clearTimeout(timer)
-    }
-  }, [id, version])
+    if (shown) setPicked(shown.id)
+  }, [shown])
 
   const fresh = () => onNote({ fresh: Date.now(), link: sessionLink(s, ticket) })
-  const shown = note && note.id === id ? note : null
   return (
     <section className="dsec s-notes">
       <div className="d-row">
