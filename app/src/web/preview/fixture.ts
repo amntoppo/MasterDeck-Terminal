@@ -2,11 +2,12 @@
 // Fictional org `acme`; nothing here comes from a real machine.
 import { DEFAULT_CONFIG, parseConfig } from '@shared/appConfig'
 import { DEFAULT_SETTINGS } from '@shared/settings'
-import type { CostBook } from '@shared/costs'
+import { dayOf, type CostBook } from '@shared/costs'
 import type { InboxEntry } from '@shared/inbox'
+import type { BurnPoint } from '@shared/sprintSummary'
 import { hourOf } from '@shared/timeline'
 import type { TokensByDay } from '@shared/tokens'
-import type { AppState, Session } from '@shared/types'
+import type { AppState, Proposal, Session, TranscriptTail } from '@shared/types'
 
 const now = Date.now()
 const min = 60_000
@@ -33,7 +34,17 @@ export const SESSIONS: Session[] = [
   session(4, 'docs-refresh', 'working', null),
   session(5, 'search-index', 'suspended', 97),
   session(9, 'master-agent', 'idle', null, { cwd: '/Users/dev/acme' }),
+  // The Dashboard's Now card: one idle with a background command, one waiting on something.
+  session(6, 'api-preview', 'idle', 31, { busyWith: 'npm run dev', cwd: '/Users/dev/acme/api' }),
+  session(7, 'release-notes', 'idle', null, { waitingOn: 'a CI run', cwd: '/Users/dev/acme/web' }),
 ]
+
+/** Accounts of the sessions (two, so Usage's per-account table shows with ?preview=accounts). */
+const ACCOUNT_OF: Record<string, string> = { 'bg-1': 'acme-dev', 'bg-2': 'acme-dev', 'bg-3': 'acme-ops', 'bg-4': 'acme-dev', 'bg-5': 'acme-ops', 'bg-6': 'acme-ops', 'bg-7': 'acme-dev' }
+
+const tail = (s: Session, lastTool: string | null, agoMin: number): TranscriptTail => ({
+  model: 'claude-opus', contextTokens: 64_000, lastTool, lastToolAt: lastTool ? now - agoMin * min : null, lastActivityAt: now - agoMin * min, cwd: s.cwd, gitBranch: s.issue ? `fix/${s.issue}` : 'main', permissionMode: 'default',
+})
 
 const entry = (id: string, kind: InboxEntry['item']['kind'], s: Session, title: string, body: string, actions: InboxEntry['item']['actions']): InboxEntry => ({
   item: { id, kind, priority: 100, sessionKey: s.key, ticket: s.issue ? { repo: null, number: s.issue } : null, title, body, actions, detail: { type: 'session' } },
@@ -127,11 +138,24 @@ export function fixtureCosts(): { book: CostBook; tokens: Record<string, TokensB
         toks[hourOf(t)] = { input: Math.round(k * 0.01), output: Math.round(k * 0.04), cacheWrite: Math.round(k * 0.1), cacheRead: Math.round(k * 0.85) }
       }
     }
-    book[s.sessionId] = { name: s.name, key: s.key, issue: s.issue, days }
+    book[s.sessionId] = { name: s.name, key: s.key, issue: s.issue, days, ...(ACCOUNT_OF[s.key] ? { account: ACCOUNT_OF[s.key] } : {}) }
     tokens[s.sessionId] = toks
   }
   return { book, tokens }
 }
+
+/** Sprint 14's burndown: one point a day since it started, a few done each day (none on day 3). */
+function fixtureBurn(startDay: number): BurnPoint[] {
+  const out: BurnPoint[] = []
+  let done = 0
+  for (let d = startDay; d >= 0; d--) {
+    if (d !== 3) done += [1, 2, 0, 1][d % 4]
+    out.push({ date: dayOf(now - d * 86_400_000), total: d > 2 ? 14 : 16, done })
+  }
+  return out
+}
+
+const proposal: Proposal = { id: 7, kind: 'ASSIGN', issue: 127, repo: 'acme/web', status: 'pending', summary: 'Start a session on #127 Rate-limit the public API: it is in Todo, unassigned, and blocks the 1.4 release.', message: '', note: null, target: {} }
 
 export function fixtureState(noBoard = false): AppState {
   const master = SESSIONS.find((s) => s.name === 'master-agent')!
@@ -159,12 +183,29 @@ export function fixtureState(noBoard = false): AppState {
         entry('i2', 'question', SESSIONS[2], 'flaky-ci asks', 'Should I also bump the Node version in CI?', [
           { type: 'reply', label: 'Reply', primary: true },
         ]),
+        entry('i3', 'ci', SESSIONS[0], 'CI is failing on web#131', 'e2e (login) failed on the last push of fix/112.', [
+          { type: 'open', label: 'Open', primary: true },
+          { type: 'dismiss', label: 'Dismiss' },
+        ]),
+        {
+          item: { id: 'proposal:7', kind: 'proposal', priority: 60, sessionKey: null, ticket: { repo: 'acme/web', number: 127 }, title: 'ASSIGN #127 Rate-limit the public API', body: proposal.summary, actions: [{ type: 'approve', label: 'Approve', primary: true }, { type: 'reject', label: 'Reject' }], detail: { type: 'proposal', proposal } },
+          state: 'open',
+          firstSeen: now - 40 * min,
+          lastSeen: now - 2 * min,
+        },
       ],
       snoozed: [],
       history: [],
     },
     stats: { [SESSIONS[0].sessionId]: stats(3.42, 61), [SESSIONS[1].sessionId]: stats(1.08, 24) },
-    tails: {},
+    // What each session last did (the Now card's lines).
+    tails: {
+      [SESSIONS[0].sessionId]: tail(SESSIONS[0], 'Bash', 4),
+      [SESSIONS[1].sessionId]: tail(SESSIONS[1], 'Bash', 0.5),
+      [SESSIONS[3].sessionId]: tail(SESSIONS[3], 'Edit', 1),
+      [SESSIONS[6].sessionId]: tail(SESSIONS[6], 'Bash', 12),
+      [SESSIONS[7].sessionId]: tail(SESSIONS[7], 'Read', 25),
+    },
     git: {},
     // Session details → GitHub: the first session's PR, live, with changes asked for.
     prLive: {
@@ -215,6 +256,8 @@ export function fixtureState(noBoard = false): AppState {
     watches: [
       { id: 'w-deploy', sessionId: SESSIONS[0].sessionId, description: 'Staging deploy status', command: 'while sleep 30; do curl -s https://staging.acme.example/health; done', startedAt: now - 95 * min, events: 7, lastEventAt: now - 3 * min, queued: 1 },
       { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
+      // The Dashboard's Needs attention: a PR watch whose reads fail.
+      { id: 'pr:https://github.com/acme/web/pull/129', sessionId: '', description: 'PR watch · web#129', command: 'https://github.com/acme/web/pull/129', startedAt: now - 50 * min, events: 2, lastEventAt: now - 30 * min, queued: 0, error: 'gh: HTTP 502 Bad Gateway (api.github.com)', errorAt: now - 14 * min },
     ],
     // The eye and Watched PRs (#182): the first session's own PR, and one the user watches for the Mine tab.
     prWatches: [
@@ -224,7 +267,7 @@ export function fixtureState(noBoard = false): AppState {
       },
       {
         url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Invoice CSV: streaming writer', manual: true, tabId: 'prs-mine', tabName: 'Mine', account: null,
-        target: { review: 'prs-mine' }, lastEvent: { at: now - 6 * min, text: 'ready to merge' }, startedAt: now - 50 * min, error: null,
+        target: { review: 'prs-mine' }, lastEvent: { at: now - 6 * min, text: 'ready to merge' }, startedAt: now - 50 * min, error: 'gh: HTTP 502 Bad Gateway (api.github.com)',
       },
     ],
     schedules: {},
@@ -284,12 +327,20 @@ export function fixtureState(noBoard = false): AppState {
     allStats: {},
     costBook: fixtureCosts().book,
     lastActivity: {},
-    boardHistory: {},
+    boardHistory: { 'Sprint 14': fixtureBurn(4) },
     ghCache: null,
+    // Mine in every stage (in review, changes asked, draft, ready to merge, CI failing, merged this
+    // week), a review asked of me, and other people's.
     teamPrs: [
       teamPr(131, 'Fix login redirect loop', 'dev', { unresolvedThreads: 2, reviewDecision: 'REVIEW_REQUIRED', requested: ['sam'] }),
       teamPr(133, 'Pin Node 22 in CI', 'riley', { ci: 'failure', requested: ['dev'] }),
       teamPr(129, 'Invoice CSV: streaming writer', 'sam', { reviewDecision: 'APPROVED', reviews: [{ login: 'dev', state: 'APPROVED' }] }),
+      teamPr(135, 'Settings: dark mode tokens', 'dev', { draft: true, ci: 'pending' }),
+      teamPr(136, 'Keep the session cookie across restarts', 'dev', { reviewDecision: 'CHANGES_REQUESTED', unresolvedThreads: 1, reviews: [{ login: 'sam', state: 'CHANGES_REQUESTED' }] }),
+      teamPr(137, 'Invoice CSV: header row', 'dev', { reviewDecision: 'APPROVED', reviews: [{ login: 'riley', state: 'APPROVED' }] }),
+      teamPr(138, 'Bump vite to 5.4', 'dev', { ci: 'failure', reviewDecision: 'REVIEW_REQUIRED', requested: ['riley'] }),
+      teamPr(130, 'Onboarding checklist', 'dev', { state: 'merged', mergedAt: new Date(now - 2 * 86_400_000).toISOString(), closedAt: new Date(now - 2 * 86_400_000).toISOString(), reviewDecision: 'APPROVED' }),
+      teamPr(139, 'Search: debounce the input', 'riley', { reviewDecision: 'REVIEW_REQUIRED', requested: ['sam'] }),
     ],
     teamPrsAt: now - 5 * min,
     teamPrsLoading: false,
@@ -342,6 +393,36 @@ export function fixtureState(noBoard = false): AppState {
       ],
       derived: [{ account: null, repos: ['acme/web', 'acme/api', 'acme/old-site'], total: 412, shown: 300, skipped: [], missing: ['acme/api', 'acme/old-site'], notes: ['acme/api not read: RATE_LIMITED'] }],
     },
+  }
+}
+
+/**
+ * `?preview=empty`: nothing waiting, nothing working, no PRs, no board and no costs, so every
+ * Dashboard card shows its empty state.
+ */
+export function emptyState(s: AppState): AppState {
+  return {
+    ...s,
+    sessions: s.sessions.filter((x) => x.name === 'master-agent'),
+    inbox: { open: [], snoozed: [], history: [] },
+    proposals: [],
+    prs: [],
+    issues: [],
+    teamPrs: [],
+    prWatches: [],
+    watches: [],
+    held: [],
+    tails: {},
+    stats: {},
+    loops: {},
+    autoReview: undefined,
+    schedRuns: {},
+    board: null,
+    repoView: undefined,
+    sprints: [],
+    boardHistory: {},
+    costBook: {},
+    pastSessions: {},
   }
 }
 
