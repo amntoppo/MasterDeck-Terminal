@@ -311,6 +311,8 @@ export interface AppState {
   prStage: Record<string, PrStage>;
   /** Statuses set by hand in a session's status popup, by Session.key. */
   manualStatus: Record<string, StatusKey>;
+  /** Web app only: what the bridge left out to fit the state in one frame (shared/webState.ts). */
+  webCut?: import("./webState").WebCut[];
 }
 
 export interface SkillStatus {
