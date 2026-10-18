@@ -875,6 +875,16 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .rail { width: var(--rail-w); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 0 12px; background: var(--bg); border-right: 1px solid var(--line); z-index: 41; }
 .rail-drag { height: 40px; width: 100%; flex: none; -webkit-app-region: drag; }
 .rail-sep { width: 24px; height: 1px; background: var(--line-2); margin: 8px 0; flex: none; }
+.rail:not(.phone-bar) { position: relative; user-select: none; }
+/* The rail's order (#170): the dragged icon follows the pointer over the others, a line marks where it lands. */
+.rail-spacer { flex: 1; }
+.rail-item { flex: none; }
+.rail-lift { position: relative; z-index: 2; background: var(--bg-4); color: var(--text); box-shadow: 0 4px 14px var(--shadow); cursor: grabbing; }
+.rail.dragging, .rail.dragging .rb { cursor: grabbing; }
+.rail.dragging .rb::after, .rail.menu-open .rb::after, .rail.dragging .ri-card { display: none; }
+.rail-drop { position: absolute; left: 10px; right: 10px; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.menu.rail-menu { position: fixed; right: auto; z-index: 60; min-width: 180px; }
+.menu.rail-menu button:disabled { color: var(--muted); cursor: default; background: none; }
 .rb { position: relative; width: 36px; height: 36px; flex: none; border-radius: 9px; border: none; background: none; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
 .rb:hover { background: var(--bg-3); color: var(--text); }
 .rb.on { background: var(--bg-4); color: var(--text); }

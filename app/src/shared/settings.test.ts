@@ -59,6 +59,16 @@ describe('theme', () => {
   })
 })
 
+describe('rail order (#170)', () => {
+  it('a settings file from before it reads as the default (empty)', () => {
+    expect(normalizeSettings({ dockBadge: false }).railOrder).toEqual([])
+  })
+  it('keeps a saved order, cleaned', () => {
+    expect(normalizeSettings({ railOrder: ['settings', 'terminals', 'settings', 3] }).railOrder).toEqual(['settings', 'terminals'])
+    expect(normalizeSettings({ railOrder: 'board' }).railOrder).toEqual([])
+  })
+})
+
 describe('update settings', () => {
   it('default to automatic downloads on the stable channel', () => {
     expect(normalizeSettings({})).toMatchObject({ autoDownloadUpdates: true, updateChannel: 'stable' })
