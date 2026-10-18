@@ -896,11 +896,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   after this PR is its first run (and, if no tag came before it, the first real upload to R2). Look
   at: the commit status on the merge commit, the tag's release commit, the GitHub release's text,
   Settings → Updates on an installed 0.9.x (installs before #122's updater need one manual update).
-- **P2 · Every app merge builds twice.** CI builds unpublished installers on `main`, then
-  `release.yml` builds the release (CI's builds carry the old version). Upgrade path: skip CI's
-  build job on pushes to `main` once the automatic release has run reliably.
+- **P2 · Branch protection.** CI runs on pull requests only, so a push straight to `main` (or a
+  PR merged with red CI) is checked only by the release build's tests. Require CI on `main`
+  (repository → Settings → Branches) so every merge has passed it.
 - **P3 · The non-app file list is fixed** (`isAppFile` in `app/scripts/auto-release.mjs`): a new
-  docs or tooling folder releases once until it is added there.
+  docs or tooling folder releases once until it is added there (and to `IGNORED_PATHS` /
+  `paths-ignore`).
 - **P3 · A tag protection rule** or ruleset on `v*` would refuse the workflow's `GITHUB_TOKEN`
   push; none is set today.
 
@@ -1043,7 +1044,9 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   CI, patch + 1 (or `package.json`'s minor/major), a release commit held only by the tag, notes from
   the merged PRs, `release.yml` called, channel/rollout from repository variables, a commit status
   and a PR comment on failure, yank documented (OPERATIONS § Release). Backend PR #12 was already
-  merged. Branch `worktree-MasterDeck-Terminal-166-ota-on-merge`.
+  merged. Branch `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR #167). Follow-up: the workflow
+  is called **Auto release** and runs on the push to `main` (`paths-ignore`); `ci.yml` runs on pull
+  requests only, so a merge is no longer built twice.
 
 - **PR watch delivers same-account reviews and shows read failures (#158)**: an item by the
   watch's own account is held back only when the session's transcript shows it posted that text
