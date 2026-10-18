@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { prReviewBriefing, type PrReviewContext } from '@shared/prReview'
 import { DEFAULT_PR_FILTERS } from '@shared/teamPrs'
 import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewPost, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
@@ -76,15 +76,16 @@ describe('writePrReviewDir', () => {
     expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual([`Bash(${post} --auto:*)`])
     // What runs unasked is outside the folder acceptEdits lets the session rewrite (cp, sed…), and no
     // script of that name is left in the folder for a `./post-review.sh` to find.
-    expect(post.startsWith(`${dir}/`)).toBe(false)
-    expect(post.startsWith(join(home, 'pr-review-guard') + '/')).toBe(true)
+    expect(post.startsWith(`${dir}${sep}`)).toBe(false)
+    expect(post.startsWith(join(home, 'pr-review-guard') + sep)).toBe(true)
     expect(readdirSync(dir).filter((f) => f.includes('post-review'))).toEqual([])
     // Its hooks say when the turn is over, in the guard folder (outside the session's folder).
     expect(s.hooks.Stop[0].hooks[0].command).toBe(`printf idle > '${prReviewTurn(prReviewGuard(home, 'a'))}'`)
     expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toContain('printf busy')
     expect(s.hooks.PreToolUse[0].matcher).toBe('*')
     expect(s.permissions.deny).toEqual(expect.arrayContaining(['Bash(gh pr review:*)', 'Bash(gh pr comment:*)', 'Bash(gh pr merge:*)']))
-    expect(statSync(post).mode & 0o111).not.toBe(0)
+    // Windows has no execute bits.
+    if (process.platform !== 'win32') expect(statSync(post).mode & 0o111).not.toBe(0)
     expect(prReviewFolderAccount(home, 'a')).toBe('alice')
     // The account comes from the guard: the session editing context.json changes nothing.
     writeFileSync(join(dir, 'context.json'), JSON.stringify({ account: 'mallory' }))
@@ -114,7 +115,7 @@ describe('writePrReviewDir', () => {
   })
 })
 
-describe('post-review.sh', { timeout: 20_000 }, () => {
+describe.skipIf(process.platform === 'win32')('post-review.sh', { timeout: 20_000 }, () => {
   // A stand-in gh: `api user` answers $FAKE_LOGIN; a POST records its path and payload.
   const world = (c: PrReviewContext = ctx()) => {
     const home = mkdtempSync(join(tmpdir(), 'prr-'))

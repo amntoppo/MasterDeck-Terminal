@@ -32,7 +32,8 @@ describe('prepareSetupDir', () => {
     writeFileSync(join(dir, 'review.json'), '{}')
     prepareSetupDir(dir, 'darwin')
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain('# MasterDeck: setting up with the user')
-    expect(statSync(join(dir, 'md-setup.sh')).mode & 0o111).toBeTruthy()
+    // Windows has no execute bits.
+    if (process.platform !== 'win32') expect(statSync(join(dir, 'md-setup.sh')).mode & 0o111).toBeTruthy()
     const allow = JSON.parse(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8')).permissions.allow
     expect(allow).toContain('Bash(./md-setup.sh:*)')
     expect(allow.some((a: string) => a.includes('brew'))).toBe(false)
