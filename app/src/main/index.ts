@@ -591,9 +591,9 @@ async function detectAllAs(env: Record<string, string>): Promise<{ ok: true; dat
   return fx ? { ok: true, data: JSON.parse(readFileSync(fx, "utf8")) } : cli.configDetectAll(env);
 }
 
-/** Keys of the live sessions named `name` now: a start into a tab never pulls those in (#171). */
-function liveKeysNamed(name: string): string[] {
-  return (latest?.sessions ?? []).filter((s) => s.name === name && s.state !== "done").map((s) => s.key);
+/** Keys of the sessions named `name` listed now (done ones too): a start into a tab never pulls those in (#171). */
+function keysNamed(name: string): string[] {
+  return (latest?.sessions ?? []).filter((s) => s.name === name).map((s) => s.key);
 }
 
 /**
@@ -655,7 +655,8 @@ async function startSession(raw: unknown): Promise<{ ok: true; message: string; 
     workflows().setPending(name, o.workflow);
   const linked = livePeerKeys(o.peers);
   if (linked.length) peerStore.expect(name, linked);
-  sessionGroups.expect(name, o.group, liveKeysNamed(name));
+  sessionGroups.expect(name, o.group, keysNamed(name));
+  // A start that throws leaves no wait behind either (a later session of that name would take it).
   const r = await run(
     claudeBin,
     [
@@ -671,7 +672,10 @@ async function startSession(raw: unknown): Promise<{ ok: true; message: string; 
       cwd,
       timeoutMs: 60_000,
     },
-  );
+  ).catch((e: unknown) => {
+    sessionGroups.unexpect(name);
+    throw e;
+  });
   if (r.code !== 0) {
     sessionGroups.unexpect(name);
     return {
@@ -3343,11 +3347,17 @@ function registerIpc(): void {
     if (peers.length && typeof req.name === "string") peerStore.expect(req.name, peers);
     if (typeof req.name !== "string") return assignNow(req);
     const name = req.name;
-    sessionGroups.expect(name, given?.group, liveKeysNamed(name));
-    return assignNow(req).then((r) => {
-      if (!r.ok) sessionGroups.unexpect(name);
-      return r;
-    });
+    sessionGroups.expect(name, given?.group, keysNamed(name));
+    return assignNow(req).then(
+      (r) => {
+        if (!r.ok) sessionGroups.unexpect(name);
+        return r;
+      },
+      (e: unknown) => {
+        sessionGroups.unexpect(name);
+        throw e;
+      },
+    );
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.

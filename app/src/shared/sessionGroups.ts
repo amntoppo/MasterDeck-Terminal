@@ -167,8 +167,8 @@ export function pruneGroups(
 
 /**
  * A session started into a tab (#171) that is not listed yet: its key is unknown until a poll lists
- * it, so it is matched by name. `skip`: keys of live sessions with that name already listed when it
- * started, never pulled in.
+ * it, so it is matched by name. `skip`: keys of the sessions with that name already listed when it
+ * started (done ones too), never pulled in; a new one is claimed even if it is done by its first poll.
  */
 export interface GroupWait {
   name: string
@@ -185,7 +185,7 @@ export interface GroupWait {
 export function claimWaits(
   d: SessionGroups,
   waits: GroupWait[],
-  sessions: { key: string; name: string; state: string }[],
+  sessions: { key: string; name: string }[],
   now = Date.now(),
   ms = GROUP_GRACE_MS,
 ): { groups: SessionGroups; waits: GroupWait[] } {
@@ -193,7 +193,7 @@ export function claimWaits(
   const left: GroupWait[] = []
   for (const w of waits) {
     if (now - w.at > ms || !d.groups.some((g) => g.id === w.group)) continue
-    const s = sessions.find((x) => x.name === w.name && x.state !== 'done' && !w.skip.includes(x.key))
+    const s = sessions.find((x) => x.name === w.name && !w.skip.includes(x.key))
     if (!s) {
       left.push(w)
       continue

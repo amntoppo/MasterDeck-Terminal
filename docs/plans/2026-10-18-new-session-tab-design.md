@@ -19,9 +19,9 @@ and there the user is not looking at the session list at all.
    opened as today, is the selected row in the tab on screen.
 4. **Main keeps a pending "target tab" per start, matched by the session's name** (as the peers
    and account stores do). The start request carries `group` (a tab id). Main records
-   `{name, group, skip, at}` just before it starts the session; `skip` holds the keys of live
-   sessions with that name already listed, so an older session is never pulled in. A failed start
-   drops it.
+   `{name, group, skip, at}` just before it starts the session; `skip` holds the keys of the
+   sessions with that name already listed (done ones too), so an older session is never pulled in.
+   A failed or thrown start drops it.
 5. **Claimed in the state callback**, before the groups are put in the state: the first state that
    lists the session already shows it in its tab. A session already in a tab is left as it is.
 6. **Dropped without a word** when the tab is deleted first (the session stays in All) or after
@@ -43,8 +43,8 @@ export function claimWaits(d, waits, sessions, now, ms = GROUP_GRACE_MS): { grou
 ```
 
 - a wait whose tab is gone or older than `ms` is dropped;
-- a live session (`state !== 'done'`) with the wait's name and a key not in `skip` claims it: it is
-  put in the tab unless it is in one already; the wait goes.
+- a session with the wait's name and a key not in `skip` claims it (also one already done by its
+  first poll): it is put in the tab unless it is in one already; the wait goes.
 - returns `d` itself (and the same `waits` array) when nothing changed.
 
 `main/sessionGroups.ts` (`SessionGroupStore`): `expect(name, group, skip)` (ignored for All or an

@@ -125,11 +125,15 @@ describe('claimWaits', () => {
     expect(later.waits).toEqual([])
     expect(d.of).toEqual(two().of)
   })
-  it('never pulls in an older session of that name or a done one', () => {
+  it('never pulls in an older session of that name, done or not', () => {
     const d = two()
-    const r = claimWaits(d, [wait({ skip: ['o1'] })], [live('o1', 'new-1'), live('o2', 'new-1', 'done')], 10)
+    const r = claimWaits(d, [wait({ skip: ['o1', 'o2'] })], [live('o1', 'new-1'), live('o2', 'new-1', 'done')], 10)
     expect(r.groups).toBe(d)
     expect(r.waits).toHaveLength(1)
+  })
+  it('claims a new session that is done by its first poll', () => {
+    const r = claimWaits(two(), [wait()], [live('n1', 'new-1', 'done')], 10)
+    expect(r.groups.of.n1).toBe('g00000001')
   })
   it('leaves a session already in a tab where it is', () => {
     const d = two()

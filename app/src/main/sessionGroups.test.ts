@@ -51,10 +51,10 @@ describe('SessionGroupStore', () => {
     const s = new SessionGroupStore(f, () => now)
     const id = s.act({ op: 'add', name: 'A' }).id!
     s.expect('new-1', id, ['old00000'])
-    s.claim([{ key: 'old00000', name: 'new-1', state: 'idle' }])
+    s.claim([{ key: 'old00000', name: 'new-1' }])
     expect(s.all().of).toEqual({})
     now = 5_000
-    s.claim([{ key: 'new00001', name: 'new-1', state: 'working' }])
+    s.claim([{ key: 'new00001', name: 'new-1' }])
     expect(new SessionGroupStore(f).all().of).toEqual({ new00001: id })
     s.carry('new00001', 'copy0001')
     expect(new SessionGroupStore(f).all().of).toEqual({ copy0001: id })
@@ -67,7 +67,7 @@ describe('SessionGroupStore', () => {
     s.expect('b', 'g99999999', [])
     s.expect('c', id, [])
     s.unexpect('c')
-    s.claim(['a', 'b', 'c'].map((n) => ({ key: `${n}0000000`, name: n, state: 'idle' })))
+    s.claim(['a', 'b', 'c'].map((n) => ({ key: `${n}0000000`, name: n })))
     expect(s.all().of).toEqual({})
   })
   it('drops the wait when its tab is deleted first', () => {
@@ -76,7 +76,7 @@ describe('SessionGroupStore', () => {
     const id = s.act({ op: 'add', name: 'A' }).id!
     s.expect('n', id, [])
     s.act({ op: 'remove', id })
-    s.claim([{ key: 'n0000000', name: 'n', state: 'idle' }])
+    s.claim([{ key: 'n0000000', name: 'n' }])
     expect(s.all()).toEqual({ groups: [], of: {} })
   })
 })

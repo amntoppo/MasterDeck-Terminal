@@ -72,7 +72,7 @@ export class SessionGroupStore {
 
   /**
    * A session is being started into `group` (#171): put it there when a poll first lists it.
-   * `skip`: keys of live sessions with that name already listed. All or an unknown tab: nothing.
+   * `skip`: keys of the sessions with that name already listed (done ones too). All or an unknown tab: nothing.
    */
   expect(name: string, group: unknown, skip: string[]): void {
     if (typeof group !== 'string' || group === ALL || !this.load().groups.some((g) => g.id === group)) return
@@ -86,7 +86,7 @@ export class SessionGroupStore {
   }
 
   /** Put the expected sessions a real session list now has in their tabs (shared/sessionGroups claimWaits). */
-  claim(sessions: { key: string; name: string; state: string }[]): void {
+  claim(sessions: { key: string; name: string }[]): void {
     if (!this.waits.length) return
     const r = claimWaits(this.load(), this.waits, sessions, this.now())
     this.waits = r.waits
