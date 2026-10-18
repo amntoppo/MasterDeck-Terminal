@@ -85,7 +85,7 @@ export interface WorkflowStatus extends FlowProgress {
   from: string | null;
 }
 import type { SessionSummary } from "./summary";
-import type { ProcsAnswer } from "./sessionProcs";
+import type { ProcsAll, ProcsAnswer } from "./sessionProcs";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
 
@@ -145,6 +145,7 @@ export const CH = {
   openEditor: "app:openEditor",
   procsList: "procs:list",
   procsOutput: "procs:output",
+  procsAll: "procs:all",
   openPort: "procs:openPort",
   copy: "app:copy",
   stopSession: "session:stop",
@@ -894,6 +895,8 @@ export interface DeckApi {
   procsList(key: string): Promise<ProcsAnswer>;
   /** The last few KB one of them wrote, when its output goes to a file (a background command). */
   procsOutput(key: string, pid: number): Promise<{ ok: true; text: string } | { ok: false; message: string }>;
+  /** Every session's running processes, and the strays listening in their folders (the Dashboard). */
+  procsAll(): Promise<ProcsAll>;
   /** Open a local server in the browser: `http://localhost:<port>` (or an IP literal); anything else is refused. */
   openPort(url: string): void;
   openEditor(dir: string): Promise<CliResult>;

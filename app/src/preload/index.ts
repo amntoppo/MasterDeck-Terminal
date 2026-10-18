@@ -150,6 +150,7 @@ const api: DeckApi = {
   onUpdateOpen: (cb) => listen(CH.updateOpen, cb),
   procsList: (key) => ipcRenderer.invoke(CH.procsList, key),
   procsOutput: (key, pid) => ipcRenderer.invoke(CH.procsOutput, key, pid),
+  procsAll: () => ipcRenderer.invoke(CH.procsAll),
   openPort: (url) => ipcRenderer.send(CH.openPort, url),
   hoursActivity: (ids, since) => ipcRenderer.invoke(CH.hoursActivity, ids, since),
   hoursExport: (csv, name) => ipcRenderer.invoke(CH.hoursExport, csv, name),

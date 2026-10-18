@@ -4,6 +4,7 @@ import { readTail } from './files'
 import {
   cleanOutput,
   EXITED_KEEP_MS,
+  findStrays,
   parseLsof,
   parsePs,
   PS_ARGS,
@@ -12,6 +13,7 @@ import {
   transcriptTasks,
   uniquePorts,
   type LsofInfo,
+  type ProcsAll,
   type ProcsAnswer,
   type SessionProc,
   type TranscriptTasks,
@@ -23,6 +25,14 @@ export interface ProcsSession {
   /** Its `claude` process; null: not running. */
   pid: number | null
   transcript: string | null
+}
+
+/** A session for `listAll`: its `claude` process (null: not running), its folder and worktrees. */
+export interface ProcsAllSession {
+  key: string
+  pid: number | null
+  cwd: string | null
+  worktrees: string[]
 }
 
 interface Seen {
@@ -118,6 +128,62 @@ export class SessionProcs {
     const ended = [...seen.ended.values()].map(({ taskId: _t, ...p }) => p)
     running = running.sort((a, b) => a.startedAt - b.startedAt)
     return { ok: true, supported: true, running: s.pid !== null, procs: [...running, ...ended.sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))] }
+  }
+
+  /**
+   * Every listed session's running processes and the strays in their folders (`procs:all`, the
+   * Dashboard): one `ps`, one `lsof` for the listening sockets on the machine, one `lsof` for the
+   * folders and stdouts of the sessions' processes and the listeners. Never exited rows, and it
+   * only reads `seen` (the groups list() saw), so Details → Processes is unchanged by it.
+   * ponytail: no transcript is read, so a shell is `background` when its stdout is a task output
+   * file (recent Claude Code versions write a foreground call's there too); Details has the exact kind.
+   */
+  async listAll(sessions: ProcsAllSession[]): Promise<ProcsAll> {
+    const at = this.now()
+    if (this.platform === 'win32' || !sessions.length) return { at, sessions: {}, strays: [] }
+    const [ps, socks] = await Promise.all([
+      this.run(PS, PS_ARGS, { timeoutMs: 5000 }),
+      this.run(LSOF, ['-nP', '-w', '-iTCP', '-sTCP:LISTEN', '-Fpcfn'], { timeoutMs: 5000 }),
+    ])
+    const rows = ps.code === 0 ? parsePs(ps.stdout) : []
+    const listens = parseLsof(socks.stdout)
+    const live = rows.length ? sessions.filter((s) => s.pid !== null) : []
+    const groups = new Map(live.map((s) => [s.key, sessionGroups(rows, s.pid!, new Set(this.seen.get(s.key)?.groups), at)]))
+    const pids = new Set([...groups.values()].flatMap((gs) => gs.flatMap((g) => g.pids)))
+    for (const [pid, i] of listens) if (i.listens.length) pids.add(pid)
+    const files = pids.size
+      ? parseLsof((await this.run(LSOF, ['-nP', '-w', '-a', '-d', 'cwd,1', '-p', [...pids].sort((a, b) => a - b).join(','), '-Fpftn'], { timeoutMs: 5000 })).stdout)
+      : new Map<number, LsofInfo>()
+    for (const [pid, i] of listens) {
+      const had = files.get(pid)
+      if (had) had.listens.push(...i.listens)
+      else files.set(pid, i)
+    }
+    const out: Record<string, SessionProc[]> = {}
+    for (const s of sessions)
+      out[s.key] = (groups.get(s.key) ?? [])
+        .map((g): SessionProc => {
+          const lead = files.get(g.pid)
+          return {
+            pid: g.pid,
+            command: g.command,
+            kind: !g.shell ? 'detached' : taskIdOf(lead?.out) ? 'background' : 'foreground',
+            cwd: lead?.cwd ?? g.pids.map((x) => files.get(x)?.cwd).find(Boolean) ?? null,
+            startedAt: g.startedAt,
+            state: 'running',
+            exitCode: null,
+            endedAt: null,
+            ports: uniquePorts(g.pids.flatMap((x) => files.get(x)?.listens ?? [])),
+            cpu: g.cpu,
+            memKb: g.memKb,
+            children: g.children,
+            // Its output is read through list() (Details), which keeps the paths.
+            hasOutput: false,
+          }
+        })
+        .sort((a, b) => a.startedAt - b.startedAt)
+    const folders = [...new Set(sessions.flatMap((s) => [s.cwd, ...s.worktrees]).filter((f): f is string => !!f))]
+    return { at, sessions: out, strays: findStrays(rows, files, folders, live.map((s) => s.pid!), at) }
   }
 
   /** The last few KB a process of this session wrote, when its stdout is a file (only one the last list found). */

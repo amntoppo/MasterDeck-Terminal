@@ -3999,6 +3999,16 @@ function registerIpc(): void {
       ? sessionProcs.output(key, pid as number)
       : { ok: false, message: "bad request" },
   );
+  reg.handle(CH.procsAll, () =>
+    sessionProcs.listAll(
+      (latest?.sessions ?? []).map((s) => ({
+        key: s.key,
+        pid: s.state === "done" ? null : s.pid,
+        cwd: s.cwd || null,
+        worktrees: (latest?.sessionWorktrees[s.key] ?? []).map((w) => w.path),
+      })),
+    ),
+  );
   reg.on(CH.openPort, (e, url: unknown) => {
     if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
   });

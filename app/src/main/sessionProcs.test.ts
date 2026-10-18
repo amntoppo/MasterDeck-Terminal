@@ -98,6 +98,66 @@ describe('SessionProcs', () => {
     expect(next.ok && next.supported && next.procs.map((p) => [p.pid, p.kind, p.state])).toEqual([[31, 'detached', 'running']])
   })
 
+  it('listAll: every session’s running processes and the strays, in three spawns', async () => {
+    const { t, run } = fake()
+    const now = 5_000_000
+    const procs = new SessionProcs(run, 'darwin', () => now)
+    t.ps = [
+      `  10     1    10   09:00  0.0  100 claude`,
+      `  20    10    20   00:30  0.0  100 ${wrap('npm run dev')}`,
+      `  21    20    20   00:29  1.0  2048 node dev.js`,
+      `  50     1    50   08:00  0.0  100 claude`,
+      `  70     1    70   02:00  0.0  500 python -m http.server`,
+      `  80     1    80   03:00  0.0  500 redis-server`,
+      `  90     1    90   01:00  0.0  500 vite`,
+    ].join('\n')
+    t.socks = ['p21', 'cnode', 'f4', 'n*:3000', 'p70', 'cpython', 'f3', 'n*:8000', 'p80', 'credis', 'f6', 'n127.0.0.1:6379', 'p90', 'cvite', 'f5', 'n*:5173'].join('\n')
+    t.files = ['p20', 'fcwd', 'tDIR', 'n/work/api', 'p21', 'fcwd', 'tDIR', 'n/work/api', 'p70', 'fcwd', 'tDIR', 'n/work/api/docs', 'p80', 'fcwd', 'tDIR', 'n/', 'p90', 'fcwd', 'tDIR', 'n/work/apix'].join('\n')
+    const a = await procs.listAll([
+      { key: 'k1', pid: 10, cwd: '/work/api', worktrees: ['/work/api/.claude/worktrees/w'] },
+      { key: 'k2', pid: 50, cwd: '/work/web', worktrees: [] },
+      { key: 'k3', pid: null, cwd: '/work/old', worktrees: [] },
+    ])
+    expect(t.calls).toHaveLength(3)
+    expect(t.calls.filter((c) => /(^|\/)lsof$/.test(c[0]) && c.includes('-p'))[0]).toContain('20,21,70,80,90')
+    expect(a.at).toBe(now)
+    expect(Object.keys(a.sessions)).toEqual(['k1', 'k2', 'k3'])
+    expect(a.sessions.k1.map((p) => [p.pid, p.command, p.cwd, p.state, p.ports.map((x) => x.port)])).toEqual([[20, 'npm run dev', '/work/api', 'running', [3000]]])
+    expect(a.sessions.k2).toEqual([])
+    expect(a.sessions.k3).toEqual([])
+    // 21 is below a session; 80 is elsewhere; 90's folder only shares a prefix with /work/api.
+    expect(a.strays).toEqual([
+      { pid: 70, command: 'python -m http.server', cwd: '/work/api/docs', ports: [{ host: '*', port: 8000 }], startedAt: now - 120_000, folderOf: '/work/api' },
+    ])
+  })
+
+  it('listAll leaves list()’s ended processes alone', async () => {
+    const { t, run } = fake()
+    let now = 0
+    const procs = new SessionProcs(run, 'darwin', () => now)
+    t.ps = [`  10     1    10   01:00  0.0  100 claude`, `  30    10    30   00:01  0.0  100 ${wrap('npm run dev &')}`, `  31    30    30   00:01  0.0  100 node dev.js`].join('\n')
+    await procs.list({ key: 'k', pid: 10, transcript: null })
+    now += 1000
+    t.ps = [`  10     1    10   01:01  0.0  100 claude`, `  31     1    30   00:02  0.0  100 node dev.js`].join('\n')
+    // The group 30 was seen by list(): listAll still finds what it left running, and never shows an exited row.
+    const all = await procs.listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(all.sessions.k.map((p) => [p.pid, p.kind, p.state])).toEqual([[31, 'detached', 'running']])
+    // list()'s last answer is untouched: 30 is still its process (no output file), 31 is not yet.
+    expect(procs.output('k', 30)).toEqual({ ok: false, message: 'Its output goes straight to Claude Code; there is nothing to read here.' })
+    expect(procs.output('k', 31)).toEqual({ ok: false, message: 'That process is not running.' })
+    // list() still has 30 as its last answer: it ended in between, a foreground call, so it just drops off.
+    const next = await procs.list({ key: 'k', pid: 10, transcript: null })
+    expect(next.ok && next.supported && next.procs.map((p) => [p.pid, p.kind, p.state])).toEqual([[31, 'detached', 'running']])
+    expect(procs.output('k', 31).ok).toBe(false)
+  })
+
+  it('listAll on Windows, and with nothing to look at', async () => {
+    const { t, run } = fake()
+    expect(await new SessionProcs(run, 'win32', () => 7).listAll([{ key: 'k', pid: 1, cwd: '/w', worktrees: [] }])).toEqual({ at: 7, sessions: {}, strays: [] })
+    expect(await new SessionProcs(run, 'darwin', () => 7).listAll([])).toEqual({ at: 7, sessions: {}, strays: [] })
+    expect(t.calls).toEqual([])
+  })
+
   it('says the session is not running, and that Windows is not covered', async () => {
     const { t, run } = fake()
     const a = await new SessionProcs(run, 'darwin').list({ key: 'k', pid: null, transcript: null })
