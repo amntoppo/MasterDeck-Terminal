@@ -37,6 +37,7 @@ import {
 } from "./components/SummaryDialogs";
 import { BoardView } from "./components/BoardView";
 import { PrPopup } from "./components/PrPopup";
+import type { WatchTabRef } from "./components/WatchEye";
 import { NotesPanel, type NotesTarget } from "./components/NotesPanel";
 import { useNotes } from "./notes";
 import { StartHereDialog } from "./components/StartHereDialog";
@@ -176,7 +177,7 @@ export function App() {
   const [linking, setLinking] = useState<Issue | null>(null);
   const [prCard, setPrCardRaw] = useState<BoardCard | null>(null);
   // The PR popup's Review with Claude: the Pull requests view's panel, when it was opened from there.
-  const [prReview, setPrReview] = useState<{ run: () => void } | null>(null);
+  const [prReview, setPrReview] = useState<{ run: () => void; watch?: WatchTabRef } | null>(null);
   const setPrCard = (c: BoardCard | null) => {
     setPrReview(null);
     setPrCardRaw(c);
@@ -1089,11 +1090,12 @@ export function App() {
     issue: Ticket | null,
     title: string,
     review?: () => void,
+    watch?: WatchTabRef,
   ) => {
     // The PR popup needs GitHub on the Mac; the web opens the PR itself.
     if (isWeb()) return deck().openExternal(url);
     // Its Review with Claude (opened from the Pull requests view only).
-    setPrReview(review ? { run: review } : null);
+    setPrReview(review ? { run: review, ...(watch ? { watch } : {}) } : null);
     const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(url);
     if (!m) return;
     const known = issue
@@ -1661,6 +1663,7 @@ export function App() {
           onStartReview={startSession}
           onStart={(card) => setAssigning(issueOf(card))}
           onReviewWithClaude={prReview?.run}
+          watchTab={prReview?.watch}
         />
       )}
       {notesAt && (

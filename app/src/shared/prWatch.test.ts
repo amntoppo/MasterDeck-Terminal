@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { followUpMessage, fresh, heavyQuery, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, REPLY_CMD, RESOLVE_CMD, safeRef, STALL_MS, THREAD_RULE, threadOutcomes, trackThreads, unhandled, type HeavyPr, type TrackedThread } from './prWatch'
 
 const ref = { owner: 'acme', repo: 'web', number: 12 }
-const base: HeavyPr = { state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', baseRefName: 'dev', updatedAt: '2026-10-03T10:00:00Z', createdAt: '2026-10-03T09:00:00Z', author: 'me', threads: [], reviews: [], comments: [] }
+const base: HeavyPr = { state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', baseRefName: 'dev', updatedAt: '2026-10-03T10:00:00Z', createdAt: '2026-10-03T09:00:00Z', author: 'me', title: '', head: '', decision: '', mergeState: '', checks: null, threads: [], reviews: [], comments: [] }
 const note = (id: number, author: string, body: string, updatedAt = '2026-10-03T10:00:00Z') => ({ id, author, body, updatedAt })
 const NOW = Date.parse('2026-10-03T10:30:00Z')
 
@@ -18,7 +18,16 @@ describe('queries', () => {
   })
   it('parses aligned results, null for a missing PR', () => {
     const text = JSON.stringify({ data: { p0: { pullRequest: { state: 'OPEN', isDraft: false, mergeable: 'CONFLICTING', baseRefName: 'dev', updatedAt: 'u', createdAt: 'c', author: { login: 'me' } } }, p1: null } })
-    expect(parseLight(text, 2)).toEqual([{ state: 'OPEN', isDraft: false, mergeable: 'CONFLICTING', baseRefName: 'dev', updatedAt: 'u', createdAt: 'c', author: 'me' }, null])
+    expect(parseLight(text, 2)).toEqual([
+      { state: 'OPEN', isDraft: false, mergeable: 'CONFLICTING', baseRefName: 'dev', updatedAt: 'u', createdAt: 'c', author: 'me', title: '', head: '', decision: '', mergeState: '', checks: null },
+      null,
+    ])
+    // What a watch no session owns needs (#182): title, head, decision, merge state, the head's checks.
+    const more = JSON.stringify({
+      data: { p0: { pullRequest: { state: 'OPEN', title: 'T', headRefOid: 'abc', reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN', commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] } } } },
+    })
+    expect(parseLight(more, 1)[0]).toMatchObject({ title: 'T', head: 'abc', decision: 'APPROVED', mergeState: 'CLEAN', checks: 'SUCCESS' })
+    expect(lightQuery([ref])).toContain('headRefOid')
     const heavy = JSON.stringify({ data: { p0: { pullRequest: { state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', baseRefName: 'dev', updatedAt: 'u', createdAt: 'c', author: { login: 'me' },
       reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ databaseId: 7, updatedAt: 'u', author: { login: 'bob' }, body: 'nit' }] } }] },
       reviews: { nodes: [{ databaseId: 8, state: 'CHANGES_REQUESTED', submittedAt: 's', author: { login: 'bob' }, body: '' }] },

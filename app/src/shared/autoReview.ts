@@ -55,6 +55,13 @@ export interface AutoTrack {
   at: number
   /** Reads in a row that did not return it. */
   misses: number
+  /**
+   * Queued for a PR the user watches and no session owns (#182): reviewed also while Automate
+   * Review is off for the tab (never merged then), kept when it is switched off.
+   */
+  watched?: true
+  /** The tab's name, for a tab that has only watched tracks (its review session's start). */
+  tabName?: string
 }
 
 /** A PR as the poll reads it. */
@@ -344,6 +351,7 @@ function move(t: AutoTrack, status: AutoStatus, now: number, note: string | null
 function advance(t: AutoTrack, pr: AutoPr, x: ReconcileIn, notices: AutoNotice[], merges: ReconcileOut['merges'], events: string[]): void {
   const name = label(t)
   t.title = pr.title
+  t.author = pr.author
   t.head = pr.head
   if (pr.state === 'MERGED') {
     if (t.status !== 'merging') events.push(`${name} was merged`)

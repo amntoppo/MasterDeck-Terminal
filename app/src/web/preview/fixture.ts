@@ -229,6 +229,17 @@ export function fixtureState(noBoard = false): AppState {
         ],
       },
     ],
+    // The eye and Watched PRs (#182): the first session's own PR, and one the user watches for the Mine tab.
+    prWatches: [
+      {
+        url: 'https://github.com/acme/web/pull/131', repo: 'acme/web', number: 131, title: 'Fix login redirect loop', manual: false, tabId: null, tabName: null, account: null,
+        target: { session: { key: SESSIONS[0].key, name: SESSIONS[0].name } }, lastEvent: { at: now - 20 * min, text: 'sam: please add a test' }, startedAt: now - 3 * 3600_000, error: null,
+      },
+      {
+        url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Invoice CSV: streaming writer', manual: true, tabId: 'prs-mine', tabName: 'Mine', account: null,
+        target: { review: 'prs-mine' }, lastEvent: { at: now - 6 * min, text: 'ready to merge' }, startedAt: now - 50 * min, error: null,
+      },
+    ],
     schedules: {},
     schedRuns: { 'bg-4': { scheduleId: 'p2', name: 'Nightly docs' } },
     loops: {},

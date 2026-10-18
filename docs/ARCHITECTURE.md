@@ -539,6 +539,28 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `withActivity`. Review offers are left out of Needs you (`InboxInput.watchedPrs`) only for watched PRs whose
   session can take a message now (`canSend`: not parked, not on a prompt, master up for interactive).
   BoardFlow's PR states come from the same light query (`prStates`, ttl 300 s).
+  **Watches the user asks for (#182).** The eye (Pull requests rows, the PR popup) and the Review
+  with Claude card's **Watched PRs** call `prWatch:set` (`remote`): main parses the input
+  (`parsePrInput`, `primaryRepoOf` in `shared/watchPr.ts`), checks the tab and its account, reads
+  the PR once as that account past the cache (exists, readable, open; `watchReadError`), and calls
+  `PrWatch.start` (one watch per URL: a watched PR answers `reused`; a stop in `done` is undone;
+  at most `MANUAL_MAX`). Stopping a session's own watch asks first (the window's native dialog; a
+  browser asked with `webConfirm`). A manual entry carries `manual`, `tabId` / `tabName`, `title`,
+  `head`, `readyHead`, reads as the tab's account, starts `quiet`, and never ends because the
+  author is not the account. Its owner is decided again on every `sync` (`watchOwner`: `ownerOf`
+  over `state.prs`, else `sessionPrs`); an owned one is delivered like any watch, and when its
+  session goes it falls back to the tab (`sessionKey` back to ''). One with no owner (`toReview`)
+  goes through `deps.review` (`WatchReview`, wired to `AutoReview` in `main/index.ts`): its items
+  become one `reviewWatchLine` typed with `AutoReview.say` (the review pane's turn clock; started
+  if none runs; everything by the account is the review session's own, stalls are dropped), a new
+  `headRefOid` in the light read calls `AutoReview.rereview` (a `watched` track, polled without the
+  search through a stand-in tab when Automate Review is off, kept when it is switched off, never
+  merged unless the tab's Merge automatically is on and it was reviewed at that head), and
+  ready (`watchReady`) / merged / closed / unreadable go to Needs you through
+  `AutoReview.watchNotice` (skipped when a track tells it itself). The light query reads `title
+  headRefOid reviewDecision mergeStateStatus` and the head's check rollup for this. Closing a PR
+  tab (`autoReviewSet` with `forget`) calls `PrWatch.forgetTab`. `PrWatch.rows` → `Sources.setPrWatches`
+  → `AppState.prWatches` (`PrWatchRow`: target, last event, error) for the eye and the list.
 - **Session details → Session → Processes** (#115, `renderer/.../SessionProcs.tsx`): read on
   demand, never in `AppState`. While the section is on screen (and the window visible) it calls
   `deck.procsList(key)` (`procs:list`) every 2.5 s; `SessionProcs` (`main/sessionProcs.ts`) runs one
@@ -2394,7 +2416,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `notes/` | One JSON file per note (`n-<32 hex>.json` a global note, `t-<owner>~<name>~<number>.json` a ticket's): title, text, ticket, created, updated. Written as temp file + rename by `main/notes.ts`. Private: never in `AppState`, a snapshot, a prompt or a GitHub call |
 | `meetings/` | `<id>.json` per meeting (`m-<32 hex>`; temp file + rename), `<id>/audio.webm` (the playback copy, appended every 10 s), `<id>/chunks/<you|others>-<seq>.wav` (30-second 16 kHz WAVs until transcribed), `models/` (speech models). Private like notes (`main/meetings/store.ts`) |
 | `meeting-notices.json` | Meetings' Needs-you items, one per meeting (meeting id, title, kind, counts or reason, time); temp file + rename by `main/meetingNotices.ts`; 30 days |
-| `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages) and ended PR URLs |
+| `pr-watch.json` | PR watch: watched PRs (seen keys, pending messages; the user's own with their PR tab, #182) and ended PR URLs |
 | `ticket-links.json` | session ↔ ticket links (tt.sh `state.json` shape; imported once from babysit-ticket) |
 | `board-link-tried.json` | sessions BoardFlow already tried to auto-link (never retried) |
 | `board-moved.json` | `<ticket>:<target>:<PR urls>` board moves BoardFlow made or found done (never retried) |
