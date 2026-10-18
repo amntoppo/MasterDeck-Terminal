@@ -436,8 +436,8 @@ buttons; it does not go through macOS window drag regions.
   Board's too) have a **Session list tab** field when a named tab exists (default: the tab on
   screen); main keeps a pending target by name (`SessionGroupStore.expect` / `claim`,
   `claimWaits`) and the list switches to the tab on Start. Design and plan:
-  `docs/plans/2026-10-18-new-session-tab-{design,plan}.md`. Checked: typecheck, vitest (240 files
-  passed, 2 skipped; 3074 tests passed, 5 skipped), the web preview (both dialogs at 1400 and 390
+  `docs/plans/2026-10-18-new-session-tab-{design,plan}.md`. Checked: typecheck, vitest (241 files
+  passed, 2 skipped; 3077 tests passed, 5 skipped), the web preview (both dialogs at 1400 and 390
   px), and the isolated app with a stand-in `claude` listing a new session only from its third
   poll (claimed into its tab in the first state that listed it; a deleted tab and All left it in
   All; the dialog's default, a start into the tab on screen selected there, All picked switching
