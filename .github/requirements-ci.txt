@@ -1,2 +1,0 @@
-# The Python tests' packages in CI (ci.yml, release.yml), pinned so the pip cache stays valid.
-pytest==8.3.5

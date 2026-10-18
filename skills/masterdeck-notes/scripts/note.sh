@@ -23,8 +23,7 @@ command -v jq >/dev/null 2>&1 || { echo "note: jq is needed (brew install jq)." 
 
 D="${MASTERDECK_HOME:-$HOME/.claude/masterdeck}/deck"
 now=$(date +%s)
-# GNU's form first: GNU stat reads BSD's -f as "file system" and prints a report instead of failing.
-m=$(stat -c %Y "$D/alive" 2>/dev/null || stat -f %m "$D/alive" 2>/dev/null || echo 0)
+m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
 [ $((now - m)) -lt 30 ] || { echo "note: MasterDeck is not running, so nothing was saved. Tell the user instead." >&2; exit 1; }
 
 mkdir -p "$D/note-requests" "$D/note-answers" 2>/dev/null

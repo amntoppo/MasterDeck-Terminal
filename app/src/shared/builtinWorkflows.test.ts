@@ -221,7 +221,6 @@ describe.skipIf(process.platform === "win32")(
   "TDD's check: the tests: commits are unchanged",
   { timeout: 20_000 },
   () => {
-    // A failing check is any non-zero exit (the loop reads no more): GNU xargs answers 123, BSD's 1.
     const guard = loopOf("md-tdd").check.command;
     it("passes on the exit code alone", () => {
       expect(loopOf("md-tdd").check.output).toBe("");
@@ -245,11 +244,11 @@ describe.skipIf(process.platform === "win32")(
       commitAll(r, "tests: acme cases");
       expect(run(r, guard).exit).toBe(0);
       writeFileSync(spaced, "changed\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
       writeFileSync(spaced, "a\n");
       expect(run(r, guard).exit).toBe(0);
       writeFileSync(accented, "changed\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("guards every tests: commit, each file at its newest one", () => {
@@ -263,7 +262,7 @@ describe.skipIf(process.platform === "win32")(
       expect(run(r, guard).exit).toBe(0);
       // The first commit's file, edited after the second one: still guarded (at its newest form).
       writeFileSync(join(r, "a.test.js"), "a\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("an edit to the first tests: commit's file fails with two of them", () => {
@@ -274,9 +273,9 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(join(r, "b.test.js"), "b\n");
       commitAll(r, "tests: more acme cases");
       writeFileSync(join(r, "a.test.js"), "skipped\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
       git(r, "commit", "-qam", "Loosen the first test");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("an empty tests: commit alone fails", () => {
@@ -285,7 +284,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(join(r, "README.md"), "acme\n");
       commitAll(r, "Start");
       git(r, "commit", "-q", "--allow-empty", "-m", "tests: nothing yet");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("skips a file its newest tests: commit deleted", () => {
@@ -309,13 +308,13 @@ describe.skipIf(process.platform === "win32")(
       git(r, "update-ref", "refs/remotes/origin/HEAD", "HEAD");
       git(r, "checkout", "-qb", "work");
       // Only the default branch has a tests: commit: nothing of this branch is guarded.
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
       writeFileSync(join(r, "work.test.js"), "work\n");
       commitAll(r, "tests: this branch's cases");
       writeFileSync(join(r, "base.test.js"), "changed on this branch\n");
       expect(run(r, guard).exit).toBe(0);
       writeFileSync(join(r, "work.test.js"), "changed\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("fails without a tests: commit, passes after it, fails when a test changes", () => {
@@ -326,7 +325,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(join(r, "src", "parse.js"), "export const parse = () => null;\n");
       git(r, "add", "-A");
       git(r, "commit", "-qm", "Start acme parser");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
 
       writeFileSync(join(r, "test", "parse.test.js"), "expect(parse('1')).toBe(1);\n");
       writeFileSync(join(r, "test", "edge.test.js"), "expect(parse('')).toBe(null);\n");
@@ -344,14 +343,14 @@ describe.skipIf(process.platform === "win32")(
       const t = join(r, "test", "parse.test.js");
       const before = readFileSync(t, "utf8");
       writeFileSync(t, "// skipped\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
       writeFileSync(t, before);
       expect(run(r, guard).exit).toBe(0);
 
       // A test edit committed.
       writeFileSync(t, "expect(parse('1')).toBeTruthy();\n");
       git(r, "commit", "-qam", "Loosen a test");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("fails when a test file is deleted", () => {
@@ -362,7 +361,7 @@ describe.skipIf(process.platform === "win32")(
       git(r, "commit", "-qm", "tests: acme case");
       expect(run(r, guard).exit).toBe(0);
       unlinkSync(join(r, "a.test.js"));
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
 
     it("guards the newest tests: commit", () => {
@@ -376,7 +375,7 @@ describe.skipIf(process.platform === "win32")(
       git(r, "commit", "-qm", "tests: a gap the review found");
       expect(run(r, guard).exit).toBe(0);
       writeFileSync(join(r, "b.test.js"), "changed\n");
-      expect(run(r, guard).exit).not.toBe(0);
+      expect(run(r, guard).exit).toBe(1);
     });
   },
 );
