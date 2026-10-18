@@ -236,8 +236,13 @@ jobs:
           set -euo pipefail
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
           notes=".github/releases/v$VERSION.md"
-          prs="$( { [ -f "$notes" ] && grep -oE "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/[0-9]+" "$notes" | sed 's#.*/##' || true
-                    gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] | select(.merged_at != null) | .number' || true; } | sort -nu)"
+          listed() {
+            if [ -f "$notes" ]; then
+              grep -oE "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/[0-9]+" "$notes" | sed 's#.*/##' || true
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] | select(.merged_at != null) | .number' || true
+          }
+          prs="$(listed | sort -nu)"
           printf 'prs=%s\n' "$(paste -sd' ' - <<< "$prs")" >> "$GITHUB_OUTPUT"
           mark="<!-- masterdeck-release:v$VERSION -->"
           body="$mark
