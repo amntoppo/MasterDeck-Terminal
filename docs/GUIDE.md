@@ -7,6 +7,12 @@ One window for all your Claude Code sessions, laid out as a command center:
   on Terminals counts what needs you; one on PRs counts PRs waiting on you. A blinking amber dot
   above the bottom buttons means a browser, phone or API client is connected right now (see
   *Remote connections* below).
+  - **Your order:** drag any icon up or down the rail to move it, also between the top and the
+    bottom; a line shows where it lands, and Esc cancels. With an icon focused, ⌥↑ / ⌥↓ (Alt+↑ / ↓
+    on Windows) moves it one place. The line and the gap above the bottom group stay where they are.
+    The order is kept in Settings (also for the web app's desktop layout); right-click the rail →
+    **Reset icon order**, or Settings → General → **Rail icons**, puts it back. An icon added in a
+    later version shows at its usual place. The phone's tab bar keeps its own order.
 - **Terminals:**
   - **Sessions column:** what needs you, then the **tabs** (All and your own), then your **Starred** sessions, then every other session grouped by what it needs (Needs you,
     Working, In review, Idle, Merged; your drag order within each group), then open shells and

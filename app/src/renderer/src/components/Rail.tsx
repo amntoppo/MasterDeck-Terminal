@@ -1,12 +1,13 @@
-import { useEffect, useId, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatRefreshed } from '@shared/format'
 import { describeDevice, showRemoteDot, type Presence } from '@shared/remotePresence'
 import type { View } from './Sidebar'
 import { isWeb, screenOk } from '../web'
-import { RecordMeeting } from './RecordMeeting'
+import { canRecord, RecordMeeting } from './RecordMeeting'
 import type { MeetingLive } from '@shared/meetings'
 import { meetingsHere } from '../meetingLinks'
 import { badgeLabel } from '../updates'
+import { dropBefore, isDefaultOrder, isRailMark, moveStep, moveTo, RAIL_DEFAULT, RAIL_SEP, RAIL_SPACER, railOrder, toSaved, type RailEntry } from '@shared/railOrder'
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
@@ -65,6 +66,9 @@ interface Props {
     setOpen: (open: boolean) => void
     onSetup: () => void
   }
+  /** The saved icon order (Settings.railOrder; empty: the default) and where a new one is saved. */
+  order: string[]
+  onOrder: (saved: string[]) => void
 }
 
 /** The blinking amber dot (only while something remote is connected) and its hover/focus card. */
@@ -141,42 +145,254 @@ const ACTIONS: [RailAction, string, string][] = [
   ['skills', 'Skills', 'Add or remove skills'],
   ['palette', 'Commands', '⌘K'],
 ]
+const viewOf = new Map<string, [View, string, string]>(VIEWS.map((v) => [v[0], v]))
+const toolOf = new Map<string, [View | 'notes', string]>(TOOLS.map((t) => [t[0], t]))
+const actionOf = new Map<string, [RailAction, string, string]>(ACTIONS.map((a) => [a[0], a]))
 
-/** The Command Center rail: views on top, tools, then actions and Settings at the bottom. */
-export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes, meeting, update }: Props) {
+/** Pixels the pointer moves before a press on an icon becomes a drag (less is a click). */
+const DRAG_PX = 4
+
+interface Drag {
+  id: string
+  /** How far the pointer moved since the press: the dragged icon follows it. */
+  dy: number
+  /** Where it lands: before this id (null: the end), so an order synced in mid-drag still holds. */
+  before: string | null
+  /** The drop line's top, in the rail's box. */
+  line: number
+}
+
+/** The rail's right-click menu: Reset icon order. */
+function RailMenu({ x, y, canReset, onReset, onClose }: { x: number; y: number; canReset: boolean; onReset: () => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose()
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', onClose)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', onClose)
+    }
+  }, [onClose])
+  return (
+    <div className="menu rail-menu" ref={ref} style={{ left: x, top: Math.max(4, Math.min(y, window.innerHeight - 48)) }} role="menu" aria-label="Rail">
+      <button role="menuitem" autoFocus disabled={!canReset} onClick={() => (onClose(), onReset())}>
+        Reset icon order
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The Command Center rail: views on top, tools, then actions and Settings at the bottom, in the
+ * user's order (#170): an icon is dragged, or moved with ⌥↑ / ⌥↓, around the fixed line and spacer.
+ */
+export function Rail({ view, onView, onAction, needs, prAttention, remote, onRemote, notesOpen, onNotes, meeting, update, order: saved, onOrder }: Props) {
+  // The order just picked, drawn until the saved settings carry it (state updates keep coming meanwhile).
+  const savedKey = saved.join(' ')
+  const [local, setLocal] = useState<{ key: string; order: string[] } | null>(null)
+  const order = useMemo(() => (local && local.key === savedKey ? local.order : railOrder(saved)), [local, savedKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Once the saved order moved on, the picked one is done: kept, it would come back when the saved
+  // order returns to the same value (a reset to [] after a move saved from []).
+  useEffect(() => setLocal((l) => (l && l.key !== savedKey ? null : l)), [savedKey])
+  const [drag, setDrag] = useState<Drag | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const nav = useRef<HTMLElement>(null)
+  const press = useRef<{ id: string; x: number; y: number; pointer: number } | null>(null)
+  const live = useRef<Drag | null>(null)
+  const boxes = useRef<{ top: number; entries: (RailEntry & { top: number; bottom: number })[] }>({ top: 0, entries: [] })
+  // A click that ends a drag (or a cancelled one) is not a click on the icon.
+  const swallow = useRef(false)
+  const focusAfter = useRef<string | null>(null)
+
+  const shown = (id: string): boolean => {
+    if (isRailMark(id)) return true
+    if (id === 'record') return !!meeting && canRecord()
+    if (toolOf.has(id)) return toolOk(id as View | 'notes')
+    if (actionOf.has(id)) return id === 'palette' || screenOk(id as Exclude<RailAction, 'palette'>)
+    return screenOk(id as View)
+  }
+  const hasIcon = (ids: string[]) => ids.some((x) => !isRailMark(x) && shown(x))
+  // As before: a line only between two groups that both have an icon here.
+  const sepDrawn = () => {
+    const i = order.indexOf(RAIL_SEP)
+    return hasIcon(order.slice(0, i)) && hasIcon(order.slice(i + 1, order.indexOf(RAIL_SPACER)))
+  }
+  /** What ⌥↑ / ⌥↓ steps over: a drawn icon, the spacer, the separator only where it is drawn. */
+  const stepShown = (id: string) => (id === RAIL_SEP ? sepDrawn() : shown(id))
+  const commit = (next: string[]) => {
+    if (next.join(' ') === order.join(' ')) return false
+    setLocal({ key: savedKey, order: next })
+    onOrder(toSaved(next, saved))
+    return true
+  }
+  const end = () => {
+    press.current = null
+    live.current = null
+    setDrag(null)
+    // The click a release makes (if any) comes in this same task; a later one (Enter) is real.
+    if (swallow.current) setTimeout(() => (swallow.current = false), 0)
+  }
+  const dragging = !!drag
+  useEffect(() => {
+    if (!dragging) return
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      end()
+    }
+    window.addEventListener('keydown', key, true)
+    window.addEventListener('blur', end)
+    return () => {
+      window.removeEventListener('keydown', key, true)
+      window.removeEventListener('blur', end)
+    }
+  }, [dragging])
+  // Moving the focused icon in the DOM drops its focus: give it back after ⌥↑ / ⌥↓.
+  useLayoutEffect(() => {
+    const id = focusAfter.current
+    focusAfter.current = null
+    const el = id ? nav.current?.querySelector<HTMLElement>(`[data-rail="${id}"]`) : null
+    const b = el?.matches('button') ? el : el?.querySelector('button')
+    if (b && document.activeElement !== b) b.focus()
+  }, [order])
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    swallow.current = false
+    const t = e.target as HTMLElement
+    const el = t.closest<HTMLElement>('[data-rail]')
+    // Only the icons drag, never Record's popout or the remote card drawn beside them.
+    if (e.button !== 0 || live.current || !el || t.closest('.rec-pop, .ri-card')) return
+    press.current = { id: el.dataset.rail!, x: e.clientX, y: e.clientY, pointer: e.pointerId }
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    const p = press.current
+    const box = nav.current
+    if (!p || !box || p.pointer !== e.pointerId) return
+    // A press let go outside the rail before it became a drag: no button is down any more.
+    if (!e.buttons) return void end()
+    if (!live.current) {
+      if (Math.abs(e.clientY - p.y) < DRAG_PX && Math.abs(e.clientX - p.x) < DRAG_PX) return
+      const top = box.getBoundingClientRect().top
+      const entries = [...box.querySelectorAll<HTMLElement>('[data-rail], [data-rail-mark]')]
+        .map((el) => ({ id: el.dataset.rail ?? el.dataset.railMark ?? '', r: el.getBoundingClientRect() }))
+        .filter((x) => x.id !== p.id)
+        .map(({ id, r }) => ({ id, top: r.top - top, bottom: r.bottom - top, mid: (r.top + r.bottom) / 2 - top }))
+      boxes.current = { top, entries }
+      box.setPointerCapture(e.pointerId)
+      swallow.current = true
+    }
+    const { top, entries } = boxes.current
+    const y = e.clientY - top
+    const next = entries.find((x) => x.mid > y)
+    const last = entries.at(-1)
+    // The line sits in the 4 px gap above the entry it lands before (the spacer's top: the middle group's end).
+    const d = { id: p.id, dy: e.clientY - p.y, before: order[dropBefore(order, entries, y)] ?? null, line: next ? next.top - 2 : last ? last.bottom + 2 : 0 }
+    live.current = d
+    setDrag(d)
+  }
+  const onPointerUp = (e: React.PointerEvent) => {
+    const d = live.current
+    end()
+    if (!d) return
+    if (nav.current?.hasPointerCapture(e.pointerId)) nav.current.releasePointerCapture(e.pointerId)
+    const at = d.before === null ? order.length : order.indexOf(d.before)
+    if (at >= 0) commit(moveTo(order, d.id, at))
+  }
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+    const t = e.target as HTMLElement
+    const id = t.closest<HTMLElement>('[data-rail]')?.dataset.rail
+    if (!id || t.closest('.rec-pop')) return
+    e.preventDefault()
+    if (commit(moveStep(order, id, e.key === 'ArrowUp' ? -1 : 1, stepShown))) focusAfter.current = id
+  }
+
+  /** What every icon carries: its id for the drag, and the lift while it is the one dragged. */
+  const lift = (id: string) => ({
+    'data-rail': id,
+    'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown',
+    style: drag?.id === id ? { transform: `translateY(${drag.dy}px)` } : undefined,
+  })
+  const liftClass = (id: string) => (drag?.id === id ? ' rail-lift' : '')
   const viewBtn = (v: View, label: string, hint = '', badge = 0, dot: Props['update'] = null) => {
     const name = dot ? `${label} · ${badgeLabel(dot)}` : label
     return (
-      <button key={v} className={`rb ${view === v ? 'on' : ''}`} data-tip={hint ? `${name}  ${hint}` : name} aria-label={name} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
+      <button key={v} {...lift(v)} className={`rb ${view === v ? 'on' : ''}${liftClass(v)}`} data-tip={hint ? `${name}  ${hint}` : name} aria-label={name} aria-current={view === v ? 'page' : undefined} onClick={() => onView(v)}>
         <RailIcon name={v} />
         {badge > 0 && <span className="rb-badge">{badge}</span>}
         {dot && <span className={`rb-dot ${dot}`} aria-hidden="true" />}
       </button>
     )
   }
-  return (
-    <nav className="rail" aria-label="Views">
-      <div className="rail-drag" />
-      {VIEWS.filter(([v]) => screenOk(v)).map(([v, label, hint]) => viewBtn(v, label, hint, v === 'terminals' ? needs : v === 'prs' ? prAttention : 0))}
-      {TOOLS.some(([v]) => toolOk(v)) && <div className="rail-sep" />}
-      {TOOLS.filter(([v]) => toolOk(v)).map(([v, label]) =>
-        v === 'notes' ? (
-          <button key={v} className={`rb ${notesOpen ? 'on' : ''}`} data-tip={label} aria-label={label} aria-pressed={notesOpen} onClick={onNotes}>
-            <RailIcon name="notes" />
-          </button>
-        ) : (
-          viewBtn(v, label)
-        ),
-      )}
-      {meeting && <RecordMeeting {...meeting} />}
-      <div style={{ flex: 1 }} />
-      <RemoteIndicator remote={remote} onRemote={onRemote} />
-      {ACTIONS.filter(([a]) => a === 'palette' || screenOk(a)).map(([a, label, hint]) => (
-        <button key={a} className="rb" data-tip={`${label} · ${hint}`} aria-label={label} onClick={() => onAction(a)}>
-          <RailIcon name={a} />
+  const entry = (id: string): ReactNode => {
+    if (id === RAIL_SEP) return sepDrawn() ? <div key={id} className="rail-sep" data-rail-mark={id} /> : null
+    if (id === RAIL_SPACER)
+      return (
+        <Fragment key={id}>
+          <div className="rail-spacer" data-rail-mark={id} />
+          <RemoteIndicator remote={remote} onRemote={onRemote} />
+        </Fragment>
+      )
+    if (!shown(id)) return null
+    if (id === 'record')
+      return (
+        meeting && (
+          <div key={id} {...lift(id)} className={`rail-item${liftClass(id)}`}>
+            <RecordMeeting {...meeting} />
+          </div>
+        )
+      )
+    if (id === 'notes')
+      return (
+        <button key={id} {...lift(id)} className={`rb ${notesOpen ? 'on' : ''}${liftClass(id)}`} data-tip="Notes" aria-label="Notes" aria-pressed={notesOpen} onClick={onNotes}>
+          <RailIcon name="notes" />
         </button>
-      ))}
-      {screenOk('settings') && viewBtn('settings', 'Settings', '⌘,', 0, update)}
+      )
+    const a = actionOf.get(id)
+    if (a)
+      return (
+        <button key={id} {...lift(id)} className={`rb${liftClass(id)}`} data-tip={`${a[1]} · ${a[2]}`} aria-label={a[1]} onClick={() => onAction(a[0])}>
+          <RailIcon name={id} />
+        </button>
+      )
+    if (id === 'settings') return viewBtn('settings', 'Settings', '⌘,', 0, update)
+    const v = viewOf.get(id) ?? toolOf.get(id)
+    if (!v) return null
+    return viewBtn(v[0] as View, v[1], v[2] ?? '', id === 'terminals' ? needs : id === 'prs' ? prAttention : 0)
+  }
+  return (
+    <nav
+      ref={nav}
+      className={`rail${drag ? ' dragging' : menu ? ' menu-open' : ''}`}
+      aria-label="Views"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={end}
+      onLostPointerCapture={() => live.current && end()}
+      onClickCapture={(e) => {
+        if (!swallow.current) return
+        swallow.current = false
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      onKeyDown={onKeyDown}
+      onContextMenu={(e) => {
+        if ((e.target as HTMLElement).closest('.rec-pop, .ri-card, .rail-menu, input, textarea')) return
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
+    >
+      <div className="rail-drag" />
+      {order.map(entry)}
+      {drag && <div className="rail-drop" style={{ top: drag.line }} aria-hidden="true" />}
+      {menu && <RailMenu x={menu.x} y={menu.y} canReset={!isDefaultOrder(order)} onReset={() => commit([...RAIL_DEFAULT])} onClose={closeMenu} />}
     </nav>
   )
 }
