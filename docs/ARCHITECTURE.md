@@ -532,7 +532,9 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   `Sources.setPrThreads` → `InboxInput.prThreads`: one `review` item per PR (`detail: threads`, id by
   the open threads' ids) with Open and View on GitHub. `WatchInfo.threads` feeds Details' "Threads
   sent to the session" list (not the remote snapshot). `REPLY_CMD` single-quotes the body, so
-  `shellWord` (`shared/ownPosts.ts`) reads `'\''` as an apostrophe inside it.
+  `shellWord` (`shared/ownPosts.ts`) reads `'\''` as an apostrophe inside it. Only a session gets
+  follow-ups: a manual watch (#182) that no session owns goes to its tab's review session as one
+  line (`deliverReview`, nothing tracked), and one whose session ends drops its `follow`.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
   `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
   `state.watches` with ids `pr:<url>` (`watchStop` routes them), so they count as monitors in
