@@ -61,11 +61,11 @@ export function recordCosts(book: CostBook, entries: CostEntry[], bucket: string
   for (const e of entries) {
     if (!(e.cost >= 0)) continue
     if (!book[e.sessionId] && dayStartMs !== undefined && (e.startedAt == null || e.startedAt < dayStartMs)) {
-      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days:{ [BASELINE]: e.cost } }
+      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days: { [BASELINE]: e.cost } }
       changed = true
       continue
     }
-    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days:{} })
+    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days: {} })
     if (rec.name !== e.name || rec.issue !== e.issue || (rec.issueRepo ?? null) !== (e.issueRepo ?? null) || rec.key !== e.key) {
       rec.name = e.name
       rec.key = e.key
