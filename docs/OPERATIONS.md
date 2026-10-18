@@ -53,7 +53,7 @@ open /Applications/MasterDeck.app
 
 ## Release
 
-Only when the user asks. Last release: v0.9.0 (2026-10-10). Before it: v0.8.2 (2026-10-06; v0.8.0
+Only when the user asks. Last release: v0.9.1 (2026-10-18). Before it: v0.9.0 (2026-10-10), v0.8.2 (2026-10-06; v0.8.0
 and v0.8.1 had no Windows build).
 
 ```bash
