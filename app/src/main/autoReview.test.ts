@@ -309,6 +309,89 @@ describe('AutoReview: what the review found', () => {
   })
 })
 
+describe('AutoReview: watched PRs no session owns (#182)', () => {
+  const tab = { tabId: 'mine', name: 'Mine', account: null }
+  const reviewed = (approved: boolean) => ({
+    latestReviews: {
+      nodes: [
+        { state: 'COMMENTED', submittedAt: new Date(1_000_000).toISOString(), url: `${URL1}#r1`, author: { login: 'alice' }, commit: { oid: 'aaa' }, comments: { totalCount: 1 } },
+        ...(approved ? [{ state: 'APPROVED', submittedAt: new Date(1_000_000).toISOString(), url: 'c', author: { login: 'carol' }, commit: { oid: 'aaa' }, comments: { totalCount: 0 } }] : []),
+      ],
+    },
+    ...(approved ? { reviewDecision: 'APPROVED' } : {}),
+  })
+  it('new commits are reviewed with Automate Review off, without a search, and never merged', async () => {
+    const w = world()
+    w.pane.id = 'p'
+    w.a.rereview(tab, URL1)
+    expect(w.a.due()).toBe(true)
+    await w.a.poll()
+    expect(w.calls.some((c) => c.some((x) => x.includes('search(')))).toBe(false)
+    w.a.deliver()
+    expect(w.typed.map((t) => t[1])).toEqual([expect.stringMatching(/^\[MasterDeck auto-review\] Review acme\/web#12/)])
+    expect(w.queues.mine).toEqual([URL1])
+    w.gh.pr = node(reviewed(true))
+    w.tick(POLL_MS)
+    await w.a.poll()
+    w.tick(POLL_MS)
+    await w.a.poll()
+    expect(w.a.view().prs[0]).toMatchObject({ status: 'ready' })
+    expect(w.calls.some((c) => c[0] === 'pr')).toBe(false)
+  })
+  it('one track per PR: a second rereview, or one Automate Review follows, adds nothing', async () => {
+    const w = world()
+    w.a.set('mine', on)
+    await w.a.poll()
+    w.a.rereview(tab, URL1)
+    expect(w.a.view().prs).toHaveLength(1)
+  })
+  it('switching Automate Review off keeps watched tracks; unwatch drops one not merging', async () => {
+    const w = world()
+    w.a.rereview(tab, URL1)
+    w.a.set('mine', on)
+    w.a.set('mine', { review: false })
+    expect(w.a.view().prs).toHaveLength(1)
+    w.a.unwatch(null, URL1)
+    expect(w.a.view().prs).toHaveLength(0)
+    expect(w.a.due()).toBe(false)
+  })
+  it('say types into an idle pane, waits while it is busy, and starts one when none runs', () => {
+    const w = world()
+    w.pane.id = 'p'
+    expect(w.a.say(tab, '[MasterDeck PR watch] x').ok).toBe(true)
+    expect(w.typed).toEqual([['p', '[MasterDeck PR watch] x']])
+    w.pane.ready = false
+    expect(w.a.say(tab, 'y').ok).toBe(false)
+    w.pane.id = null
+    expect(w.a.say(tab, 'z').ok).toBe(true)
+    expect(w.started).toEqual(['z'])
+    w.pane.id = null
+    expect(w.a.say(tab, 'again').ok).toBe(false)
+  })
+  it('a notice is left to a track that tells it itself', async () => {
+    const w = world()
+    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' })
+    expect(w.notices).toHaveLength(1)
+    w.pane.id = 'p'
+    w.a.rereview(tab, URL1)
+    await w.a.poll()
+    w.a.deliver()
+    w.a.watchNotice(tab, URL1, { kind: 'ready', title: 'ready', body: '' })
+    expect(w.notices).toHaveLength(1)
+    w.a.watchNotice(tab, URL1, { kind: 'closed', title: 'closed', body: '' })
+    expect(w.notices).toHaveLength(2)
+  })
+  it('watched tracks are kept across a restart', async () => {
+    const w = world()
+    w.a.rereview(tab, URL1)
+    const file = (w.a as unknown as { file: string }).file
+    const b = new AutoReview(file, (w.a as unknown as { deps: ConstructorParameters<typeof AutoReview>[1] }).deps)
+    b.load()
+    expect(b.view().prs.map((p) => p.url)).toEqual([URL1])
+    expect(b.due()).toBe(true)
+  })
+})
+
 describe('paneReady', () => {
   const now = 10_000_000
   it('idle after the last line, and the user not typing', () => {

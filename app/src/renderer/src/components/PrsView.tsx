@@ -16,12 +16,15 @@ import { ClaudeMark } from './NewTicket'
 import { SessionAccount } from './AccountBits'
 import { TerminalView } from './TerminalView'
 import { AutoReviewWidget } from './AutoReviewWidget'
+import { WatchEye, type WatchTabRef } from './WatchEye'
+import type { PrWatchRow } from '@shared/watchPr'
 
 interface Props {
   state: AppState
   onOpenSession: (s: Session) => void
   /** Open the PR popup (summary + Review PR); `review`: its Review with Claude, here in the panel. */
-  onPr: (url: string, issue: Ticket | null, title: string, review?: () => void) => void
+  /** `watch`: the tab the PR popup's eye watches it for (#182). */
+  onPr: (url: string, issue: Ticket | null, title: string, review?: () => void, watch?: WatchTabRef) => void
   /** No owning session: start one for the issue, instruction pre-filled. */
   onStartWith: (issue: Issue, instructions: string) => void
 }
@@ -197,6 +200,9 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     wasMulti.current = multi
   }, [multi]) // eslint-disable-line react-hooks/exhaustive-deps
   const select = (url: string) => setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, selected: url } : t)))
+  // The eye (#182): which PRs MasterDeck watches, for this tab and its account.
+  const watchRows = new Map((state.prWatches ?? []).map((r) => [r.url, r]))
+  const watchTab: WatchTabRef = { tabId: tab.id, tabName: tab.name, ...(acct ? { account: acct } : {}), ...(tab.filters.repo ? { repo: tab.filters.repo } : {}) }
   const prepare = (url: string | undefined, contextOnly: boolean) =>
     deck().prReviewPrepare({ tabId: tab.id, tab: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters, ...(url ? { url } : {}), ...(contextOnly ? { context: true } : {}) })
   /**
@@ -464,10 +470,12 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
                 onReview={() => void openReview(p.url, true)}
                 onPr={(url, issue, title) => {
                   select(url)
-                  onPr(url, issue, title, () => void openReview(url, true))
+                  onPr(url, issue, title, () => void openReview(url, true), watchTab)
                 }}
                 onOpenSession={onOpenSession}
                 onStartWith={onStartWith}
+                watchRow={watchRows.get(p.url)}
+                watchTab={watchTab}
                 onAuthor={(a) => set({ author: isMe(a) ? '@me' : a })}
                 onRepo={(r) => set({ repo: r })}
               />
@@ -563,7 +571,12 @@ function PrRow({
   selected,
   onSelect,
   onReview,
+  watchRow,
+  watchTab,
 }: {
+  /** Its watch, if MasterDeck watches it (#182). */
+  watchRow: PrWatchRow | undefined
+  watchTab: WatchTabRef
   p: TeamPr
   pr: Pr
   mine: boolean
@@ -651,6 +664,7 @@ function PrRow({
             Review
           </button>
         )}{' '}
+        {(open || watchRow) && <WatchEye url={p.url} row={watchRow} tab={watchTab} onError={setMsg} />}{' '}
         <button className="link-btn review-claude" onClick={onReview} title="Review with Claude" aria-label={`Review #${p.number} with Claude`}>
           <ClaudeMark />
         </button>{' '}

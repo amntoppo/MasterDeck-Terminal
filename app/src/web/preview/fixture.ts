@@ -216,6 +216,17 @@ export function fixtureState(noBoard = false): AppState {
       { id: 'w-deploy', sessionId: SESSIONS[0].sessionId, description: 'Staging deploy status', command: 'while sleep 30; do curl -s https://staging.acme.example/health; done', startedAt: now - 95 * min, events: 7, lastEventAt: now - 3 * min, queued: 1 },
       { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
     ],
+    // The eye and Watched PRs (#182): the first session's own PR, and one the user watches for the Mine tab.
+    prWatches: [
+      {
+        url: 'https://github.com/acme/web/pull/131', repo: 'acme/web', number: 131, title: 'Fix login redirect loop', manual: false, tabId: null, tabName: null, account: null,
+        target: { session: { key: SESSIONS[0].key, name: SESSIONS[0].name } }, lastEvent: { at: now - 20 * min, text: 'sam: please add a test' }, startedAt: now - 3 * 3600_000, error: null,
+      },
+      {
+        url: 'https://github.com/acme/web/pull/129', repo: 'acme/web', number: 129, title: 'Invoice CSV: streaming writer', manual: true, tabId: 'prs-mine', tabName: 'Mine', account: null,
+        target: { review: 'prs-mine' }, lastEvent: { at: now - 6 * min, text: 'ready to merge' }, startedAt: now - 50 * min, error: null,
+      },
+    ],
     schedules: {},
     schedRuns: { 'bg-4': { scheduleId: 'p2', name: 'Nightly docs' } },
     loops: {},

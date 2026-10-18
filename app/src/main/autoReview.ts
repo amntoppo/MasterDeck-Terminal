@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
-  autoPrompt, autoQuery, autoSearch, label, mergeArgs, mergeGuard, normalizeTab, parseAutoAnswer, parseTurn, POLL_MS, reconcile, TRACK_MAX, TYPING_MS,
+  autoPrompt, autoQuery, autoSearch, label, mergeArgs, mergeGuard, normalizeTab, parseAutoAnswer, parseTurn, POLL_MS, reconcile, TRACK_MAX, trackKey, TYPING_MS,
   type AutoPr, type AutoReviewTab, type AutoReviewView, type AutoTrack,
 } from '@shared/autoReview'
 import { parsePrUrl } from '@shared/prSummary'
 import { safeRef } from '@shared/prWatch'
+import { normalizePrFilters } from '@shared/teamPrs'
 import { TICKET_TAB } from '@shared/ticketBuilder'
 import { pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
 import type { CliResult } from '@shared/types'
@@ -39,6 +40,15 @@ type Saved = { tabs?: Record<string, AutoReviewTab>; tracks?: AutoTrack[] }
 
 /** Automate Review's monitor in the monitors list. */
 export const monitorId = (tabId: string): string => `review:${tabId}`
+
+const DONE = (t: AutoTrack): boolean => t.status === 'merged' || t.status === 'closed'
+
+/** A PR tab, as a watch no session owns knows it (#182): its id, name and account. */
+export interface WatchTab {
+  tabId: string
+  name: string
+  account: string | null
+}
 
 /**
  * Automate Review and Merge automatically (#157): every 2 minutes, for each PR tab with the switch
@@ -80,8 +90,105 @@ export class AutoReview {
       .filter((t) => typeof t?.url === 'string' && parsePrUrl(t.url) && typeof t.key === 'string' && TICKET_TAB.test(t.tabId) && Array.isArray(t.told))
       // MasterDeck stopped during a merge: what happened is not known, so it is not tried again for that commit.
       .map((t) => (t.status === 'merging' ? { ...t, status: 'merge-failed' as const, note: 'MasterDeck stopped during the merge: check the PR' } : t))
-      // A tab switched off (or gone) follows nothing: its open PRs are free for another tab.
-      .filter((t) => this.tabs[t.tabId] || t.status === 'merged' || t.status === 'closed')
+      // A tab switched off (or gone) follows nothing: its open PRs are free for another tab. A
+      // watched PR's track stays: the PR watch asked for it.
+      .filter((t) => this.tabs[t.tabId] || t.watched || DONE(t))
+  }
+
+  /**
+   * The tab's switches, or a stand-in for a tab with only watched tracks (Automate Review off:
+   * nothing searched, nothing merged). Null: nothing to do for it.
+   */
+  private tabFor(tabId: string): AutoReviewTab | null {
+    if (this.tabs[tabId]) return this.tabs[tabId]
+    const t = this.tracks.find((x) => x.tabId === tabId && x.watched && !DONE(x))
+    return t ? { review: false, merge: false, name: t.tabName ?? 'PRs', account: t.account, filters: normalizePrFilters(undefined), since: 0 } : null
+  }
+
+  /** Every tab with something to do: switched on, or following a watched PR. */
+  private tabIds(): string[] {
+    return [...new Set([...Object.keys(this.tabs), ...this.tracks.filter((t) => t.watched && !DONE(t)).map((t) => t.tabId)])]
+  }
+
+  /**
+   * New commits on a watched PR no session owns (#182): it is reviewed for the tab by Automate
+   * Review's rules. Already followed (reviewing, or by Automate Review itself): left to that track,
+   * which reviews new commits by itself.
+   */
+  rereview(tab: WatchTab, url: string): void {
+    const ref = parsePrUrl(url)
+    if (!TICKET_TAB.test(tab.tabId) || !ref || !safeRef(ref)) return
+    const key = trackKey(tab.account, url)
+    const have = this.tracks.find((t) => t.key === key)
+    if (have && !DONE(have)) return
+    const now = this.now()
+    const t: AutoTrack = {
+      key, url, repo: `${ref.owner}/${ref.repo}`, number: ref.number, title: '', author: '', tabId: tab.tabId, account: tab.account,
+      status: 'queued', head: '', sentHead: null, sentAt: null, reviewUrl: null, comments: 0, told: [], mergeTried: null, note: 'new commits on a watched PR', at: now, misses: 0,
+      watched: true, tabName: tab.name.slice(0, 100),
+    }
+    this.tracks = [...this.tracks.filter((x) => x.key !== key), t]
+    this.event(tab.tabId, `new commits on watched ${label(t)}: queued for review`)
+    // Read soon: the line typed into the session needs the PR's details.
+    this.lastPoll = 0
+    this.save()
+    this.deps.onChange()
+  }
+
+  /** The PR's watch ended: a watched track not merging goes (one merging finishes; a done one stays listed). */
+  unwatch(account: string | null, url: string): void {
+    const key = trackKey(account, url)
+    const t = this.tracks.find((x) => x.key === key && x.watched)
+    if (!t || DONE(t) || t.status === 'merging') return
+    this.tracks = this.tracks.filter((x) => x !== t)
+    this.writeQueue(t.tabId)
+    this.save()
+    this.deps.onChange()
+  }
+
+  /**
+   * A line for the tab's review session from a watch no session owns (#182): typed now when its
+   * turn is over, or as the first message of a session MasterDeck starts. Shares the turn clock
+   * with Automate Review's own lines: the next one waits for this turn to end.
+   */
+  say(tab: WatchTab, text: string): CliResult {
+    if (!TICKET_TAB.test(tab.tabId)) return { ok: false, message: 'bad PR tab' }
+    const tabId = tab.tabId
+    const pane = this.paneNow(tabId)
+    const now = this.now()
+    if (pane && !this.deps.panes.ready(tabId, pane, this.sent[tabId] ?? 0)) return { ok: false, message: 'busy' }
+    if (!pane) {
+      if (now - (this.started[tabId] ?? 0) < RESTART_MS) return { ok: false, message: 'waiting to start the review session' }
+      this.started[tabId] = now
+      const r = this.deps.panes.start(tabId, this.tabFor(tabId) ?? { review: false, merge: false, name: tab.name, account: tab.account, filters: normalizePrFilters(undefined), since: 0 }, text)
+      if ('error' in r) return { ok: false, message: r.error }
+      this.panesSeen[tabId] = r.paneId
+    } else this.deps.panes.type(pane, text)
+    this.sent[tabId] = now
+    this.event(tabId, 'sent PR watch news to the review session')
+    this.deps.onChange()
+    return { ok: true, message: 'typed' }
+  }
+
+  /**
+   * A watched PR's Needs-you notice (#182), unless a track of this account tells it itself: a
+   * "ready" its reconcile says, a merge Merge automatically made.
+   */
+  watchNotice(tab: WatchTab, url: string, n: { kind: 'ready' | 'merged' | 'closed' | 'gone'; title: string; body: string }): void {
+    const t = this.tracks.find((x) => x.key === trackKey(tab.account, url))
+    if (n.kind === 'ready' && t && !DONE(t) && t.sentHead) return
+    if (n.kind === 'merged' && t?.status === 'merged') return
+    this.deps.notify({ title: n.title, body: n.body, url })
+  }
+
+  /** The tab's live review pane; a new one counts only turns its own hooks write after now (the file outlives panes). */
+  private paneNow(tabId: string): string | null {
+    const pane = this.deps.panes.live(tabId)
+    if (pane !== (this.panesSeen[tabId] ?? null)) {
+      this.panesSeen[tabId] = pane
+      if (pane) this.sent[tabId] = Math.max(this.sent[tabId] ?? 0, this.now())
+    }
+    return pane
   }
 
   /**
@@ -89,14 +196,14 @@ export class AutoReview {
    * seen. Never a PR not sent yet: a prompt injection in one PR can't post on the others.
    */
   private writeQueue(tabId: string): void {
-    const sent = this.tabs[tabId]
+    const sent = this.tabFor(tabId)
       ? this.tracks.filter((t) => t.tabId === tabId && t.status === 'reviewing' && t.sentAt !== null).sort((a, b) => b.sentAt! - a.sentAt!)[0]
       : undefined
     this.deps.writeQueue(tabId, sent ? [sent.url] : [])
   }
 
   private dropOpen(tabId: string): void {
-    this.tracks = this.tracks.filter((t) => t.tabId !== tabId || t.status === 'merged' || t.status === 'closed')
+    this.tracks = this.tracks.filter((t) => t.tabId !== tabId || t.watched || DONE(t))
   }
 
   private save(): void {
@@ -160,15 +267,18 @@ export class AutoReview {
   }
 
   due(): boolean {
-    return Object.keys(this.tabs).length > 0 && this.now() - this.lastPoll >= POLL_MS
+    return this.tabIds().length > 0 && this.now() - this.lastPoll >= POLL_MS
   }
 
   async poll(): Promise<void> {
-    if (this.polling || !Object.keys(this.tabs).length || this.deps.paused()) return
+    if (this.polling || !this.tabIds().length || this.deps.paused()) return
     this.polling = true
     this.lastPoll = this.now()
     try {
-      for (const tabId of Object.keys(this.tabs)) if (this.tabs[tabId]) await this.pollTab(tabId, this.tabs[tabId])
+      for (const tabId of this.tabIds()) {
+        const tab = this.tabFor(tabId)
+        if (tab) await this.pollTab(tabId, tab)
+      }
       this.save()
       this.deps.onChange()
     } finally {
@@ -188,7 +298,9 @@ export class AutoReview {
     let error: string | null = null
     for (let i = 0; i === 0 || i < refs.length; i += TRACK_MAX) {
       const group = refs.slice(i, i + TRACK_MAX)
-      const args = ['api', 'graphql', '-f', `query=${autoQuery(group.map((g) => g.r!), i === 0)}`, ...(i === 0 ? ['-f', `q=${search}`] : [])]
+      // A tab with Automate Review off (only watched PRs): no review requests are searched.
+      const searching = i === 0 && tab.review
+      const args = ['api', 'graphql', '-f', `query=${autoQuery(group.map((g) => g.r!), searching)}`, ...(searching ? ['-f', `q=${search}`] : [])]
       const r = await gh(args, { ttl: 60, timeoutMs: 30_000 })
       if (this.deps.paused(ghErrorText(r))) {
         error = 'GitHub calls are paused'
@@ -210,7 +322,7 @@ export class AutoReview {
       return
     }
     // Switched off, or changed, while GitHub answered: this answer is for switches that are gone.
-    if (this.tabs[tabId] !== tab) return
+    if (tab.review ? this.tabs[tabId] !== tab : !!this.tabs[tabId] || !this.tabFor(tabId)) return
     for (const p of [...(requested ?? []), ...[...tracked.values()].filter((p): p is AutoPr => !!p)]) this.prs.set(p.url, p)
     const out = reconcile({ tabId, tab, viewer, requested, tracked, tracks: this.tracks, now: this.now() })
     this.tracks = out.tracks
@@ -277,14 +389,12 @@ export class AutoReview {
   /** Type the next PR into each tab's session whose turn is over; start one where none runs. */
   deliver(): void {
     let changed = false
-    for (const [tabId, tab] of Object.entries(this.tabs)) {
-      const pane = this.deps.panes.live(tabId)
-      if (pane !== (this.panesSeen[tabId] ?? null)) {
-        this.panesSeen[tabId] = pane
-        // A new pane: only a turn its own hooks write after now counts (the file outlives panes).
-        if (pane) this.sent[tabId] = Math.max(this.sent[tabId] ?? 0, this.now())
-        changed = true
-      }
+    for (const tabId of this.tabIds()) {
+      const tab = this.tabFor(tabId)
+      if (!tab) continue
+      const seen = this.panesSeen[tabId] ?? null
+      const pane = this.paneNow(tabId)
+      if (pane !== seen) changed = true
       const next = this.tracks
         .filter((t) => t.tabId === tabId && t.status === 'queued' && this.prs.has(t.url))
         .sort((a, b) => a.at - b.at)[0]

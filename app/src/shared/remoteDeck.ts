@@ -130,6 +130,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   // The PR view's review session: main checks the tab, the account and the folder, and takes the PR's facts from its own list.
   prReviewPrepare: invoke(CH.prReviewPrepare),
   autoReviewSet: invoke(CH.autoReviewSet),
+  // The eye and Watched PRs (#182): main checks the tab, the account and the PR; the browser asked before stopping.
+  prWatchSet: invoke(CH.prWatchSet),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
   ticketRepoMeta: invoke(CH.ticketRepoMeta),
   workspaceRepos: invoke(CH.workspaceRepos),
