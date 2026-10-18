@@ -133,8 +133,8 @@ The behaviour comes from the code the Needs-you list runs, with no second copy. 
 2. **Implement it**. The constructor is `(file, {now?, onChange?, setTimer?})`, and it writes
    with `appendFileSync`. It logs a write error at most once a minute, with no path in the message.
 
-**Review focus**: atomic rewrite only on load, no unbounded growth in memory, no throw reaches a
-caller.
+**Review focus**: atomic rewrites only on load and after 5000 appended lines, no unbounded
+growth in memory or on disk, no throw reaches a caller.
 
 ### Task 3: wiring the log into main
 

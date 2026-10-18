@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
+  ACTIVITY_COALESCE_MS,
   ACTIVITY_KEEP_DAYS,
   ACTIVITY_LIST_MAX,
   ACTIVITY_MAX_LINES,
@@ -29,9 +30,31 @@ const defaultTimer = (fn: () => void, ms: number) => {
 const reason = (e: unknown) => (e as NodeJS.ErrnoException)?.code ?? 'error'
 
 /**
+ * `coalesce` over a whole file in one pass: oldest first, each line replaces the last kept event
+ * of its type and subject when within the window of it (keeping that one's id), else is kept.
+ * Returns newest first.
+ */
+function replay(read: ActivityEvent[]): ActivityEvent[] {
+  read.sort((a, b) => a.at - b.at)
+  const out: ActivityEvent[] = []
+  const last = new Map<string, number>()
+  for (const e of read) {
+    const key = `${e.type}|${e.subject}`
+    const i = last.get(key)
+    if (i !== undefined && Math.abs(e.at - out[i].at) <= ACTIVITY_COALESCE_MS) {
+      out[i] = { ...e, id: out[i].id }
+    } else {
+      last.set(key, out.length)
+      out.push(e)
+    }
+  }
+  return out.sort((a, b) => b.at - a.at)
+}
+
+/**
  * The Dashboard's activity log (#183) in MASTERDECK_HOME/activity.jsonl: one event per line,
- * appended. The file is trimmed (14 days, 5000 lines) and cleaned only on load, then rewritten
- * atomically. In memory the events are kept newest first, coalesced and bounded the same way.
+ * appended. The file is trimmed (14 days, 5000 events) and cleaned on load, and after 5000
+ * appended lines, by an atomic rewrite from memory. In memory the events are kept newest first, coalesced and bounded the same way.
  * Nothing here throws into a caller: a failed write is logged (once a minute) and dropped.
  */
 export class ActivityLog {
@@ -43,6 +66,8 @@ export class ActivityLog {
   private lastChange = -Infinity
   private changePending = false
   private lastError = -Infinity
+  /** Lines appended since the last load or rewrite. */
+  private appended = 0
 
   constructor(
     private file: string,
@@ -71,6 +96,9 @@ export class ActivityLog {
       try {
         mkdirSync(dirname(this.file), { recursive: true })
         appendFileSync(this.file, JSON.stringify(e) + '\n')
+        // Appends alone would grow the file until the next launch: past 5000 since the last
+        // load or rewrite, it is written again from memory (already coalesced and bounded).
+        if (++this.appended > ACTIVITY_MAX_LINES) this.rewrite()
       } catch (err) {
         this.fail('write', err)
       }
@@ -114,17 +142,17 @@ export class ActivityLog {
       }
       if (e && e.at >= cutoff) read.push(e)
     }
-    // Oldest first through coalesce, so a newer line replaces the one it repeats.
-    read.sort((a, b) => a.at - b.at)
-    let list: ActivityEvent[] = []
-    for (const e of read.slice(-ACTIVITY_MAX_LINES)) list = coalesce(list, e)
-    this.events = list
-    // Rewritten whenever the file holds anything memory does not (trimmed, corrupt or coalesced lines).
-    if (list.length !== rows.length) this.rewrite()
+    this.events = this.bound(replay(read))
+    // Rewritten whenever the file holds anything memory does not (trimmed, corrupt or coalesced
+    // lines), or ends in a torn line the next append would run on from.
+    const torn = text.length > 0 && !text.endsWith('\n')
+    if (this.events.length !== rows.length || torn) this.rewrite()
+    this.appended = 0
   }
 
   private rewrite(): void {
     const tmp = `${this.file}.tmp`
+    this.appended = 0
     try {
       const body = [...this.events].reverse().map((e) => JSON.stringify(e) + '\n').join('')
       writeFileSync(tmp, body)

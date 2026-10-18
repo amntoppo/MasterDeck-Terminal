@@ -269,8 +269,12 @@ From main's stores, through one `activity.add(e)`:
 `main/activityLog.ts`, `ActivityLog`:
 
 - **File**: `<MASTERDECK_HOME>/activity.jsonl`, one event per line, appended.
-- **Load**: it keeps the last 14 days and at most 5000 lines. A line that does not parse is
-  skipped. When it trimmed or skipped, it rewrites the file atomically (temp file + rename).
+- **Load**: it keeps the last 14 days, coalesces them (below), then keeps at most 5000 events.
+  A line that does not parse is skipped. When it trimmed, skipped or coalesced a line, or the
+  file's last line is torn (no final newline), it rewrites the file atomically (temp file +
+  rename) from memory.
+- **Growth**: after 5000 lines appended since the last load or rewrite, the file is rewritten
+  the same way from memory, so it stays bounded while the app runs.
 - **Coalescing**: an event of the same `type` and `subject` within 15 minutes of the last one
   replaces it in memory (time and title updated) and is appended. On the next load the newer
   line wins, matched by `type`, `subject` and the window.

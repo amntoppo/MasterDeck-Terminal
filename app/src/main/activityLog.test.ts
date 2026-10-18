@@ -114,6 +114,55 @@ describe('ActivityLog', () => {
     expect(rows[0]).toMatchObject({ at: NOW, title: 'two' })
   })
 
+  it('coalesces before the 5000 cut on load, so older days survive a flood of repeats', () => {
+    const older = ev({ at: NOW - 3 * DAY })
+    const rows: ActivityEvent[] = [older]
+    for (let i = 0; i < ACTIVITY_MAX_LINES + 1000; i++) rows.push(ev({ type: 'session-finished', subject: 'session:busy', at: NOW - 3_600_000 + i * 100 }))
+    writeLines(rows)
+    const log = new ActivityLog(file, { now: () => NOW })
+    const kept = log.list(0, NOW)
+    // the repeats chain in 15-minute steps of 100 ms into one row per window
+    expect(kept.length).toBeLessThan(10)
+    expect(kept.some((e) => e.id === older.id)).toBe(true)
+    expect(kept[0]).toMatchObject({ subject: 'session:busy', at: NOW - 3_600_000 + (ACTIVITY_MAX_LINES + 999) * 100, id: rows[1].id })
+    expect(lines()).toHaveLength(kept.length)
+  })
+
+  it('rewrites the file from memory after 5000 appended lines', () => {
+    let t = NOW - DAY
+    const log = new ActivityLog(file, { now: () => t })
+    for (let i = 0; i < ACTIVITY_MAX_LINES; i++) log.add(ev({ type: 'session-finished', subject: 'session:k', at: (t += 1000) }))
+    expect(lines()).toHaveLength(ACTIVITY_MAX_LINES)
+    log.add(ev({ type: 'session-finished', subject: 'session:k', at: (t += 1000) }))
+    expect(lines()).toHaveLength(log.size)
+    expect(log.size).toBeLessThan(10)
+    expect(readdirSync(dir)).toEqual(['activity.jsonl'])
+    // the count starts again: the next add only appends
+    log.add(ev({ at: (t += 1000) }))
+    expect(lines()).toHaveLength(log.size)
+    expect(new ActivityLog(file, { now: () => t }).list(0, t)).toEqual(log.list(0, t))
+  })
+
+  it('rewrites a file whose last line is torn, so the next append starts on a line of its own', () => {
+    const a = ev({ at: NOW - 2 })
+    const b = ev({ at: NOW - 1 })
+    writeFileSync(file, JSON.stringify(a) + '\n' + JSON.stringify(b))
+    const log = new ActivityLog(file, { now: () => NOW })
+    expect(readFileSync(file, 'utf8').endsWith('\n')).toBe(true)
+    const c = ev({ at: NOW })
+    log.add(c)
+    expect(lines()).toEqual([a, b, c])
+  })
+
+  it('drops a half-written last line', () => {
+    const a = ev({ at: NOW - 2 })
+    writeFileSync(file, JSON.stringify(a) + '\n' + JSON.stringify(ev()).slice(0, 20))
+    const log = new ActivityLog(file, { now: () => NOW })
+    log.add(ev({ at: NOW }))
+    expect(lines()).toHaveLength(2)
+    expect(log.list(0, NOW)).toHaveLength(2)
+  })
+
   it('swallows a write failure; a later add still lands in memory', () => {
     const blocker = join(dir, 'blocker')
     writeFileSync(blocker, 'a file, not a folder')
