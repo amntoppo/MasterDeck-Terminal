@@ -1928,6 +1928,23 @@ details.sd-more > summary:hover { color: var(--text); }
 .auto-prs li { padding: 2px 0; overflow-wrap: anywhere; }
 .auto-st { font-weight: 600; }
 .auto-st.st-ready, .auto-st.st-merged { color: var(--green); }
+/* Watch any PR (#182): the eye on a PR, and the widget's Watched PRs. */
+.watch-eye { display: inline-flex; vertical-align: middle; padding: 2px 3px; color: var(--faint); opacity: 0.75; }
+.watch-eye:hover { color: var(--text); opacity: 1; }
+.watch-eye.on { color: var(--accent); opacity: 1; }
+.pr-title .watch-eye { margin-left: 4px; }
+.watched-prs { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.watched-head { margin-bottom: 5px; }
+.watched-add { display: flex; gap: 6px; margin-bottom: 4px; }
+.watched-add input { flex: 1; min-width: 0; font-size: 11.5px; padding: 3px 6px; }
+.watched-add input[aria-invalid="true"] { border-color: var(--red); }
+.watched-add .btn { padding: 2px 9px; font-size: 11.5px; }
+.watched-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.watched-list li { padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.watched-list li:first-child { border-top: none; }
+.watched-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.watched-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watched-x { padding: 0 3px; }
 .auto-st.st-stalled, .auto-st.st-merge-failed { color: var(--red); }
 .auto-st.st-queued, .auto-st.st-reviewing, .auto-st.st-merging { color: var(--amber); }
 .auto-badge { margin-left: 2px; padding: 0 5px; border-radius: 6px; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; background: var(--claude); color: var(--bg); }

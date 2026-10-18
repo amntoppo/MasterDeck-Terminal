@@ -598,3 +598,144 @@ describe('prStatesFor', () => {
     expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
   })
 })
+
+describe('PrWatch: watches the user asked for (#182)', () => {
+  const ask = (n = 7, o: Partial<Parameters<PrWatch['start']>[0]> = {}) => ({ url: url(n), owner: 'acme', repo: 'web', number: n, tabId: 'prs-1', tabName: 'Team', account: null, title: 'Fix it', head: 'h1', ...o })
+  /** The review session's side, recorded. */
+  function review(ok = true) {
+    const said: string[] = []
+    const told: string[] = []
+    const rereviews: string[] = []
+    const stopped: string[] = []
+    const r: NonNullable<PrWatchDeps['review']> = {
+      say: (_w, t) => (said.push(t), { ok, message: ok ? 'typed' : 'busy' }),
+      rereview: (w) => rereviews.push(w.url),
+      notify: (w, kind, head) => told.push(`${kind}:${w.number}${head ? `@${head}` : ''}`),
+      stopped: (w) => stopped.push(w.url),
+    }
+    return { r, said, told, rereviews, stopped }
+  }
+  // Someone else's PR (bob's), read as "me".
+  const bobs = (o: object = {}) => ({ ...lightPr, author: { login: 'bob' }, title: 'Fix it', headRefOid: 'h1', ...o })
+
+  it('one watch per PR: a second start reuses it, and a session’s own watch counts', () => {
+    const { w } = make(fakeGh(() => null).gh)
+    expect(w.start(ask(), null, NOW)).toMatchObject({ ok: true, message: 'Watching' })
+    expect(w.start(ask(), null, NOW)).toMatchObject({ ok: true, reused: true })
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    expect(w.start(ask(1), null, NOW)).toMatchObject({ reused: true })
+    expect(w.rows([sess()]).map((r) => [r.number, r.manual])).toEqual([[7, true], [1, false]])
+  })
+  it('persists across a restart, with its tab and target', () => {
+    const { w, file } = make(fakeGh(() => null).gh)
+    w.start(ask(), null, NOW)
+    const again = make(fakeGh(() => null).gh, file).w
+    expect(again.rows([])).toMatchObject([{ url: url(7), manual: true, tabId: 'prs-1', tabName: 'Team', title: 'Fix it', target: { review: 'prs-1' } }])
+  })
+  /** One PR's fields for both reads: the light read sees what the full one does. */
+  const both = (cur: () => object) => fakeGh((_i, h) => (h ? { reviewThreads: { nodes: [] }, reviews: { nodes: [] }, comments: { nodes: [] }, ...cur() } : cur()))
+  it('does not end because the PR is someone else’s, and starts quiet', async () => {
+    let cur: object = bobs({ reviewThreads: { nodes: [thread(1, 'old')] } })
+    const rv = review()
+    const { w } = make(both(() => cur).gh, undefined, false, { review: rv.r })
+    w.start(ask(), null, NOW)
+    await w.poll(NOW)
+    w.deliver([], NOW)
+    expect(w.rows([])).toHaveLength(1)
+    expect(rv.said).toEqual([])
+    cur = bobs({ updatedAt: 'later', reviewThreads: { nodes: [thread(1, 'old'), thread(2, 'new one')] } })
+    await w.poll(NOW + 60_000)
+    w.deliver([], NOW + 60_000)
+    expect(rv.said).toHaveLength(1)
+    expect(rv.said[0]).toMatch(/^\[MasterDeck PR watch\] acme\/web#7 "Fix it" has 1 new comment: bob \(on a line\): "new one"/)
+  })
+  it('no session owns it: the account’s own posts are the review session’s, never news', async () => {
+    const mine = { isResolved: false, comments: { nodes: [{ databaseId: 9, updatedAt: 'u', author: { login: 'me' }, body: 'my review note' }] } }
+    let cur: object = bobs()
+    const rv = review()
+    const { w } = make(both(() => cur).gh, undefined, false, { review: rv.r, ownPost: () => () => false })
+    w.start(ask(), null, NOW)
+    await w.poll(NOW)
+    cur = bobs({ updatedAt: 'later', reviewThreads: { nodes: [mine] } })
+    await w.poll(NOW + 60_000)
+    w.deliver([], NOW + 60_000)
+    expect(rv.said).toEqual([])
+  })
+  it('a busy review session keeps the news for the next try', async () => {
+    let cur: object = bobs()
+    const rv = review(false)
+    const { w } = make(both(() => cur).gh, undefined, false, { review: rv.r })
+    w.start(ask(), null, NOW)
+    await w.poll(NOW)
+    cur = bobs({ updatedAt: 'later', comments: { nodes: [{ databaseId: 3, updatedAt: 'u', author: { login: 'carol' }, body: 'lgtm?' }] } })
+    await w.poll(NOW + 60_000)
+    w.deliver([], NOW + 60_000)
+    w.deliver([], NOW + 61_000)
+    expect(rv.said).toHaveLength(2)
+    expect((w as unknown as { list: { pending: unknown[] }[] }).list[0].pending).toHaveLength(1)
+  })
+  it('new commits ask for a review; ready to merge is told once per head; a merge ends it in Needs you', async () => {
+    let l: object = bobs()
+    const heavy = () => ({ ...l, reviewThreads: { nodes: [] }, reviews: { nodes: [] }, comments: { nodes: [] } })
+    const rv = review()
+    const { w } = make(fakeGh((_i, h) => (h ? heavy() : l)).gh, undefined, false, { review: rv.r })
+    w.start(ask(), null, NOW)
+    await w.poll(NOW)
+    expect(rv.rereviews).toEqual([])
+    l = bobs({ headRefOid: 'h2', updatedAt: 'u2' })
+    await w.poll(NOW + 60_000)
+    expect(rv.rereviews).toEqual([url(7)])
+    const ready = { headRefOid: 'h2', reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN', commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] } }
+    l = bobs({ ...ready, updatedAt: 'u2' })
+    await w.poll(NOW + 120_000)
+    await w.poll(NOW + 180_000)
+    expect(rv.told).toEqual(['ready:7@h2'])
+    l = bobs({ ...ready, state: 'MERGED', updatedAt: 'u3' })
+    await w.poll(NOW + 240_000)
+    expect(rv.told).toEqual(['ready:7@h2', 'merged:7'])
+    expect(rv.stopped).toEqual([url(7)])
+    w.deliver([], NOW + 240_000)
+    expect(rv.said).toEqual([])
+    expect(w.rows([])).toEqual([])
+  })
+  it('owned by a session: its news goes there; when the session ends it falls back to the review session', async () => {
+    let cur: object = bobs()
+    const rv = review()
+    const { w, sent } = make(both(() => cur).gh, undefined, false, { review: rv.r })
+    w.start(ask(), null, NOW)
+    w.sync({ sessions: [sess()], sessionPrs: {}, prLive: {} }, () => false, NOW, (u) => (u === url(7) ? sess() : null))
+    expect(w.rows([sess()])[0].target).toEqual({ session: { key: 'k1', name: 's' } })
+    // The tab's review session stops reviewing the PR's pushes once a session owns it.
+    expect(rv.stopped).toEqual([url(7)])
+    // The session's own switch being off does not drop the user's watch.
+    expect(w.rows([sess()])).toHaveLength(1)
+    await w.poll(NOW)
+    cur = bobs({ updatedAt: 'later', comments: { nodes: [{ databaseId: 3, updatedAt: 'u', author: { login: 'carol' }, body: 'please rename' }] } })
+    await w.poll(NOW + 60_000)
+    w.deliver([sess()], NOW + 60_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('web#7: 1 new PR comment: carol: "please rename"')
+    w.deliver([sess('done')], NOW + 70_000)
+    expect(w.rows([])[0].target).toEqual({ review: 'prs-1' })
+  })
+  it('stops from the eye (an automatic one is kept stopped), and a new start undoes the stop', () => {
+    const rv = review()
+    const { w } = make(fakeGh(() => null).gh, undefined, false, { review: rv.r })
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    expect(w.stop(`pr:${url(1)}`)).toBe(true)
+    w.sync(one(NOW - 60_000), () => true, NOW)
+    expect(w.info([sess()])).toEqual([])
+    expect(w.start(ask(1), null, NOW)).toMatchObject({ ok: true, message: 'Watching' })
+    expect(w.rows([sess()]).map((r) => r.manual)).toEqual([true])
+    w.stop(`pr:${url(1)}`)
+    expect(rv.stopped).toEqual([url(1)])
+  })
+  it('a closed tab ends the watches it routed to its review session, not those a session owns', () => {
+    const { w } = make(fakeGh(() => null).gh)
+    w.start(ask(7), null, NOW)
+    w.start(ask(8), sess(), NOW)
+    w.forgetTab('prs-1')
+    expect(w.rows([sess()]).map((r) => [r.number, r.tabId])).toEqual([[8, null]])
+  })
+})
