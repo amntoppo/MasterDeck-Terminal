@@ -70,14 +70,22 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
-- `.github/workflows/` — `ci.yml` (pull requests only: Python tests, typecheck, vitest, unpublished
-  DMG/EXE builds), `release.yml` (a `v*` tag, or called: build, attach, then `ota-release.yml`, which
-  signs and publishes the in-app update) and `ota-main.yml`: **every merge to `main` that changes
+- `.github/workflows/` — PR → checks → merge → release → OTA (#178). `ci.yml` (pull requests:
+  checks only, on ubuntu: Python tests, typecheck + vitest, actionlint for workflow changes; what
+  runs is `app/scripts/ci-changes.mjs`; a new push cancels the old run; the job **CI** is the one
+  required check, branch protection on `main`), `package.yml` (a PR's mac/win build, only for
+  packaging files or the `build` label), `build.yml` (the one build, mac ∥ win; whisper-cli and
+  md-mute cached, `.github/actions/native-helpers`), `release.yml` (a `v*` tag, or called: tests on
+  the tag's commit, `build.yml`, attach, then `ota-release.yml`, which signs, publishes the in-app
+  update and smoke-checks it, `app/scripts/release-smoke.mjs`), `web-deploy.yml` (app.masterdeck.dev
+  on merges that change the web app, once the Cloudflare secrets exist) and `ota-main.yml`: **every merge to `main` that changes
   the app is released to users** (Actions: **Auto release**; runs on the push, its build runs the
   tests again; patch + 1 from the latest tag, or `package.json`'s
   higher minor/major; a release commit only the tag holds; channel/rollout from the repo variables
   `OTA_MAIN_CHANNEL` / `OTA_MAIN_ROLLOUT`, `OTA_MAIN=off` pauses it; logic in
-  `app/scripts/auto-release.mjs`). See [OPERATIONS § Release](docs/OPERATIONS.md#release).
+  `app/scripts/auto-release.mjs`; after a release it comments the link on the PRs and moves their
+  tickets to Done with `BOARD_TOKEN`). See [OPERATIONS § Release](docs/OPERATIONS.md#release)
+  (pause: `OTA_MAIN=off`; yank: `PATCH … {"yanked":true}`).
 
 ## Commands
 
@@ -150,7 +158,9 @@ It never opens the Keychain (a new ad-hoc build would put a dialog up that block
 Never edit it by hand: change the backend file, then `app/scripts/sync-protocol.sh` (reads
 `$MASTERDECK_BACKEND`, default `../../masterdeck-backend` from `app/scripts`). The drift test
 `app/src/shared/remote.drift.test.ts` compares the two; it resolves the backend as the sibling
-checkout (or `MASTERDECK_BACKEND`) and **skips** when that is missing (so it never runs in CI).
+checkout (or `MASTERDECK_BACKEND`) and **skips** when the sibling is missing; a `MASTERDECK_BACKEND`
+without the file fails. CI checks backend `master` out for it once the secret `BACKEND_DEPLOY_KEY`
+exists (until then it skips there too, with a notice).
 `session.start.account` (2026-10-03) is optional; desktops before it refuse a command that sets it.
 It fails when the backend checkout is on a branch with a different `protocol.ts`.
 `PROTOCOL_VERSION` is 3 (`MIN_PROTOCOL` 2); keep changes additive so old desktops, servers and
@@ -276,6 +286,8 @@ buttons; it does not go through macOS window drag regions.
   session (`claude rm` deletes its worktree too): the old side of a copy is listed in
   `superseded-sessions.json` (`main/superseded.ts`) and hidden while it does not run.
 - **Shell scripts run under macOS bash 3.2**: write `${var}` before non-ASCII text (`"$chip…"` breaks).
+  Their tests also run on Linux in CI (#178): where BSD and GNU tools differ, try GNU's form first
+  (`stat -c %Y f || stat -f %m f`: GNU reads `-f` as "file system" and prints instead of failing).
 - **A ticket session MasterDeck starts sits in its repository's main checkout** until it makes its
   worktree (a PR review stays there), on whatever branch was left checked out. `master spawn`
   records it (`parked-sessions.json`); before giving a session anything that belongs to "the branch
@@ -465,6 +477,21 @@ buttons; it does not go through macOS window drag regions.
   minutes equal on Terminals and Dashboard (0.3–0.4 %, ~160 wakeups/min). Not checked: the real
   web app over the bridge, a real phone, Windows, real sessions and GitHub data in the installed app.
   Open points: TODO ("Dashboard (#183): open points").
+
+- **CI/CD for a fast cycle (#178)** on branch `worktree-178-ci-cd-fast-cycle` (PR, not merged).
+  PR CI is checks only on ubuntu (Python, typecheck + vitest, actionlint) behind one required job
+  **CI**, cancels older runs, and skips docs-only PRs (`app/scripts/ci-changes.mjs`); installers are
+  built by `build.yml` only at release and in `package.yml` (packaging files or the `build` label),
+  whisper-cli and md-mute cached; `release.yml` tests on ubuntu before building; `ota-release.yml`
+  smoke-checks the published update (`release-smoke.mjs`); Auto release's **announce** comments the
+  release on the PRs and moves tickets to Done; `web-deploy.yml` deploys app.masterdeck.dev. Spec and
+  plan: `docs/superpowers/{specs,plans}/2026-10-18-ci-cd-fast-cycle*`. For the owner after the merge:
+  branch protection (OPERATIONS § Protecting main) and the optional secrets `BOARD_TOKEN` (+ variable
+  `BOARD_PROJECT`), `BACKEND_DEPLOY_KEY`, `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`; each part
+  says in a notice when its secret is missing. The backend's deploy on merge waits on #4. Checked:
+  actionlint, vitest for the two scripts, the full suite and typecheck, the PR's own CI run. Not
+  checked: a real release through the new `build.yml`, the smoke check against a real publish, the
+  announce job, a web deploy (all need a merge and the secrets). Open points: TODO ("CI/CD (#178)").
 
 - **Watch any PR (#182)** on branch `worktree-182-watch-any-pr` (PR, not merged, **not
   installed**: the rebuild of the real app waits for the user's word). The eye on every open PR

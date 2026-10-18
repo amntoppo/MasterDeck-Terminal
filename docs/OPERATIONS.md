@@ -53,6 +53,20 @@ open /Applications/MasterDeck.app
 
 ## Release
 
+```
+PR ─► CI (checks only, the required check) ─► merge ─► Auto release: test → build mac ∥ win → attach
+   → publish the OTA update → smoke check → release link on the PRs, tickets to Done
+                                         └─► Web deploy (web files changed): app.masterdeck.dev
+```
+
+**Pause and yank, one step each:**
+
+- **Pause** automatic releases: repository → Settings → Secrets and variables → Actions →
+  Variables → `OTA_MAIN` = `off` (`gh variable set OTA_MAIN -b off`; remove it to resume:
+  `gh variable delete OTA_MAIN`). Merges still run CI; nothing is released.
+- **Yank** a bad update: `PATCH /v1/admin/releases/X.Y.Z` with `{"yanked":true}` (the command is
+  under "Yank a bad update" below). From then on no install is offered it.
+
 **Every merge to `main` that changes the app is released automatically** (issue #166, below:
 "Automatic release on every merge"): a patch version, a GitHub release and the in-app update, with
 no manual step. A release by hand is for a minor or major version, a beta, or a release of a
@@ -75,20 +89,53 @@ git push origin main && git push origin vX.Y.Z
 A version with a `-` (`0.10.0-beta.1`) is the **beta** channel and a GitHub prerelease (so
 `install.sh`, which takes the latest release, stays on stable); anything else is **stable**.
 
-**CI.** `.github/workflows/ci.yml` runs on **pull requests only** (and by hand): the Python
-tests, typecheck and vitest, and the DMGs and zips (macos-latest) and the NSIS EXE (windows-latest),
-unpublished. A merge to `main` is built and tested by the automatic release below, a tag by
-`release.yml`. `.github/workflows/release.yml` runs on a tag `v*` (or by hand, **Run workflow** with
-an existing tag):
+**CI** (`.github/workflows/ci.yml`, issue #178) runs on **pull requests** (also on `merge_group`
+for a merge queue, and by hand), checks only, on `ubuntu-latest`, in parallel:
 
-1. **build** (mac and win, the same steps as `ci.yml`, `--publish never`) uploads the DMGs, the mac
-   zips, the EXE, the blockmaps and `latest*.yml` as artifacts.
-2. **release** (ubuntu) checks the tag against `app/package.json`'s version and attaches the DMGs
+| Job | What | When |
+|---|---|---|
+| `changes` | `app/scripts/ci-changes.mjs` (tested): what the PR changed since it left the base | always |
+| `python` | `pytest skills/master/tests` (pip cache, `.github/requirements-ci.txt`) | `code` |
+| `app` | `npm run typecheck`, `npm test` (npm cache, no Electron download); the protocol drift test against the backend when the secret `BACKEND_DEPLOY_KEY` is set | `code` |
+| `actionlint` | every workflow, with shellcheck on their scripts | a `.github/workflows` or `.github/actions` YAML changed |
+| **CI** | fails when any job above failed or was cancelled (skipped is fine): **the one check to require** | always |
+
+`code` is every change except docs: `**/*.md` outside `skills/`, `mods/`, `app/src/` and
+`app/test/` (those ship or are read by tests), `docs/`, `.claude/`, `.github/` other than CI's own
+files (`ci.yml`, `.github/actions/`, `requirements-ci.txt`), `LICENSE`, `.gitignore`. A docs-only
+PR gets a green **CI** in seconds. This is not `ota-main.yml`'s list: that one skips tests, which a
+PR must run. A new push to a PR cancels its older run (`concurrency: ci-<number>`).
+
+**Package** (`.github/workflows/package.yml`, not required) builds the DMGs, mac zips and NSIS EXE
+on a PR (unpublished, artifacts kept 7 days) only when it changes what they are built from
+(`ci-changes.mjs` `package`: `app/electron-builder.yml`, `app/electron.vite.config.ts`, `app/build/`,
+`app/native/`, `app/resources/`, `whisper.sh`, `mute.sh`, `build.yml`, `package.yml`,
+`.github/actions/`, `app/package.json`'s dependencies / `main` / `build` / `postinstall` / `dist:*`,
+the lock beyond its version) or when the PR has the **build** label (adding it starts the build).
+**Run workflow** builds any branch.
+
+**Build** (`.github/workflows/build.yml`, reusable) is the one build: mac (macos-latest) and win
+(windows-latest) in parallel, `--publish never`, artifacts `masterdeck-macos-latest` /
+`masterdeck-windows-latest`. whisper-cli and md-mute come from the Actions cache
+(`.github/actions/native-helpers`: keyed by the hash of `whisper.sh`, which pins whisper.cpp's
+commit, and of `mute.sh` + `app/native/mute/`; checked with `codesign --verify`) and are built only
+when their sources changed. A cache saved by a release on `main` is restored by later releases and
+by PRs.
+
+`.github/workflows/release.yml` runs on a tag `v*` (or by hand, **Run workflow** with an existing
+tag; a tag made before #178 has no `.github/actions/` and fails at its setup step, but those are
+released already):
+
+1. **test** (ubuntu) runs the Python tests, typecheck and vitest on the tag's commit (a merge can
+   differ from the PR head that passed CI), before any mac/win minute.
+2. **build** calls `build.yml` with the tag; it uploads the DMGs, the mac zips, the EXE, the
+   blockmaps and `latest*.yml` as artifacts.
+3. **release** (ubuntu) checks the tag against `app/package.json`'s version and attaches the DMGs
    and EXE (new installs) and the update files (the two mac zips, the EXE's `.blockmap`) to the
    GitHub release, with the tag's `.github/releases/<tag>.md` (when there is one) on top of
    `.github/release-notes.md` as the body.
-3. **ota** calls `.github/workflows/ota-release.yml` (below), last, so a live update always has its
-   installers on GitHub.
+4. **ota** calls `.github/workflows/ota-release.yml` (below), last, so a live update always has its
+   installers on GitHub. It ends with the smoke check.
 
 `release.yml` is also callable (`workflow_call` with `tag`, an optional `rollout` and the two
 secrets): that is how `ota-main.yml` runs it, since a tag pushed with `GITHUB_TOKEN` starts no
@@ -96,8 +143,9 @@ workflow.
 
 ### Automatic release on every merge
 
-`.github/workflows/ota-main.yml` (**Auto release** in the Actions tab; it calls **Release**, which calls **OTA release**) runs on every push to `main`. The merged code passed CI on its pull request, and `release.yml`
-runs the Python tests, typecheck and vitest again on both builds before anything is published. A
+`.github/workflows/ota-main.yml` (**Auto release** in the Actions tab; it calls **Release**, which calls **OTA release**) runs on every push to `main`. The merged code passed CI on its pull request (required by branch
+protection, below), and `release.yml` runs the Python tests, typecheck and vitest again on the
+merge commit before the builds. A
 push that touches only docs, tests or CI starts nothing (`paths-ignore`, the same list as
 `IGNORED_PATHS` / `isAppFile` in `app/scripts/auto-release.mjs`; a test keeps them equal). Spec:
 `docs/superpowers/specs/2026-10-18-ota-on-merge-design.md`.
@@ -123,9 +171,15 @@ push that touches only docs, tests or CI starts nothing (`paths-ignore`, the sam
    `package.json` keeps the last version set by hand. The tag is self-describing, so
    `release.yml`'s and `ota-release.yml`'s version checks and notes work unchanged, and every way
    of publishing it again gives the same notes (the backend refuses a re-publish with others).
-2. **release** calls `release.yml` with the tag and the rollout (build mac and win with the tests,
-   attach, `ota-release.yml`). Nothing is published unless both builds and their tests pass.
-3. **report** sets the status to success (the version, channel and rollout, or why nothing was
+2. **release** calls `release.yml` with the tag and the rollout (test, build mac and win, attach,
+   `ota-release.yml` with its smoke check). Nothing is published unless the tests and both builds
+   pass.
+3. **announce** (only after a published release) comments the release's link, channel and rollout
+   on every PR it ships (the PRs its notes link, and the merge commit's own; once per PR and
+   version, marked `<!-- masterdeck-release:vX.Y.Z -->`), then moves the issues those PRs close to
+   **Done** on the board when the secret `BOARD_TOKEN` and the variable `BOARD_PROJECT` are set
+   (an issue not on that board is left alone). Without them it says so in a notice.
+4. **report** sets the status to success (the version, channel and rollout, or why nothing was
    released) or failure, and on failure comments on the merged PR with the run's link.
 
 **Order.** One concurrency group, `ota-main-refs/heads/main`, never cancelled in progress. GitHub keeps one pending
@@ -139,6 +193,8 @@ merge before it (its notes list them all).
 | `OTA_MAIN_CHANNEL` | `stable` | `beta` sends merges to the beta channel (`X.Y.Z-beta.N`, a GitHub prerelease) |
 | `OTA_MAIN_ROLLOUT` | `100` | The first rollout percent; raise it later with `PATCH` (below) |
 | `OTA_MAIN` | on | `off` pauses automatic releases (Run workflow still works) |
+| `BOARD_PROJECT` | unset | The board whose tickets go to Done after a release, `owner/number` (`amntoppo/1`); needs the secret `BOARD_TOKEN` |
+| `BOARD_DONE` | `Done` | The board's Status option for a released ticket |
 
 `min_supported` is never set automatically. **Run workflow** on *Auto release* releases the current
 `main` with a channel and rollout picked for that run.
@@ -162,6 +218,30 @@ more merges are coming before the fix, merge the fix (it ships as the next patch
 reaches the installs on X.Y.Z), then remove `OTA_MAIN`. Optionally mark the GitHub release a
 prerelease (so `install.sh` skips it) or delete it; keep the tag: a version is never reused. To
 force installs off X.Y.Z, set `minSupportedVersion` on the fixed release with the same `PATCH`.
+
+### Protecting main
+
+`main` takes changes through pull requests only, each with the **CI** check passed on a branch up
+to date with `main`, and auto-merge is on (**Enable auto-merge** on a PR merges it once it is
+green). Set once by the owner (it was not set before #178):
+
+```bash
+gh api -X PUT repos/amntoppo/MasterDeck-Terminal/branches/main/protection --input - <<'EOF'
+{"required_status_checks": {"strict": true, "checks": [{"context": "CI"}]},
+ "enforce_admins": true,
+ "required_pull_request_reviews": {"required_approving_review_count": 0},
+ "restrictions": null, "allow_force_pushes": false, "allow_deletions": false}
+EOF
+gh api -X PATCH repos/amntoppo/MasterDeck-Terminal -F allow_auto_merge=true > /dev/null
+gh api repos/amntoppo/MasterDeck-Terminal/branches/main/protection --jq '.required_status_checks'
+```
+
+Auto release pushes only tags, so protection does not touch it. A PR opened before #178 runs the
+old `ci.yml` (no **CI** check): updating its branch from `main` (which "up to date" asks anyway)
+brings the new one. For an emergency push straight to `main`, an admin turns `enforce_admins`
+off (`gh api -X DELETE repos/amntoppo/MasterDeck-Terminal/branches/main/protection/enforce_admins`)
+and back on after. `ci.yml` also runs on `merge_group`, so a **merge queue** (Settings → Rules)
+can replace "up to date" when PRs start waiting on each other.
 
 ### Publishing the update (ota-release.yml)
 
@@ -194,12 +274,27 @@ and registers the release with `POST /v1/admin/releases`, which checks every siz
 signature. Nothing is offered to users until
 that last call. The DMGs stay on GitHub Releases for new installs (`install.sh`, the website).
 
+**Smoke check.** Last, the workflow runs `app/scripts/release-smoke.mjs --version X.Y.Z [--rollout
+N]` (tested in `release-smoke.test.ts`; reads only, safe to run by hand): for mac arm64, mac Intel
+and Windows, `GET /v1/updates/check` from version 0.0.0 with an install id in rollout bucket 0
+(inside every rollout above 0) must offer X.Y.Z with the expected file name, an https address and
+a signature that verifies against the app's key (`releaseKey.ts`, or `--expect-key`); the
+per-install feed (`latest-mac.yml` / `latest.yml`) must name it; the file must download with the
+offered size and sha512. Each call is tried three times. A rollout of 0 offers it to nobody, so
+nothing is checked. Notices, not failures: a newer version offered instead (a re-publish of an
+older release), and, when no rollout was given (a `release: published` run keeps the stored one),
+the version not offered at all. A tag from before #178 has no script and is not checked. A failure fails the run (and Auto release's report comments on the PR): the
+update may be live but broken, so look at the log, and yank it if a file is wrong.
+
 **Secrets** (repository → Settings → Secrets and variables → Actions; set by the owner):
 
 | Secret | What |
 |---|---|
 | `RELEASE_ADMIN_TOKEN` | The backend's `RELEASE_ADMIN_TOKEN` (the admin routes' bearer token) |
 | `RELEASE_SIGNING_KEY` | The release private key, PKCS8 PEM (the whole file, `-----BEGIN PRIVATE KEY-----` included) |
+| `BOARD_TOKEN` | Optional: a classic personal access token with the `project` scope (a fine-grained one needs Projects read and write on the board's owner), for Auto release's **announce** (tickets to Done). Unset: tickets are not moved |
+| `BACKEND_DEPLOY_KEY` | Optional: the private half of a **read-only deploy key** of `masterdeck-backend` (`ssh-keygen -t ed25519 -N '' -f k`; backend → Settings → Deploy keys gets `k.pub`), for CI's protocol drift test (#5). Unset (and on forks): the test skips with a notice |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Optional: for **Web deploy** (below). A token from the "Edit Cloudflare Workers" template on the account and the `masterdeck.dev` zone (Workers Scripts edit, Workers Routes edit, the zone's DNS for the custom domain). Unset: the web app is not deployed, with a notice |
 
 The private key is also kept on the owner's Mac at
 `~/.config/masterdeck-remote/release-signing-key.pem` (mode 600), and nowhere else. Its public key
@@ -267,6 +362,19 @@ others beside the real zip.
 
 ## Web app deploy
 
+**On merge** (`.github/workflows/web-deploy.yml`, **Web deploy**, #178): every push to `main` that
+changes what the web app is built from (`app/src/web/`, `app/src/renderer/`, `app/src/shared/`,
+`app/web/`, `app/vite.web.config.ts`, `app/package.json` and its lock; not tests or Markdown) runs
+`build:web` and `wrangler@4 deploy -c web/wrangler.jsonc` with the secrets `CLOUDFLARE_API_TOKEN`
+and `CLOUDFLARE_ACCOUNT_ID` (table above), then checks that app.masterdeck.dev serves the bundle the
+built `index.html` names. A commit status **Web deploy** on the commit, and a comment on the
+merged PR on failure. One deploy at a time (a newer push waits). Until the secrets are set it does
+nothing but say so in a notice. **Run workflow** deploys `main` by hand. The desktop part of a
+merge reaches Macs through Auto release a few minutes later, so the web app must keep working with
+the previous desktop (the protocol stays additive, `PROTOCOL_VERSION`).
+
+**By hand** (no CI token, or another branch):
+
 ```bash
 cd app && npm run deploy:web     # build:web (MD_API https://dev.masterdeck.dev) + wrangler@4 deploy -c web/wrangler.jsonc
 ```
@@ -289,7 +397,7 @@ from the README, the release notes (`.github/release-notes.md`) and the reposito
 ## Backend deploy (other repo, for reference)
 
 `cd ~/Documents/masterdeck-backend && npx wrangler deploy` (local; the CI deploy fails
-with Cloudflare error 7403). Changes go branch → PR → squash merge to `master`, when the user
+with Cloudflare error 7403, #4: the deploy on merge waits on that token's fix, #137). Changes go branch → PR → squash merge to `master`, when the user
 asks. Secrets `DESKTOP_TOKEN` / `CLIENT_TOKEN` / `CALLBACK_SECRET` (static dev/test tokens are
 only accepted on dev hosts since accounts/OAuth); local copies in `~/.config/masterdeck-remote/`
 (mode 600). The owner's Cloudflare account,
@@ -738,7 +846,9 @@ a tab open is still to be measured (TODO).
 |---|---|
 | `npm test` / `npm run dev` crash in node-pty (wrong architecture, x86_64) | `cd app && npx electron-builder install-app-deps` (needed after every packaging build) |
 | `electron-builder` fails or DMG build dies | disk space: `rm -rf app/dist`; a DMG build needs ~1.5 GB free |
-| `remote.drift.test.ts` fails | the backend checkout is on a branch whose `src/protocol.ts` differs (or `remote.ts` was hand-edited). Check out backend `master` (or the matching branch) or run `app/scripts/sync-protocol.sh`; set `MASTERDECK_BACKEND` if the backend lives elsewhere. Missing checkout = skipped |
+| `remote.drift.test.ts` fails | the backend checkout is on a branch whose `src/protocol.ts` differs (or `remote.ts` was hand-edited). Check out backend `master` (or the matching branch) or run `app/scripts/sync-protocol.sh`; set `MASTERDECK_BACKEND` if the backend lives elsewhere. Missing sibling checkout = skipped; a `MASTERDECK_BACKEND` without `src/protocol.ts` fails. In CI it runs against backend `master` once `BACKEND_DEPLOY_KEY` is set: a backend protocol change turns every PR red until it is synced here |
+| CI is required but a PR shows no **CI** check | the PR was opened before #178 and runs its own old `ci.yml`: update the branch from `main` |
+| Release smoke check fails | the update is published: read the step's log (which platform, which check). A wrong or missing file: yank the version (above) and merge a fix. A network error only: re-run the job |
 | Remote stuck on "waiting for sessions to load" | `claude agents --json` is failing (the status says why when it errors); run it by hand. After 60 s the line connects anyway; commands then fail at once with "MasterDeck has no session list: …" and no snapshot is sent until the session list is in |
 | "Another Mac is connected to this account" | close 4005: only one Mac per account; sign the other out |
 | Notifications never show | the bundle needs a whole-bundle (ad-hoc) signature; reinstall from a fresh build |

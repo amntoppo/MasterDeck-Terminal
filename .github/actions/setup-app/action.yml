@@ -1,0 +1,22 @@
+name: Set up the app
+description: Node 22 with the npm cache, then npm ci in app/ (without the Electron download unless asked).
+inputs:
+  electron:
+    description: "'true' downloads Electron's binary (packaging needs it; typecheck and vitest do not)"
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: app/package-lock.json
+    # postinstall still runs electron-builder install-app-deps (node-pty for Electron's ABI).
+    - name: Install
+      shell: bash
+      working-directory: app
+      run: npm ci
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.electron != 'true' && '1' || '' }}

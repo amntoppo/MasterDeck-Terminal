@@ -1,9 +1,11 @@
 name: Release
 
 # A tag v* builds the installers, attaches them and the update files to the GitHub release, then
-# runs ota-release.yml, which publishes the in-app update (signed, app/scripts/release-publish.mjs).
-# ci.yml does not run on tags, so a tag is built once. ota-main.yml calls it for every merge to
-# main (a tag it pushes with GITHUB_TOKEN starts no workflow). docs/OPERATIONS.md § Release.
+# runs ota-release.yml, which publishes the in-app update (signed, app/scripts/release-publish.mjs)
+# and checks it (release-smoke.mjs). test (ubuntu) → build (build.yml: mac and win in parallel) →
+# release → ota. ci.yml does not run on tags, so a tag is built once. ota-main.yml calls it for
+# every merge to main (a tag it pushes with GITHUB_TOKEN starts no workflow). docs/OPERATIONS.md
+# § Release.
 on:
   push:
     tags: ['v*']
@@ -39,69 +41,37 @@ env:
   TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  build:
-    strategy:
-      # A release needs both builds; one failing stops the other (no half release).
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            dist: dist:mac
-          - os: windows-latest
-            dist: dist:win
-    runs-on: ${{ matrix.os }}
+  # The tag's commit, not the PR head that passed CI: a merge can differ. Quick, on ubuntu, before
+  # any mac/win minute.
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
       - name: Python tests
         run: |
-          python -m pip install pytest
+          python -m pip install -r .github/requirements-ci.txt
           python -m pytest skills/master/tests -q
-      - name: Install
-        working-directory: app
-        run: npm ci
+      - uses: ./.github/actions/setup-app
       - name: Typecheck and test
         working-directory: app
         run: |
           npm run typecheck
           npm test
-      - name: Build whisper-cli (meetings' speech engine, macOS only)
-        if: runner.os == 'macOS'
-        working-directory: app
-        run: |
-          command -v cmake >/dev/null || brew install cmake
-          ./scripts/whisper.sh arm64
-          ./scripts/whisper.sh x64
-      - name: Build md-mute (meetings' mute reader, macOS only)
-        if: runner.os == 'macOS'
-        working-directory: app
-        run: |
-          ./scripts/mute.sh arm64
-          ./scripts/mute.sh x64
-      - name: Build installers
-        working-directory: app
-        run: npm run ${{ matrix.dist }} -- --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: masterdeck-${{ matrix.os }}
-          if-no-files-found: error
-          path: |
-            app/dist/*.dmg
-            app/dist/*.zip
-            app/dist/*.exe
-            app/dist/*.blockmap
-            app/dist/latest*.yml
+
+  # mac and win in parallel; whisper-cli and md-mute come from the cache unless their sources changed.
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      retention-days: 30
 
   release:
     needs: build

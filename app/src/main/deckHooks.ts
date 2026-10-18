@@ -115,7 +115,8 @@ mkdir -p "$D/pending" "$D/answers" "$D/context" "$D/peers" 2>/dev/null
 case "$ev" in
   MonitorCall)
     [ "$(cat "$D/monitors-by" 2>/dev/null)" = masterdeck ] || exit 0
-    m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
+    # GNU's form first: GNU stat reads BSD's -f as "file system" and prints a report instead of failing.
+    m=$(stat -c %Y "$D/alive" 2>/dev/null || stat -f %m "$D/alive" 2>/dev/null || echo 0)
     [ $((now - m)) -lt 30 ] || exit 0
     mkdir -p "$D/watch-requests" "$D/watch-answers" 2>/dev/null
     id="$now-$$-$RANDOM"
@@ -130,7 +131,7 @@ case "$ev" in
     rm -f "$D/watch-requests/$id.json"
     exit 0 ;;
   PermissionRequest)
-    m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
+    m=$(stat -c %Y "$D/alive" 2>/dev/null || stat -f %m "$D/alive" 2>/dev/null || echo 0)
     [ $((now - m)) -lt 30 ] || exit 0
     id="$now-$$-$RANDOM"
     printf '{"id":"%s","pid":%s,"at":%s000,"data":%s}\\n' "$id" "$$" "$now" "$in" > "$D/pending/$id.tmp" && mv "$D/pending/$id.tmp" "$D/pending/$id.json"
@@ -183,7 +184,7 @@ $(jq -r 'input_line_number as $n | "\\($n). \\(.)"' "$f" 2>/dev/null)"; else r="
     f="$Q/$sid.jsonl"
     # MasterDeck messages held for this session (#123, held/<session id>): MasterDeck hands the first one over.
     [ -s "$f" ] || [ -f "$D/held/$sid" ] || exit 0
-    m=$(stat -f %m "$D/alive" 2>/dev/null || stat -c %Y "$D/alive" 2>/dev/null || echo 0)
+    m=$(stat -c %Y "$D/alive" 2>/dev/null || stat -f %m "$D/alive" 2>/dev/null || echo 0)
     if [ $((now - m)) -lt 30 ]; then
       # MasterDeck runs: it picks the next prompt. It claims the request by renaming it, so only
       # one of us ever takes this turn's item.
