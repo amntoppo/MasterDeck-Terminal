@@ -1564,6 +1564,8 @@ function ExtraCard({
       ? "API ERROR"
       : i.kind === "notice"
       ? "NOTICE"
+      : i.detail.type === "threads"
+      ? "REVIEW THREADS"
       : i.detail.type === "nudge"
         ? `${i.kind === "idle" ? "IDLE" : "WAITING"} ${i.detail.minutes}M`
         : i.detail.type === "context"
@@ -1618,7 +1620,7 @@ function ExtraCard({
             {msg}
           </span>
         )}
-        {i.detail.type === "notice" && i.detail.url && (
+        {(i.detail.type === "notice" || i.detail.type === "threads") && i.detail.url && (
           <button className="btn" onClick={() => deck().openExternal((i.detail as { url: string }).url)}>
             View on GitHub
           </button>

@@ -5,7 +5,8 @@ import { groupByAccount } from '@shared/accounts'
 import type { AppConfig } from '@shared/appConfig'
 import { parsePrUrl } from '@shared/prSummary'
 import {
-  BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type OwnCheck, type PrItem, type PrRef,
+  BASELINE_AGE_MS, baselineMessage, followUpMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, threadOutcomes, trackThreads, unhandled,
+  type LightPr, type OwnCheck, type PrItem, type PrRef, type TrackedThread,
 } from '@shared/prWatch'
 import { canDeliver, pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
 import type { AppState, CliResult, Session } from '@shared/types'
@@ -48,6 +49,24 @@ export interface PrWatchEntry {
   error?: string
   errorAt?: number
   okAt?: number
+  /** Who the last full read was as: the account the session posts as. */
+  viewer?: string
+  /** Threads delivered to the session and what became of them (#177). */
+  threads?: TrackedThread[]
+  /**
+   * The follow-up of the last delivery with threads: their ids, when it went, whether the session
+   * was seen at work since, and when its turn was over (the next poll then checks the threads).
+   */
+  follow?: { at: number; ids: string[]; busy: boolean; dueAt?: number }
+}
+
+/** A PR's threads the session replied to and left open: they wait on the user (Needs you). */
+export interface OpenThreads {
+  sessionKey: string
+  url: string
+  repo: string
+  number: number
+  threads: TrackedThread[]
 }
 
 export interface PrWatchDeps {
@@ -82,6 +101,8 @@ const POLL_TTL = 50
  * ponytail: a fixed window; a PR opened inside it is baselined silently too.
  */
 const FIRST_RUN_MS = 10 * 60_000
+/** A delivery's follow-up is due this long after it even when the session was never seen at work. */
+export const FOLLOW_MAX_MS = 10 * 60_000
 const chunks = <T>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const graphql = (q: string) => ['api', 'graphql', '-f', `query=${q}`]
 const ERROR_MAX = 300
@@ -199,6 +220,26 @@ export class PrWatch {
     }
   }
 
+  /**
+   * A due follow-up (the session's turn after a delivery is over, and this read came after it):
+   * one reminder for the delivered threads still without a reply. Threads it replied to and left
+   * open are not nagged; they are the user's (Needs you).
+   */
+  private followUp(w: PrWatchEntry, now: number): string {
+    const f = w.follow
+    if (f?.dueAt === undefined || now < f.dueAt) return ''
+    delete w.follow
+    const waiting = new Set(w.pending.flatMap((x) => (x.thread ? [x.thread.id] : [])))
+    const left = unhandled(w.threads ?? [], f.ids, waiting)
+    if (!left.length) return ''
+    const ids = new Set(left.map((t) => t.id))
+    w.threads = (w.threads ?? []).map((t) => (ids.has(t.id) ? { ...t, reminded: true } : t))
+    const text = followUpMessage(w, left, w.viewer)
+    w.notes.push(text)
+    pushEvents((w.log ??= []), [{ at: now, kind: 'note', text }])
+    return text
+  }
+
   private end(w: PrWatchEntry, line?: string): void {
     w.ended = true
     if (line) {
@@ -287,7 +328,7 @@ export class PrWatch {
             const conflictKnown = w.seen.some((k) => k.startsWith('X:'))
             const due =
               w.heavyAt === 0 || l.updatedAt !== w.updatedAt || now - w.heavyAt >= HEAVY_EVERY_MS || (w.stallAt !== null && now >= w.stallAt) ||
-              l.state !== 'OPEN' || (l.mergeable === 'CONFLICTING') !== conflictKnown
+              l.state !== 'OPEN' || (l.mergeable === 'CONFLICTING') !== conflictKnown || w.follow?.dueAt !== undefined
             // A due PR keeps its old updatedAt until its full read lands: a failed read is retried.
             if (due) heavy.push({ w, l })
             else {
@@ -312,7 +353,7 @@ export class PrWatch {
             const { w, l } = group[i]
             if (!h) return this.failed([w], readError(r, viewer), now)
             this.ok(w, now)
-            const { items, stallAt } = prItems(h, viewer, now, this.ownCheck(w))
+            const { items, stallAt, replied } = prItems(h, viewer, now, this.ownCheck(w))
             const ending = h.state !== 'OPEN'
             const quiet = !!w.quiet
             // Older PR: counted once in a summary, its items never listed. First run: not even that.
@@ -325,6 +366,8 @@ export class PrWatch {
             w.mergeable = h.mergeable
             w.heavyAt = now
             w.stallAt = stallAt
+            w.viewer = viewer
+            if (w.threads?.length) w.threads = threadOutcomes(w.threads, h.threads, replied)
             if (summary) w.notes.push(summary)
             pushEvents((w.log ??= []), [
               ...(summary ? [{ at: now, kind: 'note', text: summary }] : []),
@@ -332,10 +375,12 @@ export class PrWatch {
             ])
             const keys = new Set(news.map((x) => x.key))
             w.pending = [...w.pending.filter((x) => !keys.has(x.key)), ...news.map((x) => ({ ...x, text: x.text.slice(0, TEXT_MAX) }))].slice(-ITEM_MAX)
-            if (news.length || summary || ending) {
-              w.events += news.length + (summary || ending ? 1 : 0)
+            const reminder = ending ? '' : this.followUp(w, now)
+            if (news.length || summary || reminder || ending) {
+              w.events += news.length + (summary ? 1 : 0) + (reminder ? 1 : 0) + (ending ? 1 : 0)
               w.lastEventAt = now
             }
+            if (ending) delete w.follow
             if (ending) {
               this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
               this.deps.ended?.(w.url)
@@ -366,6 +411,7 @@ export class PrWatch {
         this.deps.onChange()
         continue
       }
+      if (s) this.watchTurn(ws, s, now)
       if (!s || this.sending.has(key) || !canDeliver(s)) continue
       const waiting = ws.filter((w) => w.pending.length || w.notes.length)
       if (!waiting.length) {
@@ -376,15 +422,15 @@ export class PrWatch {
         continue
       }
       // One message per PR, built now from what accumulated; PRs past PASTE_MAX wait for next time.
-      const taken: { w: PrWatchEntry; keys: Set<string>; notes: number; nudges: number; text: string }[] = []
+      const taken: { w: PrWatchEntry; items: PrItem[]; notes: number; nudges: number; text: string }[] = []
       let size = 0
       for (const w of waiting) {
-        const m = prWatchMessage(w, w.pending, w.nudges)
+        const m = prWatchMessage(w, w.pending, w.nudges, w.viewer)
         if (!m.text) w.pending = [] // nothing to say about them (a stall past its nudges): dropped
         const text = [m.text, ...w.notes].filter(Boolean).join('\n')
         if (!text) continue
         if (taken.length && size + text.length > PASTE_MAX) break
-        taken.push({ w, keys: new Set(w.pending.map((x) => x.key)), notes: w.notes.length, nudges: m.nudges, text })
+        taken.push({ w, items: [...w.pending], notes: w.notes.length, nudges: m.nudges, text })
         size += text.length + 1
       }
       if (!taken.length) {
@@ -398,10 +444,16 @@ export class PrWatch {
         .send(s, text)
         .then((r) => {
           if (!r.ok) return
+          const at = now
           for (const t of taken) {
-            t.w.pending = t.w.pending.filter((x) => !t.keys.has(x.key))
+            const keys = new Set(t.items.map((x) => x.key))
+            t.w.pending = t.w.pending.filter((x) => !keys.has(x.key))
             t.w.notes.splice(0, t.notes)
             t.w.nudges = t.nudges
+            const ids = t.items.flatMap((x) => (x.kind === 'thread' && x.thread?.id ? [x.thread.id] : []))
+            if (!ids.length) continue
+            t.w.threads = trackThreads(t.w.threads ?? [], t.items, at)
+            t.w.follow = { at, ids: [...new Set([...(t.w.follow?.ids ?? []), ...ids])], busy: false }
           }
           this.list = this.list.filter((w) => !(w.ended && !w.pending.length && !w.notes.length))
           this.save()
@@ -410,6 +462,35 @@ export class PrWatch {
         .catch(() => {})
         .finally(() => this.sending.delete(key))
     }
+  }
+
+  /**
+   * The session's turn after a delivery: seen at work, then over (as canDeliver: idle, or only background work left),
+   * makes its follow-up due; so does FOLLOW_MAX_MS of a turn that never seemed to start.
+   */
+  private watchTurn(ws: PrWatchEntry[], s: Session, now: number): void {
+    for (const w of ws) {
+      const f = w.follow
+      if (!f || f.dueAt !== undefined || this.sending.has(w.sessionKey)) continue
+      // As for delivery: a turn that ended with background work running (a Monitor, a server) is over.
+      const over = canDeliver(s)
+      if (!over) {
+        if (f.busy) continue
+        f.busy = true
+        this.save()
+      } else if (f.busy || now - f.at >= FOLLOW_MAX_MS) {
+        f.dueAt = now
+        this.save()
+      }
+    }
+  }
+
+  /** Per PR, the delivered threads the session replied to and left open (Needs you). */
+  openThreads(): OpenThreads[] {
+    return this.list
+      .filter((w) => !w.ended)
+      .map((w) => ({ sessionKey: w.sessionKey, url: w.url, repo: w.repo, number: w.number, threads: (w.threads ?? []).filter((t) => t.outcome === 'open') }))
+      .filter((x) => x.threads.length)
   }
 
   info(sessions: Session[]): WatchInfo[] {
@@ -427,6 +508,7 @@ export class PrWatch {
         ...(w.error ? { error: w.error, errorAt: w.errorAt ?? null } : {}),
         ...(w.okAt ? { okAt: w.okAt } : {}),
         ...(w.unchecked ? { unchecked: w.unchecked } : {}),
+        ...(w.threads?.length ? { threads: w.threads } : {}),
       }))
   }
 

@@ -110,7 +110,7 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('web#1: 1 new review thread: "rename x"')
+    expect(sent[0]).toMatch(/web#1: 1 new review thread\.[^]*: "rename x"/)
     await w.poll(NOW + 60_000)
     w.deliver([sess()], NOW + 60_000)
     await tick()
@@ -207,7 +207,7 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('1 new review thread: "Bug: target drops itemId"')
+    expect(sent[0]).toMatch(/1 new review thread\.[^]*: "Bug: target drops itemId"/)
     expect(sent[0]).toContain('me: "Two findings"')
     // The session replies on the thread: the reply is its own, so nothing goes back to it.
     wrote.add('Fixed in abc.')
@@ -247,7 +247,7 @@ describe('PrWatch', () => {
     w.deliver([sess()], NOW + 11 * 60_000)
     await tick()
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('1 new review thread: "typo"')
+    expect(sent[0]).toMatch(/1 new review thread\.[^]*: "typo"/)
   })
   it("without the session's transcript, items by its account are held back and counted for Details", async () => {
     const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(), comments: { nodes: [{ databaseId: 3, updatedAt: 'u', author: { login: 'me' }, body: 'Please add a test' }] } } : lightPr))
@@ -306,7 +306,7 @@ describe('PrWatch', () => {
     b.w.deliver([sess()], NOW)
     await tick()
     expect(b.sent).toHaveLength(1)
-    expect(b.sent[0]).toContain('1 new review thread: "new thread"')
+    expect(b.sent[0]).toMatch(/1 new review thread\.[^]*: "new thread"/)
     expect(b.sent[0]).not.toContain('old thread')
   })
   it('batches: one light query per 50 PRs, heavy only for changed ones, nothing while paused', async () => {
@@ -596,5 +596,111 @@ describe('prStatesFor', () => {
     expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
     bobThrows = true
     expect(Object.keys(await prStatesFor(ghFor, cfg, urls))).toEqual([url(1)])
+  })
+})
+
+describe('PrWatch: threads the session handles (#177)', () => {
+  /** A thread with an id; `last` is who wrote its last comment and what. */
+  const idThread = (id: string, by: string, body: string, resolved = false) => ({
+    id, path: 'src/a.ts', line: 3, isResolved: resolved, first: { nodes: [{ url: `https://github.com/acme/web/pull/1#${id}` }] },
+    comments: { nodes: [{ databaseId: Number(id.slice(-1)), updatedAt: `u-${by}`, author: { login: by }, body }] },
+  })
+  /** GitHub whose threads (and updatedAt) the test changes between polls. */
+  function liveGh() {
+    const pr = { threads: [] as object[], updatedAt: '2026-10-03T10:00:00Z' }
+    const { gh } = fakeGh((_i, heavy) => (heavy ? { ...withThreads(...pr.threads), updatedAt: pr.updatedAt } : { ...lightPr, updatedAt: pr.updatedAt }))
+    return { gh, pr }
+  }
+  const replies = new Set<string>()
+  const ownPost = () => (body: string) => replies.has(body)
+  async function delivered() {
+    const g = liveGh()
+    g.pr.threads = [idThread('PRRT_1', 'bob', 'rename x'), idThread('PRRT_2', 'bob', 'why not y?'), idThread('PRRT_3', 'bob', 'product call?')]
+    const m = make(g.gh, undefined, false, { ownPost })
+    m.w.sync(one(NOW - 60_000), () => true, NOW)
+    await m.w.poll(NOW)
+    m.w.deliver([sess()], NOW)
+    await tick()
+    return { ...g, ...m }
+  }
+  it('delivers ids, places and links; outcomes show in Details; one reminder after the turn for threads with no reply', async () => {
+    const { w, sent, pr } = await delivered()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('- PRRT_1 · src/a.ts:3 · bob: "rename x" · https://github.com/acme/web/pull/1#PRRT_1')
+    expect(sent[0]).toContain('Post as me')
+    expect(w.info([sess()])[0].threads?.map((t) => [t.id, t.outcome])).toEqual([['PRRT_1', 'pending'], ['PRRT_2', 'pending'], ['PRRT_3', 'pending']])
+    // The session works: resolves 1 (fixed), resolves 2 (no change needed), replies on 3 and leaves it open.
+    w.deliver([sess('working')], NOW + 5_000)
+    replies.add('Waiting on the owner: which one?')
+    pr.threads = [idThread('PRRT_1', 'me', 'Fixed in abc', true), idThread('PRRT_2', 'me', 'Not needed', true), idThread('PRRT_3', 'me', 'Waiting on the owner: which one?')]
+    pr.updatedAt = '2026-10-03T10:40:00Z'
+    w.deliver([sess()], NOW + 60_000)
+    await w.poll(NOW + 61_000)
+    expect(w.info([sess()])[0].threads?.map((t) => [t.id, t.outcome])).toEqual([['PRRT_1', 'resolved'], ['PRRT_2', 'resolved'], ['PRRT_3', 'open']])
+    // Replied and left open: Needs you, not a reminder.
+    expect(w.openThreads()).toMatchObject([{ url: url(1), repo: 'web', number: 1, threads: [{ id: 'PRRT_3' }] }])
+    w.deliver([sess()], NOW + 62_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+  })
+  it('a thread left without a reply gets one reminder, and only one', async () => {
+    const { w, sent, pr } = await delivered()
+    w.deliver([sess('working')], NOW + 5_000)
+    pr.threads = [idThread('PRRT_1', 'me', 'Fixed', true), idThread('PRRT_2', 'bob', 'why not y?'), idThread('PRRT_3', 'bob', 'product call?')]
+    w.deliver([sess()], NOW + 60_000)
+    await w.poll(NOW + 61_000)
+    w.deliver([sess()], NOW + 62_000)
+    await tick()
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toContain('web#1: 2 review threads you were sent still have no reply and are not resolved: PRRT_2')
+    expect(sent[1]).toContain('PRRT_3')
+    expect(sent[1]).not.toContain('PRRT_1 ')
+    // Another turn and more reads: never a second reminder.
+    w.deliver([sess('working')], NOW + 70_000)
+    w.deliver([sess()], NOW + 120_000)
+    await w.poll(NOW + 180_000)
+    await w.poll(NOW + 30 * 60_000)
+    w.deliver([sess()], NOW + 31 * 60_000)
+    await tick()
+    expect(sent).toHaveLength(2)
+    expect(w.info([sess()])[0].threads?.find((t) => t.id === 'PRRT_2')).toMatchObject({ outcome: 'pending', reminded: true })
+  })
+  it('no check while the turn goes on; a turn never seen starting is checked after 10 minutes', async () => {
+    const { w, sent } = await delivered()
+    // Still idle (the message did not start a turn we saw): not yet.
+    w.deliver([sess()], NOW + 60_000)
+    await w.poll(NOW + 61_000)
+    w.deliver([sess()], NOW + 62_000)
+    await tick()
+    expect(sent).toHaveLength(1)
+    w.deliver([sess()], NOW + 11 * 60_000)
+    await w.poll(NOW + 11 * 60_000 + 1)
+    w.deliver([sess()], NOW + 11 * 60_000 + 2)
+    await tick()
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toContain('3 review threads you were sent still have no reply')
+  })
+  it('a turn that ended with background work running (a Monitor) counts as over', async () => {
+    const { w, sent } = await delivered()
+    w.deliver([sess('working')], NOW + 5_000)
+    w.deliver([{ ...sess('working'), waitingOn: 'monitor: CI' }], NOW + 60_000)
+    await w.poll(NOW + 61_000)
+    w.deliver([{ ...sess('working'), waitingOn: 'monitor: CI' }], NOW + 62_000)
+    await tick()
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toContain('still have no reply')
+  })
+  it('the follow-up and outcomes survive a restart', async () => {
+    const { w, file, pr, gh } = await delivered()
+    w.deliver([sess('working')], NOW + 5_000)
+    const b = make(gh, file, false, { ownPost })
+    expect(b.w.info([sess()])[0].threads).toHaveLength(3)
+    b.w.deliver([sess()], NOW + 60_000)
+    pr.threads = []
+    await b.w.poll(NOW + 61_000)
+    b.w.deliver([sess()], NOW + 62_000)
+    await tick()
+    expect(b.sent).toHaveLength(1)
+    expect(b.sent[0]).toContain('3 review threads you were sent')
   })
 })

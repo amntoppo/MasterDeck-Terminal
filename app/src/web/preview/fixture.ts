@@ -159,6 +159,11 @@ export function fixtureState(noBoard = false): AppState {
         entry('i2', 'question', SESSIONS[2], 'flaky-ci asks', 'Should I also bump the Node version in CI?', [
           { type: 'reply', label: 'Reply', primary: true },
         ]),
+        // A review thread the session replied to and left open for the user (#177).
+        (() => {
+          const e = entry('i3', 'review', SESSIONS[0], `${SESSIONS[0].name} · web#131`, '1 review thread waits on you: the session replied and left it open. src/auth/redirect.ts:42 (octo-reviewer).', [{ type: 'open', label: 'Open' }])
+          return { ...e, item: { ...e.item, priority: 50, detail: { type: 'threads' as const, url: 'https://github.com/acme/web/pull/131#discussion_r3', count: 1 } } }
+        })(),
       ],
       snoozed: [],
       history: [],
@@ -214,7 +219,15 @@ export function fixtureState(noBoard = false): AppState {
     // A monitor of the first session's own, and MasterDeck's PR watch on its PR (listed under the PR).
     watches: [
       { id: 'w-deploy', sessionId: SESSIONS[0].sessionId, description: 'Staging deploy status', command: 'while sleep 30; do curl -s https://staging.acme.example/health; done', startedAt: now - 95 * min, events: 7, lastEventAt: now - 3 * min, queued: 1 },
-      { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0 },
+      { id: 'pr:https://github.com/acme/web/pull/131', sessionId: SESSIONS[0].sessionId, description: 'PR watch · web#131', command: 'https://github.com/acme/web/pull/131', startedAt: now - 3 * 3600_000, events: 4, lastEventAt: now - 20 * min, queued: 0,
+        // The review threads it sent the session and what became of them (#177).
+        threads: [
+          { id: 'PRRT_a1', path: 'src/auth/redirect.ts', line: 18, url: 'https://github.com/acme/web/pull/131#discussion_r1', by: 'octo-reviewer', text: 'This loops when the cookie is missing.', at: now - 40 * min, outcome: 'resolved' },
+          { id: 'PRRT_b2', path: 'src/auth/redirect.ts', line: 31, url: 'https://github.com/acme/web/pull/131#discussion_r2', by: 'octo-reviewer', text: 'Nit: rename to nextUrl?', at: now - 40 * min, outcome: 'resolved' },
+          { id: 'PRRT_c3', path: 'src/auth/redirect.ts', line: 42, url: 'https://github.com/acme/web/pull/131#discussion_r3', by: 'octo-reviewer', text: 'Should a signed-out user land on /home or /login?', at: now - 40 * min, outcome: 'open' },
+          { id: 'PRRT_d4', path: 'e2e/login.spec.ts', line: 7, url: 'https://github.com/acme/web/pull/131#discussion_r4', by: 'octo-reviewer', text: 'Add a test for the expired session.', at: now - 20 * min, outcome: 'pending', reminded: true },
+        ],
+      },
     ],
     schedules: {},
     schedRuns: { 'bg-4': { scheduleId: 'p2', name: 'Nightly docs' } },

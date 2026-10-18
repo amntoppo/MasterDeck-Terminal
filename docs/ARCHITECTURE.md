@@ -514,6 +514,25 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   one `[MasterDeck PR watch]` message per PR is built from them (10 listed per kind, "and N more"),
   and the paste stops at 6 KB ("(N more PR updates — check MasterDeck)", the rest next time). Ends on merge/close (told), on another author (silent) or by Stop (told). On merge/close it also calls `deps.ended(url)` → `Sources.prEnded`, which reads that PR again past the gh cache so the session's lane (`prStage`) moves at once, not on the next review poll. Its messages, like `[MasterDeck monitor: …]` lines, are not the user writing (`isUserWords` in `shared/ask.ts`): the "merged" message arrives after the merge and would otherwise turn Merged into Rework.
   With two or more accounts each watched PR keeps its session's account (`PrWatchEntry.account`) and `poll` reads each account's PRs with that account's runner, so "me" (`viewer`) is that account.
+  Threads (#177): the heavy read takes each thread's `id path line`, its first comment's `url` (a
+  thread has no url field) and outdated threads too (kept for the follow-up, never items). A thread
+  item carries `PrItem.thread`; the message lists one per line (`PRRT_…` · path:line · who: text ·
+  link), the rule (`THREAD_RULE`: fixed → reply with the change and commit, resolve; no change needed
+  → reply with why, resolve; needs the user → reply "Waiting on the owner:", leave open, say so),
+  `REPLY_CMD` / `RESOLVE_CMD` (`gh api graphql` with `-f` variables) and "Post as <viewer>" (the
+  last full read's `viewer`, `PrWatchEntry.viewer`). A delivery that went sets `threads`
+  (`trackThreads`, newest 30, saved) and `follow` (ids, when). `deliver()`'s `watchTurn` marks the
+  follow-up `busy` once the session is seen at work and `dueAt` once its turn is over (`canDeliver`:
+  idle, or working only on background work), or 10 min after the delivery (`FOLLOW_MAX_MS`) when no turn was seen; a due follow-up
+  makes the next light poll read in full. Every full read updates outcomes (`threadOutcomes`:
+  resolved; `open` = unresolved with the session's own last comment, from `prItems`' `replied`;
+  `pending`), and a due follow-up queues one note (`followUpMessage`) for the delivery's threads
+  still `pending`, not `reminded` and not waiting in `pending` items again (`unhandled`); they are
+  marked `reminded` (a later delivery of the thread clears it). `openThreads()` →
+  `Sources.setPrThreads` → `InboxInput.prThreads`: one `review` item per PR (`detail: threads`, id by
+  the open threads' ids) with Open and View on GitHub. `WatchInfo.threads` feeds Details' "Threads
+  sent to the session" list (not the remote snapshot). `REPLY_CMD` single-quotes the body, so
+  `shellWord` (`shared/ownPosts.ts`) reads `'\''` as an apostrophe inside it.
   Kept in `pr-watch.json` (`seen`, pending, ended URLs never re-watched); `sync`/save wait for
   `load()`, and an unreadable file is moved to `pr-watch.corrupt.<ts>.json`. Rows join
   `state.watches` with ids `pr:<url>` (`watchStop` routes them), so they count as monitors in

@@ -1246,7 +1246,19 @@ Stored in `~/.claude/masterdeck/settings.json`.
   have: only what comes after. Reviews and comments posted from your own GitHub account count
   too (you reviewing your own PR, or a review session posting as you); only the replies the
   session posted itself are left out. A session busy for a long time gets one short message per PR, not a backlog. The session is told reviewer text is for it to judge, never to
-  force-push or merge. The watch ends when the PR is merged or closed (the session is told), and
+  force-push or merge.
+  - **Review threads:** each thread comes with its id, file and line, and a link, plus the commands
+    to reply and resolve and the account to post as. The rule the session is given: a thread it
+    fixed gets a reply with what changed and the commit, then is resolved; a thread that needs no
+    change (already handled, not applicable, a question answered, a nit it disagrees with) gets a
+    reply with the reason, then is resolved; a thread that needs you (unclear, a product decision)
+    gets a reply starting "Waiting on the owner:" and stays open. A thread the session replied to
+    and left open shows in **Needs you** as **REVIEW THREADS** (Open, View on GitHub) until it is
+    resolved.
+  - **The check afterwards:** once the session's turn after the message is over (or 10 minutes
+    later if no turn was seen), MasterDeck reads the PR again. Threads still open with no reply from
+    the session get **one** short reminder listing them; never a second one, and never for threads
+    it replied to and left open for you. The watch ends when the PR is merged or closed (the session is told), and
   has no time limit. A PR MasterDeck can no longer read (deleted repo, lost access) ends after three
   tries, with one line to the session. Review-thread offers for a watched PR are not added to Needs you while its
   session can take messages (it gets them already); a parked session, one on a prompt, or an
@@ -1270,7 +1282,9 @@ Stored in `~/.claude/masterdeck/settings.json`.
     not watched again. The PR watch says when it last read the PR from GitHub; when reads fail it
     shows **read failing** and the error (it tries again every minute and clears itself), and if
     it could not read the session's transcript it says how many comments by the session's account
-    it held back.
+    it held back. Under **Threads sent to the session** it lists each review thread it sent, newest
+    first, with what became of it: **resolved**, **waits on you** (it replied and left it open), or **no reply
+    yet** (with "reminded" once the reminder went), each linked to the thread on GitHub.
 - **Details → Scheduled:** jobs a session scheduled with Claude Code's CronCreate (e.g. "check App
   Store Connect every 10 minutes"), read from its transcript: a name from the prompt, how often, when
   it runs next and when it ends (recurring jobs expire after 7 days; session-only ones end with the
