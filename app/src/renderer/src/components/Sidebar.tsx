@@ -11,6 +11,7 @@ import {
 import { inOrder, moveBefore, trimOrder, withNew } from "@shared/sessionOrder";
 import { pruneStars, splitStarred } from "@shared/stars";
 import { setStars, toggleStar, useStars } from "../stars";
+import { pickGroup, usePickedGroup } from "../sessionGroupPick";
 import { NewMenu, type NewAction } from "./NewMenu";
 import { StatusDialog } from "./StatusDialog";
 import { SessionMenu } from "./SessionMenu";
@@ -105,8 +106,6 @@ export type SessionAction = "summary" | "close-tab" | "clone";
 const ORDER_KEY = "sessionOrder";
 const FILTER_KEY = "sessionFilter";
 const FILTER_OPEN_KEY = "sessionFilterOpen";
-/** The session list's tab on screen (#146), per window or browser. */
-const GROUP_KEY = "sessionGroup";
 /** When each starred session was first missing from the list (see pruneStars). */
 const starsMissingSince = new Map<string, number>();
 
@@ -163,12 +162,8 @@ export function Sidebar({
   );
   // The tab on screen: everything below (Starred, groups, filters, Parked, Cleanup) lists its sessions.
   const groups = state.sessionGroups ?? EMPTY_GROUPS;
-  const [pickedTab, setPickedTab] = useState(() => load<string>(GROUP_KEY, ALL));
-  const tab = shownTab(groups, pickedTab);
-  const pickTab = (id: string) => {
-    setPickedTab(id);
-    save(GROUP_KEY, id);
-  };
+  const tab = shownTab(groups, usePickedGroup());
+  const pickTab = pickGroup;
   const sessions = useMemo(
     () => inGroup(everySession, groups, tab),
     [everySession, groups, tab],

@@ -22,6 +22,9 @@ import { RepoPicker } from "./RepoPicker";
 import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { deck, load, save } from "../deck";
 import { can } from "../web";
+import { shownTab } from "@shared/sessionGroups";
+import { SessionTabSelect } from "./SessionGroupBar";
+import { pickedGroup } from "../sessionGroupPick";
 
 interface Props {
   issue: Issue;
@@ -57,6 +60,8 @@ export function AssignDialog({
   const [draft, setDraft] = useState<DraftAssign | null>(null);
   const [name, setName] = useState("");
   const [peers, setPeers] = useState<string[]>([]);
+  // The session list's tab it goes into (#171): the one on screen unless picked here.
+  const [group, setGroup] = useState(() => shownTab(state.sessionGroups, pickedGroup()));
   // The chosen peers' saved summaries, for the first prompt's linked-sessions block.
   const [peerSummaries, setPeerSummaries] = useState<PeerSummaries>({});
   useEffect(() => {
@@ -458,6 +463,7 @@ export function AssignDialog({
       workflow: workflow === "default" ? undefined : workflow,
       ...(override ? { account: override } : {}),
       ...(peers.length ? { peers } : {}),
+      ...(state.sessionGroups?.groups.length ? { group: shownTab(state.sessionGroups, group) } : {}),
     });
     onClose();
   };
@@ -836,6 +842,11 @@ export function AssignDialog({
                         </option>
                       ))}
                     </select>
+                  </div>
+                )}
+                {!!state.sessionGroups?.groups.length && (
+                  <div>
+                    <SessionTabSelect id="sd-group" groups={state.sessionGroups} value={group} onChange={setGroup} />
                   </div>
                 )}
               </div>
