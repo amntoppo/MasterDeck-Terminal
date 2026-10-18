@@ -214,6 +214,7 @@ web tabs keep working.
 | Remote indicator | `renderer/.../Rail.tsx` (`RemoteIndicator`), `shared/remotePresence.ts`, `shared/deviceInfo.ts` |
 | MasterDeck's mods (inside a session: ticket line, alerts, `/md-note`, `/md-ticket`; switches per session) | `mods/masterdeck` (core: `hooks/register.ts`, `hooks/core.ts`), `mods/masterdeck-ticket`, `mods/masterdeck-alerts`, `mods/masterdeck-note`, shared `mods/shared/deck.ts` (copied by `mods/sync-shared.sh`, checked by `shared/modsShared.test.ts`), the app's side: `shared/modBand.ts` (`modBand`, `bandFor`, `parseModBeat`), `DeckHooks.setBand` / `pruneBands` / `modBeats` in `main/deckHooks.ts`, per-session mod switches `main/modOff.ts` (`ModOff` → `mod-off.json`, `ModCatalog` → `mod-catalog.json`, `CH.modSet`), `modRows` / `mergeCatalog` / `MASTERDECK_MODS` in `shared/modBand.ts`, the state callback in `main/index.ts` (`state.modLive`, `state.modOff`, `state.modCatalog`), `SessionMods.tsx` (Tools → Mods, a sub-tab of `SessionTools.tsx`); the mod refuses switched-off mods in its `plugin.register` hook |
 | Installing MasterDeck's mods (Setup → Mods, Settings → Mods, the reload offer) | `main/mods.ts` (`syncModsFolder`, `ModsInstaller`: `claude plugin … --json`), `shared/mods.ts` (`modsInSettings`, `withPrepend`, `prependNote`, `modsReloadOffer`), `paths.bundledMods` / `modsDir` / `modsSettings`, `modsNow` / `reloadMods` in `main/index.ts`, the `mods` inbox kind, `renderer/.../ModsPanel.tsx`; `backupSettings` in `main/hooks.ts` |
+| The rail's icon order (drag, ⌥↑ / ⌥↓, Reset icon order) | `shared/railOrder.ts` (`RAIL_DEFAULT`, `railOrder`, `moveTo`, `moveStep`, `dropBefore`, `toSaved`), `Settings.railOrder`, `renderer/.../Rail.tsx`, Settings → General → Rail icons in `SettingsView.tsx` |
 | Themes (Settings → General → Appearance: Light / Dark / System) | `shared/themes.ts` (`TOKENS`, `DARK`, `LIGHT`, `THEMES`, `resolveTheme`, `xtermTheme`, `contrast`), `renderer/src/theme.ts` (`applyTheme`, `bootTheme`, `useTheme`, `onTheme`, the web app's own `useWebThemePref`), `applyNativeTheme` in `main/index.ts` (`nativeTheme.themeSource`, window background), `Settings.theme`, `remoteSettings` (a browser never changes the Mac's theme); CSS reads only `var(--token)`: never write a colour literal in `renderer/src` or `src/web` (`themes.lint.test.ts` fails); light AA checks in `themes.test.ts` |
 | Session details tabs (Session · GitHub, #103; Mods moved to Tools) | `renderer/.../SessionDetails.tsx` (tabs, `md.detailsTab`), `renderer/.../GitHubDetails.tsx` (rows: ticket, PRs, monitors; `prLineOf`, `sessionPrUrls`), `shared/prDetail.ts` (`pr:detail`, `GitHub.prDetail`), events rings `pushEvents` in `shared/watches.ts` → `Watches.events` / `PrWatch.events` (`watch:events`) |
 | A session's running processes and ports (Details → Session → Processes) | `shared/sessionProcs.ts` (`parsePs`, `sessionGroups`, `isClaudeShell`, `parseLsof`, `transcriptTasks`, `isPortUrl`), `main/sessionProcs.ts` (`SessionProcs`: `ps` + `lsof` on demand, exited ones kept 60 s), `CH.procsList` / `procsOutput` / `openPort` in `main/index.ts` (`openPort` blocked on the web), `renderer/.../SessionProcs.tsx` |
@@ -457,6 +458,15 @@ buttons; it does not go through macOS window drag regions.
   actionlint, vitest for the two scripts, the full suite and typecheck, the PR's own CI run. Not
   checked: a real release through the new `build.yml`, the smoke check against a real publish, the
   announce job, a web deploy (all need a merge and the secrets). Open points: TODO ("CI/CD (#178)").
+
+- **The rail's icons can be reordered (#170)** on branch `worktree-MasterDeck-Terminal-170-rail-reorder`
+  (PR, not merged, **not installed**): drag an icon (4 px threshold, drop line, Esc cancels) or ⌥↑ /
+  ⌥↓, around the fixed line and spacer; kept in `Settings.railOrder` (`shared/railOrder.ts`); Reset
+  from the rail's right-click menu or Settings → General → Rail icons. Design and plan:
+  `docs/plans/2026-10-18-rail-order-{design,plan}.md`. Checked: typecheck, vitest, and the isolated
+  app driven with real CDP mouse and key events (click, a 2 px press, drags within and across
+  groups, Esc, ⌥↑ / ⌥↓ with focus kept, kept after a restart, both resets). Not checked: Windows,
+  the web app over the bridge. Open points: TODO ("Rail icon order (#170)").
 
 - **The ticket's note in Session details (#164)** on branch
   `worktree-MasterDeck-Terminal-164-session-notes` (PR, not merged, **not installed**): Details →

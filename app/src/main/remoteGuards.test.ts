@@ -9,6 +9,8 @@ it('remote save keeps current remoteEnabled and theme and passes other keys', ()
   expect(remoteSettings({ font: 14 }, { remoteEnabled: true, font: 12, theme: 'light' })).toEqual({ remoteEnabled: true, font: 14, theme: 'light' })
   // A browser picks its own theme; saving settings from it never changes the Mac's.
   expect(remoteSettings({ theme: 'light' }, { remoteEnabled: true, theme: 'system' })).toEqual({ remoteEnabled: true, theme: 'system' })
+  // The rail's order is shared: a browser's desktop layout may change it (#170).
+  expect(remoteSettings({ railOrder: ['settings'] }, { remoteEnabled: true, theme: 'dark', railOrder: [] })).toMatchObject({ railOrder: ['settings'] })
   // Nor how the Mac updates.
   expect(remoteSettings({ autoDownloadUpdates: false, updateChannel: 'beta' }, { remoteEnabled: true, theme: 'dark', autoDownloadUpdates: true, updateChannel: 'stable' })).toEqual({
     remoteEnabled: true,
