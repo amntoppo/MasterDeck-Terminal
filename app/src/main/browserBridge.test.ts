@@ -640,6 +640,51 @@ describe('BrowserBridge fix round 1', () => {
     expect(of(w, 'browserClose')).toEqual([])
   })
 
+  it('#168: a state over the frame with long finished proposals is fitted and sent, to subscribers and getState', async () => {
+    const w = await world()
+    const prompt = 'p'.repeat(30_000)
+    const proposals = Array.from({ length: 50 }, (_, i) => ({
+      id: i, kind: 'ASSIGN', issue: i, status: i < 45 ? 'done' : 'proposed', summary: `s${i}`, message: prompt, note: 'n',
+      target: { spawn: { name: `t${i}`, prompt } },
+    }))
+    w.state = { sessions: [{ key: 'a' }], proposals, teamPrs: [], inbox: { open: [], snoozed: [], history: [] }, pastSessions: {} }
+    expect(JSON.stringify(w.state).length).toBeGreaterThan(2_000_000)
+    const c = await connected(w)
+    await c.sub(CH.state)
+    const evs = (await c.recv()).filter((x) => x.k === 'ev')
+    const s = evs.at(-1).v[0]
+    expect(s.sessions).toEqual([{ key: 'a' }])
+    expect(s.proposals).toHaveLength(50)
+    expect(s.proposals[0]).toMatchObject({ message: '', summary: 's0', note: 'n' })
+    expect(s.proposals[0].target.spawn.prompt).toBeUndefined()
+    expect(s.proposals[49].message).toBe(prompt) // an open proposal keeps what it will send
+    expect(w.logs.join('\n')).not.toContain('too large')
+    const got = (await c.call('getState', [])) as { ok: boolean; v: { proposals: { message: string }[] } }
+    expect(got.ok).toBe(true)
+    expect(got.v.proposals[0].message).toBe('')
+  })
+
+  it('#168: a state that cannot be fitted sends one notice, not silence', async () => {
+    const w = await world()
+    const c = await connected(w)
+    await c.sub(CH.state)
+    w.bridge.event(CH.state, [{ big: 'x'.repeat(1_200_000) }])
+    await tick(100)
+    w.bridge.event(CH.state, [{ big: 'y'.repeat(1_200_000) }])
+    await tick(1600)
+    let notes: any[] = (await c.recv()).filter((x) => x.k === 'notice')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ k: 'notice', ev: CH.state, why: 'tooLarge' })
+    expect(notes[0].bytes).toBeGreaterThan(1_200_000)
+    // A state that goes out ends the run: the next oversize one gets a notice again.
+    w.bridge.event(CH.state, [{ n: 2 }])
+    await tick(1600)
+    w.bridge.event(CH.state, [{ big: 'z'.repeat(1_200_000) }])
+    await tick(1600)
+    notes = (await c.recv()).filter((x) => x.k === 'notice')
+    expect(notes).toHaveLength(2)
+  })
+
   it('send() = false closes the channel', async () => {
     const w = await world()
     const c = await connected(w)
@@ -695,7 +740,7 @@ describe('BrowserBridge fix round 1', () => {
 })
 
 describe('BrowserBridge state patches', () => {
-  const stateMsgs = async (c: Awaited<ReturnType<typeof connectBrowser>>) => (await c.recv()).filter((x) => x.ev === CH.state)
+  const stateMsgs = async (c: Awaited<ReturnType<typeof connectBrowser>>) => (await c.recv()).filter((x) => x.ev === CH.state && x.k !== 'notice')
   const big = (i: number) => ({ rows: Array.from({ length: 50 }, (_, j) => ({ id: j, text: 'row ' + j })), tick: i })
 
   it('a web without the patches flag gets full state messages as before (no n, no evp)', async () => {

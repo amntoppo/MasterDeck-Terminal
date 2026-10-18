@@ -428,7 +428,19 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release). A merge to `main` that changes the app is released to users automatically (`ota-main.yml`); a release by hand only when the user asks.
 
-## Current state and next steps (2026-10-17)
+## Current state and next steps (2026-10-18)
+
+- **The web app's "Loading sessions…" for ever (#168)** is fixed on branch
+  `worktree-168-web-loading-sessions` (PR, not merged, **not installed**). Root cause: the Mac's
+  state (1.21 MB of JSON, mostly finished master proposals with their prompts) was over the bridge
+  frame and was dropped with only a log line. The bridge fits each state (`shared/webState.ts`,
+  832 KB for that state), sends `notice` when it can't, and the web's loading screen names each
+  stage and times out after 15 s with the reason and Retry (`shared/webLoading.ts`, `Gate.tsx`;
+  REMOTE "The web's state is fitted"). Checked: typecheck, vitest (242 files passed, 2 skipped;
+  3084 tests passed, 5 skipped), and the real-sized state measured in an isolated app with copies
+  of this Mac's data. Not checked: the installed app with the live web app, a phone. The fix itself is the
+  desktop's (it reaches Macs by OTA); the new web screens work with old desktops too (timeout and
+  Retry instead of the notice), so the web deploy can go either side of it.
 
 - **Every merge to `main` publishes an OTA update (#166)** on branch
   `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR, not merged; nothing runs until it is on

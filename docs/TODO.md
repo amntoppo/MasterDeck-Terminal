@@ -382,6 +382,14 @@ fixes it, and move the item here to "Recently done".
 
 ## Remote / web
 
+- **P2 · Web state budget (#168 follow-ups).** The rest of the state is still unbudgeted: a
+  very large board or `costBook` next to a long PR list can still pass the frame (then the web
+  says "Too much to send"). Approach: split the state over several frames, or move history-like
+  parts (`costBook`, `teamPrs`, finished proposals) behind their own calls. The Mac's Settings →
+  Remote does not yet say a browser got a cut or no state; and the hub does not send the Mac's
+  protocol, only `appVersion` (a mismatch is still found at hello). Not checked live: the
+  installed app with the real web app, `wrangler tail` (the backend was not touched).
+
 - **P1 · Drift test doesn't run in CI.** `app/src/shared/remote.drift.test.ts` skips without the
   backend checkout, and MasterDeck CI doesn't check it out (the backend repo is private). Approach:
   a CI step that checks out `amntoppo/masterdeck-backend` with a read-only deploy key / fine-grained
@@ -1038,6 +1046,14 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   it react by itself.
 
 ## Recently done
+
+- **The web app no longer stays on "Loading sessions…" (#168)**: root cause, a state over the
+  bridge frame (a real Mac's was 1.21 MB of JSON, 560 KB of it finished master proposals with
+  their prompts, 285 KB the PRs view) was dropped on the Mac with only a log line. The bridge now
+  fits every state (`shared/webState.ts`), sends a `notice` when it still can't, and the web's
+  loading screen names each stage, times out after 15 s with the reason and Retry, and names the
+  versions on a protocol mismatch (`shared/webLoading.ts`, `Gate.tsx`). Branch
+  `worktree-168-web-loading-sessions`.
 
 - **Every merge to `main` publishes an OTA update (#166)**: `.github/workflows/ota-main.yml` after
   CI, patch + 1 (or `package.json`'s minor/major), a release commit held only by the tag, notes from

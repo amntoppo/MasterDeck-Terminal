@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { browserHandshake, generateStatic, type Channel } from '@shared/e2e'
 import { deviceFrom } from '@shared/deviceInfo'
-import { formatAgo } from '@shared/format'
 import { PROTOCOL_VERSION, type DesktopStatus, type ServerToBrowser } from '@shared/remote'
+import { loadView, updateText, type LoadPhase } from '@shared/webLoading'
 import type { MacToWeb } from '@shared/bridgeWire'
 import { App } from '@renderer/App'
 import { afterClose, approve, browserName, type Api, type Outcome, type Res } from './approval'
@@ -33,7 +33,7 @@ type Screen =
   | { s: 'error'; message: string }
   | { s: 'approve'; words: string[] | null; outcome: Outcome | 'revoked' | null }
   | { s: 'otherTab' }
-  | { s: 'update' }
+  | { s: 'update'; mac: { appVersion?: string; protocol: number } }
   | { s: 'app' }
 
 interface Conn {
@@ -42,12 +42,22 @@ interface Conn {
   desktop: DesktopStatus | null
   /** Bumped per channel: App remounts on a fresh deck, so nothing stale shows. */
   gen: number
+  /** How far this connection got, and since when: the loading screen names a reason when a phase lasts (#168). */
+  phase: LoadPhase
+  since: number
+  /** The first state arrived on this channel: only then the app shows (never a bare "Loading sessions…"). */
+  stateSeen: boolean
+  /** The Mac said its state is too large to send. */
+  tooLarge: { bytes: number } | null
 }
+
+const freshConn = (): Conn => ({ up: false, desktop: null, gen: 0, phase: 'socket', since: Date.now(), stateSeen: false, tooLarge: null })
 
 /** Everything before the app renders (spec §5): sign in, this browser's keys, approval, the encrypted channel. */
 export function Gate() {
   const [screen, setScreen] = useState<Screen>({ s: 'loading' })
-  const [conn, setConn] = useState<Conn>({ up: false, desktop: null, gen: 0 })
+  const [conn, setConn] = useState<Conn>(freshConn)
+  const [now, setNow] = useState(Date.now())
   const [run, setRun] = useState(0)
   const ctx = useRef<{ userId: string; rec: KeyRec } | null>(null)
   /** Ends the current run: polling, socket, everything. */
@@ -92,9 +102,10 @@ export function Gate() {
         return show({ s: 'approve', words: null, outcome: out })
       }
       show({ s: 'app' })
+      setConn(freshConn())
       stop = connect(rec, {
         conn: (f) => !dead && setConn(f),
-        update: () => show({ s: 'update' }),
+        update: (mac) => show({ s: 'update', mac }),
         closed: async (code, reason, helloed) => {
           const next = await afterClose(api, rec.browserId!, code, reason, helloed)
           if (dead) return false
@@ -118,6 +129,14 @@ export function Gate() {
     return () => cancel.current()
   }, [run])
 
+  const ready = screen.s === 'app' && conn.gen > 0 && conn.stateSeen
+  // The loading screen's clock: a stage that lasts turns into its reason.
+  useEffect(() => {
+    if (screen.s !== 'app' || ready) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [screen.s, ready])
+
   const retry = () => {
     setScreen({ s: 'loading' })
     setRun((n) => n + 1)
@@ -133,20 +152,12 @@ export function Gate() {
   }
 
   if (screen.s === 'app') {
-    const d = conn.desktop
-    const banner = !conn.up
-      ? conn.desktop && 'Reconnecting…'
-      : d && !d.online
-        ? `Your Mac is offline${d.lastSeen ? ` — last seen ${formatAgo(Date.now() - d.lastSeen)} ago` : ''}`
-        : null
+    // The Loading card names the rest (Mac offline, no answer, …); this only says it was connected before.
+    const banner = !conn.up && conn.desktop ? 'Reconnecting…' : null
     return (
       <>
         {banner && <div className="web-banner">{banner}</div>}
-        {conn.gen > 0 && !banner ? (
-          <App key={conn.gen} />
-        ) : (
-          <Card title="MasterDeck">{banner ? 'Actions are paused until your Mac is back.' : 'Connecting to your Mac…'}</Card>
-        )}
+        {ready ? <App key={conn.gen} /> : <Loading conn={conn} now={Math.max(now, conn.since)} retry={retry} />}
         <button className="web-signout" onClick={() => void signOut()} title="Sign out of MasterDeck on this browser">
           Sign out
         </button>
@@ -176,7 +187,7 @@ export function Gate() {
   if (screen.s === 'update')
     return (
       <Card title="Update MasterDeck">
-        <p>Your Mac's MasterDeck and this page speak different versions. Update MasterDeck on your Mac, or reload this page.</p>
+        <p>{updateText(screen.mac)}</p>
         <button className="btn" onClick={() => location.reload()}>Reload</button>
       </Card>
     )
@@ -220,6 +231,21 @@ export function Gate() {
   )
 }
 
+/** Between approval and the first state: what is happening, and after a while why it is not (#168). */
+function Loading({ conn, now, retry }: { conn: Conn; now: number; retry: () => void }) {
+  const v = loadView({ up: conn.up, desktop: conn.desktop, phase: conn.phase, since: conn.since, now, tooLarge: conn.tooLarge })
+  return (
+    <Card title={v.title}>
+      <p data-stage={v.stage}>{v.text}</p>
+      {v.retry && (
+        <button className="btn primary" onClick={retry}>
+          Retry
+        </button>
+      )}
+    </Card>
+  )
+}
+
 export function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="web-card">
@@ -231,7 +257,7 @@ export function Card({ title, children }: { title: string; children: React.React
 
 interface Hooks {
   conn(f: (c: Conn) => Conn): void
-  update(): void
+  update(mac: { appVersion?: string; protocol: number }): void
   /** The socket closed; resolves true to reconnect with backoff, false when the Gate took over. */
   closed(code: number, reason: string, helloed: boolean): Promise<boolean>
 }
@@ -248,7 +274,12 @@ function connect(rec: KeyRec, h: Hooks): () => void {
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let ws: WebSocket | null = null
 
+  /** A new phase restarts the loading clock; the same one (a reconnect) keeps it running. */
+  const phase = (p: LoadPhase, more?: Partial<Conn>) =>
+    h.conn((c) => (c.phase === p && !more ? c : { ...c, ...more, phase: p, since: c.phase === p ? c.since : Date.now() }))
+
   const open = () => {
+    phase('socket')
     const sock = new WebSocket(`${WS}/v1/browser?id=${encodeURIComponent(rec.browserId!)}`)
     ws = sock
     let q: Promise<void> = Promise.resolve()
@@ -260,6 +291,7 @@ function connect(rec: KeyRec, h: Hooks): () => void {
     /** This socket reached the Mac's hello (hello itself resets when the channel ends). */
     let reached = false
     let onFrame: ((d: string) => void) | undefined
+    let offState: (() => void) | undefined
     let onClose: (() => void) | undefined
     const ping = setInterval(() => sendRaw({ t: 'ping' }), 30_000)
     const sendRaw = (m: unknown) => sock.readyState === WebSocket.OPEN && sock.send(JSON.stringify(m))
@@ -273,11 +305,15 @@ function connect(rec: KeyRec, h: Hooks): () => void {
       ch = null
       if (hello) h.conn((c) => ({ ...c, gen: 0 }))
       hello = false
+      offState?.()
+      offState = undefined
+      h.conn((c) => (c.stateSeen || c.tooLarge ? { ...c, stateSeen: false, tooLarge: null } : c))
       onClose?.()
       onFrame = onClose = undefined
     }
     const start = async () => {
       endChannel()
+      phase('handshake')
       const x = await browserHandshake(rec.pair, rec.macPublicKey!)
       if (ws !== sock || !online) return
       hs = x
@@ -316,15 +352,18 @@ function connect(rec: KeyRec, h: Hooks): () => void {
           if (first.k !== 'hello') return void sock.close()
           if (first.protocol !== PROTOCOL_VERSION) {
             stop()
-            return h.update()
+            return h.update({ appVersion: first.appVersion, protocol: first.protocol })
           }
           hello = true
           reached = true
           const io = { send: sendFrame, onFrame: (cb: (d: string) => void) => void (onFrame = cb), onClose: (cb: () => void) => void (onClose = cb) }
-          window.deck = createRemoteDeck(io, ch, first)
+          window.deck = createRemoteDeck(io, ch, first, (n) => {
+            if (n.why === 'tooLarge') h.conn((c) => (c.stateSeen ? c : { ...c, tooLarge: { bytes: n.bytes } }))
+          })
           backoff = 1000
           quick = true
-          h.conn((c) => ({ ...c, gen: Date.now() }))
+          phase('state', { gen: Date.now(), stateSeen: false, tooLarge: null })
+          offState = window.deck.onState(() => h.conn((c) => (c.stateSeen ? c : { ...c, stateSeen: true, tooLarge: null })))
           if (document.hidden) void visible()
           // Tell the Mac what this is ("Chrome on macOS") for its remote indicator; an older Mac ignores the message.
           const device = deviceFrom(navigator.userAgent, (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform)
@@ -346,6 +385,7 @@ function connect(rec: KeyRec, h: Hooks): () => void {
       endChannel()
       if (ws !== sock || stopped) return
       h.conn((c) => ({ ...c, up: false }))
+      phase('socket')
       if (e.code === 4006 && quick) {
         quick = false
         retryTimer = setTimeout(open, 0)

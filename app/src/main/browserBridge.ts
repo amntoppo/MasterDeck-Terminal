@@ -4,7 +4,8 @@ import { CH } from '@shared/ipc'
 import { ARG_FIX, DECK_ACCESS, type Access } from '@shared/remoteDeck'
 import { MAX_FRAME, PROTOCOL_VERSION, type DesktopMsg, type ServerToDesktop } from '@shared/remote'
 import type { MacToWeb, WebToMac } from '@shared/bridgeWire'
-import type { BrowserRequestView } from '@shared/types'
+import type { AppState, BrowserRequestView } from '@shared/types'
+import { fitWebState } from '@shared/webState'
 import { ticketSpecError } from '@shared/ticketBuilder'
 import { prReviewSpecError } from '@shared/prReview'
 import type { ApprovedBrowser, BrowserStore } from './browserStore'
@@ -54,6 +55,8 @@ const PTY_CHUNK = 128 * 1024
 /** Base64url length of a sealed message whose JSON is this many UTF-8 bytes (+16 GCM tag). */
 const sealedLen = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3)
 const tooBig = (m: unknown) => sealedLen(Buffer.byteLength(JSON.stringify(m) ?? '')) > MAX_FRAME
+/** The state as the web gets it: fitted into one frame (`fitWebState`); null (still loading) as is. */
+const webState = (s: unknown) => (s && typeof s === 'object' ? fitWebState(s as AppState).state : s)
 const later = (ms: number, f: () => void) => setTimeout(f, Math.max(0, ms)).unref?.()
 const isHs1 = (d: string) => {
   try {
@@ -99,6 +102,8 @@ interface Conn {
   resyncTimer?: NodeJS.Timeout
   stateAt: number
   stateNext?: unknown
+  /** A "state too large" notice went out and no state since: one per run of dropped states. */
+  noticed?: boolean
   stateTimer?: NodeJS.Timeout
   ptyBuf: Map<string, { d: string; seq: unknown }>
   ptyTimer?: NodeJS.Timeout
@@ -410,7 +415,8 @@ export class BrowserBridge {
     }
     args = ARG_FIX[m.m as keyof typeof ARG_FIX]?.(args) ?? args
     try {
-      const v = await this.d.call(access.ch, args)
+      let v = await this.d.call(access.ch, args)
+      if (access.ch === CH.getState) v = webState(v)
       if (access.mode === 'invoke') await this.ret(c, m.id, true, v)
     } catch (e) {
       if (access.mode === 'invoke') await this.ret(c, m.id, false, e instanceof Error ? e.message : String(e))
@@ -436,7 +442,7 @@ export class BrowserBridge {
     }
     c.subs.add(key)
     if (m.ev === CH.state) {
-      const s = await this.d.call(CH.getState, [])
+      const s = webState(await this.d.call(CH.getState, []))
       if (this.conns.get(c.b) !== c || c.state !== 'open' || !c.subs.has(key)) return
       await this.sendState(c, JSON.stringify(s), true, s)
     }
@@ -448,9 +454,11 @@ export class BrowserBridge {
     const wait = Math.max(0, c.stateAt + (this.d.stateMs ?? 1500) - this.now())
     c.stateTimer = setTimeout(() => {
       c.stateTimer = undefined
-      const json = JSON.stringify(c.stateNext)
-      if (c.state !== 'open' || !c.subs.has(CH.state) || json === c.lastState) return
-      void this.sendState(c, json, false, c.stateNext)
+      if (c.state !== 'open' || !c.subs.has(CH.state)) return
+      const s = webState(c.stateNext)
+      const json = JSON.stringify(s)
+      if (json === c.lastState) return
+      void this.sendState(c, json, false, s)
     }, wait)
   }
 
@@ -517,10 +525,18 @@ export class BrowserBridge {
   private out(c: Conn, m: MacToWeb): Promise<void> {
     // Too big for the relay: never seal it (the counter must not move for a frame the hub would drop).
     // ponytail: stringified twice (here and in seal); fine at AppState sizes.
+    const isState = (m.k === 'ev' || m.k === 'evp') && m.ev === CH.state
     if (tooBig(m)) {
-      this.d.log?.(`browser ${c.b}: ${m.k === 'ev' && m.ev === CH.state ? 'state too large for the web' : `${m.k} too large for the web`}; not sent`)
-      return m.k === 'ret' ? this.out(c, { k: 'ret', id: m.id, ok: false, e: 'result too large for the web' }) : Promise.resolve()
+      this.d.log?.(`browser ${c.b}: ${isState ? 'state too large for the web' : `${m.k} too large for the web`}; not sent`)
+      if (m.k === 'ret') return this.out(c, { k: 'ret', id: m.id, ok: false, e: 'result too large for the web' })
+      // Say why instead of leaving the web on "Loading sessions…" (#168); once until a state goes out again.
+      if (isState && !c.noticed) {
+        c.noticed = true
+        return this.out(c, { k: 'notice', ev: CH.state, why: 'tooLarge', bytes: Buffer.byteLength(JSON.stringify(m)) })
+      }
+      return Promise.resolve()
     }
+    if (isState) c.noticed = false
     return c.ch!.seal(m).then(
       (d) => {
         if (this.conns.get(c.b) !== c || c.state !== 'open') return

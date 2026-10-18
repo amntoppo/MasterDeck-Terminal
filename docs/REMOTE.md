@@ -227,7 +227,9 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   constant ("B2M1"/"M2B1") + 64-bit counter, AAD `masterdeck-e2e-v1`; seal/open are serialized so
   counters stay in step; any failed open kills the channel (fail closed).
 - Then the Mac sends `hello {protocol, appVersion, platform, home}`; the web refuses a different
-  `PROTOCOL_VERSION` ("Update MasterDeck" screen). `connectedAt` is recorded at open.
+  `PROTOCOL_VERSION` ("Update MasterDeck" screen, naming the Mac's version and both protocols:
+  `updateText` in `shared/webLoading.ts`; an older Mac → update the Mac, a newer one → reload the
+  page). `connectedAt` is recorded at open.
 - Failures (bad frame, handshake) close the channel; 3 in an hour for one browser →
   `warning()` "Possible tampering on the connection to <name>" (shown in Settings → Remote).
 - Limits: 200 calls/s per browser; frames ≤ `MAX_FRAME` (1.4 MB) after sealing — too-big
@@ -249,6 +251,25 @@ The backend only relays opaque frames; the Mac's store is authoritative.
 | `ret {id, ok, v \| e}` | call result |
 | `ev {ev, arg?, v, n?}` | event; for a `patches: 1` state subscriber `n` numbers each state |
 | `evp {ev: state, n, ops}` | state patch: ops turn state n-1 into n |
+| `notice {ev: state, why: 'tooLarge', bytes}` | the state could not be sent even after fitting (#168); once per run of dropped states. Older webs ignore it |
+
+- **The web's state is fitted to one frame** (#168, `fitWebState` in `shared/webState.ts`, budget
+  `WEB_STATE_BUDGET` 950 KB of JSON): every state the bridge sends (subscription, queued state,
+  `getState`'s `ret`) goes through it. Finished proposals (`done`, `rejected`) always lose `message`
+  and `target.spawn.prompt` (nothing on the web reads them; on a long ledger they were most of the
+  state: a real Mac's 1.21 MB state became 832 KB). Only while still over the budget it drops, in
+  order, the closed PRs of the PRs view, the finished proposals, the Needs-you history and
+  `pastSessions`, and lists what went in `state.webCut` (the PRs view says "Open PRs only on the
+  web"). Over the budget after all that → `notice`. Before this a state over the frame was logged
+  on the Mac and never sent, and the web stayed on "Loading sessions…" for ever.
+- **The web's loading screen** (`Loading` in `src/web/Gate.tsx`, stages from `loadView` in
+  `shared/webLoading.ts`): the app is shown only once the first state arrived on the channel.
+  Until then: Connecting… (socket) → Waiting for your Mac… (handshake) → Loading sessions… (hello
+  in, no state); "Your Mac is offline" (with last seen) as soon as the hub says so; the Mac's
+  `notice` at once; any stage that lasts `WEB_LOAD_TIMEOUT_MS` (15 s) turns into its reason
+  (can't reach the server, the Mac doesn't answer, no sessions arrived, with the Mac's version from
+  the hub's `desktop.appVersion`) and **Retry** (a fresh run: session, approval, socket). A reconnect
+  in the same phase keeps the clock running.
 
 - State: queued per connection at most every `stateMs` (1500 ms default), deduped by JSON.
   Old web (no `patches`) → full state each time. Patch subscriber → numbered full first, then
