@@ -76,10 +76,26 @@ export function nextVersion({ tags, pkgVersion, channel = 'stable' }) {
   return `${core(next)}-beta.${n + 1}`
 }
 
+/** isAppFile's rule as ota-main.yml's `paths-ignore` globs (auto-release.test.ts keeps them equal). */
+export const IGNORED_PATHS = [
+  '**/*.md',
+  'docs/**',
+  '.github/**',
+  '.claude/**',
+  '**/*.test.ts',
+  '**/*.test.tsx',
+  'skills/master/tests/**',
+  'app/web/**',
+  'install.sh',
+  'LICENSE',
+  '.gitignore',
+]
+
 /**
  * Files that never change the app users install: docs, tests, CI and tooling. A change to
  * anything else (app code, skills, mods, package files) is worth a release.
- * ponytail: a fixed list; a new non-app folder must be added here (or it releases once, harmlessly).
+ * ponytail: a fixed list; a new non-app folder must be added here and to IGNORED_PATHS (or it
+ * releases once, harmlessly).
  */
 export function isAppFile(path) {
   const p = path.trim().replace(/^\.\//, '')

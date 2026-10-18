@@ -379,6 +379,11 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           ))}
         </div>
         <span style={{ flex: 1 }} />
+        {state.webCut?.includes('teamPrsClosed') && (
+          <span className="muted" title="Your Mac's lists were too large to send whole; open MasterDeck on the Mac for them">
+            Open PRs only on the web
+          </span>
+        )}
         <span className="muted" title={state.teamPrsError ?? ''}>
           {loading ? 'refreshing from GitHub…' : state.teamPrsError ? <span className="bad">⚠ {state.teamPrsError.slice(0, 60)}</span> : state.teamPrsAt ? `refreshed ${formatRefreshed(now - state.teamPrsAt)}` : 'not loaded yet'}
         </span>

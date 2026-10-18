@@ -1,9 +1,8 @@
 name: CI
 
+# Pull requests only: a merge to main is built, tested and released by ota-main.yml (Auto release)
+# through release.yml, and tags by release.yml.
 on:
-  push:
-    branches: [main]
-  # Tags are built and released by release.yml.
   pull_request:
   workflow_dispatch:
 

@@ -11,6 +11,7 @@ export interface Io {
   onClose(cb: () => void): void
 }
 export type Hello = Extract<MacToWeb, { k: 'hello' }>
+export type Notice = Extract<MacToWeb, { k: 'notice' }>
 
 const BLOCKED = 'Not available on the web yet'
 const OFFLINE = 'Your Mac went offline — not sent'
@@ -23,7 +24,7 @@ const unsafe = (ops: unknown[]) =>
 const RESYNC_RETRY_MS = 3000
 
 /** `window.deck` for the web app (spec §3): calls and events travel sealed to the Mac; local members run here. */
-export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
+export function createRemoteDeck(io: Io, ch: Channel, hello: Hello, onNotice?: (n: Notice) => void): DeckApi {
   let next = 1
   let closed = false
   const waiting = new Map<number, { ok(v: unknown): void; no(e: Error): void }>()
@@ -56,7 +57,9 @@ export function createRemoteDeck(io: Io, ch: Channel, hello: Hello): DeckApi {
     } catch {
       return // the channel is dead; the Gate closes the socket
     }
-    if (m.k === 'ret') {
+    if (m.k === 'notice') {
+      onNotice?.(m)
+    } else if (m.k === 'ret') {
       const w = waiting.get(m.id)
       waiting.delete(m.id)
       if (w) m.ok ? w.ok(m.v) : w.no(new Error(m.e))
