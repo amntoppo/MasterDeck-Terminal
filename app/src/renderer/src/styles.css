@@ -2144,6 +2144,23 @@ button.dash-kpi:hover { background: var(--bg-4); }
 .dash-more.dash-r { color: var(--accent); }
 .dash-hrow { min-height: 30px; }
 
+/* Customise: a dashed frame per card, a handle, ← → and an eye; the dragged card follows the pointer. */
+.dash-grid { position: relative; }
+.dash-custbtn { display: inline-flex; align-items: center; gap: 6px; }
+.dash-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-cust { outline: 1px dashed var(--line-3); outline-offset: 3px; }
+.dash-cust:focus-visible { outline: 2px solid var(--accent); }
+.dash-handle { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: grab; touch-action: none; }
+.dash-handle:hover { color: var(--text); background: var(--bg-3); }
+.dash-cust-tools { display: flex; gap: 2px; }
+.dash-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.dash-icon:hover { color: var(--text); background: var(--bg-3); }
+.dash-icon:disabled { opacity: .35; cursor: default; background: none; }
+.dash-lift { position: relative; z-index: 10; box-shadow: 0 10px 28px var(--shadow); cursor: grabbing; }
+.dash-lift .dash-handle { cursor: grabbing; }
+.dash-marker { display: none; position: absolute; z-index: 9; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.dash-hidden-ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
+
 /* One column at a phone's width or a narrow window (after the rules it overrides). */
 @container (max-width: 760px) {
   .dash-grid { grid-template-columns: minmax(0, 1fr); }

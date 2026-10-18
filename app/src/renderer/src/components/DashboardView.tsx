@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActivityEvent } from '@shared/activityLog'
 import { attentionItems, deliveryView, healthView, nowView, pruneDismissed, usageView, type AttentionItem, type Dismissal } from '@shared/dashboard'
-import { cleanLayout, layoutOrder, type CardId } from '@shared/dashboardLayout'
+import type { CardId } from '@shared/dashboardLayout'
 import { formatRefreshed } from '@shared/format'
 import type { JanitorRow } from '@shared/ipc'
 import type { SchedList } from '@shared/sched'
@@ -16,6 +16,8 @@ import { deck, load, save, useNow } from '../deck'
 import { useStable } from '../useStable'
 import { can, isWeb, usePhone } from '../web'
 import { AttentionCard } from './dashboard/AttentionCard'
+import { CustomiseCtx } from './dashboard/Card'
+import { useCustomise } from './dashboard/customise'
 import { DeliveryCard } from './dashboard/DeliveryCard'
 import { HealthCard } from './dashboard/HealthCard'
 import type { DashNav } from './dashboard/nav'
@@ -60,6 +62,8 @@ function recordingSince(): number {
 }
 
 const atWork = (s: Session) => s.state === 'working' || s.state === 'needs-input' || (s.state === 'idle' && (!!s.busyWith || !!s.waitingOn))
+
+const CARD_TITLE: Record<CardId, string> = { now: 'Now', timeline: 'Timeline', delivery: 'Delivery', usage: 'Usage and cost', health: 'Health' }
 
 const PR_TAB_NAME = { mine: 'Mine', review: 'Needs my review', merged: 'Recently merged' } as const
 
@@ -384,9 +388,7 @@ export function DashboardView(props: DashboardProps) {
 
   const agentsLoading = state.sources.agents === 'pending' || state.sources.agents === undefined
   const portLinks = can('openPort')
-  // Customise is Task 11: for now the saved order, hidden cards left out.
-  const [layout] = useState(() => cleanLayout(load<unknown>(LAYOUT_KEY, null)))
-  const order = useMemo(() => layoutOrder(layout).filter((id) => !layout.hidden.includes(id)), [layout])
+  const cust = useCustomise(LAYOUT_KEY)
 
   const card = (id: CardId) => {
     switch (id) {
@@ -413,6 +415,28 @@ export function DashboardView(props: DashboardProps) {
           {date}
           {Number.isFinite(snap) ? ` · updated ${formatRefreshed(now - snap)}` : ''}
         </span>
+        <span style={{ flex: 1 }} />
+        {cust.on ? (
+          <>
+            <span className="muted dash-hint">Drag a card by its handle, or press ⌥ and an arrow. The eye hides it.</span>
+            <button className="btn" disabled={!cust.canReset} title={cust.canReset ? 'Back to the default order, every card shown' : 'The layout is the default'} onClick={cust.reset}>
+              Reset
+            </button>
+            <button className="btn primary" onClick={() => cust.setOn(false)}>
+              Done
+            </button>
+          </>
+        ) : (
+          <button className="btn dash-custbtn" onClick={() => cust.setOn(true)} title="Move and hide cards">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
+              <circle cx="16" cy="6" r="2" />
+              <circle cx="10" cy="12" r="2" />
+              <circle cx="18" cy="18" r="2" />
+            </svg>
+            Customise
+          </button>
+        )}
       </header>
       <div className="panel-body dash-body">
         <div className="dash-wrap">
@@ -428,7 +452,25 @@ export function DashboardView(props: DashboardProps) {
             dismissedCount={dismissedHere}
             onUndismiss={undismiss}
           />
-          <div className="dash-grid">{order.map(card)}</div>
+          <CustomiseCtx.Provider value={cust.ctx}>
+            <div className={`dash-grid${cust.on ? ' dash-customising' : ''}`} ref={cust.gridRef} onKeyDown={cust.onKeyDown}>
+              {cust.shown.map(card)}
+              {cust.on &&
+                cust.hidden.map((id) => (
+                  <div key={`hidden:${id}`} className="dash-hidden-ph">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.1 6.1C3.6 7.8 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1" />
+                    </svg>
+                    <span>{CARD_TITLE[id]} is hidden</span>
+                    <span className="dash-grow" />
+                    <button className="btn" onClick={() => cust.show(id)}>
+                      Show
+                    </button>
+                  </div>
+                ))}
+              <div className="dash-marker" ref={cust.markerRef} aria-hidden="true" />
+            </div>
+          </CustomiseCtx.Provider>
         </div>
       </div>
     </section>
